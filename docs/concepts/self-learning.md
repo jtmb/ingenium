@@ -9,6 +9,22 @@ description: Comprehensive guide to the Ingenium self-learning pipeline — extr
 
 A comprehensive guide to the Ingenium self-learning pipeline that replaced the old agent self-reporting system.
 
+## Memory lanes are separate
+
+Ingenium has several kinds of durable context. They are not interchangeable and
+do not share a save or synthesis path:
+
+| Lane | Current entry point | Meaning |
+|------|---------------------|---------|
+| **Explicit saved preference memory** | `ingenium_memory_save`, `/api/v1/memory` | Content the current user explicitly asks to remember. It defaults to a private owner/project/workspace scope, is returned as `source=user-directive`, and can be updated or forgotten with receipts and versions. It is not inferred or synthesized. |
+| **Inferred learning** | `ingenium_observe`, server-side extraction, `observations` | Durable user-behavior rules extracted from eligible interactions and then consolidated into personality traits or governed skill proposals. An observation is not an explicit-memory receipt. |
+| **Operational coordination memory** | `ingenium_coordination_memory_read` | Typed session/worktree handoff and recovery state used by agents. It is not a user preference and is not a personality observation. |
+| **Context, documents, and transcripts** | Context conversations/RAG, repository Docs, linked-session transcript storage | User-provided working material, canonical guidance, or transcript replay. These remain separate from both saved preferences and inferred observations. |
+
+Retrieved explicit memory, coordination entries, Context content, and transcripts
+are reference data. They do not become instructions merely because they are
+inserted into a model context.
+
 ---
 
 ## 1. Overview
@@ -217,6 +233,25 @@ is bounded to a 64-byte error code, a 1,024-byte error message, and at most 100
 recorded errors per batch. These bounds keep retry diagnostics discoverable
 without allowing an unbounded synthesis payload.
 
+### Explicit saved memory is outside this pipeline
+
+The Chat composer keeps **Use memory**, **Save message**, and **Allow automatic
+learning** independent. Use memory reads at most 16 private memories within a
+2,048-token budget as delimited, untrusted reference data. Save message is an
+explicit user control that stores the exact accepted user message with the
+`chat` tag; it does not create an observation or run synthesis. Turning off
+Allow automatic learning removes the `auto_observe_now` and
+`synthesize_observations` tools from that Chat turn, but does not disable the
+scheduled extraction/synthesis cycle.
+
+The extension's `SessionCoordinator` in
+`packages/ingenium-extension/session-coordinator.ts` retains an independent
+per-turn read in `experimental.chat.system.transform`: it invokes `memory_list`
+through the general binding's `memory:read` grant, and
+`packages/ingenium-extension/explicit-memory.ts` injects only validated private
+memory as untrusted data. This finalizer path is separate from the dashboard
+controls and must not be confused with operational `coordination_memory_read`.
+
 ### Explicit current-learning RAG snapshots
 
 CTX-003 does not automatically export raw observations into RAG. A caller can
@@ -413,4 +448,4 @@ GROUP BY project_id, trait_type;
 
 **v4.2.0 (2026-07-16) — Scheduler/resource-sync boundary:** API scheduled maintenance runs extraction → synthesis under the skills lease. Bidirectional resource sync is no longer an API scheduler step; the extension runs it on `session.created` and throttled `session.idle` events.
 
-*Last updated: July 16, 2026 (v4.2.0 — scheduler/resource-sync boundary)*
+*Last updated: September 9, 2026 (explicit saved-memory and independent Chat retrieval boundary)*

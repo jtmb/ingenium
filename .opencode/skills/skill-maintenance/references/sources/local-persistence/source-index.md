@@ -12,5 +12,4 @@ Ingenium MCP stdio transport → authenticated Ingenium API → database
 ```
 
 Git is authoritative. Administrative `ingenium_skill_*` CRUD/sync operations are
-repair/import interfaces only. See `AGENTS.md` and
-`docs/concepts/skill-system.md` for the active policy.
+repair/import interfaces only. See `docs/concepts/skill-system.md` for the active policy.

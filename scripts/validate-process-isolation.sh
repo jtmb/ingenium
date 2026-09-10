@@ -6,7 +6,7 @@ fail() {
   exit 1
 }
 
-users="ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-runtime-manager ingenium-runtime-gateway appuser"
+users="ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-runtime-manager ingenium-runtime-gateway ingenium-cloudflare appuser"
 uids=""
 for user in $users; do
   uid="$(id -u "$user")"
@@ -18,12 +18,14 @@ api_dir=/run/ingenium-secrets/api
 dashboard_dir=/run/ingenium-secrets/dashboard
 opencode_dir=/run/ingenium-secrets/opencode
 restore_dir=/run/ingenium-secrets/restore
+cloudflare_dir=/run/ingenium-secrets/cloudflare
 
 for entry in \
   "$api_dir:ingenium-api:ingenium-api" \
   "$dashboard_dir:ingenium-dashboard:ingenium-dashboard" \
   "$opencode_dir:ingenium-opencode:ingenium-opencode" \
-  "$restore_dir:ingenium-restore:ingenium-restore"; do
+  "$restore_dir:ingenium-restore:ingenium-restore" \
+  "$cloudflare_dir:ingenium-cloudflare:ingenium-cloudflare"; do
   path="${entry%%:*}"
   remainder="${entry#*:}"
   owner="${remainder%%:*}"
@@ -40,30 +42,38 @@ can_write_dir() { runuser -u "$1" -- test -w "$2"; }
 
 for file in "$api_dir"/*; do
   can_read ingenium-api "$file" || fail
-  for user in ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore appuser; do
+  for user in ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
     ! can_read "$user" "$file" || fail
   done
 done
 for file in "$dashboard_dir"/*; do
   can_read ingenium-dashboard "$file" || fail
-  for user in ingenium-api ingenium-boundary ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore appuser; do
+  for user in ingenium-api ingenium-boundary ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
     ! can_read "$user" "$file" || fail
   done
 done
 for file in "$opencode_dir"/*; do
   can_read ingenium-opencode "$file" || fail
-  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-ttyd ingenium-vscode ingenium-restore appuser; do
+  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do
     ! can_read "$user" "$file" || fail
   done
 done
 for file in "$restore_dir"/*; do
   can_read ingenium-restore "$file" || fail
-  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode appuser; do
+  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-cloudflare appuser; do
+    ! can_read "$user" "$file" || fail
+  done
+done
+for file in "$cloudflare_dir"/*; do
+  [ -e "$file" ] || break
+  [ -f "$file" ] && [ ! -L "$file" ] && [ "$(stat -c '%a' "$file")" = 600 ] || fail
+  can_read ingenium-cloudflare "$file" || fail
+  for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore appuser; do
     ! can_read "$user" "$file" || fail
   done
 done
 
-for entry in "$api_dir:ingenium-api" "$dashboard_dir:ingenium-dashboard" "$opencode_dir:ingenium-opencode" "$restore_dir:ingenium-restore"; do
+for entry in "$api_dir:ingenium-api" "$dashboard_dir:ingenium-dashboard" "$opencode_dir:ingenium-opencode" "$restore_dir:ingenium-restore" "$cloudflare_dir:ingenium-cloudflare"; do
   path="${entry%%:*}"
   owner="${entry#*:}"
   for user in $users; do

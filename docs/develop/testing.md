@@ -25,6 +25,51 @@ When a focused Playwright run uses the fixture, follow it with
 prove that the run-owned processes and ports were contained. Ordinary feature
 work must not expand into root tests or broad suites.
 
+For the dashboard settings, context, chat-memory, and Cloudflare changes, the
+smallest current workspace selection is:
+
+```bash
+npm run typecheck --workspace=services/ingenium-dashboard
+npm run lint --workspace=services/ingenium-dashboard
+npm run test --workspace=services/ingenium-dashboard -- \
+  tests/chat-config-readiness.test.tsx \
+  tests/chat-project-context.test.tsx \
+  tests/cloudflare-api-client.test.ts \
+  tests/cloudflare-panel.test.tsx \
+  tests/context-workspace.test.tsx \
+  tests/explicit-memory.test.ts \
+  tests/memory-api-client.test.ts \
+  tests/settings-overlay-tabs.test.tsx
+```
+
+### Documentation and configuration audit
+
+The repository's deterministic docs/configuration gate is a source/static
+check, not a replacement for feature tests:
+
+```bash
+bash tests/test-doc-config-audit.sh
+```
+
+It reads `opencode.json`, derives the MCP catalog counts from
+`packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`, checks the root agent
+map and `.opencode/models.md`, scans all Markdown under `docs/`, and scans
+`README.md` files under `packages/` and `services/`. It guards stale catalog
+counts, plugin claims, `session-id-tui.ts` registration claims, lease-scope
+claims, managed-command denial claims, and model/variant rows. It does not
+inspect deployment health, browser state, provider credentials, or live model
+sessions. The default `bash tests/test-agent-validation.sh` run invokes this
+gate at the end; its `--role-matrix`, `--skill-only`, and `--permission-parity`
+modes exit before the docs gate.
+
+The retained CLI export evidence and its non-liveness limits are recorded in the
+[CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
+
+Do not interpret a source test, fixture run, route-parity run, typecheck, or
+documentation audit as deployed/model-session proof. That claim requires a
+declared current-source rebuild/restart and actual route plus real provider or
+session evidence; this documentation-only task does not provide it.
+
 ## Git and GitHub workflow
 
 Manual and user-created commits are valid and never block continued work. Before
@@ -49,8 +94,8 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **283-tool** inventory
-(281 `ingenium_` catalog entries plus 2 extension tools).
+also verifies `ingenium_context_upload_file` and the **291-tool** inventory
+(289 `ingenium_` catalog entries plus 2 extension tools).
 
 ## Explicit full/release/cross-cutting acceptance gates
 
@@ -127,7 +172,8 @@ must be an owner-readable (`0600`) regular non-symlink file, and is never
 returned to browser responses. Invalid or unsafe token-file configuration fails
 closed.
 
-After fixture setup reports its manifest and ports, passive QA Vision can open
+After fixture setup reports its manifest and ports, passive visual QA owned by
+`@ingenium-qa` can open
 `http://localhost:<dashboard-port>/test-fixture/session`. The `localhost`
 origin allows Chromium to accept the Secure fixture cookie over loopback HTTP.
 The dashboard performs
@@ -510,7 +556,7 @@ credential is installed in browser state. The route inventory uses the run
 project rather than `global-default`.
 
 The suite loads the production `.next` route manifests, derives the canonical 24
-primary routes from dashboard navigation, checks all 19 settings deep links and
+primary routes from dashboard navigation, checks all 20 settings deep links and
 supported query variants, rejects retired routes, and smoke-renders every route.
 The serialized navigation governor remains active.
 

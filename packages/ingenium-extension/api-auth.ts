@@ -9,6 +9,8 @@ const API_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IMAGE_REVISION_PATTERN = /^[0-9a-f]{40}$/;
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 5_000;
+const PREFLIGHT_RATE_LIMIT_RETRIES = 3;
+const PREFLIGHT_RETRY_DELAY_CAP_MS = 2_000;
 
 /** Startup probes remain deliberately small and finite so plugin loading cannot hang. */
 export const EXTENSION_STARTUP_READINESS_ATTEMPTS = 3;
@@ -79,6 +81,7 @@ export interface ApiAuthenticationPreflightResult {
   error?: "Unable to authenticate with Ingenium API";
   /** Safe category only; it never contains a status, URL, response body, or credential detail. */
   failure?: ApiAuthenticationFailureKind;
+  reason?: "rate_limited";
   binding?: ApiAuthenticationBinding;
   runtime?: ApiAuthenticationRuntime;
 }
@@ -122,6 +125,7 @@ export interface ApiAuthenticationResolverInput {
 
 export interface ApiAuthenticationPreflightOptions {
   timeoutMs?: number;
+  sleep?: (milliseconds: number) => Promise<void>;
   credentialPurpose?: ExtensionCredentialPurpose;
   runtimeId?: string;
   resolverInput?: Readonly<ApiAuthenticationResolverInput>;
@@ -260,10 +264,27 @@ export async function preflightApiAuthentication(
       query.set("runtime_id", options.runtimeId);
       preflightUrl.search = query.toString();
     }
-    const response = await request(preflightUrl.toString(), {
+    const probe = () => request(preflightUrl.toString(), {
       headers: apiRequestHeaders(worktree, undefined, { binding: expectedBinding }),
       signal: AbortSignal.timeout(boundedInteger(options.timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS, 1, DEFAULT_PREFLIGHT_TIMEOUT_MS)),
     });
+    let response = await probe();
+    for (let retry = 0; response.status === 429; retry += 1) {
+      const retryAfter = response.headers.get("Retry-After");
+      await response.body?.cancel();
+      if (retry === PREFLIGHT_RATE_LIMIT_RETRIES) {
+        return { ...failedPreflight("unavailable"), reason: "rate_limited" };
+      }
+      const seconds = retryAfter?.trim() ? Number(retryAfter) : NaN;
+      const requestedDelay = Number.isFinite(seconds)
+        ? seconds * 1_000
+        : retryAfter ? Date.parse(retryAfter) - Date.now() : NaN;
+      const delay = Number.isFinite(requestedDelay)
+        ? Math.max(0, requestedDelay)
+        : 500 * 2 ** retry + Math.floor(Math.random() * 100);
+      await (options.sleep ?? sleepFor)(Math.min(delay, PREFLIGHT_RETRY_DELAY_CAP_MS));
+      response = await probe();
+    }
     if (response.status === 200) {
       const payload = await response.json().catch(() => null);
       const attestedBinding = authenticationBinding(payload);
@@ -310,6 +331,7 @@ export async function waitForAuthenticatedApiReadiness(
     result = await preflightApiAuthentication(apiBase, worktree, request, {
       credentialPurpose: options.credentialPurpose,
       runtimeId: options.runtimeId,
+      sleep,
       timeoutMs: boundedInteger(
         options.timeoutMs,
         EXTENSION_STARTUP_PREFLIGHT_TIMEOUT_MS,
@@ -317,7 +339,8 @@ export async function waitForAuthenticatedApiReadiness(
         DEFAULT_PREFLIGHT_TIMEOUT_MS,
       ),
     });
-    if (result.authenticated || result.failure !== "unavailable" || attempt === attempts) return result;
+    // A rate-limited preflight has already spent its own retry budget.
+    if (result.authenticated || result.reason === "rate_limited" || result.failure !== "unavailable" || attempt === attempts) return result;
     await sleep(retryDelayMs);
   }
 

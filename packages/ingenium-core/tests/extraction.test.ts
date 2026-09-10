@@ -274,6 +274,29 @@ describe("callLLMForExtraction", () => {
 });
 
 describe("partial extraction retry safety", () => {
+  it("does not make messages eligible when automatic learning is disabled", async () => {
+    const disabledProject = createProject("disabled-extraction-project");
+    setSetting(disabledProject.id, "automatic_learning_enabled", "false");
+    let messagesRequested = false;
+    let llmCalled = false;
+
+    const result = await runExtraction(disabledProject.id, disabledProject.name, {
+      messagesClient: async () => {
+        messagesRequested = true;
+        return { messages: [makeCandidate("I prefer this message never to become eligible for automatic extraction.")] };
+      },
+      llmExecutor: async () => {
+        llmCalled = true;
+        return { ok: true, content: JSON.stringify({ rules: [] }) };
+      },
+    });
+
+    expect(result).toMatchObject({ scanned: 0, candidates: 0, created: 0, reason: "Automatic learning is disabled." });
+    expect(messagesRequested).toBe(false);
+    expect(llmCalled).toBe(false);
+    expect(getObservations(disabledProject.id)).toEqual([]);
+  });
+
   it("persists successful batch hashes when a later batch fails", async () => {
     const startedAt = Date.now();
     mockMessages = Array.from({ length: 16 }, (_, index) => ({

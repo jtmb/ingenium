@@ -4,7 +4,17 @@ import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { getDb, resetDbForTest } from "../lib/db.js";
+import { ChildMcpServerDefinitionInputSchema, ChildMcpServerDefinitionSchema } from "../lib/schema.js";
 import * as childMcpServers from "../lib/tools/child-mcp-servers.js";
+import {
+  PLAYWRIGHT_CHILD_MCP_ARGS,
+  PLAYWRIGHT_CHILD_MCP_INTEGRITY,
+  PLAYWRIGHT_CHILD_MCP_EXECUTABLE,
+  PLAYWRIGHT_CHILD_MCP_PACKAGE,
+  PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS,
+  isPlaywrightChildMcpPreset,
+  playwrightChildMcpPreset,
+} from "../lib/tools/child-mcp-presets.js";
 import { MCP_TOOL_CATALOG } from "../lib/tools/mcp-tool-catalog.js";
 import { buildMcpToolConformanceReport } from "../lib/tools/mcp-tool-conformance.js";
 import * as mcpToolStates from "../lib/tools/mcp-tool-states.js";
@@ -56,6 +66,136 @@ afterEach(() => {
 });
 
 describe("child MCP definitions", () => {
+  it.each([undefined, "", "Managed browser"])("preserves description %j through creation and lifecycle updates", (description) => {
+    const project = createIsolatedProject("child-mcp-description");
+    const created = childMcpServers.createChildMcpServer(project.id, {
+      name: "calendar", executable: "npx", description,
+    });
+    const expected = description ?? null;
+    expect(created).toMatchObject({ description: expected });
+    expect(childMcpServers.createPlaywrightChildMcpServer(project.id, description)).toMatchObject({ description: expected });
+    expect(childMcpServers.recordChildMcpDiscovery(project.id, "calendar", { status: "ready", tools: [] }))
+      .toMatchObject({ description: expected });
+    expect(childMcpServers.setChildMcpServerEnabled(project.id, "calendar", false)).toMatchObject({ description: expected });
+    expect(childMcpServers.setChildMcpServerEnabled(project.id, "calendar", true)).toMatchObject({ description: expected });
+    expect(childMcpServers.requestChildMcpServerRefresh(project.id, "calendar")).toMatchObject({ description: expected });
+    resetDbForTest();
+    expect(childMcpServers.listEffectiveChildMcpServers(project.id).map((server) => server.description)).toEqual([expected, expected]);
+  });
+
+  it("upgrades existing definitions without a description and guards repeat opens", () => {
+    const project = createIsolatedProject("child-mcp-description-upgrade");
+    const created = childMcpServers.createChildMcpServer(project.id, { name: "calendar", executable: "npx" });
+    getDb().exec("ALTER TABLE mcp_child_server_definitions DROP COLUMN description");
+    resetDbForTest();
+    expect(childMcpServers.getOwnedChildMcpServer(project.id, "calendar")).toMatchObject({ id: created.id, description: null });
+    resetDbForTest();
+    expect(childMcpServers.getOwnedChildMcpServer(project.id, "calendar")).toMatchObject({ id: created.id, description: null });
+  });
+
+  describe("description schemas", () => {
+    it.each([undefined, "", "Managed browser"])("accepts optional input description %j", (description) => {
+      expect(ChildMcpServerDefinitionInputSchema.parse({ name: "calendar", executable: "npx", description }).description).toBe(description);
+    });
+
+    it.each([null, 123, {}, []])("rejects non-string input description %j", (description) => {
+      expect(ChildMcpServerDefinitionInputSchema.safeParse({ name: "calendar", executable: "npx", description }).success).toBe(false);
+    });
+
+    it.each([undefined, null, "", "Managed browser"])("reads persisted description %j", (description) => {
+      const project = createIsolatedProject("child-mcp-description-schema");
+      const server = childMcpServers.createChildMcpServer(project.id, { name: "calendar", executable: "npx" });
+      expect(ChildMcpServerDefinitionSchema.parse({ ...server, args: "[]", description }).description).toBe(description);
+    });
+  });
+
+  it.each([
+    { executable: "npx" },
+    { args: [...PLAYWRIGHT_CHILD_MCP_ARGS, "--no-sandbox"] },
+    { scope: "global" },
+    { environment: { TOKEN: { vault_item_id: randomUUID() } } },
+  ])("rejects non-canonical Playwright creation: %j", (override) => {
+    const project = createIsolatedProject("child-mcp-playwright-invalid");
+    expectErrorCode(() => childMcpServers.createChildMcpServer(project.id, {
+      ...playwrightChildMcpPreset(), ...override,
+    }), "INVALID_CHILD_MCP_SERVER");
+    expect(childMcpServers.listEffectiveChildMcpServers(project.id)).toEqual([]);
+  });
+
+  it("registers the pinned shell-free Playwright preset with managed permission names", () => {
+    const project = createIsolatedProject("child-mcp-playwright");
+
+    const server = childMcpServers.createPlaywrightChildMcpServer(project.id);
+
+    expect(server).toMatchObject({
+      name: "playwright",
+      executable: PLAYWRIGHT_CHILD_MCP_EXECUTABLE,
+      args: [...PLAYWRIGHT_CHILD_MCP_ARGS],
+      environment: {},
+      scope: "project",
+      enabled: true,
+      discovery_status: "pending",
+    });
+    expect(PLAYWRIGHT_CHILD_MCP_PACKAGE).toBe("@playwright/mcp@0.0.78");
+    expect(PLAYWRIGHT_CHILD_MCP_INTEGRITY).toMatch(/^sha512-/);
+    expect(PLAYWRIGHT_CHILD_MCP_EXECUTABLE).toBe("/app/node_modules/.bin/playwright-mcp");
+    expect(PLAYWRIGHT_CHILD_MCP_ARGS.some((argument) => argument.includes("latest"))).toBe(false);
+    expect(isPlaywrightChildMcpPreset(server)).toBe(true);
+    expect(PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS).toEqual(
+      expect.arrayContaining([
+        "ingenium_playwright_browser_navigate",
+        "ingenium_playwright_browser_snapshot",
+        "ingenium_playwright_browser_close",
+      ]),
+    );
+    expect(PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS.every((name) => name.startsWith("ingenium_playwright_"))).toBe(true);
+  });
+
+  it("discovers managed Playwright names and rejects refresh while the preset is disabled", () => {
+    const project = createIsolatedProject("child-mcp-playwright-lifecycle");
+    childMcpServers.createPlaywrightChildMcpServer(project.id);
+    childMcpServers.recordChildMcpDiscovery(project.id, "playwright", {
+      status: "ready",
+      tools: [
+        { name: "browser_navigate", description: "Navigate", input_schema: { type: "object" } },
+        { name: "browser_snapshot", description: "Snapshot", input_schema: { type: "object" } },
+      ],
+    });
+
+    expect(childMcpServers.listEffectiveChildMcpTools(project.id).map((tool) => tool.canonical_name)).toEqual([
+      "ingenium_playwright_browser_navigate",
+      "ingenium_playwright_browser_snapshot",
+    ]);
+    expect(childMcpServers.setChildMcpServerEnabled(project.id, "playwright", false)).toMatchObject({ enabled: false });
+    expect(childMcpServers.listEffectiveChildMcpRuntimeServers(project.id)).toEqual([]);
+    expectErrorCode(
+      () => childMcpServers.requestChildMcpServerRefresh(project.id, "playwright"),
+      "MCP_SERVER_DISABLED",
+    );
+  });
+
+  it("defaults discovered tools to the passive allowlist while preserving explicit project choices", () => {
+    const project = createIsolatedProject("child-mcp-playwright-permissions");
+    childMcpServers.createPlaywrightChildMcpServer(project.id);
+    const allowed = PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS.map((name) => name.slice("ingenium_playwright_".length));
+    const denied = ["browser_evaluate", "browser_run_code", "browser_click", "browser_future_tool"];
+    childMcpServers.recordChildMcpDiscovery(project.id, "playwright", {
+      status: "ready",
+      tools: [...allowed, ...denied].map((name) => ({ name, description: name, input_schema: {} })),
+    });
+    for (const name of [...allowed, ...denied]) {
+      const canonical = `ingenium_playwright_${name}`;
+      expect(mcpToolStates.getToolState(project.id, canonical)).toBe(allowed.includes(name));
+      expect(mcpToolStates.listToolStatesWithDefaults(project.id)).toContainEqual({
+        tool_name: canonical, enabled: allowed.includes(name),
+      });
+    }
+    mcpToolStates.setToolState(project.id, "ingenium_playwright_browser_evaluate", true);
+    mcpToolStates.setToolState(project.id, "ingenium_playwright_browser_snapshot", false);
+    expect(mcpToolStates.getToolState(project.id, "ingenium_playwright_browser_evaluate")).toBe(true);
+    expect(mcpToolStates.getToolState(project.id, "ingenium_playwright_browser_snapshot")).toBe(false);
+  });
+
   it("persists shell-free executable arguments and vault references without an env payload", () => {
     const project = createIsolatedProject("child-mcp-local");
     const vaultItemId = createVaultReference(project.id);
@@ -161,7 +301,7 @@ describe("child MCP definitions", () => {
     ]);
     expect(mcpToolStates.getAllTools(project.id).get(toolName)).toMatchObject({ category });
     expect(mcpToolStates.getCategoryMap(project.id).get(category)).toContain(toolName);
-    expect(mcpToolStates.listToolStatesWithDefaults(project.id)).toContainEqual({ tool_name: toolName, enabled: true });
+    expect(mcpToolStates.listToolStatesWithDefaults(project.id)).toContainEqual({ tool_name: toolName, enabled: false });
     mcpToolStates.setToolState(project.id, toolName, false);
     expect(mcpToolStates.getToolState(project.id, toolName)).toBe(false);
     const report = buildMcpToolConformanceReport({
@@ -176,7 +316,7 @@ describe("child MCP definitions", () => {
           category,
           description: "List events from the configured calendar.",
           projectScope: "per-project",
-          defaultEnabled: true,
+          defaultEnabled: false,
           apiEndpoints: [],
         },
       ],

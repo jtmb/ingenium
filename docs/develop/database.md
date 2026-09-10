@@ -149,7 +149,7 @@ another Compose project volume.
 | 105 | `105_runtime_localhost_browser_origins.sql` | Rebuilds runtime browser launch-ticket and session tables so exact HTTPS host origins remain valid and HTTP is accepted only when the exact persisted host ends in the special-use `.localhost` domain. |
 | 106 | `106_session_csrf_grants.sql` | Adds bounded hash-only browser CSRF grants tied to one auth session, user, security epoch, and expiry. Session deletion cascades; revocation and user security changes delete grants through triggers. |
 
-### Coordination and runtime hardening migrations (107–112)
+### Coordination, transcript, saved-memory, and child-MCP migrations (107–117)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -159,11 +159,63 @@ another Compose project volume.
 | 110 | `110_coordination_memory_cursors.sql` | Adds durable per-session acknowledgement cursors for bounded operational-memory replay and seeds existing sessions with a bounded message lookback. |
 | 111 | `111_managed_mutation_repository_serialization.sql` | Adds accepted worktree epochs, path baselines, retained managed-operation evidence, and repository-sync manifest generations for managed mutation serialization. |
 | 112 | `112_atomic_epoch_recovery.sql` | Binds coordination claims and quarantine recovery evidence to accepted epochs, requiring immutable epoch ownership and preventing takeover during crash recovery. |
+| 113 | `113_linked_session_transcripts.sql` | Adds principal-bound linked-session relationships and append-only transcript replay with per-reader cursors; transcript payloads remain separate from saved preference memory. |
+| 114 | `114_explicit_saved_memory.sql` | Adds owner/project/workspace-scoped explicit saved memory, versioned mutation receipts, forget tombstones, restore suppressions, and FTS5 retrieval. |
+| 115 | `115_explicit_memory_fts_update_order.sql` | Replaces the explicit-memory FTS update-delete trigger with a `BEFORE UPDATE` delete trigger and rebuilds the FTS index to repair terms lost to same-phase trigger ordering. |
+| 116 | `116_child_mcp_description.sql` | Adds the nullable operator description column to `mcp_child_server_definitions`. |
+| 117 | `117_mcp_credential_receipts.sql` | Adds encrypted replay receipts keyed by idempotency key and request hash, bound to the issued MCP credential so bootstrap retries reuse it without persisting plaintext. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.
 Existing AUTH-101 databases receive the guarded trigger-only upgrade; fresh and
 AUTH-100 upgrade paths install the same canonical definition directly.
+
+### Explicit saved-memory migrations (114–115)
+
+`114_explicit_saved_memory.sql` creates the separate explicit-memory lane:
+`explicit_memories`, immutable operation receipts, content-free version rows,
+forget tombstones, restore suppressions, and the `explicit_memories_fts` FTS5
+table. A memory is bound to an organization, project, authorized workspace,
+and owner. It is either private or explicitly project-visible. Core validation
+limits content to 2,048 estimated tokens (the SQL column permits at most 32,768
+characters) and limits retrieval to 16 items and 2,048 estimated tokens.
+
+Save, update, and forget are versioned mutations. An `operationId` is
+idempotent for the same request and conflicts when reused with a different
+request. Forget clears the stored content and tags, retains only hashes and a
+content-free tombstone/receipt, and excludes the ID from future reads and FTS
+search. `explicit_memories_fts_update_delete` runs before an update and
+`explicit_memories_fts_update_insert` runs after it; the FTS triggers are the
+sole writers to the FTS table.
+
+The backup/restore implementation in `packages/ingenium-core/lib/tools/backups.ts`
+captures a bounded, content-free ledger of forgotten memories. During restore
+merge it reapplies the forgotten state so an older snapshot cannot resurrect a
+forgotten memory. If the forgotten memory's owner or workspace parent is not
+available in the restored database, it records an immutable content-free row in
+`explicit_memory_restore_suppressions` instead. A conflicting merge fails
+closed; it does not overwrite the conflicting memory.
+
+The migration runner probes the complete 114 schema and applies the SQL only
+when the boundary is absent. Migration 115 separately probes for the
+`BEFORE UPDATE` FTS trigger and applies its ordered delete/rebuild repair when
+that trigger is missing; it does not rewrite memory rows or receipts. A database
+that already has the 115 trigger is not rebuilt again. These migrations therefore
+do not prove the state of a database whose schema probe is already complete
+without the required trigger; any exceptional repair still requires an
+authorized database operation. See [Backup and Restore Procedures](../operations/backup-restore.md)
+for the privileged restore boundary.
+
+### Child-MCP description migration (116)
+
+`116_child_mcp_description.sql` adds nullable `description` metadata to
+`mcp_child_server_definitions`. The API accepts the optional description when a
+managed Playwright preset is created, and the dashboard displays it as an
+operator label; it is not a child environment value or executable argument.
+The migration runner checks `PRAGMA table_info(mcp_child_server_definitions)`
+after the child-definition schema exists and adds the column only when it is
+missing. The value is independent of discovery status and child-process
+lifecycle.
 
 ### Mail watcher durability migration (092)
 

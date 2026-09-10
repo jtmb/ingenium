@@ -7,7 +7,10 @@ description: Project management — create, rename, archive, restore, and config
 
 ## What It Does
 
-Manages project configurations. Each project has its own SQLite database containing skills, observations, tasks, and servers. The dashboard provides Active/Archived tab views with rename, archive, restore, and purge actions.
+Manages project configurations in the canonical SQLite database. Project-scoped
+rows and filesystem roots are isolated by project identity; the dashboard
+provides Active/Archived tab views with rename, archive, restore, and purge
+actions.
 
 ## How to Use
 

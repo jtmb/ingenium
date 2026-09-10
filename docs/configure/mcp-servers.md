@@ -8,6 +8,15 @@ description: Child MCP server definitions and Tool Manager — register, connect
 ## What It Does
 Manages child MCP server definitions and the project-scoped tool catalog. The page has two tabs: **Servers** (manage definitions and connection state) and **Tools** (enable/disable catalog and discovered child tools).
 
+## External MCP transport
+
+External OpenCode sessions run the Ingenium MCP server as a **local stdio**
+process. That process sends authenticated requests to the trusted Ingenium API;
+it does not expose a new HTTP MCP listener. Local operation uses the canonical
+loopback API. Remote operation requires the launcher-controlled
+`INGENIUM_TRUSTED_API_URL` to be an HTTPS API origin; do not put that trust
+override or a plaintext credential in tracked `opencode.json`.
+
 ## Server Management
 
 ### Adding a Server
@@ -28,10 +37,56 @@ vault and are never returned by the browser/API projection.
 - **Refresh** requests bounded child discovery. Discovery metadata is persisted by the API; the MCP runtime reconciles it through its post-start loop.
 - **Remove** deletes the child definition and its owned discovery metadata.
 
+## Managed Playwright preset
+
+Use **Add Playwright** in the Servers tab for browser automation. It creates a
+project-scoped, owned child definition with no environment values. The managed
+contract is exact:
+
+| Field | Value |
+|---|---|
+| Package | `@playwright/mcp@0.0.78` |
+| Package integrity | `sha512-XLTUeA6mEN9sQ+hJ4dfG8EIkDbxS0K3Trc2RBkUJuf02TgE2FQRNTMtq/aJfhyRMINsRl/Ybc4sxcWLtFn4/TQ==` |
+| Nested Playwright runtime | `1.62.0-alpha-1783623505000` |
+| Executable | `/app/node_modules/.bin/playwright-mcp` |
+| Browser | `/opt/ingenium-playwright/chromium` |
+| Browser store | `/opt/ingenium-playwright/browsers` |
+| Runtime mode | Headless Chromium, isolated profile, vision capability, service workers blocked |
+| Output | File mode, maximum 52,428,800 bytes, run-owned temporary directory |
+| Description | Optional operator label persisted with the child definition; it is not passed as child environment or arguments |
+
+The Docker image installs Chromium once during the image build under
+`/opt/ingenium-playwright/browsers` and validates the fixed executable path.
+Runtime startup uses those image-baked artifacts; it does not download a
+package or browser.
+
+The child server name is `playwright`. The parent `ingenium` MCP server exposes
+discovered tools as `ingenium_playwright_<tool>`, for example
+`ingenium_playwright_browser_navigate`. The preset declares a passive
+allow-list covering close, console messages, find, navigate, network
+request(s), resize, snapshot, tabs, and screenshot operations under that
+namespace. The allow-list enforcement remains an open PLAYWRIGHT-100 gate; a
+declared list is not runtime proof that tools default disabled. The gateway
+requires the project, organization, workspace, and launcher worktree binding,
+adds a run-owned output directory, redacts that path from results, and removes
+the directory during cleanup.
+
+Child-tool execution requires the project-bound `child-mcp:execute` scope and
+launcher binding. The trusted runtime handoff is separate and requires the
+`runtime` audience with `child-mcp:runtime`; neither path broadens the parent
+agent's profile permissions or exposes child stderr. The optional description is
+accepted by `POST /api/v1/mcp-servers/presets/playwright` and is shown as
+metadata in the Servers tab.
+
+Do not add a root `mcp.playwright` server or run `npx -y @playwright/mcp` from
+OpenCode configuration. The tracked root configuration exposes the canonical
+`ingenium` MCP server; Playwright is a project child preset and must use the
+fixed executable, browser path, arguments, and namespace above.
+
 ## Tool Manager
 
 The Tools tab shows the current project-scoped total. The built-in catalog
-contains 283 tools in 30 baseline categories (281 `ingenium_` catalog entries
+contains 291 tools in 31 baseline categories (289 `ingenium_` catalog entries
 plus 2 extension tools); discovered child tools are added dynamically and may increase
 both the total and the category list for that project.
 
@@ -69,6 +124,7 @@ compatibility. Discovered child tools use the canonical lowercase form
 - `GET /api/v1/mcp-servers/tools?project=<name>` — list discovered child tools
 - `GET /api/v1/mcp-servers/status?project=<name>` — list discovery status
 - `GET /api/v1/mcp-servers/runtime?project=<name>` — list sanitized runtime projections
+- `POST /api/v1/mcp-servers/presets/playwright?project=<name>` — create the pinned managed preset (`description?`)
 - `POST /api/v1/mcp-servers?project=<name>` — register a definition (`name`, `executable`, `args`, `environment` vault references, `scope`)
 - `POST /api/v1/mcp-servers/:name/connect|disconnect|refresh?project=<name>` — change lifecycle state or request discovery
 - `DELETE /api/v1/mcp-servers/:name?project=<name>` — remove a child definition

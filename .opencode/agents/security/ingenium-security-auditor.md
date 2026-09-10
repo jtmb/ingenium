@@ -2,7 +2,10 @@
 name: ingenium-security-auditor
 description: "Security review agent. Performs a bounded current-diff and relevant dependency review; history scans require a confirmed secret or critical explicit trigger."
 mode: subagent
+disable: false
+hidden: false
 permission:
+  "*": deny
   read: allow
   question: deny
   edit: deny
@@ -45,20 +48,20 @@ permission:
   ingenium_docs_get_page: allow
   ingenium_docs_list_comments: allow
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@database-conventions": allow
-    "@engineering-workflow": allow
-    "@mcp-tooling": allow
-    "@security-audit": allow
-    "@documentation": allow
-    "@self-learning": allow
-    "@skill-maintenance": allow
-    "@ponytail": allow
-    "*": allow
+    development-conventions: allow
+    devops-conventions: allow
+    database-conventions: allow
+    mcp-tooling: allow
+    security-audit: allow
+    documentation: allow
+    self-learning: allow
+    skill-maintenance: allow
+    ponytail: allow
 ---
 
 # Security Auditor
+
+Before any action, load `@ponytail` and the task-matching allowed skills.
 
 Produce at most one bounded security report per declared implementation boundary. Do not edit, delegate, trigger Docs, spawn QA, reopen a closed task, add acceptance criteria, or expand scope.
 

@@ -7,7 +7,6 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
-  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -32,6 +31,8 @@ const MAX_TIMER_MS = 2_147_483_647;
 const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
+const RECOVERY_ATTESTED_CONTEXT = "INGENIUM_RECOVERY_ATTESTED_CONTEXT";
+const ADMITTED_RECOVERY_CONTEXT = "INGENIUM_ADMITTED_RECOVERY_CONTEXT";
 const GIT = "/usr/bin/git";
 export const CANONICAL_DIRECTORY_AUDIT_PATH = `/tmp/opencode-${ownerUid()}/recovery-bootstrap-directory-audit.jsonl`;
 export const CANONICAL_DIRECTORY_ROLES = Object.freeze([
@@ -65,6 +66,7 @@ const RECOVERY_ENVIRONMENT = [
   "INGENIUM_RECOVERY_OWNER_NONCE",
   "INGENIUM_RECOVERY_OWNER_PID",
   "INGENIUM_RECOVERY_OWNER_START_TICKS",
+  ADMITTED_RECOVERY_CONTEXT,
   "INGENIUM_STORAGE_MAPPING_HASH",
   "INGENIUM_WORKSPACE_ID",
   "INGENIUM_WORKTREE",
@@ -76,12 +78,39 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_SESSION = /^[A-Za-z0-9_-]{1,256}$/;
+const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43,128}$/;
+const API_TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
+const RECOVERY_SOURCE_MAX_BYTES = 256 * 1024;
 const RECOVERY_ADMISSION_MAX_BYTES = 16 * 1024;
 const RECOVERY_ADMISSION_LIFETIME_MS = 15 * 60 * 1_000;
+const SERVER_ADMISSION_KEYS = [
+  "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
+  "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
+];
+const SERVER_RECEIPT_KEYS = ["id", "schema", "version", "action", "admissionDigest", "consumedAt"];
+const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const LEGACY_DISPOSITION_KEY = "196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3b29b355f6258b1e2";
 const LEGACY_DISPOSITION_OPERATION_ID = "e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc";
 const LEGACY_DISPOSITION_RECORD_SHA256 = "b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c";
 export const RECOVERY_ADMISSION_RELATIVE_PATH = "tests/artifacts/tui-recovery/production-restart-admission.json";
+
+function parsedAttestedContext(value) {
+  if (value === undefined) return null;
+  let context;
+  try { context = JSON.parse(value); } catch { throw new Error("Recovery bootstrap attested context is invalid"); }
+  if (!hasExactKeys(context, ["schemaVersion", "kind", "sourcePath", "repositoryRoot", "head", "sourceSha256"])
+    || context.schemaVersion !== 1 || context.kind !== "source-bootstrap"
+    || resolve(context.sourcePath ?? "") !== context.sourcePath
+    || resolve(context.repositoryRoot ?? "") !== context.repositoryRoot
+    || !GIT_OID.test(context.head ?? "") || !HASH.test(context.sourceSha256 ?? "")
+    || context.sourcePath !== resolve(context.repositoryRoot, "packages/ingenium-extension/scripts/recovery-bootstrap.js")) {
+    throw new Error("Recovery bootstrap attested context is invalid");
+  }
+  return Object.freeze({ ...context });
+}
+
+const MODULE_ATTESTATION = parsedAttestedContext(process.env[RECOVERY_ATTESTED_CONTEXT]);
+delete process.env[RECOVERY_ATTESTED_CONTEXT];
 
 export const CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS = Object.freeze([
   "directory",
@@ -326,11 +355,29 @@ function hasExactKeys(value, keys) {
 function canonicalValue(value) {
   if (Array.isArray(value)) return value.map(canonicalValue);
   if (!isRecord(value)) return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => [key, canonicalValue(entry)]));
 }
 
 export function canonicalJson(value) {
   return JSON.stringify(canonicalValue(value));
+}
+
+function isCanonicalRfc3339(value) {
+  if (typeof value !== "string") return false;
+  const match = RFC3339.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second] = match.map(Number);
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  calendar.setUTCHours(hour, minute, second, 0);
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed)
+    && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1
+    && calendar.getUTCDate() === day && calendar.getUTCHours() === hour
+    && calendar.getUTCMinutes() === minute && calendar.getUTCSeconds() === second;
 }
 
 export function recoveryPreflightOutput(preflight) {
@@ -350,7 +397,89 @@ function readBoundedDescriptor(descriptor, maximumBytes, allowEmpty = false) {
   return buffer.subarray(0, offset);
 }
 
-function readOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
+function readExactDescriptor(descriptor, size) {
+  if (!Number.isSafeInteger(size) || size < 1 || size > RECOVERY_SOURCE_MAX_BYTES) {
+    throw new Error("Recovery bootstrap source is unavailable");
+  }
+  const bytes = Buffer.allocUnsafe(size);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+    if (count === 0) break;
+    offset += count;
+  }
+  if (offset !== size) throw new Error("Recovery bootstrap source is unavailable");
+  return bytes;
+}
+
+function sourceIdentityMatches(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size
+    && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
+    && left.uid === right.uid && left.nlink === right.nlink;
+}
+
+export function openVerifiedRecoverySource(context = MODULE_ATTESTATION, options = {}) {
+  if (!context) throw new Error("Recovery bootstrap requires attested stdin execution");
+  const owner = ownerUid();
+  const root = context.repositoryRoot;
+  const path = context.sourcePath;
+  if (realpathSync(root) !== root || realpathSync(path) !== path
+    || resolve(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js") !== path
+    || gitConfiguration(root).some(isExecutableGitConfiguration)) {
+    throw new Error("Recovery bootstrap source is unavailable");
+  }
+  const topLevel = git(root, ["rev-parse", "--show-toplevel"], "utf8").trim();
+  const head = git(root, ["rev-parse", "--verify", "HEAD"], "utf8").trim();
+  if (topLevel !== root || head !== context.head) throw new Error("Recovery bootstrap Git HEAD changed");
+  const reviewed = Buffer.from(git(root, ["show", `${head}:packages/ingenium-extension/scripts/recovery-bootstrap.js`]));
+  let descriptor;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o777) !== 0o644
+      || opened.size !== reviewed.length || opened.size > RECOVERY_SOURCE_MAX_BYTES) {
+      throw new Error("Recovery bootstrap source is unavailable");
+    }
+    options.afterOpen?.(path);
+    const bytes = readExactDescriptor(descriptor, opened.size);
+    const after = fstatSync(descriptor);
+    const current = lstatSync(path);
+    if (!bytes.equals(reviewed) || sha256(bytes) !== context.sourceSha256 || !sourceIdentityMatches(opened, after)
+      || !current.isFile() || current.isSymbolicLink() || !sourceIdentityMatches(opened, current)
+      || realpathSync(path) !== path || (current.mode & 0o777) !== 0o644) throw new Error("Recovery bootstrap source changed during attestation");
+
+    let closed = false;
+    const revalidate = () => {
+      if (closed) throw new Error("Recovery bootstrap source descriptor is closed");
+      const currentHead = git(root, ["rev-parse", "--verify", "HEAD"], "utf8").trim();
+      const currentBytes = readExactDescriptor(descriptor, opened.size);
+      const currentDescriptor = fstatSync(descriptor);
+      const currentPath = lstatSync(path);
+      const currentReviewed = Buffer.from(git(root, ["show", `${currentHead}:packages/ingenium-extension/scripts/recovery-bootstrap.js`]));
+      if (currentHead !== head || !sourceIdentityMatches(opened, currentDescriptor)
+        || !currentPath.isFile() || currentPath.isSymbolicLink() || !sourceIdentityMatches(opened, currentPath)
+        || realpathSync(path) !== path || !currentBytes.equals(bytes) || !currentBytes.equals(currentReviewed)) {
+        throw new Error("Recovery bootstrap source or Git HEAD changed before admission");
+      }
+      return { head, bytes: currentBytes, path, sha256: context.sourceSha256 };
+    };
+    return {
+      descriptor,
+      source: Object.freeze({ head, bytes, path, sha256: context.sourceSha256 }),
+      revalidate,
+      close() {
+        if (closed) return;
+        closed = true;
+        closeSync(descriptor);
+      },
+    };
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    throw error;
+  }
+}
+
+function readOnlyRegularFile(path, maximumBytes, allowEmpty = false, expectedMode) {
   const requested = resolve(path);
   const owner = ownerUid();
   let descriptor;
@@ -358,10 +487,12 @@ function readOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
     const before = lstatSync(requested);
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== owner
       || (before.mode & 0o022) !== 0 || (!allowEmpty && before.size < 1) || before.size > maximumBytes
+      || (expectedMode !== undefined && (before.mode & 0o777) !== expectedMode)
       || realpathSync(requested) !== requested) throw new Error("Recovery preflight file is unavailable");
     descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
     const opened = fstatSync(descriptor);
     if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o022) !== 0
+      || (expectedMode !== undefined && (opened.mode & 0o777) !== expectedMode)
       || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
       throw new Error("Recovery preflight file is unavailable");
     }
@@ -372,7 +503,9 @@ function readOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
       || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
       || !current.isFile() || current.isSymbolicLink() || current.nlink !== 1
       || current.dev !== opened.dev || current.ino !== opened.ino || current.size !== opened.size
-      || current.uid !== owner || (current.mode & 0o022) !== 0 || realpathSync(requested) !== requested) {
+      || current.uid !== owner || (current.mode & 0o022) !== 0
+      || (expectedMode !== undefined && (current.mode & 0o777) !== expectedMode)
+      || realpathSync(requested) !== requested) {
       throw new Error("Recovery preflight file changed during inspection");
     }
     return bytes;
@@ -1041,7 +1174,7 @@ function enrollmentClassification(parent, binding, recovery) {
 
 export async function collectRecoveryPreflight(options = {}) {
   const environment = options.environment ?? process.env;
-  const sourcePath = resolve(options.sourcePath ?? fileURLToPath(import.meta.url));
+  const sourcePath = resolve(options.sourcePath ?? MODULE_ATTESTATION?.sourcePath ?? fileURLToPath(import.meta.url));
   const declaredWorktree = environment.INGENIUM_WORKTREE;
   let worktree;
   try {
@@ -1051,7 +1184,9 @@ export async function collectRecoveryPreflight(options = {}) {
     worktree = null;
   }
   let source;
-  try {
+  if (options.verifiedSource) {
+    source = options.verifiedSource;
+  } else try {
     source = readTrustedRegularFile(sourcePath, "Recovery bootstrap shim", {
       expectedMode: 0o644,
       expectedOwner: ownerUid(),
@@ -1161,7 +1296,11 @@ function expectedRecoveryAdmission(preflight, preflightDigest) {
     throw new Error("Recovery admission preflight is not admissible");
   }
   return {
+    schemaVersion: 1,
+    action: "production-restart",
+    preflightDigest,
     head: preflight.git.head,
+    sourceSha256: preflight.source.sha256,
     parent: {
       pid: preflight.parent.pid,
       startTimeTicks: preflight.parent.startTimeTicks,
@@ -1171,6 +1310,7 @@ function expectedRecoveryAdmission(preflight, preflightDigest) {
     },
     binding: {
       project: preflight.binding.project,
+      projectId: preflight.binding.projectId,
       workspaceId: preflight.binding.workspaceId,
       storageMappingHash: preflight.binding.storageMappingHash,
       worktree: preflight.binding.worktree,
@@ -1178,100 +1318,248 @@ function expectedRecoveryAdmission(preflight, preflightDigest) {
   };
 }
 
-export function validateAndConsumeRecoveryAdmission(path, preflight, preflightDigest, now = Date.now()) {
+export function readRecoveryAdmission(path, preflight, preflightDigest, now = Date.now()) {
   const expected = expectedRecoveryAdmission(preflight, preflightDigest);
   const requested = resolve(path);
-  const owner = ownerUid();
+  const parent = dirname(requested);
+  const parentStat = lstatSync(parent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || parentStat.uid !== ownerUid()
+    || (parentStat.mode & 0o022) !== 0 || realpathSync(parent) !== parent) {
+    throw new Error("Recovery admission directory is not trusted");
+  }
+  const bytes = readOnlyRegularFile(requested, RECOVERY_ADMISSION_MAX_BYTES, false, 0o600);
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) throw new Error("Recovery admission artifact is invalid");
+  let admission;
+  try { admission = JSON.parse(text); } catch { throw new Error("Recovery admission artifact is invalid"); }
+  const server = admission?.admission;
+  const issuedAt = Date.parse(server?.issuedAt);
+  const expiresAt = Date.parse(server?.expiresAt);
+  let executableSha256;
+  try { executableSha256 = sha256(readFileSync(realpathSync(server?.parent?.executable))); } catch {}
+  if (!hasExactKeys(admission, ["incarnation", "admission", "consumeToken"])
+    || !Number.isSafeInteger(admission.incarnation) || admission.incarnation < 1
+    || !OPAQUE_TOKEN.test(admission.consumeToken ?? "") || admission.consumeToken.length !== 43
+    || !hasExactKeys(server, SERVER_ADMISSION_KEYS)
+    || server.schema !== "ingenium.recovery-admission" || server.version !== 1 || server.action !== expected.action
+    || server.preflightDigest !== expected.preflightDigest || server.head !== expected.head
+    || !hasExactKeys(server.parent, ["pid", "start", "executable", "nonce", "session"])
+    || server.parent.pid !== expected.parent.pid || server.parent.start !== String(expected.parent.startTimeTicks)
+    || executableSha256 !== expected.parent.executableSha256 || sha256(server.parent.nonce ?? "") !== expected.parent.nonceSha256
+    || server.parent.session !== expected.parent.sessionId || !OPAQUE_TOKEN.test(server.parent.nonce ?? "")
+    || server.project !== expected.binding.project || server.projectId !== expected.binding.projectId
+    || server.workspace !== expected.binding.workspaceId || server.storage !== expected.binding.storageMappingHash
+    || server.worktree !== expected.binding.worktree
+    || server.worktreeId !== `worktree-${sha256(`${expected.binding.workspaceId}\0${expected.binding.storageMappingHash}`)}`
+    || !Number.isSafeInteger(server.revision) || server.revision < 0
+    || !Number.isSafeInteger(server.fence) || server.fence < 1
+    || !Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
+    || new Date(issuedAt).toISOString() !== server.issuedAt || new Date(expiresAt).toISOString() !== server.expiresAt
+    || issuedAt > now + 30_000 || expiresAt <= now || expiresAt <= issuedAt
+    || expiresAt - issuedAt > RECOVERY_ADMISSION_LIFETIME_MS) {
+    throw new Error("Recovery admission artifact does not match the current preflight");
+  }
+  return Object.freeze({
+    ...admission,
+    admission: Object.freeze({ ...server, parent: Object.freeze({ ...server.parent }) }),
+  });
+}
+
+function readRecoveryApiToken(worktree, environment) {
+  const reference = environment.INGENIUM_MCP_CREDENTIAL_FILE;
+  if (typeof reference !== "string" || reference.length < 1 || reference.length > 1024) {
+    throw new Error("Recovery admission authentication is unavailable");
+  }
+  const path = isAbsolute(reference) ? resolve(reference) : resolve(worktree, reference);
   let descriptor;
+  let bytes;
   try {
-    const parent = dirname(requested);
-    const parentStat = lstatSync(parent);
-    if (!parentStat.isDirectory() || parentStat.isSymbolicLink() || parentStat.uid !== owner
-      || (parentStat.mode & 0o022) !== 0 || realpathSync(parent) !== parent) {
-      throw new Error("Recovery admission directory is not trusted");
-    }
-    const before = lstatSync(requested);
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== owner
-      || (before.mode & 0o022) !== 0 || before.size < 1 || before.size > RECOVERY_ADMISSION_MAX_BYTES
-      || realpathSync(requested) !== requested) throw new Error("Recovery admission artifact is not trusted");
-    descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o022) !== 0
-      || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
-      throw new Error("Recovery admission artifact is not trusted");
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== ownerUid()
+      || (opened.mode & 0o777) !== 0o600 || opened.size < 32 || opened.size > 256) {
+      throw new Error("Recovery admission authentication is unavailable");
     }
-    const bytes = readBoundedDescriptor(descriptor, RECOVERY_ADMISSION_MAX_BYTES);
-    const afterRead = fstatSync(descriptor);
-    const afterPath = lstatSync(requested);
-    if (bytes.length !== opened.size || afterRead.dev !== opened.dev || afterRead.ino !== opened.ino
-      || afterRead.size !== opened.size || afterRead.mtimeMs !== opened.mtimeMs || afterRead.ctimeMs !== opened.ctimeMs
-      || !afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.nlink !== 1
-      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size
-      || afterPath.uid !== owner || (afterPath.mode & 0o022) !== 0) {
-      throw new Error("Recovery admission artifact changed during validation");
+    bytes = readBoundedDescriptor(descriptor, 256);
+    const after = fstatSync(descriptor);
+    const current = lstatSync(path);
+    if (!sourceIdentityMatches(opened, after) || !current.isFile() || current.isSymbolicLink()
+      || !sourceIdentityMatches(opened, current) || (current.mode & 0o777) !== 0o600) {
+      throw new Error("Recovery admission authentication is unavailable");
     }
-    const text = bytes.toString("utf8");
-    if (!Buffer.from(text, "utf8").equals(bytes)) throw new Error("Recovery admission artifact is invalid");
-    let admission;
-    try { admission = JSON.parse(text); } catch { throw new Error("Recovery admission artifact is invalid"); }
-    if (!hasExactKeys(admission, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "issuedAt", "expiresAt"])
-      || admission.schemaVersion !== 1 || admission.action !== "production-restart"
-      || admission.preflightDigest !== preflightDigest || admission.head !== expected.head
-      || canonicalJson(admission.parent) !== canonicalJson(expected.parent)
-      || canonicalJson(admission.binding) !== canonicalJson(expected.binding)
-      || !hasExactKeys(admission.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "sessionId"])
-      || !hasExactKeys(admission.binding, ["project", "workspaceId", "storageMappingHash", "worktree"])
-      || !Number.isSafeInteger(admission.parent.pid) || admission.parent.pid < 2
-      || !Number.isSafeInteger(admission.parent.startTimeTicks) || admission.parent.startTimeTicks < 1
-      || !HASH.test(admission.parent.executableSha256) || !HASH.test(admission.parent.nonceSha256)
-      || !SAFE_SESSION.test(admission.parent.sessionId) || !SAFE_PROJECT.test(admission.binding.project)
-      || !SAFE_ID.test(admission.binding.workspaceId) || !HASH.test(admission.binding.storageMappingHash)
-      || resolve(admission.binding.worktree) !== admission.binding.worktree
-      || typeof admission.issuedAt !== "string" || typeof admission.expiresAt !== "string") {
-      throw new Error("Recovery admission artifact does not match the current preflight");
-    }
-    const issuedAt = Date.parse(admission.issuedAt);
-    const expiresAt = Date.parse(admission.expiresAt);
-    if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)
-      || new Date(issuedAt).toISOString() !== admission.issuedAt || new Date(expiresAt).toISOString() !== admission.expiresAt
-      || issuedAt > now + 30_000 || now - issuedAt > RECOVERY_ADMISSION_LIFETIME_MS
-      || expiresAt <= now || expiresAt <= issuedAt || expiresAt - issuedAt > RECOVERY_ADMISSION_LIFETIME_MS) {
-      throw new Error("Recovery admission artifact is stale");
-    }
-    fchmodSync(descriptor, 0o400);
-    fsyncSync(descriptor);
-    const hardened = fstatSync(descriptor);
-    const current = lstatSync(requested);
-    if ((hardened.mode & 0o777) !== 0o400 || hardened.dev !== opened.dev || hardened.ino !== opened.ino
-      || hardened.size !== opened.size || hardened.mtimeMs !== opened.mtimeMs
-      || !current.isFile() || current.isSymbolicLink() || current.dev !== opened.dev || current.ino !== opened.ino
-      || (current.mode & 0o777) !== 0o400) throw new Error("Recovery admission artifact changed before consumption");
-    const consumed = resolve(dirname(requested), `${basename(requested)}.consumed-${preflightDigest}.json`);
-    linkSync(requested, consumed);
-    const consumedDescriptor = openSync(consumed, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const linked = fstatSync(consumedDescriptor);
-      if (!linked.isFile() || linked.nlink !== 2 || linked.dev !== opened.dev || linked.ino !== opened.ino
-        || linked.uid !== owner || (linked.mode & 0o777) !== 0o400) {
-        throw new Error("Recovery admission consumption is not replay safe");
-      }
-      unlinkSync(requested);
-      const consumedStat = fstatSync(consumedDescriptor);
-      const consumedPath = lstatSync(consumed);
-      if (!consumedStat.isFile() || consumedStat.nlink !== 1 || consumedStat.dev !== opened.dev
-        || consumedStat.ino !== opened.ino || !consumedPath.isFile() || consumedPath.isSymbolicLink()
-        || consumedPath.nlink !== 1 || consumedPath.dev !== opened.dev || consumedPath.ino !== opened.ino
-        || consumedPath.uid !== owner || (consumedPath.mode & 0o777) !== 0o400) {
-        throw new Error("Recovery admission consumption is not replay safe");
-      }
-    } finally {
-      closeSync(consumedDescriptor);
-    }
-    const parentDescriptor = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-    try { fsyncSync(parentDescriptor); } finally { closeSync(parentDescriptor); }
-    return consumed;
+  } catch {
+    throw new Error("Recovery admission authentication is unavailable");
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
+  }
+  const token = bytes.toString("utf8").replace(/\n$/, "");
+  if (!API_TOKEN.test(token) || Buffer.byteLength(`${token}${bytes.at(-1) === 0x0a ? "\n" : ""}`) !== bytes.length) {
+    throw new Error("Recovery admission authentication is unavailable");
+  }
+  return token;
+}
+
+export async function consumeRecoveryAdmission(admission, context, options = {}) {
+  const environment = options.environment ?? process.env;
+  if (environment.INGENIUM_PROJECT !== context.binding.project
+    || environment.INGENIUM_PROJECT_ID !== context.binding.projectId
+    || environment.INGENIUM_WORKSPACE_ID !== context.binding.workspaceId
+    || environment.INGENIUM_STORAGE_MAPPING_HASH !== context.binding.storageMappingHash
+    || environment.INGENIUM_WORKTREE !== context.binding.worktree
+    || environment.INGENIUM_MCP_AUDIENCE !== "mcp") {
+    throw new Error("Recovery admission binding changed");
+  }
+  let base;
+  try {
+    base = new URL(environment.INGENIUM_API_URL);
+  } catch {
+    throw new Error("Recovery admission API is unavailable");
+  }
+  if (base.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(base.hostname)
+    || base.username || base.password || base.search || base.hash) {
+    throw new Error("Recovery admission API is unavailable");
+  }
+  const token = readRecoveryApiToken(context.binding.worktree, environment);
+  const endpoint = new URL(`${base.href.replace(/\/$/, "")}/coordination/recovery-admissions/consume`);
+  endpoint.searchParams.set("project", context.binding.project);
+  let response;
+  try {
+    response = await (options.request ?? fetch)(endpoint, {
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Ingenium-Audience": "mcp",
+        "X-Ingenium-Workspace": context.binding.workspaceId,
+        "X-Ingenium-Launcher-Worktree": context.binding.worktree,
+      },
+      body: canonicalJson({
+        worktree_id: admission.admission.worktreeId,
+        session_id: admission.admission.parent.session,
+        incarnation: admission.incarnation,
+        expected_revision: admission.admission.revision,
+        fence: admission.admission.fence,
+        consume_token: admission.consumeToken,
+        admission: admission.admission,
+      }),
+    });
+    const payload = await response.json();
+    if (response.status !== 200 || !hasExactKeys(payload, ["data"])
+      || !hasExactKeys(payload.data, ["session", "receipt"])
+      || payload.data.session?.state !== "closed"
+      || payload.data.session?.revision !== admission.admission.revision + 1) {
+      throw new Error("invalid");
+    }
+    const receipt = validatedRecoveryAdmissionReceipt(payload.data.receipt, admission.admission);
+    return validatedAdmittedRecoveryContext(
+      admittedRecoveryContext(admission.admission, receipt),
+      context,
+      admission.admission,
+    );
+  } catch {
+    throw new Error("Recovery admission could not be consumed");
+  }
+}
+
+function validatedRecoveryAdmissionReceipt(receipt, admission) {
+  if (!hasExactKeys(receipt, SERVER_RECEIPT_KEYS)
+    || typeof receipt.id !== "string" || !UUID.test(receipt.id)
+    || receipt.schema !== "ingenium.recovery-admission-receipt"
+    || receipt.version !== 1 || receipt.action !== "production-restart"
+    || typeof receipt.admissionDigest !== "string" || !HASH.test(receipt.admissionDigest)
+    || receipt.admissionDigest !== sha256(canonicalJson(admission))
+    || !isCanonicalRfc3339(receipt.consumedAt)) {
+    throw new Error("Recovery admission receipt is invalid");
+  }
+  return Object.freeze({ ...receipt });
+}
+
+function admittedRecoveryContext(admission, receipt) {
+  const startTimeTicks = Number(admission.parent.start);
+  let executableSha256;
+  try { executableSha256 = sha256(readFileSync(realpathSync(admission.parent.executable))); } catch {}
+  if (!Number.isSafeInteger(startTimeTicks) || startTimeTicks < 1 || !HASH.test(executableSha256 ?? "")) {
+    throw new Error("Recovery admission receipt is invalid");
+  }
+  return Object.freeze({
+    schemaVersion: receipt.version,
+    action: receipt.action,
+    preflightDigest: admission.preflightDigest,
+    head: admission.head,
+    parent: Object.freeze({
+      pid: admission.parent.pid,
+      startTimeTicks,
+      executableSha256,
+      nonceSha256: sha256(admission.parent.nonce),
+      sessionId: admission.parent.session,
+    }),
+    binding: Object.freeze({
+      project: admission.project,
+      projectId: admission.projectId,
+      workspaceId: admission.workspace,
+      storageMappingHash: admission.storage,
+      worktree: admission.worktree,
+    }),
+    receipt,
+  });
+}
+
+function expectedAdmittedRecoveryContext(preflight, preflightDigest) {
+  const expected = expectedRecoveryAdmission(preflight, preflightDigest);
+  return Object.freeze({
+    schemaVersion: expected.schemaVersion,
+    action: expected.action,
+    preflightDigest: expected.preflightDigest,
+    head: expected.head,
+    parent: Object.freeze({ ...expected.parent }),
+    binding: Object.freeze({ ...expected.binding }),
+  });
+}
+
+function validatedAdmittedRecoveryContext(context, expected, admission) {
+  if (!hasExactKeys(context, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "receipt"])
+    || !Object.isFrozen(context) || !Object.isFrozen(context.parent) || !Object.isFrozen(context.binding)
+    || !Object.isFrozen(context.receipt)
+    || canonicalJson({
+      schemaVersion: context.schemaVersion,
+      action: context.action,
+      preflightDigest: context.preflightDigest,
+      head: context.head,
+      parent: context.parent,
+      binding: context.binding,
+    }) !== canonicalJson(expected)
+    || canonicalJson(validatedRecoveryAdmissionReceipt(context.receipt, admission)) !== canonicalJson(context.receipt)) {
+    throw new Error("Recovery admission receipt is invalid");
+  }
+  return context;
+}
+
+function assertUnchangedRecoveryPreflight(current, expectedDigest) {
+  const currentDigest = sha256(canonicalJson(current));
+  if (!current.admissible || currentDigest !== expectedDigest) {
+    throw new Error("Recovery admission preflight changed before consumption");
+  }
+}
+
+function recheckHeadAndParent(context, sourceHandle) {
+  try {
+    sourceHandle.revalidate();
+  } catch {
+    throw new Error("Recovery bootstrap source or Git HEAD changed after admission consumption");
+  }
+  const ancestry = inspectAncestry(context.binding.worktree);
+  const parent = ancestry.parent;
+  if (ancestry.status !== "exact" || !parent
+    || canonicalJson({
+      pid: parent.pid,
+      startTimeTicks: parent.startTimeTicks,
+      executableSha256: parent.executableSha256,
+      nonceSha256: parent.nonceSha256,
+      sessionId: parent.sessionId,
+    }) !== canonicalJson(context.parent)) {
+    throw new Error("Recovery parent changed after admission consumption");
   }
 }
 
@@ -1752,16 +2040,19 @@ export function privateNpmConfiguration(owner = ownerUid()) {
   };
 }
 
-async function runAdmittedRecoveryBootstrapShim(argv) {
+async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
-  const owner = ownerUid();
-  const sourcePath = resolve(fileURLToPath(import.meta.url));
-  const declaredWorktree = process.env.INGENIUM_WORKTREE;
-  if (!declaredWorktree) {
-    throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
+  if (!Object.isFrozen(context) || !Object.isFrozen(context.parent) || !Object.isFrozen(context.binding)
+    || !Object.isFrozen(context.receipt) || context.head !== attestedSource.head
+    || sha256(attestedSource.bytes) !== attestedSource.sha256) {
+    throw new Error("Recovery bootstrap admitted context is invalid");
   }
+  const owner = ownerUid();
+  const sourcePath = resolve(attestedSource.path);
+  const declaredWorktree = context.binding.worktree;
   try {
-    if (realpathSync(declaredWorktree) !== resolve(declaredWorktree)) {
+    if (realpathSync(declaredWorktree) !== resolve(declaredWorktree)
+      || sourcePath !== resolve(declaredWorktree, "packages/ingenium-extension/scripts/recovery-bootstrap.js")) {
       throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
     }
   } catch (error) {
@@ -1770,17 +2061,13 @@ async function runAdmittedRecoveryBootstrapShim(argv) {
     }
     throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
   }
-  normalizeTrustedRegularFileMode(sourcePath, "Recovery bootstrap shim", 0o644, owner);
   const { repoRoot, packageRoot, scriptsPath } = hardenCanonicalRepositoryDirectories(
     sourcePath,
     declaredWorktree,
     owner,
     { retainAudit: (audits) => retainCanonicalDirectoryAudit(audits, owner) },
   );
-  const source = readTrustedRegularFile(resolve(scriptsPath, "recovery-bootstrap.js"), "Recovery bootstrap shim", {
-    expectedMode: 0o644,
-    expectedOwner: owner,
-  });
+  const source = { path: sourcePath, bytes: attestedSource.bytes };
   verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
 
   const runtimeOwner = lstatSync(realpathSync(process.execPath)).uid;
@@ -1799,6 +2086,7 @@ async function runAdmittedRecoveryBootstrapShim(argv) {
     const recoveryEnvironment = {
       [CANONICAL_WORKTREE]: repoRoot,
       INGENIUM_WORKTREE: repoRoot,
+      [ADMITTED_RECOVERY_CONTEXT]: canonicalJson(context),
     };
     const build = await runFixed(
       npm,
@@ -1859,26 +2147,54 @@ async function runAdmittedRecoveryBootstrapShim(argv) {
 
 export async function runRecoveryBootstrapShim(argv = process.argv, dependencies = {}) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
-  const preflight = await (dependencies.collectPreflight ?? collectRecoveryPreflight)({
-    environment: process.env,
-    sourcePath: resolve(fileURLToPath(import.meta.url)),
-  });
-  const { digest, output } = recoveryPreflightOutput(preflight);
-  const admissionPath = dependencies.admissionPath
-    ?? (preflight.binding?.worktree ? recoveryAdmissionPath(preflight.binding.worktree) : undefined);
-  const exists = dependencies.admissionExists ?? recoveryAdmissionExists;
-  if (!admissionPath || !exists(admissionPath)) {
-    (dependencies.writeOutput ?? ((value) => process.stdout.write(value)))(`${output}\n`);
-    return;
+  const sourceHandle = (dependencies.openSource ?? openVerifiedRecoverySource)(dependencies.attestation ?? MODULE_ATTESTATION);
+  try {
+    const collect = dependencies.collectPreflight ?? collectRecoveryPreflight;
+    const preflight = await collect({
+      environment: process.env,
+      sourcePath: sourceHandle.source.path,
+      verifiedSource: sourceHandle.source,
+    });
+    const { digest, output } = recoveryPreflightOutput(preflight);
+    const admissionPath = dependencies.admissionPath
+      ?? (preflight.binding?.worktree ? recoveryAdmissionPath(preflight.binding.worktree) : undefined);
+    const exists = dependencies.admissionExists ?? recoveryAdmissionExists;
+    if (!admissionPath || !exists(admissionPath)) {
+      (dependencies.writeOutput ?? ((value) => process.stdout.write(value)))(`${output}\n`);
+      return;
+    }
+    let admission = (dependencies.readAdmission ?? readRecoveryAdmission)(
+      admissionPath,
+      preflight,
+      digest,
+      (dependencies.now ?? Date.now)(),
+    );
+    const current = await collect({
+      environment: process.env,
+      sourcePath: sourceHandle.source.path,
+      verifiedSource: sourceHandle.revalidate(),
+    });
+    assertUnchangedRecoveryPreflight(current, digest);
+    const expectedContext = expectedAdmittedRecoveryContext(current, digest);
+    sourceHandle.revalidate();
+    const context = validatedAdmittedRecoveryContext(
+      await (dependencies.consumeAdmission ?? consumeRecoveryAdmission)(admission, expectedContext),
+      expectedContext,
+      admission.admission,
+    );
+    try {
+      (dependencies.discardAdmission ?? unlinkSync)(admissionPath);
+    } finally {
+      admission = undefined;
+    }
+    (dependencies.postConsumeCheck ?? recheckHeadAndParent)(context, sourceHandle);
+    await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv, context, sourceHandle.source);
+  } finally {
+    sourceHandle.close();
   }
-  (dependencies.consumeAdmission ?? validateAndConsumeRecoveryAdmission)(
-    admissionPath,
-    preflight,
-    digest,
-    (dependencies.now ?? Date.now)(),
-  );
-  await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv);
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : undefined;
-if (invokedPath === import.meta.url) await runRecoveryBootstrapShim();
+if (MODULE_ATTESTATION || invokedPath === import.meta.url) {
+  await runRecoveryBootstrapShim(MODULE_ATTESTATION ? [process.execPath, MODULE_ATTESTATION.sourcePath] : process.argv);
+}

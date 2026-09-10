@@ -39,7 +39,7 @@ tags: [validation, checklist, testing]
 - [ ] Added to `SKILL-INDEX.md` in the correct section
 - [ ] Added to `SKILL-INDEX.md` (numbered list + category sections)
 - [ ] Skill count header incremented in SKILL-INDEX.md
-- [ ] AGENTS.md updated if needed
+- [ ] Affected `.opencode/agents/**` skill grants and role-specific instructions updated
 - [ ] Learnings entry appended with commit hash
 
 ### Agent Sync

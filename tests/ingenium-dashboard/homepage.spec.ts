@@ -28,7 +28,7 @@ async function mockSummary(page: Page): Promise<void> {
   }));
 }
 
-test("bootstraps a clean QA Vision browser into the isolated fixture session", async ({ browser, baseURL }) => {
+test("bootstraps a clean browser into the isolated fixture session", async ({ browser, baseURL }) => {
   if (!baseURL) throw new Error("Fixture dashboard URL is unavailable");
   const context = await browser.newContext();
   const page = await context.newPage();

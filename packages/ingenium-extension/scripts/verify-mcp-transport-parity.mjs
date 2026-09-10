@@ -4,9 +4,6 @@ import { fileURLToPath } from "node:url";
 
 const TRANSPORT_REGISTRATION_PATTERN = /(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"\s*,/g;
 const CATALOG_NAME_PATTERN = /\bname:\s*"([^"]+)"/g;
-// Current built-in registrations in services/ingenium-server/scripts/mcp-server.ts.
-// Update only with an intentional server/catalog parity change.
-const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 282;
 const CONTEXT_UPLOAD_TRANSPORT_NAME = "context_upload_file";
 const CONTEXT_UPLOAD_CATALOG_NAME = `ingenium_${CONTEXT_UPLOAD_TRANSPORT_NAME}`;
 const CONTEXT_UPLOAD_SCHEMA_MARKER = "contextUploadFilePathParam";
@@ -44,12 +41,12 @@ function describeDifference(expected, actual) {
   ].join("; ");
 }
 
-export function getMcpTransportParityPaths(repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")) {
+export function getMcpTransportParityPaths(repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."), distributionRoot) {
   const extensionRoot = join(repositoryRoot, "packages", "ingenium-extension");
   const serverRoot = join(repositoryRoot, "services", "ingenium-server");
   return {
     catalogSource: join(repositoryRoot, "packages", "ingenium-core", "lib", "tools", "mcp-tool-catalog.ts"),
-    packagedTransport: join(extensionRoot, "dist", "scripts", "mcp-transport.js"),
+    packagedTransport: join(distributionRoot ?? join(extensionRoot, "dist"), "scripts", "mcp-transport.js"),
     serverTransport: join(serverRoot, "scripts", "mcp-server.ts"),
   };
 }
@@ -59,11 +56,13 @@ export function getMcpTransportParityPaths(repositoryRoot = resolve(dirname(file
  * extension build so a stale copied transport cannot silently omit a server
  * registration that remains present in source and the canonical catalog.
  */
-export function assertMcpTransportParity(repositoryRoot) {
-  const paths = getMcpTransportParityPaths(repositoryRoot);
+export function assertMcpTransportParity(repositoryRoot, distributionRoot) {
+  const paths = getMcpTransportParityPaths(repositoryRoot, distributionRoot);
   const serverTransport = readRequiredFile(paths.serverTransport);
   const packagedTransport = readRequiredFile(paths.packagedTransport);
   const catalogSource = readRequiredFile(paths.catalogSource);
+  const catalogNames = new Set(extractNames(catalogSource, CATALOG_NAME_PATTERN, "catalog tool names"));
+  const expectedTransportCount = [...catalogNames].filter((name) => name.startsWith("ingenium_")).length;
 
   const serverToolNames = extractNames(serverTransport, TRANSPORT_REGISTRATION_PATTERN, "server transport registrations");
   const packagedToolNames = extractNames(packagedTransport, TRANSPORT_REGISTRATION_PATTERN, "packaged transport registrations");
@@ -71,9 +70,9 @@ export function assertMcpTransportParity(repositoryRoot) {
     ["server", serverToolNames],
     ["packaged", packagedToolNames],
   ]) {
-    if (names.length !== EXPECTED_TRANSPORT_REGISTRATION_COUNT) {
+    if (names.length !== expectedTransportCount) {
       throw new Error(
-        `Expected ${EXPECTED_TRANSPORT_REGISTRATION_COUNT} ${label} transport registrations, found ${names.length}`,
+        `Expected ${expectedTransportCount} ${label} transport registrations, found ${names.length}`,
       );
     }
   }
@@ -82,7 +81,6 @@ export function assertMcpTransportParity(repositoryRoot) {
     throw new Error(`Packaged MCP transport registrations differ from server source (${transportDifference})`);
   }
 
-  const catalogNames = new Set(extractNames(catalogSource, CATALOG_NAME_PATTERN, "catalog tool names"));
   const missingCatalogNames = serverToolNames
     .map((name) => `ingenium_${name}`)
     .filter((name) => !catalogNames.has(name));

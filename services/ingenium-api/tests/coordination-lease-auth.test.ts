@@ -100,7 +100,7 @@ beforeEach(async () => {
     kind: "runtime",
     audience: "runtime",
     name: "coordination lease runtime",
-    scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
+    scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
     organizationId,
     projectId: project.id,
     workspaceId,
@@ -177,7 +177,7 @@ describe("internal coordination lease credentials", () => {
       expect.objectContaining({
         id: issued.coordinationCredential.id,
         audience: "mcp",
-        scopes_json: JSON.stringify(["coordination:read", "coordination:write", "projects:read", "repository:sync"]),
+        scopes_json: JSON.stringify(["coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync"]),
         organization_id: organizationId,
         project_id: project.id,
         workspace_id: workspaceId,

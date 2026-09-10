@@ -46,6 +46,7 @@ const CANONICAL_JOURNAL_KEY = "/app/.ingenium/restore-journal-key";
 const CANONICAL_BACKUPS = "/app/.ingenium/backups";
 const CANONICAL_STAGING = "/app/.ingenium/restore-staging";
 const CANONICAL_SIGNING_KEY = "/app/.ingenium/backup-signing-key";
+const MAX_JOURNAL_BYTES = 16 * 1_024 * 1_024;
 const PHASES = new Set([
   "claimed", "quiescing", "snapshotting", "swapping", "buffers_written", "ingenium_rollback", "ingenium_installed",
   "opencode_rollback", "opencode_installed", "pair_committed", "rehydrated", "restarting", "completed",
@@ -317,7 +318,10 @@ function readJournal(root: string): Journal | null {
   const path = safeChild(root, JOURNAL_FILE);
   if (!existsSync(path)) return null;
   const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.uid !== expectedUid() || (stat.mode & 0o777) !== 0o600) throw new MaintenanceError("JOURNAL_INVALID");
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.uid !== expectedUid()
+    || (stat.mode & 0o777) !== 0o600 || stat.size < 1 || stat.size > MAX_JOURNAL_BYTES) {
+    throw new MaintenanceError("JOURNAL_INVALID");
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8"));
@@ -906,6 +910,7 @@ async function execute(): Promise<void> {
   let owner = "";
   let fence = "";
   let run: backups.RestoreExecutionRun | null = null;
+  let suppressionMergeFailed = false;
   const global = projects.getGlobalProject();
   try {
     if (!global) return;
@@ -940,6 +945,9 @@ async function execute(): Promise<void> {
     await stopDbUsers();
     closeDbForMaintenance();
     scanOpenHolders(paths);
+    capsule = backups.captureRestoreExecutionCapsule(global.id, run.id);
+    closeDbForMaintenance();
+    writeJournal(root, run.id, "quiescing", capsule, targets);
     parents = lockTargetParents(paths, targets);
     run = safeTransition(global.id, run, owner, fence, "snapshotting");
     writeJournal(root, run.id, "snapshotting", capsule, targets);
@@ -991,7 +999,12 @@ async function execute(): Promise<void> {
     } catch {
       throw new MaintenanceError("VERIFY_FAILED");
     }
-    run = backups.rehydrateRestoreExecutionCapsule(capsule);
+    try {
+      run = backups.rehydrateRestoreExecutionCapsule(capsule);
+    } catch {
+      suppressionMergeFailed = true;
+      throw new MaintenanceError("VERIFY_FAILED");
+    }
     run = backups.claimPendingRestoreExecution(global.id, owner, fence, queued.id);
     if (!run) throw new MaintenanceError("VERIFY_FAILED");
     run = safeTransition(global.id, run, owner, fence, "quiescing");
@@ -1067,15 +1080,16 @@ async function execute(): Promise<void> {
           removeSidecars(parents.ingenium, paths.ingenium);
           removeSidecars(parents.opencode, paths.opencode);
         }
+        // The original inodes still have mode 000 after rollback; unlock before SQLite reopens them.
+        lockedTargets = restoreAndCloseLockedTargets(lockedTargets);
         checkDatabases(paths, parents);
         closeDbForMaintenance();
-        lockedTargets = restoreAndCloseLockedTargets(lockedTargets);
         writeJournal(root, run.id, "rolling_back", journal.capsule, journal.targets);
         run = backups.recoverRestoreExecutionCapsule(journal.capsule, "rolled_back", code);
         writeJournal(root, run.id, "rolled_back", journal.capsule, journal.targets);
         restoreTargetMetadata(parents, paths, journal.targets);
         ensureRuntimeSidecars(parents, paths, journal.targets);
-        await startRestoredUsers();
+        if (!suppressionMergeFailed) await startRestoredUsers();
         removeTransientPair(parents, paths, root, run.id);
         archiveJournal(root, readJournal(root)!);
         releaseLock = null;

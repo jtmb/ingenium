@@ -581,6 +581,8 @@ install -d -o ingenium-dashboard -g ingenium-dashboard -m 0700 "$RUNTIME_DASHBOA
 install -d -o ingenium-opencode -g ingenium-opencode -m 0700 "$RUNTIME_OPENCODE_SECRET_DIR"
 install -d -o ingenium-restore -g ingenium-restore -m 0700 "$RUNTIME_RESTORE_SECRET_DIR"
 install -d -o root -g root -m 0700 /run/ingenium-bootstrap
+install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-opencode
+install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-runtime
 node /app/scripts/read-protected-api-token.mjs \
   "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE is required}" \
   "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_API_TOKEN_FILE" installation-api 0 0 "$API_UID" "$API_GID"
@@ -691,6 +693,16 @@ if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
 setfacl -R -m u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX /workspace
 setfacl -R -m d:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX /workspace
 # Collaboration ACLs must not expose private runtime state or scoped credentials.
+# The recursive ACL grant also changes existing owner-only env file masks.
+for env_path in /workspace/.env /workspace/*/.env; do
+  [ -e "$env_path" ] || continue
+  secure_persistent_path file "$env_path" - - 0600
+done
+for retention_root in /workspace/tests/artifacts/test-runs/.retention-control /workspace/*/tests/artifacts/test-runs/.retention-control; do
+  [ -e "$retention_root" ] || continue
+  secure_persistent_path tree "$retention_root" - - 0700 0600
+  setfacl -R -b -k "$retention_root"
+done
 # Revisit only the mounted root and direct worktree OpenCode directories.
 for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
   protected_index="$opencode_root/protected-runtime-index"
@@ -717,11 +729,12 @@ if [ ! -f "$OC_CONFIG" ]; then
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-opencode/.ingenium-mcp-credential",
         "INGENIUM_MCP_AUDIENCE": "mcp",
-        "INGENIUM_PROJECT": "global-default",
-        "INGENIUM_WORKSPACE_ID": "global-default-workspace",
-        "INGENIUM_WORKTREE": "/workspace"
+        "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
+        "INGENIUM_PROJECT": "ingenium",
+        "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
+        "INGENIUM_WORKTREE": "/home/brajam/repos/ingenium"
       }
     }
   },

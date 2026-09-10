@@ -5,7 +5,11 @@ description: Docker deployment guide — services, ports, volumes, health checks
 
 # Deployment Guide
 
-> **Note:** This document is the canonical operations reference for deployment. The AGENTS.md file contains a summary only.
+> **Note:** This document is the canonical operations reference for deployment. Agent execution and recovery instructions live in their respective `.opencode/agents/**` profiles.
+
+> **Command ownership:** The shell commands below are operator procedures, not
+> blanket agent permissions. An agent may execute one only when its active
+> profile and task contract explicitly grant it.
 
 ---
 

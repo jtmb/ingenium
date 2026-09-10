@@ -7,6 +7,9 @@ export interface SendOptions {
   modelId?: string;
   agentName?: string;
   useProjectContext?: boolean;
+  useSavedMemory?: boolean;
+  saveToMemory?: boolean;
+  automaticLearning?: boolean;
 }
 
 export interface Attachment {
@@ -31,6 +34,11 @@ interface ChatInputProps {
   hasSelectableModel?: boolean;
   /** Display-only reminder of the validated project that optional context searches use. */
   projectContextProject?: string;
+  memoryWorkspaceId?: string | null;
+  memoryCanRead?: boolean;
+  memoryCanSave?: boolean;
+  memoryUnavailableReason?: string | null;
+  memorySavePending?: boolean;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -97,11 +105,19 @@ export default function ChatInput({
   onAttachmentsChange,
   hasSelectableModel = true,
   projectContextProject,
+  memoryWorkspaceId,
+  memoryCanRead = false,
+  memoryCanSave = false,
+  memoryUnavailableReason,
+  memorySavePending = false,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
   const [useProjectContext, setUseProjectContext] = useState(false);
+  const [useSavedMemory, setUseSavedMemory] = useState(false);
+  const [saveToMemory, setSaveToMemory] = useState(false);
+  const [automaticLearning, setAutomaticLearning] = useState(true);
   const [isDragOver, setIsDragOver] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -241,6 +257,9 @@ export default function ChatInput({
         modelId,
         agentName,
         useProjectContext,
+        useSavedMemory: Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory,
+        saveToMemory: Boolean(memoryWorkspaceId) && memoryCanSave && !memorySavePending && saveToMemory,
+        automaticLearning,
       });
       if (accepted) {
         setValue("");
@@ -249,6 +268,7 @@ export default function ChatInput({
           textareaRef.current.style.height = "24px";
         }
         setUseProjectContext(false);
+        setSaveToMemory(false);
       }
     } catch {
       // Swallow — input text is preserved so user can retry
@@ -395,6 +415,54 @@ export default function ChatInput({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border-muted)] px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setUseSavedMemory((value) => !value)}
+            disabled={!memoryWorkspaceId || !memoryCanRead || isLoading || sending}
+            className={[
+              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              useSavedMemory && memoryWorkspaceId && memoryCanRead
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+            ].join(" ")}
+            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory}
+            aria-label="Use saved memory"
+          >
+            Use memory
+          </button>
+          <button
+            type="button"
+            onClick={() => setSaveToMemory((value) => !value)}
+            disabled={!memoryWorkspaceId || !memoryCanSave || memorySavePending || isLoading || sending}
+            className={[
+              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              saveToMemory && memoryWorkspaceId && memoryCanSave
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+            ].join(" ")}
+            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanSave && saveToMemory}
+            aria-label="Save this message to memory"
+          >
+            Save message
+          </button>
+          <button
+            type="button"
+            onClick={() => setAutomaticLearning((value) => !value)}
+            disabled={isLoading || sending}
+            className={[
+              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              automaticLearning
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+            ].join(" ")}
+            aria-pressed={automaticLearning}
+            aria-label="Allow automatic learning tools"
+          >
+            Learning tools
+          </button>
+        </div>
+        {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
         <div className="flex min-w-0 items-end gap-2 px-3 py-2">
           {/* Left buttons */}
           <div className="flex min-w-0 items-center gap-1 pb-0.5">

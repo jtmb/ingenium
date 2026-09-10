@@ -5,7 +5,7 @@ import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
 import type { LLMTextExecutor } from "./synthesis-llm.js";
 import * as skillGovernance from "./skill-governance.js";
-import { getSetting, setSetting } from "./settings.js";
+import { getSetting, isAutomaticLearningEnabled, setSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 import { logger } from "../logger.js";
 import {
@@ -45,6 +45,17 @@ export async function runSynthesis(
   sessionId?: string,
   opts?: DurableSynthesisOptions,
 ): Promise<SynthesisResult> {
+  if (!isAutomaticLearningEnabled(projectId)) {
+    return {
+      observations_processed: 0,
+      traits_created: 0,
+      traits_updated: 0,
+      skills_created: 0,
+      observations_skipped: 0,
+      errors: [],
+      summary: "Automatic learning is disabled.",
+    };
+  }
   return runDurableSynthesis(projectId, sessionId, opts);
 }
 
@@ -94,16 +105,6 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
     summary: "",
   };
 
-  try {
-    logEvent(
-      "global-default",
-      "synthesis_started",
-      "synthesis",
-      "Cross-project synthesis started",
-      "Evaluating patterns across all non-global projects",
-    );
-  } catch (_) { /* non-fatal */ }
-
   // Find global project
   const globalProject = projects.getGlobalProject();
   if (!globalProject) {
@@ -111,11 +112,24 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
     result.summary = "No global project configured.";
     return result;
   }
+  if (!isAutomaticLearningEnabled(globalProject.id)) {
+    result.summary = "Automatic learning is disabled for the global project.";
+    return result;
+  }
+  try {
+    logEvent(
+      globalProject.id,
+      "synthesis_started",
+      "synthesis",
+      "Cross-project synthesis started",
+      "Evaluating patterns across all non-global projects",
+    );
+  } catch (_) { /* non-fatal */ }
 
   // Find all non-global, non-archived projects
   const allProjects = projects.listProjects();
   const nonGlobalProjects = allProjects.filter(
-    p => !p.is_global && !p.archived_at && p.id !== globalProject.id,
+    p => !p.is_global && !p.archived_at && p.id !== globalProject.id && isAutomaticLearningEnabled(p.id),
   );
 
   if (nonGlobalProjects.length === 0) {

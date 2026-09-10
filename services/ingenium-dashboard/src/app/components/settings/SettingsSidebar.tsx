@@ -76,15 +76,14 @@ function TabIcon({ icon, className = "" }: { icon: SettingsTab["icon"]; classNam
  */
 export default function SettingsSidebar({ tabs, activeTab, onSelect }: SettingsSidebarProps) {
   return (
-    <div className="w-64 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface-muted)] overflow-y-auto hidden md:flex flex-col" role="tablist" aria-label="Settings categories">
+    <nav className="w-64 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface-muted)] overflow-y-auto hidden md:flex flex-col" aria-label="Settings categories">
       {tabs.map((tab) => {
         const isActive = tab.id === activeTab;
         return (
           <button
             key={tab.id}
             onClick={() => onSelect(tab.id)}
-            role="tab"
-            aria-selected={isActive}
+            aria-current={isActive ? "page" : undefined}
             className={`flex items-center gap-3 px-4 py-2.5 text-sm cursor-pointer text-left
               hover:bg-[var(--color-surface-hover)]
               ${isActive
@@ -97,6 +96,6 @@ export default function SettingsSidebar({ tabs, activeTab, onSelect }: SettingsS
           </button>
         );
       })}
-    </div>
+    </nav>
   );
 }

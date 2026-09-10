@@ -116,7 +116,7 @@ describe("dashboard fixture credential boundary", () => {
     updateTestRunManifest(context.manifestPath, { status: "created" });
   });
 
-  it("bootstraps QA Vision through a test-only server exchange without exposing the bearer", async () => {
+  it("bootstraps a browser through a test-only server exchange without exposing the bearer", async () => {
     const context = contextForCredentialTest();
     Object.assign(process.env, getDashboardFixtureEnvironment(context, testToken));
     process.env.INGENIUM_API_TEST_MODE = "1";

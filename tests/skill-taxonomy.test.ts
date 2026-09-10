@@ -2,9 +2,9 @@
  * Skill Taxonomy Validation Tests
  *
  * Validates the canonical taxonomy and its preserved source mappings by checking:
- *   - Canonical SKILL.md count (10)
+ *   - Active canonical SKILL.md count (8)
  *   - MIGRATED-TO.md marker count (0 after automatic cleanup)
- *   - source-index.md preserved source count (28)
+ *   - Surviving source-index.md count (19); immutable historical mappings (28)
  *   - All canonical SKILL.md files have valid YAML frontmatter (name + description)
  *   - consolidation-map.json integrity (version, mappings, source/target consistency)
  *   - metadata.json agrees with source-proven SKILL.md frontmatter fields
@@ -26,10 +26,11 @@ import {
 const PROJECT_ROOT = resolve(import.meta.dirname, "..");
 const SKILLS_DIR = resolve(PROJECT_ROOT, ".opencode", "skills");
 
-const EXPECTED_CANONICAL = 10;
+const EXPECTED_CANONICAL = 8;
 const EXPECTED_MIGRATED = 28;
 const EXPECTED_TOMBSTONES = 0;
-const EXPECTED_SOURCES = 28;
+const EXPECTED_SOURCES = 19;
+const HISTORICAL_RETIRED_SKILLS = new Set(["engineering-workflow", "local-models"]);
 const CONSOLIDATION_MAP_VERSION = "1.0.0";
 const DEVELOPMENT_CONVENTIONS_DIR = resolve(
   SKILLS_DIR,
@@ -317,7 +318,7 @@ describe("consolidation-map.json integrity", () => {
     expect(map.mappings).toHaveLength(EXPECTED_MIGRATED);
   });
 
-  it("all mapping target names are from the 10 canonical set", () => {
+  it("all mapping target names belong to the historical canonical set", () => {
     const canonicalFiles = findFiles(SKILLS_DIR, "SKILL.md").filter(
       f => !f.includes("/references/")
     );
@@ -330,7 +331,7 @@ describe("consolidation-map.json integrity", () => {
 
     for (const mapping of map.mappings) {
       expect(
-        canonicalNames.has(mapping.target),
+        canonicalNames.has(mapping.target) || HISTORICAL_RETIRED_SKILLS.has(mapping.target),
         `Mapping target "${mapping.target}" (source: "${mapping.source}") not found in canonical set [${[...canonicalNames].join(", ")}]`
       ).toBe(true);
     }
@@ -348,13 +349,13 @@ describe("consolidation-map.json integrity", () => {
     }
   });
 
-  it("all sourcePath entries point to real files", () => {
+  it("active sourcePath entries exist and retired target files remain absent", () => {
     for (const mapping of map.mappings) {
       const fullPath = resolve(PROJECT_ROOT, mapping.sourcePath);
       expect(
         existsSync(fullPath),
         `sourcePath "${mapping.sourcePath}" (source: "${mapping.source}") does not exist at ${fullPath}`
-      ).toBe(true);
+      ).toBe(!HISTORICAL_RETIRED_SKILLS.has(mapping.target));
     }
   });
 
@@ -371,26 +372,27 @@ describe("consolidation-map.json integrity", () => {
 });
 
 describe("Cross-consistency checks", () => {
-  it("source-index.md count equals consolidation-map mappings count", () => {
+  it("source-index.md count equals mappings to active targets", () => {
     const sourceCount = findFiles(SKILLS_DIR, "source-index.md").length;
     const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
     if (!existsSync(mapPath)) return;
     const map = JSON.parse(readFileSync(mapPath, "utf-8"));
-    expect(sourceCount).toBe(map.mappings.length);
+    expect(sourceCount).toBe(map.mappings.filter((mapping: { target: string }) => !HISTORICAL_RETIRED_SKILLS.has(mapping.target)).length);
   });
 
-  it("canonical skills listed in map match the 10 canonical directories", () => {
+  it("historical canonical skills equal active directories plus explicitly retired skills", () => {
     const mapPath = resolve(SKILLS_DIR, "consolidation-map.json");
     if (!existsSync(mapPath)) return;
     const map = JSON.parse(readFileSync(mapPath, "utf-8"));
     const mapCanonical: string[] = map.canonicalSkills || [];
-    expect(mapCanonical).toHaveLength(EXPECTED_CANONICAL);
+    expect(mapCanonical).toHaveLength(EXPECTED_CANONICAL + HISTORICAL_RETIRED_SKILLS.size);
 
     const canonicalDirs = getSubdirs(SKILLS_DIR)
       .filter(d => existsSync(resolve(d, "SKILL.md")))
       .map(d => basename(d));
 
     const mapCanonicalSet = new Set(mapCanonical);
+    expect([...mapCanonicalSet].sort()).toEqual([...canonicalDirs, ...HISTORICAL_RETIRED_SKILLS].sort());
     for (const dir of canonicalDirs) {
       expect(
         mapCanonicalSet.has(dir),

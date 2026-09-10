@@ -112,4 +112,3 @@ Before acting, read [`references/useful-comments/guidelines.md`](references/usef
 ## Cross-References
 
 - **`@devops-conventions`** — Shell scripting safety flags and Docker/Kubernetes conventions.
-- **`@engineering-workflow`** — Agent execution quality, debugging, configuration, and verification.

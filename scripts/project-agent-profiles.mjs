@@ -26,9 +26,11 @@ import { resolve } from "node:path";
 
 const PROFILE_MODE = 0o644;
 const RESERVED_BROKER_PROFILE = "ingenium-llm-broker.md";
+const RETIRED_PROFILE_NAMES = new Set(["browser-agent.md"]);
 const DIRECTORY_MODE = 0o700;
 const ALLOWLISTED_PROFILES = [
   ["chat", "ingenium-chat.md"],
+  ["primary", "plan.md"],
 ];
 
 if (process.platform !== "linux" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
@@ -112,6 +114,19 @@ function openRegularFileAt(parentFd, name, description, { optional = false } = {
   } catch (error) {
     closeSync(fd);
     throw error;
+  }
+}
+
+function retireProfileAt(parentFd, profileName, description) {
+  const profile = openRegularFileAt(parentFd, profileName, description, { optional: true });
+  if (!profile) return;
+  try {
+    assertExclusiveRegularFile(fstatSync(profile.fd), description);
+    unlinkSync(descriptorPath(parentFd, profileName));
+    if (fstatSync(profile.fd).nlink !== 0) fail(`${description} changed before retirement`);
+    fsyncSync(parentFd);
+  } finally {
+    closeSync(profile.fd);
   }
 }
 
@@ -277,6 +292,9 @@ function projectServerOwnedProfiles(sourcePath, targetPath) {
     const targetDirectoryStat = assertDirectory(targetDirectoryFd, "OpenCode global agents directory");
     fchmodSync(targetDirectoryFd, DIRECTORY_MODE);
     assertSameOwner(fstatSync(targetDirectoryFd), targetDirectoryStat, "OpenCode global agents directory");
+    for (const profileName of RETIRED_PROFILE_NAMES) {
+      retireProfileAt(targetDirectoryFd, profileName, `retired global agent profile ${profileName}`);
+    }
     for (const [group, profileName] of ALLOWLISTED_PROFILES) {
       projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, targetDirectoryStat, group, profileName);
     }
@@ -289,6 +307,10 @@ function projectServerOwnedProfiles(sourcePath, targetPath) {
 
 function normalizeDirectory(directoryFd) {
   for (const entry of readdirSync(`/proc/self/fd/${directoryFd}`, { withFileTypes: true })) {
+    if (RETIRED_PROFILE_NAMES.has(entry.name)) {
+      retireProfileAt(directoryFd, entry.name, `retired agent profile ${entry.name}`);
+      continue;
+    }
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
       const childDirectoryFd = openDirectoryAt(directoryFd, entry.name, `agent directory ${entry.name}`);

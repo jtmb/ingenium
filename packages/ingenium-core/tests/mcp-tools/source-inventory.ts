@@ -15,7 +15,7 @@ export function getSourceDerivedCanonicalRegistrations(): {
   const repositoryRoot = join(__dirname, "..", "..", "..", "..");
   const server = extractToolNames(
     join(repositoryRoot, "services", "ingenium-server", "scripts", "mcp-server.ts"),
-    /server\.registerTool\(\s*"([^"]+)"\s*,/g,
+    /(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"\s*,/g,
   ).map((name) => `ingenium_${name}`);
   const extension = ["observer.ts", "auto-observer.ts"].flatMap((file) => extractToolNames(
     join(repositoryRoot, "packages", "ingenium-extension", file),

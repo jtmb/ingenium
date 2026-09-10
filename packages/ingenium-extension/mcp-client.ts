@@ -1,5 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { spawn, type ChildProcess } from "node:child_process";
+import { PassThrough } from "node:stream";
+import type { McpLauncherFailureStage } from "./scripts/mcp-server.js";
 import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { basename, delimiter, dirname, isAbsolute, resolve } from "node:path";
@@ -22,7 +27,9 @@ export const MCP_LIVE_RELOAD_MIN_TIMEOUT_MS = 5_000;
 export const MCP_LIVE_RELOAD_MAX_TIMEOUT_MS = 300_000;
 
 export type McpBridgeFailure = "authentication" | "timeout" | "rate_limited" | "revision_conflict" | "request_failed";
-export type McpBridgeStage = "connect" | "call" | "close";
+export type McpBridgeStage = McpLauncherFailureStage | "spawn" | "spawntimeout" | "connect" | "initialize" | "tools-list" | "call" | "close";
+export type McpFailureBoundary = "launcher" | "parent-mcp-startup" | "parent-mcp-transport" | "bridge";
+export interface McpChildExit { code: number | null; signal: NodeJS.Signals | null }
 
 export class McpBridgeError extends Error {
   constructor(
@@ -31,6 +38,8 @@ export class McpBridgeError extends Error {
     readonly stage?: McpBridgeStage,
     readonly currentRevision?: number,
     readonly errorCode?: string,
+    readonly boundary: McpFailureBoundary = "bridge",
+    readonly childExit?: McpChildExit,
   ) {
     super("Ingenium MCP bridge is unavailable");
     this.name = "McpBridgeError";
@@ -39,6 +48,8 @@ export class McpBridgeError extends Error {
 
 interface McpTransport {
   close(): Promise<void>;
+  lastExit?: McpChildExit;
+  stage?: McpBridgeStage;
   stderr?: { on(event: "data", listener: (chunk: unknown) => void): unknown; resume?(): unknown } | null;
 }
 
@@ -150,18 +161,61 @@ export async function reconnectIngeniumMcp(
 
 /** Retain bounded child diagnostics without exposing credentials, URLs, or filesystem topology. */
 export function sanitizeMcpStderr(value: string): string {
-  return value
+  const redacted = value
     .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
     .replace(/https?:\/\/[^\s]+/gi, "[url]")
     .replace(/(?:^|\s)\/(?:[^\s/]+\/){2,}[^\s]*/g, " [path]")
+    .replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]")
     .replace(/[\u0000-\u001f\u007f]+/g, " ")
     .slice(0, MAX_STDERR_BYTES);
+  let bounded = "";
+  for (const character of redacted) {
+    if (Buffer.byteLength(bounded + character, "utf8") > MAX_STDERR_BYTES) break;
+    bounded += character;
+  }
+  return bounded;
 }
 
-function appendDiagnostic(current: string, chunk: unknown): string {
-  if (Buffer.byteLength(current, "utf8") >= MAX_STDERR_BYTES) return current;
-  const text = sanitizeMcpStderr(Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk));
-  return sanitizeMcpStderr(`${current}${text}`).slice(0, MAX_STDERR_BYTES);
+function collectDiagnostic(transport: McpTransport): () => string {
+  let raw = Buffer.alloc(0);
+  transport.stderr?.on("data", (chunk: unknown) => {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+    raw = Buffer.concat([raw, bytes.subarray(0, Math.max(0, 8_192 - raw.length))]);
+  });
+  transport.stderr?.resume?.();
+  // Sanitize after joining chunks so a split credential cannot bypass redaction.
+  return () => {
+    const text = raw.toString("utf8");
+    const first = startupFailureRecord(text);
+    return sanitizeMcpStderr(first ? `${JSON.stringify(first)} ${text}` : text);
+  };
+}
+
+function startupFailureRecord(diagnostic: string): { boundary: McpFailureBoundary; stage?: McpBridgeStage; reason: string } | undefined {
+  const stages: McpBridgeStage[] = ["local-binding", "project-preflight", "authentication", "import", "transport", "spawn", "spawntimeout", "connect", "initialize", "tools-list"];
+  // Only fixed, allowlisted fields cross the child diagnostic boundary.
+  const records = diagnostic.match(/\{[^{}]*\}/g) ?? [];
+  for (const record of records) {
+    try {
+      const data = JSON.parse(record);
+      if (data.boundary !== "launcher" && data.boundary !== "parent-mcp-startup" && data.boundary !== "parent-mcp-transport") continue;
+      const childStage = stages.includes(data.stage) ? data.stage as McpBridgeStage : undefined;
+      if (!childStage && data.reason !== "rate_limited") continue;
+      return { boundary: data.boundary, stage: childStage, reason: data.reason === "rate_limited" ? "rate_limited" : "startup_failed" };
+    } catch {}
+  }
+  return undefined;
+}
+
+function attributedFailure(error: unknown, diagnostic: string, stage: McpBridgeStage, transport: McpTransport): McpBridgeError {
+  const original = error instanceof McpBridgeError ? error : new McpBridgeError("request_failed");
+  const first = startupFailureRecord(diagnostic);
+  if (first) return new McpBridgeError(first.reason === "rate_limited" ? "rate_limited"
+    : first.stage === "authentication" ? "authentication" : original.failure,
+  diagnostic, first.stage ?? stage, original.currentRevision, original.errorCode, first.boundary, transport.lastExit);
+  return new McpBridgeError(original.failure, diagnostic, original.stage ?? (stage === "connect"
+    ? transport.stage === "spawn" && original.failure === "timeout" ? "spawntimeout" : transport.stage ?? stage
+    : stage === "call" && transport.stage === "tools-list" ? "tools-list" : stage), original.currentRevision, original.errorCode, original.boundary, transport.lastExit);
 }
 
 function bridgeEnvironment(
@@ -170,12 +224,22 @@ function bridgeEnvironment(
   purpose: ExtensionCredentialPurpose = "general",
   timeoutMs?: number,
 ): { project: string; environment: Record<string, string> } {
-  const binding = resolveExtensionBinding(worktree, { purpose, project: requestedProject });
-  const project = resolveExtensionProject(worktree, requestedProject ?? binding.project);
+  let binding: ReturnType<typeof resolveExtensionBinding>;
+  try {
+    binding = resolveExtensionBinding(worktree, { purpose, project: requestedProject });
+  } catch {
+    throw new McpBridgeError("authentication", "", "local-binding");
+  }
+  let project: string;
+  try {
+    project = resolveExtensionProject(worktree, requestedProject ?? binding.project);
+  } catch {
+    throw new McpBridgeError("request_failed", "", "project-preflight");
+  }
   const apiUrl = normalizedApiUrl(binding.apiUrl);
   const authorization = apiRequestHeaders(worktree, undefined, { binding }).get("Authorization");
   if (!apiUrl || !authorization || !TOKEN.test(authorization.slice("Bearer ".length))) {
-    throw new McpBridgeError("authentication");
+    throw new McpBridgeError("authentication", "", "authentication");
   }
 
   const localCredential = `.opencode/${basename(binding.credentialFile)}`;
@@ -217,7 +281,7 @@ export function packagedLauncherPath(moduleUrl = import.meta.url): string {
       // Source-loaded plugins fall through to the package's compiled launcher.
     }
   }
-  throw new McpBridgeError("request_failed");
+  throw new McpBridgeError("request_failed", "", "import");
 }
 
 export function resolveNodeExecutable(
@@ -243,13 +307,97 @@ export function resolveNodeExecutable(
       // Try the next operator-provided executable search path entry.
     }
   }
-  throw new McpBridgeError("request_failed");
+  throw new McpBridgeError("request_failed", "", "local-binding");
+}
+
+// The SDK stdio transport discards exit status before onclose; own the child
+// while retaining the SDK wire codec and its existing shutdown grace periods.
+export class ObservableMcpTransport implements McpTransport {
+  readonly stderr = new PassThrough();
+  lastExit?: McpChildExit;
+  stage: McpBridgeStage = "spawn";
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+  private child?: ChildProcess;
+  private readonly buffer = new ReadBuffer();
+  private closing?: Promise<void>;
+  private exited?: Promise<void>;
+
+  constructor(private readonly options: McpBridgeLaunchOptions) {}
+
+  async start(): Promise<void> {
+    if (this.child || this.exited) throw new Error("Transport already started");
+    const child = spawn(this.options.command, this.options.args, {
+      cwd: this.options.cwd, env: { ...getDefaultEnvironment(), ...this.options.env },
+      stdio: ["pipe", "pipe", "pipe"], shell: false, windowsHide: true,
+    });
+    this.child = child;
+    this.exited = new Promise((resolveExit) => child.once("close", (code, signal) => {
+      this.lastExit = { code, signal };
+      this.child = undefined;
+      resolveExit();
+      this.onclose?.();
+    }));
+    child.stderr!.pipe(this.stderr);
+    child.stdout!.on("data", (chunk: Buffer) => {
+      this.buffer.append(chunk);
+      try {
+        let message;
+        while ((message = this.buffer.readMessage()) !== null) this.onmessage?.(message);
+      } catch {
+        this.onerror?.(new Error("Invalid MCP response"));
+      }
+    });
+    for (const stream of [child.stdin!, child.stdout!, child.stderr!]) {
+      stream.on("error", () => this.onerror?.(new Error("MCP stream failed")));
+    }
+    await new Promise<void>((resolveStart, reject) => {
+      child.once("spawn", resolveStart);
+      child.once("error", () => {
+        const error = new McpBridgeError("request_failed", "", "spawn");
+        reject(error);
+        this.onerror?.(error);
+      });
+    });
+    this.stage = "connect";
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    if ("method" in message) {
+      if (message.method === "initialize") this.stage = "initialize";
+      else if (message.method === "tools/list") this.stage = "tools-list";
+      else if (message.method === "tools/call") this.stage = "call";
+    }
+    const stdin = this.child?.stdin;
+    if (!stdin || stdin.destroyed) throw new McpBridgeError("request_failed");
+    await new Promise<void>((resolveWrite, reject) => stdin.write(serializeMessage(message), (error) => {
+      if (error) reject(error);
+      else resolveWrite();
+    }));
+  }
+
+  close(): Promise<void> {
+    return this.closing ??= this.closeChild();
+  }
+
+  private async closeChild(): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    const wait = () => new Promise<void>((resolveWait) => {
+      const timer = setTimeout(resolveWait, 2_000);
+      this.exited!.then(() => { clearTimeout(timer); resolveWait(); });
+    });
+    child.stdin?.end();
+    await wait();
+    if (!this.lastExit) { child.kill("SIGTERM"); await wait(); }
+    if (!this.lastExit) { child.kill("SIGKILL"); await this.exited; }
+    this.buffer.clear();
+  }
 }
 
 function defaultTransport(options: McpBridgeLaunchOptions): McpTransport {
-  return new StdioClientTransport(
-    options as ConstructorParameters<typeof StdioClientTransport>[0] & { shell: false },
-  );
+  return new ObservableMcpTransport(options);
 }
 
 function defaultClient(): McpClient {
@@ -319,48 +467,38 @@ export async function openMcpToolClient(
     stderr: "pipe",
     shell: false,
   });
-  let diagnostic = "";
-  transport.stderr?.on("data", (chunk: unknown) => {
-    diagnostic = appendDiagnostic(diagnostic, chunk);
-  });
-  transport.stderr?.resume?.();
+  const diagnostics = collectDiagnostic(transport);
   const client = (dependencies.createClient ?? defaultClient)();
   try {
     await bounded(() => client.connect(transport), timeoutMs);
   } catch (error) {
-    await closeBridge(client, transport, false, timeoutMs, diagnostic).catch(() => undefined);
-    const rateLimited = diagnostic.includes('"reason":"rate_limited"');
-    throw new McpBridgeError(
-      rateLimited ? "rate_limited" : error instanceof McpBridgeError ? error.failure : "request_failed",
-      diagnostic,
-      "connect",
-    );
+    const failure = attributedFailure(error, diagnostics(), "connect", transport);
+    await closeBridge(client, transport, false, timeoutMs, diagnostics()).catch(() => undefined);
+    throw failure;
   }
 
   let closed = false;
   return {
     async callTool(name, args) {
-      if (closed) throw new McpBridgeError("request_failed", diagnostic, "call");
+      const diagnostic = diagnostics();
+      if (closed) throw attributedFailure(new McpBridgeError("request_failed"), diagnostic, "call", transport);
       try {
         const result = await bounded(() => client.callTool({ name, arguments: args }), timeoutMs);
         const failure = toolFailure(result);
         if (failure) throw new McpBridgeError(failure.failure, diagnostic, "call", failure.currentRevision, failure.errorCode);
         return result;
       } catch (error) {
-        throw error instanceof McpBridgeError
-          ? new McpBridgeError(error.failure, diagnostic, error.stage ?? "call", error.currentRevision, error.errorCode)
-          : new McpBridgeError("request_failed", diagnostic, "call");
+        throw attributedFailure(error, diagnostics(), "call", transport);
       }
     },
     async close() {
+      const diagnostic = diagnostics();
       if (closed) return;
       closed = true;
       try {
         await closeBridge(client, transport, true, timeoutMs, diagnostic);
       } catch (error) {
-        throw error instanceof McpBridgeError
-          ? new McpBridgeError(error.failure, error.diagnostic, "close", error.currentRevision)
-          : new McpBridgeError("request_failed", diagnostic, "close");
+        throw attributedFailure(error, diagnostics(), "close", transport);
       }
     },
   };
@@ -391,11 +529,7 @@ export async function withMcpClient<T>(
     stderr: "pipe",
     shell: false,
   });
-  let diagnostic = "";
-  transport.stderr?.on("data", (chunk: unknown) => {
-    diagnostic = appendDiagnostic(diagnostic, chunk);
-  });
-  transport.stderr?.resume?.();
+  const diagnostics = collectDiagnostic(transport);
 
   const client = (dependencies.createClient ?? defaultClient)();
   let connected = false;
@@ -408,20 +542,14 @@ export async function withMcpClient<T>(
     stage = "call";
     result = await bounded(() => operation(client, project), timeoutMs);
   } catch (error) {
-    const connectRateLimited = stage === "connect" && diagnostic.includes('"reason":"rate_limited"');
-    failure = error instanceof McpBridgeError
-      ? new McpBridgeError(connectRateLimited ? "rate_limited" : error.failure, diagnostic, error.stage ?? stage,
-        error.currentRevision, error.errorCode)
-      : new McpBridgeError(connectRateLimited ? "rate_limited" : "request_failed", diagnostic, stage);
+    failure = attributedFailure(error, diagnostics(), stage, transport);
   }
 
   try {
     stage = "close";
-    await closeBridge(client, transport, connected, timeoutMs, diagnostic);
+    await closeBridge(client, transport, connected, timeoutMs, diagnostics());
   } catch (error) {
-    if (!failure) failure = error instanceof McpBridgeError
-      ? new McpBridgeError(error.failure, error.diagnostic, error.stage ?? stage, error.currentRevision, error.errorCode)
-      : new McpBridgeError("request_failed", diagnostic, stage);
+    if (!failure) failure = attributedFailure(error, diagnostics(), stage, transport);
   }
   if (failure) throw failure;
   return result as T;

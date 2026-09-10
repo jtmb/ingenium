@@ -67,6 +67,33 @@ describe("repository-authoritative documentation manifests", () => {
     }
   });
 
+  it("accepts ROADMAP-scale documentation without relaxing secret validation", () => {
+    const roadmap = "# Roadmap\n".padEnd(712_063, "x");
+    const manifest = { files: [
+      entry("docs/reference/ROADMAP.md", roadmap),
+      entry("docs/guide.md", "# Guide\n".padEnd(1_715_418 - 712_063, "x")),
+    ] };
+    expect(validateRepositoryDocsManifest(manifest)).toEqual(manifest);
+    expect(() => validateRepositoryDocsManifest({ files: [
+      entry("docs/reference/ROADMAP.md", `${roadmap}\n-----BEGIN PRIVATE KEY-----`),
+    ] })).toThrow(RepositoryDocsManifestError);
+  });
+
+  it("bounds each document and aggregate documentation at 2 MiB of UTF-8 bytes", () => {
+    const budget = 2 * 1024 * 1024;
+    const full = entry("docs/full.md", "é".repeat(budget / 2));
+    expect(validateRepositoryDocsManifest({ files: [full] }).files).toEqual([full]);
+    expect(() => validateRepositoryDocsManifest({ files: [
+      entry(full.path, `${full.content}x`),
+    ] })).toThrow(RepositoryDocsManifestError);
+
+    const half = "é".repeat(budget / 4);
+    const files = [entry("docs/first.md", half), entry("docs/second.md", half)];
+    expect(validateRepositoryDocsManifest({ files }).files).toEqual(files);
+    expect(() => validateRepositoryDocsManifest({ files: [...files, entry("docs/extra.md", "x")] }))
+      .toThrow(RepositoryDocsManifestError);
+  });
+
   it("previews without mutation, then creates linked, tagged hierarchy and canonical RAG sources", () => {
     const manifest = baseManifest();
     const preview = syncRepositoryDocs(projectId, manifest, true);

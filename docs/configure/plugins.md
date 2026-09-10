@@ -6,8 +6,11 @@ description: Plugin lifecycle management — create, enable, disable, configure,
 # HOW-TO: Plugins
 
 ## What It Does
-Manages OpenCode plugins. Each plugin is a TypeScript file in `.opencode/plugins/`.
+Manages project OpenCode plugins. Plugin source files live under
+`.opencode/plugins/`; the dashboard accepts TypeScript or JavaScript uploads.
 Plugins can be created (uploaded), edited, enabled/disabled, or deleted from the dashboard.
+The extension bootstrap entries below are configuration-owned and are not the
+same as project plugin CRUD.
 
 ## Ponytail OpenCode Integration
 
@@ -20,11 +23,18 @@ npm, and it does not configure or invoke Ponytail MCP. The published
 `@dietrichgebert/ponytail@4.8.4` package is deliberately not used: its named
 export is incompatible with OpenCode 1.18.9's plugin loader.
 
-Register exactly one plugin entry for the environment:
+Register exactly one Ponytail entry alongside the other extension plugins for the environment.
+The canonical five-entry list is exported by
+`packages/ingenium-extension/plugin-specs.mjs` and is asserted against the root
+`opencode.json`:
 
 ```json
 "plugin": [
-  "./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+  "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+  "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
 ]
 ```
 
@@ -33,6 +43,15 @@ For the container's global config, use the equivalent absolute entry
 Do not register both entries in one config, recursively discover the checkout,
 or add the old npm package. The adapter is intentionally outside the worktree
 `.opencode/plugins/` discovery root.
+
+The `session-coordinator.ts` entry is a server-plugin wrapper. Its implementation
+handles lifecycle events, `/add-session`, and system-prompt transforms; it does
+not register `tool.execute.before` or `tool.execute.after` and does not grant,
+deny, or gate tool execution. Profile permissions remain authoritative.
+
+The separate `plugins/session-id-tui.ts` source is not in the canonical plugin
+specs, root config, or package exports. Runtime activation is explicitly deferred;
+its mocked slot test is not evidence of a live session-ID sidebar.
 
 The adapter exposes six commands: `/ponytail`, `/ponytail-audit`,
 `/ponytail-debt`, `/ponytail-gain`, `/ponytail-help`, and `/ponytail-review`.
@@ -67,7 +86,7 @@ remove the single registration, delete the checkout, remove any legacy
    - **Plugin name** and **file path**
    - **Source content preview** (first 120 characters in monospace)
    - **Edit** button — modify file path or source content
-   - **Enabled/Disabled** toggle — writes or removes the `.ts` file from `.opencode/plugins/`
+   - **Enabled/Disabled** toggle — writes or removes the configured source file from `.opencode/plugins/`
    - **Delete** button — permanently removes the plugin (requires confirmation)
 
 ## API Endpoints
@@ -78,10 +97,11 @@ All endpoints require `?project=<name>` query parameter.
 | `GET` | `/api/v1/plugins` | List all plugins |
 | `POST` | `/api/v1/plugins` | Create plugin (`{ name, file_path, source_content }`) |
 | `GET` | `/api/v1/plugins/:name` | Get a single plugin |
+| `GET` | `/api/v1/plugins/:name/source` | Read the current plugin source |
 | `PUT` | `/api/v1/plugins/:name` | Update plugin (`{ file_path?, source_content? }`) |
 | `DELETE` | `/api/v1/plugins/:name` | Delete plugin |
-| `POST` | `/api/v1/plugins/:name/enable` | Enable plugin (writes `.ts` to disk) |
-| `POST` | `/api/v1/plugins/:name/disable` | Disable plugin (removes `.ts` from disk) |
+| `POST` | `/api/v1/plugins/:name/enable` | Enable plugin (writes the configured source file to disk) |
+| `POST` | `/api/v1/plugins/:name/disable` | Disable plugin (removes the configured source file from disk) |
 
 ## MCP Tools
 

@@ -34,7 +34,11 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { getDb, resetDbForTest } from "../lib/db.js";
+import * as explicitMemory from "../lib/tools/explicit-memory.js";
+import * as identity from "../lib/tools/identity.js";
+import * as organizations from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
+import * as runtimes from "../lib/tools/runtimes.js";
 import {
   BackupError,
   authorizeRestore,
@@ -816,6 +820,120 @@ describe("RESTORE-100 restore plans", () => {
       { to_state: "rolling_back" },
       { to_state: "rolled_back" },
     ]);
+  });
+
+  it("preserves a current content-free forget across an older fixture restore", async () => {
+    const project = getDb(dbPath).prepare(
+      "SELECT organization_id FROM projects WHERE id = ?",
+    ).get(globalProjectId) as { organization_id: string };
+    const owner = identity.createUser(`restore-memory-${randomUUID()}@example.test`, "Restore Memory Owner");
+    organizations.addOrganizationMember(project.organization_id, owner.id, "admin");
+    const workspaceId = `restore-memory-${randomUUID()}`;
+    runtimes.authorizeWorkspace({
+      id: workspaceId,
+      organizationId: project.organization_id,
+      projectId: globalProjectId,
+      ownerUserId: owner.id,
+      storagePath: join(tempDir, workspaceId),
+    });
+    const scope = explicitMemory.resolveExplicitMemoryScope({
+      projectId: globalProjectId,
+      workspaceId,
+      principal: { type: "user", userId: owner.id },
+    });
+    const fact = `Synthetic restore fact ${randomUUID()}`;
+    const saved = explicitMemory.saveExplicitMemory(scope, {
+      operationId: `save-${randomUUID()}`,
+      content: fact,
+    });
+    const oldSnapshot = await snapshot();
+    const updated = explicitMemory.updateExplicitMemory(scope, saved.memory!.id, {
+      operationId: `update-${randomUUID()}`,
+      expectedVersion: saved.memory!.version,
+      content: `${fact} after a post-snapshot update`,
+    });
+    const forgotten = explicitMemory.forgetExplicitMemory(scope, saved.memory!.id, {
+      operationId: `forget-${randomUUID()}`,
+      expectedVersion: updated.memory!.version,
+    });
+    const plan = previewRestore(globalProjectId, {
+      backupId: oldSnapshot.backupId,
+      dryRun: true,
+      idempotencyKey: `preview-${randomUUID()}`,
+    });
+    const confirmation = authorizeRestore(globalProjectId, plan.id, plan.revision);
+    const ready = confirmRestore(globalProjectId, plan.id, {
+      confirmationToken: confirmation.confirmationToken,
+      expectedRevision: confirmation.plan.revision,
+      idempotencyKey: `confirm-${randomUUID()}`,
+    });
+    const execution = authorizeRestoreExecution(globalProjectId, ready.id, ready.revision);
+    executeRestore(globalProjectId, plan.id, {
+      executionToken: execution.executionToken,
+      expectedRevision: execution.plan.revision,
+      idempotencyKey: `execute-${randomUUID()}`,
+    });
+    const ownerToken = "m".repeat(43);
+    const fenceToken = "n".repeat(43);
+    const claimed = claimPendingRestoreExecution(globalProjectId, ownerToken, fenceToken)!;
+    const quiescing = transitionRestoreExecution(
+      globalProjectId,
+      claimed.id,
+      ownerToken,
+      fenceToken,
+      claimed.revision,
+      "quiescing",
+    );
+    const capsule = captureRestoreExecutionCapsule(globalProjectId, quiescing.id);
+    expect(JSON.stringify(capsule.explicitMemoryForgets)).not.toContain(fact);
+
+    resetDbForTest();
+    rmSync(`${dbPath}-wal`, { force: true });
+    rmSync(`${dbPath}-shm`, { force: true });
+    copyFileSync(join(backupsDir, oldSnapshot.backupId, "ingenium.db"), dbPath);
+
+    const invalidVersion = structuredClone(capsule) as any;
+    invalidVersion.explicitMemoryForgets.version = 2;
+    expect(() => recoverRestoreExecutionCapsule(invalidVersion, "rolled_back", "SWAP_FAILED"))
+      .toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
+    const invalidHash = structuredClone(capsule) as any;
+    invalidHash.explicitMemoryForgets.sha256 = "0".repeat(64);
+    expect(() => recoverRestoreExecutionCapsule(invalidHash, "rolled_back", "SWAP_FAILED"))
+      .toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
+    const invalidCount = structuredClone(capsule) as any;
+    invalidCount.explicitMemoryForgets.count += 1;
+    expect(() => recoverRestoreExecutionCapsule(invalidCount, "rolled_back", "SWAP_FAILED"))
+      .toThrow(expect.objectContaining({ code: "BACKUP_INVALID" }));
+
+    const recovered = recoverRestoreExecutionCapsule(capsule, "rolled_back", "SWAP_FAILED");
+    expect(recovered.state).toBe("rolled_back");
+    expect(recoverRestoreExecutionCapsule(capsule, "rolled_back", "SWAP_FAILED")).toEqual(recovered);
+    expect(explicitMemory.resolveExplicitMemoryState(scope, saved.memory!.id)).toMatchObject({
+      state: "forgotten",
+      tombstone: {
+        memoryId: saved.memory!.id,
+        version: forgotten.receipt.version,
+        receiptId: forgotten.receipt.receiptId,
+        projectId: globalProjectId,
+        workspaceId,
+        ownerUserId: owner.id,
+      },
+    });
+    expect(explicitMemory.readExplicitMemory(scope, saved.memory!.id)).toBeUndefined();
+    expect(explicitMemory.searchExplicitMemories(scope, "Synthetic restore fact").items).toEqual([]);
+    expect(getDb(dbPath).prepare(
+      "SELECT state, content, tags, organization_id, project_id, workspace_id, owner_user_id FROM explicit_memories WHERE id = ?",
+    ).get(saved.memory!.id)).toEqual({
+      state: "forgotten",
+      content: "",
+      tags: "[]",
+      organization_id: project.organization_id,
+      project_id: globalProjectId,
+      workspace_id: workspaceId,
+      owner_user_id: owner.id,
+    });
+    expect(getDb(dbPath).prepare("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
+    expect(getDb(dbPath).prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 
   it("uses the configured artifact UID rather than the validator process UID", async () => {

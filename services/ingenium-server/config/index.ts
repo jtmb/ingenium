@@ -39,6 +39,17 @@ function isContainedBy(parent: string, candidate: string): boolean {
   return relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath);
 }
 
+function configuredWorktreeRoot(): string | undefined {
+  const configured = process.env.INGENIUM_WORKTREE;
+  if (configured !== undefined && !isAbsolute(configured)) return undefined;
+  try {
+    const root = realpathSync(configured ?? process.cwd());
+    return statSync(root).isDirectory() ? root : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readPrivateTokenFile(tokenPath: string): string | undefined {
   let descriptor: number | undefined;
   try {
@@ -68,7 +79,8 @@ function readTokenFile(reference: string, expectedFileName: string): string | un
     try {
       const parent = lstatSync(dirname(reference));
       if (!parent.isDirectory() || parent.isSymbolicLink()) return undefined;
-      const worktreeRoot = realpathSync(process.cwd());
+      const worktreeRoot = configuredWorktreeRoot();
+      if (!worktreeRoot) return undefined;
       const worktreeCredential = resolve(worktreeRoot, ".opencode", expectedFileName);
       const acceptsOwnerPrivateParent = expectedFileName === MCP_CREDENTIAL_FILE_NAME
         || expectedFileName === LEARNING_CREDENTIAL_FILE_NAME
@@ -82,8 +94,8 @@ function readTokenFile(reference: string, expectedFileName: string): string | un
   }
 
   try {
-    const worktreeRoot = realpathSync(process.cwd());
-    if (!statSync(worktreeRoot).isDirectory()) return undefined;
+    const worktreeRoot = configuredWorktreeRoot();
+    if (!worktreeRoot) return undefined;
 
     const opencodeDir = resolve(worktreeRoot, ".opencode");
     if (!isContainedBy(worktreeRoot, opencodeDir)) return undefined;

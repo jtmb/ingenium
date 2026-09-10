@@ -64,6 +64,8 @@ secrets/
 # Local databases and application state
 .ingenium/
 **/.ingenium/
+.opencode/protected-runtime-index/
+**/.opencode/protected-runtime-index/
 *.db
 **/*.db
 *.db-*

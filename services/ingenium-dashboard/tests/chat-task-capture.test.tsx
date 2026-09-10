@@ -63,6 +63,19 @@ vi.mock("../src/lib/opencode", () => ({
   },
 }));
 
+vi.mock("../src/lib/RuntimeContext", () => ({
+  useOpenCodeClient: () => ({
+    chat: { config: async () => (await mocks.chatConfig()).data, saveSelection: vi.fn() },
+    mcp: { status: vi.fn().mockResolvedValue({}), connect: vi.fn(), disconnect: vi.fn() },
+    sessions: { compact: vi.fn() },
+  }),
+  useRuntime: () => ({
+    runtimeId: null,
+    projectName: "selected-project",
+    workspace: { mode: "compatibility", confirmedWorkspaceId: null },
+  }),
+}));
+
 vi.mock("../src/lib/use-opencode-sessions", () => ({
   useOpenCodeSessions: () => ({
     sessions: mocks.session.sessions,

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/opencode-client.js", () => ({
+  buildAuthHeader: (): string | null => "Basic test-auth",
   opencodeClient: {
     getMCPStatus: mocks.getMCPStatus,
     connectMCP: mocks.connectMCP,

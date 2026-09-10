@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useProject } from "@/lib/ProjectContext";
+import { useRuntime } from "@/lib/RuntimeContext";
+import { memoryWorkspaceId } from "@/lib/explicit-memory";
 import {
   api,
   type ContextCheckpoint,
@@ -11,10 +13,12 @@ import {
   type ContextMessageSummary,
 } from "@/lib/api";
 import { buildContextUrl } from "../context-navigation";
+import RuntimeWorkspacePicker from "../../components/RuntimeWorkspacePicker";
 import ContextCheckpointHistory from "./ContextCheckpointHistory";
 import ContextConversationList from "./ContextConversationList";
 import ContextMessageTimeline from "./ContextMessageTimeline";
 import ContextSourcesSection from "./ContextSourcesSection";
+import ExplicitMemorySection from "./ExplicitMemorySection";
 
 type ContextDetail = {
   conversation: ContextConversationSummary;
@@ -42,6 +46,12 @@ function newIdempotencyKey(): string {
  */
 export default function ContextWorkspace() {
   const project = useProject();
+  const runtime = useRuntime();
+  const savedMemoryWorkspaceId = memoryWorkspaceId(
+    project,
+    runtime.workspace.confirmedProjectName,
+    runtime.workspace.confirmedWorkspaceId,
+  );
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedFromUrl = searchParams.get("conversation");
@@ -237,6 +247,14 @@ export default function ContextWorkspace() {
       </header>
 
       <ContextSourcesSection project={project} />
+
+      {!savedMemoryWorkspaceId && runtime.workspace.status !== "ready" && (
+        <div className="relative min-h-[28rem] overflow-hidden rounded-lg border border-[var(--color-border)]" data-testid="context-workspace-picker">
+          <RuntimeWorkspacePicker controller={runtime.workspace} product="saved memory" />
+        </div>
+      )}
+
+      <ExplicitMemorySection key={`${project}:${savedMemoryWorkspaceId ?? "unbound"}`} project={project} workspaceId={savedMemoryWorkspaceId} />
 
       <div className="grid min-h-[36rem] overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] lg:grid-cols-[minmax(17rem,22rem)_minmax(0,1fr)]">
         <ContextConversationList

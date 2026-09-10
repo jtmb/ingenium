@@ -12,7 +12,7 @@
  "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works.
 
 ## DIRECTIVE:
-One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
+One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
 
 
 ### THE REQUESTS:
@@ -21,12 +21,19 @@ ROAD MAP, @docs/reference/roadmap.md Lets update a feature in the roadmap.
 
 Requested Fetaures:
 
-1. I want to add cloudflare tunnels to ingenium. This should be configurable through the settings menu.
+1. Opencode has been restarted. Please proceed. Remember... whatever changes you are making to opencode need to work on the TUI we are in as well. You are in plan mode now. Review NEXT STEPS 1-6 and formulate a concrete plan. Do not overenginner. Do not design something that will not work in the TUI. All opencode related tests must past in both the server and this tui session where the plugin is present.
 
 2. I want playwright to be one of the ingenium managed mcp servers *add in* 
 
 3. Diagnose why the MCP server keeps breaking.
 
+4. Ingenium scout is not to be used for anything except retrieving stuff from rag. And retrieving context. Update any agent files. Also the ponytail skill is not being loaded. Enfore the loading of this skill. (by all agents)
+
+5. Additionaly. @opencode.json should not contain permissions for agents Only model and varients. Permissions are saved in the agent template. These are golden rules add them to AGENTS.md as well.
+
+7. Additionaly Ensure the agents are always following the roadmap. and consolidating in a true autonomous loop. Enforce this through agent files and AGENTS.md
+
+8. Prove that session memory works in Ingenium UI /chat /opencode and in external opencode harness (such as the one we are in)
 
 
 
@@ -37,24 +44,3 @@ Requested Fetaures:
 | Resource | Path |
 |----------|------|
 | docs | [`docs`](docs)
-
-
-7. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
-
-
-
-<!-- 
-1. /settings > pipeline. Should be emptied. Contents should be moved to "Providers" (inside the config tab). Make it share the providers config that opencode uses. So when i set my Providers in opencode it's already set in ingenium provider settings and vice versa.
-
-2. /backups new backup endpoint. Full mcp support. This new page will allows us to export a zip file with our :
-
- - Ingenium DB export
- - Opencode DB Export
-
- It should have the ability to import/export backups from this one zip file and restore either one or both services. It should also have automatic revisioned backups every hours, days (configurable via settings).
-
- 3. http://localhost:3000/docs already acts like a RAG. I would like to enhance it with full RAG capabilities so we can get rid of thread. Thead is another application i made that stores conversation context in a rag, you can bulk upload documentation for you agents to search from offline etc. please see: /home/brajam/repos/thread
-
-    Then present me a solid plan. If you think it could be done better or improved or done differently feel free to ask questions using the question tool.
-
-5. /secrets I want a Hashicorp Vault like secrets manager that i can use in the UI to make secrets that my agents can call and use. All through MCP. On the UI side, it should act as a password manager i can use to retrieve my passwords (like vault warden) -->

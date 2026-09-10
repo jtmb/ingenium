@@ -887,10 +887,11 @@ export default function SkillsPage() {
         <>
           <p className="text-sm text-[var(--color-text-muted)]">
             The Phase 3 taxonomy consolidation (2026-07-16) reduced 36 legacy skills to 10 canonical skills.
-            Below are the 28 legacy skill names and the canonical skill they were absorbed into.
-            Source content is preserved under{" "}
+            Below are the 28 historical mappings, not the current active skill list.
+            There are now 8 active canonical skills; the engineering workflow target is retired.
+            The 19 surviving source indexes are under{" "}
             <code className="bg-[var(--color-code-bg)] px-1.5 py-0.5 rounded text-xs">references/sources/&lt;legacy-name&gt;/</code>{" "}
-            in each canonical skill directory.
+            in active canonical skill directories. Agent behavior lives in each respective agent profile.
           </p>
 
           <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded overflow-hidden" data-testid="consolidated-list">

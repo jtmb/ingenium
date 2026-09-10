@@ -26,6 +26,8 @@ export const COORDINATION_MEMORY_ACTION_LIMIT = 64;
 export const COORDINATION_MEMORY_CHECK_LIMIT = 32;
 export const COORDINATION_TRANSCRIPT_MESSAGE_LIMIT = 16;
 export const COORDINATION_TRANSCRIPT_MESSAGE_MAX_BYTES = 1_572_864;
+export const RECOVERY_ADMISSION_SCHEMA = "ingenium.recovery-admission";
+export const RECOVERY_ADMISSION_RECEIPT_SCHEMA = "ingenium.recovery-admission-receipt";
 
 export type CoordinationErrorCode =
   | "INVALID_COORDINATION_INPUT"
@@ -52,6 +54,7 @@ export type CoordinationErrorCode =
   | "TARGET_SESSION_NOT_FOUND"
   | "SESSION_LINK_CONFLICT"
   | "TRANSCRIPT_CONFLICT"
+  | "RECOVERY_ADMISSION_CONFLICT"
   | "COORDINATION_INTEGRITY_ERROR";
 
 /** Stable failures for COORD-101. Token material and claim values are never embedded in messages. */
@@ -204,6 +207,72 @@ export interface AuthorizedTakeoverCoordinationSessionResult extends Coordinatio
   takeoverEvidenceId: string;
 }
 
+export interface RecoveryAdmission {
+  schema: typeof RECOVERY_ADMISSION_SCHEMA;
+  version: 1;
+  action: "production-restart";
+  preflightDigest: string;
+  head: string;
+  parent: {
+    pid: number;
+    start: string;
+    executable: string;
+    nonce: string;
+    session: string;
+  };
+  project: string;
+  projectId: string;
+  worktreeId: string;
+  workspace: string;
+  storage: string;
+  worktree: string;
+  issuedAt: string;
+  expiresAt: string;
+  revision: number;
+  fence: number;
+}
+
+export interface MintRecoveryAdmissionInput extends CoordinationLeaseInput {
+  project: string;
+  principalId: string;
+  workspace: string;
+  storage: string;
+  worktree: string;
+  preflightDigest: string;
+  head: string;
+  parentPid: number;
+  parentStart: string;
+  parentExecutable: string;
+  parentNonce: string;
+  ttlMs: number;
+}
+
+export interface MintRecoveryAdmissionResult {
+  session: CoordinationSessionMutationResult;
+  admission: RecoveryAdmission;
+  consumeToken: string;
+}
+
+export interface ConsumeRecoveryAdmissionInput extends CoordinationSessionIdentity {
+  expectedRevision: number;
+  fence: number;
+  principalId: string;
+  consumeToken: string;
+  admission: RecoveryAdmission;
+}
+
+export interface ConsumeRecoveryAdmissionResult {
+  session: CoordinationSessionMutationResult;
+  receipt: {
+    id: string;
+    schema: typeof RECOVERY_ADMISSION_RECEIPT_SCHEMA;
+    version: 1;
+    action: "production-restart";
+    admissionDigest: string;
+    consumedAt: string;
+  };
+}
+
 export interface CoordinationClaimMutationResult {
   session: CoordinationSessionMutationResult;
   acceptedEpoch: number;
@@ -269,7 +338,40 @@ export type CoordinationOperationalActionKind = "read" | "search" | "write" | "e
 export type CoordinationOperationalCheckKind = "test" | "typecheck" | "lint" | "build" | "format" | "security" | "other";
 export type CoordinationNextWorkKind = "none" | "continue_task" | "review_changes" | "run_checks" | "address_failure";
 
+export interface CoordinationResultManifest {
+  baseCommit: string | null;
+  dirtyHashes: Array<{ pathSegments: string[]; sha256: string | null }>;
+  dependencyResults: Array<{ taskId: string; revision: number; result: "passed" | "failed" | "unknown" }>;
+  exclusivePaths: string[][];
+  profileRevision: string | null;
+  toolRevision: string | null;
+  ownerId: string;
+  fence: number;
+  unresolvedOperations: Array<{ operationId: string; status: "unknown" | "cancelled"; firstFailure: string }>;
+  todoWrite: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; priority: "high" | "medium" | "low" }>;
+  inputHash: string | null;
+  finalized: boolean;
+}
+
+export interface CoordinationReviewAdmission {
+  inputManifest: CoordinationResultManifest;
+  inputHash: string;
+  outputHash: string;
+  observedInputHash: string;
+  observedOutputHash: string;
+}
+
+export interface CoordinationAllocation {
+  phaseId: string;
+  mode: "single_todo" | "multi_todo";
+  requestedConcurrency: number;
+  agents: Array<{ agentId: string; todoId: string; writer: boolean; exclusivePaths: string[][] }>;
+}
+
 export interface CoordinationOperationalEntryInput {
+  manifest?: CoordinationResultManifest;
+  reviewAdmission?: CoordinationReviewAdmission;
+  allocation?: CoordinationAllocation;
   status: CoordinationOperationalStatus;
   actions: Array<{
     kind: CoordinationOperationalActionKind;
@@ -453,7 +555,13 @@ type CoordinationOperation =
   | "session_link"
   | "transcript_publish"
   | "transcript_acknowledge"
+  | "recovery_admission_mint"
+  | "recovery_admission_consume"
   | "close";
+
+interface StoredRecoveryAdmission extends RecoveryAdmission {
+  consumeTokenHash: string;
+}
 
 interface StoredSession {
   id: string;
@@ -528,8 +636,10 @@ const PRINCIPAL_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const OWNERSHIP_TOKEN = /^[A-Za-z0-9_-]{32,512}$/;
+const RECOVERY_CONSUME_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const CLIENT_CLAIM_KEY = OWNERSHIP_TOKEN;
 const SHA256 = /^[0-9a-f]{64}$/;
+const GIT_OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 const OPAQUE_TASK_ID = /^task-[0-9a-f]{64}$/;
 const PEER_SNAPSHOT_VERSION = 1;
 const PEER_SNAPSHOT_PATH_LIMIT = 32;
@@ -539,6 +649,7 @@ const OPERATIONAL_STATUSES = ["active", "working", "idle", "completed", "error"]
 const OPERATIONAL_ACTION_KINDS = ["read", "search", "write", "edit", "execute"] as const;
 const OPERATIONAL_CHECK_KINDS = ["test", "typecheck", "lint", "build", "format", "security", "other"] as const;
 const NEXT_WORK_KINDS = ["none", "continue_task", "review_changes", "run_checks", "address_failure"] as const;
+const RECOVERY_ADMISSION_SNAPSHOT_KEY = "recoveryAdmission";
 const SNAPSHOT_CREDENTIAL_KEY_WORDS = new Set([
   "token", "secret", "password", "credential", "authorization", "bearer", "privatekey", "apikey",
 ]);
@@ -699,6 +810,74 @@ function assertAuthorizedTakeoverInput(value: AuthorizedTakeoverCoordinationSess
   }
 }
 
+function isBoundedText(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= maxLength
+    && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isCanonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function isRecoveryAdmission(value: unknown): value is RecoveryAdmission {
+  if (!isPlainRecord(value)
+    || !hasExactKeys(value, [
+      "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
+      "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
+    ])
+    || value.schema !== RECOVERY_ADMISSION_SCHEMA || value.version !== 1 || value.action !== "production-restart"
+    || !isCoordinationSha256(value.preflightDigest)
+    || typeof value.head !== "string" || !GIT_OBJECT_ID.test(value.head)
+    || !isPlainRecord(value.parent)
+    || !hasExactKeys(value.parent, ["pid", "start", "executable", "nonce", "session"])
+    || !isSafePositiveInteger(value.parent.pid)
+    || !isBoundedText(value.parent.start, 128)
+    || !isBoundedText(value.parent.executable, 1_024) || !value.parent.executable.startsWith("/")
+    || typeof value.parent.nonce !== "string" || !OWNERSHIP_TOKEN.test(value.parent.nonce)
+    || !isCoordinationOpaqueId(value.parent.session)
+    || !isBoundedText(value.project, 64) || /[\\/]/.test(value.project)
+    || !isCoordinationOpaqueId(value.projectId) || !isCoordinationOpaqueId(value.worktreeId)
+    || !isBoundedText(value.workspace, 256)
+    || !isCoordinationSha256(value.storage)
+    || !isBoundedText(value.worktree, 1_024) || !value.worktree.startsWith("/")
+    || !isCanonicalTimestamp(value.issuedAt) || !isCanonicalTimestamp(value.expiresAt)
+    || Date.parse(value.expiresAt) <= Date.parse(value.issuedAt)
+    || !isSafeNonnegativeInteger(value.revision) || !isSafePositiveInteger(value.fence)) return false;
+  return true;
+}
+
+function assertRecoveryMintInput(value: MintRecoveryAdmissionInput): void {
+  assertLeaseInput(value);
+  assertTtl(value.ttlMs);
+  if (!isBoundedText(value.project, 64) || /[\\/]/.test(value.project)
+    || !PRINCIPAL_ID.test(value.principalId)
+    || !isBoundedText(value.workspace, 256)
+    || !isCoordinationSha256(value.storage)
+    || !isBoundedText(value.worktree, 1_024) || !value.worktree.startsWith("/")
+    || !isCoordinationSha256(value.preflightDigest)
+    || !GIT_OBJECT_ID.test(value.head)
+    || !isSafePositiveInteger(value.parentPid)
+    || !isBoundedText(value.parentStart, 128)
+    || !isBoundedText(value.parentExecutable, 1_024) || !value.parentExecutable.startsWith("/")
+    || !OWNERSHIP_TOKEN.test(value.parentNonce)
+    || value.parentNonce === value.ownershipToken) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+}
+
+function assertRecoveryConsumeInput(value: ConsumeRecoveryAdmissionInput): void {
+  assertIdentity(value);
+  if (!isSafeNonnegativeInteger(value.expectedRevision)
+    || !isSafePositiveInteger(value.fence)
+    || !PRINCIPAL_ID.test(value.principalId)
+    || !RECOVERY_CONSUME_TOKEN.test(value.consumeToken)
+    || !isRecoveryAdmission(value.admission)) {
+    throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  }
+}
+
 function assertOwnershipTokensAreNotPublicSessionValues(
   db: Db,
   projectId: string,
@@ -750,7 +929,9 @@ function containsUnsafeSnapshotData(value: unknown, ownershipTokens: readonly st
 }
 
 function assertSafeSnapshot(snapshot: unknown, ownershipTokens: readonly string[] = []): asserts snapshot is ContextMetadata {
-  if (!isBoundedContextMetadata(snapshot) || containsUnsafeSnapshotData(snapshot, ownershipTokens)) {
+  if (!isBoundedContextMetadata(snapshot)
+    || Object.prototype.hasOwnProperty.call(snapshot, RECOVERY_ADMISSION_SNAPSHOT_KEY)
+    || containsUnsafeSnapshotData(snapshot, ownershipTokens)) {
     throw new CoordinationError("INVALID_COORDINATION_INPUT");
   }
 }
@@ -777,6 +958,37 @@ function parseStoredSnapshot(value: string): ContextMetadata {
   } catch {
     throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
   }
+}
+
+function storedRecoveryAdmission(snapshot: ContextMetadata): StoredRecoveryAdmission | undefined {
+  if (!Object.prototype.hasOwnProperty.call(snapshot, RECOVERY_ADMISSION_SNAPSHOT_KEY)) return undefined;
+  const value = snapshot[RECOVERY_ADMISSION_SNAPSHOT_KEY];
+  if (!isPlainRecord(value) || !hasExactKeys(value, [
+    "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
+    "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
+    "consumeTokenHash",
+  ])) throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  const { consumeTokenHash, ...admission } = value;
+  if (!isCoordinationSha256(consumeTokenHash) || !isRecoveryAdmission(admission)) {
+    throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  }
+  return { ...admission, consumeTokenHash };
+}
+
+function publicRecoveryAdmission(admission: StoredRecoveryAdmission): RecoveryAdmission {
+  const { consumeTokenHash: _consumeTokenHash, ...publicAdmission } = admission;
+  return publicAdmission;
+}
+
+function snapshotWithoutRecoveryAdmission(snapshot: ContextMetadata): ContextMetadata {
+  const copy = { ...snapshot };
+  delete copy[RECOVERY_ADMISSION_SNAPSHOT_KEY];
+  return copy;
+}
+
+function internalSnapshotJson(snapshot: ContextMetadata): string {
+  if (!isBoundedContextMetadata(snapshot)) throw new CoordinationError("INVALID_COORDINATION_INPUT");
+  return JSON.stringify(snapshot);
 }
 
 function requireProject(db: Db, projectId: string): void {
@@ -839,7 +1051,7 @@ function readSession(row: StoredSession): CoordinationSession {
     state: row.state,
     heartbeat_at: row.heartbeat_at,
     expires_at: row.expires_at,
-    snapshot: parseStoredSnapshot(row.snapshot_json),
+    snapshot: snapshotWithoutRecoveryAdmission(parseStoredSnapshot(row.snapshot_json)),
     snapshot_revision: row.snapshot_revision,
     current_task_id: row.current_task_id,
     current_task_revision: row.current_task_revision,
@@ -1334,9 +1546,96 @@ function normalizedEncodedPath(value: unknown): string[] {
   return encodedHandoffPath(normalizedHandoffPath(decoded.join("/")));
 }
 
+export function coordinationManifestHash(manifest: CoordinationResultManifest): string {
+  return requestHash(manifest);
+}
+
+function normalizedManifestRecords(value: Record<string, unknown>): Pick<CoordinationOperationalEntryInput, "manifest" | "reviewAdmission" | "allocation"> {
+  const invalid = (): never => { throw new CoordinationError("INVALID_COORDINATION_INPUT"); };
+  const text = (value: unknown, max = 256): value is string => typeof value === "string" && value.trim().length > 0
+    && value.length <= max && !value.includes("\0");
+  const hashOrNull = (value: unknown) => value === null || isCoordinationSha256(value);
+  const exact = (value: unknown, keys: string[]): value is Record<string, unknown> => isPlainRecord(value) && hasExactKeys(value, keys);
+  const list = (value: unknown, max = 32): value is unknown[] => Array.isArray(value) && value.length <= max;
+  const paths = (value: unknown): string[] => {
+    if (!list(value)) return invalid();
+    const decoded = value.map((path) => normalizedEncodedPath(path).map((segment) => Buffer.from(segment, "base64url").toString("utf8")).join("/"));
+    if (new Set(decoded).size !== decoded.length) return invalid();
+    return decoded;
+  };
+  if (Object.hasOwn(value, "manifest")) {
+    const m = value.manifest;
+    if (!exact(m, ["baseCommit", "dirtyHashes", "dependencyResults", "exclusivePaths", "profileRevision", "toolRevision",
+      "ownerId", "fence", "unresolvedOperations", "todoWrite", "inputHash", "finalized"])
+      || (m.baseCommit !== null && (typeof m.baseCommit !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(m.baseCommit)))
+      || !hashOrNull(m.profileRevision) || !hashOrNull(m.toolRevision) || !hashOrNull(m.inputHash)
+      || typeof m.ownerId !== "string" || !/^actor-[0-9a-f]{64}$/.test(m.ownerId) || !isSafePositiveInteger(m.fence)
+      || typeof m.finalized !== "boolean" || !list(m.dirtyHashes) || !list(m.dependencyResults)
+      || !list(m.unresolvedOperations) || !list(m.todoWrite, 64)) return invalid();
+    paths(m.exclusivePaths);
+    const dirtyPaths = m.dirtyHashes.map((entry) => {
+      if (!exact(entry, ["pathSegments", "sha256"]) || !hashOrNull(entry.sha256)) return invalid();
+      return entry.pathSegments;
+    });
+    paths(dirtyPaths);
+    for (const entry of m.dependencyResults) {
+      if (!exact(entry, ["taskId", "revision", "result"]) || !text(entry.taskId)
+        || !isSafeNonnegativeInteger(entry.revision) || !["passed", "failed", "unknown"].includes(entry.result as string)) return invalid();
+    }
+    for (const entry of m.unresolvedOperations) {
+      if (!exact(entry, ["operationId", "status", "firstFailure"]) || !text(entry.operationId)
+        || !text(entry.firstFailure) || !["unknown", "cancelled"].includes(entry.status as string)) return invalid();
+    }
+    const todoIds = new Set<string>();
+    for (const entry of m.todoWrite) {
+      if (!exact(entry, ["id", "content", "status", "priority"]) || !text(entry.id) || !text(entry.content, 2048)
+        || !["pending", "in_progress", "completed", "cancelled"].includes(entry.status as string)
+        || !["high", "medium", "low"].includes(entry.priority as string) || todoIds.has(entry.id)) return invalid();
+      todoIds.add(entry.id);
+    }
+    if (m.finalized && (m.baseCommit === null || m.inputHash === null || m.profileRevision === null || m.toolRevision === null
+      || m.unresolvedOperations.length > 0 || m.dependencyResults.some((entry) => (entry as { result: string }).result !== "passed"))) return invalid();
+  }
+  if (Object.hasOwn(value, "reviewAdmission")) {
+    const review = value.reviewAdmission;
+    const manifest = value.manifest as CoordinationResultManifest | undefined;
+    if (!exact(review, ["inputManifest", "inputHash", "outputHash", "observedInputHash", "observedOutputHash"])) return invalid();
+    const inputManifest = normalizedManifestRecords({ manifest: review.inputManifest }).manifest!;
+    if (![review.inputHash, review.outputHash, review.observedInputHash, review.observedOutputHash].every(isCoordinationSha256)
+      || !inputManifest.finalized || review.inputHash !== coordinationManifestHash(inputManifest) || !manifest?.finalized
+      || review.inputHash !== manifest.inputHash || review.outputHash !== coordinationManifestHash(manifest)
+      || review.inputHash !== review.observedInputHash || review.outputHash !== review.observedOutputHash) return invalid();
+  }
+  if (Object.hasOwn(value, "allocation")) {
+    const allocation = value.allocation;
+    if (!exact(allocation, ["phaseId", "mode", "requestedConcurrency", "agents"]) || !text(allocation.phaseId)
+      || !["single_todo", "multi_todo"].includes(allocation.mode as string)
+      || !isSafePositiveInteger(allocation.requestedConcurrency) || !Array.isArray(allocation.agents)
+      || allocation.agents.length !== allocation.requestedConcurrency) return invalid();
+    const agents = new Set<string>();
+    const territories: string[] = [];
+    for (const agent of allocation.agents) {
+      if (!exact(agent, ["agentId", "todoId", "writer", "exclusivePaths"]) || !text(agent.agentId) || !text(agent.todoId)
+        || typeof agent.writer !== "boolean" || agents.has(agent.agentId)) return invalid();
+      agents.add(agent.agentId);
+      const owned = paths(agent.exclusivePaths);
+      if (!agent.writer && owned.length > 0) return invalid();
+      if (agent.writer) {
+        if (owned.length === 0) return invalid();
+        for (const path of owned) {
+          if (territories.some((prior) => prior === path || prior.startsWith(`${path}/`) || path.startsWith(`${prior}/`))) return invalid();
+        }
+        territories.push(...owned);
+      }
+    }
+  }
+  return Object.fromEntries(["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]]));
+}
+
 function normalizedOperationalEntryInput(value: unknown): CoordinationOperationalEntryInput {
   if (!isPlainRecord(value)
-    || !hasExactKeys(value, ["status", "actions", "checks", "todos", "currentTaskId", "changedPaths", "nextWork"])
+    || !hasExactKeys(value, ["status", "actions", "checks", "todos", "currentTaskId", "changedPaths", "nextWork",
+      ...["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key))])
     || !OPERATIONAL_STATUSES.includes(value.status as CoordinationOperationalStatus)
     || !Array.isArray(value.actions) || value.actions.length > COORDINATION_MEMORY_ACTION_LIMIT
     || !Array.isArray(value.checks) || value.checks.length > COORDINATION_MEMORY_CHECK_LIMIT
@@ -1402,6 +1701,7 @@ function normalizedOperationalEntryInput(value: unknown): CoordinationOperationa
     };
   });
   return {
+    ...normalizedManifestRecords(value),
     status: value.status as CoordinationOperationalStatus,
     actions,
     checks,
@@ -1422,7 +1722,8 @@ function normalizedOperationalEntryInput(value: unknown): CoordinationOperationa
 function readOperationalEntry(value: unknown): CoordinationOperationalEntry {
   if (!isPlainRecord(value)
     || !hasExactKeys(value, ["version", "type", "entryId", "actorId", "sourceRevision", "timestamp",
-      "status", "actions", "checks", "todos", "currentTaskId", "contextRevision", "changedPaths", "nextWork"])
+      "status", "actions", "checks", "todos", "currentTaskId", "contextRevision", "changedPaths", "nextWork",
+      ...["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key))])
     || value.version !== 1 || value.type !== "operational" || typeof value.entryId !== "string" || !UUID.test(value.entryId)
     || typeof value.actorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(value.actorId)
     || !isSafePositiveInteger(value.sourceRevision) || typeof value.timestamp !== "string"
@@ -1430,6 +1731,7 @@ function readOperationalEntry(value: unknown): CoordinationOperationalEntry {
     || !isSafeNonnegativeInteger(value.contextRevision)) throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
   try {
     const input = normalizedOperationalEntryInput({
+      ...Object.fromEntries(["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]])),
       status: value.status,
       actions: value.actions,
       checks: value.checks,
@@ -1535,7 +1837,7 @@ function todoState(counts: Omit<CoordinationPeerSnapshot["todos"], "total" | "st
 }
 
 function projectedPeerSnapshot(session: StoredSession): CoordinationPeerSnapshot | undefined {
-  const snapshot = parseStoredSnapshot(session.snapshot_json);
+  const snapshot = snapshotWithoutRecoveryAdmission(parseStoredSnapshot(session.snapshot_json));
   if (!hasExactKeys(snapshot, ["version", "status", "todos", "changedPaths", "currentTaskId", "contextRevision"])
     || snapshot.version !== PEER_SNAPSHOT_VERSION
     || (snapshot.status !== "active" && snapshot.status !== "working" && snapshot.status !== "idle")
@@ -1879,7 +2181,10 @@ export function recoverCoordinationSession(
     );
     const persisted = storedSession(db, projectId, input);
     if (persisted) {
-      assertSafeSnapshot(parseStoredSnapshot(persisted.snapshot_json), [input.ownershipToken, input.nextOwnershipToken]);
+      assertSafeSnapshot(
+        snapshotWithoutRecoveryAdmission(parseStoredSnapshot(persisted.snapshot_json)),
+        [input.ownershipToken, input.nextOwnershipToken],
+      );
     }
     const ownershipHash = tokenHash(input.ownershipToken);
     const nextOwnershipHash = tokenHash(input.nextOwnershipToken);
@@ -1961,7 +2266,10 @@ export function authorizedTakeoverCoordinationSession(
     assertOwnershipTokensAreNotPublicSessionValues(
       db, projectId, input, [input.ownershipToken, input.nextOwnershipToken],
     );
-    assertSafeSnapshot(parseStoredSnapshot(session.snapshot_json), [input.ownershipToken, input.nextOwnershipToken]);
+    assertSafeSnapshot(
+      snapshotWithoutRecoveryAdmission(parseStoredSnapshot(session.snapshot_json)),
+      [input.ownershipToken, input.nextOwnershipToken],
+    );
     const updatedAt = now();
     if (worktreeEpoch(db, projectId, input.worktreeId, updatedAt).state !== "active") {
       throw new CoordinationError("EPOCH_QUARANTINED");
@@ -2000,6 +2308,207 @@ export function authorizedTakeoverCoordinationSession(
   return result.result;
 }
 
+/** Mint one short-lived restart admission while retaining only its consume-token hash. */
+export function mintRecoveryAdmission(
+  projectId: string,
+  input: MintRecoveryAdmissionInput,
+): MintRecoveryAdmissionResult {
+  assertProjectId(projectId);
+  assertRecoveryMintInput(input);
+  let consumeToken = "";
+  const ownershipHash = tokenHash(input.ownershipToken);
+  const hash = requestHash({
+    operation: "recovery_admission_mint",
+    projectId,
+    identity: identityForHash(input),
+    expectedRevision: input.expectedRevision,
+    fence: input.fence,
+    ownershipTokenHash: ownershipHash,
+    project: input.project,
+    principalId: input.principalId,
+    workspace: input.workspace,
+    storage: input.storage,
+    worktree: input.worktree,
+    preflightDigest: input.preflightDigest,
+    head: input.head,
+    parentPid: input.parentPid,
+    parentStart: input.parentStart,
+    parentExecutable: input.parentExecutable,
+    parentNonce: input.parentNonce,
+    ttlMs: input.ttlMs,
+  });
+  const outcome = execTransaction(() => {
+    const db = getDb(dbPath());
+    const replay = readReceipt<Omit<MintRecoveryAdmissionResult, "consumeToken">>(
+      db, projectId, "recovery_admission_mint", input.idempotencyKey, hash,
+    );
+    if (replay !== undefined) throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    requireProject(db, projectId);
+    if (db.prepare("SELECT 1 FROM coordination_sessions WHERE ownership_token_hash = ? LIMIT 1")
+      .get(tokenHash(input.parentNonce))) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
+    do {
+      consumeToken = randomBytes(32).toString("base64url");
+    } while (consumeToken === input.ownershipToken || consumeToken === input.parentNonce
+      || db.prepare("SELECT 1 FROM coordination_sessions WHERE ownership_token_hash = ? LIMIT 1")
+        .get(tokenHash(consumeToken)) !== undefined);
+    const consumeTokenHash = tokenHash(consumeToken);
+    const issuedAt = now();
+    const session = requireActiveLease(db, projectId, input, ownershipHash, issuedAt);
+    requirePrincipalBoundSession(session, input.principalId);
+    if (worktreeEpoch(db, projectId, input.worktreeId, issuedAt).state !== "active") {
+      throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    }
+    const currentSnapshot = parseStoredSnapshot(session.snapshot_json);
+    const currentAdmission = storedRecoveryAdmission(currentSnapshot);
+    if (currentAdmission && Date.parse(currentAdmission.expiresAt) > Date.parse(issuedAt)) {
+      throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    }
+    const expiresAt = new Date(Math.min(
+      Date.parse(session.expires_at),
+      Date.parse(issuedAt) + input.ttlMs,
+    )).toISOString();
+    const admission: RecoveryAdmission = {
+      schema: RECOVERY_ADMISSION_SCHEMA,
+      version: 1,
+      action: "production-restart",
+      preflightDigest: input.preflightDigest,
+      head: input.head,
+      parent: {
+        pid: input.parentPid,
+        start: input.parentStart,
+        executable: input.parentExecutable,
+        nonce: input.parentNonce,
+        session: input.sessionId,
+      },
+      project: input.project,
+      projectId,
+      worktreeId: input.worktreeId,
+      workspace: input.workspace,
+      storage: input.storage,
+      worktree: input.worktree,
+      issuedAt,
+      expiresAt,
+      revision: session.revision + 1,
+      fence: session.fence,
+    };
+    const snapshot = {
+      ...snapshotWithoutRecoveryAdmission(currentSnapshot),
+      [RECOVERY_ADMISSION_SNAPSHOT_KEY]: { ...admission, consumeTokenHash },
+    };
+    const updated = advanceActiveSession(
+      db,
+      projectId,
+      session,
+      input,
+      ownershipHash,
+      issuedAt,
+      "snapshot_json = ?, revision = revision + 1, updated_at = ?",
+      [internalSnapshotJson(snapshot), issuedAt],
+    );
+    const result = writeReceipt(db, projectId, "recovery_admission_mint", input.idempotencyKey, hash, {
+      session: mutationResult(updated),
+      admission,
+    });
+    return { result: { ...result, consumeToken }, written: true };
+  });
+  if (outcome.written) checkpointAfterWrite();
+  return outcome.result;
+}
+
+/** Consume one exact restart admission and close the prior session authority atomically. */
+export function consumeRecoveryAdmission(
+  projectId: string,
+  input: ConsumeRecoveryAdmissionInput,
+): ConsumeRecoveryAdmissionResult {
+  assertProjectId(projectId);
+  assertRecoveryConsumeInput(input);
+  const consumeTokenHash = tokenHash(input.consumeToken);
+  const receiptKey = `recovery-consume:${consumeTokenHash}`;
+  const outcome = execTransaction(() => {
+    const db = getDb(dbPath());
+    requireProject(db, projectId);
+    const session = requireSession(db, projectId, input);
+    requirePrincipalBoundSession(session, input.principalId);
+    if (db.prepare(
+      "SELECT 1 FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+    ).get(projectId, receiptKey)) {
+      throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    }
+    const snapshot = parseStoredSnapshot(session.snapshot_json);
+    const storedAdmission = storedRecoveryAdmission(snapshot);
+    if (!storedAdmission || !hashesEqual(storedAdmission.consumeTokenHash, consumeTokenHash)) {
+      throw new CoordinationError("SESSION_NOT_FOUND");
+    }
+    const consumedAt = now();
+    const admission = publicRecoveryAdmission(storedAdmission);
+    if (requestHash(admission) !== requestHash(input.admission)
+      || admission.projectId !== projectId
+      || admission.worktreeId !== input.worktreeId
+      || admission.parent.session !== input.sessionId
+      || admission.revision !== input.expectedRevision
+      || admission.fence !== input.fence
+      || session.revision !== input.expectedRevision
+      || session.fence !== input.fence
+      || session.state !== "active"
+      || isExpired(session, consumedAt)
+      || Date.parse(admission.issuedAt) > Date.parse(consumedAt)
+      || Date.parse(admission.expiresAt) <= Date.parse(consumedAt)
+      || worktreeEpoch(db, projectId, input.worktreeId, consumedAt).state !== "active") {
+      throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    }
+    db.prepare(
+      `UPDATE coordination_claims
+       SET state = 'released', released_at = ?, updated_at = ?
+       WHERE project_id = ? AND coordination_session_id = ? AND worktree_id = ?
+         AND incarnation = ? AND fence = ? AND state <> 'released'`,
+    ).run(
+      consumedAt, consumedAt, projectId, session.id, input.worktreeId, input.incarnation, input.fence,
+    );
+    const changed = db.prepare(
+      `UPDATE coordination_sessions
+       SET state = 'closed', expires_at = ?, snapshot_json = ?, revision = revision + 1, updated_at = ?
+       WHERE project_id = ? AND id = ? AND worktree_id = ? AND session_id = ? AND incarnation = ?
+         AND principal_id = ? AND revision = ? AND fence = ? AND state = 'active' AND expires_at > ?`,
+    ).run(
+      consumedAt,
+      internalSnapshotJson(snapshotWithoutRecoveryAdmission(snapshot)),
+      consumedAt,
+      projectId,
+      session.id,
+      input.worktreeId,
+      input.sessionId,
+      input.incarnation,
+      input.principalId,
+      input.expectedRevision,
+      input.fence,
+      consumedAt,
+    );
+    if (changed.changes !== 1) throw new CoordinationError("RECOVERY_ADMISSION_CONFLICT");
+    const updated = requireSession(db, projectId, input);
+    const receipt: ConsumeRecoveryAdmissionResult["receipt"] = {
+      id: randomUUID(),
+      schema: RECOVERY_ADMISSION_RECEIPT_SCHEMA,
+      version: 1,
+      action: "production-restart",
+      admissionDigest: requestHash(admission),
+      consumedAt,
+    };
+    const result = writeReceipt(
+      db,
+      projectId,
+      "recovery_admission_consume",
+      receiptKey,
+      requestHash({ admission, consumeTokenHash, principalId: input.principalId }),
+      { session: mutationResult(updated), receipt },
+    );
+    return { result, written: true };
+  });
+  if (outcome.written) checkpointAfterWrite();
+  return outcome.result;
+}
+
 /** Replace the bounded operational snapshot and its project-owned task/context pointers. */
 export function updateCoordinationSnapshot(
   projectId: string,
@@ -2014,7 +2523,7 @@ export function updateCoordinationSnapshot(
     || (input.contextConversationId !== null && input.contextConversationId === input.ownershipToken)) {
     throw new CoordinationError("INVALID_COORDINATION_INPUT");
   }
-  const serializedSnapshot = snapshotJson(input.snapshot, [input.ownershipToken]);
+  snapshotJson(input.snapshot, [input.ownershipToken]);
   assertPointerPair(input.currentTaskId, input.currentTaskRevision);
   assertPointerPair(input.contextConversationId, input.contextRevision);
   const ownershipHash = tokenHash(input.ownershipToken);
@@ -2040,6 +2549,12 @@ export function updateCoordinationSnapshot(
     const updatedAt = now();
     const session = requireActiveLease(db, projectId, input, ownershipHash, updatedAt);
     assertPointersMatchProject(db, projectId, input);
+    const existingSnapshot = parseStoredSnapshot(session.snapshot_json);
+    const recoveryAdmission = storedRecoveryAdmission(existingSnapshot);
+    const serializedSnapshot = internalSnapshotJson({
+      ...input.snapshot,
+      ...(recoveryAdmission ? { [RECOVERY_ADMISSION_SNAPSHOT_KEY]: recoveryAdmission } : {}),
+    });
     const updated = advanceActiveSession(
       db,
       projectId,
@@ -2225,6 +2740,10 @@ export function publishCoordinationMemory(
     const createdAt = now();
     const session = requireActiveLease(db, projectId, input, ownershipHash, createdAt);
     const contextRevision = requireCoordinationMemory(db, projectId, input.worktreeId, memory.id);
+    if (normalizedEntry.manifest && (normalizedEntry.manifest.fence !== session.fence
+      || normalizedEntry.manifest.ownerId !== coordinationActorId(session.session_id, session.incarnation))) {
+      throw new CoordinationError("INVALID_COORDINATION_INPUT");
+    }
     if (session.context_conversation_id !== memory.id) throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
     const entry: CoordinationOperationalEntry = {
       version: 1,

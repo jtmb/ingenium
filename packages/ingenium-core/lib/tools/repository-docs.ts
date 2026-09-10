@@ -18,8 +18,8 @@ import {
 } from "./rag.js";
 
 export const MAX_REPOSITORY_DOC_FILES = 256;
-export const MAX_REPOSITORY_DOC_FILE_BYTES = 512 * 1024;
-export const MAX_REPOSITORY_DOC_TOTAL_BYTES = 1_500 * 1024;
+export const MAX_REPOSITORY_DOC_TOTAL_BYTES = 2 * 1024 * 1024;
+export const MAX_REPOSITORY_DOC_FILE_BYTES = MAX_REPOSITORY_DOC_TOTAL_BYTES;
 export const REPOSITORY_DOC_PAGE_TAGS = ["repository-managed", "repository-doc"] as const;
 
 export interface RepositoryDocsManifestEntry {

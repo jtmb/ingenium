@@ -30,6 +30,9 @@ vi.mock("../src/app/components/settings/panels/PipelinePanel", () => ({
 vi.mock("../src/app/components/settings/panels/ConfigPanel", () => ({
   default: () => <div>Config panel</div>,
 }));
+vi.mock("../src/app/components/settings/panels/CloudflarePanel", () => ({
+  default: () => <div>Cloudflare panel</div>,
+}));
 
 import SettingsOverlay from "../src/app/components/settings/SettingsOverlay";
 
@@ -70,6 +73,7 @@ const SETTINGS_TABS = [
   ["observations", "Observations"],
   ["personality", "Personality"],
   ["providers", "Providers"],
+  ["cloudflare", "Cloudflare"],
   ["logs", "Logs"],
 ] as const;
 
@@ -95,7 +99,9 @@ describe("SettingsOverlay deep links", () => {
 
     const panel = await screen.findByTestId(`settings-panel-${id}`);
     expect(panel.closest("[hidden]")).toBeNull();
-    expect(screen.getByRole("tab", { name: label }).getAttribute("aria-selected")).toBe("true");
+    const sidebar = screen.getByRole("navigation", { name: "Settings categories" });
+    expect(sidebar.querySelector('[role="tab"]')).toBeNull();
+    expect(screen.getByRole("button", { name: label }).getAttribute("aria-current")).toBe("page");
     expect(screen.queryByText(/No settings for|No settings available/i)).toBeNull();
 
     const destination = ROUTE_LINKS[id];

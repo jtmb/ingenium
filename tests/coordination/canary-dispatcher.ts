@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -11,7 +11,6 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { Hooks } from "@opencode-ai/plugin";
-import { managedCommand } from "../../packages/ingenium-extension/scripts/managed-command-wrapper";
 import { repositorySync } from "../../packages/ingenium-extension/resource-sync";
 import type { HarnessCheck } from "./contracts";
 
@@ -166,44 +165,9 @@ function readExactFile(path: string, marker: string): string {
   }
 }
 
-async function coordinatedMutation(
-  hooks: Hooks,
-  context: CanaryActionContext,
-  toolName: "apply_patch" | "bash",
-  args: Record<string, unknown>,
-  action: () => Promise<void> | void,
-): Promise<void> {
-  context.abort.throwIfAborted();
-  const callID = `canary-${randomUUID()}`;
-  await hooks["tool.execute.before"]?.({ tool: toolName, sessionID: context.sessionId, callID }, { args });
-  context.abort.throwIfAborted();
-  try {
-    await action();
-  } catch (error) {
-    await hooks.event?.({ event: {
-      type: "message.part.updated",
-      properties: {
-        part: {
-          type: "tool",
-          sessionID: context.sessionId,
-          messageID: context.messageId,
-          callID,
-          tool: toolName,
-          state: { status: "error", input: args, error: "Injected local canary failure", time: { start: Date.now(), end: Date.now() } },
-        },
-      },
-    } as never });
-    throw error;
-  }
-  context.abort.throwIfAborted();
-  await hooks["tool.execute.after"]?.(
-    { tool: toolName, sessionID: context.sessionId, callID, args },
-    { title: "coordination canary", output: "completed", metadata: { additions: toolName === "apply_patch" ? 1 : 0, deletions: 0 } },
-  );
-}
-
 export class RealCanaryActions implements CanaryActions {
-  constructor(private readonly plan: CanaryPlan, private readonly hooks: Hooks) {}
+  // The action runner still passes hooks; execution is governed by its canary profile, not coordinator admission.
+  constructor(private readonly plan: CanaryPlan, _hooks?: Hooks) {}
 
   async execute(step: CanaryStep, context: CanaryActionContext): Promise<string> {
     context.abort.throwIfAborted();
@@ -215,36 +179,25 @@ export class RealCanaryActions implements CanaryActions {
     if (step.operation === "observe") return readExactFile(path, step.marker!);
 
     if (step.operation === "fail_local") {
-      const patchText = `*** Begin Patch\n*** Add File: ${step.path}\n+${step.marker}\n*** End Patch`;
-      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText, currentTaskId: this.plan.nonce }, () => {
-        throw new Error("Injected local canary failure");
-      });
+      throw new Error("Injected local canary failure");
     }
 
     if (step.operation === "mutate_only" || step.operation === "mutate_commit_sync") {
-      const patchText = `*** Begin Patch\n*** Add File: ${step.path}\n+${step.marker}\n*** End Patch`;
-      await coordinatedMutation(this.hooks, context, "apply_patch", { patchText, currentTaskId: this.plan.nonce }, () => {
-        const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-        try { writeFileSync(descriptor, `${step.marker}\n`, "utf8"); } finally { closeSync(descriptor); }
-      });
+      const descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try { writeFileSync(descriptor, `${step.marker}\n`, "utf8"); } finally { closeSync(descriptor); }
       if (step.operation === "mutate_only") return step.marker!;
     } else {
       readExactFile(path, step.marker!);
     }
 
-    const buildPayload = Buffer.from(JSON.stringify(["run", this.plan.check]), "utf8").toString("base64url");
-    await coordinatedMutation(this.hooks, context, "bash", { command: `ingenium-build ${buildPayload}` }, () => {
-      required(managedCommand("build", ["run", this.plan.check], this.plan.worktree) === 0, "Canary check failed");
-    });
-    const addPayload = Buffer.from(JSON.stringify(["add", step.path]), "utf8").toString("base64url");
-    await coordinatedMutation(this.hooks, context, "bash", { command: `ingenium-repository ${addPayload}` }, () => {
-      required(managedCommand("repository", ["add", step.path!], this.plan.worktree) === 0, "Canary Git add failed");
-    });
+    const options = { cwd: this.plan.worktree, shell: false, stdio: "inherit" } as const;
+    context.abort.throwIfAborted();
+    required(spawnSync(resolve(dirname(process.execPath), "npm"), ["run", this.plan.check], options).status === 0, "Canary check failed");
+    context.abort.throwIfAborted();
+    required(spawnSync("/usr/bin/git", ["add", "--", step.path!], options).status === 0, "Canary Git add failed");
     const message = `test(coordination): add ${step.slot} canary`;
-    const commitPayload = Buffer.from(JSON.stringify(["commit", message]), "utf8").toString("base64url");
-    await coordinatedMutation(this.hooks, context, "bash", { command: `ingenium-repository ${commitPayload}` }, () => {
-      required(managedCommand("repository", ["commit", message], this.plan.worktree) === 0, "Canary Git commit failed");
-    });
+    context.abort.throwIfAborted();
+    required(spawnSync("/usr/bin/git", ["commit", "-m", message], options).status === 0, "Canary Git commit failed");
     context.abort.throwIfAborted();
     const sync = await repositorySync(this.plan.worktree, { project: this.plan.project });
     required(sync.docs.errors === 0 && sync.skills.errors === 0 && sync.agents.errors === 0 && sync.plugins.errors === 0, "Canary repository sync failed");

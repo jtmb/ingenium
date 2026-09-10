@@ -118,13 +118,15 @@ describe("repository resource sync", () => {
   });
 
   it("accepts a combined projection above 2 MiB after structural preflight", () => {
-    const content = "x".repeat(450_000);
     const docsManifest = {
-      files: Array.from({ length: 3 }, (_, index) => ({
-        path: `docs/large-${index}.md`, content,
-        sha256: createHash("sha256").update(content).digest("hex"),
-        fileType: "regular", isSymlink: false,
-      })),
+      files: [712_063, 501_677, 501_678].map((size, index) => {
+        const content = "# Documentation\n".padEnd(size, "x");
+        return {
+          path: index === 0 ? "docs/reference/ROADMAP.md" : `docs/large-${index}.md`, content,
+          sha256: createHash("sha256").update(content).digest("hex"),
+          fileType: "regular", isSymlink: false,
+        };
+      }),
     };
     const source = "x".repeat(200_000);
     const plugins = Array.from({ length: 4 }, (_, index) => {
@@ -152,8 +154,14 @@ describe("repository resource sync", () => {
     const candidates = [
       { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: Array(513).fill(null), agents: [], plugins: [] } },
       { docsManifest: { files: [{ path: "x".repeat(513), content: "", sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
-      { docsManifest: { files: [{ path: "docs/large.md", content: "x".repeat(512 * 1024 + 1), sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
-      { docsManifest: { files: Array.from({ length: 4 }, (_, index) => ({ path: `docs/${index}.md`, content: "x".repeat(400 * 1024) })) } },
+      { docsManifest: { files: [{ path: "docs/large.md", content: "x".repeat(2 * 1024 * 1024 + 1), sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
+      { docsManifest: { files: Array.from({ length: 3 }, (_, index) => ({ path: `docs/${index}.md`, content: "x".repeat(700 * 1024) })) } },
+      { docsManifest: { files: [] }, resourcesManifest: {
+        version: 2, skills: [], agents: [], plugins: [{ source: "x".repeat(256 * 1024 + 1) }],
+      } },
+      { docsManifest: { files: [] }, resourcesManifest: {
+        version: 2, skills: [], agents: [], plugins: [], content: "x".repeat(512 * 1024 + 1),
+      } },
       { docsManifest: { files: [] }, resourcesManifest: {
         version: 2, skills: [], agents: [],
         plugins: Array.from({ length: 7 }, (_, index) => ({ source: "x".repeat(240 * 1024), path: `.opencode/plugins/${index}.ts` })),

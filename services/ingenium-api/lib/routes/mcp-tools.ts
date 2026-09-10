@@ -133,7 +133,9 @@ export function authorizedCatalog(req: import("express").Request, projectId: str
     if (policy.target === "installation") return authorization.requireInstallationPermission(authorizationPrincipal, policy.resource, policy.permission).allowed;
     if (policy.target === "organization") return Boolean(projectAccess.organizationId)
       && authorization.requireOrganizationPermission(authorizationPrincipal, projectAccess.organizationId!, policy.resource, policy.permission).allowed;
-    if (policy.target === "private") return false;
+    if (policy.target === "private") return (principal.type === "service"
+      || (principal.type === "user" && Boolean(principal.session) && policy.resource === "memory"))
+      && authorization.requireProjectPermission(authorizationPrincipal, projectId, policy.resource, policy.permission).allowed;
     return authorization.requireProjectPermission(authorizationPrincipal, projectId, policy.resource, policy.permission).allowed;
   }));
 }

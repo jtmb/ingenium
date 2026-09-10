@@ -2,9 +2,11 @@ import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { authentication, authorization, getDb, identity, invitations, mcpCredentials, oidcAuthentication, organizations, projects, runtimes, securityAudit, securityTokens } from "ingenium-core";
 import { AppError } from "../middleware/errors.js";
-import { authAttemptRateLimit, enforceOidcRateLimit, oidcStartRateLimit } from "../middleware/auth-rate-limit.js";
+import { authAttemptRateLimit, enforceOidcRateLimit, mcpBootstrapRateLimit, oidcStartRateLimit } from "../middleware/auth-rate-limit.js";
 import { issuePreAuthCsrf, preAuthCsrf } from "../middleware/pre-auth-csrf.js";
 import { inspectManagedRuntime } from "../runtime-manager-client.js";
+import { LocalRuntimeProvisionError, provisionLocalRuntime } from "../runtime-provisioner.js";
+import { logger } from "ingenium-core";
 
 export const authPreflightRouter = Router();
 
@@ -130,7 +132,7 @@ authPreflightRouter.post("/fixture-session", (req, res) => {
   if (!owner) throw new AppError("Fixture owner is not provisioned", "FIXTURE_NOT_READY", 409);
 
   bindFixtureOwner(projectName, owner.userId);
-  const session = authentication.createSession(owner.userId, new Date(), "QA Vision fixture", true);
+  const session = authentication.createSession(owner.userId, new Date(), "Browser fixture", true);
   setSession(res, session);
   res.set("Cache-Control", "no-store");
   res.json({ data: { authenticated: true } });
@@ -313,9 +315,70 @@ const McpCredentialSchema = z.object({
   expiresAt: z.string().datetime(),
 }).strict();
 
+authPreflightRouter.post("/bootstrap-mcp-credential", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  if (req.principal?.type !== "compatibility" || req.headers.cookie !== undefined || req.get("origin") !== undefined) {
+    throw new AppError("Compatibility authentication is required", "FORBIDDEN", 403);
+  }
+  next();
+}, mcpBootstrapRateLimit, (req, res) => {
+  if (!z.object({}).strict().safeParse(req.body ?? {}).success || Object.keys(req.query).length !== 0) {
+    throw new AppError("Bootstrap overrides are not permitted", "VALIDATION_ERROR", 422);
+  }
+  try {
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const project = projects.getProject("ingenium");
+    const owner = database.prepare("SELECT owner_user_id AS id FROM bootstrap_state WHERE singleton = 1 AND state = 'claimed'")
+      .get() as { id: string } | undefined;
+    if (!project || project.archived_at || !owner) throw new Error("Bootstrap unavailable");
+    const principal = database.prepare("SELECT id FROM service_principals WHERE organization_id = ? AND name = ?")
+      .get(project.organization_id, "Compatibility OpenCode") as { id: string } | undefined;
+    const credential = mcpCredentials.createMcpCredential({
+      servicePrincipalId: principal?.id,
+      servicePrincipalName: "Compatibility OpenCode",
+      kind: "service", audience: "mcp", name: "Compatibility OpenCode",
+      scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
+      organizationId: project.organization_id, projectId: project.id,
+      workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000), createdByUserId: owner.id,
+    }, "compatibility-opencode-v1");
+    res.status(201).location(`/api/v1/auth/mcp-credentials/${credential.id}`).json({ data: credential });
+  } catch {
+    throw new AppError("Compatibility credential provisioning is unavailable", "MCP_BOOTSTRAP_UNAVAILABLE", 503);
+  }
+});
+
 authPreflightRouter.get("/mcp-credentials", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({ data: mcpCredentials.listMcpCredentials(currentUser(req).id) });
+});
+authPreflightRouter.post("/bootstrap-local-runtime", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  if (req.principal?.type !== "compatibility" || req.headers.cookie !== undefined || req.get("origin") !== undefined) {
+    throw new AppError("Compatibility authentication is required", "FORBIDDEN", 403);
+  }
+  next();
+}, mcpBootstrapRateLimit, (req, res) => {
+  if (!z.object({}).strict().safeParse(req.body ?? {}).success || Object.keys(req.query).length !== 0) {
+    throw new AppError("Bootstrap overrides are not permitted", "VALIDATION_ERROR", 422);
+  }
+  try {
+    const project = projects.getProject("ingenium");
+    const owner = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT owner_user_id AS id FROM bootstrap_state WHERE singleton = 1 AND state = 'claimed'",
+    ).get() as { id: string } | undefined;
+    const workspace = runtimes.getAuthorizedWorkspace("shared-memory-ingenium");
+    if (!project || project.archived_at || !owner || !workspace || workspace.projectId !== project.id
+      || workspace.organizationId !== project.organization_id || workspace.ownerUserId !== owner.id
+      || workspace.storagePath !== "/home/brajam/repos/ingenium") throw new Error("Bootstrap unavailable");
+    res.status(201).json({ data: { ...provisionLocalRuntime(workspace.id), runtimeWorktree: "/workspace" } });
+  } catch (error) {
+    logger.warn("local-runtime-bootstrap", "LOCAL_RUNTIME_BOOTSTRAP_UNAVAILABLE", {
+      stage: error instanceof LocalRuntimeProvisionError ? error.stage : "bootstrap-binding",
+      code: error instanceof LocalRuntimeProvisionError ? error.code : "PREREQUISITE_FAILED",
+    });
+    throw new AppError("Compatibility runtime provisioning is unavailable", "LOCAL_RUNTIME_BOOTSTRAP_UNAVAILABLE", 503);
+  }
 });
 authPreflightRouter.post("/mcp-credentials", (req, res) => {
   const principal = requireRecentStepUp(req);

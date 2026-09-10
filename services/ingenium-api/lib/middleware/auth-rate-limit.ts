@@ -7,6 +7,7 @@ const ipEntries = new Map<string, { count: number; resetAt: number }>();
 const accountEntries = new Map<string, { count: number; resetAt: number }>();
 const oidcStartEntries = new Map<string, { count: number; resetAt: number }>();
 const oidcCallbackEntries = new Map<string, { count: number; resetAt: number }>();
+const mcpBootstrapEntries = new Map<string, { count: number; resetAt: number }>();
 
 function makeRoom(entries: Map<string, { count: number; resetAt: number }>, now: number): void {
   if (entries.size < MAX_TRACKED_KEYS) return;
@@ -38,6 +39,13 @@ export function authAttemptRateLimit(req: Request, res: Response, next: NextFunc
   rateLimitedResponse(res, resetAt, now);
 }
 
+export function mcpBootstrapRateLimit(_req: Request, res: Response, next: NextFunction): void {
+  const now = Date.now();
+  const resetAt = limited(mcpBootstrapEntries, "compatibility", now);
+  if (resetAt === undefined) next();
+  else rateLimitedResponse(res, resetAt, now);
+}
+
 function rateLimitedResponse(res: Response, resetAt: number, now: number): void {
   res.set("Retry-After", String(Math.ceil((resetAt - now) / 1000)));
   res.status(429).json({ error: { code: "RATE_LIMITED", message: "Too many authentication attempts", details: null, requestId: "req_auth" } });
@@ -66,4 +74,5 @@ export function clearAuthAttemptRateLimit(): void {
   accountEntries.clear();
   oidcStartEntries.clear();
   oidcCallbackEntries.clear();
+  mcpBootstrapEntries.clear();
 }

@@ -1,6 +1,6 @@
 # ingenium-server
 
-MCP stdio server with 281 catalog tools. Calls the API via HTTP. Zero DB access.
+MCP stdio server with 289 server registrations. Calls the API via HTTP. Zero DB access.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ MCP stdio server with 281 catalog tools. Calls the API via HTTP. Zero DB access.
 
 ## Tools
 
-281 server tools across the 30 baseline catalog categories. The complete built-in catalog contains 283 entries after adding the two extension tools (`synthesize_observations` and `auto_observe_now`). All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
+289 server registrations across the 31 baseline catalog categories. The complete built-in catalog contains 291 entries after adding the two extension tools (`synthesize_observations` and `auto_observe_now`). All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 
 ## Configuration
 

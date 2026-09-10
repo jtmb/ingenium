@@ -84,7 +84,7 @@ export function isCanonicalBrokerMetadata(value: unknown): boolean {
 }
 
 function canonicalPermissionsForAgent(name: string, value: string | null | undefined): string {
-  return isReservedAgentName(name) ? LLM_BROKER_PERMISSIONS : serializeAgentObject(value);
+  return JSON.stringify(defaultPermissionsForAgent(name, parseSerializedAgentObject(value)));
 }
 
 function canonicalMetadataForAgent(name: string, value: string | null | undefined): string {
@@ -96,8 +96,9 @@ function defaultPermissionsForAgent(name: string, permissions: JsonObject): Json
   // `permission` block must never turn a wildcard-deny broker into an allow-all
   // profile when the definition is restored from storage.
   if (isReservedAgentName(name)) return { "*": "deny" };
-  if (Object.keys(permissions).length > 0) return permissions;
-  return { read: "allow", write: "allow", bash: "allow" };
+  const withDefaultDeny = { "*": "deny", ...permissions };
+  withDefaultDeny["*"] = "deny";
+  return withDefaultDeny;
 }
 
 function canonicalMetadataForDisk(name: string, metadata: JsonObject): JsonObject {
@@ -123,6 +124,26 @@ function appendYamlObject(lines: string[], value: JsonObject, indent: number): v
       lines.push(`${prefix}${yamlKey(key)}: ${yamlScalar(child)}`);
     }
   }
+}
+
+function writePermissionFrontmatter(frontmatter: string, permissions: JsonObject): string {
+  const lines = frontmatter.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^permission:\s*/.test(line));
+  const replacement = ["permission:"];
+  appendYamlObject(replacement, permissions, 2);
+  if (start === -1) return `${frontmatter}\n${replacement.join("\n")}`;
+
+  let end = start + 1;
+  while (end < lines.length && (!lines[end]!.trim() || /^\s/.test(lines[end]!))) end += 1;
+  lines.splice(start, end - start, ...replacement);
+  return lines.join("\n");
+}
+
+function ensureDefaultDenyPermission(frontmatter: string): string {
+  return writePermissionFrontmatter(
+    frontmatter,
+    defaultPermissionsForAgent("", parsePermissionFrontmatter(frontmatter)),
+  );
 }
 
 function unquoteYamlScalar(value: string): string {
@@ -194,6 +215,10 @@ function parsePermissionFrontmatter(frontmatter: string): JsonObject {
 function parseAgentMetadata(frontmatter: string): JsonObject {
   const hidden = frontmatter.match(/^hidden:\s*(true|false)\s*$/mi)?.[1];
   return hidden === "true" ? { hidden: true } : hidden === "false" ? { hidden: false } : {};
+}
+
+function parseAgentEnabled(frontmatter: string): boolean {
+  return frontmatter.match(/^disable:\s*(true|false)\s*$/mi)?.[1] !== "true";
 }
 
 function reservedBrokerFileContent(): string {
@@ -490,7 +515,7 @@ function writePublicAgentProfile(filePath: string, content: string): void {
   }
 }
 
-type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean }>;
+type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean; [key: string]: unknown }>;
 
 function parseConfig(content: string): Record<string, unknown> {
   return JSON.parse(content.replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
@@ -518,7 +543,7 @@ function configuredAgentModel(projectId: string, name: string): string | null {
 function updateAgentRuntimeConfig(
   projectId: string,
   name: string,
-  options: { model?: string | null; disabled?: boolean; remove?: boolean },
+  options: { model?: string | null; remove?: boolean },
 ): void {
   // Resolve the DB/disk fallback before taking the write lock. `readProjectConfig`
   // can read opencode.json when the database copy is missing or malformed, and
@@ -542,13 +567,12 @@ function updateAgentRuntimeConfig(
     if (options.remove) {
       delete agents[name];
     } else {
+      for (const key of Object.keys(entry)) {
+        if (key !== "model" && key !== "variant") delete entry[key];
+      }
       if (options.model !== undefined) {
         if (options.model) entry.model = options.model;
         else delete entry.model;
-      }
-      if (options.disabled !== undefined) {
-        if (options.disabled) entry.disable = true;
-        else delete entry.disable;
       }
       if (Object.keys(entry).length > 0) agents[name] = entry;
       else delete agents[name];
@@ -680,17 +704,18 @@ function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerCo
 /**
  * Write an agent definition to `.opencode/agents/<category>/<name>.md` as a YAML-frontmatter markdown file.
  *
- * If the file already exists, it does an in-place field update (replacing only name, description,
- * mode in the YAML frontmatter) — this preserves any handwritten fields (like
- * permissions, skills, or custom YAML keys) that OpenCode's agent system uses.
+ * Existing profiles retain handwritten permissions and body unless explicitly
+ * updated. Custom YAML and skills always remain profile-authoritative.
  *
  * If the file doesn't exist, it creates a full frontmatter block from the DB record, including
  * permissions (read/write/bash/task/mcp/skill), skills list, and content body.
  */
-function writeAgentToDisk(agent: Agent): void {
+function writeAgentToDisk(
+  agent: Agent,
+  options: { replacePermissions?: boolean; preserveBody?: boolean } = {},
+): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  if (!agent.enabled) return;
   if (isReservedAgentName(agent.name)) {
     throw new Error("Reserved LLM broker profile is deployment-owned");
   }
@@ -704,10 +729,10 @@ function writeAgentToDisk(agent: Agent): void {
     if (fmMatch) {
       const frontmatter = fmMatch[1]!;
 
-        let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
-       // Models are runtime configuration only. Remove stale active model lines while
-       // retaining comments that document historical model choices.
-       updated = updated.replace(/^model:\s*.*(?:\r?\n|$)/gm, "");
+      let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
+      // Models are runtime configuration only. Remove stale active model lines while
+      // retaining comments that document historical model choices.
+      updated = updated.replace(/^model:\s*.*(?:\r?\n|$)/gm, "");
 
       if (frontmatter.match(/^description:\s*".*"$/m)) {
         updated = updated.replace(/^description:\s*".*"$/m, `description: "${escapedDesc}"`);
@@ -715,50 +740,59 @@ function writeAgentToDisk(agent: Agent): void {
         updated = updated.replace(/^description:\s*.+$/m, `description: "${escapedDesc}"`);
       }
 
-       if (updated.match(/^mode:\s*.+$/m)) {
-         updated = updated.replace(/^mode:\s*.+$/m, `mode: ${agent.mode}`);
-       } else {
-         updated += `\nmode: ${agent.mode}`;
-       }
+      if (updated.match(/^mode:\s*.+$/m)) {
+        updated = updated.replace(/^mode:\s*.+$/m, `mode: ${agent.mode}`);
+      } else {
+        updated += `\nmode: ${agent.mode}`;
+      }
+      if (updated.match(/^disable:\s*.+$/m)) {
+        updated = updated.replace(/^disable:\s*.+$/m, `disable: ${agent.enabled ? "false" : "true"}`);
+      } else {
+        updated += `\ndisable: ${agent.enabled ? "false" : "true"}`;
+      }
 
-       const metadata = canonicalMetadataForDisk(
-         agent.name,
-         parseSerializedAgentObject(agent.metadata),
-       );
-       if (metadata.hidden === true) {
-         if (updated.match(/^hidden:\s*.+$/m)) {
-           updated = updated.replace(/^hidden:\s*.+$/m, "hidden: true");
-         } else {
-           updated += "\nhidden: true";
-         }
-       } else {
-         updated = updated.replace(/^hidden:\s*.+(?:\r?\n|$)/gm, "");
-       }
+      const metadata = canonicalMetadataForDisk(
+        agent.name,
+        parseSerializedAgentObject(agent.metadata),
+      );
+      const hidden = metadata.hidden === true;
+      if (updated.match(/^hidden:\s*.+$/m)) {
+        updated = updated.replace(/^hidden:\s*.+$/m, `hidden: ${hidden ? "true" : "false"}`);
+      } else {
+        updated += `\nhidden: ${hidden ? "true" : "false"}`;
+      }
+      updated = options.replacePermissions
+        ? writePermissionFrontmatter(
+            updated,
+            defaultPermissionsForAgent(agent.name, parseSerializedAgentObject(agent.permissions)),
+          )
+        : ensureDefaultDenyPermission(updated);
 
-      writePublicAgentProfile(filePath, `---\n${updated}\n---\n\n${agent.content}`);
+      const body = options.preserveBody ? fmMatch[2]! : `\n${agent.content}`;
+      writePublicAgentProfile(filePath, `---\n${updated}\n---\n${body}`);
       return;
     }
   }
 
-  // File doesn't exist — create full frontmatter from scratch
-   const permissions = defaultPermissionsForAgent(
-      agent.name,
-      parseSerializedAgentObject(agent.permissions),
-   );
-   const metadata = canonicalMetadataForDisk(
-     agent.name,
-     parseSerializedAgentObject(agent.metadata),
-   );
-   const skills = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
+  const permissions = defaultPermissionsForAgent(
+    agent.name,
+    parseSerializedAgentObject(agent.permissions),
+  );
+  const metadata = canonicalMetadataForDisk(
+    agent.name,
+    parseSerializedAgentObject(agent.metadata),
+  );
+  const skills = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
 
   const frontmatter = [
     "---",
     `name: ${agent.name}`,
-   `description: "${escapedDesc}"`,
-   `mode: ${agent.mode}`,
+    `description: "${escapedDesc}"`,
+    `mode: ${agent.mode}`,
+    `disable: ${agent.enabled ? "false" : "true"}`,
   ];
   if (agent.reasoning_effort) frontmatter.push(`reasoning_effort: "${agent.reasoning_effort}"`);
-  if (metadata.hidden === true) frontmatter.push("hidden: true");
+  frontmatter.push(`hidden: ${metadata.hidden === true ? "true" : "false"}`);
   if (Object.keys(permissions).length > 0) {
     frontmatter.push("permission:");
     appendYamlObject(frontmatter, permissions, 2);
@@ -774,7 +808,7 @@ function writeAgentToDisk(agent: Agent): void {
 
 /**
  * Remove an agent's .md file from disk. Silently ignores if the file doesn't exist.
- * Used by disable/delete/update (on category change) operations.
+ * Used by delete/update (on category change) operations.
  */
 function removeAgentFromDisk(agent: Agent): void {
   assertSafeAgentName(agent.name);
@@ -865,10 +899,10 @@ export function createAgent(
       safeCategory,
       mode ?? "subagent",
       model ?? null,
-       canonicalPermissionsForAgent(name, permissions),
-       canonicalMetadataForAgent(name, metadata),
-       content,
-       enabled ? 1 : 0,
+      canonicalPermissionsForAgent(name, permissions),
+      canonicalMetadataForAgent(name, metadata),
+      content,
+      enabled ? 1 : 0,
       now,
       now,
     );
@@ -877,8 +911,8 @@ export function createAgent(
     return agent;
   });
   // Filesystem effects must happen after the database transaction commits.
-  if (agent.enabled) writeAgentToDisk(agent);
-  updateAgentRuntimeConfig(projectId, name, { model: model ?? null, disabled: !agent.enabled });
+  writeAgentToDisk(agent);
+  updateAgentRuntimeConfig(projectId, name, { model: model ?? null });
   checkpointAfterWrite();
   return agent;
 }
@@ -1018,7 +1052,10 @@ export function updateAgent(
     if (updated.agent.category !== updated.previous.category) {
       removeAgentFromDisk(updated.previous);
     }
-    writeAgentToDisk(updated.agent);
+    writeAgentToDisk(updated.agent, {
+      replacePermissions: updates.permissions !== undefined,
+      preserveBody: updates.content === undefined,
+    });
   }
   if (updated && updates.model !== undefined) {
     updateAgentRuntimeConfig(projectId, name, { model: updates.model || null });
@@ -1062,14 +1099,14 @@ export function enableAgent(projectId: string, name: string): Agent | undefined 
     return agent;
   });
   if (agent) {
-    writeAgentToDisk(agent);
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined, disabled: false });
+    writeAgentToDisk(agent, { preserveBody: true });
+    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
 }
 
-/** Disable an agent and remove its `.md` file from disk. */
+/** Disable an agent while retaining its profile with `disable: true`. */
 export function disableAgent(projectId: string, name: string): Agent | undefined {
   if (!isSafeAgentName(name)) return undefined;
   // The reserved broker may not enter the ordinary disable lifecycle.
@@ -1084,8 +1121,8 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
     return agent;
   });
   if (agent) {
-    removeAgentFromDisk(agent);
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model, disabled: true });
+    writeAgentToDisk(agent, { preserveBody: true });
+    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
@@ -1096,7 +1133,7 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
  * Used by the bidirectional agent sync engine to reconcile disk → DB changes.
  *
  * If the agent exists in DB, its category from the DB is used to locate the file.
- * If not, all four category directories (primary, execution, research, security) are searched.
+ * If not, every supported category directory is searched.
  *
  * Parses the full YAML frontmatter structure including:
  * - Basic fields: name, description, mode, reasoning_effort
@@ -1120,10 +1157,6 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
     if (dbAgent) return validateReservedBrokerState(dbAgent);
     validateReservedBrokerDeployment();
     return undefined;
-  }
-
-  if (dbAgent && !dbAgent.enabled) {
-    return dbAgent;
   }
 
   if (dbAgent) {
@@ -1161,6 +1194,11 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
 
   const frontmatter = fmMatch[1]!;
   const body = fmMatch[2]!.trim();
+  if (!/^disable:\s*(?:true|false)\s*$/mi.test(frontmatter)
+    || !/^hidden:\s*(?:true|false)\s*$/mi.test(frontmatter)) {
+    logger.warn("agents", "Agent profile has incomplete lifecycle metadata", { name });
+    return undefined;
+  }
 
   const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
   const descMatch = frontmatter.match(/^description:\s*"(.+)"$/m);
@@ -1168,41 +1206,47 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const reasoningMatch = frontmatter.match(/^reasoning_effort:\s*"(.+)"$/m);
   const skillMatches = [...frontmatter.matchAll(/^\s+-\s(.+)$/gm)].map(m => m[1]!);
 
-   const agentName = nameMatch?.[1] ?? name;
-   if (!isSafeAgentName(agentName) || agentName !== name || !isAgentCategory(category)) return undefined;
+  const agentName = nameMatch?.[1] ?? name;
+  if (!isSafeAgentName(agentName) || agentName !== name || !isAgentCategory(category)) return undefined;
   const description = descMatch?.[1] ?? "";
   const mode = modeMatch?.[1] ?? "subagent";
-   // Markdown model lines are deliberately ignored. Config is authoritative;
-   // absent a configured model, retain existing API metadata for compatibility.
-   const model = configuredAgentModel(projectId, name) ?? dbAgent?.model ?? null;
+  const enabled = parseAgentEnabled(frontmatter);
+  // Markdown model lines are deliberately ignored. Config is authoritative;
+  // absent a configured model, retain existing API metadata for compatibility.
+  const model = configuredAgentModel(projectId, name) ?? dbAgent?.model ?? null;
   const reasoningEffort = reasoningMatch?.[1] ?? null;
+  const profilePermissions = parsePermissionFrontmatter(frontmatter);
+  if (Object.keys(profilePermissions)[0] !== "*" || profilePermissions["*"] !== "deny") {
+    logger.warn("agents", "Agent profile is not default-deny", { name });
+    return undefined;
+  }
 
-   const permissions = canonicalPermissionsForAgent(
-     agentName,
-     JSON.stringify(defaultPermissionsForAgent(agentName, parsePermissionFrontmatter(frontmatter))),
-   );
-   const metadata = canonicalMetadataForAgent(
-     agentName,
-     JSON.stringify(parseAgentMetadata(frontmatter)),
-   );
+  const permissions = canonicalPermissionsForAgent(
+    agentName,
+    JSON.stringify(profilePermissions),
+  );
+  const metadata = canonicalMetadataForAgent(
+    agentName,
+    JSON.stringify(parseAgentMetadata(frontmatter)),
+  );
 
-   const agent = execTransaction(() => {
+  const agent = execTransaction(() => {
     const now = new Date().toISOString();
     if (dbAgent) {
       db.prepare(
-         `UPDATE agents SET name = ?, description = ?, category = ?, mode = ?, model = ?, reasoning_effort = ?, permissions = ?, metadata = ?, skills = ?, content = ?, updated_at = ? WHERE id = ?`
-       ).run(agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, now, dbAgent.id);
+        `UPDATE agents SET name = ?, description = ?, category = ?, mode = ?, model = ?, reasoning_effort = ?, permissions = ?, metadata = ?, skills = ?, content = ?, enabled = ?, updated_at = ? WHERE id = ?`
+      ).run(agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, enabled ? 1 : 0, now, dbAgent.id);
     } else {
       const id = randomUUID();
       db.prepare(
-         `INSERT OR IGNORE INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-       ).run(id, projectId, agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, now, now);
+        `INSERT OR IGNORE INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(id, projectId, agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, enabled ? 1 : 0, now, now);
     }
-     return db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
-       .get(projectId, agentName) as Agent | undefined;
-   });
-    if (agent && !dbAgent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined, disabled: true });
-     checkpointAfterWrite();
-   return agent;
+    return db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+      .get(projectId, agentName) as Agent | undefined;
+  });
+  if (agent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
+  checkpointAfterWrite();
+  return agent;
 }

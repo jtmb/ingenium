@@ -2,7 +2,7 @@
  * MIME parsing and limited HTML filtering for email content.
  *
  * Uses `mailparser` (simpleParser) for RFC 2822 parsing rather than hand-writing
- * regex-based header parsers — per AGENTS.md HARD RULE #12.
+ * regex-based header parsers — see docs/concepts/conventions.md.
  */
 
 import { simpleParser } from "mailparser";

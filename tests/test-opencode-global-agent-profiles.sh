@@ -38,23 +38,29 @@ GLOBAL_AGENTS_DIR="$TEMP_ROOT/global-config/opencode/agents"
 WORKSPACE_AGENTS_DIR="$TEMP_ROOT/workspace/.opencode/agents"
 OUTSIDE_PROFILE="$TEMP_ROOT/outside-profile.md"
 OUTSIDE_HARDLINK_PROFILE="$TEMP_ROOT/outside-hardlink-profile.md"
-mkdir -p "$SOURCE_AGENTS_DIR/chat" "$SOURCE_AGENTS_DIR/execution" "$SOURCE_AGENTS_DIR/research" \
-  "$GLOBAL_AGENTS_DIR" "$WORKSPACE_AGENTS_DIR"
+RETIRED_OUTSIDE_HARDLINK_PROFILE="$TEMP_ROOT/retired-outside-hardlink-profile.md"
+GLOBAL_RETIRED_PROFILE="$GLOBAL_AGENTS_DIR/browser-agent.md"
+WORKSPACE_RETIRED_PROFILE="$WORKSPACE_AGENTS_DIR/execution/browser-agent.md"
+mkdir -p "$SOURCE_AGENTS_DIR/chat" "$SOURCE_AGENTS_DIR/primary" "$SOURCE_AGENTS_DIR/execution" "$SOURCE_AGENTS_DIR/research" \
+  "$GLOBAL_AGENTS_DIR" "$WORKSPACE_AGENTS_DIR/execution"
 
 [[ -f "$PROJECTOR" ]] || fail "descriptor-safe projector is missing"
 
 cp "$REPO_ROOT/.opencode/agents/chat/ingenium-chat.md" "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
+cp "$REPO_ROOT/.opencode/agents/primary/plan.md" "$SOURCE_AGENTS_DIR/primary/plan.md"
 cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
   "$SOURCE_AGENTS_DIR/execution/ingenium-llm-broker.md"
 printf '%s\n' 'unowned source profile' > "$SOURCE_AGENTS_DIR/research/unowned.md"
 printf '%s\n' 'operator-managed global profile' > "$GLOBAL_AGENTS_DIR/operator-profile.md"
 chmod 0600 "$GLOBAL_AGENTS_DIR/operator-profile.md"
+printf '%s\n' 'retired global profile' > "$GLOBAL_RETIRED_PROFILE"
 cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
   "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md"
 chmod 0600 "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md"
 global_broker_metadata_before="$(stat -c '%i:%Y:%a:%u:%g' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")"
 printf '%s\n' 'workspace compatibility profile' > "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
 chmod 0600 "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+printf '%s\n' 'retired workspace profile' > "$WORKSPACE_RETIRED_PROFILE"
 cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
   "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md"
 chmod 0644 "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md"
@@ -66,9 +72,15 @@ sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR
 
 cmp -s "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md" "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
   || fail 'global chat profile differs from the server-owned source'
+cmp -s "$SOURCE_AGENTS_DIR/primary/plan.md" "$GLOBAL_AGENTS_DIR/plan.md" \
+  || fail 'global Plan profile differs from the server-owned source'
+require_mode "$GLOBAL_AGENTS_DIR/plan.md" 644
+require_link_count "$GLOBAL_AGENTS_DIR/plan.md" 1
 cmp -s "$SOURCE_AGENTS_DIR/execution/ingenium-llm-broker.md" "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" \
   || fail 'global broker profile differs from the server-owned source'
 [[ ! -e "$GLOBAL_AGENTS_DIR/unowned.md" ]] || fail 'unowned source profile was projected globally'
+[[ ! -e "$GLOBAL_RETIRED_PROFILE" && ! -L "$GLOBAL_RETIRED_PROFILE" ]] \
+  || fail 'retired global browser-agent profile was not removed'
 [[ "$(<"$GLOBAL_AGENTS_DIR/operator-profile.md")" == 'operator-managed global profile' ]] \
   || fail 'operator-managed global profile content was modified'
 require_mode "$GLOBAL_AGENTS_DIR/operator-profile.md" 600
@@ -89,13 +101,38 @@ grep -q '^  "\*": deny$' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" \
   || fail 'global broker profile lost its wildcard denial'
 
 chat_metadata_before="$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-chat.md")"
+plan_metadata_before="$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/plan.md")"
 broker_metadata_before="$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")"
 sleep 1
 sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"
 [[ "$chat_metadata_before" == "$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-chat.md")" ]] \
   || fail 'idempotent projection rewrote the unchanged chat profile'
+[[ "$plan_metadata_before" == "$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/plan.md")" ]] \
+  || fail 'idempotent projection rewrote the unchanged Plan profile'
 [[ "$broker_metadata_before" == "$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")" ]] \
   || fail 'idempotent projection rewrote the unchanged broker profile'
+[[ ! -e "$GLOBAL_RETIRED_PROFILE" && ! -L "$GLOBAL_RETIRED_PROFILE" ]] \
+  || fail 'idempotent projection restored the retired global browser-agent profile'
+
+ln -s "$OUTSIDE_PROFILE" "$GLOBAL_RETIRED_PROFILE"
+if sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"; then
+  fail 'projection accepted a symlinked retired global profile'
+fi
+[[ "$(<"$OUTSIDE_PROFILE")" == 'outside profile must remain unchanged' ]] \
+  || fail 'retired global profile cleanup followed a symlink'
+rm "$GLOBAL_RETIRED_PROFILE"
+
+printf '%s\n' 'retired hard-link target must remain unchanged' > "$RETIRED_OUTSIDE_HARDLINK_PROFILE"
+chmod 0600 "$RETIRED_OUTSIDE_HARDLINK_PROFILE"
+ln "$RETIRED_OUTSIDE_HARDLINK_PROFILE" "$GLOBAL_RETIRED_PROFILE"
+if sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"; then
+  fail 'projection accepted a hard-linked retired global profile'
+fi
+require_link_count "$RETIRED_OUTSIDE_HARDLINK_PROFILE" 2
+[[ "$(<"$RETIRED_OUTSIDE_HARDLINK_PROFILE")" == 'retired hard-link target must remain unchanged' ]] \
+  || fail 'retired global profile cleanup changed a hard-link target'
+rm "$GLOBAL_RETIRED_PROFILE"
+require_link_count "$RETIRED_OUTSIDE_HARDLINK_PROFILE" 1
 
 # Hard links can let a privileged descriptor chmod an inode outside the owned
 # agent tree. Every source and destination identity must therefore be unique.
@@ -202,12 +239,36 @@ NODE
 sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"
 
 sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"
+[[ ! -e "$WORKSPACE_RETIRED_PROFILE" && ! -L "$WORKSPACE_RETIRED_PROFILE" ]] \
+  || fail 'retired workspace browser-agent profile was not removed'
 [[ "$(<"$WORKSPACE_AGENTS_DIR/workspace-profile.md")" == 'workspace compatibility profile' ]] \
   || fail 'workspace profile content changed during normalization'
 require_mode "$WORKSPACE_AGENTS_DIR/workspace-profile.md" 644
 require_mode "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md" 644
 [[ "$workspace_broker_metadata_before" == "$(stat -c '%i:%Y:%a:%u:%g' "$WORKSPACE_AGENTS_DIR/ingenium-llm-broker.md")" ]] \
   || fail 'unprivileged normalization touched the reserved broker profile'
+sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"
+[[ ! -e "$WORKSPACE_RETIRED_PROFILE" && ! -L "$WORKSPACE_RETIRED_PROFILE" ]] \
+  || fail 'idempotent normalization restored the retired workspace browser-agent profile'
+
+ln -s "$OUTSIDE_PROFILE" "$WORKSPACE_RETIRED_PROFILE"
+if sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"; then
+  fail 'normalization accepted a symlinked retired workspace profile'
+fi
+[[ "$(<"$OUTSIDE_PROFILE")" == 'outside profile must remain unchanged' ]] \
+  || fail 'retired workspace profile cleanup followed a symlink'
+rm "$WORKSPACE_RETIRED_PROFILE"
+
+ln "$RETIRED_OUTSIDE_HARDLINK_PROFILE" "$WORKSPACE_RETIRED_PROFILE"
+if sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"; then
+  fail 'normalization accepted a hard-linked retired workspace profile'
+fi
+require_link_count "$RETIRED_OUTSIDE_HARDLINK_PROFILE" 2
+[[ "$(<"$RETIRED_OUTSIDE_HARDLINK_PROFILE")" == 'retired hard-link target must remain unchanged' ]] \
+  || fail 'retired workspace profile cleanup changed a hard-link target'
+rm "$WORKSPACE_RETIRED_PROFILE"
+require_link_count "$RETIRED_OUTSIDE_HARDLINK_PROFILE" 1
+
 rm "$OUTSIDE_HARDLINK_PROFILE"
 cp "$WORKSPACE_AGENTS_DIR/workspace-profile.md" "$OUTSIDE_HARDLINK_PROFILE"
 chmod 0600 "$OUTSIDE_HARDLINK_PROFILE"

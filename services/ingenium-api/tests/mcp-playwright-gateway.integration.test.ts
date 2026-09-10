@@ -2,11 +2,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { projects, resetDbForTest } from "ingenium-core";
+import {
+  PLAYWRIGHT_CHILD_MCP_ARGS,
+  PLAYWRIGHT_CHILD_MCP_EXECUTABLE,
+} from "../../../packages/ingenium-core/lib/tools/child-mcp-presets.js";
 import {
   ChildMcpGateway,
   type ChildMcpGatewayApi,
@@ -14,6 +17,7 @@ import {
   type ChildMcpToolHost,
 } from "../../ingenium-server/lib/child-mcp-gateway.js";
 import { ChildMcpRuntimeManager } from "../../ingenium-server/lib/proxy.js";
+import { ManagedPlaywrightRuntime, resolveManagedPlaywright } from "../../ingenium-server/lib/child-mcp-playwright.js";
 import { getProjectStateAttestation, getToolAuthorizationPolicy } from "../../ingenium-server/lib/tool-state-gate.js";
 import {
   CHILD_MCP_RUNTIME_HANDOFF_HEADER,
@@ -24,17 +28,9 @@ import {
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { runtimeServicePrincipal } from "./http-fixtures.js";
 
-const repositoryRoot = new URL("../../../", import.meta.url);
-const opencodeConfigPath = new URL("opencode.json", repositoryRoot);
 const projectName = "mcp-playwright-gateway-project";
 const childName = "playwright";
 const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
-
-interface PlaywrightMcpConfig {
-  command: string[];
-  enabled: boolean;
-  environment?: Record<string, string>;
-}
 
 interface RegisteredTool {
   handler: (args: Record<string, unknown>) => Promise<unknown>;
@@ -51,41 +47,6 @@ const managers: ChildMcpRuntimeManager[] = [];
 let apiServer: Server | undefined;
 let fixtureServer: Server | undefined;
 let temporaryDirectory = "";
-
-function configuredPlaywrightMcp(): PlaywrightMcpConfig {
-  const config = JSON.parse(readFileSync(opencodeConfigPath, "utf8")) as {
-    mcp?: { playwright?: PlaywrightMcpConfig };
-  };
-  const playwright = config.mcp?.playwright;
-  if (!playwright?.enabled || !Array.isArray(playwright.command) || playwright.command.length < 2) {
-    throw new Error("MCP-005 configured Playwright MCP server is missing or disabled in opencode.json");
-  }
-  return playwright;
-}
-
-function verifyConfiguredExecutable(config: PlaywrightMcpConfig): void {
-  const [launcher, executable] = config.command;
-  if (!launcher || !executable) {
-    throw new Error("MCP-005 configured Playwright MCP command is incomplete");
-  }
-
-  const environment = {
-    ...process.env,
-    ...config.environment,
-  };
-  try {
-    execFileSync(launcher, [executable, "--version"], {
-      env: environment,
-      encoding: "utf8",
-      timeout: 10_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch {
-    throw new Error(
-      `MCP-005 configured Playwright MCP executable is unavailable: ${config.command.join(" ")}`,
-    );
-  }
-}
 
 function jsonRequest(baseUrl: string, path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
@@ -287,9 +248,6 @@ describe("MCP-005 gateway API fixture", () => {
 
 describe("MCP-005 real Playwright child gateway", () => {
   it("registers through the API, discovers canonical tools, forwards fixture navigation/snapshot, toggles, reconnects, and leaves no child", async () => {
-    const playwright = configuredPlaywrightMcp();
-    verifyConfiguredExecutable(playwright);
-
     temporaryDirectory = mkdtempSync(join(tmpdir(), "ingenium-mcp-playwright-gateway-"));
     process.env.INGENIUM_CORE_DB_PATH = join(temporaryDirectory, "data.db");
     const project = projects.createProject(projectName);
@@ -304,203 +262,182 @@ describe("MCP-005 real Playwright child gateway", () => {
     app.use("/api/v1/mcp-tools", mcpToolsRouter);
     const baseUrl = await startHttpServer(app);
     const fixtureUrl = await startFixtureServer();
+    const resolved = resolveManagedPlaywright();
+    accessSync(resolved.browserExecutablePath, constants.X_OK);
+    accessSync(resolved.cliPath, constants.R_OK);
+    accessSync(resolved.executablePath, constants.X_OK);
+    const stateDirectory = join(temporaryDirectory, "playwright-runtime");
+    const pids = new Set<number>();
+    const hosts: ReturnType<typeof createHost>[] = [];
 
-    const [launcher, ...configuredArgs] = playwright.command;
-    if (!launcher) throw new Error("MCP-005 configured Playwright MCP launcher is empty");
-    const registered = await jsonRequest(baseUrl, `/api/v1/mcp-servers${query(projectName)}`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: childName,
-        executable: launcher,
-        args: configuredArgs,
-        environment: {},
-      }),
-    });
-    expect(registered.status).toBe(201);
-    await expect(jsonBody(registered)).resolves.toMatchObject({
-      data: { name: childName, executable: launcher, args: configuredArgs },
-    });
-    const listed = await jsonRequest(baseUrl, `/api/v1/mcp-servers${query(projectName)}`);
-    expect(listed.status).toBe(200);
-    await expect(jsonBody(listed)).resolves.toMatchObject({
-      data: [expect.objectContaining({ name: childName, enabled: true })],
-    });
-
-    const { host, tools } = createHost();
-    const manager = new ChildMcpRuntimeManager({ startupMs: 30_000, requestMs: 15_000, shutdownMs: 5_000 });
-    managers.push(manager);
-    const gateway = new ChildMcpGateway(host, projectName, createGatewayApi(baseUrl), manager, 50);
-    gateways.push(gateway);
-    await gateway.start();
-
+    const createManagedGateway = () => {
+      const hostState = createHost();
+      hosts.push(hostState);
+      const { host, tools } = hostState;
+      const manager = new ChildMcpRuntimeManager({ startupMs: 30_000, requestMs: 15_000, shutdownMs: 5_000 });
+      managers.push(manager);
+      const gateway = new ChildMcpGateway(
+        host,
+        projectName,
+        createGatewayApi(baseUrl),
+        manager,
+        100,
+        undefined,
+        {
+          project: projectName,
+          projectId: project.id,
+          organizationId: project.organization_id,
+          workspaceId: "mcp-playwright-gateway-workspace",
+          launcherWorktree: "/workspace",
+          scopes: ["child-mcp:execute", "child-mcp:runtime", "memory:read"],
+        },
+        new ManagedPlaywrightRuntime(resolved.browserExecutablePath, resolved.executablePath, stateDirectory),
+      );
+      gateways.push(gateway);
+      return { gateway, manager, tools };
+    };
     const navigate = "ingenium_playwright_browser_navigate";
     const snapshot = "ingenium_playwright_browser_snapshot";
     const close = "ingenium_playwright_browser_close";
-    expect(tools.has(navigate)).toBe(true);
-    expect(tools.has(snapshot)).toBe(true);
-    expect(tools.has(close)).toBe(true);
-    expect([...tools.keys()]).not.toContain("browser_navigate");
-    expect([...tools.keys()]).not.toContain("playwright_browser_navigate");
 
-    const discovered = await jsonRequest(baseUrl, `/api/v1/mcp-servers/tools${query(projectName)}`);
-    const discoveredBody = await jsonBody(discovered);
-    expect(discovered.status).toBe(200);
-    expect(discoveredBody.data).toEqual(expect.arrayContaining([
-      expect.objectContaining({ canonical_name: navigate, category: "Child MCP / playwright" }),
-      expect.objectContaining({ canonical_name: snapshot, category: "Child MCP / playwright" }),
-    ]));
-    const status = await jsonRequest(baseUrl, `/api/v1/mcp-servers/status${query(projectName)}`);
-    expect(status.status).toBe(200);
-    await expect(jsonBody(status)).resolves.toMatchObject({
-      data: [expect.objectContaining({
-        name: childName,
-        enabled: true,
-        discovery_status: "ready",
-      })],
-    });
-    const catalog = await jsonRequest(baseUrl, `/api/v1/mcp-tools/catalog${query(projectName)}`);
-    const catalogBody = await jsonBody(catalog);
-    const catalogNames = (catalogBody.data as Array<{ name?: string }>).map((entry) => entry.name);
-    expect(catalogNames).toContain(navigate);
-    expect(catalogNames).not.toContain("browser_navigate");
-    expect(catalogNames).not.toContain("playwright_browser_navigate");
+    try {
+      let { gateway, manager, tools } = createManagedGateway();
+      await gateway.start();
+      expect(tools.size).toBe(0);
+      const presetPath = `/api/v1/mcp-servers/presets/playwright${query(projectName)}`;
+      const registered = await jsonRequest(baseUrl, presetPath, { method: "POST" });
+      expect(registered.status).toBe(201);
+      await expect(jsonBody(registered)).resolves.toMatchObject({
+        data: { name: childName, executable: PLAYWRIGHT_CHILD_MCP_EXECUTABLE, args: [...PLAYWRIGHT_CHILD_MCP_ARGS] },
+      });
+      const duplicate = await jsonRequest(baseUrl, presetPath, { method: "POST" });
+      expect(duplicate.status).toBe(409);
+      await expect(jsonBody(duplicate)).resolves.toMatchObject({ error: { code: "MCP_SERVER_NAME_CONFLICT" } });
 
-    const navigation = await tools.get(navigate)!.handler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    });
-    expect(serializedToolResult(navigation)).toContain(fixtureUrl);
+      await waitForToolPresence(tools, close, true, 30_000);
+      expect(manager.getStatus(childName).state).toBe("ready");
+      pids.add(manager.getStatus(childName).pid!);
+      for (const name of [navigate, snapshot, close]) expect(tools.has(name)).toBe(true);
+      expect([...tools.keys()]).not.toContain("browser_navigate");
+      expect([...tools.keys()]).not.toContain("playwright_browser_navigate");
 
-    const snapshotResult = await tools.get(snapshot)!.handler({
-      project: projectName,
-      arguments: {},
-    });
-    expect(serializedToolResult(snapshotResult)).toContain("Playwright gateway fixture");
+      const discovered = await jsonRequest(baseUrl, `/api/v1/mcp-servers/tools${query(projectName)}`);
+      expect(discovered.status).toBe(200);
+      await expect(jsonBody(discovered)).resolves.toMatchObject({ data: expect.arrayContaining([
+        expect.objectContaining({ canonical_name: navigate, category: "Child MCP / playwright" }),
+        expect.objectContaining({ canonical_name: snapshot, category: "Child MCP / playwright" }),
+      ]) });
+      const status = await jsonRequest(baseUrl, `/api/v1/mcp-servers/status${query(projectName)}`);
+      expect(status.status).toBe(200);
+      await expect(jsonBody(status)).resolves.toMatchObject({
+        data: [expect.objectContaining({ name: childName, enabled: true, discovery_status: "ready" })],
+      });
+      const catalog = await jsonRequest(baseUrl, `/api/v1/mcp-tools/catalog${query(projectName)}`);
+      const catalogBody = await jsonBody(catalog);
+      const catalogNames = (catalogBody.data as Array<{ name?: string }>).map((entry) => entry.name);
+      expect(catalogNames).toContain(navigate);
+      expect(catalogNames).not.toContain("browser_navigate");
+      expect(catalogNames).not.toContain("playwright_browser_navigate");
 
-    const disabledTool = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-tools/${encodeURIComponent(navigate)}${query(projectName)}`,
-      { method: "PUT", body: JSON.stringify({ enabled: false }) },
-    );
-    expect(disabledTool.status).toBe(200);
-    const blockedNavigation = await tools.get(navigate)!.handler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    });
-    expect(serializedToolResult(blockedNavigation)).toContain("TOOL_DISABLED");
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, false);
+      const navigation = await tools.get(navigate)!.handler({ project: projectName, arguments: { url: fixtureUrl } });
+      expect(serializedToolResult(navigation)).toContain(fixtureUrl);
+      expect(navigation).not.toMatchObject({ isError: true });
+      const snapshotResult = await tools.get(snapshot)!.handler({ project: projectName, arguments: {} });
+      expect(serializedToolResult(snapshotResult)).toContain("Playwright gateway fixture");
+      const closed = await tools.get(close)!.handler({ project: projectName, arguments: {} });
+      expect(serializedToolResult(closed)).not.toContain("error");
 
-    const enabledTool = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-tools/${encodeURIComponent(navigate)}${query(projectName)}`,
-      { method: "PUT", body: JSON.stringify({ enabled: true }) },
-    );
-    expect(enabledTool.status).toBe(200);
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, true);
-    await expect(tools.get(navigate)!.handler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    })).resolves.toMatchObject({ content: expect.any(Array) });
+      const disabledTool = await jsonRequest(
+        baseUrl,
+        `/api/v1/mcp-tools/${encodeURIComponent(navigate)}${query(projectName)}`,
+        { method: "PUT", body: JSON.stringify({ enabled: false }) },
+      );
+      expect(disabledTool.status).toBe(200);
+      await gateway.refresh();
+      await waitForToolPresence(tools, navigate, false);
 
-    const category = "Child MCP / playwright";
-    const disabledCategory = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-tools/category/${encodeURIComponent(category)}${query(projectName)}`,
-      { method: "PUT", body: JSON.stringify({ enabled: false }) },
-    );
-    expect(disabledCategory.status).toBe(200);
-    const blockedSnapshot = await tools.get(snapshot)!.handler({
-      project: projectName,
-      arguments: {},
-    });
-    expect(serializedToolResult(blockedSnapshot)).toContain("TOOL_DISABLED");
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, false);
-    await waitForToolPresence(tools, snapshot, false);
+      await gateway.shutdown();
+      await waitForProcessExit([...pids][0]!);
+      ({ gateway, manager, tools } = createManagedGateway());
+      await gateway.start();
+      pids.add(manager.getStatus(childName).pid!);
+      expect(tools.has(navigate)).toBe(false);
+      expect(tools.has(snapshot)).toBe(true);
 
-    const enabledCategory = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-tools/category/${encodeURIComponent(category)}${query(projectName)}`,
-      { method: "PUT", body: JSON.stringify({ enabled: true }) },
-    );
-    expect(enabledCategory.status).toBe(200);
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, true);
-    await waitForToolPresence(tools, snapshot, true);
-    await expect(tools.get(snapshot)!.handler({
-      project: projectName,
-      arguments: {},
-    })).resolves.toMatchObject({ content: expect.any(Array) });
+      const enabledTool = await jsonRequest(
+        baseUrl,
+        `/api/v1/mcp-tools/${encodeURIComponent(navigate)}${query(projectName)}`,
+        { method: "PUT", body: JSON.stringify({ enabled: true }) },
+      );
+      expect(enabledTool.status).toBe(200);
+      await gateway.refresh();
+      await waitForToolPresence(tools, navigate, true);
 
-    const firstPid = manager.getStatus(childName).pid;
-    expect(firstPid).toEqual(expect.any(Number));
-    const staleNavigateHandler = tools.get(navigate)!.handler;
-    const disconnected = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-servers/${childName}/disconnect${query(projectName)}`,
-      { method: "POST" },
-    );
-    expect(disconnected.status).toBe(200);
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, false);
-    await waitForToolPresence(tools, snapshot, false);
-    await expect(staleNavigateHandler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    })).resolves.toMatchObject({
-      content: [{ type: "text", text: expect.stringContaining("CHILD_MCP_UNAVAILABLE") }],
-    });
-    await waitForProcessExit(firstPid!);
+      for (const enabled of [false, true]) {
+        const category = await jsonRequest(
+          baseUrl,
+          `/api/v1/mcp-tools/category/${encodeURIComponent("Child MCP / playwright")}${query(projectName)}`,
+          { method: "PUT", body: JSON.stringify({ enabled }) },
+        );
+        expect(category.status).toBe(200);
+        await gateway.refresh();
+        for (const name of [navigate, snapshot, close]) await waitForToolPresence(tools, name, enabled);
+      }
 
-    const connected = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-servers/${childName}/connect${query(projectName)}`,
-      { method: "POST" },
-    );
-    expect(connected.status).toBe(200);
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, true);
-    await waitForToolPresence(tools, snapshot, true);
-    const reconnected = manager.getStatus(childName);
-    expect(reconnected).toMatchObject({ state: "ready", toolCount: expect.any(Number) });
-    expect(reconnected.pid).toEqual(expect.any(Number));
-    expect(reconnected.pid).not.toBe(firstPid);
-    expect(() => process.kill(firstPid!, 0)).toThrow();
-    await expect(staleNavigateHandler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    })).resolves.toMatchObject({
-      content: [{ type: "text", text: expect.stringContaining("CHILD_MCP_UNAVAILABLE") }],
-    });
+      const firstPid = manager.getStatus(childName).pid!;
+      const disconnected = await jsonRequest(
+        baseUrl, `/api/v1/mcp-servers/${childName}/disconnect${query(projectName)}`, { method: "POST" },
+      );
+      expect(disconnected.status).toBe(200);
+      await gateway.refresh();
+      for (const name of [navigate, snapshot, close]) await waitForToolPresence(tools, name, false);
+      await waitForProcessExit(firstPid);
 
-    const closed = await tools.get(close)!.handler({ project: projectName, arguments: {} });
-    expect(serializedToolResult(closed)).not.toContain("error");
-
-    const removedHandler = tools.get(navigate)!.handler;
-    const removed = await jsonRequest(
-      baseUrl,
-      `/api/v1/mcp-servers/${childName}${query(projectName)}`,
-      { method: "DELETE" },
-    );
-    expect(removed.status).toBe(204);
-    await gateway.refresh();
-    await waitForToolPresence(tools, navigate, false);
-    await waitForToolPresence(tools, snapshot, false);
-    await expect(removedHandler({
-      project: projectName,
-      arguments: { url: fixtureUrl },
-    })).resolves.toMatchObject({
-      content: [{ type: "text", text: expect.stringContaining("TOOL_STATE_UNAVAILABLE") }],
-    });
-
-    const reconnectedPid = reconnected.pid!;
-    await gateway.shutdown();
-    expect(tools.has(navigate)).toBe(false);
-    expect(tools.has(snapshot)).toBe(false);
-    expect(tools.has(close)).toBe(false);
-    expect(() => manager.getStatus(childName)).toThrow();
-    expect(() => process.kill(reconnectedPid, 0)).toThrow();
+      const connected = await jsonRequest(
+        baseUrl, `/api/v1/mcp-servers/${childName}/connect${query(projectName)}`, { method: "POST" },
+      );
+      expect(connected.status).toBe(200);
+      await gateway.refresh();
+      for (const name of [navigate, snapshot, close]) await waitForToolPresence(tools, name, true);
+      const reconnected = manager.getStatus(childName);
+      pids.add(reconnected.pid!);
+      expect(reconnected).toMatchObject({ state: "ready", pid: expect.any(Number), toolCount: expect.any(Number) });
+      expect(reconnected.pid).not.toBe(firstPid);
+      expect(readdirSync(stateDirectory)).toHaveLength(3);
+    } finally {
+      for (const manager of managers) {
+        try {
+          const pid = manager.getStatus(childName).pid;
+          if (pid) pids.add(pid);
+        } catch { /* A disconnected child is already unregistered. */ }
+      }
+      try {
+        const removed = await jsonRequest(
+          baseUrl, `/api/v1/mcp-servers/${childName}${query(projectName)}`, { method: "DELETE" },
+        );
+        expect([204, 404]).toContain(removed.status);
+        await Promise.all(gateways.map((gateway) => gateway.refresh()));
+        const listed = await jsonRequest(baseUrl, `/api/v1/mcp-servers${query(projectName)}`);
+        await expect(jsonBody(listed)).resolves.toMatchObject({ data: [] });
+      } finally {
+        await Promise.all(gateways.map((gateway) => gateway.shutdown()));
+        await Promise.all(managers.map((manager) => manager.stopAll()));
+        for (const pid of pids) await waitForProcessExit(pid);
+        for (const { tools } of hosts) expect(tools.size).toBe(0);
+        if (existsSync(stateDirectory)) {
+          for (const directory of readdirSync(stateDirectory)) {
+            const record = JSON.parse(readFileSync(join(stateDirectory, directory, "ownership.json"), "utf8"));
+            expect(record).toMatchObject({
+              ownerPid: process.pid,
+              project: projectName,
+              cleanedAt: expect.any(String),
+              cancellationRequestedAt: expect.any(String),
+            });
+            expect(existsSync(record.outputDirectory)).toBe(false);
+            expect(existsSync(join(stateDirectory, directory, "failed-cleanup.json"))).toBe(false);
+          }
+        }
+      }
+    }
   }, 60_000);
 });

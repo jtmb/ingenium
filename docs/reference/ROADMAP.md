@@ -10,6 +10,342 @@ contracts, dependencies, verification, and live markers. Repository Markdown is
 canonical; the Docs Workspace is a projection and is not mutated by this roadmap.
 The archived predecessor is [ROADMAP-2026-07-31-phase-0.md](./archive/ROADMAP-2026-07-31-phase-0.md).
 
+## Current execution board — restored 23-item master Todo + linked current Todos 24–46 (2026-09-09)
+Board continuation: linked Todo 42 (2026-09-09) records the session-analysis documentation turn and root `AGENTS.md` rebuild; linked Todo 43 (2026-09-09) records exclusive subagent-orchestration ownership, the Plan explore-only task grant, and non-destructive Git read grants; linked Todos 44–45 record documentation upkeep and `ingenium-qa-vision` retirement; linked Todo 46 records the CLI session-context documentation boundary; no row above is altered.
+
+### Consolidated session summary — 2026-09-09
+
+- **Source/test boundary status (not overall rollout):** **SOURCE/TEST COMPLETE; runtime/deployment/activation gates remain OPEN.** This applies only to the named profile-only governance, memory-contract, MCP-catalog/designation, and documentation-audit boundaries: source tests, validator/gate checks, and typechecks are recorded for those boundaries; no broader rollout or runtime acceptance is inferred.
+- **Consolidated status/evidence cell:** R08 / restored item 8 (scheduler validation scripts) is **SOURCE UPDATED; focused validation OPEN; runtime/deployment/activation gates remain OPEN.** Prior harness/gate/typecheck evidence remains source/static history only and does not close the focused validator acceptance.
+- **Still open:** deployment and activation gates, the environment-blocked Playwright browser binary, `SKILL-100` runtime absence after restart, deployment R09/R19, activation T29/T35/T36/R20, visual R22/R21, T41 execution, and final commit R23. The `backgroundSubagents` capability probe is inconclusive: port 3000 redirected to login and only port 3000 responded. MEMORY-100 active-path runtime fresh-session A/B/C acceptance remains open.
+- **Open-roadmap work detection:** A roadmap task or TodoWrite item is open whenever its row, marker, or evidence cell retains an unresolved gate; the explicit open-row list below is authoritative, and open work exists even when a source/test boundary is complete.
+- **Explicit open-row list:** Restored items **1–23** remain enumerated with their row-level gates: item 1 baseline reconciliation; items 2–4 policy, validator, continuation, and activation; items 5–7 recovery/access, verifier, and regression; item 8 focused validator acceptance; items 9–11 compiled/deployment/MCP; items 12–15 loaded-surface, route, memory, and activation; items 16–18 helper, source, and directly affected documentation; and items 19–23 deployment, recovery, fresh-session, visual/containment, and final reconciliation. Current Todos **25–41** retain deterministic admission/resume, activation/runtime, enforcement, active-reference, checkout-retirement, and safe-activation gates. Current Todos **42–46** retain their local boundary evidence but do not close parent activation or broader rollout gates; `RESP-FMT-01` and T-AUX-02 remain open.
+- **Open-roadmap continuation:** Execution resumes synchronously and uninterrupted on the next open dependency-ready item; this is autonomous resumption, and the orchestrator immediately dispatches the next declared phase rather than ending a turn with a status update or waiting for a user reprompt.
+- **Open-marker terminal guard:** While active `work-started` markers remain, no final completion may be claimed; only the explicitly permitted terminal states or an explicit user `STOP`/`CANCELLED` request can end execution.
+- **Standing instructions:** profile-only tool governance; one documentation audit per finalized docs boundary plus the mechanical doc-config gate; one distinct subagent per dependency-ready item under the explicit user concurrency request; no subagent delegation; preserve the 291 catalog / 289 server-registration boundary.
+- **Escalation:** only the five permitted conditions; the inconclusive capability probe, internal denials, and pending runtime gates are not user escalation evidence.
+- **Cell rule:** The dated `SOURCE/TEST COMPLETE` overlay is authoritative only for the named source/test evidence; each row's original missing-dependency/gates list and next action remain unchanged, and runtime/activation/model-session/visual/deployment gates are not inferred closed.
+- **Preservation boundary:** No item is deleted or renumbered; the `qa-vision` and `session-id-tui` retirements remain historical. This is a roadmap-only consolidation: no shell, source change, commit, restart, VS Code action, or Docs Workspace mutation.
+- **CLI-DOC-04 current boundary:** The installed-CLI session-context audit is the active documentation continuation; it records valid in-memory PTY-parsed captures, the `CLI_EXPORT_INVALID_JSON` framing failure, non-liveness limits, and the current one-item/one-subagent scheduling decision. It does not close runtime, deployment, review, or model/session gates.
+- **CLI-DOC-05 current boundary:** The response-only formatting follow-on is complete as `RESPONSE_STRUCTURE`/readback evidence. It adds no persistent formatter, profile/theme change, restart, or broader rollout completion claim.
+
+#### Current-state consolidation overlay — 2026-09-10
+
+- **Delivered governance and authority (`SOURCE/STATIC`, `SOURCE/TEST`):** Profile-only tool governance is in force in the source boundary: the coordinator tool-execution denial layer was removed, `.opencode/agents/**` is the sole tool authority, and the harness/docs/tests are aligned. Root `opencode.json` entries are model/variant-only; the canonical Plan profile is read-only and Explore-only for delegation, `plan.md` is no longer hidden by `.gitignore`, Scout is retrieval-only, and `AGENTS.md` carries the golden rules plus Correction/Clarification/Evidence safeguards.
+- **Delivered Ponytail and scheduling (`SOURCE/STATIC`, `SOURCE/TEST`, `IN-SESSION`, `RUNTIME OBSERVATION`):** Ponytail is injected canonically by `experimental.chat.system.transform`, profiles require loading it, and the session observed a passing skill call with `PONYTAIL MODE ACTIVE` at full intensity. Allocation is request-scoped with no fixed 6/3 cap, the 20-writer regression and one-agent-per-item policy are recorded, and the reachable runtime observed `backgroundSubagents:false`; the earlier inconclusive probe remains historical.
+- **Delivered MCP and Playwright surfaces (`SOURCE/TEST`, `INTEGRATION`, `DEPLOYED`):** Typed launcher/bridge diagnostics, bounded redaction, `Retry-After` handling, the compatibility-only `POST /api/v1/auth/bootstrap-mcp-credential` route, migration 117 receipts, protected `0600`/UID-GID `1105` provisioning at `/run/ingenium-opencode/.ingenium-mcp-credential`, same-path mounting, and `INGENIUM_MCP_CREDENTIAL_PURPOSE=general` precedence are recorded with multiple post-restart `ingenium.status: connected` checks. The server-owned Playwright preset, anchored `@playwright/mcp` resolution, optional description (migration 116), Docker browser path, real navigate/snapshot/close/reconnect/cleanup integration, and the compatibility local-runtime live child lifecycle are complete in the final 2026-09-10 record below.
+- **Delivered memory (`SOURCE/TEST`, `API/BRIDGE LIFECYCLE`, `DASHBOARD`):** Seven `ingenium_memory_*` tools, preference/source tagging, secret rejection, project/workspace/owner isolation, versions/receipts/tombstones/restore suppression, migrations 114–117, and enabled `/chat` controls are recorded. API/bridge lifecycle proof is save `201` → restart → fresh-session recall present → forget → `404` absent; internal `/opencode` model-session recall remains open.
+- **Delivered documentation, review, and operations evidence (`DOC AUDIT`, `REVIEW`, `DEPLOYED`, `VISUAL/CONTAINMENT`):** Documentation audit repairs, the mechanical doc-config gate, Documentation Gates policy, affected README/API/MCP/auth/database/testing updates, security/Ponytail reviews, the resolved Premium `plan.md` hold, compatibility recreation with one image per service, untouched VS Code, strict containment exit `0`, and the 52/52-route HTTP-200 visual sweep with 10 screenshots are recorded in the final append-only block below. The retained non-mail `net::ERR_ABORTED` and `/vscode` wasm-404 observations remain honest findings.
+- **Current open gates:** The strict three-window external A/B/C + internal model-session recall + typed memory restart replay (`COORD-106`); internal `/opencode` model recall (manual session creation required); chat update/forget controls (management remains in Context); the dispatched managed-Playwright security-review outcome; encrypted-receipt/retained-credential and Ponytail follow-ups; and final scoped commit `R23` pending explicit user go with a large/mixed shared worktree remain open. This dated overlay supersedes the preceding 2026-09-09 summary only for current-state reading; its text, every row/marker, and all historical evidence remain preserved.
+
+This is the single authoritative board for the current execution state. It
+consolidates and preserves the restored 23-item master Todo, then links the
+  current Todos 24–46 continuation issues to the existing `ORCH-100` contract without
+creating a feature ID. It **supersedes older live-status summaries for current
+stage and next action only**; historical contracts, markers, evidence, and
+records below remain unchanged and retain their original meaning. The board is
+anchored to the [approved rollout contracts](#approved-rollout-extension-cloudflare-managed-playwright-mcp-diagnosis-agent-authority-scoped-dispatch-and-memory-100-2026-09-05), the
+[latest ledger](#latest-rollout-ledger-reconciliation-2026-09-06), the
+[current authorization/evidence record](#current-explicit-development-authorization-and-latest-execution-evidence-2026-09-06),
+and the [source/static inventory](#source-static-inventory-for-the-approved-rollout-2026-09-05).
+
+This board is continued by linked Todo 46 (2026-09-09) below.
+
+- **Master Todo status:** the original 23 items are preserved: the completed
+  checkpoint/documentation portions of items 1–4 are recorded; item 1 is
+  consolidation-complete only, while rows 2–4 retain unfinished
+  validator/implementation/test/activation gates; restored item 8 is **IN
+  PROGRESS**; the remaining 18 items are **PENDING**. Current Todo 24's
+  product-boundary decision is **COMPLETE by explicit user choice**; linked Todos
+   25–27, 29–31, and 32–34 remain **OPEN** for deterministic
+  harness/documentation work, verification/resume reconciliation, reminder
+  activation, safe recovery, and evidence under `ORCH-100`. Todo 28's full
+  official-guide integration is recorded as SOURCE/STATIC complete; Todo 30's
+  source/static removal is recorded while its verification, artifact,
+  deployment, activation, and runtime-absence gates remain open; Todo 31's
+  active-reference cleanup remains open. Todo 35's profile-repair/static and
+  consumed-QA boundary, and Todo 36's bounded Fast proof, are recorded while
+  their activation/current-loaded-surface gates remain open. Todo 29's activation
+   and runtime evidence remain open. Todo 37's bounded safeguard amendment is
+   recorded while runtime enforcement remains open. Todo 38's earlier
+   "retirement unauthorized" wording is superseded by the current explicit user
+   authorization to delete obsolete Ingenium checkouts while preserving data and
+   unique work; no deletion or registration reconciliation has been performed.
+   Linked Todos 39–41 record the source-only checkpoint, candidate/data-
+   preservation boundary, and exact route/safe-activation boundary. These linked
+   items do not replace, delete, or cancel an original item and do not claim
+   whole-feature or broader-rollout completion.
+
+ - **IN_SCOPE:** `docs/reference/ROADMAP.md` existing Todo 26, restored item 9,
+    and Current Todos 38–41 under existing `ORCH-100`; preserve the original 23
+    items and read back the resulting board.
+ - **OUT_OF_SCOPE:** Other documentation, code, configuration, source, runtime,
+    tool calls, checkout deletion or registration reconciliation, delegation,
+    tests, reviews, commits, and Docs Workspace mutation.
+- **Acceptance:** The original 23 board rows remain present, linked Todos 24–41
+  are recorded under `ORCH-100` rather than as duplicate features, Todo 24's
+  product-boundary decision is resolved by explicit user choice, the deterministic
+  child-outcome guard and phase-accounting amendment are recorded, Todo 27's
+  retrieval evidence, Todo 28's static integration, Todo 29's open activation
+  boundary, Todo 30's implemented source/static removal with its open
+  verification/artifact/deployment/activation/runtime gates, Todo 31's open
+  active-reference cleanup, Todo 35/36's bounded evidence with open activation
+   boundaries, Todo 37's independent-executor, internal-mismatch,
+   no-new-evidence, stable-ID owner-routing, and static-only boundaries, Todo
+   38's current-worktree authorization, Todo 39's source checkpoint and
+   consumed reviews, Todo 40's candidate/data-preservation inventory, and Todo
+   41's exact route audit and unproven safe activation are explicit; item 20's
+   reminder activation and safe-recovery gates remain open, historical records
+   remain preserved, and evidence classes stay explicit. `SOURCE/STATIC` or
+   “source complete” is never blanket feature completion. Todo 9's carried
+   source waves and Todo 26's open auth-verifier boundary do not close compiled,
+   deployment, runtime, QA/security, or broader-rollout gates.
+ - **Authorization boundary:** The current user instruction makes the current
+    canonical worktree authoritative and authorizes discarding obsolete source and
+    stashes while preserving operational records. This supersedes Todo 38's prior
+    "retirement unauthorized" wording only; password, provider, learning, and
+    repository-sync credential actions remain unchanged.
+ - **Runtime boundary:** Retained source, fixture, documentation, and isolated
+    artifact-build evidence are not runtime proof. Todo 36 adds only a bounded
+    Fast model/session tool proof; Todo 37 adds only static safeguard wording;
+    Todo 39 records the source checkpoint and isolated artifact evidence; and
+    Todos 40–41 retain the open retirement, registration, activation, and runtime
+    boundaries. No artifact adoption, deployed build/image acceptance, deletion,
+    registration reconciliation, fresh screenshots, Premium activation, broader
+    model/session acceptance, runtime-absence proof, or runtime enforcement proof
+    is recorded.
+- **STOP_CONDITION:** `PASS` applies only to this documentation amendment after
+  the current board and append-only links are read back; it is not overall
+  rollout completion or a `STOP`. An explicit user `STOP`/`CANCELLED` remains
+  terminal, and `ESCALATE_USER` is permitted only with positive evidence of a
+  permitted external condition after configured paths are exhausted. Deployment
+  is `N/A` for this documentation-only turn.
+- **Inventory boundary:** No Explore agents are dispatched because delegation
+  is out of scope. The inventory uses five distinct, non-overlapping lenses:
+  contract/ID coverage; retained execution and unknown outcomes; source/static
+ evidence; deployment/review/model/visual gates; and historical,
+ authorization, and cleanup boundaries. No broad duplicate discovery is added.
+
+- **R08 row reconciliation:** The legacy scheduler-limit details retained in the
+  restored item 8 evidence cell are historical evidence only and are superseded
+  by the current no-fixed-ceiling policy in item 2. The current R08 status is
+  **SOURCE UPDATED; focused validation OPEN; runtime/deployment/activation gates
+  remain OPEN**; no obsolete limit is an active scheduling requirement.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| Restored item 1 — current consolidation / [BASELINE-100](#baseline-100--rollout-preflight-and-territory-manifest) | **CONSOLIDATION COMPLETE.** This 23-row board is authoritative for current stage/next action; the broader rollout remains open and resumable. The historical 14-item note is not a current missing-nine state. This is not `BASELINE-100` or whole-feature completion. | Existing contracts, the latest ledger, and the retained 23-item Todo are linked above. This board is `SOURCE/STATIC` only. | Read-only branch/HEAD, dirty-path, task/Todo, claim, outbox, and unknown-outcome reconciliation; cleanup state is unknown. | `@ingenium-orchestrator`: run one supported read-only baseline reconciliation, retain unknowns, and do not replay mutations. |
+| Restored item 2 — scheduler instruction update / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **CURRENT POLICY CORRECTION RECORDED; no fixed active-agent or writer ceiling.** | The 2026-09-09 CLI context record retains the decision to dispatch one distinct subagent per dependency-ready item with exclusive territory and actual-count reporting. The older prospective scheduler clarification remains historical and does not override this live rule. Prior source/test evidence remains intact. | Runtime-loaded policy and enforcement are not proven; historical phase/count contracts remain preserved below. | `@ingenium-orchestrator`: use the current one-item/one-subagent rule for new dispatches, respect explicit user concurrency, and retain the static/runtime boundary. |
+| Restored item 3 — [OPENCODE-100](#opencode-100--copyable-current-session-id-in-the-opencode-tui-sidebar) sidebar roadmap addition | **Roadmap addition DONE; feature remains `PLANNED`.** | The existing [planned feature section](#planned-opencode-tui-session-id-sidebar-feature-2026-09-05) records the contract and static extension-point context only. | Source integration, focused tests, rebuilt/runtime TUI behavior, actual session proof, and wide/narrow screenshots. | `@ingenium-software-engineer-premium`: inspect the installed-versus-supported TUI extension point first; do not treat the roadmap addition as implementation. |
+| Restored item 4 — `AUTONOMY_REMINDER_V1` / coordination continuation gate / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC focused evidence PASS; no active/live hook, enforcement, or true continuation proof.** The actual-idle-continuation candidate is rejected at design level because master/abort/atomicity gaps remain. | The source hook in `packages/ingenium-extension/session-coordinator.ts` plus two autonomy tests `ses_f888cd094ffeeVnN3H7wLOAAo9`, replay-fix set of five `ses_f8830c740ffeRlyIRJYpdWZoqY`, extension typecheck `ses_f88235fb7ffeGnv22T3zpVkI3I`, and hook QA `ses_f87fe064bffe7E0ptoAvfFu8V2` are retained in the [authorization/evidence record](#current-explicit-development-authorization-and-latest-execution-evidence-2026-09-06). | Full 64-test coordinator integration is unrun/denied latest; existing-parent activation, live enforcement, and restart proof are absent. | `@ingenium-orchestrator`: retain the reminder only; close the master/abort/atomicity admission before considering any continuation design. |
+| Restored item 5 — connection reset plus Core unit timeout / [RECOVERY-100](#recovery-100--planmcp-chat-loss-recovery-and-resumable-handoff)–[RECOVERY-102](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing) | **UNKNOWN OUTCOME; recovery OPEN.** | Root npm-workspace Vitest timed out at `300000ms` while Core-only: 28 files / 777 observed tests, 776 PASS and 1 FAIL in `agents.test` (`uses explicit profile disable state during disk sync`, expected `Updated`, got `undefined`). Full output: `/home/brajam/.local/share/opencode/tool-output/tool_078aea7e9001k35Cxr6YKiSkkJ`. All other workspaces were not reached; cleanup is unknown and an accidental empty claim was aborted with unknown outcome. A retained note classifies native `ECONNRESET` as retryable for 1.18.29, but the current typed error/endpoint is unknown and this is not `MCP-107` proof. Current recovery/access probes are retained in the final reconciliation note below; they do not establish absence or an external credential fault. | Authorized live read-only session/supervisor access, exact status, and process/claim/outbox/session/Todo reconciliation; the actual current typed error/endpoint; and an executable verifier. | `@ingenium-orchestrator` with the recovery owner: obtain the authorized live read-only interface and exact status first, preserve the first failure, and do not retry or replay until attribution is known. |
+| Restored item 6 — executable targeted-verifier readiness / [BASELINE-100](#baseline-100--rollout-preflight-and-territory-manifest) | **OPEN; isolated supported verifier proven; live/access gates remain open.** | Todo 6's isolated supported verifier is proven. It does not establish universal command authorization, an admitted compiled-refresh path, or recovered live-session proof; the current access limitations are recorded below. | A design-admission row for each remaining check, including compiled-refresh/runtime gates, with executor, exact path, failure behavior, rollback/adoption owner, and evidence. | `@ingenium-orchestrator`: retain the isolated verifier evidence; obtain exact live status through an authorized read-only interface before any replay, build, or restart. |
+| Restored item 7 — Core agents fixture `hidden: false` / [AGENT-100](#agent-100--scout-retrieval-boundary-ponytail-loading-and-profile-authority) | **STATIC correction complete; focused regression OPEN; broad run incomplete.** | Task `ses_f80a8f989ffeMAVRQd7nC3ayX8` broad run timed out at `300000ms` after partial Core coverage of 28 files / 777 tests: 776 passed and 1 observed failure, the exact first-failure test `uses explicit profile disable state during disk sync`; this is not suite completion. The actual fixture fix is `packages/ingenium-core/tests/agents.test.ts:300-313`, with line 305 now supplying `hidden: false`; the regression is unrun. Process completion, cleanup hook, child processes, ports, `/tmp/ingenium-agents-*`, manifests, handles/RSS, and artifact ownership are all **UNKNOWN** because no attributable run manifest exists; there is no known residue and nothing may be deleted. The reader's `packages/ingenium-core/tests/repository-resources.test.ts` `hidden: true` fixture is the wrong file and remains untouched/out of scope. The accepted AGENT-100 static-QA run `ses_f8c1b8a19ffe1emkkDDBDzdRnh` is distinct; the earlier declined intake was **not** a QA review. | Exact future regression: `npm run test --workspace=packages/ingenium-core -- tests/agents.test.ts -t "uses explicit profile disable state during disk sync"`; safe only after verifier recovery. Installed-loader behavior and runtime profile evidence remain open. | `@ingenium-software-engineer-premium`: recover the verifier, then run the exact named regression once; keep Todo7 open, do not broad-rerun, and do not delete anything while cleanup and artifact ownership remain unknown. |
+| Restored item 8 — scheduler validation scripts / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **UNKNOWN OUTCOME; source updated; focused validation OPEN; no completion marker.** | `tests/test-orchestrator-scheduler-policy.sh` now carries the six-active/three-writer and Multi-Todo exactly-two constants plus the Single-Todo 1–6 and Multi-Todo fixture coverage. `tests/test-agent-validation.sh` carries the same allocation limits and its `--role-matrix` path invokes the standalone scheduler policy check once, propagating failure. The earlier `ses_f8462d49effe2zWvOdMlviCo0z` record remains historical. The earlier task `ses_f81dca04cffenIiaP2pNckLcfQ` attempted the exact command `ingenium-build WyJhZ2VudC12YWxpZGF0aW9uIl0`; generic coordination was denied without output. Latest evidence task `ses_f80c1485fffeX0FDz0O2od2wI1` records that command returning a generic managed denial; source trace shows the same text can be emitted in the before-hook or after wrapper execution if pending authorization disappeared, so the prior outcome remains **UNKNOWN** and there was no replay. The operation is repeatable/read-only with wrapper fingerprint enforcement; it may be replayed exactly once only after causal trusted-call authorization repair. A passing validator result remains open under this acceptance Todo; no completion marker is added. The prior hook/managed-denial trace is historical evidence only: owner decision removed that coordinator enforcement layer, managed CLIs remain neutral optional utilities, and verification now runs directly under `.opencode/agents/**` profile permissions. | An executable validator under the applicable agent profile permissions, plus authorized live read-only session/supervisor access and exact status before any replay; preserve the unknown outcome and do not replay until attribution is known. | `@ingenium-orchestrator`: obtain exact status, then run one repeatable/read-only validator directly under profile governance with wrapper fingerprint enforcement; keep this acceptance Todo open until the executable check passes. |
+| Restored item 9 — `IMAGE_REVISION` wrapper and compiled refresh / [RUN-A01](#memory-100-acceptance-scenario-ledger) | **SOURCE WAVES AND CONSUMED REVIEWS RECORDED; compiled refresh/runtime gates OPEN.** | Same-writer wave `ses_f7e968baeffeq9VQxrsB1iiOLQ`: staged server/extension build touched 5 files and reported **7 passed, 79 skipped, 86 total**, plus typecheck. QA `ses_f7e476860ffekKBnVWwoXm3bO1` records the pino blocker fixed in the extension package and lockfile; the existing `^9.0.0` range resolved to actual `9.14.0`, with no upgrade, and 1 regression passed. Security `ses_f7e476730ffeMsf7QkfLksnl3l` found no blockers; journal error masking remains `FOLLOW_UP` and untouched; these reviews are consumed. The whole-root isolated artifact build helper/package/Docker contract reported **6 passed, 87 skipped, 93 total**, plus typecheck; QA `ses_f7e280f07ffe1jiV1NWMRth9rH` and security `ses_f7e2210c7ffe9XZjBuC1NPwk9B` both returned **PASS** and are consumed. The candidate-only locked-dependency fallback reported **4 passed, 91 skipped, 95 total** with no real install. Actual root `ingenium-build WyJydW4iLCJidWlsZCJd300000` returned a generic managed-shell denial with no exit/output and an absent build directory; outcome is **UNKNOWN**, not no-launch proof, and no retry occurred. The latest typecheck likewise returned generic denial with no compiler output and remains unverified. Active/dist are unchanged; no build adoption, parent restart, or checkout deletion occurred. Source fixes are not a roadmap `PASS`. | Compiled artifact refresh, exact revision provenance, safe adoption, deployment/runtime health, and the new coordinator auth boundary's QA/security evidence remain open; the current access boundary is recorded below. | Todo9 source-wave and consumed-review evidence is recorded without closing compiled refresh or runtime gates. Deployment is `N/A` for this documentation-only turn. |
+| Restored item 10 — general-MCP reset / [COORD-RESET-100](#protected-coordination-credential-reset-coord-reset-100) and [RECOVERY-100](#recovery-100--planmcp-chat-loss-recovery-and-resumable-handoff) | **Executed once; `coordination reset: failed (binding)`; lock definitely created and cleaned; command incomplete; credential result UNKNOWN.** No blind rerotation. | Evidence task `ses_f80b58bc0ffevj1V0Gw9Mn7s1Y` records one exact reset attempt. Prior credential revocation was definitely not reached. Replacement DB issuance is UNKNOWN. The inspected rollback source does not expect a persistent local replacement for this incomplete command, but current identity remains UNKNOWN. Forced reconnect, re-registration/epoch recovery, and outbox replay are UNKNOWN. No exact operation ID is available and no replay occurred. The inventory of 168 outbox records and 1 disposition is inventory only, not attribution to this reset. The current authorized general-MCP scope and unchanged credential classes remain as recorded in the [latest authorization trace](#current-explicit-development-authorization-and-latest-execution-evidence-2026-09-06). | Exact operation metadata/current binding, read-only preflight/status reconciliation, exact-ID adoption/revocation decision, post-reset authorization/status canary, and durable recovery reconciliation. | `@ingenium-orchestrator`: perform read-only metadata/preflight/status reconciliation, then record the exact-ID adoption/revocation decision; never rotate or revoke by pattern and never rerun reset. |
+| Restored item 11 — live `-32000` cause plus coordinator integration / [MCP-107](#mcp-107--exact-32000-connection-closure-diagnosis-and-causal-repair) | **`IMPLEMENTED_UNVERIFIED`; actual live cause UNKNOWN.** | The [source/static inventory](#source-static-inventory-for-the-approved-rollout-2026-09-05) proves relevant launcher/bridge surfaces only. The first live stderr/exit, actual endpoint, coordinator integration, deployment, and MCP canary remain unproved. | First-stage redacted child artifact, typed error/endpoint attribution, coordinator integration regression, exact artifact deployment, MCP initialize/list/status evidence, and `.env.example` dependency. | `@ingenium-software-engineer-premium`: capture the actual first startup artifact through the safe executable path, repair only its proven cause, and never rotate credentials for diagnosis. |
+| Restored item 12 — [AGENT-100](#agent-100--scout-retrieval-boundary-ponytail-loading-and-profile-authority) lifecycle, revocation, sync, Scout, and Ponytail checks | **SOURCE/TEST COMPLETE (2026-09-09); activation/runtime/model-session gates OPEN.** | Static inventory records root model/variant mappings, native-profile authority, Scout retrieval-only wording, broker boundary, and Ponytail preflight. SOURCE/TEST COMPLETE (2026-09-09): permission-parity PASS; 291 catalog entries / 289 server registrations; 32 Tasks, 7 Memory, `120/291` designated; broker wildcard-deny; QA credit scope fix; source tests PASS, validator/gate PASS, typecheck PASS; runtime/activation evidence still pending for deployment items. | Installed loader/default-deny proof; lifecycle/revocation and sync checks; full-parent restart; actual per-agent Ponytail/prompt/tool evidence; bounded review. | `@ingenium-software-engineer-premium`: validate the installed authority/lifecycle path and then capture actual loaded-surface evidence; do not widen root permissions. |
+| Restored item 13 — [CLOUDFLARE-100](#cloudflare-100--existing-named-tunnel-and-authenticated-https-audience-gateways) trusted routes, connector, package, and selected services | **`MISSING` / `IMPLEMENTED_UNVERIFIED`; Todo13 remains OPEN and source remediation waits for the verifier.** | Source task `ses_f8040e6e9ffeLjWk7ut4KAH3BE` records the implemented foundations and the three blocking gaps retained in the Todo13 record below. Scout failure `ses_f8040e5e1ffexU9N4VasiOuXCt` is retained in that record and was not retried. | (1) The five audience labels are not consumed by the production authenticated gateway/Host/CSP routing; (2) route health never probes public HTTPS routes and a running connector reports `unknown`; (3) token replace/clear and config save have no atomic or compensating rollback. Exact source checks and the deployed canary plan remain unrun. | `@ingenium-software-engineer-premium`: wait for the supported verifier, then remediate only the named gaps and run the retained checks/canary plan. Protected credential/access paths were not attempted; no user escalation is supported. |
+| Restored item 14 — [PLAYWRIGHT-100](#playwright-100--pinned-managed-child-mcp-browser-preset) pin, namespace, lifecycle, isolation, and cleanup | **SOURCE + DEPLOYED + LIVE ACCEPTANCE COMPLETE (2026-09-10); security-review outcome OPEN.** | The final [completion/recovery record](#playwright-100-completion-and-compatibility-runtime-recovery-2026-09-10) proves the `bootstrap-local-runtime` provisioner, runtime credential/capability and launcher attestation; healthy container/image with `MCP_BOOTSTRAP_READY` and connected MCP; the complete `201` → 30-tool discovery → navigate/snapshot/close → `204` → `404` lifecycle; zero residuals; and the three transport/projection test corrections. | Dispatched bounded security-review outcome; strict three-window A/B/C model-session gate; internal `/opencode` model recall; Chat update/forget UX; encrypted-receipt/retained-credential follow-ups; and `R23` final commit. | Append the review outcome when received; preserve the other rollout gates and do not reopen the completed lifecycle. |
+| Restored item 15 — [MEMORY-100](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination) foundation, clients/UI, scopes, receipts, learning, forget, and restore | **SOURCE/TEST COMPLETE (2026-09-09); active PATH/runtime fresh-session A/B/C, deployment, visual, and containment gates OPEN.** | Static inventory records scoped lifecycle, committed receipts, idempotency/conflicts, tombstones/suppression, bounded retrieval, API routes, and untrusted-data framing. SOURCE/TEST COMPLETE (2026-09-09): seven `ingenium_memory_*` tools, preference-tag default, secret rejection, `memory:read`/`memory:write` credential scopes, tests `8+6+4+3+48` PASS, and MCP `291/289`; source tests PASS, validator/gate PASS, typecheck PASS; active PATH: runtime fresh-session A/B/C acceptance still open; runtime/activation evidence still pending for deployment items. | Foundation/client/UI regressions; external writer path and receipts; scope evidence; learning separation; forget/restore suppression; deployment; fresh sessions; restart replay; visual and containment gates. | `@ingenium-software-engineer-premium`: complete the dependency-ordered foundation, then prove external write capability before the cross-surface matrix; preserve the existing MEMORY-100 task rather than creating another ID. |
+| Restored item 16 — browser helper/parser candidate / [PLAYWRIGHT-100](#playwright-100--pinned-managed-child-mcp-browser-preset) | **OPEN; generic helper baseline restored to HEAD; candidate inactive; unsafe Chrome setup not invoked.** | Evidence task `ses_f80a05b0fffeLPVEUNkhtBc0dX` confirms the helper is generic and has no removed `browser-agent` identity dependency; active skill docs use `--json`, but the active helper does not parse it. The preserved candidate adds parser/timeout improvements but remains inactive and retains unsafe all-Chrome `Stop-Process -Force`. Active skill-reference cleanup is tracked separately under Todo31; historical/error and negative references are not conflated with this item. | An admitted implementation must preserve generic browser/Playwright infrastructure, remove all-Chrome signaling, add no-signal startup coverage, and provide admitted execution. Exact future checks are `bash tests/test-wsl-chrome-connect.sh` and the Vitest test `browser denies the removed agent wrapper without weakening generic controls` in `packages/ingenium-extension/session-coordinator.test.ts`; Playwright containment audit is not applicable to these stub shell/Vitest checks. | `@ingenium-software-engineer-fast` owns the later admitted helper/parser implementation and checks; `@ingenium-software-engineer-premium` owns the later Todo30 removal-admission boundary. Keep Todo16 open; do not route or substitute the removed `browser-agent`, including for website retrieval. |
+| Restored item 17 — outstanding QA/security and named regressions / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/TEST COMPLETE (2026-09-09); accepted review and broader rollout gates OPEN.** | AGENT-100 static QA `ses_f8c1b8a19ffe1emkkDDBDzdRnh` remains accepted; the earlier declined intake is not review. SOURCE/TEST COMPLETE (2026-09-09): harness/source tests and validator gates PASS, source tests PASS, validator/gate PASS, typecheck PASS; security B1/F2/F3/F4 remediated and the QA credit scope fixed; runtime/activation evidence still pending for deployment items. | Finalized input/output manifests, each named minimum regression, and exactly one applicable QA report plus at most one predeclared security report per finalized boundary. | `@ingenium-qa` and, only where predeclared, `@ingenium-security-auditor`: review after source verification; preserve accepted reports, do not rerun completed review, and do not convert unperformed QA into PASS. |
+| Restored item 18 — nonsecret `.env.example` entry and directly affected docs / [MCP-107](#mcp-107--exact-32000-connection-closure-diagnosis-and-causal-repair) | **PENDING; not changed in this docs-only turn.** | The retained ledger records the intended `.env.example` edit as denied/pending; the MCP troubleshooting contract names only directly affected docs after behavior is verified. | Source environment contract, nonsecret example entry, focused link/command check, and proven MCP cause. | `@ingenium-software-engineer-premium` plus the later Docs owner: add only the nonsecret entry and directly affected wording after the source cause is proven; no Workspace write. |
+| Restored item 19 — exact tested-source deployment, provenance, routes, and MCP / [RUN-A01](#memory-100-acceptance-scenario-ledger) | **OPEN; no current-revision deployment proof.** | Current records explicitly state no current deployed-runtime, live MCP, route, or image-provenance proof; API liveness alone is not MCP initialize/list or state-bearing proof. | Exact tested artifact, `IMAGE_REVISION`, rebuild/restart, supervisor/application health, actual affected routes, MCP initialize/list/status, and cleanup evidence. | `@ingenium-software-engineer-premium` with the recovery owner: complete design admission, deploy the exact artifact, and verify actual routes/MCP only after source gates pass. Deployment is `N/A` now. |
+| Restored item 20 — safe parent activation, actual continuation, Ponytail, and session Todo replay / [RECOVERY-101](#recovery-101--autonomous-tui-recovery-and-replacement-parent-adoption) | **OPEN; reminder-only boundary accepted; no live activation or actual continuation proof.** | Recovery history requires nonce/enrollment, typed handoff, external supervisor, replacement health, reconnect, rollback/adoption, and split-brain fencing; current notes record no restart and no live session replay. The explicit user choice retains upstream OpenCode/reminders and excludes a maintained patched-runtime/native completion guard. | Fresh read-only recovery preflight, durable handoff, replacement-first health, reconnect/resume, fencing, actual model/session evidence, and TodoWrite replay; the excluded native completion guard is not an acceptance dependency. | `@ingenium-recovery-engineer`: retain the reminder-only boundary, perform the read-only preflight first, and activate only after every replacement-first gate is proven. |
+| Restored item 21 — fresh `/chat` and external `/opencode` memory plus simultaneous A/B/C canonical identity / [MEMORY-100](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination) and [COORD-106](#coord-106--multi-window-acceptance-and-rollout) | **SOURCE/TEST COMPLETE (2026-09-09); active PATH runtime fresh-session A/B/C acceptance OPEN.** | MEMORY-100 requires fresh synthetic save/recall/update/forget/restart evidence. Existing COORD-106 history records only a sanitized external A/B handoff; simultaneous external A, external B, and internal C cross-awareness remains pending. SOURCE/TEST COMPLETE (2026-09-09): memory source/client/receipt/scope/redaction tests PASS, source tests PASS, validator/gate PASS, typecheck PASS; active PATH: runtime fresh-session A/B/C acceptance still open; runtime/activation evidence still pending for deployment items. | Fresh independent `/chat` and `/opencode` sessions, one canonical `shared-memory-ingenium` identity, receipts/scopes, restart replay, and no transcript leakage. | `@ingenium-software-engineer-premium` + `@ingenium-explore` (model/session acceptance): run the cross-surface matrix only after deployment and client gates are final. |
+| Restored item 22 — changed-route desktop/mobile, passive full-site sweep, and containment / [VIS-A01](#memory-100-acceptance-scenario-ledger) + [VIS-A02](#memory-100-acceptance-scenario-ledger) | **OPEN; no fresh screenshots or cleanup proof.** | Existing rollout gates require `1440x900` and `390x844`, accessibility, console/network, browser cleanup, one passive full-site sweep, and strict containment; current records claim none for this rollout. | Final changed UI route, both viewport artifacts, passive desktop/mobile sweep, containment audit, and retained cleanup/telemetry. | `@ingenium-qa` after the final UI/deployment boundary: run one changed-route gate and one passive full-site sweep; do not treat source evidence as visual proof. |
+| Restored item 23 — synthesis, final roadmap/Todo reconciliation, scoped commit, and evidence / [MEMORY-100](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination) + [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **OPEN; broader rollout remains OPEN and resumable.** | Existing final-reconciliation and MEMORY-100 gates require separate evidence classes; this board contributes `SOURCE/STATIC` only and makes no commit or overall PASS claim. | `/synthesize`, final TodoWrite/roadmap/status/claim/outbox reconciliation, exact changed-file list, scoped commit, and all applicable source, deployed, model/session, visual, review, and cleanup evidence. | `@ingenium-orchestrator`: after dependencies close, synthesize and reconcile every item/evidence class, then make only the authorized scoped commit; not in this turn. |
+| Current Todo 25 — deterministic harness/admission amendment / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC POLICY/DOCUMENTATION BOUNDARY COMPLETE; runtime source enforcement, verifier repair, profile activation, and model/session proof OPEN.** | Consumed QA `ses_f7fe7d903ffez7Z0Eztveb4J2u` found one blocking static parity gap in the orchestrator. Remediation task `ses_f7fdb259cffeXPC9OoRJrTpZVg` added the design-admission/`REJECT_AND_REPLAN`, all-failure signatures, stable-ID master-Todo continuity, and no-bootstrap-cycle controls to the orchestrator profile; the named minimum readback confirmed the corresponding labels in `AGENTS.md` at lines 440, 486, 585, and 620 and in the profile at lines 124, 140, 148, and 156. QA was not rerun. | Runtime source enforcement, verifier repair, profile activation, and model/session proof remain open under dependent Todos; this marker is not broader rollout completion. | `@ingenium-orchestrator`: preserve this static boundary, then continue with the dependency-ordered verifier, source-enforcement, activation, and model/session gates; do not infer runtime proof from the readback. |
+| Current Todo 26 — verification and resume reconciliation / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/TEST COMPLETE (2026-09-09); reconciliation, runtime, and broader-rollout gates OPEN.** | The full-board/TodoWrite and same-turn resume rule remains linked below; rows 6 and 8 are unchanged, while item 9 now records the staged/isolated source waves, consumed reviews, locked-dependency fallback, unknown root-build denial, and unchanged active/dist boundary. The latest coordinator source reproduction is **RED** at 1 failed/72 skipped, then **GREEN** after the exact-call independent-auth/one-shot-cleanup fix at **8 passed, 72 skipped, 80 total, 2.44s**. The actual production-root denial is not attributed to that source reproduction. The latest typecheck was generically denied with no compiler output and is unverified; this new auth boundary has no finalized QA/security evidence. Owner decision removed the former coordinator tool-enforcement/admission layer; verification now runs directly under `.opencode/agents/**` profile permissions. SOURCE/TEST COMPLETE (2026-09-09): harness tests green, validator/gate PASS, typecheck PASS, and profile-only tool governance is active in the source boundary; runtime/activation evidence still pending for deployment items. | Read-only reconciliation of every open gate, stable item/failure IDs, claims/outbox, `nextWork`, and dependency-ready scheduling; preserve unknown outcomes and do not convert source fixes or internal denials into `PASS`/external escalation. The remaining tool-related gate is executable verification under profile governance. | `@ingenium-orchestrator`: preserve the recorded source evidence, obtain a currently supported executable verifier/status path under profile governance, and do not retry the denied root build or typecheck. |
+| Current Todo 27 — official-guide retrieval / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **RETRIEVED; 84 statements retained; Todo 28 integration recorded; activation OPEN.** | Task `ses_f81883549ffe41TuQsvsDvbTWn` retains the official requested URL `https://developers.openai.com/api/docs/guides/latest-model` and its advertised `.md` form `https://developers.openai.com/api/docs/guides/latest-model.md`: 13 headings, 12 fenced examples, 84 statements (80 normative, 4 descriptive), section match, and no truncation marker. | Todo 29's separate activation and runtime/session evidence boundary, plus any later source/test evidence admitted by its own contract. | `@ingenium-orchestrator`: preserve the retrieval counts and static-only boundary; do not infer activation from the guide readback. |
+| Current Todo 28 — official-guide instruction integration / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC COMPLETE; activation and runtime proof OPEN.** | Task `ses_f81883549ffe41TuQsvsDvbTWn` added `LATEST-MODEL-GUIDE-01` to both instruction files with all 84 stable IDs exactly once in each, preserving the 80 normative and 4 descriptive split, conditional API wording, higher-priority safety, deterministic-failure rules, the browser prohibition, and the upstream reminder-only boundary. | Todo 29's activation/evidence boundary; no source, test, provider, model, configuration, restart, deployment, or Workspace evidence is part of this docs-only amendment. | `@ingenium-orchestrator`: retain the static policy and run only the declared readback/mechanical checks for this documentation boundary. |
+| Current Todo 29 — official-guide activation and acceptance boundary / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **OPEN; activation not performed or claimed.** | Todo 28 supplies repository static policy only. No parent restart, reload, deployment, actual model/session artifact, native completion enforcement, or runtime acceptance is added or implied. | A separately admitted activation/reload path, runtime health, and actual model/session evidence, while preserving the reminder-only decision and all restart/recovery gates. | `@ingenium-orchestrator`: keep activation separate; do not mark or infer it from Markdown, counts, or mechanical coverage. |
+| Current Todo 30 — browser-agent removal admission / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC REMOVAL IMPLEMENTED; Todo30 remains OPEN.** | The retained evidence records root mapping, canonical profile, and browser-exception source removal as implemented static source, while preserving generic Playwright/passive visual-QA wording and the historical error record. This does not prove the generated/host artifact, loaded parent, runtime absence, or broader removal completion. | Projector, coordinator, and validator tests; one applicable QA report and one security report; host artifact refresh; deployment; full-parent activation; and runtime-absence/loaded-session proof remain open. Todo31's active skill-reference cleanup remains separate. | `@ingenium-software-engineer-premium` owns the admitted removal checks and later activation boundary; `@ingenium-software-engineer-fast` owns the helper/parser check. Preserve the prohibition and do not route or substitute `@browser-agent`. |
+  | Current Todo 31 — active skill-reference cleanup / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/TEST COMPLETE (2026-09-09); activation/runtime boundary OPEN.** | Documentation audit/repair fixed all active findings while preserving historical, error, and negative references. SOURCE/TEST COMPLETE (2026-09-09): `test-doc-config-audit.sh` PASS, source tests PASS, validator/gate PASS, typecheck PASS, docs-gate policy added, and all named documentation findings repaired; runtime/activation evidence still pending for deployment items. | No additional active-reference cleanup is part of this boundary; preserve the repaired active-reference wording and do not reclassify or rewrite historical/error/negative references. | `@ingenium-docs` preserves the consumed documentation evidence; activation/runtime gates remain open and no Todo31 cleanup is manufactured in this turn. |
+| Current Todo 32 — deterministic agent-failure documentation / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC AMENDMENT RECORDED; enforcement OPEN.** | [`AGENTS.md`](../../AGENTS.md#-deterministic-failure-authorization-and-dispatch-safeguards) and the [orchestrator phase protocol](../../.opencode/agents/primary/ingenium-orchestrator.md#-active-child-outcome-guard) record parent-owned child outcomes, immediate stable tool-state failure surfacing, one distinct diagnostic, redacted signatures, same-turn repair, and the screenshot-derived pass/fail example. | Premium-owned source hook/focused test, activation, and runtime/model-session proof; prose is not enforcement. | `@ingenium-software-engineer-premium`: implement the admitted source/test boundary later; no source or test change is part of this documentation turn. |
+| Current Todo 33 — source enforcement hook and focused test / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **OPEN; Premium-owned implementation boundary.** | No source or test evidence is added by Todo 32; the required behavior and stable-signature fields are documented only. | Source hook, focused regression, and the named minimum proving check. | `@ingenium-software-engineer-premium`: own the `session-coordinator` source/test implementation after the documentation boundary; do not infer enforcement from Markdown. |
+| Current Todo 34 — activation and runtime acceptance / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **OPEN; deployment owner Premium later.** | No restart, deployment, activation, or model/session evidence is added here. The upstream reminder-only decision remains unchanged and no native completion veto is claimed. | Source/test completion, full-parent activation, rebuilt current source, health/recovery gates, and actual model/session evidence. | `@ingenium-software-engineer-premium`: own the later deployment/activation wave after Todo 33; preserve restart, recovery, and acceptance gates. |
+| Current Todo 35 — Premium/Fast profile wording repair / [AGENT-100](#agent-100--scout-retrieval-boundary-ponytail-loading-and-profile-authority) | **SOURCE/STATIC REPAIR AND ONE QA PASS COMPLETE; activation OPEN.** | Evidence reference `ses_f7f71279dffeSQzPCBP1GDdwcW` records the Premium/Fast profile wording repair and one QA result consumed with PASS. This is static/profile evidence and does not prove a full-parent reload or the currently loaded profile surface. | Full-parent activation/reload, loaded Premium/Fast profile evidence, deployment/runtime health, and the remaining AGENT-100 acceptance gates remain open. | `@ingenium-software-engineer-premium`: preserve the consumed QA result, then use the admitted full-parent activation path and verify the loaded profiles; do not rerun QA or infer runtime from static wording. |
+| Current Todo 36 — Fast `apply_patch` create/read/delete proof / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **BOUNDED FAST MODEL/SESSION PROOF COMPLETE; loaded Premium remains stale; activation OPEN.** | Evidence reference `ses_f7f71279dffeSQzPCBP1GDdwcW` records a fresh Fast `apply_patch` create/read/delete proof with no residue. The loaded Premium session remained stale, so this bounded proof does not establish Premium activation, broader runtime completion, or runtime absence of the removed agent. | Fresh admitted Premium/current-parent activation and loaded-surface reconciliation, deployment/runtime and model/session acceptance, and remaining review/marker gates remain open. | `@ingenium-orchestrator` with Premium: preserve the no-residue Fast proof, reconcile the stale loaded Premium state through the admitted activation path, and do not replay the mutation or claim broader completion. |
+| Current Todo 37 — independent-executor and no-repeat safeguard amendment / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC POLICY AMENDMENT COMPLETE; RUNTIME ENFORCEMENT OPEN.** | This bounded user-requested documentation change updates the existing `AGENTS.md` deterministic/design-admission safeguards: independent authorized executor paths, internal-mismatch handling, no-new-evidence repeat prevention, stable-ID roadmap/`TodoWrite` continuity, and static-only enforcement wording. The declared verification is one exact changed-section readback; no source, tool, grant, configuration, test, build, restart, deployment, QA, or Docs follow-on is included. | Loaded behavior, source enforcement, verifier repair, activation, deployment, and model/session proof remain unproven; an internal tool/instruction mismatch is not external escalation evidence. | `@ingenium-orchestrator`: preserve the full roadmap and stable-ID `TodoWrite`, demonstrate the independent authorized path before dependent implementation, and route the named failure signature to its repair owner; do not claim runtime enforcement from Markdown. |
+| Current Todo 38 — bounded duplicate-profile/worktree reconciliation / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) + [AGENT-100](#agent-100--scout-retrieval-boundary-ponytail-loading-and-profile-authority) | **IDENTIFICATION COMPLETE; CURRENT WORKTREE AUTHORITY RECORDED; RETIREMENT NOT PERFORMED; no cleanup or broad PASS.** | Findings tasks `ses_f7ea8e70affegIraTzCK97jL69` and `ses_f7ea05e4cfferWkcDlTt94SeMJ` identify exactly the canonical `.opencode/agents/execution/ingenium-software-engineer-fast.md` and `.opencode/agents/execution/ingenium-software-engineer-premium.md`, plus stale same-relative-path files `.opencode/protected-runtime-index/.opencode/agents/execution/ingenium-software-engineer-fast.md` and `.opencode/protected-runtime-index/.opencode/agents/execution/ingenium-software-engineer-premium.md`. The directory is a registered Git worktree: `.git` points to `.git/worktrees/protected-runtime-index`, linkage is bidirectional, and `HEAD` is detached; nested `opencode.json` lines 20–21 reference both stale files. It contains retained outbox/restart state; producer/retention owner is unestablished. No proof the current parent loads the copies. Historical `multi-session-plan.md` snippets are not profiles; canonical profiles remain intact and no deletion was performed. The current canonical worktree is authoritative; obsolete source and stashes may be discarded, while operational records remain preserved. | Safe deletion and registration reconciliation with preserved operational records, exact candidate identity, and the safe route/activation boundary remain open; no deletion was performed. | `@ingenium-orchestrator`: preserve all existing roadmap items, retain linked Todos 39–41, and do not delete or reconcile registrations until the exact supported route and safe activation are proven. |
+| Current Todo 39 — data-only runtime source checkpoint / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC CHECKPOINT AND ISOLATED ARTIFACT EVIDENCE RECORDED; retirement, activation, and deployment OPEN.** | The source wave retains directory-only runtime data in `packages/ingenium-extension/coordination-outbox.ts:409-420` and excludes `.opencode/protected-runtime-index` from worktree snapshots at `packages/ingenium-extension/session-coordinator.ts:536-544`; `.dockerignore:67-68` carries both root and recursive protected-runtime exclusions. `packages/ingenium-extension/session-coordinator.test.ts:587-613` records `runtime_data_without_checkout`; the carried result is **1 passed, 71 skipped, 72 total**. Extension typecheck returned no diagnostics. Eight trusted admission tests passed through the installed wrapper; the compiled outbox test allowlist was stale, and the supported intersection was used successfully. QA `ses_f7e8223c8ffegFgOlnU3I7znBj` and security `ses_f7e8222b8ffe62UktQJnkkHHaS` both passed after repaired intake; neither is rerun. The later same-writer staged/isolated artifact evidence and consumed reviews are recorded under item 9; active/dist remain unchanged and no adoption occurred. | Safe checkout retirement/registration reconciliation, compiled/deployed artifact acceptance, parent activation, runtime absence, and broader model/session gates remain open. | `@ingenium-orchestrator`: preserve this source/static evidence and its consumed reviews; continue only through the supported retirement admission, without adding source or test work to this documentation turn. |
+| Current Todo 40 — authorized checkout retirement and candidate/data-preservation boundary / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **AUTHORIZATION RECORDED; INVENTORY ONLY; NO DELETION OR REGISTRATION RECONCILIATION.** | The current canonical worktree is authoritative; obsolete source and stashes may be discarded while operational records are preserved. Candidate registrations remain at `.opencode/protected-runtime-index` with `1cd90d4998e4f8fffa4ab11941f2b4821b336847` and `/tmp/opencode/ingenium-deploy-6991061` with `6991061533e0830b4dccb6a9987eece6448e6e10`; neither was deleted. Observed runtime counts are **168 outbox, 1 disposition, 1 restart, 0 TUI** entries only, with no hashes and no attribution claim. The actually retrieved references are [Bazel remote output directories](https://bazel.build/remote/output-directories) and [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/); systemd `418` is not evidence. | A safe, exact, data-preserving deletion and registration reconciliation path remains unproven; authorization does not substitute for candidate identity, ownership, retention, rollback, or activation evidence. | `@ingenium-orchestrator`: retain both candidate registrations and the inventory-only counts, then wait for the exact supported retirement route and safe activation evidence; do not delete by pattern or infer hashes. |
+| Current Todo 41 — exact repository retirement route and safe activation / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **ROUTE AUDIT COMPLETE; coordinator enforcement layer removed by owner decision; profile-governed executable verification, retirement operation, and safe activation OPEN.** | The former parent admission path in `packages/ingenium-extension/session-coordinator.ts:694-715` and child wrapper path in `packages/ingenium-extension/scripts/managed-command-wrapper.ts:242-247,302-318,693-715` are retained as historical route evidence; owner decision removed the coordinator enforcement layer. `packages/ingenium-extension/scripts/repository-command.ts:1-4` only delegates to that wrapper; its supported `ingenium-repository` surface is ordinary path Git, and both `ingenium-repository` and `ingenium-build` remain neutral optional utilities, not enforcement layers. An actual root `ingenium-build WyJydW4iLCJidWlsZCJd300000` returned a generic managed-shell denial with no exit/output and an absent build directory; the outcome is **UNKNOWN**, not no-launch proof, and no retry occurred. The denial is not attributed to the coordinator source reproduction. Tool governance now runs only through `.opencode/agents/**` profile permissions; safe activation of any new retirement operation remains unproven. | No safe deletion/registration reconciliation, build adoption, deploy/image acceptance, restart, or runtime acceptance was performed; active/dist remain unchanged. The remaining tool-related gate is executable verification under the applicable agent profile permissions. | `@ingenium-orchestrator`: preserve the full master roadmap and distinguish the carried source evidence from the open Todo38–41 retirement boundary; run the remaining verification directly under profile governance, with no operation replay or new route admitted from this readback. |
+| T-AUX-01 — subagent tool-failure analysis and repair | **COMPLETE.** | Wave-1 parallel subagent runs were analyzed; observed “failing gates” had two causes: (1) ordering race — the doc-gate check ran concurrently with the docs-fix task and reported drift the docs task was still fixing; (2) four deterministic documentation mismatches that survived the first docs pass: `README.md:171`, `docs/usage/dashboard.md:48`, and `docs/usage/opencode.md:109` used “Ponytail” instead of lowercase “ponytail”, and `docs/configure/plugins.md:26` showed a Ponytail-only plugin array missing `session-coordinator`. All repaired. Verification: `bash tests/test-doc-config-audit.sh` PASS (291 catalog/289 server registrations), full `bash tests/test-agent-validation.sh` exit 0, server/core/api/extension focused suites PASS, typecheck PASS, `git diff --check` PASS. Retained historical managed-shell denial records left untouched. | None; this item is complete. | Owner: no further action; preserve the retained historical managed-shell denial records. |
+| T-AUX-02 — subagent batch-wait investigation (slowest child blocks the wave) | **RESEARCH COMPLETE; action OPEN.** | Multivariate Task calls in one assistant message start concurrently, but the parent model cannot take its next step until every synchronous Task result settles — batch latency = slowest child (verified against `@opencode-ai/sdk` 1.18.9 types: synchronous subagents “blocking the session”; tool calls `running`→`completed`). No repository setting makes Task async; `subagent_depth` is nesting-only; `permission.task` is visibility; `experimental.batch_tool` is the batch tool, not async Task. Native facility exists: `POST /experimental/session/{sessionID}/background` detaches synchronous subagents to background, gated by capability `backgroundSubagents` (`experimental.capabilities`). Recommendation: query `/experimental/capabilities`; if true, use the native background action (UI/controller or a tiny adapter); only if a hard requirement, build a narrowly scoped event-driven scheduler plugin (event bus `session.status`/`message.part.updated` + `session.create(parentID)` + `promptAsync`) — do not expand the coordination plugin; any plugin change requires a full parent restart. Verification evidence (2026-09-09): the `backgroundSubagents` capability probe is inconclusive; port 3000 redirected to login and only port 3000 responded, so no capability PASS is claimed. | Query `experimental.capabilities` and prove the native background path; otherwise a hard requirement and a separately admitted narrow adapter/plugin decision remain open. | Owner: use the native background action if capability is true; only build the narrowly scoped scheduler plugin if the hard requirement is confirmed, and never expand the coordination plugin. |
+
+#### Compatibility deployment evidence — 2026-09-09 (no new task IDs)
+
+Restored items **15/19/21/22/23 remain OPEN**; this adds deployed evidence, not an overall rollout PASS. The user-authorized compatibility recreation occurred exactly once, using the fixed `ingenium-ingenium:compat` tag at image `sha256:d806e18c3dc900884e13d826577fae84f69539ece0b3f70449fb7b025298eeeb` and HEAD label `ea8833c883270182c5badfbca228fb644dd98146` (dirty working-tree batch included). The preceding build failed on distribution candidate permissions; explicit owner-only candidate creation fixed it, 9 focused staged-distribution tests passed, and the Docker build succeeded. The new container is healthy, supervised primary services are running, installation-token preflight and browser login pass, authenticated `/chat` and `/opencode` return 200, the preset route changed from measured 404 to 201, and dashboard-cookie memory reads return 200. Applied migration log evidence includes 114/115/116.
+
+The retained VS Code backup is `/tmp/opencode/vscode-data-pre-recreate-20260909T182038Z.tgz` (157641 bytes; gzip integrity verified). The old unused compatibility image was removed by exact ID without force after health verification; dangling-only prune reclaimed 0 B. Project image count is one before and after, with Docker-reported size 2.91 → 4.47 GB. No control-plane/runtime images were touched, no Compose down or all-image prune ran, and no commit was made.
+
+**Remaining acceptance blockers:** compatibility mode does not confirm a workspace for the memory UI, so `/chat` save and `/context` edit/forget remain unavailable; the configured MCP grant lacks memory scopes (actual bridge `TOOL_STATE_UNAVAILABLE`, underlying API 403); preset creation succeeds but the configured bridge lists zero Playwright tools and discovery remains pending. Supplemental dashboard-session API memory save/presence/update-v2/search/forget/absence passed and was cleaned, but is not A/B/C UI/model proof. One passive 50-view desktop/mobile sweep retained 429/console failures; five paced mobile target recaptures after backoff rendered successfully. No simultaneous three-process model/session or restart-replay proof is claimed.
+
+Evidence and exact reconciliation: `tests/artifacts/visual-qa/runtime-20260909T1835Z-deployed/REPORT.md`, with desktop target screenshots and mobile `-post-backoff.png` screenshots. Initial strict containment failed on an empty retention lock root with mode 0770; restoring the exact owner-controlled parent/lock directory modes to 0700 yielded strict audit exit 0 and no discovered processes, retention errors, or artifact residuals. Synthetic memory/presets and verification browsers were cleaned. Next work for the existing implementation/deployment owner is to repair the compatibility memory binding, reconcile supported scoped MCP grants and child discovery, then prove the remaining gates under a new deployment admission; this record does not authorize another recreation.
+
+#### Compatibility source repair and no-reload re-proof — 2026-09-09
+
+Restored items **15/19/21/22/23 remain OPEN**. This boundary changed no container, deployed artifact, credential, or parent process and made no commit. The compatibility memory descriptor and dashboard hook now confirm only a unique, currently authorized workspace owned by the browser principal in the requested project; unbound, ambiguous, revoked, and foreign-project cases remain unconfirmed. The regression uses `ingenium` / `shared-memory-ingenium` and the canonical checkout path. The existing memory authorization and capability probe are unchanged.
+
+The compatibility launcher previously discarded provisioned runtime identity and forced the legacy `global-default` / general-MCP configuration. It now preserves an explicitly supplied runtime identity and overrides the persistent MCP entry with the enabled packaged runtime transport and protected `/run/ingenium-runtime/capability` reference. It rejects incomplete runtime identity, but does **not** mint or install a capability or turn an unprovisioned compatibility process into a provisioned runtime. Runtime provisioning now includes `child-mcp:execute` in addition to `child-mcp:runtime`: discovery permission alone does not authorize the discovered tools. Exact preset validation is unchanged; the existing post-connect gateway reconciliation is reused.
+
+**Source verification:** API `runtimes-route`, `mcp-servers-route`, and `mcp-playwright-gateway.integration`: **39 passed**; server `child-mcp-gateway` and `child-mcp-runtime`: **23 passed**, followed by **3 passed / 14 skipped** for the final runtime/legacy launcher handoff refinement; dashboard `runtime-launch` and `runtime-context`: **33 passed**. The exact canonical-workspace refinement passed **1 / 24 skipped**. API/server/core/dashboard typechecks, affected dashboard ESLint, shell/Node syntax checks, and strict containment audit exited 0. The real Playwright integration starts the gateway before preset creation and proves periodic discovery → ready/tools → navigate/snapshot/close, toggles/reconnect, and cleanup. This is a local source integration with fixture identity, not deployed OpenCode model/session proof.
+
+`node tests/compatibility-runtime-reproof.mjs --proof` retained these running-service states without logging credentials or synthetic memory content:
+
+| Surface | Measured state |
+|---|---|
+| Browser login | 200 using protected `.env` inputs; no credentials persisted by the probe |
+| Memory backend, supplemental only | Synthetic save 201, update 200, forget 200 |
+| External A / B probes | Two independent MCP-client attempts both blocked with `McpBridgeError`; no successful recall or actual OpenCode model/session proof |
+| Internal C / chat | `/chat` 200, confirmed-workspace warning still present; runtime descriptor still ready without a workspace; parent Ingenium MCP `failed` |
+| Playwright deployed preset | Create 201, refresh 200, three polls at 200 with zero tools, discovery `pending`; runtime navigate/snapshot/close blocked by the failed parent MCP |
+| Cleanup | Synthetic memory forgotten, created preset deleted (204), verification browser/HTTP context closed; no screenshots taken because deployed route rendering was not changed |
+
+**Remaining deployment dependency:** the image runs copied compiled API/dashboard artifacts and a copied launcher, not these hot-reloaded source files. Adoption/reload is outside this no-container-change authorization. The deployment owner must also provide the validated compatibility runtime identity and owner-private capability, verify that the runtime worktree mount actually represents the authorized canonical workspace, and adopt the scoped grant through the supported provisioning path; a rebuild alone is not proof of those prerequisites. Full-parent activation and actual simultaneous external A/B/internal C memory/restart and runtime Playwright acceptance remain open. No deployment or overall rollout PASS is claimed.
+
+#### Governance and memory-boundary remediation notes (no new task IDs)
+
+| Boundary | Status | Remediated source/test evidence | Remaining gates |
+|---|---|---|---|
+| **B1 governance — `git --output` deny rules** under `ORCH-100` | **SOURCE/TEST COMPLETE; remediated; runtime/activation gates remain OPEN.** | The orchestrator profile and agent-validation policy retain deny rules for both `git diff`/`git log` `--output` argument placements; this is a source/static governance remediation, not loaded-runtime proof. | Parent activation, profile-loaded behavior, and broader runtime/deployment acceptance. |
+| **B2 memory boundary — dashboard tag sanitization** under `MEMORY-100` | **SOURCE/TEST COMPLETE; remediated; fresh-session/runtime acceptance pending.** | Dashboard explicit-memory context strips both untrusted-memory delimiters from tags before JSON projection while preserving ordinary tags; the focused dashboard regression records that boundary. | Exact deployment, fresh-session A/B/C acceptance, restart replay, visual, and containment gates. |
+
+**Standing instructions (2026-09-09, owner):** Profile-only tool governance (no wrapper denial layer); one documentation audit per finalized docs boundary plus the mechanical doc-config gate in the validation suite; one distinct subagent per open dependency-ready item under explicit user concurrency requests; ChatGPT-like agent memory feature: **feature source/test complete; fresh-session/runtime acceptance pending** (`7 ingenium_memory_*` tools); MCP catalog 291 entries/289 server registrations.
+
+**Partner-report reconciliation:** The five caller reports are represented without
+changing the original 23-row shape: MCP/recovery remain `UNKNOWN`; the current scheduler
+validator attempt is `UNKNOWN` after one no-output coordination denial and was not
+replayed; Todo9 has one consumed QA PASS but its compiled refresh remains open;
+Cloudflare,
+Playwright, and other source gates remain pending focused checks/deployment;
+MEMORY-100 has reader-only external evidence and unverified external writes; and
+the helper candidate plus the partial Core-777 result remain retained artifacts.
+Todo30's source/static removal is recorded with its projector/coordinator/
+validator, review, artifact, deployment, activation, and runtime gates open;
+Todo31 remains open for active-reference cleanup; and Todo35/36 retain only
+their bounded profile/QA and Fast no-residue evidence, with activation/current-
+loaded-surface gates open.
+No current-revision deployment, cleanup, credential, or active-hook outcome is
+recorded here; the managed health response below is not artifact, route, or
+replay proof.
+
+**Todo5 recovery evidence (2026-09-07; retained, not completion):** Explore
+status research `ses_f82299063ffexUkwzP9iZ0Www6` read HEAD
+`ea8833c883270182c5badfbca228fb644dd98146` on branch
+`context-upload-hardening-opencode-1.18.9`, canonical worktree
+`/home/brajam/repos/ingenium`, workspace `shared-memory-ingenium`. The outbox
+has 168 records: the two ambiguous identityless records were checked, with
+`196a4b…` dispositioned and `098781…` lacking a matching disposition; three
+records are `claim_failed`. The historical candidate handoff contains 18 stale
+Todos versus the current 23 plus linked 24 and has zero nonce, current
+identity, or fence, so it is not current handoff or replay proof.
+
+> **Superseded pointer (2026-09-09):** The retained coordinator/managed-command denial evidence below is historical; owner decision removed that enforcement layer and current verification is profile-governed.
+
+Premium status evidence `ses_f82298f0cffefbwM8QKNkeMcNe` reports managed
+`ingenium-build WyJkZXBsb3ltZW50IiwiaGVhbHRoIl0` health `status: ok` with
+`uptime: 234675.84160157`, plus missing duplicate chat-profile-hash warnings.
+Generic `compose-ps` and `mcp-status` denials produced no replay; source denial
+may occur before or after execution or in construction fallback, so the generic
+error does not prove the command was unrun. Reading `/usr/local/bin/ingenium-build`
+was denied as an external-directory read, and no PATH candidate was established.
+Trusted provenance is known to poll at 250 ms and normalize workdir versus dist
+against one snapshot with strict equality, but the currently loaded module is
+unknown and no cause is proven.
+
+No current reset outcome, test cleanup, current-revision deployment,
+supervisor, session/nonce/fence/handoff, or replay proof exists. The
+investigation made no source/build/reset/restart changes and ran no tests.
+
+**Final current-board evidence reconciliation (2026-09-07; retained, not
+completion):** Todo 6's isolated verifier is proven. Todo 8's current scheduler
+validator attempt is the single `ses_f81dca04cffenIiaP2pNckLcfQ` attempt recorded
+above: generic coordination denied without output, outcome **UNKNOWN**, and no
+replay. Todo 9 has the `IMAGE_REVISION` source-test evidence and one consumed QA
+PASS with no actionable finding; compiled refresh remains unrun. The only
+supported `rootbuild` path deletes active `dist`, with no preservation or rollback
+operation. Read-only design `ses_f81e33829ffeocHZ1NRcE1AYgP` found a technically
+possible source-visible candidate build, but it was not admitted because the root
+Dockerfile expects in-place artifacts and no admitted candidate consumes deploy;
+no staging was implemented.
+
+Explore recovery `ses_f81d87e57ffe3Z2VIojeClDkeA` recorded inventory 168, outbox 1,
+disposition 0, and no TUI records available to exact-token inspection
+(`"No files found"`); that is not evidence of absence. Browser
+`ses_f81d87cfdffeMLi1PYzYTxdXKk` found empty resources/templates through a denied
+managed path, with no screenshots or tabs. Dedicated recovery
+`ses_f81d4bb60ffepZYJcwf83uEn7N` confirmed that even its effective tool surface
+lacks status/memory/handoff access; resources/templates were empty and live
+identity/nonce/fence/handoff/supervisor access was unavailable. The obstacle is an
+internal tool-surface/activation diagnostic gap; no external credential fault is
+proven. **Safe nextWork:** obtain an authorized live read-only session/supervisor
+interface, then exact status before any replay, build, or restart. No active
+deployment or model-session evidence exists this turn; deployment remains `N/A`.
+
+**Todo5 current read-only recovery preflight (2026-09-08; task `ses_f80881d90ffe177YyPeCH188DP`; retained, not completion):** The candidate confirms project `ingenium`, workspace `shared-memory-ingenium`, and canonical worktree `/home/brajam/repos/ingenium` are present. Candidate evidence for storage, session, status, and changed paths is stale. Current session/incarnation, epoch/fence/claim, nonce/enrollment, durable typed handoff, external supervisor identity/current-source/health, replacement health, reconnect/resume, rollback/adoption decision, and split-brain fencing are absent or unknown. `tui-recovery/` is empty. The retained candidate has a zero nonce and invalid handoff; legacy replacement-first bootstrap applies only to that candidate, while current-parent enrollment remains unknown. Restart is **REJECTED**, and the legacy parent must not be signaled first. Exact `nextWork`: perform one authorized fresh read-only live session/supervisor status probe bound to the exact identity. No production-restart dispatch is permitted until all gates pass. No secrets are included. Todo5 and Todo20 remain **OPEN**.
+
+**Todo20 Explore audit (2026-09-08; `ses_f7f8bd3bcffe9STw2zApEP1q5D`; retained, not completion):** **RESTART REJECTED.** Configured project `ingenium`, workspace `shared-memory-ingenium`, and worktree `/home/brajam/repos/ingenium` are present, but project ID, storage mapping, and parent PID are stale **UNKNOWN**; session/incarnation and recovery state are missing, the nonce is zero, and the current handoff is invalid. Source confirms legacy-unenrolled automatic bootstrap is replacement-first: the legacy parent must not be signaled before replacement health and replay/owner readiness.
+
+Required gates are fresh exact binding; nonce/enrollment; a complete typed handoff with stable-ID `TodoWrite`, task/status/`nextWork`; external supervisor ownership; the exact merged build; replacement health before signal; MCP `initialize`, `tools/list`, and project-bound state; reconnect to the accepted session; full stable-ID `TodoWrite` replay; rollback/adoption; epoch/fence/claim and split-brain fencing; loaded root/profile grants; the per-turn reminder; `@ponytail` for every user-facing agent; proven `browser-agent` absence; and post-restart visual QA by `@ingenium-qa`. Two source **BLOCKERS** remain: pre-signal replacement health has no MCP canaries; and the handoff stores Todo counts rather than stable items, while its Scout acknowledgement does not prove accepted work-session replay.
+
+**Audit's compact 13-step safe order:** (1) read-only preflight the exact project, workspace, worktree, IDs/storage/audience, parent identity, epoch/fence/claim, nonce/enrollment, handoff, changed paths, task, `TodoWrite`, status, and `nextWork`; (2) reject stale or unknown binding without mutation; (3) discover and validate the unique parent/session/listener/data-home and live handoff; (4) start the external supervisor/recovery owner with a fresh nonce; (5) enroll and admit that owner against the exact parent; (6) revalidate binding and parent identity; (7) persist the complete typed handoff with stable Todo items; (8) verify the exact merged build and loaded root/profile grants, reminder, Ponytail, and browser-agent absence; (9) launch the distinct replacement with fresh nonce/enrollment and expected executable identity; (10) prove replacement health, including MCP initialize, `tools/list`, and project-bound state, before any signal; (11) reconnect the accepted session and replay typed work-session state, including stable-ID `TodoWrite`, task/status/`nextWork`, and accepted acknowledgements; (12) prove recovery-owner readiness, rollback/adoption, and epoch/fence/claim/split-brain safety; (13) only then quiesce/retire or signal the legacy parent, followed by post-restart visual QA by `@ingenium-qa` and separate evidence reconciliation. No legacy signal precedes replacement health, replay, and owner readiness.
+
+Evidence remains separate: **SOURCE/STATIC** proves ordering, schemas, grants, reminders, Ponytail loading, and browser-agent absence; **DEPLOYED** proves the exact merged build, supervisor, replacement health, MCP canaries, and fencing; **ACTUAL SESSION/MODEL** proves accepted-session reconnect, stable-ID TodoWrite/task/status/`nextWork` replay, and model/session behavior. Premium owns source and deployment repair; Recovery may execute only after every gate passes. Todo20 remains **OPEN**; this documentation-only record adds no runtime or session proof and no completion marker.
+
+All 23 original rows and linked current Todos 24–41 remain present. Todo 24 remains resolved
+only at the explicit product-decision boundary: keep upstream OpenCode reminders,
+with no native guarantee against premature completion. The broader rollout and
+all other open gates remain unchanged and resumable.
+
+**Exact next ready validator action:** after the authorized live read-only
+session/supervisor interface returns exact status and the unknown current attempt
+is reconciled, recover an admitted static execution path, then run exactly one
+focused validator check for Single-Todo 1–6, Multi-Todo exactly 2 per Todo,
+global active 6, and writer 3. Record the result without a completion marker
+until it passes; do not rerun the broad Core unit.
+
+**Coverage and preservation check:** Rows 1–23 map every restored master-Todo item. Existing
+`BASELINE-100`, `MCP-107`, `AGENT-100`, `ORCH-100`, `CLOUDFLARE-100`,
+`PLAYWRIGHT-100`, `MEMORY-100`, `RECOVERY-100`–`RECOVERY-102`, and
+`OPENCODE-100` are reused; no duplicate feature ID is introduced. The historical
+markers, work logs, contracts, and evidence records after this board are not
+rewritten. If an older live-status summary conflicts with this board's current
+stage or next action, this board controls current execution reading while the
+older entry remains the historical record. No source-complete statement,
+static check, API liveness response, or accepted review substitutes for a
+missing deployed-runtime, model/session, visual, review, or cleanup gate.
+
+### Current Todo 24 — ORCH-100 continuation-boundary decision
+
+This is one linked continuation issue under the existing [ORCH-100 contract](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity), not a new feature, task ID, or duplicate rollout item.
+
+**Explicit product decision (2026-09-07):** "1. Keep upstream OpenCode: retain reminders, without a native guarantee against premature completion."
+
+| Issue | Stage | Retained source/static basis | Remaining dependency | Next action |
+|---|---|---|---|---|
+| Current Todo 24 — deterministic completion-boundary choice | **PRODUCT DECISION COMPLETE; remaining runtime/recovery acceptance OPEN; no completion marker.** | Actual OpenCode `1.18.29` source proof at commit `16747470f976aca3d362ad730bcd3fe82ecc2c9a`: `prompt.ts:1226–1250` adds `StructuredOutput` after ordinary tools are wrapped; `prompt.ts:1570–1590` calls `onSuccess` directly; `prompt.ts:1288–1293` breaks the loop; `pluginHooks` has no before-finish/completion-veto hook. Existing `AUTONOMY_REMINDER_V1` and the prior two tests, coordinator test coverage (TC), and QA prove prompt injection only. Current `coordinatorNativeTodo.updated` retains only counts and discards full items; there is no completion controller. The explicit decision above retains the upstream reminder-only boundary. | The product decision is resolved. Remaining dependencies are the reminder's runtime activation proof, safe recovery, actual model/session evidence, and TodoWrite replay; a maintained patched-runtime/native completion guard is excluded. The proposed `plugin idle -> promptAsync` design remains unadmitted because of user-input/abort races and unknown POST outcomes. | `@ingenium-orchestrator` under `ORCH-100`: retain the reminder-only boundary and continue with the existing activation/recovery gates; do not promise idle continuation, claim native completion enforcement, or claim broader-rollout completion. |
+
+**Architectural decision:** The explicit 2026-09-07 user choice retains the
+upstream binary and reminder-only behavior. A maintained patched OpenCode
+runtime/native completion guard against premature completion is excluded.
+
+**Continuation boundary:** `plugin idle -> promptAsync` remains unadmitted. Its
+user-input/abort races and unknown POST outcomes make it unsuitable as a
+deterministic completion controller. No idle-continuation promise is recorded.
+
+**Rollout state:** The original 23 items and all rollout gates remain open and
+unverified. Current Todo 24's product-boundary decision is resolved/completed by
+explicit user choice; its reminder activation, safe recovery, and actual
+evidence remain open. No existing Todo is deleted or canceled. This
+reconciliation is `SOURCE/STATIC` from the current-board readback only, with
+deployment `N/A`; it adds no runtime, test, commit, delegation, or overall
+`PASS` evidence.
+
 ## Approved multi-user authentication and authorization program
 
 The `AUTH-100`–`AUTH-111` contracts below are the approved multi-user release
@@ -120,23 +456,20 @@ protocol above; the placeholder is not a live marker:
 
 ## Operating model
 
-Execution is synchronous: at most **6 active agents**, comprising at most **3
-permission-derived writers** and a dynamic read-only ceiling of **`6 - W`**
-nonwriters, where `W` is the number of active writers in that phase. Writers have
-exclusive territories; territory overlap is zero. Independent work runs in barrier
-subwaves: all tasks in a subwave finish and verify before dependent tasks start. The
-open-roadmap rule applies: while a roadmap task or TodoWrite item is open, the
-orchestrator immediately dispatches the next declared phase and does not end the turn with a progress or completion response. Only `PASS`, `ESCALATE_USER`, an
-explicit `STOP`, or an explicit `CANCELLED` ends execution.
+Execution is synchronous and dependency-ordered. For each dependency-ready
+`TodoWrite` or roadmap item, dispatch one distinct subagent instance with an
+exclusive writer territory when writing is required; there is no fixed active-agent
+or writer ceiling. Respect explicit user concurrency, record the actual active and
+writer counts, and never manufacture a Todo, duplicate research, or overlapping
+territory. Independent work still runs in barrier subwaves: finish and verify a
+subwave before starting dependent work. QA, security, visual timing, review limits,
+STOP/CANCELLED handling, and the full master Todo remain in force.
 
-Todo allocation is also bounded: before each phase, enumerate independent,
-dependency-ready `TodoWrite` items and select up to three concurrently. Every
-selected Todo receives exactly one pair of exactly two agents in one parallel
-call, so one, two, or three selected Todos use 2, 4, or 6 agents. If fewer than
-three are eligible, leave the remaining capacity unused; never invent a Todo or
-add a third agent. Pair members have distinct, non-overlapping responsibilities,
-and the three-writer maximum, exclusive territories, dependency order, and
-QA/security/visual review gates remain in force.
+The older phase/count entries and the 2026-09-07 prospective scheduler clarification
+are retained as historical records. They do not override this current scheduling
+decision. The open-roadmap rule still requires the orchestrator to continue the next
+declared dependency-ready phase while work remains open; only `PASS`,
+`ESCALATE_USER`, an explicit `STOP`, or an explicit `CANCELLED` ends execution.
 
 Safe defaults are mandatory: grounding is off; task references are metadata-only;
 events come from a trusted catalog; MCP verification is fixture-first; usage
@@ -178,9 +511,10 @@ P0 DOC-100
   -> P1 BUG-100, MCP-100, CTX-100, CHAT-100, TASK-100, JOB-100, USAGE-100, VAULT-100, RESTORE-100
   -> P2 MCP-101..103, CTX-101, TASK-101..102, JOB-101, USAGE-101, VAULT-101, RESTORE-101
   -> P3 JOB-102, MCP-104..105, USAGE-102, VAULT-102, RESTORE-102
-  -> P4 MCP-106
-   -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101 -> C9 RECOVERY-102 -> S0 SKILL-100
-  -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
+   -> P4 MCP-106
+    -> C0 COORD-100 -> C1 COORD-101 -> C2 COORD-102 -> C3 COORD-103 -> C4 COORD-104 -> C5 COORD-105 -> C6 COORD-106 -> C6R COORD-RESET-100 -> C7 RECOVERY-100 -> C8 RECOVERY-101 -> C9 RECOVERY-102 -> S0 SKILL-100
+   -> M0 CTX-100 + CTX-101 + AUTH-105 + COORD-106 -> MEMORY-100
+   -> P5 UI-100 -> UI-101 -> UI-102 -> UI-103
   -> P5 UI-102 -> CHAT-101
   -> P5 VSCODE-100 -> VSCODE-101 -> VSCODE-102 -> VSCODE-103
   -> P6 REL-100
@@ -244,7 +578,7 @@ These gates are explicit acceptance requirements, not implied future work:
    `PRAGMA foreign_key_check`; any mismatch blocks the cutoff.
 7. **Final reconciliation:** AUTH-111 reconciles every roadmap marker and
    TodoWrite item, confirms the changed-file list and canonical-doc links, and
-   records evidence before terminal `PASS`. An open roadmap task or TodoWrite
+    records evidence before a permitted `PASS` response. An open roadmap task or TodoWrite
    item requires immediate autonomous continuation, not a progress response.
 
 ## Authentication and authorization execution contracts
@@ -477,7 +811,7 @@ Evidence AUTH-102: source implementation and focused verification establish a ce
 - **Escalation:** Only unavailable configured browser/deployment/OIDC access,
   unauthorized destructive action, a genuine UX/product decision or ambiguity,
   or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed
+- **Verification owner:** `@ingenium-qa` owns the changed
   route visual gate and `@ingenium-security-auditor` verifies browser token,
   CSRF, privacy, and step-up presentation boundaries.
 - **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
@@ -902,7 +1236,7 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
 - **Escalation:** Only unavailable configured HTTPS/browser/deployment access,
   unauthorized destructive runtime action, a genuine origin/embedding product
   decision or ambiguity, or bounded diagnosis without a reproducible root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns changed
+- **Verification owner:** `@ingenium-qa` owns changed
   route and passive relevant visual checks; `@ingenium-security-auditor` owns
   origin, ticket, header, CSP, and permission review.
 - **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
@@ -1055,7 +1389,7 @@ Evidence AUTH-105: source implementation adds migration 098 complete/partial pro
   a root cause.
 - **Verification owner:** `@ingenium-qa` owns one declared fixture/release pass;
   `@ingenium-security-auditor` owns one bounded security pass; and
-  `@ingenium-qa-vision` owns the changed-route and passive desktop/mobile visual
+  `@ingenium-qa` owns the changed-route and passive desktop/mobile visual
   gates. They report findings once and never dispatch follow-up work.
 - **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
   permission; rebuild/restart the current merged source, verify image/source
@@ -1151,7 +1485,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** API-down, authentication, timeout, and logger-failure fixtures produce no stdout/stderr or Chat-visible diagnostic text; plugin hooks resolve safely; approved warnings contain no response body, URL, token, prompt, or stack; `auto-observer`, `observer`, `resource-sync`, and their registered wrappers have deterministic load and lifecycle regression coverage; deployed OpenCode remains clean during session-created/idle failure paths.
 - **STOP_CONDITION:** `PASS` after extension tests, package build, deployed OpenCode failure-path smoke, and marker reconciliation; otherwise continue or permitted escalation.
 - **Escalation:** Only unavailable configured OpenCode/deployment access or a genuine product decision about retaining a user-visible plugin failure.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` only if the deployed interaction surface changes visually.
+- **Verification owner:** `@ingenium-qa`, including visual review if the deployed interaction surface changes visually.
 - **Deployment owner:** `@ingenium-software-engineer-premium` for rebuilt extension/container acceptance.
 - **Rollback/safety:** Never print secrets or upstream error text; preserve non-fatal hooks and manual tool failures; revert only plugin diagnostic routing and tests.
 - **Tests:** Registered-wrapper load tests; lifecycle API-down/auth/timeout/logger-failure tests; stdout/stderr spies; extension full suite/typecheck/build; deployed session-created/idle Chat/OpenCode console and output smoke.
@@ -1211,7 +1545,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** Live OpenCode and Chat reflect toggle changes on refresh/reconnect and reject disabled direct calls with actionable errors.
 - **STOP_CONDITION:** `PASS` after deployed live-path checks and exact viewport checks where UI changes.
 - **Escalation:** Unavailable configured OpenCode access or genuine visibility contract ambiguity.
-- **Verification owner:** `@ingenium-qa`; visual owner is `@ingenium-qa-vision` when applicable.
+- **Verification owner:** `@ingenium-qa`, including visual review when applicable.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Preserve bearer boundaries and fail closed on stale visibility.
 - **Tests:** Live fixture OpenCode/Chat discovery and direct-call tests; Playwright only for changed UI.
@@ -1271,7 +1605,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** Default chat is ungrounded; explicit grounding retrieves bounded relevant sources, labels source use, and answers safely when none apply.
 - **STOP_CONDITION:** `PASS` after fixture-first API/UI workflow and visual checks if changed.
 - **Escalation:** Product ambiguity over the explicit opt-in control or unavailable configured provider.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision` for UI.
+- **Verification owner:** `@ingenium-qa` for UI and visual review.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Grounding off by default; never expose hidden source content or secrets.
 - **Tests:** Ungrounded/grounded/no-result, citation, project isolation, console/network, and viewport tests.
@@ -1351,7 +1685,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** Explicit capture creates correct project-scoped references for Chat and Docs; source content is not copied; missing sources are actionable.
 - **STOP_CONDITION:** `PASS` after fixture UI/API path and visual check if changed.
 - **Escalation:** Only unavailable configured UI route or product ambiguity about confirmation.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision` for UI.
+- **Verification owner:** `@ingenium-qa` for UI and visual review.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** No automatic capture; preserve source and task data on failed writes.
 - **Tests:** Chat/Docs capture, project isolation, missing source, duplicate, accessibility, and viewport tests.
@@ -1411,7 +1745,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** UI accurately reflects durable state, redacts payloads, explains failures, and supports only authorized bounded actions.
 - **STOP_CONDITION:** `PASS` after deployed route and visual checks.
 - **Escalation:** Unavailable deployment/browser access or unresolved action authorization.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Verification owner:** `@ingenium-qa`.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** No secret rendering; preserve existing jobs and fail closed on actions.
 - **Tests:** API/UI state matrix, polling/reload, action authorization, accessibility, console/network, and viewport tests.
@@ -1471,7 +1805,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** UI labels advisory results, unknown/not-reported values, UTC freshness, loading/empty/error states, and deduplicated attention.
 - **STOP_CONDITION:** `PASS` after deployed route and 1440x900/390x844 visual gate.
 - **Escalation:** Product choice on unknown wording or unavailable browser/deployment access.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Verification owner:** `@ingenium-qa`.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Never fabricate usage or expose credentials; preserve navigation.
 - **Tests:** Component/API/Playwright states, accessibility, console/network, screenshots, and health checks.
@@ -1531,7 +1865,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** UI never renders values, shows sealed/authorized/denied states, and audit identifies actor/job/action without secrets.
 - **STOP_CONDITION:** `PASS` after deployed exact workflow and visual/security checks.
 - **Escalation:** Authorization ambiguity or unavailable browser/deployment access.
-- **Verification owner:** `@ingenium-security-auditor`, `@ingenium-qa`, and `@ingenium-qa-vision` for UI.
+- **Verification owner:** `@ingenium-security-auditor` and `@ingenium-qa` for UI.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Sealed default, no automatic unlock, fixture-only tests, preserve audit evidence.
 - **Tests:** UI/API state matrix, audit redaction, accessibility, console/network, viewport, and no-real-credential tests.
@@ -1591,7 +1925,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** Operator sees exact scope, confirmation, progress, terminal outcome, rollback guidance, and audit link; UI prevents unsafe defaults.
 - **STOP_CONDITION:** `PASS` after deployed desktop/mobile workflow and accessibility checks.
 - **Escalation:** Destructive product decision or unavailable browser/deployment access.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Verification owner:** `@ingenium-qa`.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Operator-command-first, explicit confirmation, preserve source and failed evidence.
 - **Tests:** Playwright preview/confirm/cancel/failure/reload, API authorization, accessibility, console/network, screenshots.
@@ -1631,7 +1965,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** Existing Tool Manager shows report freshness, fixture/live provenance, per-tool outcomes, and empty/error states accurately.
 - **STOP_CONDITION:** `PASS` after deployed route and visual gate.
 - **Escalation:** Unavailable browser/deployment access or unresolved existing-surface placement choice.
-- **Verification owner:** `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Verification owner:** `@ingenium-qa`.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Preserve existing toggles; no secret/prompt rendering; fail closed on stale report.
 - **Tests:** Component/API/Playwright, accessibility, console/network, 1440x900 and 390x844 screenshots.
@@ -1748,6 +2082,11 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 
 #### COORD-104 — Managed write enforcement
 
+> **Superseded by owner decision (2026-09-09):** The former coordinator hook and
+> managed-command enforcement contract below remains approved-history context;
+> current tool governance is solely in `.opencode/agents/**` profile permissions,
+> with executable verification performed under those permissions.
+
 - **IN_SCOPE:** Enforce claims in `tool.execute.before/after` for exact `edit`, `write`, `apply_patch`, `create`, `delete`, and `rename` paths; atomically acquire claims, validate fence/lease and dirty hashes, record actual post-write footprint, quarantine unexpected writes, fail closed when API is unavailable, and deny mutating Bash to writers except fixed wrappers under `@build`/`@repository` claims.
 - **OUT_OF_SCOPE:** Manual VS Code/external writes, read-only Bash, formatter/generator expansion, dashboard UI, and guarantees outside managed OpenCode mutations in an accepted session epoch.
 - **Owner:** `@ingenium-software-engineer-premium`.
@@ -1797,7 +2136,7 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 - **Acceptance:** All three-window, conflict, peer-freshness, crash/expiry, quarantine, outage, sync, restart/config, redaction, deployment, cleanup, and regression gates pass; separate-worktree mode is future scope and not used to claim V1 success.
 - **STOP_CONDITION:** `PASS` only after deployed three-window evidence, targeted QA/security checks, cleanup, and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable required OpenCode/deployment access, unauthorized destructive cleanup, genuine product ambiguity, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` only if coordination UI changes.
+- **Verification owner:** `@ingenium-qa`; it also owns visual review if coordination UI changes.
 - **Security owner:** `@ingenium-security-auditor`.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Deploy behind fail-closed gates, preserve dirty/quarantined evidence, clean only owned fixtures, and never use real credentials.
@@ -1868,7 +2207,7 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 - **Acceptance:** All 52 identified native selects use UI-100; every select has a programmatic accessible name; existing form behavior and keyboard operation remain intact; focused component/accessibility/static checks pass with no unowned select left behind.
 - **STOP_CONDITION:** `PASS` after the 52-select migration checks, dashboard checks, and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable required test/deployment access, a genuine product decision about changed form semantics, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route visual gate.
+- **Verification owner:** `@ingenium-qa` owns the changed-route visual gate.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Preserve each existing option/value/validation contract; revert only UI-101 consumer edits if the shared primitive fails; no broad formatting churn.
 - **Tests:** Static count and consumer-ownership check for all 52 selects, focused component/accessibility tests, dashboard typecheck/build, Playwright form/keyboard checks, console/network checks, and 1440x900/390x844 screenshots.
@@ -1888,7 +2227,7 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 - **Acceptance:** Every inventoried custom menu/combobox uses the approved pattern; accessible names, expanded/selected/active states, focus return, Escape/Arrow/Home/End/typeahead behavior, and pointer behavior pass focused and browser checks; no duplicate custom pattern remains in scope.
 - **STOP_CONDITION:** `PASS` after focused accessibility/component tests, deployed changed-route checks, visual gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable browser/deployment access, a genuine product decision about interaction semantics, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route and passive desktop/mobile visual gates.
+- **Verification owner:** `@ingenium-qa` owns the changed-route and passive desktop/mobile visual gates.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Preserve selected values and server contracts; keep a single reversible migration boundary; do not weaken keyboard/accessibility behavior or alter unrelated controls.
 - **Tests:** Pattern unit/component and accessibility tests, keyboard/focus/typeahead/outside-click tests, route Playwright tests, console/network checks, and 1440x900/390x844 screenshots with browser cleanup.
@@ -1908,7 +2247,7 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 - **Acceptance:** `/chat` offers an accessible explicit project selector; selected Context project is visible, selectable, request-bound, and isolated; global tools remain under their independent authority and are not silently redirected to the Context project; defaults and no-selection behavior are safe and documented in the UI; fixture/API/UI checks pass.
 - **STOP_CONDITION:** `PASS` after fixture-first API/UI tests, deployed Chat checks, visual/accessibility gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable configured Chat/deployment access, a genuine product decision about project-selection defaults, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns Chat visual/accessibility checks; `@ingenium-security-auditor` verifies project/global authority separation.
+- **Verification owner:** `@ingenium-qa` owns Chat visual/accessibility checks; `@ingenium-security-auditor` verifies project/global authority separation.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Context remains explicit and project-scoped; global tools retain current authority; fail closed on missing/foreign projects; never expose hidden source content or secrets.
 - **Tests:** Component/API project-selection, request-attestation and foreign-project rejection, global-tool-authority separation, no-selection/refresh/reload, accessibility, keyboard, console/network, 1440x900/390x844 visual, and fixture E2E tests.
@@ -1948,7 +2287,7 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 - **Acceptance:** `/vscode` is reachable from navigation and direct URL; iframe targets exactly `http://vscode.localhost:3000/`, is unsandboxed only because it is trusted separate-origin, requests only minimal clipboard permission, CSP/frame headers and WebSocket trusted `Origin` are exact, hostile and missing WebSocket `Origin` requests are rejected, loading/error/unavailable states are explicit, standalone/new-tab fallback works, dashboard/OpenCode remain on the established `3000` virtual-host gateway, and existing routes remain healthy.
 - **STOP_CONDITION:** `PASS` after deployed route, iframe/CSP/navigation, accessibility, console/network, visual, and marker checks; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable configured browser/deployment access, a genuine origin/trust product decision, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns changed-route and passive desktop/mobile visual gates; `@ingenium-security-auditor` owns CSP/permission review.
+- **Verification owner:** `@ingenium-qa` owns changed-route and passive desktop/mobile visual gates; `@ingenium-security-auditor` owns CSP/permission review.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Keep OpenCode roots unchanged; allow only the dedicated expected origin and minimal clipboard permission; fail closed when origin/runtime is unavailable; remove only route/navigation/iframe changes on rollback.
 - **Tests:** Route/navigation and standalone component tests, exact `http://vscode.localhost:3000/` iframe-origin/CSP/permissions/header tests, WebSocket exact-trusted-Origin acceptance plus hostile/missing-Origin rejection, dashboard/OpenCode `3000` regression, loading/error/unavailable states, accessibility/keyboard, console/network, deployed health, 1440x900/390x844 screenshots, and browser cleanup.
@@ -1968,7 +2307,7 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 - **Acceptance:** A rebuilt current source passes exact code-server provenance, same-container/appuser, private code-server `127.0.0.1:4100`, established port-`3000` virtual-host gateway, no host `3002` or public `4100` exposure, exact public origin `http://vscode.localhost:3000/`, dashboard/OpenCode `3000` preservation, private-loopback/no-LAN, dedicated-root/CSP/permission, exact trusted WebSocket `Origin` acceptance with hostile/missing `Origin` rejection, `/workspace`, `vscode-data` restart persistence, auth-none local profile, full-terminal/Open VSX, status/health, security redaction, E2E, accessibility, 1440x900/390x844 visual, cleanup, and rollback checks; the administrator-grade/no-LAN caveat is visible and not weakened.
 - **STOP_CONDITION:** `PASS` only after deployed E2E/visual/security evidence and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable required deployment/browser access, unauthorized destructive cleanup, a genuine trust/auth product decision, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa` owns one declared E2E acceptance pass; `@ingenium-security-auditor` owns one bounded security pass; `@ingenium-qa-vision` owns one changed-route visual gate and one passive desktop/mobile sweep.
+- **Verification owner:** `@ingenium-qa` owns one declared E2E acceptance pass and one changed-route visual gate plus one passive desktop/mobile sweep; `@ingenium-security-auditor` owns one bounded security pass.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Rebuild/restart only the current merged source, preserve `vscode-data` and retained failure evidence, clean only manifest-owned resources, never expose LAN or real credentials, and rollback the VSCode wave without touching OpenCode or unrelated dirty changes.
 - **Tests:** Exact artifact/provenance, Docker/Supervisor/appuser, private `127.0.0.1:4100`, established port-`3000` virtual-host gateway, no host `3002` or public `4100` exposure, exact `http://vscode.localhost:3000/` route/iframe/gateway/CSP/headers, dashboard/OpenCode `3000` regression, WebSocket exact-trusted-Origin acceptance plus hostile/missing-Origin rejection, route/standalone, persistence/restart, health/status, terminal/Open VSX, security/no-LAN/redaction, fixture E2E, accessibility, console/network, 1440x900/390x844 screenshots, strict containment, cleanup, and targeted rollback checks.
@@ -2149,7 +2488,7 @@ Evidence USAGE-101: Core802/API762; QA15+11 and security concurrency/direct-SQL 
 - **Acceptance:** Fresh and existing `vscode-data` volumes both receive the system color-scheme defaults and the pinned extension without losing user settings or existing extensions; restart and offline operation remain successful; the extension list reports exactly `sst-dev.opencode` at version `0.0.13`; explicit user theme values remain unchanged; system dark and light changes are followed when no explicit user value overrides them; build identity, VSIX SHA-256, and code-server engine compatibility are verified; installation is offline, `appuser`-owned, persisted, and idempotent; visual acceptance covers dark/light themes and the extension; evidence contains no content or secrets; all 7 services remain healthy.
 - **STOP_CONDITION:** `PASS` only after fresh/existing-volume, restart/offline, provenance, persistence, security, deployment, dark/light visual, extension, seven-service, and marker checks pass; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable required deployment/browser/build access, unauthorized destructive volume cleanup, a genuine product decision or ambiguity, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa` owns the declared deployment and acceptance pass; `@ingenium-security-auditor` owns the bounded provenance, offline, ownership, and no-content/secrets review; `@ingenium-qa-vision` owns the dark/light and extension visual gate.
+- **Verification owner:** `@ingenium-qa` owns the declared deployment, acceptance, dark/light, and extension visual gates; `@ingenium-security-auditor` owns the bounded provenance, offline, ownership, and no-content/secrets review.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Verify the baked VSIX before installation; preserve `vscode-data`, user settings, and pre-existing extensions; install only as `appuser` into the persisted extension directory; stop/remove only owned fixtures; rollback removes the pinned extension/theme additions without deleting the volume or altering unrelated VSCode/OpenCode state.
 - **Tests:** Build identity and code-server engine checks; exact VSIX SHA-256 and extension manifest/version checks; offline install and no-marketplace-network checks; fresh-volume and existing-volume preservation checks; appuser ownership, idempotence, persisted extension-directory, restart, and offline checks; explicit theme-value preservation and system dark/light follow checks; exact extension-list check; content/secrets redaction checks; seven-service health/deployment checks; 1440x900 and 390x844 dark/light/extension visual, accessibility, console/network, and browser-cleanup checks.
@@ -2176,7 +2515,7 @@ Evidence VSCODE-103: canonical run `tests/artifacts/test-runs/run-20260802-vscod
 - **Acceptance:** Burger placement is immediately before the logo; desktop full/compact navigation persists and is applied without a hydration or first-paint flash; mobile retains only the existing full drawer behavior; current theme, links, groups, and active states remain intact; idle scrollbars are not visible, hover reveals the thumb, and scrollbar width is stable with no layout shift or overflow; keyboard, touch, and wheel interactions work; rail controls have accessible names and native titles; focus trapping/restoration, unique IDs, closed-drawer unmounting, Escape, backdrop dismissal, route close, reduced motion, deployment, changed-route visual, and full-site desktop/mobile gates pass.
 - **STOP_CONDITION:** `PASS` after focused interaction/accessibility tests, deployed dashboard acceptance, desktop/mobile visual gates, full-site gates, and marker reconciliation; otherwise continue in scope or permitted escalation.
 - **Escalation:** Only unavailable required browser/deployment access, a genuine product decision or ambiguity in navigation interaction semantics, or bounded diagnosis that cannot reproduce a root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed-route and passive full-site desktop/mobile visual gates.
+- **Verification owner:** `@ingenium-qa` owns the changed-route and passive full-site desktop/mobile visual gates.
 - **Deployment owner:** `@ingenium-software-engineer-premium`.
 - **Rollback/safety:** Preserve the current navigation model and mobile drawer; keep persistence fail-safe and hydration-safe; change only dashboard navigation/scrollbar behavior and focused tests; do not alter global scrollbar styles, unrelated routes, or other dirty files.
 - **Tests:** Navigation component/accessibility tests; persistence/pre-paint and hydration tests; focus trap/restoration, unique-ID, unmount, Escape, backdrop, route-close, reduced-motion, keyboard/touch/wheel, scrollbar-hover/stability, overflow, console/network, deployment health, changed-route 1440x900/390x844 screenshots, and passive full-site desktop/mobile checks with browser cleanup.
@@ -2505,7 +2844,7 @@ evidence before the next subwave starts.
   configured fixture path; unauthorized destructive or irreversible action;
   mutually exclusive product decision; genuine requirement ambiguity; or
   bounded diagnosis without a reproducible root cause.
-- **Verification owner:** `@ingenium-qa`; `@ingenium-qa-vision` owns the changed
+- **Verification owner:** `@ingenium-qa` owns the changed
   route at 1440x900 and 390x844 plus the requested passive sweep;
   `@ingenium-security-auditor` reviews authorization, alias, session, generation,
   and idle-lease boundaries.
@@ -2697,7 +3036,7 @@ evidence before the next subwave starts.
   bounded diagnosis without a reproducible root cause.
 - **Verification owner:** `@ingenium-qa` owns one declared merged fixture/
   containment pass; `@ingenium-security-auditor` owns one bounded current-diff
-  and dependency pass; `@ingenium-qa-vision` owns the changed-route and passive
+  and dependency pass; `@ingenium-qa` owns the changed-route and passive
   desktop/mobile visual gates; `@ingenium-docs` owns final canonical-doc and
   marker reconciliation.
 - **Deployment owner:** `@ingenium-software-engineer-premium` with Docker/Compose
@@ -3456,6 +3795,8 @@ No `(work-complete)` marker is appended for `COORD-103`–`COORD-106`.
 
 ### COORD-104/105 hardening and production canary (2026-08-26)
 
+> **Superseded pointer (2026-09-09):** The retained managed-mutation enforcement evidence below is historical; owner decision moved tool governance to `.opencode/agents/**` profile permissions.
+
 - Source hardening now completes or quarantines a managed mutation before any
   snapshot publish can fail, restricts managed Git to literal-path `add`, `mv`,
   and `rm`, suppresses executable Git configuration and inherited execution
@@ -3560,6 +3901,8 @@ No `(work-complete)` marker is appended for `COORD-103`–`COORD-106`.
   marker is appended.
 
 ### COORD-106 A-only ApplyPatch diagnosis (2026-08-26)
+
+> **Superseded pointer (2026-09-09):** The retained coordinator hook/preclaim evidence below is historical; owner decision removed that enforcement layer and current verification is profile-governed.
 
 - The bounded private diagnostic retained at
   `tests/artifacts/test-runs/run-20260826T162247Z-coord106-a-apply-patch-diagnostic/`
@@ -4896,6 +5239,8 @@ This append-only node reconciles the current verification wave. The entries belo
 are **SOURCE/STATIC** or **DIAGNOSTIC** evidence only; none is deployed-runtime,
 production-restart, MCP-canary, browser-canary, or actual model/session proof.
 
+> **Superseded pointer (2026-09-09):** The retained managed-hook/wrapper enforcement evidence below is historical; owner decision removed that layer and current verification runs under agent profile permissions.
+
 - **SOURCE/STATIC — corrected scheduler contract:** The orchestrator contract now
   assigns exactly two agents to each selected Todo, selects at most three
   independent dependency-ready Todos, and therefore uses 2, 4, or 6 agents for
@@ -4984,6 +5329,8 @@ causal remediations are source/static evidence only. Browser admission
 QA/security findings and the TOCTOU/shell-alias remediations are likewise
 source/static evidence only.
 
+> **Superseded pointer (2026-09-09):** The retained managed-command denial and execution-admission evidence below is historical; owner decision removed that layer and current verification is profile-governed.
+
 The MCP cause remains unresolved between a stale parent and the credential
 target; the real canary is still pending. The two attempted paths have the same
 explicit outcome:
@@ -5031,12 +5378,13 @@ begin until `RECOVERY-100` is complete and the restart gates below are proven.
   writes are limited to declared recovery evidence/roadmap, and execution is
   limited to the fixed production-restart command plus safe Git
   inspection/checkpoint; Premium remains the implementation owner.
-- **OUT_OF_SCOPE:** Completing or reimplementing `RECOVERY-100`, new MCP or
-  credential-reset features, broad supervisor/runtime redesign, automatic
-  transcript or Docs Workspace export, manual/editor write guarantees, broad
-  cleanup, Cloudflare decisions, Playwright/browser decisions, and source/test
-  edits, source/package/config permission changes, and profile/skill changes in
-  this documentation contract wave.
+- **OUT_OF_SCOPE:** Completing or reimplementing `RECOVERY-100`, a maintained
+  patched OpenCode runtime or native completion guard against premature
+  completion, new MCP or credential-reset features, broad supervisor/runtime
+  redesign, automatic transcript or Docs Workspace export, manual/editor write
+  guarantees, broad cleanup, Cloudflare decisions, Playwright/browser
+  decisions, and source/test edits, source/package/config permission changes,
+  and profile/skill changes in this documentation contract wave.
 - **Owner:** `@ingenium-software-engineer-premium` for replacement implementation;
   `@ingenium-recovery-engineer` for deployment-only fixed production restart,
   safe Git inspection/checkpoint, and declared recovery evidence/roadmap writes;
@@ -5066,10 +5414,13 @@ begin until `RECOVERY-100` is complete and the restart gates below are proven.
    live TUI/session and `TodoWrite` replay evidence proves the replacement path,
    including resume and fencing; source tests, deployed canaries, file-only
    visibility, or native forks cannot substitute for it.
-  Any temporary self-bootstrap used by the recovery lane remains pending and
-  unverified; it does not satisfy this acceptance until the live runtime gates
-  pass.
-  The Recovery writer cannot implement source, package, or configuration changes;
+   Any temporary self-bootstrap used by the recovery lane remains pending and
+   unverified; it does not satisfy this acceptance until the live runtime gates
+   pass.
+   This acceptance retains upstream OpenCode with reminders only; it does not
+   require or imply a maintained patched runtime or native completion guard
+   against premature completion.
+   The Recovery writer cannot implement source, package, or configuration changes;
   its activation and runtime proof remain pending until the full parent restart
   and live acceptance gates pass.
 - **Live acceptance:** Run one bounded live recovery with a real TUI parent,
@@ -5574,3 +5925,3317 @@ agent validation's nine-skill/profile checks pass, but its process remains
 nonzero for the pre-existing `RECOVERY-102` Phase/counts format at checkpoint
 `d6a9145`. The excluded full-parent restart and actual runtime skill-list/profile
 proof remain open, so no `(work-complete)` marker is recorded.
+
+## Planned explicit saved memory and revision-aware agent coordination
+
+This append-only opening records the supplied Section 13.2 execution specification
+as a planned roadmap contract only. It makes no implementation, deployment/runtime,
+actual model/session, or visual pass claim. The full supplied specification is
+preserved in [MEMORY-100](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination);
+no separate plan file is created.
+
+### MEMORY-100 dependency-graph linkage
+
+The actual prerequisite edge is
+`CTX-100 + CTX-101 + AUTH-105 + COORD-106 -> MEMORY-100 (M0) -> M1 -> M2 -> M3 -> M4 -> M5 -> M6 -> M7 -> M8`.
+The open `RECOVERY-100 -> RECOVERY-101 -> RECOVERY-102` chain is not a prerequisite
+for isolated source development; current recovery admission gates only the M7
+parent-restart path when that path is required.
+
+#### MEMORY-100 — Explicit saved memory and revision-aware agent coordination
+
+- **Status:** `PLANNED` — roadmap contract only; no implementation, deployment/runtime, actual model/session, or visual acceptance is claimed.
+- **Outcome:** Users can say “remember this to memory” or “commit this to memmory” and receive a truthful scoped persistence receipt. A fresh authorized session recalls the correct version without receiving the old transcript. Users can inspect, explain, correct, and forget memories. Agents exchange typed task state and review finalized source snapshots rather than unversioned summaries.
+- **Extend, do not replace:** Reuse immutable Context conversations/messages/checkpoints, observations, personality synthesis, coordination memory, API-owned SQLite storage, MCP authorization, and documentation retrieval. Keep four lanes: explicit saved memory; inferred behavioural learning; operational coordination state; canonical repository guidance. Do not resurrect `ingenium_learning_log`, create another database, or rewrite `AGENTS.md` automatically.
+- **IN_SCOPE:** Explicit save/update/forget lifecycle; owner/project/visibility boundaries; trusted current-user provenance; optimistic versions; idempotent operation receipts/status including unknown outcomes; common API-owned retrieval/context manifest for native Chat and external OpenCode; independent use/save/automatic-learning controls; forget propagation/suppression/backup-restore protection; revision-aware task/result manifests with base commit and relevant dirty-file hashes, dependency results, exclusive paths, memory/profile/tool revisions, ownership/fence, unresolved operations and next work; finalize-before-review and stale-input detection; exact-six-agent/three-writer/two-agent-pair enforcement; actual Memory UI and save/queued/failed/updated/forgotten states.
+- **OUT_OF_SCOPE:** New memory database or daemon, vector database requirement, full transcript prompt stuffing, silent policy/skill rewriting, model-specific dependency, resurrecting retired tools/skills, credential rotation, direct external DB/REST mutation, unrelated recovery closure, production-data deletion tests.
+- **Owner:** `@ingenium-orchestrator` coordinates; `@ingenium-software-engineer-premium` owns cross-layer implementation; `@ingenium-docs` owns canonical docs; `@ingenium-qa` owns declared acceptance.
+- **Dependencies:** Current Context/tenancy/auth/coordination foundations (`CTX-100`, `CTX-101`, `AUTH-105`, relevant completed coordination tasks); current source reconciliation; production activation only depends on current recovery admission when a parent restart is required. Isolated source development does not wait for unrelated recovery work.
+- **Acceptance:** Every MEM-A01–MEM-A18, COORD-A01–COORD-A07, VIS-A01–VIS-A02, and RUN-A01 scenario from this contract passes on synthetic run-owned fixtures. Explicit save acknowledgment follows committed persistence; same operation/same payload is idempotent; same ID/different payload conflicts; six concurrent updates use version conflicts without silent overwrite; explicit beats inferred; native Chat and OpenCode share the contract; no cross-principal/project/workspace disclosure; forget suppresses synthesis/cache/jobs and old-backup resurrection; retrieved hostile content remains data; migrations preserve populated fixtures; context stays bounded (initial engineering budget 2,048 tokens/16 items, configurable); reviews bind to finalized input/output manifests; A≤6, W≤3, exact pairs; current-source deployment, MCP canary, independent fresh sessions, restart replay, and real visual evidence pass.
+- **STOP_CONDITION:** PASS only after source, deployed-runtime, actual model/session, visual, roadmap and Todo evidence all pass; explicit STOP/CANCELLED; or ESCALATE_USER only for a permitted credential/access, destructive authorization, mutually exclusive product decision, genuine ambiguity, or unreproduced-cause condition.
+- **Escalation:** Preserve first failure and unknown mutation outcome. Reconcile by operation/task ID before retry. A stale review needs proven manifest/hash mismatch. Never weaken assertions, trust gates, filesystem modes, credential scopes, or deletion guarantees to obtain PASS.
+- **Verification owner:** `@ingenium-qa` owns each declared finalized-boundary report once and the passive visual gates; `@ingenium-security-auditor` runs at most once for the predeclared memory-write/privacy/auth/transcript/deletion surface; the orchestrator reconciles evidence classes.
+- **Deployment owner:** `@ingenium-software-engineer-premium` rebuilds/restarts exact merged source and health-checks actual routes. Current replacement-first recovery admission applies before any necessary parent restart.
+- **Rollback/safety:** Preserve existing data volumes, credentials, protected runtime evidence, unrelated dirty files, and append-only markers. Use isolated fixture DBs/workspaces and synthetic identities. Forget/deletion testing never targets user data. Restore/reconcile deletion ledger before recall after backup restore. Historical overflow authorization applies only to its exact record.
+- **Tests:** Focused core memory/Context lifecycle/migration/FTS/authorization/receipt tests; coordination manifest/fence/stale-input tests; API/MCP catalog/policy/integration tests; extension intent/retry/outbox/context tests; native Chat/UI/component/accessibility tests; exact MCP initialize/tool calls; focused Playwright plus strict containment; fresh-session A/B/C model/session scenarios; current deployment/runtime checks. Root/full suites only when explicitly declared.
+- **Docs:** Architecture decision; data dictionary; privacy/forget and backup semantics; migration/rollback; API/MCP/OpenCode commands and receipts; user controls/help; source/runtime/model-session/visual evidence index; final implementation report. Repository Markdown remains authority. Canonical references: [self-learning](../concepts/self-learning.md), [architecture](../concepts/architecture.md#context-memory-architecture-phase-3), [API](../develop/api.md), [database](../develop/database.md), [MCP tools](./mcp-tools.md).
+- **Exclusive writer territory:** Phase 0 fixes exact paths. Core DB/schema/migration has one owner; coordination writer cannot edit that territory; transport writer owns API/MCP catalog/policy; extension writer owns OpenCode hooks/commands/outbox; UI and native-Chat plumbing are separately reserved/serialized; Docs owns named canonical docs.
+- **Phase/counts:** `M0`; 2 writers / 4 non-writers; A=6, W=2 — source/roadmap reconciliation, three pairs. `M1`; two serialized steps each 1 writer / 1 non-writer; A=2, W=1 — contract freeze, then ADR/schema fixtures. `M2`; 3 writers / 3 non-writers; A=6, W=3 — core memory, coordination, docs. `M3`; 3 writers / 3 non-writers; A=6, W=3 — API/MCP, OpenCode, docs. `M4`; 3 writers / 3 non-writers; A=6, W=3 — Memory UI, native Chat, docs. `M5`; 1 writer / 5 non-writers; A=6, W=1 — finalized-manifest QA/security/UI/docs review. `M6`; 1 writer / 1 non-writer; A=2, or 2 writers / 2 non-writers; A=4, or 3 writers / 3 non-writers; A=6 — causal fixes only when blocking. `M7`; 2 writers / 2 non-writers; A=4, W=2 — deployment, actual sessions, docs evidence. `M8`; 1 writer / 1 non-writer; A=2, W=1 — roadmap/evidence reconciliation.
+- **Verification plan:** M0 records exact branch/HEAD/dirty/input manifest, migration tip, reuse decisions, baseline and territories. M1 freezes typed memory/receipt/scope/provenance/lifecycle/context/task/result contracts and negative fixtures. M2 implements transactional lifecycle/lineage/FTS/suppression and revision-aware coordination. M3 wires API/MCP/OpenCode with trusted live-user intent and at-least-once/idempotent reconciliation. M4 wires common native Chat and accessible Memory UI. M5 reviews exact finalized manifests. M6 remediates only reproduced blockers with named regressions. M7 deploys exact source and proves independent-session save/recall/update/forget/restart plus desktop/mobile visual evidence. M8 reconciles markers/Todo/evidence.
+- **Causal remediation rule:** Preserve the first actionable failure, isolate its cause, change only in-scope source, run the minimum proving regression, then continue to deploy and acceptance. Unknown mutation outcomes reconcile before replay; failed checks alone never escalate.
+- **Finding classification:** In-scope acceptance failure or immediately exploitable changed code is `BLOCKING`; valid out-of-scope/hardening/test-hygiene work is `FOLLOW_UP`; context requiring no action is `INFORMATIONAL`.
+
+- **Markers/evidence:**
+  - [ ] Current checkout, existing Context/memory implementation, migration tip, exact roadmap feature, and input manifest reconciled.
+  - [ ] Explicit lifecycle, scope/visibility, receipts, conflict handling, suppression and deletion lineage implemented and source-tested.
+  - [ ] Native Chat and external OpenCode both use the shared persistence/recall contract.
+  - [ ] Negative tests reject quoted/imported/hostile save instructions, unauthorized access, false saved receipts, cross-scope cache leaks, and stale/unknown outcomes.
+  - [ ] Finalized manifest required for QA; dirty-file differences and stale workers detected.
+  - [ ] Six-agent, three-writer, exact-two-agent pairing enforced.
+  - [ ] Deployed-runtime provenance and state-bearing MCP canary verified.
+  - [ ] Actual model/session independent fresh-session recall/update/forget/restart replay verified.
+  - [ ] Real browser/TUI desktop/mobile visual evidence inspected with route/revision/viewport/fixture, accessibility, console/network, and cleanup evidence.
+  - [ ] Forget cannot be silently undone by synthesis, stale cache/jobs, or older fixture backup restore.
+  - [ ] Documentation, roadmap markers and final report distinguish source-test, deployed-runtime, model/session and visual evidence.
+
+### Work marker log (continued)
+
+<!-- (work-started) MEMORY-100 2026-09-05T00:00:00Z ingenium-docs -->
+Evidence MEMORY-100: Planned Section 13.2 contract appended at branch
+`context-upload-hardening-opencode-1.18.9`, HEAD
+`105f981ffa6318c7b0f2ac7153e64acd574d2104`. This is roadmap/source-static
+documentation evidence only; implementation, deployment/runtime, actual
+model/session, visual, completion, and unrelated recovery claims remain unmade.
+
+## Approved rollout extension: Cloudflare, managed Playwright, MCP diagnosis, agent authority, scoped dispatch, and MEMORY-100 (2026-09-05)
+
+This append-only section records the user's approved rollout after the existing
+roadmap and its retained evidence. It does not rewrite historical markers,
+evidence, dirty-worktree claims, or the existing `MEMORY-100` contract. The
+current documentation opening changes only this file; it performs no source,
+configuration, profile, runtime, deployment, commit, Docs Workspace mutation,
+delegation, QA, or security work.
+
+### Rollout outcome
+
+The approved outcome is a bounded, evidence-backed rollout with these product
+and policy guarantees:
+
+1. **Named Cloudflare tunnel:** Settings connects an existing named Cloudflare
+   tunnel, stores its protected credential, and independently selects the
+   Dashboard, OpenCode, CLI, VS Code, and API hostnames. Only authenticated HTTPS
+   audience gateways are supported. The token does **not** grant DNS management;
+   the rollout documents and validates preconfigured Cloudflare routes rather
+   than creating or editing DNS records. External MCP remains a local stdio
+   extension that talks to the authenticated HTTPS API; no new HTTP MCP transport
+   is introduced.
+2. **Managed Playwright:** Playwright is a pinned preset in the existing managed
+   child MCP infrastructure, with lifecycle, discovery, tool permissions, browser
+   isolation, run ownership, and cleanup guarantees. It is not an unbounded or
+   ad-hoc browser process.
+3. **MCP connection diagnosis:** The exact `-32000: Connection closed` failure is
+   diagnosed from its first stderr, exit, or startup stage. Credential, API, and
+   project failures are distinguished from import, distribution, and transport
+   failures. A distribution-deletion/build race is reproduced before any fix is
+   selected. Normal startup never runs tests, builds, scans, or migration work.
+4. **Agent autonomy:** Scout is used only for genuine RAG/context retrieval and
+   never for generic source review. Every user-facing agent explicitly loads
+   `@ponytail`, with actual load and prompt evidence. The hidden
+   `ingenium-llm-broker` keeps its no-tool/default-deny boundary.
+5. **OpenCode authority:** `opencode.json` agent mappings contain only model and
+   variant. Permissions and metadata are authoritative in native Markdown
+   profiles. Installed OpenCode loader semantics and default-deny behavior are
+   proven before root permissions, prompt, or disable mappings are removed.
+   Config generators and enable/disable lifecycle projection are repaired as one
+   authority boundary.
+6. **Execution integrity:** Roadmap dispatch is scoped, every selected Todo has
+   exactly two agents, a phase has at most six active agents and three
+   permission-derived writers, and finalized manifests are required before
+   review. Unknown outcomes are recovered before replay; reviewers do not reopen
+   work; source tests, deployed canaries, model/session artifacts, and visual
+   evidence are never substituted for one another.
+7. **Explicit saved memory:** The existing `MEMORY-100` task is extended rather
+   than duplicated. Fresh independent sessions prove save, recall, update, and
+   forget across `/chat` and an external `/opencode` harness using synthetic
+   random facts, receipts, scope/isolation checks, no transcript leakage, and
+   restart replay.
+
+### Allocated task IDs and dependency graph
+
+The following IDs were unused in the existing roadmap at this opening and are
+allocated here: `BASELINE-100`, `MCP-107`, `AGENT-100`, `ORCH-100`,
+`CLOUDFLARE-100`, and `PLAYWRIGHT-100`. `MEMORY-100` is deliberately extended
+below; no second memory task is created.
+
+```text
+BASELINE-100
+  -> MCP-107
+  -> AGENT-100
+  -> ORCH-100
+  -> CLOUDFLARE-100  ||  PLAYWRIGHT-100
+  -> MEMORY-100 extension: foundation -> clients/UI -> review -> deployment
+       -> fresh independent model/session acceptance -> final reconciliation
+
+MCP-107 + AGENT-100 + ORCH-100 + CLOUDFLARE-100 + PLAYWRIGHT-100
+  -> MEMORY-100 final rollout evidence and roadmap/Todo reconciliation
+```
+
+The `||` indicates independent territories that may run in the same phase only
+when their exact writer pairs and manifests do not overlap. Source development
+does not wait for unrelated `RECOVERY-100`/`RECOVERY-101`/`RECOVERY-102` work.
+Those recovery gates apply only when a later deployment path actually requires
+their parent-restart or recovery capability. No task may use that exception to
+skip baseline reconciliation, exact artifact provenance, or safe replacement-
+first activation.
+
+### Rollout operating contract
+
+- **Role routing:** `@ingenium-software-engineer-premium` owns critical
+  implementation and deployment; `@ingenium-software-engineer-fast` may own only
+  the isolated Playwright preset territory when it is run concurrently with the
+  Cloudflare territory; `@ingenium-explore` performs source research;
+  `@ingenium-docs` owns canonical repository documentation; `@ingenium-qa` owns
+  verification; and `@ingenium-scout` performs only genuine RAG/context
+  retrieval, never generic source review.
+- **Baseline first:** Before any implementation or runtime action, reconcile the
+  current branch and HEAD, every dirty path, existing roadmap content and
+  historical evidence, unknown or cancelled task/tool outcomes, active claims,
+  outbox/recovery state, and the current `MEMORY-100` evidence. Retain an
+  exact, content-free input manifest. Do not copy credentials, private data, or
+  transcript content into the manifest.
+- **Territories after baseline:** Assign exclusive file/directory territories
+  only after the baseline manifest is retained. Preserve unrelated dirty files,
+  credentials, databases, volumes, runtime state, and historical roadmap
+  evidence. A failed or denied command is not permission to bypass policy or to
+  repeat a blind command.
+- **Unknown outcomes:** A cancelled or aborted task/tool, stale claim, or lost
+  transport result is `RECOVER_UNKNOWN_OUTCOME`, not failure completion. Reconcile
+  durable status, claims, outbox, task/Todo state, and the first failure before
+  any retry; never replay an uncertain mutation.
+- **Causal repair:** Diagnose the earliest reproducible in-scope boundary, repair
+  only that named cause, and run only its minimum proving regression. A failed
+  check alone is not escalation. After a reviewer reports a blocker and the
+  writer repairs it, do not rerun that reviewer; run the named regression and
+  continue to deployment and acceptance.
+- **Startup safety:** Ordinary OpenCode/TUI startup is side-effect-free with
+  respect to npm, Vitest, typecheck, build, test scripts, test databases, and
+  scans. Explicit API/deployment lifecycle work remains separate and authorized.
+- **Evidence labels:** Every result is labeled `SOURCE/STATIC`,
+  `DEPLOYED-RUNTIME`, `MODEL/SESSION`, `VISUAL`, or `REVIEW`. A completion marker
+  requires the applicable set, and missing model/session or visual artifacts are
+  recorded as missing rather than inferred.
+- **Review limits:** Each finalized implementation boundary receives exactly one
+  QA report. A security report is permitted only for a predeclared changed
+  security surface and is at most one per boundary. Visual review is required for
+  changed UI routes. None of these reviewers may dispatch, add scope, or reopen a
+  closed task.
+- **Deployment and activation:** Premium deploys the exact tested artifact,
+  rebuilds/restarts the merged source, and health-checks the actual affected
+  routes. Any parent OpenCode activation uses replacement-first ordering:
+  durable handoff, externally supervised replacement, health, reconnect/resume,
+  rollback or authorized adoption, and split-brain fencing precede old-parent
+  retirement. A child-MCP restart is not a parent restart.
+- **Visual and containment gates:** UI changes receive a changed-route gate at
+  `1440x900` and `390x844`, plus one passive full-site desktop/mobile sweep.
+  Fixture Playwright runs retain run-owned artifacts and execute
+  `npx tsx tests/suite-containment-audit.ts --strict` once. Screenshots are
+  stored only below `tests/artifacts/visual-qa/<run-id>/`.
+
+#### BASELINE-100 — Rollout preflight and territory manifest
+
+- **Status:** `PLANNED`; this opening records the contract only.
+- **Outcome:** A content-free baseline manifest proves what the rollout started
+  from, including HEAD, dirty paths, historical roadmap evidence, unknown
+  outcomes, and the exact file territories assigned after preflight.
+- **IN_SCOPE:** Read-only branch/HEAD and dirty-path reconciliation; retained
+  task, marker, TodoWrite, claim, outbox, and unknown/cancelled-outcome state;
+  current `MEMORY-100` linkage; first-failure inventory; and post-baseline
+  exclusive territory assignment.
+- **OUT_OF_SCOPE:** Source/config/profile edits, runtime or deployment actions,
+  commits, credential rotation, data mutation, broad docs work, delegation,
+  QA/security dispatch, and any change to historical evidence.
+- **Owner:** `@ingenium-orchestrator` coordinates the preflight;
+  `@ingenium-explore` performs source research and `@ingenium-docs` records only
+  the canonical roadmap state.
+- **Dependencies:** None. This is the gate for every new rollout task.
+- **Acceptance:** The retained manifest identifies current branch/HEAD, all
+  dirty paths, open and historical markers, unknown/cancelled outcomes, active
+  claims/outbox state, the current memory contract, and the resulting exclusive
+  territories without retaining secrets or private content. No unrelated path is
+  changed.
+- **STOP_CONDITION:** `PASS` when the read-only manifest and territory ledger are
+  retained; explicit user `STOP`/`CANCELLED`; or permitted external access,
+  authorization, ambiguity, or unreproducible-cause escalation only.
+- **Escalation:** Internal denial, unavailable subagent, or a failed check is
+  recoverable state, not escalation. Escalate only after configured supported
+  access paths fail and one of the five permitted external conditions is proven.
+- **Verification owner:** `@ingenium-explore` verifies source identity and
+  `@ingenium-docs` verifies roadmap preservation; no QA report is opened for
+  this read-only gate.
+- **Deployment owner:** N/A.
+- **Rollback/safety:** Read only; preserve unrelated dirty files, credentials,
+  databases, volumes, claims, outbox records, and historical evidence. Never
+  clear an unknown or foreign state to make the manifest pass.
+- **Tests:** Read-only status/diff/log/marker and coordination-state checks;
+  content-free hash/path comparison; no source suite, startup test/build/scan,
+  runtime operation, or broad documentation audit.
+- **Docs:** This roadmap only.
+- **Exclusive writer territory:** No source territory; the Docs writer may
+  update only the roadmap's new contract/evidence section.
+- **Phase/counts:** `B0`; one Todo, exact pair `@ingenium-explore` +
+  `@ingenium-docs`; `A=2`, `W=1`, read-only ceiling `5`. The current roadmap
+  opening dispatches no agents.
+- **Verification plan:** Reconcile the first retained state once, record the
+  manifest, assign non-overlapping territories, and stop before implementation
+  if identity or outcome is unknown. Do not repeat a denied command blindly.
+- **Causal remediation rule:** Fix the first manifest, identity, or durable-
+  state discrepancy; do not overwrite the roadmap or normalize unknown state by
+  guesswork.
+- **Finding classification:** Missing or false baseline identity, lost dirty
+  path, or replayed unknown mutation is `BLOCKING`; unrelated historical drift
+  is `FOLLOW_UP`; retained manifest metadata is `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` is the read-only manifest and territory
+  ledger. No `DEPLOYED-RUNTIME`, `MODEL/SESSION`, or `VISUAL` proof is claimed.
+- **Markers/evidence:** No new work marker is added by this documentation-only
+  opening; the existing `MEMORY-100` marker and evidence remain untouched.
+
+#### MCP-107 — Exact `-32000` connection-closure diagnosis and causal repair
+
+- **Status:** `PLANNED`.
+- **Outcome:** The first stderr/exit/startup stage producing the exact MCP
+  `-32000: Connection closed` is retained and classified as credential/API/
+  project, import/distribution, or stdio/transport failure. The distribution
+  deletion/build race is reproduced before repair, and only the proven cause is
+  fixed.
+- **IN_SCOPE:** Existing MCP child launcher, bridge, startup diagnostics,
+  project/workspace binding, distribution/import checks, the exact failure
+  artifact, and directly affected troubleshooting wording. Keep the explicitly
+  noncritical development credential unchanged.
+- **OUT_OF_SCOPE:** Credential rotation/replacement, new HTTP MCP transport,
+  arbitrary startup commands, startup tests/builds/scans, test-database
+  provisioning, broad launcher refactoring, unrelated recovery closure, and
+  Docs Workspace mutation.
+- **Owner:** `@ingenium-software-engineer-premium` owns implementation and
+  deployment; `@ingenium-explore` performs source research; `@ingenium-docs`
+  updates only directly affected canonical wording after behavior is verified.
+- **Dependencies:** `BASELINE-100`; existing MCP/extension boundaries. Source
+  diagnosis does not wait for unrelated recovery tasks. A required parent
+  restart remains a later deployment gate.
+- **Acceptance:** The retained diagnostic begins at the first available stderr,
+  exit, or startup stage; credential/API/project failures are distinguishable
+  from import/distribution/transport failures; the distribution-deletion/build
+  race is reproduced before a fix; normal startup runs none of npm, Vitest,
+  typecheck, build, test, scan, or migration work; the causal fix passes its
+  minimum regression; and no credential value, response body, prompt, or private
+  path is retained.
+- **STOP_CONDITION:** `PASS` only after source diagnosis/fix, exact tested
+  artifact deployment, actual API/MCP health, one QA report, one predeclared
+  security report if the changed boundary requires it, and final evidence
+  reconciliation pass; explicit `STOP`/`CANCELLED`; or permitted escalation.
+- **Escalation:** Only unavailable required protected access after its configured
+  path, unauthorized irreversible action, a mutually exclusive product choice,
+  genuine ambiguity, or a root cause that remains unreproduced after bounded
+  diagnosis. A failed command or internal shell denial is not enough.
+- **Verification owner:** `@ingenium-qa` owns exactly one targeted verification
+  report; `@ingenium-security-auditor` may review the predeclared launcher/auth
+  surface once; `@ingenium-docs` checks only the named troubleshooting links,
+  commands, and policy wording.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; rebuild/restart
+  the exact merged source and health-check the actual API/MCP path. Use the
+  replacement-first parent gate if the changed plugin/config requires it.
+- **Rollback/safety:** Preserve the first failure and unknown outcomes; do not
+  rotate or guess credentials; fail closed on missing binding; retain the prior
+  distribution until the race is understood; clean only identity-checked,
+  run-owned state.
+- **Tests:** First-stage stderr/exit/startup fixtures; credential/API/project
+  classification; import/distribution failures; reproduced `dist` deletion/build
+  race; normal-startup negative checks proving no test/build/scan/database side
+  effects; exact MCP initialize and `tools/list` canary; targeted redaction and
+  cleanup checks. No broad suite or startup test/build/scan is part of startup.
+- **Docs:** After verification, update only [OpenCode usage](../usage/opencode.md),
+  [MCP Tools Reference](./mcp-tools.md), and the directly affected
+  [testing guidance](../develop/testing.md) troubleshooting sections.
+- **Exclusive writer territory:** Existing MCP child launcher/bridge and its
+  focused diagnostics/tests; no Cloudflare, Playwright, agent-profile, root-
+  config, or memory-client overlap.
+- **Phase/counts:** `B1`; one implementation Todo, exact pair
+  `@ingenium-software-engineer-premium` + `@ingenium-explore`; `A=2`, `W=1`,
+  read-only ceiling `5`. QA/security are dependency-gated review Todos, not
+  implementation pair substitutes.
+- **Verification plan:** Reconcile the first failure, reproduce the named race,
+  fix its earliest cause, run its minimum source regression, deploy the exact
+  artifact, health-check API/MCP, run one bounded review phase, and proceed
+  without reviewer reruns. Record a missing artifact as missing.
+- **Causal remediation rule:** Repair the first launcher, binding, import,
+  distribution, or transport boundary proven by the trace; never hide the
+  visible `Connection closed` error downstream or broaden credentials.
+- **Finding classification:** Wrong first-stage attribution, startup side
+  effects, credential/project confusion, transport closure, missing required
+  artifact, or false completion is `BLOCKING`; optional diagnostics or broader
+  launcher cleanup is `FOLLOW_UP`; bounded failure provenance is
+  `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` covers the first-stage trace, race
+  reproduction, and focused regression; `DEPLOYED-RUNTIME` covers exact artifact
+  health and MCP initialize/list; `MODEL/SESSION` is not inferred from either
+  class; `VISUAL` is required only if a user-facing route changes.
+
+#### AGENT-100 — Scout retrieval boundary, Ponytail loading, and profile authority
+
+- **Status:** `PLANNED`.
+- **Outcome:** Scout is a retrieval-only role; every user-facing agent explicitly
+  loads `@ponytail` and proves its actual prompt contribution; and native
+  Markdown profiles, not root permission metadata, define the user-facing
+  authority while the hidden broker remains no-tool/default-deny.
+- **IN_SCOPE:** Scout task routing; the enumerated user-facing agent loading
+  surface; actual Ponytail skill/prompt loading evidence; hidden broker
+  visibility/tool boundary; native Markdown profile permissions/metadata;
+  `opencode.json` agent mapping shape; installed OpenCode loader/default-deny
+  proof; config generators; and enable/disable lifecycle projection.
+- **OUT_OF_SCOPE:** Generic source review by Scout, changing broker capabilities,
+  new tools, provider/model behavior, unrelated skill retirement, transcript
+  sharing, broad configuration cleanup, and Docs Workspace mutation.
+- **Owner:** `@ingenium-software-engineer-premium` owns the authority/lifecycle
+  implementation and deployment; `@ingenium-scout` may retrieve existing RAG/
+  context policy only; `@ingenium-explore` performs source research;
+  `@ingenium-docs` owns canonical agent guidance.
+- **Dependencies:** `BASELINE-100`; the installed OpenCode version and current
+  profile/config inventory. A parent restart is a later evidence gate, not a
+  reason to block isolated source work.
+- **Acceptance:** Every user-facing agent, including Chat and the user-facing
+  Plan/custom surfaces, has actual post-load Ponytail skill and prompt evidence;
+  Scout is rejected for generic source review and succeeds only on genuine
+  RAG/context retrieval; the hidden `ingenium-llm-broker` remains hidden,
+  immutable, unmapped, wildcard-denied, and without tools; root agent mappings
+  contain only model/variant; permissions/metadata are read from native
+  Markdown profiles; and no root permission, prompt, or disable mapping is
+  removed until installed loader semantics and default-deny are proven.
+- **STOP_CONDITION:** `PASS` only after source/config/profile checks, installed
+  loader proof, full-parent restart, actual per-agent load/prompt evidence, one
+  QA report, one predeclared security report for the profile/broker surface, and
+  reconciliation pass; explicit `STOP`/`CANCELLED`; or permitted escalation.
+- **Escalation:** Only unavailable required protected OpenCode access, an
+  unauthorized irreversible profile/config action, a mutually exclusive loader
+  decision, genuine ambiguity, or bounded diagnosis without a reproducible
+  cause. A profile read denial or child-MCP denial must use the supported
+  recovery path and is not itself escalation.
+- **Verification owner:** `@ingenium-qa` owns one targeted profile/loading report;
+  `@ingenium-security-auditor` owns at most one review of default-deny, hidden
+  broker, prompt/tool, and lifecycle boundaries; `@ingenium-scout` is not a
+  source reviewer.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; deploy the exact
+  tested configuration/profile artifact and perform the required full parent
+  restart, health, and actual loaded-surface checks.
+- **Rollback/safety:** Prove the loader before deleting root metadata; preserve
+  the broker's no-tool boundary; snapshot config/profile bytes; restore only the
+  task-owned authority changes if validation fails; never widen permissions or
+  expose prompts/tools to repair a denial.
+- **Tests:** Installed OpenCode loader semantics; default-deny and unknown-field
+  behavior; root mapping shape; native-profile permission/metadata loading;
+  Ponytail load and prompt capture for every user-facing agent; Scout retrieval-
+  only and generic-review denial; hidden broker no-tool checks; generator
+  round-trip; enable/disable lifecycle; full-parent restart; and actual loaded
+  profile evidence. No source file read is accepted as runtime-load proof.
+- **Docs:** After verification, update only [Agents configuration](../configure/agents.md),
+  [Conventions](../concepts/conventions.md), and directly affected
+  [Architecture](../concepts/architecture.md) sections.
+- **Exclusive writer territory:** Agent profiles, agent-loading adapters,
+  authority/config generators, enable/disable lifecycle projections, and focused
+  tests; no MCP launcher, Cloudflare, Playwright, or memory-client territory.
+- **Phase/counts:** `B2`; one implementation Todo, exact pair
+  `@ingenium-software-engineer-premium` + `@ingenium-scout`; `A=2`, `W=1`,
+  read-only ceiling `5`. Scout's pair responsibility is RAG/context retrieval
+  only, never generic source review.
+- **Verification plan:** Inventory the loaded surface after `BASELINE-100`, prove
+  installed loader/default-deny semantics before removing root fields, repair
+  generators/lifecycle, run the minimum source checks, rebuild/restart the exact
+  artifact, capture actual load/prompt/tool evidence, run one review phase, and
+  reconcile without rerunning a reviewer after remediation.
+- **Causal remediation rule:** Fix the first loader, profile-resolution,
+  default-deny, Ponytail-load, broker, generator, or lifecycle boundary shown by
+  evidence; do not patch a missing prompt or tool result with a root allowlist.
+- **Finding classification:** Unauthorized tools/permissions, broker exposure,
+  missing actual Ponytail load, Scout source-review access, wrong mapping
+  authority, or false runtime proof is `BLOCKING`; optional agent UX or broader
+  profile cleanup is `FOLLOW_UP`; load/provenance metadata is `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` covers mapping/profile/generator checks;
+  `DEPLOYED-RUNTIME` covers the rebuilt parent and health; `MODEL/SESSION` covers
+  actual per-agent load/prompt/tool behavior; `VISUAL` applies only if the agent
+  Settings route changes; `REVIEW` remains separate.
+
+#### ORCH-100 — Scoped roadmap dispatch and evidence integrity
+
+- **Status:** `PLANNED`.
+- **Outcome:** The orchestrator cannot dispatch underspecified or unsafe work and
+  cannot claim review or completion without finalized manifests and the required
+  evidence classes.
+- **IN_SCOPE:** Roadmap/Todo contract validation; exact-two-agent pairing;
+  dependency-ready selection; maximum six active agents and three
+  permission-derived writers; zero-overlap writer territories; finalized input/
+  output manifests; unknown-outcome recovery; review timing; causal regression
+  handling; and final marker/Todo reconciliation.
+- **OUT_OF_SCOPE:** Product feature implementation, arbitrary delegation,
+  source changes unrelated to the enforcement boundary, manual/editor write
+  guarantees, credential bypass, broad workflow redesign, and Docs Workspace
+  mutation.
+- **Owner:** `@ingenium-orchestrator` coordinates; `@ingenium-software-engineer-premium`
+  owns any enforcement implementation/deployment; `@ingenium-explore` performs
+  source research; `@ingenium-docs` owns this canonical contract.
+- **Dependencies:** `BASELINE-100`; no dependency on unrelated recovery work for
+  isolated source enforcement.
+- **Acceptance:** Dispatch rejects empty prompts, incomplete contracts,
+  non-ready Todos, singleton or three-agent assignments, invalid roles,
+  overlapping territories, more than six active agents, more than three
+  writers, and premature QA/security/visual review. Every selected Todo has one
+  pair of exactly two agents; every phase retains a finalized manifest; unknown
+  outcomes reconcile status/claims/outbox before replay; reviewer findings do
+  not add scope or trigger reviewer reruns; and no source-test, canary, or
+  model/session result is mislabeled as completion.
+- **STOP_CONDITION:** `PASS` only after source enforcement, targeted contract
+  checks, any required deployed scheduler/coordination health, one QA report,
+  one predeclared security report if applicable, actual unknown-outcome recovery
+  evidence, and final Todo/roadmap reconciliation; explicit `STOP`/`CANCELLED`;
+  or permitted escalation.
+- **Escalation:** Only unavailable configured access, unauthorized irreversible
+  action, mutually exclusive product decision, genuine ambiguity, or bounded
+  diagnosis without a reproducible cause. Internal policy denial, unavailable
+  reviewer, or failed check continues through the deterministic recovery path.
+- **Verification owner:** `@ingenium-qa` owns one dispatch/evidence report;
+  `@ingenium-security-auditor` reviews only a predeclared execution/evidence
+  security surface; `@ingenium-explore` checks source policy without reopening
+  the task.
+- **Deployment owner:** `@ingenium-software-engineer-premium` for any runtime
+  scheduler/coordination artifact; exact tested artifact and actual health are
+  required.
+- **Rollback/safety:** Preserve first failures, unknown outcomes, manifests,
+  claims, and outbox records; never replay uncertain mutations, clear foreign
+  state, bypass default-deny, or mark a review/completion item to make the graph
+  close.
+- **Tests:** Contract completeness; exact pair and dependency guard; active/writer
+  capacity; territory collision; finalized-manifest and stale-input checks;
+  cancellation/unknown-outcome reconciliation; one-review/no-rerun behavior;
+  marker/Todo reconciliation; and targeted runtime recovery where the boundary
+  is deployed. No speculative suite is added.
+- **Docs:** This roadmap and directly affected [Agents configuration](../configure/agents.md)
+  policy sections only.
+- **Exclusive writer territory:** Orchestrator dispatch guards, manifest/evidence
+  state, and focused scheduler/coordination tests; no product-feature territory.
+- **Phase/counts:** `B3`; one implementation Todo, exact pair
+  `@ingenium-software-engineer-premium` + `@ingenium-explore`; `A=2`, `W=1`,
+  read-only ceiling `5`. Review is dependency-gated and never added as a third
+  member of this pair.
+- **Verification plan:** Validate the contract before each dispatch, reconcile
+  unknown state before any retry, finalize manifests before review, run one
+  targeted QA/security phase where applicable, fix only a named reproducible
+  cause, and reconcile Todo/markers before any terminal result.
+- **Causal remediation rule:** Repair the first contract, dependency, capacity,
+  territory, manifest, or unknown-outcome boundary proven by evidence; do not
+  weaken a guard or manufacture a successful review.
+- **Finding classification:** Unsafe dispatch, false completion/review, replayed
+  unknown mutation, capacity/territory violation, or missing final manifest is
+  `BLOCKING`; workflow convenience or extra automation is `FOLLOW_UP`; retained
+  phase accounting is `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` covers the guards and manifests;
+  `DEPLOYED-RUNTIME` covers any deployed scheduler/coordination path;
+  `MODEL/SESSION` is required for actual unknown-outcome/restart behavior when
+  claimed; `VISUAL` is not applicable unless a UI changes; `REVIEW` is bounded.
+
+#### CLOUDFLARE-100 — Existing named tunnel and authenticated HTTPS audience gateways
+
+- **Status:** `IMPLEMENTED_UNVERIFIED`; source implementation is present, while focused
+  checks, deployment, route health, review, visual, and containment evidence
+  remain open.
+- **Outcome:** An operator can connect one existing named Cloudflare tunnel,
+  protect its credential, and independently select preconfigured authenticated
+  HTTPS hostnames for Dashboard, OpenCode, CLI, VS Code, and API audiences.
+- **IN_SCOPE:** Settings connect/disconnect and protected credential metadata;
+  independent five-audience hostname selection; preconfigured Cloudflare route
+  validation and display; authenticated HTTPS gateway/audience binding; API
+  origin and external-MCP HTTPS calls; and directly affected operator/security
+  wording.
+- **OUT_OF_SCOPE:** Creating or editing DNS records; DNS management permissions;
+  arbitrary tunnel provisioning; plaintext credential display; unauthenticated
+  HTTP audience gateways; shared-origin bypasses; new HTTP MCP transport; direct
+  database access; and Docs Workspace mutation.
+- **Owner:** `@ingenium-software-engineer-premium` owns implementation and
+  deployment; `@ingenium-explore` performs source research; `@ingenium-docs`
+  owns directly affected canonical docs.
+- **Dependencies:** `BASELINE-100`; existing authenticated gateway and API
+  boundary; independent of `PLAYWRIGHT-100` when territories remain disjoint.
+  A configured named tunnel/credential is an external access prerequisite for
+  live acceptance, not permission to grant DNS scope.
+- **Acceptance:** Settings connects only an existing named tunnel; stored
+  credential values are protected and absent from responses, browser storage,
+  logs, prompts, and artifacts; each of Dashboard/OpenCode/CLI/VS Code/API can
+  be selected independently; only preconfigured routes are accepted; every
+  audience gateway is authenticated HTTPS; the token cannot manage DNS; and
+  external MCP remains local stdio extension -> authenticated HTTPS API with no
+  HTTP MCP transport.
+- **STOP_CONDITION:** `PASS` only after source/API/Settings checks, exact tested
+  artifact deployment and route health, one QA report, one predeclared security
+  report for credential/audience/host boundaries, changed-route and passive
+  full-site desktop/mobile visual evidence, containment, and reconciliation;
+  explicit `STOP`/`CANCELLED`; or permitted escalation.
+- **Escalation:** Only unavailable configured Cloudflare/tunnel or deployment
+  access after the supported path, unauthorized DNS/destructive action, a
+  mutually exclusive hostname/product decision, genuine ambiguity, or bounded
+  diagnosis without a reproducible cause. A request to expand the token to DNS
+  management is outside the approval and is not silently accepted.
+- **Verification owner:** `@ingenium-qa` owns one functional/API report;
+  `@ingenium-security-auditor` owns one credential, audience, HTTPS, host,
+  origin, and DNS-scope review; `@ingenium-qa` owns the changed Settings
+  route and passive full-site visual gates.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; rebuild the
+  exact merged artifact, activate through the safe replacement-first parent
+  path when required, and health-check all five selected audience roots plus
+  the authenticated API.
+- **Rollback/safety:** Preserve the existing tunnel and preconfigured routes;
+  disconnect/revert only task-owned selections; never delete DNS, rotate or log
+  credentials, broaden host allowlists, expose private upstreams, or fall back
+  to an unauthenticated gateway.
+- **Tests:** Protected credential storage/redaction; existing-named-tunnel
+  connect/disconnect; per-audience selection and preconfigured-route allowlist;
+  DNS-management denial; HTTPS/auth/origin/header/CSP checks; external local
+  stdio-to-HTTPS-API MCP path; no HTTP MCP transport; API/Settings states;
+  deployed root health; 1440x900 and 390x844 changed-route/full-site visual
+  checks; and run-owned containment. Default fixtures use no real credential.
+- **Docs:** After verified behavior, update only [Settings](../configure/settings.md),
+  [Deployment](../operations/deployment.md), [Security](../security/index.md),
+  [OpenCode usage](../usage/opencode.md), and [MCP Tools Reference](./mcp-tools.md)
+  sections directly affected by the shipped boundary.
+- **Exclusive writer territory:** Cloudflare/tunnel Settings controls, protected
+  credential adapter, audience-host selection/gateway configuration, focused
+  tests, and their deployment fixture; no Playwright, MCP-diagnosis, agent,
+  orchestration, or memory territory.
+- **Phase/counts:** `B4-CF`; one implementation Todo, exact pair
+  `@ingenium-software-engineer-premium` + `@ingenium-explore`; `A=2`, `W=1`,
+  read-only ceiling `5`. It may run beside `PLAYWRIGHT-100` only as a separate
+  pair with zero path overlap.
+- **Verification plan:** Inventory existing named routes and credential scope,
+  implement the smallest allowlisted selection boundary, run focused redaction
+  and route checks, deploy the exact artifact, health-check each actual HTTPS
+  audience, capture the Settings route/full-site visual evidence, run one
+  bounded review, and remediate only the first reproducible root cause.
+- **Causal remediation rule:** Fix the earliest credential, route allowlist,
+  audience authentication, origin, HTTPS, or MCP transport boundary shown by
+  evidence; never repair a failed route by adding DNS scope, HTTP fallback, or a
+  broad host allowlist.
+- **Finding classification:** Credential exposure, DNS-scope grant, unauthenticated
+  or wrong-audience gateway, private-upstream exposure, HTTP MCP transport,
+  cross-audience routing, failed required visual/health gate, or false completion
+  is `BLOCKING`; extra hostname aliases or DNS automation are `FOLLOW_UP`;
+  preconfigured-route and deployment provenance is `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` covers credential/route/policy tests;
+  `DEPLOYED-RUNTIME` covers exact artifact, HTTPS roots, and API/MCP health;
+  `MODEL/SESSION` is not inferred from a Settings screenshot; `VISUAL` covers
+  the changed route and passive sweep; `REVIEW` is separate.
+
+#### PLAYWRIGHT-100 — Pinned managed child-MCP browser preset
+
+- **Status:** `SOURCE + DEPLOYED + LIVE ACCEPTANCE COMPLETE (2026-09-10); security-review outcome OPEN`; source implementation is present.
+  The final dated record below closes source checks, exact deployed artifact and
+  health, lifecycle, cleanup, and live acceptance; the bounded security-review
+  outcome and any separately applicable UI visual gate remain open.
+- **Outcome:** The existing managed child MCP infrastructure exposes one pinned
+  Playwright preset with deterministic lifecycle, discovery, permissions,
+  isolated browser state, and identity-checked cleanup.
+- **IN_SCOPE:** Pinned Playwright package/preset identity; managed child-MCP
+  registration and discovery; exact browser-tool permissions; lifecycle start,
+  readiness, stop, crash, and unknown-outcome state; isolated browser context,
+  profile, storage, process, and ports; run-owned artifacts; and cleanup.
+- **OUT_OF_SCOPE:** A new MCP transport, arbitrary browser automation, real
+  credentials, shared browser profiles, unmanaged processes, broad Playwright
+  upgrades, unrelated UI features, and Docs Workspace mutation.
+- **Owner:** `@ingenium-software-engineer-fast` may own the isolated preset
+  implementation only when `BASELINE-100` proves no territory collision;
+  `@ingenium-software-engineer-premium` owns the exact artifact deployment;
+  `@ingenium-scout` retrieves existing child-MCP/RAG context only;
+  `@ingenium-docs` owns canonical docs.
+- **Dependencies:** `BASELINE-100`; existing managed child MCP infrastructure.
+  It is independent of `CLOUDFLARE-100` when its files, processes, ports, and
+  credentials are disjoint.
+- **Acceptance:** The preset's version and artifact identity are pinned and
+  verified; lifecycle/discovery expose only the declared preset; tool
+  permissions are least-privilege and default-deny; each run receives isolated
+  browser state and run-owned process/port/artifact identity; crash, timeout,
+  cancellation, and unknown outcomes retain bounded manifests; cleanup removes
+  only owned state and leaves no process, port, profile, or credential residue.
+- **STOP_CONDITION:** `PASS` only after focused source checks, exact artifact
+  deployment/health, one QA report, one predeclared security report for browser
+  isolation/tool permissions, changed-route visual evidence when the preset is
+  surfaced in UI, and strict containment; explicit `STOP`/`CANCELLED`; or
+  permitted escalation.
+- **Escalation:** Only unavailable configured child-MCP/deployment access,
+  unauthorized destructive cleanup, a mutually exclusive pin/isolation choice,
+  genuine ambiguity, or bounded diagnosis without a reproducible cause. Browser
+  or shell denial is not permission to bypass isolation.
+- **Verification owner:** `@ingenium-qa` owns exactly one lifecycle/discovery/
+  cleanup report; `@ingenium-security-auditor` owns at most one tool/permission/
+  isolation review; `@ingenium-scout` is retrieval-only and does not review
+  source.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; rebuild and
+  restart the exact tested managed child artifact, then health-check discovery,
+  readiness, permissions, and cleanup.
+- **Rollback/safety:** Preserve existing child infrastructure; pin and verify
+  before launch; use synthetic fixture data; stop/remove only identity-proven
+  run-owned processes, ports, profiles, and artifacts; retain stopping manifests
+  on failed cleanup; never reuse a shared browser profile or real credential.
+- **Tests:** Pin/version/hash/manifest checks; managed registration/discovery;
+  tool allow/deny matrix; lifecycle/readiness/crash/timeout/cancel/unknown
+  outcome; browser context/profile/storage/process/port isolation; artifact
+  redaction; cleanup and strict containment; and focused Playwright UI checks
+  only for changed routes. Screenshots use run-scoped artifact paths.
+- **Docs:** After verification, update only [MCP server configuration](../configure/mcp-servers.md),
+  [Testing Guide](../develop/testing.md), [Deployment](../operations/deployment.md),
+  and directly affected [MCP Tools Reference](./mcp-tools.md) sections.
+- **Exclusive writer territory:** Managed child-MCP Playwright preset,
+  lifecycle/discovery/permission adapters, browser isolation/cleanup harness,
+  and focused tests; no Cloudflare, MCP-diagnosis, agent, orchestration, or
+  memory territory.
+- **Phase/counts:** `B4-PW`; one implementation Todo, exact pair
+  `@ingenium-software-engineer-fast` + `@ingenium-scout`; `A=2`, `W=1`,
+  read-only ceiling `5`. Scout's responsibility is existing RAG/context
+  retrieval only, never generic source review.
+- **Verification plan:** Verify pin and existing child boundary, implement the
+  smallest preset, run focused lifecycle/isolation/cleanup checks, deploy the
+  exact artifact through Premium, run the strict containment audit once, run one
+  bounded review, and fix only a named reproducible cause without replaying an
+  uncertain browser mutation.
+- **Causal remediation rule:** Fix the first registration, permission,
+  isolation, lifecycle, identity, or cleanup boundary proven by the manifest;
+  never broaden tools or delete a path based only on telemetry.
+- **Finding classification:** Wrong/unpinned artifact, tool or permission
+  bypass, shared browser state, unowned cleanup, residual process/port/secret,
+  false health, or false completion is `BLOCKING`; optional browser features or
+  pin refreshes are `FOLLOW_UP`; bounded lifecycle telemetry is
+  `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` covers pin, permissions, lifecycle, and
+  cleanup tests; `DEPLOYED-RUNTIME` covers exact child artifact and health;
+  `MODEL/SESSION` is required only when a real session consumes the preset;
+  `VISUAL` is route-scoped and separate; `REVIEW` is bounded.
+
+### MEMORY-100 approved cross-surface extension (extend, do not duplicate)
+
+The existing `MEMORY-100` contract, marker, dependency graph, and historical
+evidence remain authoritative. This addendum narrows its acceptance to the
+approved fresh-session rollout and adds no `MEMORY-101` or parallel memory task.
+
+- **Status:** `PLANNED`; the existing `MEMORY-100` work-started marker remains
+  the only memory marker from this documentation opening.
+- **Outcome:** A fresh authorized session can save a synthetic random fact from
+  `/chat` or the external `/opencode` harness, receive a truthful committed
+  receipt, recall the current version from a different fresh session, update
+  it with revision/conflict semantics, forget it, and observe suppression after
+  restart without receiving the old transcript.
+- **IN_SCOPE:** The existing explicit saved-memory lifecycle and API-owned
+  contract; cross-surface `/chat` and external `/opencode` clients; fresh
+  independent sessions; synthetic random facts; save/update/forget receipts;
+  scope and project/workspace isolation; no-transcript-leakage checks; restart
+  replay; suppression of synthesis/cache/jobs/older-backup resurrection; and
+  the existing revision-aware coordination/finalized-manifest gates.
+- **OUT_OF_SCOPE:** A second memory database or daemon, full transcript prompt
+  stuffing, real user facts or credentials, silent policy/skill rewriting,
+  unrelated recovery closure, arbitrary HTTP MCP transport, production-data
+  deletion, and broad docs/index work.
+- **Owner:** `@ingenium-orchestrator` coordinates; `@ingenium-software-engineer-premium`
+  owns cross-layer implementation and deployment; `@ingenium-docs` owns the
+  directly affected canonical docs; `@ingenium-qa` owns one report per finalized
+  boundary; `@ingenium-scout` may retrieve memory/context documentation only.
+- **Dependencies:** Existing `CTX-100`, `CTX-101`, `AUTH-105`, completed
+  coordination prerequisites, `BASELINE-100`, and the approved MCP/agent/
+  orchestration boundaries as needed by the selected client. Isolated source
+  development does not wait for unrelated recovery; a parent restart is gated
+  only when the exact client/plugin path requires it.
+- **Acceptance:** Fresh independent sessions execute a cross-surface matrix in
+  which `/chat` saves and external `/opencode` recalls, external `/opencode`
+  updates and `/chat` recalls, and a fresh session forgets and verifies no
+  recall. Facts are synthetic and random per run. Receipts prove committed
+  persistence, version, scope, and operation identity; same operation/payload
+  is idempotent; same ID/different payload conflicts; stale updates do not
+  silently overwrite; user/project/workspace scopes reject foreign reads;
+  old transcript text is not supplied as memory; retrieved hostile content is
+  data, not instruction; forget suppresses current retrieval, synthesis/cache/
+  jobs, and older-backup resurrection; restart replays each durable receipt once
+  with no duplicate; and TodoWrite/roadmap evidence is reconciled separately.
+- **STOP_CONDITION:** `PASS` only after source lifecycle/API/client checks,
+  exact tested artifact deployment and health, one QA report and at most one
+  predeclared security report per finalized boundary, real fresh independent
+  model/session evidence, changed-route and passive full-site visual evidence,
+  strict containment for fixture runs, and final Todo/roadmap reconciliation;
+  explicit `STOP`/`CANCELLED`; or permitted escalation.
+- **Escalation:** Preserve the first failure and unknown receipt outcome, and
+  reconcile by operation/task ID before retry. Escalate only for unavailable
+  configured protected access, unauthorized irreversible action, a mutually
+  exclusive memory/privacy decision, genuine ambiguity, or an unreproduced
+  cause after bounded diagnosis. A failed check alone is not escalation.
+- **Verification owner:** `@ingenium-software-engineer-premium` owns focused
+  source/client checks; `@ingenium-qa` produces one targeted report per final
+  boundary; `@ingenium-security-auditor` runs at most one predeclared memory
+  write/privacy/auth/deletion review; `@ingenium-qa` owns changed-route
+  and passive desktop/mobile visual gates; `@ingenium-docs` verifies only named
+  canonical wording, links, commands, and evidence labels.
+- **Deployment owner:** `@ingenium-software-engineer-premium`; rebuild/restart
+  the exact merged artifact, health-check actual API, `/chat`, `/opencode`, and
+  MCP routes, and use replacement-first parent activation where required.
+- **Rollback/safety:** Use only run-owned temporary databases, projects,
+  workspaces, sessions, credentials, browser state, and synthetic facts;
+  preserve existing data/volumes and unrelated dirty paths; never delete user
+  memory or restore an older backup into a live scope; retain unknown receipts,
+  manifests, and cleanup evidence; never place transcript, secret, or random
+  fact content in logs/screenshots/artifacts beyond the bounded authorized test
+  record.
+- **Tests:** Focused lifecycle/FTS/receipt/version/conflict/suppression/
+  authorization tests; API/MCP contract and redaction tests; extension intent,
+  retry, outbox, and context tests; native Chat and external OpenCode client
+  tests; fresh-session A/B/C save/recall/update/forget/restart scenarios with
+  random synthetic facts and no transcript leakage; exact MCP initialize/list/
+  state calls; focused Playwright plus strict containment; 1440x900 and
+  390x844 `/chat`/`/opencode` changed-route evidence; one passive full-site
+  sweep; and final marker/Todo reconciliation. Root/full suites run only if a
+  separate acceptance contract explicitly declares them.
+- **Docs:** After verified behavior, update only [Chat usage](../usage/chat.md),
+  [OpenCode usage](../usage/opencode.md), [Architecture](../concepts/architecture.md),
+  [API Reference](../develop/api.md), [Database](../develop/database.md), and
+  [MCP Tools Reference](./mcp-tools.md) sections directly affected by the
+  shipped memory contract; repository Markdown remains authoritative.
+- **Exclusive writer territory:** Foundation/migration/core memory, API/MCP
+  contract, external OpenCode hooks, native Chat/UI plumbing, and named docs
+  are separate serialized territories. No writer may overlap the Cloudflare,
+  Playwright, MCP-diagnosis, agent, or orchestration boundaries.
+- **Phase/counts:** Existing `M0`–`M8` remains the memory lane. For this
+  extension, each Todo still receives exactly one pair of exactly two agents:
+  foundation `@ingenium-software-engineer-premium` + `@ingenium-explore`
+  (`A=2,W=1`); clients/UI `@ingenium-software-engineer-premium` +
+  `@ingenium-docs` only when source and docs territories are separate
+  (`A=2,W=2`); finalized review `@ingenium-qa` +
+  `@ingenium-security-auditor` (`A=2,W=0`, security omitted when not
+  predeclared); visual review `@ingenium-qa-vision` + `@ingenium-explore`
+  (`A=2,W=0`); exact deployment/activation `@ingenium-software-engineer-premium`
+  + `@ingenium-recovery-engineer` (`A=2,W=2`); and model/session acceptance
+  `@ingenium-software-engineer-premium` + `@ingenium-explore` (`A=2,W=1`).
+  No pair gains a third agent, and no phase exceeds `A=6`, `W=3`.
+- **Verification plan:** M0 records the baseline and finalized input manifest;
+  foundation proves transactional lifecycle, lineage, FTS, scope, receipts,
+  and suppression; clients wire the shared contract to `/chat` and external
+  `/opencode`; finalized manifests are reviewed once; exact artifact deployment
+  proves health and MCP state; real independent sessions run the synthetic
+  save/recall/update/forget/restart matrix; visual gates and strict containment
+  run once; then evidence, TodoWrite, and roadmap markers are reconciled.
+- **Causal remediation rule:** Fix the first persistence, scope, receipt,
+  revision, suppression, client-boundary, restart, or evidence-class cause
+  proven by the trace. Unknown outcomes reconcile before replay; a reviewer is
+  never rerun after its named blocker is fixed.
+- **Finding classification:** False receipt, cross-scope disclosure, transcript
+  leakage, stale overwrite, forget resurrection, duplicate replay, missing real
+  session proof, unsafe cleanup, failed required visual/deployment gate, or
+  false completion is `BLOCKING`; richer memory UX or unrelated recovery work is
+  `FOLLOW_UP`; bounded synthetic evidence and provenance are `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` proves lifecycle and client source
+  behavior; `DEPLOYED-RUNTIME` proves the exact rebuilt API/MCP/client path;
+  `MODEL/SESSION` proves fresh independent cross-surface behavior and restart
+  replay; `VISUAL` proves the changed routes and passive sweep; `REVIEW` is
+  bounded and separate. No class substitutes for another.
+
+### Phase allocation, unused capacity, and review gates
+
+The following allocation is the execution envelope, not a dispatch from this
+documentation opening. Every row is one Todo with exactly one pair; a second
+row is a separate Todo and never a third member of the first pair.
+
+| Phase | Dependency-ready Todo pairs | Active / writers | Unused capacity |
+|---|---|---:|---|
+| Current roadmap opening | No delegated Todo | `A=0 / W=0` | All six active and three writer slots are unused because the user explicitly limited this turn to one roadmap file; no speculative work is added. |
+| `B0` baseline | Explore + Docs | `A=2 / W=1` | Four active and two writer slots remain unused because no implementation is safe before the baseline manifest. |
+| `B1` MCP diagnosis | Premium + Explore | `A=2 / W=1` | Four active and two writer slots remain unused; QA/security wait for the finalized implementation. |
+| `B2` agent authority | Premium + Scout (RAG/context retrieval only) | `A=2 / W=1` | Four active and two writer slots remain unused; Scout is not a generic source reviewer. |
+| `B3` orchestration | Premium + Explore | `A=2 / W=1` | Four active and two writer slots remain unused; no unrelated recovery work is invented. |
+| `B4` disjoint infrastructure | Premium + Explore for Cloudflare; Fast + Scout for Playwright | `A=4 / W=2` | Two active and one writer slot remain unused; only the two proven-disjoint territories are eligible. |
+| Memory foundation/clients | One exact pair per serialized source or docs Todo | `A=2 / W=1` or `A=2 / W=2` | Remaining slots stay unused when a territory or dependency is not ready. |
+| Finalized review | QA + Security only when the security surface is predeclared; QA Vision + Explore for UI visual review | `A=2 / W=0` per pair | No implementation writer is added to a review Todo; a visual pair waits for the final UI change. |
+| Deployment and activation | Premium + Recovery for the fixed replacement-first deployment boundary | `A=2 / W=2` | Four active and one writer slot remain unused; Recovery cannot implement source/package/config changes. |
+| Final reconciliation | Docs + QA | `A=2 / W=1` | Four active and two writer slots remain unused; no new review or implementation is opened. |
+
+QA and security reports are each produced once for their applicable finalized
+boundary. A reproducible blocker is repaired by the original writer and its
+named minimum regression is rerun; the reviewer is not rerun. The final gate
+requires reconciled TodoWrite, roadmap markers, exact changed paths, and all
+applicable `SOURCE/STATIC`, `DEPLOYED-RUNTIME`, `MODEL/SESSION`, `VISUAL`, and
+`REVIEW` evidence. No completion marker is valid from this roadmap-only
+opening.
+
+### Approved rollout coverage matrix
+
+| Approved feature | Roadmap contract | Required outcome and proof boundary |
+|---|---|---|
+| Named Cloudflare tunnel, protected credential, five independent hostnames, authenticated HTTPS audiences, preconfigured routes, local stdio MCP to HTTPS API, no DNS or HTTP MCP | `CLOUDFLARE-100` | Source credential/route policy; deployed HTTPS audience/API health; Settings changed-route and passive full-site visual proof; one bounded QA and one security report. |
+| Pinned Playwright preset in managed child MCP | `PLAYWRIGHT-100` | Source pin/lifecycle/permission/isolation checks; exact deployed child artifact; run-owned cleanup and strict containment; UI visual proof only if surfaced. |
+| First-stage exact `-32000` diagnosis, credential/API/project distinction, dist deletion/build-race reproduction, side-effect-free startup | `MCP-107` | Source first-failure and race evidence; deployed MCP initialize/list and health; no startup tests/builds/scans; no credential rotation. |
+| Scout RAG-only role, explicit Ponytail load/prompt for all user-facing agents, hidden broker no-tool boundary | `AGENT-100` | Installed loader/profile source proof; restarted actual load/prompt/tool model/session evidence; one bounded policy/security review. |
+| Root model/variant-only mappings, native Markdown permission/metadata authority, loader/default-deny proof, generator/lifecycle repair | `AGENT-100` | Installed OpenCode loader and default-deny proof before root-field removal; restart replay and lifecycle evidence; no profile-only runtime claim. |
+| Scoped dispatch, exact pairs, A≤6/W≤3, manifests, unknown-outcome recovery, no false review/completion | `ORCH-100` | Source guard/manifests plus actual recovery/model-session evidence where claimed; one bounded QA/security review as applicable; no reviewer rerun. |
+| Fresh independent memory save/recall/update/forget across `/chat` and external `/opencode`, synthetic random facts, receipts, isolation, no transcript leakage, restart replay | `MEMORY-100` extension | Source/API/client receipts and scope tests; deployed exact artifact/MCP health; real model/session A/B/C evidence; changed-route/full-site visual proof; strict containment. |
+
+### Documentation-only opening evidence
+
+This section is the approved rollout contract and does not claim that any listed
+source, deployment, runtime, model/session, visual, QA, security, or containment
+gate has run. Existing historical evidence, current uncommitted roadmap content,
+and the existing `MEMORY-100` marker remain preserved above. The next execution
+step is `BASELINE-100`; no source development, runtime operation, commit, or
+delegated review is part of this opening.
+
+## Prospective clarifications to the 2026-09-05 rollout append
+
+This append-only clarification preserves every earlier contract, marker, evidence
+record, and current task entry. The six allocated task IDs remain allocated with
+their existing owners; the scenario IDs below are acceptance labels inside
+`MEMORY-100`, not additional tasks, owners, markers, or features.
+
+### Ownership and dependency clarifications
+
+- **`MCP-107` and `RECOVERY-102`:** The existing [RECOVERY-102
+  contract](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing)
+  remains the sole owner of the exact `-32000: Connection closed` first-cause
+  diagnosis and causal repair. `MCP-107` links to and consumes its retained
+  first-stage trace, distribution/build-race, and side-effect-free-startup
+  evidence for the rollout; it does not create a second diagnosis, remediation,
+  marker, or duplicate evidence requirement. Any missing first-cause repair stays
+  a `RECOVERY-102` boundary. `MCP-107` may add only rollout-specific MCP
+  initialize/list/health evidence not already covered by that shared diagnosis.
+- **`ORCH-100` and the operating policy:** `ORCH-100` is the implementation and
+  verification boundary for the existing [operating model](#operating-model),
+  [marker protocol](#marker-protocol), and phase-declaration rules. It does not
+  create a second autonomy policy, alternate capacity limit, or duplicate owner;
+  its guards and manifests prove enforcement of the existing `A≤6`, `W≤3`,
+  exact-pair, dependency, territory, review, and reconciliation rules.
+- **Scout boundary:** `@ingenium-scout` performs only genuine RAG/context
+  retrieval. An explicitly requested read-only
+  `ingenium_coordination_status` result or
+  `ingenium_coordination_handoff` `memory_read` result is context; neither
+  authorizes a source audit, source verification, generic review, or
+  implementation. This applies to `AGENT-100`, `PLAYWRIGHT-100`, and every
+  later pair allocation.
+- **Dependencies:** `BASELINE-100` remains the common preflight gate. `AGENT-100`
+  and `ORCH-100` source work does not acquire a new dependency on unrelated
+  recovery work; `CLOUDFLARE-100` and `PLAYWRIGHT-100` remain parallel only when
+  their declared territories are disjoint. The `MEMORY-100` extension consumes
+  the applicable MCP, agent, orchestration, infrastructure, and recovery
+  evidence without creating duplicate work or a second memory task.
+- **Evidence reuse:** Reusing a retained artifact is valid only when its source
+  revision, boundary, identity, and evidence class match the consuming contract.
+  `SOURCE/STATIC`, `DEPLOYED-RUNTIME`, `MODEL/SESSION`, `VISUAL`, and `REVIEW`
+  remain separate; no class is inferred from another.
+
+### Prospective amendment to open recovery acceptance
+
+This amendment applies prospectively to the still-open `RECOVERY-100` acceptance
+and to any later `RECOVERY-101` gate that consumes its permission evidence. It
+does not rewrite the [retained RECOVERY-100 audit](#recovery-100-six-boundary-audit-2026-09-03),
+its historical source claims, or its markers.
+
+- The retained statement that the root mapping owned Premium's model, variant,
+  prompt/profile path, and permissions remains accurate as a source snapshot for
+  the revision in which that evidence was captured. It is historical evidence,
+  not a requirement to preserve those fields after the approved `AGENT-100`
+  authority migration.
+- After `AGENT-100` changes the authority boundary, current-source recovery
+  acceptance uses one exact merged revision: native Markdown profile permissions
+  and metadata, the root model/variant mapping, installed loader/default-deny
+  behavior, and the actual parent-loaded effective grants. Recovery must not
+  require restoring the old root permission fields or label the preserved
+  pre-migration evidence contradictory.
+- A profile file read or source/config check remains `SOURCE/STATIC` only. The
+  recovery runtime gate still requires the applicable rebuilt parent, health,
+  MCP, and actual model/session evidence at the current revision. If a parent
+  restart is required, the existing replacement-first recovery admission remains
+  the dependency; this amendment adds no reverse dependency from profile source
+  work to recovery completion.
+
+### `MEMORY-100` acceptance scenario ledger
+
+The existing `MEMORY-100` acceptance names `MEM-A01`–`MEM-A18`, `COORD-A01`–
+`COORD-A07`, `VIS-A01`–`VIS-A02`, and `RUN-A01`, but no exact scenario
+definitions were present. The ledger below gives those existing references
+precise acceptance meaning using only the approved `MEMORY-100` outcome and
+scope. It adds no product behavior, task, marker, owner, or independent
+dependency. A scenario's evidence column names the proof required for that
+scenario; it does not claim that the proof exists.
+
+| ID | Existing-scope acceptance scenario | Depends on | Required evidence |
+|---|---|---|---|
+| `MEM-A01` | An authorized `/chat` or external `/opencode` session explicitly saves one synthetic random fact in the selected owner/project/workspace scope. | Explicit lifecycle and tenancy/auth foundations | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A02` | The save receipt follows committed API-owned persistence and identifies operation, version, and scope; failed or unknown persistence is not reported as saved. | `MEM-A01` | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A03` | Repeating the same operation with the same payload is idempotent and does not create a duplicate memory. | `MEM-A02` | `SOURCE/STATIC` |
+| `MEM-A04` | Reusing a memory ID with a different payload returns a conflict and leaves the committed value and version unchanged. | `MEM-A02` | `SOURCE/STATIC` |
+| `MEM-A05` | An update with the current revision commits, while a stale revision conflicts without silently overwriting the current value. | `MEM-A04` and optimistic-version lifecycle | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A06` | A different fresh authorized session recalls the current version and does not receive old transcript text as memory. | `MEM-A05`, `RUN-A01` | `DEPLOYED-RUNTIME`, `MODEL/SESSION` |
+| `MEM-A07` | Foreign principal, project, workspace, or visibility reads and writes fail closed without disclosing the protected record. | `MEM-A01` and scope/visibility boundaries | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A08` | `/chat` save → external `/opencode` recall and external `/opencode` update → `/chat` recall use one API-owned persistence/retrieval contract. | `MEM-A06`, `MEM-A07`, `RUN-A01` | `DEPLOYED-RUNTIME`, `MODEL/SESSION` |
+| `MEM-A09` | Explicit memory use/save controls remain independent from inferred learning and synthesis; an inferred observation is not an explicit save receipt. | `MEM-A01` and existing learning controls | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A10` | Forget produces a truthful committed receipt, and a fresh authorized session no longer recalls the forgotten memory. | `MEM-A06` | `DEPLOYED-RUNTIME`, `MODEL/SESSION` |
+| `MEM-A11` | After forget, synthesis, cache, and jobs cannot reintroduce or serve the forgotten record. | `MEM-A10` | `SOURCE/STATIC`, `DEPLOYED-RUNTIME` |
+| `MEM-A12` | Restoring an older populated fixture backup cannot resurrect the forgotten record in its live scope. | `MEM-A10`, `MEM-A11` | `SOURCE/STATIC` |
+| `MEM-A13` | Quoted, imported, or hostile retrieved content is framed as data and cannot grant instructions, tools, permissions, or new scope. | `MEM-A06` and bounded retrieval | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A14` | Migration/backfill preserves populated synthetic fixture IDs, ownership, scope, values, and revision semantics. | Existing migration and populated fixtures | `SOURCE/STATIC` |
+| `MEM-A15` | The retrieval/context manifest stays within the initial 2,048-token/16-item budget, remains configurable, and does not stuff the full transcript. | `MEM-A06`, `MEM-A08` | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `MEM-A16` | A revision-aware result manifest records base commit, relevant dirty-file hashes, dependency results, exclusive paths, memory/profile/tool revisions, owner/fence, unresolved operations, and next work. | Existing coordination-manifest scope | `SOURCE/STATIC` |
+| `MEM-A17` | Review is admitted only for finalized input/output manifests; a dirty-file or hash mismatch is detected as stale input before review. | `MEM-A16` and finalized-review gate | `SOURCE/STATIC`, `REVIEW` |
+| `MEM-A18` | The affected Memory UI accurately and accessibly exposes save, queued, failed, updated, and forgotten states. | `MEM-A01`, `MEM-A10`, affected UI boundary | `SOURCE/STATIC`, `VISUAL` |
+
+| ID | Existing-scope acceptance scenario | Depends on | Required evidence |
+|---|---|---|---|
+| `COORD-A01` | A typed operational record preserves actions, changed paths, checks, and results and is retrievable only in its authorized scope. | Existing coordination-memory contract | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `COORD-A02` | Task, `TodoWrite`, status, and `nextWork` state persists and replays after restart. | `COORD-A01`, `RUN-A01` | `DEPLOYED-RUNTIME`, `MODEL/SESSION` |
+| `COORD-A03` | A dispatch phase applies the current allocation rule: Single-Todo mode uses 1–6 useful distinct agents; Multi-Todo mode uses exactly two agents per Todo across max three Todos; the global limits are `A<=6/W<=3`; and writer territories are exclusive. | Existing [operating model](#operating-model), `ORCH-100` enforcement | `SOURCE/STATIC`, `REVIEW` |
+| `COORD-A04` | Result manifests carry base/revision, ownership/fence, and dependency outcomes; stale or foreign updates fail closed. | `COORD-A01`, `COORD-A03` | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `COORD-A05` | A review binds to a finalized input/output manifest and detects dirty-file or revision drift before review begins. | `COORD-A04` | `SOURCE/STATIC`, `REVIEW` |
+| `COORD-A06` | An unknown or cancelled operation preserves its first failure and reconciles by task/operation ID before replay; an uncertain mutation is never replayed. | `COORD-A01`, `COORD-A02` | `SOURCE/STATIC`, `MODEL/SESSION` |
+| `COORD-A07` | The declared review gate and final `TodoWrite`/roadmap reconciliation retain separate evidence labels, and a reviewer is not rerun after its named regression. | `COORD-A05`, `COORD-A06`, existing review policy | `REVIEW`, `MODEL/SESSION` |
+
+| ID | Existing-scope acceptance scenario | Depends on | Required evidence |
+|---|---|---|---|
+| `VIS-A01` | The final affected `/chat` and `/opencode` memory surfaces are captured at `1440x900` and `390x844` with route/revision/fixture, accessibility, console/network, screenshot, and browser-cleanup evidence. | `MEM-A18`, final UI change | `VISUAL` |
+| `VIS-A02` | One passive full-site desktop/mobile sweep runs at `1440x900` and `390x844` after the final UI change, retaining its clean or failed result without stale artifacts. | `VIS-A01` | `VISUAL` |
+
+| ID | Existing-scope acceptance scenario | Depends on | Required evidence |
+|---|---|---|---|
+| `RUN-A01` | The exact merged artifact is deployed and restarted as required; API health, affected `/chat`/`/opencode` routes, MCP initialize/list, and the state-bearing status canary are verified with source/image provenance. This runtime proof does not substitute for model/session or visual proof. | `BASELINE-100`, finalized applicable source/client boundaries, conditional recovery admission for parent restart | `DEPLOYED-RUNTIME` |
+
+The scenario ledger defines all previously referenced acceptance IDs exactly once.
+It does not add work markers or completion evidence. This documentation-only
+clarification itself provides `SOURCE/STATIC` evidence only; no listed scenario,
+deployment, runtime, model/session, visual, QA, security, or containment gate is
+claimed passed.
+
+## Planned OpenCode TUI session-ID sidebar feature (2026-09-05)
+
+This append-only opening allocates the previously unused task ID `OPENCODE-100`.
+It records the requested OpenCode terminal user interface (TUI) feature as a
+planned contract only; it does not implement UI, change source or configuration,
+commit, deploy, restart, delegate work, mutate the Docs Workspace, or claim
+source, deployed-runtime, model/session, visual, QA, security, or completion
+evidence. The related [MEMORY-100 rollout](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination)
+and [RECOVERY-102 linked/forked-session contract](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing)
+are context links only and must not block unrelated work.
+
+#### OPENCODE-100 — Copyable current session ID in the OpenCode TUI sidebar
+
+- **Status:** `PLANNED` — roadmap contract only; no implementation, deployment,
+  restart, actual TUI/session, visual, QA, security, or completion evidence is
+  claimed.
+- **Outcome:** The actual OpenCode TUI sidebar in the VS Code terminal/embedded
+  terminal surface shows a compact, beautiful, copyable locator for the current
+  raw OpenCode `sessionID`. It fits naturally beneath the title and near Context
+  without displacing the existing Context, MCP, LSP, Todo, or footer sections.
+- **IN_SCOPE:** First inspect the installed OpenCode `1.18.29` reported by the
+  user against the repository-supported OpenCode `1.18.9`, the relevant source
+  and package contracts, and the supported TUI extension points. Choose the
+  smallest proven native integration; a dashboard wrapper alone does not satisfy
+  this contract, and no speculative upstream fork or patch is allowed before
+  source proof and a minimal integration choice. Add a compact Session section
+  just under the title/near Context with a subtle label, monospaced raw session
+  ID, narrow-terminal truncation, and an understated copy affordance. Copy must
+  always use the full exact ID even when rendering is truncated. Provide
+  transient `Copied` and failure/unavailable feedback without a layout jump;
+  support the keyboard, focus, and mouse interactions the actual TUI supports;
+  and provide selection/manual-copy or a supported terminal clipboard fallback,
+  including VS Code/WSL and embedded ttyd. Resolve the authoritative current
+  OpenCode session ID and replace it atomically on switch, new, and fork, with no
+  stale value. Never substitute a coordination hash, project ID, or auth
+  credential: the displayed/copyable session ID is a locator, not an auth
+  credential. Capture actual TUI screenshots at wide and narrow terminal sizes;
+  if the embedded terminal browser surface changes, also capture the required
+  desktop/mobile browser evidence.
+- **OUT_OF_SCOPE:** This roadmap-only opening performs no UI/source/configuration
+  edit, commit, deployment, restart, external delegation, or documentation
+  update outside this file. The future feature excludes a dashboard-wrapper-only
+  implementation, unsupported OpenCode patches/forks, new session or auth
+  protocols, coordination/project-ID display, credential handling, unrelated
+  sidebar redesign, and unrelated memory/recovery work.
+- **Owner:** `@ingenium-software-engineer-premium` owns the source-first TUI
+  integration and focused tests; `@ingenium-docs` owns this roadmap contract and
+  any later directly affected canonical wording; the current opening has no
+  implementation or delegation owner action.
+- **Dependencies:** The implementation's first gate is the bounded installed-
+  versus repository-version and supported-extension-point inventory. The linked
+  [MEMORY-100 contract](#memory-100--explicit-saved-memory-and-revision-aware-agent-coordination)
+  and [RECOVERY-102 contract](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing)
+  may supply related session, switch, link, or fork semantics, but are
+  non-blocking context links; `OPENCODE-100` neither blocks nor waits on unrelated
+  memory/recovery work.
+- **Acceptance:** Source evidence identifies the installed/repository version
+  difference and a supported native TUI extension point before implementation;
+  the sidebar renders the current raw OpenCode `sessionID` in the intended
+  Session section with stable truncated narrow-terminal output; copy returns the
+  full exact ID; success, unavailable, denied, and failure paths never report a
+  false copy; keyboard/focus/mouse behavior matches the actual TUI; switch/new/
+  fork transitions update the ID atomically without stale display or copied
+  values; coordination hashes, project IDs, and auth credentials are rejected as
+  substitutes; wide/narrow actual-TUI screenshots pass; and any changed embedded
+  ttyd/browser surface passes desktop/mobile accessibility, console/network, and
+  cleanup checks.
+- **STOP_CONDITION:** For this documentation opening, `PASS` means the planned
+  contract, unique ID, required fields, and links are statically verified;
+  deployment is `N/A` now. The future feature may claim `PASS` only after the
+  source/extension-point proof, focused tests, rebuilt current-source runtime
+  health, actual TUI interaction and screenshot evidence, applicable embedded
+  browser desktop/mobile evidence, QA/visual/security gates, and final
+  TodoWrite/roadmap reconciliation all pass. Explicit user `STOP` or
+  `CANCELLED` is terminal; otherwise continue in scope or use only the permitted
+  escalation rule. No source-only, file-only, dashboard-only, or simulated result
+  may be treated as full acceptance.
+- **Escalation:** Only unavailable required protected OpenCode/runtime or browser
+  access after the configured supported path was attempted, an unauthorized
+  destructive or irreversible action, a mutually exclusive product or supported
+  extension-point decision, genuine ambiguity about the authoritative session
+  identity, or a bounded diagnosis that cannot reproduce the cause. A failed
+  static or feature check alone is not escalation.
+- **Verification owner:** `@ingenium-qa` owns one targeted source/runtime and
+  interaction report; `@ingenium-qa` owns the actual TUI wide/narrow visual
+  evidence and, only if embedded ttyd changes, the desktop/mobile browser gate;
+  `@ingenium-security-auditor` is applicable once only if source inspection shows
+  an auth/session transport or credential boundary change. Reviewers do not
+  expand scope, delegate, or rerun after a named remediation.
+- **Deployment owner:** `N/A` for this roadmap-only opening. For a later runtime
+  implementation, `@ingenium-software-engineer-premium` rebuilds/restarts the
+  current merged source and health-checks the actual OpenCode TUI and embedded
+  terminal path; any required parent activation uses the existing
+  replacement-first recovery gates.
+- **Security surface:** The raw OpenCode session ID is a user-visible locator,
+  never an authentication credential. The integration must not copy, persist, or
+  log bearer tokens, auth-session values, coordination hashes, project IDs, or
+  unrelated private data, and must not broaden any auth/session scope.
+- **Rollback/safety:** This opening is append-only and has no runtime rollback
+  action. A future rollback removes only the Session display/copy integration,
+  preserves the existing sidebar sections and session state, fails closed when
+  the raw ID is unavailable, and retains no secret or credential in screenshots,
+  logs, clipboard fallbacks, or evidence.
+- **Tests:** Version/source and supported-extension-point inventory; raw-ID
+  producer and non-substitution checks; exact full-copy versus truncated-render
+  checks; copied/unavailable/permission-denied/failure feedback; fixed-layout
+  feedback; keyboard/focus/mouse and manual-selection fallback; VS Code/WSL and
+  embedded ttyd clipboard paths; atomic switch/new/fork and stale-ID negatives;
+  actual wide/narrow TUI screenshots; and, if the embedded terminal browser
+  changes, Playwright desktop/mobile checks at `1440x900` and `390x844` with
+  accessibility, console/network, and browser-cleanup evidence.
+- **Docs:** This roadmap only for the current task; no documentation outside it
+  is changed. After verified implementation, update only directly affected
+  OpenCode or multi-session canonical sections in a later documentation task.
+- **Exclusive writer territory:** Premium owns the proven OpenCode TUI
+  integration and focused tests; any embedded ttyd/browser harness changes are
+  serialized in their own declared territory; Docs owns only
+  `docs/reference/ROADMAP.md` in this opening and later named canonical wording.
+  No dashboard wrapper may be used as a substitute, and no writer may overlap
+  unrelated memory, recovery, or sidebar work.
+- **Phase/counts:** `O0` planned OpenCode TUI lane; future source work uses one
+  exact implementation pair, `@ingenium-software-engineer-premium` plus
+  `@ingenium-explore`, with `A=2`, `W=1`, and read-only ceiling `5`; QA/visual
+  review waits for the finalized integration, and deployment is serialized after
+  source verification. The current documentation opening dispatches no agents.
+- **UNUSED_CAPACITY:** All six active and three writer slots are unused by this
+  opening because the user explicitly limited the work to one roadmap file and
+  forbade delegation; no implementation, review, browser, deployment, or
+  speculative upstream work is added.
+- **Verification plan:** First run the roadmap-only ID/field/link/whitespace
+  checks after this append. In the future implementation lane, inspect the
+  installed `1.18.29` report and repository `1.18.9` source/package contracts,
+  prove the supported TUI extension point, implement the smallest native
+  boundary, run focused copy/feedback/keyboard/transition/fallback tests, deploy
+  the current merged source, health-check the actual TUI/embedded terminal,
+  capture wide/narrow TUI evidence and any applicable `1440x900`/`390x844`
+  browser evidence, run the single applicable QA/visual/security review set, and
+  reconcile evidence/TodoWrite/markers. Fix only the first reproducible
+  in-scope root cause and rerun its minimum proving regression.
+- **Causal remediation rule:** Fix the earliest proven version mismatch,
+  unsupported extension boundary, session-ID producer, atomic transition,
+  truncation/copy, feedback-layout, clipboard fallback, or terminal integration
+  cause; do not hide a stale or incorrect ID with dashboard text or a display-only
+  patch, and do not fork/patch upstream without source proof.
+- **Finding classification:** Wrong/stale/non-raw ID, false copy success, auth or
+  coordination/project-ID substitution, broken switch/new/fork atomicity,
+  unsupported integration, missing required actual-TUI evidence, or applicable
+  accessibility/visual/runtime failure is `BLOCKING`; optional sidebar polish,
+  alternate upstream support, or unrelated memory/recovery work is `FOLLOW_UP`;
+  version inventory, provenance, and bounded screenshot/test metadata are
+  `INFORMATIONAL`.
+- **Evidence classes:** `SOURCE/STATIC` proves version, extension-point, producer,
+  and focused behavior; `DEPLOYED-RUNTIME` proves the rebuilt actual TUI/embedded
+  terminal path; `MODEL/SESSION` proves switch/new/fork current-session behavior;
+  `VISUAL` proves wide/narrow TUI and any changed desktop/mobile browser surface;
+  `REVIEW` is bounded and separate. No evidence class substitutes for another.
+- **Markers/evidence:** No work marker is added by this documentation-only
+  opening. Future execution must append one `work-started` marker after the
+  version/extension-point preflight and declared ownership, then one matching
+  `work-complete` marker only after every applicable acceptance gate passes, with
+  non-empty evidence for source, deployed runtime, actual TUI/session, visual,
+  review, cleanup, and final reconciliation. No completion marker or runtime
+  evidence is claimed here.
+
+## Source/static inventory for the approved rollout (2026-09-05)
+
+This append-only inventory records source evidence read from the current checkout
+for the approved rollout lanes. `IMPLEMENTED_UNVERIFIED` means that a relevant
+source/configuration surface is present. `CLOUDFLARE-100` and `PLAYWRIGHT-100`
+are now `IN_PROGRESS`; this inventory does not claim deployed-runtime,
+model/session, visual, QA, security, or completion evidence.
+
+- **MCP-107 — `IMPLEMENTED_UNVERIFIED` (`SOURCE/STATIC`):** The packaged
+   launcher resolves the extension-owned `dist` entry point, rejects missing or
+   symlinked launchers, and projects the global MCP environment without an inline
+   bearer token in [`mcp-launcher.ts`](../../services/ingenium-api/lib/mcp-launcher.ts).
+   The extension bridge binds the project/worktree, uses a non-shell stdio child,
+   bounds and redacts stderr, and checks the packaged launcher in
+   [`mcp-client.ts`](../../packages/ingenium-extension/mcp-client.ts). Exact
+   `-32000` first-stage diagnosis, race reproduction, deployment, and MCP canary
+   evidence remain open. External sessions still use local stdio to the trusted
+   authenticated API; a remote authority requires the operator-controlled
+   `INGENIUM_TRUSTED_API_URL` HTTPS boundary.
+- **AGENT-100 — `IMPLEMENTED_UNVERIFIED` (`SOURCE/STATIC`):** Root
+   [`opencode.json`](../../opencode.json) contains the runtime model/variant
+   entries, while [`resource-sync.ts`](../../packages/ingenium-extension/resource-sync.ts)
+   validates categorized native profiles, default-deny permissions, lifecycle
+   booleans, and unique names. The profile projection and global-config scripts
+   preserve the broker exception and strip managed root agent fields other than
+   model/variant. Profile text records the `@ponytail` preflight and Scout's
+   retrieval-only boundary. [`coordination-reset.ts`](../../packages/ingenium-extension/coordination-reset.ts)
+   issues a bound service credential, verifies its scope, installs it atomically,
+   and revokes prior matching credentials. Full-parent restart and actual loaded
+   prompt/tool evidence remain open.
+- **CLOUDFLARE-100 — `IMPLEMENTED_UNVERIFIED` (`SOURCE/STATIC`):** The core
+   Cloudflare boundary validates an existing named tunnel, exactly five service
+   mappings, distinct public HTTPS origins, and protected vault-token metadata in
+   [`cloudflare-tunnel.ts`](../../packages/ingenium-core/lib/tools/cloudflare-tunnel.ts).
+   [`cloudflare-connector.ts`](../../services/ingenium-api/lib/cloudflare-connector.ts)
+   owns the fixed Supervisor lifecycle, while
+   [`cloudflare-trusted-ingress.ts`](../../services/ingenium-api/lib/cloudflare-trusted-ingress.ts)
+   loads the no-follow, bounded trusted inventory from the fixed
+   `/etc/ingenium/cloudflare-routes.json` path and requires the exact targets
+   `authenticated-production-dashboard-gateway`,
+   `authenticated-production-opencode-audience-gateway`,
+   `authenticated-production-cli-audience-gateway`,
+   `authenticated-production-vscode-audience-gateway`, and
+   `authenticated-https-api-boundary`. Authenticated API routes and the Settings
+   panel expose validation, connect, disconnect, per-audience selection, and
+   write-only token handling without DNS management. Live connector, HTTPS
+   gateway, and route-health evidence remain open.
+- **PLAYWRIGHT-100 — `IMPLEMENTED_UNVERIFIED` (`SOURCE/STATIC`; historical and superseded for current state by the 2026-09-10 completion record below):** The managed
+   child preset pins `@playwright/mcp@0.0.78`, the executable
+   `/app/node_modules/.bin/playwright-mcp`, the browser path
+   `/opt/ingenium-playwright/chromium`, the `ingenium_playwright_*` namespace,
+   isolated/headless vision mode, blocked service workers, bounded file output,
+   identity-derived temporary output, redaction, and cleanup in
+   [`child-mcp-playwright.ts`](../../services/ingenium-server/lib/child-mcp-playwright.ts).
+   The image installs the browser under `/opt/ingenium-playwright/browsers`;
+   root direct `mcp.playwright`/`npx -y @playwright/mcp` is not the managed path.
+   Child discovery materializes only the matching owned definition and removes
+   discovered tools on failure or shutdown. This historical source inventory's
+   deployed-lifecycle open state is superseded for current Playwright reading
+   by the completion record below; independent containment gates retain their
+   own evidence boundary.
+- **MEMORY-100 — `IMPLEMENTED_UNVERIFIED` (`SOURCE/STATIC`):** The explicit
+   memory core implements scoped save/update/forget/read operations, committed
+   receipts, idempotency and operation conflicts, optimistic version conflicts,
+   tombstones, restore suppressions, bounded retrieval, and post-transaction WAL
+   checkpoints in [`explicit-memory.ts`](../../packages/ingenium-core/lib/tools/explicit-memory.ts).
+   Authenticated API routes expose the save/update/forget lifecycle in
+   [`memory.ts`](../../services/ingenium-api/lib/routes/memory.ts), while the
+   core state resolver preserves restore suppression; the extension/dashboard
+   clients frame retrieved content as untrusted data in
+   [`explicit-memory.ts`](../../packages/ingenium-extension/explicit-memory.ts)
+   and [`explicit-memory.ts`](../../services/ingenium-dashboard/src/lib/explicit-memory.ts).
+   Fresh independent-session, restart-replay, suppression, and visual evidence
+   remain open.
+- **OPENCODE-100 — remains `PLANNED`:** The installed plugin declaration exposes
+   native `sidebar_title`/`sidebar_content` slots and a raw `session_id` in
+   `node_modules/@opencode-ai/plugin/dist/tui.d.ts`; this is static extension-point
+   evidence only. The reported installed OpenCode `1.18.29` versus repository-
+   supported `1.18.9`, clipboard behavior, actual TUI interaction, and runtime
+   proof remain unverified. No TUI/sidebar implementation or runtime claim is
+   recorded.
+
+### Current execution evidence reconciliation (2026-09-05)
+
+This append-only node records the retained execution limits alongside the source
+inventory above. It does not convert source reads, an API liveness response, or
+partial review notes into deployment, MCP, model/session, visual, QA, security,
+or completion evidence.
+
+- **Verification record:** All feature test and typecheck attempts were denied
+  with the exact error `Managed shell coordination denied the command`. The only
+  reported completed verification is actual static QA for `AGENT-100`; the initial
+  general QA intake was rejected before a QA report was completed. Security-review
+  blocker findings have source remediation recorded, but their proving regressions
+  were not run and no reviewer was rerun.
+- **Unclosed runtime evidence:** No current-revision deployment, live
+  TUI/profile/`@ponytail` replay, Cloudflare public-route check, fresh independent
+  memory session, fresh screenshot, or cleanup proof exists. An API liveness `200`
+  is not MCP initialize/list or state-bearing MCP proof. Browser-helper attempts
+  returned no script JSON and observed no page authentication; external token
+  absence is not confirmed at runtime. The retained browser-helper error history
+  is in [`browser-agent-errors.md`](../../.opencode/agents/browser-agent-errors.md).
+- **MCP diagnosis:** The `LIVE MCP` closure cause remains unknown because the
+  first startup stderr/exit artifact was not captured. Source defects identified
+  in the launcher/bridge do not prove the cause of the browser screenshot or
+  connection failure. The intended root [`.env.example`](../../.env.example)
+  edit was denied and remains pending.
+- **Next exact steps:** Secure supported test admission and capture the actual
+  MCP startup stderr/exit; run the named focused regressions; deploy the current
+  source through the safe parent-restart gates and health-check actual routes;
+  capture live MCP, TUI/profile, Cloudflare, fresh-memory-session, screenshot,
+  accessibility/console/network, and cleanup evidence; then reconcile TodoWrite
+  and roadmap markers. Do not replay an uncertain mutation, mark the original
+  task complete, or cancel pending work before those gates pass.
+
+**Inventory verification:** Source/static reads only in this documentation update;
+no new work-started or work-complete marker is added. The rollout remains open and
+no `PASS` is claimed.
+
+### Latest browser-evidence task update (2026-09-05)
+
+- **Helper interface:** Evidence-producing calls now document the explicit
+  `.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json`
+  form, with the browser script emitting exactly one `JSON.stringify(...)` value
+  on stdout. Non-evidence helper calls may remain plain text; JSON is not a global
+  requirement, and empty output is not authentication proof.
+- **Verification limits:** The source helper fix and focused test were not
+  executed because managed shell coordination denied the command. The live browser
+  attempt failed, and MCP startup stderr/exit remain unknown after the bounded
+  configured paths. No screenshot or runtime-completion evidence is claimed.
+- **OPENCODE-100:** The user-requested sidebar-roadmap addition is done, while
+  `OPENCODE-100` remains `PLANNED`; no TUI, model/session, runtime, or visual
+  completion is claimed.
+
+### Final helper-parser documentation reconciliation (2026-09-05)
+
+- **Static scope completed:** The browser-agent evidence examples and the
+  directly matching dev-browser integration/setup examples now use the admitted
+  executable form
+  `.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json <<'EOF'`
+  without a `bash` prefix. Non-evidence helper calls may still omit `--json` and
+  return plain text; JSON mode is not a global requirement.
+- **OPENCODE-100:** The copyable `sessionID` sidebar feature remains a
+  roadmap-only `PLANNED` item. No verified writer-final source for that feature
+  was available in this reconciliation; any source feature changes remain
+  unverified, and activation and tests remain pending.
+- **AGENT-100:** The retained actual static-QA pass is tied to task
+  `ses_f8c1b8a19ffe1emkkDDBDzdRnh`; executable tests were denied by managed shell
+  coordination. This does not provide deployed, live MCP, model/session, or
+  visual proof.
+- **Current proof boundary:** No current deployed-runtime, live MCP,
+  model/session, or visual proof is recorded.
+- **Runtime and access limits:** The first runtime stderr/exit and child-identity
+  diagnostic gap remains bounded after the configured paths were denied. There
+  is no proof that a Cloudflare credential is absent and no proof that browser
+  login is required; neither condition is asserted. No automatic Todo was
+  cancelled.
+- **Pending work:** `.env.example` remains pending after mutation denial.
+  `nextWork` is to obtain the actual redacted failed MCP child log/artifact and a
+  safe executable test path, then run focused tests, deploy, and complete UI and
+  model/session acceptance. The rollout is not overall complete and no such
+  completion is claimed.
+
+**Reconciliation stop:** Static documentation is complete for this task. Stop
+unless the user explicitly stops/cancels or a permitted external escalation is
+proven; the outstanding runtime/source/test gates remain open.
+
+## Latest rollout ledger reconciliation (2026-09-06)
+
+This append-only ledger records the latest exact-source reset and helper trace.
+It preserves every prior status, marker, evidence record, and completion state;
+it adds no completion and does not authorize execution.
+
+### Protected reset trace and admission boundary
+
+> **Superseded pointer (2026-09-09):** The coordinator admission/hooks described in this retained reset trace are historical evidence; owner decision removed the tool-execution enforcement layer and current verification is profile-governed.
+
+- **Exact source order (`SOURCE/STATIC`):** The literal special-admitted
+  `ingenium-coordination-reset reset` path creates the durable
+  `.opencode/.ingenium-mcp-credential.reset-lock` first, then performs the
+  bootstrap-owner login and recent step-up, issues a new 30-day general `mcp`
+  service credential, atomically replaces `.opencode/.ingenium-mcp-credential`,
+  verifies the safe `GET /auth/preflight` **after issuance and replacement**,
+  and revokes only prior credentials matching the exact project/workspace/
+  launcher binding and all six coordination scopes:
+  `coordination:read`, `coordination:write`, `projects:read`,
+  `repository:sync`, `documentation:read`, and `rag:read`. The traced reset
+  runner is [`coordination-reset.ts:1053-1099`](../../packages/ingenium-extension/coordination-reset.ts)
+  with owner login/step-up and issuance contracts at
+  [`coordination-reset.ts:826-935`](../../packages/ingenium-extension/coordination-reset.ts)
+  and exact-match revocation at
+  [`coordination-reset.ts:937-1009`](../../packages/ingenium-extension/coordination-reset.ts).
+- **Admission:** `session-coordinator.ts:386-397` admits only the exact
+  literal command `ingenium-coordination-reset reset` as the reset-only
+  read-only coordination exception; this independent exception does **not**
+  require the existing general binding/authentication. The before/after hooks at
+  `session-coordinator.ts:3201-3272` prepare the reset and then reconnect
+  after it; the reload path creates fresh incarnations, re-registers, recovers
+  the accepted epoch, and replays the bounded outbox before clearing reset
+  state (`session-coordinator.ts:1497-1561`, `1587-1623`). Current issuer and
+  admission contracts agree, but the active parent’s cached binding and loaded
+  source remain **UNKNOWN**.
+- **No inspection mode / current governance:** The CLI grammar at
+  [`coordination-reset.ts:1102-1131`](../../packages/ingenium-extension/coordination-reset.ts)
+  has `reset`, `reset-learning`, and owner-secret `store` forms only. No
+  `status`, `dryrun`, or `inspect` mode exists. The safe `GET /auth/preflight`
+  is a post-issuance verification endpoint, not an independently admitted
+  CLI/MCP reset-status method. The earlier coordinator admission wording in
+  this ledger is superseded by the 2026-09-09 owner decision: `.opencode/agents/**`
+  profile permissions are the sole tool gate, and the coordinator does not admit
+  or deny `ingenium-build` or other tool execution. `ingenium-build` and
+  `ingenium-repository` remain neutral optional utilities; reset verification
+  remains an executable gate under the invoking profile.
+- **Live boundary:** Package `bin` wiring names the generated reset executable,
+  but bare executable availability on the actual `PATH` is unproven; the
+  inspected local npm bin has no `ingenium-coordination-reset` entry. The reset
+  is **not** proven as a live fix. No runtime, parent-reload, fresh-incarnation,
+  epoch, safe-replay, or MCP canary claim is made.
+
+### Historical credential authorization record
+
+- **Historical task-state (preserved, superseded for current development):** The
+  earlier accepted scope recorded credential mutation/reset as outside that
+  task, so no reset or rotation was authorized by that earlier task. This is an
+  assistant-authored task/roadmap summary, not evidence that the user ever
+  denied general-MCP rotation/reset; it must not be reused as a current user
+  denial.
+- **Internal denial:** An invalid managed-shell, executable-path, or currently
+  loaded-parent denial is an internal diagnosis/recovery condition, not an
+  `ESCALATE_USER` authorization decision. This ledger requests no user logs,
+  test commands, or general go-ahead.
+
+### Browser-helper candidate and rollout state
+
+- Evidence task `ses_f80a05b0fffeLPVEUNkhtBc0dX` confirms that the helper at
+  [`.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh`](../../.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh)
+  is generic and has no removed `browser-agent` identity dependency. Active
+  skill docs use `--json`, but the active helper does not parse that option.
+- The helper candidate remains preserved at
+  [`tests/artifacts/wsl-chrome-connect-candidate-ea8833c8-20260906.md`](../../tests/artifacts/wsl-chrome-connect-candidate-ea8833c8-20260906.md).
+  Its parser/timeout improvements remain inactive, and it retains unsafe
+  all-Chrome `Stop-Process -Force` signaling. The active helper is restored to
+  the HEAD baseline; the candidate is **not lost, tested, or activated**.
+- The proposed safe probe was not invoked because the candidate can execute
+  `Stop-Process` against all Chrome processes and there was no current
+  prerequisite proof authorizing that destructive side effect. This is not
+  runtime browser evidence.
+- The required implementation must preserve generic browser/Playwright
+  infrastructure, remove all-Chrome signaling, add no-signal startup coverage,
+  and provide admitted execution. The exact future checks are
+  `bash tests/test-wsl-chrome-connect.sh` and the Vitest test
+  `browser denies the removed agent wrapper without weakening generic controls`
+  in `packages/ingenium-extension/session-coordinator.test.ts`. A Playwright
+  containment audit is not applicable to these stub shell/Vitest checks.
+- The restored MasterTodo contains 14 items and the original rollout remains
+  **OPEN and RESUMABLE**. `OPENCODE-100` remains **PLANNED**; its planned
+  sidebar feature has no new implementation, visual, runtime, or completion
+  evidence.
+
+### Contingent next work and verification boundary (historical record)
+
+- **Historical NextWork (superseded for current execution):** Do not reset until
+  an explicit external exception is granted.
+  If granted, first verify the exact executable, the current fixed binding, and
+  failure/rollback safety; then execute only the approved operation and run its
+  focused verification. Without that exception, establish a
+  credential-preserving independent executor before any dependent writes.
+- **Verification:** `SOURCE/STATIC` ledger and exact-source trace reconciliation
+  only. No tests, commands, deployment, commit, delegation, or runtime claims
+  were made in this update. Static ledger verification was the **STOP** boundary
+  for that historical documentation-only turn; it is not a current stop or
+  continuation rule. Deployment is **N/A**. No new marker or completion evidence
+  is recorded.
+
+### Current explicit development authorization and latest execution evidence (2026-09-06)
+
+This supplemental note corrects stale inferred authorization language only. It
+preserves the historical source/static and task-state evidence, does not close a
+dependency, and is not a blanket destructive-production license. The contingent
+`NextWork` restriction immediately above remains historical execution state and
+is superseded for the current development scope; it is not a current user
+denial.
+
+- **Authorization provenance:** Only an actual user instruction establishes a
+  user authorization or denial. Assistant summaries, contracts, roadmap notes,
+  and inferred constraints cannot fabricate a user denial; a later explicit
+  user instruction supersedes stale inferred constraints.
+- **Current authorized scope:** The user explicitly authorizes development
+  autonomy for replacement, revocation, reload, and coordination recovery of
+  the general-MCP credential at `.opencode/.ingenium-mcp-credential`, including
+  scoped investigation, implementation, tests, packaging/configuration,
+  recovery, and deployment under the existing safety, binding,
+  design-admission, rollback/adoption, redaction, unknown-outcome, and runtime
+  gates. Do not ask again for this same approved scope.
+- **Unchanged credentials/actions:** Password credentials, provider
+  credentials, the learning credential, and the repository-sync credential or
+  actions remain unchanged unless separately authorized.
+- **Every-turn autonomy hook:** `AUTONOMY_REMINDER_V1` is source-implemented and
+  focused-verified in the existing `session-coordinator` system-transform and
+  fallback paths ([`session-coordinator.ts:77,180-187,3382-3384,3554-3556`](../../packages/ingenium-extension/session-coordinator.ts)). Two focused
+  autonomy tests passed (`ses_f888cd094ffeeVnN3H7wLOAAo9`); a separate replay-fix
+  set of five passed (`ses_f8830c740ffeRlyIRJYpdWZoqY`); the latest extension
+  typecheck exited 0 (`ses_f88235fb7ffeGnv22T3zpVkI3I`); and single-hook QA passed
+  (`ses_f87fe064bffe7E0ptoAvfFu8V2`). The full 64-test coordinator integration is
+  unrun/denied latest and is not `PASS`. Existing-parent activation is not proven;
+  no restart was performed. This note is not runtime enforcement or proof of
+  parent activation; a reminder is distinct from scheduler and tool-policy
+  authority and cannot grant permissions.
+- **Retained execution trace, not success:** Within the current user-development
+  authorization, the general reset was executed once, returned `exit 1` at
+  `binding`, and cleaned its reset lock. Credential replacement or revocation
+  outcome remains not fully proven. After the hook path, a forced reload of the
+  existing credential was permitted; the latest extension typecheck exited 0
+  (`ses_f88235fb7ffeGnv22T3zpVkI3I`). Do not repeat reset.
+- **Todo10 evidence task, not success:** `ses_f80b58bc0ffevj1V0Gw9Mn7s1Y`
+  records the exact result `coordination reset: failed (binding)`, with the
+  reset lock definitely created and cleaned and the command incomplete. Prior
+  credential revocation was definitely not reached; replacement DB issuance is
+  UNKNOWN. The inspected rollback source does not expect a persistent local
+  replacement for this incomplete command, but current identity remains
+  UNKNOWN. Forced reconnect, re-registration/epoch recovery, and outbox replay
+  are UNKNOWN. No exact operation ID is available and no replay occurred. The
+  inventory of 168 outbox records and 1 disposition is inventory only, not
+  attribution to this reset. NextWork is read-only metadata/preflight/status
+  reconciliation followed by an exact-ID adoption/revocation decision; never
+  rotate or revoke by pattern and never rerun reset.
+- **Compose boundary:** `docker compose ps` exited 0 and the old container was
+  healthy for 38 hours. The first Compose build failed before image creation
+  because `IMAGE_REVISION` was unset (`ses_f87fe08f1ffe8aVqjNsW1DbntZ`); the
+  source wrapper-environment fix remains in progress.
+- **Source boundary:** The reset lock/finally cleanup and CLI failure mapping
+  are in [`coordination-reset.ts`](../../packages/ingenium-extension/coordination-reset.ts)
+  (`1018-1036`, `1053-1099`, `1102-1131`); existing-credential live reload and
+  the before/after hook path are in
+  [`session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts)
+  (`1497-1590`, `3201-3272`). These are source/static references, not runtime
+  success proof.
+- **Rollout continuity:** The full master Todo and all broader rollout tasks
+  remain open and resumable. Completing this narrow authorization/evidence note
+  never authorizes ending the broader rollout or claiming overall `PASS`.
+- **Verification boundary:** This documentation update records a static reread
+  after the edit only. No reset rerun, credential execution, deployment, commit,
+  or overall `PASS` is claimed.
+
+## Prospective scheduler clarification (2026-09-07)
+
+This entry is append-only and applies to future dispatches. It clarifies the
+live global scheduler without rewriting earlier task contracts, phase/count
+entries, markers, evidence, or historical statuses. Where older live-model
+wording says that every Todo must use a two-agent pair, use this mode-aware rule
+for new dispatches:
+
+- The global active set is capped at **6 total agents**, with at most **3
+  permission-derived writers** and a dynamic read-only ceiling of `6 - W`.
+  Concurrent phases share this budget; they do not receive separate six-agent
+  allowances. Writer territories remain exclusive, and underfilled capacity
+  must be justified without fabricating work or duplicate research.
+- **Single-Todo mode** selects one dependency-ready Todo and may assign 1–6
+  useful, distinct agents to independent streams. Consume every ready stream
+  that fits the global budget; do not default to two agents. Record the concrete
+  dependency, territory conflict, role absence, premature review, or lack of
+  another useful stream behind any underfill.
+- **Multi-Todo mode** selects two or three independent, dependency-ready Todos
+  and assigns exactly two agents to each in one parallel call, for four or six
+  total agents. Six agents are never assigned to each Todo. QA, security, and
+  visual timing, report limits, STOP/CANCELLED handling, no subagent
+  delegation, and the full master Todo remain unchanged.
+
+Examples: one cross-service Todo can use six useful agents across exclusive
+territories; two or three concurrent Todos use two agents per Todo, never six
+agents per Todo. This clarification is static policy evidence only; it does not
+prove runtime activation or alter excluded profiles, validation scripts, or
+deployment state.
+
+## Linked Current Todo 25: deterministic harness admission amendment (2026-09-07)
+
+This append-only item extends the existing `ORCH-100` continuation boundary. It
+preserves Current Todo 24's product decision and does not create a feature ID,
+replace a master item, authorize a restart, or claim rollout completion.
+
+- **Status:** `SOURCE/STATIC POLICY/DOCUMENTATION BOUNDARY COMPLETE`; runtime
+  source enforcement, verifier repair, profile activation, and model/session
+  evidence remain open under dependent Todos.
+- **IN_SCOPE:** The directly affected deterministic and design-admission wording
+  in [`AGENTS.md`](../../AGENTS.md), plus this roadmap linkage.
+- **OUT_OF_SCOPE:** Source, configuration, skills, native OpenCode patching,
+  credentials, restart, QA/security/visual execution, shell commands, broad
+  audit, delegation, and unrelated documentation.
+- **Acceptance:** Every mutation, check, deploy, or recovery gate has a current
+  supported executor, exact action, smallest safe probe, preserved working
+  verifier, rollback/adoption owner, and whole consumer contract including
+  package/compiled builds and Docker/Compose. A missing field rejects and
+  replans before dependent source; the rejection names an owner and dispatches
+  an executable enabling repair or current diagnostic in the same turn. Missing
+  verifier/status tools, managed denials, activation-only grants, and missing
+  diagnostic access remain owned harness defects. Failure signatures prevent
+  duplicate research, and `nextWork` names an executable action, owner, and
+  prerequisites.
+- **Authorization correction:** The historical ledger sentence “Do not reset
+  until an explicit external exception is granted” remains retained history and
+  is not current `nextWork`. The last assistant `ESCALATE_USER` is invalid as
+  current external evidence because the retained condition was internal denial or
+  missing access, not positive proof of an external need; it remains history and
+  is not erased. `ESCALATE_USER` is permitted only after positive evidence of a
+  genuinely external need and exhaustion of every configured supported path; the
+  current default is harness repair or a distinct supported diagnostic path.
+- **Boundary:** The accepted upstream reminder-only choice remains unchanged:
+  Markdown is policy/static evidence, not a native OpenCode completion veto, and
+  no native runtime patch is authorized here. Explicit user `STOP`/`CANCELLED`,
+  real security/irreversible boundaries, `A≤6`/`W≤3`, no blind replay, denied-
+  command safeguards, and no invented credentials remain in force. This rule
+  does not promise zero possible external failures.
+- **NextWork:** `@ingenium-orchestrator` preserves this static boundary, then
+  continues with the dependency-ordered verifier/resume, source-enforcement,
+  activation, and model/session gates. A missing supported status/diagnostic
+  path remains an internal harness-repair/current-diagnostic transition before
+  any dependent mutation; prerequisites are the full master-roadmap and
+  `TodoWrite` readback.
+
+### Todo25 consumed QA and static readback reconciliation (2026-09-08)
+
+- **Consumed finding:** QA task `ses_f7fe7d903ffez7Z0Eztveb4J2u` found one
+  `BLOCKING` static parity gap in the orchestrator. It is consumed and was not
+  rerun.
+- **Remediation evidence:** Task `ses_f7fdb259cffeXPC9OoRJrTpZVg` added the
+  design-admission/`REJECT_AND_REPLAN`, all-failure signatures,
+  stable-ID master-Todo continuity, and no-bootstrap-cycle controls to
+  [`.opencode/agents/primary/ingenium-orchestrator.md`](../../.opencode/agents/primary/ingenium-orchestrator.md).
+- **Named minimum readback:** The corresponding labels were confirmed in
+  [`AGENTS.md`](../../AGENTS.md) at lines 440, 486, 585, and 620, and in the
+  orchestrator profile at lines 124, 140, 148, and 156.
+- **Completion boundary:** Todo25 is complete only for this static
+  policy/documentation boundary. The former coordinator enforcement layer was
+  removed by owner decision; verification now runs directly under agent profile
+  permissions, and executable verification under profile governance remains open
+  alongside profile activation and model/session proof. No source test, restart,
+  deployment, or runtime/model claim is added.
+
+## Linked Current Todo 26: verification and resume reconciliation (2026-09-07)
+
+This append-only item is the resume gate linked to `ORCH-100` and Current Todo
+25. It keeps the full master roadmap open until evidence-backed completion and
+does not reinterpret this documentation request as `STOP`.
+
+- **Status:** `OPEN`; no completion marker and no broader-rollout `PASS`.
+- **IN_SCOPE:** One full master-roadmap and `TodoWrite` reconciliation; stable
+  item IDs; task/status/`nextWork`, claims, outbox, unknown-outcome, and
+  profile-governance state; dependency-ready mode selection; and preservation of
+  all existing evidence classes.
+- **Acceptance:** The owner initializes or updates a nonempty `TodoWrite` before
+  task/tool mutation, appends rather than replaces the master Todo, updates both
+  records after every transition, preserves unknown outcomes before replay, and
+  dispatches the next eligible action in the same turn. No status-only exit,
+  fake `PASS`, duplicate research, or invalid external escalation is accepted.
+  The former coordinator denial/preclaim/admission layer is removed by owner
+  decision; executable tool verification now runs directly under the applicable
+  `.opencode/agents/**` profile permissions.
+ - **Preservation:** Existing current-board rows 6 and 8 are unchanged: item 6
+   retains its proven isolated verifier with live/access gates open, and item 8
+   remains **UNKNOWN** with focused validation open. Item 9 now retains the
+   staged/isolated source-wave counts, consumed reviews, locked-dependency
+   fallback, unknown root-build denial, and unchanged active/dist boundary while
+   compiled refresh/runtime gates remain open. Historical records and Current
+   Todo 24 remain preserved.
+- **Verification boundary:** This documentation-only turn provides static
+  readback only; no QA, shell, restart, credential, source, deployment, or
+  model/session evidence is added. The full rollout remains open and resumable.
+- **NextWork:** After Todo 25's profile-governance readback, `@ingenium-orchestrator`
+  performs the read-only reconciliation once, attributes every unknown, and
+  selects/dispatches the next dependency-ready Todo under the mode guard. A
+  missing status/diagnostic path is routed to harness repair, never to a user
+  reconnect/provide-tools request.
+
+> **Superseded pointer (2026-09-09):** The managed-command/coordinator admission
+> denial described in the retained Todo26 evidence below is historical; owner
+> decision removed that enforcement layer. Current verification is governed by
+> `.opencode/agents/**` profile permissions, with executable verification still open.
+
+### Todo26 verifier-access rejection evidence (2026-09-08)
+
+- **Evidence:** Tasks `ses_f80dc8a8effe2U5eixxqUXNexi`,
+  `ses_f80cd88dcffeF9g22b2XbNINca`, `ses_f80d0ae0cffeBMvwXRmPuz1Eu3`,
+  `ses_f8090c434ffeG63PvCgE6SlCEC`, and resumed verifier
+  `ses_f88235fb7ffeGnv22T3zpVkI3I` record that the exact managed browser test
+  and typecheck were denied before a result. Source authorization reconstructs
+  Premium identity from session messages and collapses its predicates into a
+  generic denial; the same current error can also occur after execution when
+  pending authorization disappears.
+- **Admissibility:** Direct `npm`/`npx`, QA, Docker, jobs/CI, Recovery, MCP
+  build, and external-supervisor paths are not currently admitted alternatives.
+  Explore and Premium external-storage reads were denied. Allowed tool-output
+  search found 72 generic matches in 11 files, but zero target session IDs or
+  payload correlation.
+- **Decision:** `REJECT_AND_REPLAN`. No trusted-call source mutation, commit,
+  restart, or activation may use its own unavailable verifier. Preserve prior
+  source and require a currently attested diagnostic/verifier or an exact
+  durable session record before repair.
+- **Classification:** Internal access defect; no `ESCALATE_USER`. Todo26 stays
+  **OPEN**, with all dependent checks open and no completion marker.
+
+## Linked Current Todo 27: official-guide retrieval boundary (2026-09-07)
+
+This append-only item records the retrieved-guide context and links it to the
+separate Todo 28 integration. It remains linked to `ORCH-100`, creates no feature
+ID, and does not replace any master Todo.
+
+- **Status:** `RETRIEVED; 84 statements retained; Todo 28 integration recorded; activation OPEN`.
+- **Evidence boundary:** Task `ses_f81883549ffe41TuQsvsDvbTWn` retains the
+  official requested URL `https://developers.openai.com/api/docs/guides/latest-model`
+  and its advertised `.md` form
+  `https://developers.openai.com/api/docs/guides/latest-model.md`: 13 headings,
+  12 fenced examples, 84 statements (80 normative, 4 descriptive), section
+  match, and no truncation marker. No new browser retrieval, runtime proof, or
+  model/session proof is claimed here.
+- **Scope boundary:** Todo 28 owns integration of all 84 statements. Todo 32
+  adopts only the exact child-failure behavior that overlaps its own task;
+  unrelated guide rules are not assigned to it.
+- **NextWork:** Keep Todo 29's activation and runtime/session boundary separate;
+  do not infer activation from the retrieval or static integration evidence.
+
+## Linked Current Todo 30: browser-agent removal admission (2026-09-07)
+
+This append-only item records the removal boundary under `ORCH-100`. Its initial
+wave did not delete the profile or mapping or authorize a configuration removal;
+the later source/static reconciliation below records the implemented source
+removal without claiming host or runtime activation, and does not create a new
+feature ID.
+
+- **Status:** `SOURCE/STATIC REMOVAL IMPLEMENTED; Todo30 remains OPEN for
+  verification, artifact, deployment, activation, and runtime evidence`.
+- **Policy:** The removed `browser-agent` is not part of the active documented
+  topology and must not be routed or substituted, including for website
+  retrieval. No website retrieval may be assigned to `@browser-agent`.
+- **Verification boundary:** Evidence reference
+  `ses_f7f71279dffeSQzPCBP1GDdwcW` records the root mapping, canonical profile,
+  and browser-exception source removal as implemented static source. Projector,
+  coordinator, and validator tests; QA/security; host artifact refresh;
+  deployment; full-parent activation; and runtime-absence/loaded-session proof
+  remain open. No Workspace mutation is claimed.
+- **NextWork:** `@ingenium-software-engineer-premium` owns the admitted
+  projector/coordinator/validator checks and later activation boundary, while
+  `@ingenium-software-engineer-fast` owns the helper/parser check. Preserve the
+  prohibition and do not infer host, loaded-session, or runtime removal from
+  source text.
+
+### Todo30 wave 1 documentation/orchestration removal evidence (2026-09-07)
+
+This append-only node records the documentation boundary for Todo30's first wave.
+Its statements about physical removal describe the 2026-09-07 state; the later
+source/static reconciliation below records the subsequent source result without
+rewriting this historical evidence or creating a new feature ID.
+
+- **Status:** `SOURCE/STATIC WAVE 1 COMPLETE; TODO30 IN PROGRESS; WAVE 2 OPEN`.
+- **Changed paths:** `AGENTS.md`,
+  [`.opencode/agents/primary/ingenium-orchestrator.md`](../../.opencode/agents/primary/ingenium-orchestrator.md),
+  [`README.md`](../../README.md), [`.opencode/models.md`](../../.opencode/models.md),
+  [`docs/configure/agents.md`](../configure/agents.md), this roadmap, and
+  [`.opencode/agents/browser-agent-errors.md`](../../.opencode/agents/browser-agent-errors.md).
+- **Static result:** The active documentation topology now records 12 logical
+  agents including the broker, 11 user-facing agents (2 primary + 9 custom
+  subagents), one hidden broker, four writer-capable identities, 12 post-removal
+  mapping entries, 16 categorized profile files including four native overrides
+  and the broker, and 15 repository-sync non-broker profiles. The orchestrator
+  has no browser-agent task grant, active browser routing row, or browser writer
+  identity. The guide's G001–G084 wording is unchanged, including G056's browser
+  prohibition.
+- **Item 16 ownership:** The non-destructive helper/parser check is reassigned to
+  `@ingenium-software-engineer-fast`; `@ingenium-software-engineer-premium`
+  owns the later cross-cutting removal-admission boundary. The task remains
+  present and is not deleted.
+- **Residual classification:** Dated browser-agent/error evidence is historical
+  and retained with an explicit label. Physical profile, root mapping, projector,
+  coordinator, validator, skill, activation, restart, and source/test references
+  are wave-2 dependencies. Generic Playwright, browser automation, and passive
+  visual-QA guidance are not agent-topology references and remain valid.
+- **Verification boundary:** One affected-file active-reference search and direct
+  readback are the only checks for this wave. No tests, QA, security review,
+  restart, deployment, delegation, or Workspace mutation is performed. Static
+  docs `PASS` is limited to this readback; full Todo30 removal is not `PASS`.
+- **NextWork:** `@ingenium-software-engineer-premium` later admits and owns the
+  wave-2 projector/coordinator/validator/skills/activation boundary, while
+  `@ingenium-software-engineer-fast` later runs the helper/parser check. Neither
+  path may route or substitute the removed `browser-agent`.
+
+### Todo30 source/static removal reconciliation (2026-09-08)
+
+- **Evidence reference:** `ses_f7f71279dffeSQzPCBP1GDdwcW`.
+- **Static result:** The root mapping, canonical profile, and browser-exception
+  source removal are implemented in the repository source. This updates only
+  the current source/static state; it does not prove the generated or host
+  artifact, a loaded parent, or runtime absence of the removed agent.
+- **Open gates:** Projector, coordinator, and validator tests; one applicable QA
+  report and one security report; host artifact refresh; deployment;
+  full-parent activation; and runtime-absence/loaded-session evidence remain
+  open. Todo31's active skill-reference cleanup remains a separate item.
+- **NextWork:** `@ingenium-software-engineer-premium` runs the admitted
+  projector/coordinator/validator checks before the review and artifact gates;
+  `@ingenium-software-engineer-fast` retains the helper/parser check. No
+  completion marker or broader Todo30 completion is added.
+
+## Linked Current Todo 32: deterministic agent-failure documentation (2026-09-07)
+
+This append-only item implements the documentation boundary for the screenshot-
+derived agent-failure guard under `ORCH-100`. It preserves the upstream
+reminder-only product decision and does not create a native completion veto.
+
+- **Status:** `SOURCE/STATIC AMENDMENT RECORDED; enforcement OPEN`.
+- **IN_SCOPE:** The deterministic-failure and phase-accounting wording in
+  [`AGENTS.md`](../../AGENTS.md),
+  [`.opencode/agents/primary/ingenium-orchestrator.md`](../../.opencode/agents/primary/ingenium-orchestrator.md),
+  and this linked roadmap record.
+- **OUT_OF_SCOPE:** `session-coordinator` source/tests, other source or config,
+  delegation, Workspace mutation, tests, restart, deployment, model branding,
+  and Todo 28's full 84-statement guide integration.
+- **Acceptance:** The parent owns every active child transition/result;
+  `TOOL_STATE_UNAVAILABLE` and equivalent stable internal tool-state failures
+  are surfaced immediately; after the first failure there is at most one named
+  genuinely distinct diagnostic only when it can add evidence; changed
+  arguments/project/query do not justify a second same-family call; signatures
+  contain code, tool family, session, first path, attempted paths, new evidence,
+  owner, and nextWork without secrets; partial/cancel/abort/failure remains an
+  unknown nonterminal parent state; the parent reconciles and dispatches causal
+  harness repair in the same turn; and no user-provide-tools or status-only exit
+  is allowed. The phase protocol checks every active child transition/result.
+- **Enforcement boundary:** Permanent enforcement requires a source hook, focused
+  test, and activation. Markdown is static policy evidence, not enforcement.
+- **Verification boundary:** This turn provides targeted readback, marker grep,
+  and contradiction review only. No source-test, deployment, restart, or
+  model/session evidence is added; no full-rollout `PASS` is claimed.
+- **NextWork:** `@ingenium-software-engineer-premium` owns the later source/test
+  boundary in Todo 33; no source mutation is part of Todo 32.
+
+## Linked Current Todo 33: source hook and focused test (2026-09-07)
+
+This append-only item is the implementation dependency for Todo 32 and remains
+under `ORCH-100`.
+
+- **Status:** `OPEN; Premium-owned implementation boundary`.
+- **Owner:** `@ingenium-software-engineer-premium` owns the
+  `session-coordinator` source/test territory.
+- **Acceptance:** A source hook and focused regression enforce the documented
+  parent-owned child-outcome, stable-signature, one-distinct-diagnostic, and
+  same-turn repair behavior without secret-bearing evidence.
+- **Dependency:** Todo 32's static policy boundary is recorded; source/test
+  implementation and its minimum proving check remain outstanding.
+- **NextWork:** Premium implements the admitted source/test change and runs only
+  its named focused regression; Markdown alone cannot close this item.
+
+## Linked Current Todo 34: activation and runtime acceptance (2026-09-07)
+
+This append-only item is the deployment and activation dependency for Todo 33
+under `ORCH-100`; it is not part of the current documentation turn.
+
+- **Status:** `OPEN; deployment owner Premium later`.
+- **Acceptance:** After Todo 33, the current merged source is activated through
+  the full parent path and passes the declared health, recovery, and actual
+  model/session checks. A child-source test or documentation readback is not
+  runtime proof.
+- **Boundary:** No restart, deployment, activation, or model/session evidence is
+  added here. The accepted upstream OpenCode reminder-only decision remains in
+  force; no native completion veto is promised.
+- **NextWork:** `@ingenium-software-engineer-premium` owns the later deployment/
+  activation wave after the source/test gate passes, preserving the existing
+  restart and recovery safeguards.
+
+## Linked Current Todo 28: official-guide instruction integration (2026-09-07)
+
+This append-only item records the documentation integration under `ORCH-100`. It
+does not create a feature ID, replace a master Todo, authorize an API change, or
+claim activation.
+
+- **Status:** `SOURCE/STATIC COMPLETE; activation and runtime proof OPEN`.
+- **Task/evidence:** `ses_f81883549ffe41TuQsvsDvbTWn` retains the official
+  requested URL `https://developers.openai.com/api/docs/guides/latest-model` and
+  its advertised `.md` form
+  `https://developers.openai.com/api/docs/guides/latest-model.md`: 13 headings,
+  12 fenced examples, 84 statements (80 normative, 4 descriptive), section
+  match, and no truncation marker.
+- **Coverage:** `AGENTS.md` and
+  `.opencode/agents/primary/ingenium-orchestrator.md` both contain the neutral
+  `LATEST-MODEL-GUIDE-01` section and all 84 stable guide IDs exactly once. The
+  wording is conditional for unsupported API features and preserves higher-priority
+  safety/order, deterministic-failure safeguards, the browser prohibition, and
+  the upstream reminder-only/no-native-completion boundary.
+- **Verification boundary:** The completed evidence is source/static readback:
+  both sections were reread, mechanical ID coverage and duplication were checked,
+  the disallowed guide naming search was clean, and contradiction review was
+  performed. No QA, test, source, provider, model, configuration, restart,
+  deployment, or Docs Workspace evidence is added.
+- **Activation boundary:** No activation marker or activation claim is added.
+- **NextWork:** Todo 29 remains a separate acceptance boundary; do not infer
+  loaded-session, runtime, or model/session behavior from this documentation.
+
+## Linked Current Todo 29: official-guide post-integration acceptance (2026-09-07)
+
+This append-only item preserves the next boundary under `ORCH-100`; it is not
+closed by Todo 28's static documentation evidence.
+
+- **Status:** `OPEN; activation not performed or claimed`.
+- **Evidence:** Todo 28 proves only repository instruction text and mechanical
+  coverage. It does not prove a parent restart or reload, deployed behavior,
+  runtime health, actual model/session behavior, or native completion enforcement.
+- **Dependency:** Any activation or runtime acceptance requires its own admitted
+  executor, restart/recovery safeguards, health evidence, and actual session
+  artifacts. The reminder-only product decision remains in force.
+- **NextWork:** `@ingenium-orchestrator` keeps this boundary open and does not
+  mark activation from Markdown, source counts, or static readback.
+
+## Linked Current Todo 31: active skill-reference cleanup (2026-09-08)
+
+This separate item records active skill-reference cleanup and must not be merged
+into Todo16's browser-helper/parser evidence. It does not reclassify retained
+historical or negative references.
+
+- **Status:** `OPEN; no cleanup performed`.
+- **Active scope:** The active `browsing-the-web` skill references
+  `references/sources/browsing-the-web/source-index.md` and
+  `references/sources/browsing-the-web/references/site-recipes/how-to-write-a-site-recipe.md`
+  still contain browser-agent identity wording.
+- **Preservation:** `.opencode/agents/browser-agent-errors.md`, dated
+  site-recipe records, and the negative coordinator test remain historical or
+  negative evidence; they are not active-reference cleanup targets in Todo16.
+- **Verification boundary:** This Todo16 documentation update performs no
+  Todo31 cleanup, source/test change, QA, Playwright containment audit, or Docs
+  Workspace mutation.
+- **NextWork:** `@ingenium-docs` later removes or replaces only the active
+  skill-reference identity wording under its own admitted documentation
+  boundary, while preserving generic browser/Playwright infrastructure.
+
+## Todo15: MEMORY-100 source/static persistence (2026-09-08)
+
+This append-only record persists the final source/static trace for the existing
+`MEMORY-100` task. It does not rewrite historical records or create a new task.
+
+- **Final trace:** `ses_f807e8f52ffeHIsmY4ONSdoIkA`.
+- **Current source matrix:** `4 IMPLEMENTED`, `10 MISSING`, `14 UNKNOWN`.
+- **Ordered source gaps:**
+  1. General binding lacks memory read/write.
+  2. No designated external mutation grant.
+  3. Forget suppression is not consumed by synthesis/cache/jobs.
+  4. A populated migration/backfill fixture is absent.
+  5. A revision-aware operational/result manifest is absent.
+  6. Stable Todo replay is absent.
+  7. Finalized review admission is absent.
+  8. `COORD-A03` source enforcement is absent.
+- **Future evidence pointers:** Exact future source checks remain under
+  `MEMORY-100`; deployed health/MCP canaries under `RUN-A01`; and fresh A/B/C
+  model/session artifacts under Todo21 and `COORD-106`. The exact task IDs are
+  retained here instead of duplicating the full report.
+- **Evidence boundary:** This is `SOURCE/STATIC` documentation evidence only;
+  it does not prove tests, deployed runtime/canaries, model/session, or visual
+  evidence.
+- **Open state:** Todo15, Todo21, and Todo22 remain `OPEN`. Source remediation
+  waits for the current verifier. No other file, Docs Workspace mutation, test,
+  or QA work is part of this update.
+
+## Todo13: CLOUDFLARE-100 source/static persistence (2026-09-08)
+
+This append-only record persists the current Cloudflare source trace without
+rewriting the original contract or claiming implementation, deployment, or
+review completion.
+
+- **Source trace:** `ses_f8040e6e9ffeLjWk7ut4KAH3BE`.
+- **Current result:** `MISSING/IMPLEMENTED_UNVERIFIED`; Todo13 remains `OPEN`.
+  Source remediation waits for the supported verifier.
+- **Implemented foundations (`SOURCE/STATIC`):** The source validates one exact
+  named tunnel and exact public HTTPS host/origin mappings, does not manage DNS,
+  stores the tunnel token through encrypted vault storage and redacts it from
+  responses, requires installation-admin plus recent step-up and CSRF for
+  browser writes, makes connector start/stop idempotent, uses a transient
+  mode-`0600` handoff with connector-user process isolation, and pins
+  `cloudflared` to version `2026.8.3` with a checked SHA-256 and `--no-autoupdate`.
+  The source surfaces are `packages/ingenium-core/lib/tools/cloudflare-tunnel.ts`,
+  `services/ingenium-api/lib/cloudflare-trusted-ingress.ts`,
+  `services/ingenium-api/lib/cloudflare-tunnel-service.ts`,
+  `services/ingenium-api/lib/cloudflare-connector.ts`,
+  `services/ingenium-api/lib/routes/cloudflare.ts`,
+  `scripts/start-cloudflare-tunnel.sh`, and `Dockerfile`.
+- **Blocking gaps (`BLOCKING`; source trace `ses_f8040e6e9ffeLjWk7ut4KAH3BE`):**
+  1. The five labels `authenticated-production-dashboard-gateway`,
+     `authenticated-production-opencode-audience-gateway`,
+     `authenticated-production-cli-audience-gateway`,
+     `authenticated-production-vscode-audience-gateway`, and
+     `authenticated-https-api-boundary` are not consumed by the production
+     authenticated gateway's Host/CSP routing.
+  2. Route health never probes the public HTTPS origins; a running connector is
+     reported as `unknown` rather than as the result of a public-route probe.
+  3. Token replacement/clear and configuration save are not atomic and have no
+     compensating rollback when the later operation fails.
+- **Scout retrieval failure:** `ses_f8040e5e1ffexU9N4VasiOuXCt` returned
+  `TOOL_STATE_UNAVAILABLE` for `ingenium_docs_search` and
+  `ingenium_docs_get_page`. This is recorded once; neither tool is retried.
+- **Exact source checks retained for `ses_f8040e6e9ffeLjWk7ut4KAH3BE` (not run
+  in this docs-only update):**
+  ```text
+  npm run typecheck --workspace=packages/ingenium-core
+  npm run test --workspace=packages/ingenium-core -- tests/cloudflare-tunnel.test.ts
+  npm run typecheck --workspace=services/ingenium-api
+  npm run test --workspace=services/ingenium-api -- tests/cloudflare-api.test.ts tests/runtime-gateway.test.ts
+  npm run typecheck --workspace=services/ingenium-dashboard
+  npm run test --workspace=services/ingenium-dashboard -- tests/cloudflare-api-client.test.ts tests/cloudflare-panel.test.tsx tests/gateway-static-contract.test.ts tests/phase-2c-gateway-config.test.ts tests/next-config-gateway.test.ts
+  bash tests/test-gateway-static.sh
+  ```
+  The remediation must add the named regressions for production five-label
+  Host/CSP consumption, public HTTPS probing, and atomic/compensating token plus
+  config failure before this check set can satisfy the blocking gaps.
+- **Deployed canary plan retained for `ses_f8040e6e9ffeLjWk7ut4KAH3BE` (not
+  run):** After the verifier and source checks pass, rebuild the exact merged
+  artifact with `IMAGE_REVISION="$(git rev-parse HEAD)"` and
+  `docker compose --profile compatibility up --build`; verify the fixed
+  `cloudflare-tunnel` connector and redacted `GET /api/v1/services/cloudflare`
+  status, then probe each selected public HTTPS root with the appropriate
+  authenticated session: Dashboard `/`, OpenCode `/`, CLI `/`, VS Code
+  `/?folder=/workspace`, and API `/api/v1/health` plus authenticated
+  `/api/v1/services/status`. The canary must prove the selected Host, audience isolation,
+  exact CSP/origin behavior, no private-upstream exposure, and route health from
+  actual public responses rather than `unknown`; it must also retain exact image
+  revision and handoff/credential cleanup evidence.
+- **Security boundary:** Credential, audience, Host/CSP, origin, DNS-scope,
+  connector-handoff, and rollback behavior are predeclared as the changed
+  security surface for one later security report. No security report or QA was
+  run or requested in this documentation-only update.
+- **Access and escalation:** Protected credential and deployment access paths
+  have not been attempted. No configured path was exhausted, so no
+  `ESCALATE_USER` condition is proven.
+- **Evidence boundary:** This is `SOURCE/STATIC` roadmap persistence only. No
+  source remediation, test execution, deployment, public HTTPS canary, Docs
+  Workspace mutation, QA, or security execution is claimed.
+
+## Todo14: PLAYWRIGHT-100 source/static persistence (2026-09-08)
+
+This append-only record persists task `ses_f802bd86fffemxsbXGP7ZcU2TX` without
+rewriting the `PLAYWRIGHT-100` contract or claiming test, runtime, review, or
+completion evidence.
+
+- **Status:** `IMPLEMENTED_UNVERIFIED`; Todo14 remains **OPEN**.
+- **Implemented static foundations:** The managed path records a pinned
+  package/image browser, a fixed UI preset, the `ingenium_playwright_*` namespace,
+  launcher validation, isolated headless output, output redaction,
+  readiness/reconnect, and exact process-group cleanup.
+- **Blocking gaps (`BLOCKING`; task `ses_f802bd86fffemxsbXGP7ZcU2TX`):**
+  1. Arbitrary Playwright-name definitions can bypass preset materialization;
+     this supersedes the earlier inventory summary that discovery materializes
+     only the matching owned definition.
+  2. The declared passive allowlist is not consumed, and tools default enabled.
+  3. No durable ownership/cancellation/failed-cleanup manifest exists.
+  4. The declared verifier lacks managed admission for the required checks and
+     audit.
+  5. Strict containment reports but does not enforce active handles.
+- **Non-overlapping territories and wave order:** `BASELINE-100` owns the
+  baseline and managed-verifier admission first. `PLAYWRIGHT-100`/Todo14 then
+  owns only the managed preset, materialization, permissions, lifecycle,
+  isolation, cleanup, and focused checks; it does not overlap `CLOUDFLARE-100`,
+  `MCP-107`, `AGENT-100`, `ORCH-100`, `MEMORY-100`, Todo16, or Todo30.
+  `RUN-A01` follows with Premium-owned exact-artifact deployment. After that,
+  `@ingenium-qa` owns the eventual full fixture suite and its one report; one
+  `@ingenium-security-auditor` report is predeclared for browser isolation and
+  tool permissions; and `@ingenium-qa` owns later `/mcp-servers` visual
+  evidence under the visual gate. These later gates are not part of Todo14's
+  current proof.
+- **Exact future commands (not run; focused before full):**
+  ```text
+  npm run typecheck --workspace=services/ingenium-server
+  npm run test --workspace=services/ingenium-server -- tests/child-mcp-gateway.test.ts tests/child-mcp-runtime.test.ts
+  npx playwright test --config=tests/playwright.config.ts --reporter=list
+  npx tsx tests/suite-containment-audit.ts --strict
+  ```
+  The Playwright fixture command must precede the strict containment audit; the
+  audit command is not evidence that active handles are enforced.
+- **Evidence boundary:** This is roadmap static persistence only. No source-test,
+  deployed-runtime, managed-admission, QA, security, visual, or containment-
+  enforcement proof is claimed. No source/runtime/QA/security/visual work,
+  test execution, or Docs Workspace mutation is part of this update.
+
+## Todo12: AGENT-100 source/static persistence (2026-09-08)
+
+This append-only record retains tasks `ses_f8014cff0ffe2AGqPDLv3aT37d` and
+`ses_f8014cedfffe1Cb0tiJWO06wtI` without rewriting the AGENT-100 contract or
+claiming runtime, review, or completion evidence.
+
+- **Status:** `SOURCE/STATIC PARTIAL`; Todo12 remains **OPEN**.
+- **Implemented static evidence:** Profile/root authority, lifecycle persistence,
+  protected broker projection, browser-agent retirement, the correct Scout tool
+  names/catalog registrations (`ingenium_docs_search`,
+  `ingenium_docs_search_semantic`, `ingenium_docs_get_page`,
+  `ingenium_coordination_status`, and `ingenium_coordination_memory_read`),
+  explicit Ponytail grant/preflight coverage for all 12 user-facing/native
+  profiles, and plugin/fallback/projection source are recorded. Scout's
+  `TOOL_STATE_UNAVAILABLE` is tool-state evidence, not evidence of a spelling or
+  profile-grant failure.
+- **Unresolved defects and gates:** Fast canonical-profile/root-mapping name
+  parity is unresolved; the validator model matrix is stale; agent changes do
+  not set `restartRequired`; MCP lifecycle descriptions incorrectly say that
+  disabling removes the profile; and the Ponytail transform lacks broker-prompt
+  exclusion if broker prompt isolation is required. Exact deployed state,
+  attestation, and binding cause are **UNKNOWN**. Runtime activation, database
+  projection, and fresh-session evidence are **UNKNOWN**. The failed session was
+  not retried.
+- **Exact future checks, tied to AGENT-100 and both retained task refs (not
+  run):**
+  1. After repairing the canonical Fast name and validator matrix, run
+     `bash tests/test-agent-validation.sh`; retain the model-only root mapping,
+     Ponytail, Scout, broker, and lifecycle results. Run the focused package
+     checks with `npm run typecheck --workspace=packages/ingenium-extension`,
+     `npm run typecheck --workspace=services/ingenium-server`,
+     `npm run test --workspace=packages/ingenium-core -- tests/agents.test.ts`,
+     `npm run test --workspace=services/ingenium-api -- tests/agents-route.test.ts`,
+     and `npm run test --workspace=packages/ingenium-extension --
+     resource-sync.test.ts repository-sync.test.ts global-config-projection.test.ts`.
+  2. Use `ingenium_agent_enable`, `ingenium_agent_disable`,
+     `ingenium_agent_sync`, `ingenium_agent_get`, and `ingenium_agent_list` plus
+     `ingenium_repository_sync` (`dryRun: true`, then the exact bound apply) to
+     prove database-to-disk projection, persisted disable state, broker
+     protection, and an explicit `restartRequired` result for agent changes.
+  3. Rebuild the exact merged artifact with
+     `export IMAGE_REVISION="$(git rev-parse HEAD)"` followed by
+     `docker compose --profile compatibility up --build`; perform the required
+     full parent restart, then retain `/api/v1/health`, MCP initialize/tools-list/
+     status, and supervisor/attestation/binding evidence.
+  4. In fresh sessions, verify Ponytail prompt/skill loading for every
+     user-facing/native profile, Scout access only to the five exact tools above,
+     the hidden broker's no-tool boundary, and broker prompt exclusion when that
+     isolation requirement is admitted. No source read substitutes for this
+     model/session canary.
+- **Evidence boundary:** This is roadmap persistence only. No tests, source
+  remediation, deployment, activation, database projection, fresh session,
+  Docs Workspace mutation, QA, or security review was performed or requested.
+
+## Todo11: coordinator and extension-artifact source/static persistence (2026-09-08)
+
+This append-only record persists the three Todo11 evidence streams under the
+existing `MCP-107` and `ORCH-100` boundaries. It does not create a task, change
+source or tests, refresh installed artifacts, or claim deployment or review
+completion.
+
+- **Status:** `SOURCE/STATIC PARTIAL; BLOCKING coordinator defects and the
+  artifact-refresh gate remain; Todo11 remains OPEN`.
+- **Evidence streams:** `ses_f7ffef18dffevwESnHyECdVHJ1`,
+  `ses_f7ffeef35ffevzahh0jBI0SRGj`, and
+  `ses_f7ffeee24ffesJ0Zpoqbklgz54`. These are retained task references, not
+  runtime or review proof.
+
+> **Superseded pointer (2026-09-09):** The retained coordinator-hook defects and managed-command enforcement language in this Todo11 record are historical; owner decision removed that layer and remaining executable checks run under agent profile permissions.
+
+- **In-scope blocking coordinator defects (`BLOCKING`; source remediation
+  remains open):**
+  1. A child `error.message` can cross the coordinator's bounded diagnostic
+     surface instead of remaining sanitized.
+  2. An event arriving before the after-hook can suppress the required handoff
+     rather than reconciling the event and after-hook state.
+  3. An unavailable mutation path can return early while leaving its mutation
+     pending.
+  4. Session close/delete can drop pending mutations instead of preserving or
+     quarantining their evidence.
+  5. A failed reset can leave the global reset state active.
+- **Follow-ups (`FOLLOW_UP`; no dispatch):** after-argument drift; the
+  distinct-diagnostic budget is not enforced; and the inclusive acknowledged
+  replay boundary remains unspecified. API Docs unexpected-message/error-envelope
+  behavior and the missing adapter test are outside this changed boundary and
+  remain `FOLLOW_UP` only.
+- **Installed artifact boundary (`BLOCKING`; no safe refresh was admitted):**
+  the installed extension `dist` is stale relative to source. The root/in-place
+  build deletes the active server and extension `dist`; the Docker builder is
+  isolated and does not refresh the host installation. The configured MCP entry
+  point remains the packaged extension artifact in [`opencode.json`](../../opencode.json),
+  and the destructive build sequence is present in the extension
+  [`package.json`](../../packages/ingenium-extension/package.json).
+- **Required design admission:** before any host refresh, an owner-private
+  staging root must assemble the server and extension artifacts, verify the
+  exact source revision and manifest, then atomically adopt the staged pair;
+  the prior active pair must remain available for rollback. No root/in-place
+  deletion or unowned host refresh is an acceptable verifier or deployment
+  path.
+- **Exact focused checks retained by task ID (not run in this documentation-only
+  update):**
+  - `ORCH-100` / Todo11, evidence refs `ses_f7ffef18dffevwESnHyECdVHJ1`,
+    `ses_f7ffeef35ffevzahh0jBI0SRGj`, and
+    `ses_f7ffeee24ffesJ0Zpoqbklgz54`:
+    `npm run typecheck --workspace=packages/ingenium-extension`, then
+    `npm run test --workspace=packages/ingenium-extension -- session-coordinator.test.ts -t "toolstateunavailable|reconstructs missing before-state locally|abort_without_after|retains local session state across heartbeat, consume, and close outages|accepts a bounded reset|retries live Ingenium-only credential rotation|ambiguous_quarantine_replay|replays unacknowledged live memory"`.
+  - `MCP-107` / Todo11, the packaged bridge and transport checks:
+    `npm run test --workspace=packages/ingenium-extension -- mcp-client.test.ts mcp-transport-parity.test.ts -t "launches only the packaged launcher|disconnects, reconnects, and checks only the injected Ingenium MCP server|matches current server registrations and the canonical catalog|ships the packaged transport artifact used by the parity verifier"`.
+  - `MCP-107` / Todo11 reset diagnostics:
+    `npm run test --workspace=packages/ingenium-extension -- coordination-reset.test.ts -t "keeps the install substage non-enumerable and emits only allowlisted CLI diagnostics"`.
+    The destructive in-place build is not a permitted focused check until the
+    staged assembly/adoption/rollback design is admitted.
+- **Runtime canaries retained by task ID (not run):** After remediation and
+  staged adoption, `MCP-107` requires the exact tested revision, an executable
+  invocation of the neutral optional `ingenium-build deployment
+  production-restart` utility under the applicable `.opencode/agents/**`
+  profile permissions, `GET /api/v1/health`, authenticated
+  `GET /api/v1/services/status`, MCP `initialize`, MCP `tools/list`, and the
+  project-bound MCP health/status canary. The canary must prove that the running
+  child uses the adopted extension artifact and that no stale source/`dist` pair
+  remains. `ORCH-100` then requires its coordination/session cases—including
+  child-error, handoff, pending-mutation, close/delete, and reset-failure—to be
+  exercised against that same revision; none is a coordinator tool-execution
+  admission check.
+- **Review and visual boundary:** After final source remediation and staged
+  artifact adoption, run exactly one `@ingenium-qa` report and one
+  `@ingenium-security-auditor` report for the changed coordinator/launcher
+  boundary. No visual report is applicable because no user-facing route
+  changed; neither report ran in this documentation-only update.
+ - **Open-state:** Todo9, Todo11, Todo26, Todo32, Todo33, and Todo34 remain
+   **OPEN**. No work-complete marker, compiled-refresh completion, deployment,
+   runtime, model/session, QA, security, visual, or overall `PASS` marker is
+   added; the carried source-wave tests and reviews do not close those gates.
+ - **Evidence boundary:** This is roadmap `SOURCE/STATIC` persistence only. No
+   other file, test, build, host refresh, deployment, Docs Workspace mutation,
+   QA, security review, or visual work is part of this update.
+
+## Todo31: Git preflight and scoped persistence (2026-09-08)
+
+This append-only record persists the latest Todo31 preflight without performing
+active skill-reference cleanup. The documentation territory is exclusive to
+`docs/reference/ROADMAP.md`.
+
+- **Status:** `OPEN; no cleanup, staging, or commit admitted`.
+- **Git preflight:** A separate `git status --short` succeeded. Its exact
+  currently modified skill-path subset was:
+  - `.opencode/skills/engineering-workflow/SKILL.md`
+  - `.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md`
+  - `.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md`
+  - `.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md`
+  - `.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/references/orchestrator-flow.md`
+  - `.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md`
+  - `.opencode/skills/mcp-tooling/references/dev-browser/setup.md`
+  - `.opencode/skills/mcp-tooling/references/sources/browsing-the-web/references/dev-browser-integration.md`
+- **HEAD preflight:** A separate `git log --oneline -10` succeeded with HEAD
+  `ea8833c8` (`fix(recovery): require read-only restart preflight`).
+- **Diff boundary:** A separate `git diff --name-only -- ".opencode/skills"`
+  returned `Managed shell coordination denied the command`. Content diff
+  inspection is mandatory before checkpoint; therefore no stage, commit, or
+  skill edit is admitted.
+- **Reference inventory:** Task
+  `ses_f80c58674ffeGES3pP2sG3hm2R` records 12 active removed-agent lines
+  across seven files. Preserve 32 historical/generic references.
+- **Scope boundary:** No other file, test, or Docs Workspace mutation is part
+  of this persistence update.
+- **NextWork:** Keep Todo31 open. Use an available authorized content-diff
+  inspection, then retain the exact scoped snapshot of the eight status-listed
+  skill paths and HEAD `ea8833c8`; do not stage, commit, or edit skills until
+  that inspection succeeds.
+- **Evidence boundary:** This is roadmap `SOURCE/STATIC` persistence only; it
+  does not prove cleanup, content-diff approval, tests, QA, deployment, or
+  Docs Workspace state.
+
+## Todo19: deployment admission persistence (2026-09-08)
+
+This append-only note records task `ses_f7fc60edbffe1I3VMyOYHfjvML` without
+duplicating the RUN-A01 table.
+
+- **Status:** `STRICT DEPLOYMENT REJECTED`; Todo19 and Todo20 remain **OPEN**.
+- **First missing prerequisite / exact next action:** perform one fresh
+  authorized exact-binding read-only session/supervisor status probe. Do not
+  build or restart.
+- **Still missing before admission:** finalized source checks; safe staged host
+  `dist` assembly/adoption/rollback; exact current `IMAGE_REVISION`; deployed
+  image provenance; nine-process, API, dashboard, OpenCode, CLI, and VS Code
+  health; MCP `initialize`, `tools/list`, and state; selected Cloudflare routes;
+  a retained rollback target; and all parent-recovery gates.
+- **Boundary:** The Docker builder safely builds source in isolation as a
+  mechanism only. Host `dist` refresh is rejected, and Docker recreate is not
+  admitted. Full parent replacement is separate and Recovery-only after every
+  gate passes.
+- **Evidence boundary:** This is roadmap `SOURCE/STATIC` persistence only. No
+  build, test, host refresh, Docker recreate, restart, or Docs Workspace
+  mutation is performed or claimed.
+
+## Todo22: visual gate and source-gap persistence (2026-09-08)
+
+- **Status:** `OPEN; visual execution NOT RUN`. Explore evidence
+  `ses_f7fb93123ffe7GEoNGL0lgpm7g` defines changed-route gates for `/chat`,
+  `/context`, `/?settings=cloudflare`, `/mcp-servers`, and both
+  `/opencode?mode=web` and `/opencode?mode=cli` at `1440x900` and `390x844`.
+  Retain screenshots under `tests/artifacts/visual-qa/<run-id>/` with the
+  expected accessibility, network, console, and browser-cleanup evidence.
+- **Passive sweep:** Separately sweep all 24 primary routes and all 20 current
+  Settings tab IDs at both viewports. Run strict containment once after fixture
+  teardown; external deployment still requires browser cleanup, and the
+  managed Playwright lifecycle requires separate cleanup evidence.
+- **Blocking source gaps (`BLOCKING`; no remediation in this docs-only update):**
+  1. `tests/dashboard-route-parity/route-inventory.ts` hardcodes 14 Settings
+     deep-link IDs instead of the current 20.
+  2. `services/ingenium-dashboard/src/app/components/settings/SettingsSidebar.tsx`
+     has an incomplete ARIA tab pattern; prefer navigation with `aria-current`.
+  3. `services/ingenium-dashboard/src/app/context/components/ExplicitMemorySection.tsx`
+     loses focus after a successful forget action.
+  4. Loading states lack status semantics in
+     `services/ingenium-dashboard/src/app/components/settings/panels/CloudflarePanel.tsx`
+     and `services/ingenium-dashboard/src/app/mcp-servers/components/McpServerManager.tsx`.
+- **Next gate:** Visual execution is **NOT RUN** and remains blocked on a
+  finalized exact revision, deployment, a synthetic non-sensitive fixture, and
+  source remediation for the four gaps above. This record is `SOURCE/STATIC`
+  only; no screenshots, tests, deployment, cleanup run, or Docs Workspace
+  mutation is claimed, and Todo22 is not marked complete.
+
+## Todo21: `/chat` and `/opencode` memory acceptance persistence (2026-09-08)
+
+This append-only record persists Explore evidence
+`ses_f7fa6cd12ffepClbnsvdljbF0t` without changing Todo21's acceptance boundary.
+
+- **Admission:** `REJECTED` for current acceptance; Todo21 remains **OPEN**.
+- **Source/static evidence:** canonical host configuration; isolated external
+  A/B process launch; internal C launch; scoped credentials;
+  registration/heartbeat/status; revisions, fences, and claims; typed
+  handoff/replay cursors; operational-memory fields; mutating harness; and
+  cleanup/redacted artifacts.
+- **Historical boundary:** `docs/evidence/multi-session/coord106-r24/` proves
+  simultaneous A/B/C, conflicts, restart replay, cleanup, and 29 SHA-indexed
+  artifacts for **r24 only**; it does not prove current acceptance.
+- **Current state:** credential validity, runtime ownership, and health are
+  **UNKNOWN**. Current exact-source deployment, fresh `/chat` and
+  `/opencode` memory acceptance, simultaneous awareness, restart replay, and
+  transcript-leakage proof are **MISSING**.
+- **First prerequisite / NextWork:** deploy the current revision and establish
+  exact live identity. The smallest non-mutating readiness probe is
+  `ingenium_coordination_status` with exact `project`, `worktree_id`,
+  `session_id`, `incarnation`, and ownership token; it is authorized only in
+  Plan and remains **UNRUN** because identity values are unavailable.
+- **Boundary:** No other file, test, or Docs Workspace mutation is part of
+  this docs-only persistence. Readback keeps Todo21 **OPEN**.
+
+## Todo26: final verifier-access and source-inventory persistence (2026-09-08)
+
+This append-only record keeps Todo26 open and records the final distinct access
+reconciliation plus the later carried source reproduction/fix. It does not
+authorize or perform additional source mutation, commit, build, restart,
+deployment, tests, or Docs Workspace mutation.
+
+- **Status:** `OPEN`; no completion marker and no broader-rollout `PASS`.
+- **Phase accounting:** Single-Todo mode selected Todo26 with **one active agent
+  and one writer**. The exclusive writer territory is
+  `docs/reference/ROADMAP.md`; no delegation is used. Other active roles and
+  writer slots are unused because no other useful parallel documentation stream
+  exists; carried reviews are already consumed and the new auth boundary is not
+  yet ready for QA/security.
+- **Verification/stop boundary:** This documentation amendment uses one targeted
+  changed-section readback. Deployment is `N/A`; generic managed denials and
+  unsupported internal paths are not external escalation evidence.
+- **Premium Docker probe:** Task `ses_f7f97858cffeNxb8IFbqSKzIWZ` attempted the
+  exact command `docker version --format '{{json .}}'`. It was denied before
+  process/exit with exactly `Managed shell coordination denied the command`.
+  The Compose probe was skipped, and no Docker mutation occurred.
+- **Final distinct source inventory:** Task `ses_f7f9487f8ffee7O2v9x71iInpf`
+  found **NONE currently usable**. There are no `.github` workflows or CI
+  dispatch; Jobs are mutating shell-backed OpenCode `/workspace`; MCP exposes
+  no build/test/typecheck tool and loads compiled `dist`; the TypeScript
+  language service has no configured result channel; the supervisor observes
+  deployed `/app`; and the runtime container has no test endpoint.
+- **Causal owner and freeze:** `@ingenium-software-engineer-premium` remains
+  the causal owner for currently loaded managed-command authorization. Freeze
+  source mutation, commit, build, restart, and deploy work dependent on that
+  authorization.
+- **Next proving action:** After the causal authorization change, run one
+  non-mutating managed command consuming dirty source at
+  `/home/brajam/repos/ingenium` and returning bounded exit/result evidence.
+  Do not repeat a command-family diagnostic, request user action, or add other
+  files, tests, or Docs Workspace work.
+- **Evidence boundary:** This is roadmap `SOURCE/STATIC` persistence only. The
+  access denial is an internal managed-command authorization defect, not
+  `ESCALATE_USER` evidence. Todo26 remains **OPEN**.
+
+### Todo26 Explore repair design and admission persistence (2026-09-08)
+
+This append-only record preserves Explore repair-design task
+`ses_f7f7d1201ffeskDuiI3QH6XuuK`. The source reproduction/fix below is carried
+evidence; this documentation update does not authorize or perform additional
+source mutation, test execution, commit, build, restart, deployment, or Docs
+Workspace mutation.
+
+- **Admission:** `REJECTED` because no independent first verifier is available.
+  Todo26 remains **OPEN** with no completion marker.
+- **Four root causes:** (1) transcript authorization rejects too early, before
+  an incomplete snapshot can be polled to completeness; (2) `deploymentOwner`
+  exists only in `pendingMutations` and is deleted by the terminal event; (3)
+  after-hook authorization runs before unreachable reconstruction; and (4) a
+  resumed coordinator restores no exact-call authorization.
+- **Minimum future patch:** The later implementation may touch only
+  [`packages/ingenium-extension/session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts)
+  and
+  [`packages/ingenium-extension/session-coordinator.test.ts`](../../packages/ingenium-extension/session-coordinator.test.ts).
+  It must poll incomplete snapshots, bind exact-call authorization separately
+  from claim lifecycle, use a one-shot terminal tombstone, perform tightly
+  constrained completed-transcript reconstruction on resume, and apply bounded
+  cleanup. No other file is admitted.
+- **Six named regression categories:**
+  1. `incomplete_snapshot_polling` — incomplete transcript state becomes
+     pollable and admits only after the exact call reaches the required state.
+  2. `exact_call_auth_claim_lifecycle_separation` — exact-call authorization
+     survives claim-map and claim-finalization cleanup without broadening scope.
+  3. `one_shot_terminal_tombstone` — one terminal event consumes the exact
+     authorization once; duplicate terminal events cannot reauthorize it.
+  4. `after_hook_authorization_reconstruction_order` — after-hook authorization
+     cannot precede or bypass the constrained unreachable reconstruction path.
+  5. `bounded_completed_transcript_resume_reconstruction` — resume restores
+     authorization only from a bounded, exact completed transcript record.
+  6. `bounded_exact_call_cleanup` — stale exact-call authorization and tombstones
+     are cleaned within explicit bounds without cross-session or unbounded state.
+- **Intended focused command (not run):**
+
+  ```bash
+  npm run test --workspace=packages/ingenium-extension -- session-coordinator.test.ts -t "trusted_managed_call_admission"
+  ```
+
+- **Attempt outcome:** The orchestrator's exact command was denied before the
+  process with `Managed shell coordination denied the command`; no exit status
+  was returned and there was no retry.
+- **Latest coordinator source result (carried; not roadmap `PASS`):** The
+  before-to-terminal-event-to-after lost-authorization reproduction was **RED**
+  at **1 failed, 72 skipped**. The exact-call independent-authorization and
+  one-shot-cleanup fix was **GREEN** at **8 passed, 72 skipped, 80 total,
+  2.44s**. The actual production-root denial is not attributed to this source
+  reproduction.
+- **Current verifier/review boundary:** The latest typecheck returned generic
+  denial with no compiler output and remains unverified; it was not retried.
+  This new auth boundary has not received finalized QA/security evidence. The
+  source fix is not a roadmap `PASS`.
+- **Owner and prerequisite:** `@ingenium-software-engineer-premium` / the
+  harness owner may implement only after an independent dirty-source,
+  non-mutating probe succeeds. Until then, freeze the dependent source/test
+  patch and do not replay the denied command.
+- **Evidence boundary:** This is roadmap `SOURCE/STATIC` persistence only. The
+  source reproduction/fix is carried evidence, not deployment, runtime,
+  model/session, QA, security, or visual proof; Todo26 remains **OPEN**. The
+  internal denial is not `ESCALATE_USER` evidence.
+
+## Linked Current Todo 35: Premium/Fast profile wording repair (2026-09-08)
+
+This append-only item records the bounded profile-repair checkpoint under
+`AGENT-100`. It does not claim that an already-running parent loaded the repair
+or that the broader agent/profile rollout is complete.
+
+- **Status:** `SOURCE/STATIC REPAIR AND ONE QA PASS COMPLETE; ACTIVATION OPEN`.
+- **Evidence reference:** `ses_f7f71279dffeSQzPCBP1GDdwcW` records the
+  Premium/Fast profile wording repair and one QA result consumed with PASS. The
+  QA result is not rerun.
+- **Activation boundary:** The static profile result does not prove a
+  full-parent reload, current loaded Premium/Fast wording, deployed health, or
+  the remaining AGENT-100 acceptance gates.
+- **NextWork:** `@ingenium-software-engineer-premium` preserves the consumed QA
+  result, then uses the admitted full-parent activation path and verifies the
+  loaded profiles. Do not infer activation or runtime state from the static
+  wording repair.
+- **Marker boundary:** No broader completion marker is added for this bounded
+  checkpoint; the activation and loaded-surface gates remain open.
+
+## Linked Current Todo 36: Fast `apply_patch` create/read/delete proof (2026-09-08)
+
+This append-only item records a bounded Fast model/session proof under
+`ORCH-100`. It does not convert that proof into Premium activation, runtime
+absence, or broader rollout completion.
+
+- **Status:** `BOUNDED FAST MODEL/SESSION PROOF COMPLETE; LOADED PREMIUM STALE;
+  ACTIVATION OPEN`.
+- **Evidence reference:** `ses_f7f71279dffeSQzPCBP1GDdwcW` records a fresh Fast
+  `apply_patch` create/read/delete sequence with no residue. The loaded Premium
+  session remained stale, so the proof is not current Premium activation proof.
+- **Open boundary:** Fresh admitted Premium/current-parent activation and
+  loaded-surface reconciliation, deployment/runtime and model/session
+  acceptance, runtime absence of the removed agent, and remaining review/marker
+  gates are open.
+- **NextWork:** `@ingenium-orchestrator` with Premium preserves the no-residue
+  Fast proof, reconciles the stale loaded Premium state through the admitted
+  activation path, and does not replay the mutation or claim broader completion.
+- **Marker boundary:** No broader completion marker is added for this bounded
+  proof.
+
+## Linked Current Todo 37: independent-executor and no-repeat safeguards (2026-09-08)
+
+This append-only item records the bounded user-requested amendment to the
+existing deterministic-failure/design-admission safeguards under `ORCH-100`.
+It preserves the broader roadmap and does not authorize source, tool, grant,
+configuration, test, build, restart, deployment, or delegation work.
+
+- **Status:** `SOURCE/STATIC POLICY AMENDMENT COMPLETE; RUNTIME ENFORCEMENT OPEN`.
+- **Changed paths:** `AGENTS.md` and this linked roadmap item only.
+- **Safeguard boundary:** Design admission requires an authorized path
+  independent of the component it tests, diagnoses, or recovers; internal
+  tool/instruction mismatches remain owned harness defects; identical failure
+  signatures with no new evidence cannot repeat probes or audits or become a
+  `docs-as-progress` claim; and the full stable-ID roadmap/`TodoWrite` remains
+  intact with named repair-owner `nextWork`.
+- **Evidence boundary:** One exact readback of the changed sections is the
+  declared verification. Markdown and readback are `SOURCE/STATIC` only; they
+  do not prove loaded behavior or runtime enforcement. STOP/CANCELLED, security,
+  and unknown-outcome restrictions remain unchanged. Deployment is `N/A`.
+- **NextWork:** `@ingenium-orchestrator` preserves the full roadmap/Todo and
+  demonstrates the independent authorized path before any dependent
+  implementation, routing internal failures to the named repair owner. No QA
+  or Docs follow-on is requested by this item.
+- **Marker boundary:** No broader completion marker is added for this bounded
+  documentation amendment.
+
+## Linked Current Todo 39: data-only runtime source checkpoint (2026-09-08)
+
+This append-only item records the completed source checkpoint linked from Todo
+38 under `ORCH-100` and the carried isolated-artifact boundary. It does not
+authorize another source rerun, delete a checkout, reconcile a registration, or
+claim deployed/runtime acceptance.
+
+- **Status:** `SOURCE CHECKPOINT COMPLETE; RETIREMENT, ACTIVATION, AND DEPLOYMENT OPEN`.
+- **Source evidence:** Runtime data is directory-only in
+  [`coordination-outbox.ts`](../../packages/ingenium-extension/coordination-outbox.ts#L409-L420),
+  and the protected runtime index is excluded from worktree snapshots in
+  [`session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts#L536-L544).
+  The root and recursive protected-runtime exclusions are present at
+  [`.dockerignore`](../../.dockerignore#L67-L68). The focused
+  [`runtime_data_without_checkout`](../../packages/ingenium-extension/session-coordinator.test.ts#L587-L613)
+  result is **1 passed, 71 skipped, 72 total**; extension typecheck returned no
+  diagnostics. Active/dist remained unchanged.
+- **Admission/review evidence:** Eight trusted admission tests passed through
+  the installed wrapper. The compiled outbox test allowlist was stale, so the
+  supported intersection was used successfully. QA
+  `ses_f7e8223c8ffegFgOlnU3I7znBj` and security
+  `ses_f7e8222b8ffe62UktQJnkkHHaS` both passed after repaired intake; neither
+  review is rerun.
+- **Authorization boundary:** The current canonical worktree is authoritative;
+  obsolete source and stashes may be discarded while operational records remain
+  preserved. This supersedes Todo 38's former unauthorized-retirement wording,
+  but this source checkpoint performed no deletion or registration
+  reconciliation.
+- **Open boundary:** Safe retirement, candidate reconciliation, compiled/deployed
+  artifact acceptance, build adoption, parent activation, runtime absence, and
+  broader model/session gates remain open. No parent restart or checkout
+  deletion occurred. Source-test and review evidence do not prove those
+  boundaries.
+- **NextWork:** `@ingenium-orchestrator` preserves this source checkpoint and
+  the consumed reviews, then uses only the supported retirement admission. No
+  source or test work is part of this documentation turn.
+- **Marker boundary:** No broader completion marker is added.
+
+## Linked Current Todo 40: authorized checkout retirement and candidate/data-preservation boundary (2026-09-08)
+
+This append-only item records the authorization and retained candidate inventory
+without performing the destructive or registration operation.
+
+- **Status:** `AUTHORIZATION RECORDED; INVENTORY ONLY; NO DELETION OR REGISTRATION RECONCILIATION`.
+- **Authorization:** The current canonical worktree is authoritative. Obsolete
+  source and stashes may be discarded while operational records are preserved.
+  This is the current authorization boundary; the old Todo 38 claim that
+  retirement was unauthorized is superseded, not the deletion safety gates.
+- **Candidate inventory:** The two candidate registrations remain untouched:
+  `.opencode/protected-runtime-index` at
+  `1cd90d4998e4f8fffa4ab11941f2b4821b336847`, and
+  `/tmp/opencode/ingenium-deploy-6991061` at
+  `6991061533e0830b4dccb6a9987eece6448e6e10`. No deletion occurred. The
+  observed runtime inventory is **168 outbox, 1 disposition, 1 restart, 0 TUI**
+  entries only; it contains no hashes and makes no attribution claim.
+- **Reference evidence:** The actually retrieved references are
+  [Bazel remote output directories](https://bazel.build/remote/output-directories)
+  and [Docker multi-stage builds](https://docs.docker.com/build/building/multi-stage/).
+  Systemd `418` is not evidence for this item.
+- **Open boundary:** A safe, exact, data-preserving deletion and registration
+  reconciliation path still needs candidate identity, ownership, retention,
+  rollback/adoption, and activation evidence. Authorization does not replace
+  those gates.
+- **NextWork:** `@ingenium-orchestrator` retains both candidates and the
+  inventory-only counts, then waits for the exact supported retirement route;
+  do not delete by pattern or infer hashes.
+- **Marker boundary:** No deletion, cleanup, registration, or broader completion
+  marker is added.
+
+## Linked Current Todo 41: exact repository retirement route and safe activation (2026-09-08)
+
+This append-only item records the final route audit and the documentation-only
+phase boundary. It preserves the full master roadmap and distinguishes Todo 39's
+completed source checkpoint from the open Todo 38–41 retirement boundary.
+
+- **Status:** `ROUTE AUDIT COMPLETE; coordinator enforcement layer removed by
+  owner decision; profile-governed executable verification, RETIREMENT OPERATION
+  AND SAFE ACTIVATION OPEN`.
+- **Route evidence (historical):** The former parent admission path in
+  [`session-coordinator.ts`](../../packages/ingenium-extension/session-coordinator.ts#L694-L715)
+  and the former child wrapper path in
+  [`managed-command-wrapper.ts`](../../packages/ingenium-extension/scripts/managed-command-wrapper.ts#L242-L247),
+  [`managed-command-wrapper.ts`](../../packages/ingenium-extension/scripts/managed-command-wrapper.ts#L302-L318),
+  and [`managed-command-wrapper.ts`](../../packages/ingenium-extension/scripts/managed-command-wrapper.ts#L693-L715)
+  are retained as route evidence only; the owner decision removed that
+  coordinator enforcement layer. The
+  [`repository-command.ts`](../../packages/ingenium-extension/scripts/repository-command.ts#L1-L4)
+  entry point only delegates to that wrapper. The `ingenium-repository` surface
+  supports ordinary path Git, not worktree retirement, and both managed CLIs
+  remain neutral optional utilities rather than enforcement layers.
+- **Tool boundary:** Current work used supported encoded `ingenium-build` and
+  Premium `apply_patch`; raw Git worktree operations are unsupported. The
+  compiled outbox allowlist was stale, and the supported intersection—not an
+  unallowlisted command—was used. An actual root
+  `ingenium-build WyJydW4iLCJidWlsZCJd300000` returned a generic managed-shell
+  denial with no exit/output and an absent build directory; the outcome is
+  **UNKNOWN**, not no-launch proof, and no retry occurred. The denial is not
+  attributed to the coordinator source reproduction. Current tool governance is
+  solely through `.opencode/agents/**` profile permissions; a new retirement
+  operation therefore still needs executable verification under the applicable
+  profile and safe activation, both currently unproven.
+- **Phase accounting:** The current documentation amendment selected Todo26 with
+  **one active agent and one writer**. The exclusive writer territory is
+  `docs/reference/ROADMAP.md`; no delegation is used. Other active roles and
+  writer slots are unused because no other useful documentation stream exists;
+  the carried prior QA/security reviews are consumed, while the new auth
+  boundary is not review-ready.
+- **Verification and stop condition:** This turn performs one changed-section
+  readback only; source-wave tests and reviews are carried evidence, not rerun.
+  The remaining tool-related gate is executable verification directly under the
+  applicable agent profile permissions. Deployment is `N/A` for this static
+  documentation turn. No build adoption, image acceptance, safe deletion,
+  registration reconciliation, parent restart, or runtime acceptance was
+  performed; active/dist remain unchanged. Internal denial or an unsupported
+  route is not external escalation evidence; escalation requires positive
+  evidence of a permitted external condition after configured paths are
+  exhausted, and none is established here.
+- **NextWork:** Preserve the full master state and admit no new retirement
+  operation until the supported route, profile-governed executable verification,
+  and safe activation are proven. Do not replay an uncertain mutation or claim
+  broader `PASS`.
+- **Marker boundary:** This item closes only the route-audit/readback boundary;
+  the retirement and deployment gates remain open.
+
+## Current Todo 42 — session-analysis documentation and root AGENTS.md rebuild / ORCH-100 (2026-09-09)
+
+This append-only record captures a documentation turn (2026-09-09) that analyzed the “Roadmap consolidation and continuation” OpenCode session and other last-24h session evidence. The raw transcript store (`~/.local/share/opencode/storage`) and MCP coordination tools were unreachable from the runtime (external-directory deny; coordination tools absent from the subagent registry), so retrieval used durable evidence only: the `docs/reference/ROADMAP.md` board (restored 23 items + linked Todos 24–41), git log through `ea8833c8`, the uncommitted working tree (212 files, +11788/−6692), coordination outbox (168 records, 2026-09-02/03), production-restart state, tool-output samples, and two bounded read-only audits of the current topology and doc staleness. The consistency pass updated README.md, docs/configure/agents.md, docs/reference/index.md, docs/concepts/architecture.md, .opencode/models.md, .opencode/SKILL-INDEX.md, docs/reference/skill-taxonomy.md, and docs/security/iframe-sandbox.md; the root AGENTS.md was rebuilt (150 lines) from the authoritative `opencode.json` agent map (12 entries), the deterministic-safeguards anchor section restored verbatim, with pointers to profiles, skills, commands, and the roadmap. No commit was made; open roadmap gates (Todos 2, 8, 26, 29–41, etc.) remain unchanged and the working tree is shared with concurrent sessions.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| Session-analysis documentation and root `AGENTS.md` rebuild / `ORCH-100` | **COMPLETE for this documentation boundary:** consistency pass applied across the files listed above; root `AGENTS.md` rebuilt (150 lines); this Todo 42 record appended; no commit made. | Read-back verified the AGENTS.md anchor heading at line 85 and the appended record; diffs remain uncommitted in the shared working tree. | None within this documentation-only task; broader rollout gates (Todos 2, 8, 26, 29–41) remain open; raw transcript-store retrieval stays blocked by the runtime access boundary. | `@ingenium-orchestrator`/rollout owners continue the open roadmap gates; any commit happens only at an evidence-backed boundary under the existing scoped-commit authorization. |
+
+## Linked Current Todo 43 — exclusive subagent-orchestration ownership, Plan explore-only task grant, and non-destructive Git read grants (2026-09-09)
+
+This append-only record captures the completed implementation/documentation boundary for `ORCH-100`. The user requested exclusive ownership of subagent orchestration, non-destructive Git access for applicable agents, and a built-in Plan task grant limited to `@ingenium-explore`; it does not claim broader rollout completion.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| Exclusive subagent-orchestration ownership, Plan explore-only task grant, and non-destructive Git read grants / `ORCH-100` | **COMPLETE for this implementation/documentation boundary.** User request: orchestration instructions for subagents exist in no agent profile except `.opencode/agents/primary/ingenium-orchestrator.md`; `@ingenium-docs` and other applicable agents can access all non-destructive Git commands; built-in Plan's root `opencode.json` task permission grants exactly `@ingenium-explore` and no other subagent. | Boundary acceptance recorded below; no broader rollout claim. | Parent activation and broader rollout gates remain open. | `@ingenium-orchestrator` and rollout owners preserve the full roadmap and continue only the open gates. |
+| Profile implementation | **COMPLETE** | `.opencode/agents/execution/ingenium-software-engineer-fast.md` and `.opencode/agents/execution/ingenium-software-engineer-premium.md`: Delegation sections removed; the Subagent Boundary sentence added verbatim: **"Never delegate, spawn, reassign, or request another subagent; return research or documentation needs to the orchestrator."** `.opencode/agents/primary/ingenium-orchestrator.md` and `.opencode/agents/execution/ingenium-recovery-engineer.md`: curated read-only Git inspection rules added for `git show`, `git blame`, `git ls-files`, `git ls-tree`, and `git rev-parse`, with the orchestrator additionally allowing `git branch --list`, `git tag --list`, and `git remote -v`; destructive forms remain denied and there is no blanket Git allow. | None within this boundary. | Full parent OpenCode restart is required before the changed profiles and permissions load. |
+| Validator and canonical documentation updates | **COMPLETE** | `tests/test-agent-validation.sh`: Plan root-permission exception with exact Explore-only task map, live-config Plan checks, exact orchestrator/recovery Git maps, delegation-ownership matcher, and boundary-sentence checks. `packages/ingenium-extension/agent-validation.test.ts`: Plan exception acceptance/rejection cases; changed only because it extracts a validator block from the shell suite. `docs/configure/agents.md`: Plan sole root-permission exception, worker no-delegation policy, and Git access clarification. | None within this boundary. | No additional documentation or validator work is part of this item. |
+| Verification evidence | **WRITER SELF-VERIFICATION AND ONE QA PASS COMPLETE; NO BLOCKING/FOLLOW_UP FINDINGS** | QA delegation scan across `.opencode/agents/**` found positive delegation instructions only in the orchestrator profile. `bash tests/test-agent-validation.sh --permission-parity` **PASS**. The default-mode suite was red only on pre-existing unrelated rollout items: QA Vision profile/topology, chat model matrix, retired `engineering-workflow` skill directory, and orchestrator prose plus roadmap/vision assertions owned by other items. Focused extension test was **2/3** with one known unrelated active-agent-set/chat-model mismatch. During this boundary, a concurrent session aligned Scout default-deny and validator profile-count expectations in the shared tree, which is why parity mode is green. | Default-mode unrelated rollout failures and the remaining rollout gates are outside this boundary. | Preserve the evidence labels; do not reinterpret parity PASS as full rollout or runtime proof. |
+| Activation and commit boundary | **COMPLETE for this implementation/documentation boundary; ACTIVATION OPEN** | Source/config changes are uncommitted in the shared working tree; no commit was made, consistent with Todo 42 practice. Commits occur only at an evidence-backed wave boundary under the existing scoped-commit authorization. | A full parent OpenCode restart by the user/host is required to load the new permissions and prompts. | User/host performs the parent restart; `@ingenium-orchestrator` verifies the loaded surface through the admitted rollout path. |
+
+## Current Todo 44 — documentation steward upkeep following Todo 43 / ORCH-100 (2026-09-09)
+
+This upkeep turn verified `docs/configure/agents.md` alignment with the root `opencode.json` agent map and the Todo 43 profile changes; added the no-delegation bullet to `AGENTS.md`; extended the board continuation line to cover Todo 43; observed concurrent-session source deltas in the shared working tree (`packages/ingenium-core/lib/tools/mcp-credentials.ts`, `packages/ingenium-extension/opentui-jsx-runtime.d.ts`, `services/ingenium-api/tests/coordination-lease-auth.test.ts`, `mcp-status-contract.test.ts`, `opencode-broker.test.ts`, dashboard oauth-callback-redaction/select/setup tests, and related files) as informational monitoring items whose canonical documentation is owned by their implementing sessions; parent activation of the Todo 43 profiles remains open; no commit made. At read-back, the concurrent session had further updated the root `opencode.json` (`ingenium-chat` mapped to `openai/gpt-5.6-luna`/`max`, and the `session-id-tui.ts` entry removed from the root plugin array); this upkeep pass folded that mapping change into `AGENTS.md` and `.opencode/models.md`, while ownership of the config change remains with the implementing session.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| Documentation steward upkeep following Todo 43 / `ORCH-100` | **COMPLETE for this documentation-upkeep boundary** | Read-back of the changed files. | None within this boundary; broader rollout gates and Todo 43 parent activation remain open. | Orchestrator/rollout owners continue; commits only at evidence-backed boundaries. |
+
+## Current Todo 45 — retire ingenium-qa-vision agent; visual gates owned by @ingenium-qa / ORCH-100 (2026-09-09)
+
+This append-only record captures the user decision that `ingenium-qa-vision` is not needed because `@ingenium-qa` covers visual QA; audit task `ses_f7a5d1188ffeC6R4xUi0z6bWRG` inventoried active references; docs/config/profile/validator removals were executed by the docs and engineer waves; historical ROADMAP/archive references are retained as append-only history; the `opencode.json` map drops to 11 entries including `plan`; and a parent restart is required to unload the mapped agent from running parents.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| Retire `ingenium-qa-vision` agent; visual gates owned by `@ingenium-qa` / `ORCH-100` | **COMPLETE for this removal boundary** | Read-backs + audit inventory. | None within boundary; parent activation open. | `@ingenium-orchestrator` verifies the loaded surface after restart. |
+
+## Linked Current Todo 46 — CLI-DOC-04 session-context documentation finalizer / ORCH-100 (2026-09-09)
+
+<!-- (work-started) CLI-DOC-04 2026-09-09T13:08:29Z ingenium-docs -->
+
+This append-only record captures the explicit documentation finalizer for the
+installed OpenCode CLI session-context evidence. It preserves the valid PTY-parsed
+captures, the invalid-pipe failure, the evidence-class boundaries, the current
+one-item/one-subagent scheduling decision, and the parent-owned response-format
+request without changing source, runtime, or historical records.
+
+| Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
+|---|---|---|---|---|
+| `CLI-DOC-04` canonical documentation update | **COMPLETE for this documentation boundary.** | [CLI session-context audit](./session-context-audit-2026-09-09.md) records sessions `ses_f9bb821c0ffeUa4loCXV7iXDf0` and `ses_f7aeee264ffeTH6ys2qrR6tJDj`, PTY-to-EOF recovery, exact message/byte counts, decision provenance, coverage inventory, exclusions, and the final readback. | Broader runtime, deployment, QA/security, visual, and model/session gates remain out of scope. | Parent/rollout owners continue the open gates; no further Docs action is manufactured. |
+| `CLI-DOC-04-AUDIT` receipt and coverage | **COMPLETE for this source/static boundary.** | The receipt lists the 53 pre-existing canonical docs, root/package/service guides, 11 current profiles, 5 commands, active skill/reference inventory, historical/evidence exclusions, and the design-admission row. | None within this documentation boundary. | Preserve the receipt and evidence classes; do not rewrite historical records. |
+| `CLI-DOC-04-VERIFY` focused verification | **PASS.** | `bash tests/test-doc-config-audit.sh` passed once with 291 catalog entries / 289 server registrations; the corrected scoped local-link probe passed; changed sections were read back; final `git diff --check` passed after the completion marker. | None within this documentation boundary. | Parent/rollout owners preserve the evidence classes and continue only the open broader gates. |
+| `CLI-DOC-05` final evidence reconciliation (same linked request; not a new roadmap item) | **COMPLETE for this evidence boundary.** | Fast readback `ses_f79a8d23dffeT9p97Zv3qWfWIg` plus exactly one formatting QA report `ses_f79a3dbb3ffe57z5Xdwtxnoi70`; final details are in the [receipt](./session-context-audit-2026-09-09.md#cli-doc-05--final-evidence-reconciliation). | None within this documentation/response-structure boundary; all broader rollout gates remain open. | Preserve the limited evidence class; no broad gate or follow-on work is manufactured. |
+| `RESP-FMT-01` response-format follow-up | **COMPLETE for the response-only formatting boundary; no persistent source fix.** | Fast readback confirmed renderable Markdown is permitted, the eight mandatory contract fields remain, parent output now uses `###` headings, `**bold labels**`, and ordinary lists, and code fences remain for actual code. No profile/theme change or restart was needed. | No persistent formatter, exact palette, fresh TUI render, or runtime proof is part of this boundary. | No further action in this Docs record; broader rollout owners retain all unrelated open gates. |
+| `RESP-FMT-02` formatting QA evidence (same linked request; evidence record, not a feature/item) | **PASS.** | Exactly one QA report `ses_f79a3dbb3ffe57z5Xdwtxnoi70` passed all five criteria; evidence class `RESPONSE_STRUCTURE`/readback; tests, screenshots, restarts, and source changes were `NONE`; no blocking or follow-up finding. | None within the formatting boundary. | Retain the report; do not rerun formatting QA. |
+
+**IN_SCOPE:** The directly affected canonical root guides, concept/index pages,
+OpenCode and multi-session usage wording, reference index, `ROADMAP.md` live
+summary/append-only record, and the new repository receipt.
+
+**OUT_OF_SCOPE:** Source, tests, configuration, profiles, commands, skills,
+credentials, deployment, restart, Docs Workspace mutation, historical rewriting,
+raw transcript storage, visual/QA/security review, and `next-steps-plan/**`.
+
+**STOP_CONDITION:** `PASS` applies only to this documentation boundary after the
+changed sections and declared checks are read back. It does not close `ORCH-100`,
+the full roadmap, or any runtime/model/session gate; the response-only
+`RESP-FMT-01`/`RESP-FMT-02` boundary is recorded complete. Explicit user `STOP`
+or `CANCELLED` remains terminal.
+
+<!-- (work-complete) CLI-DOC-04 2026-09-09T13:20:17Z ingenium-docs -->
+
+### CLI-DOC-05 final evidence reconciliation
+
+**STATUS:** `COMPLETE` for the final evidence reconciliation only.
+
+**IN_SCOPE:** Only this latest linked-Todo-46 region and
+`docs/reference/session-context-audit-2026-09-09.md`'s formatting-evidence and
+manifest regions. The two distinct files in this user wave are the roadmap and
+the receipt; this is an exclusive-scope count, not a total shared-worktree diff.
+
+**OUT_OF_SCOPE:** Every other file, source/profile/theme/grant/runtime change,
+restart, commit, history rewrite, new CLI export/research, Workspace write, and
+QA/security/visual rerun.
+
+**ACCEPTANCE:** `RESP-FMT-01` is closed only for response structure/readback;
+`RESP-FMT-02` retains the one final QA report; the receipt preserves the 53-doc
+coverage count, exclusions, exact evidence limits, and current residual findings;
+all other master-rollout gates remain open.
+
+## S1–S6 documentation reconciliation — 2026-09-09
+
+This append-only record documents the canonical documentation reconciliation for
+the six approved rollout lanes. It does not create a task ID, rewrite an earlier
+contract or evidence record, change source/configuration/profiles/tests/runtime,
+restart or deploy OpenCode, mutate the Docs Workspace, dispatch QA/security, or
+claim completion of the broader rollout. The source paths below are exact
+implementation-evidence paths read from the shared dirty worktree; because the
+worktree is concurrently owned, this record does not attribute every source
+delta to this documentation turn.
+
+### Contract
+
+- **IN_SCOPE:** Directly affected canonical wording for MCP diagnosis and typed
+  diagnostics, managed Playwright and child-MCP metadata, saved memory clients
+  and scopes, credential reset scope distinctions, migration 115/116 behavior,
+  and the S1–S6 source/static status and open-gate record.
+- **OUT_OF_SCOPE:** Source or test edits, generated artifacts, credential or
+  database mutation, deployment/restart, live MCP or model/session acceptance,
+  visual/containment runs, QA/security review, historical rewriting, broad index
+  regeneration, `next-steps-plan/**`, and Docs Workspace writes.
+- **ACCEPTANCE:** Only the directly affected repository Markdown sections are
+  updated; commands, links, scope names, limits, and evidence labels match the
+  current source; the exact canonical changed-path list and each lane's open
+  gates are retained; no source/static result is labeled deployed or
+  model/session proof.
+- **STOP_CONDITION:** `PASS` applies only to this documentation boundary after
+  changed-section readback and the declared documentation checks. The master
+  rollout, S1–S6 runtime gates, and all model/session/visual gates remain open.
+  Explicit user `STOP` or `CANCELLED` remains terminal.
+- **VERIFICATION PLAN:** Read the changed sections back, run
+  `bash tests/test-doc-config-audit.sh` and `git diff --check`, and repair only
+  reproducible in-scope documentation defects before rerunning the affected
+  check.
+- **ESCALATION:** No external access path has been exhausted. A failed check is
+  repaired in scope; escalation is limited to the existing contract's protected
+  access, authorization, product-decision, genuine ambiguity, or unreproduced
+  root-cause conditions.
+
+### Canonical paths changed by this documentation turn
+
+```text
+docs/configure/mcp-servers.md
+docs/develop/api.md
+docs/develop/database.md
+docs/reference/mcp-tools.md
+docs/security/api-authentication.md
+docs/usage/chat.md
+docs/usage/opencode.md
+docs/reference/ROADMAP.md
+```
+
+The already-aligned authority pages `AGENTS.md`, `.opencode/models.md`,
+`docs/configure/agents.md`, and `docs/configure/plugins.md` were read but not
+rewritten by this reconciliation; their existing shared-worktree changes remain
+owned by their earlier documentation/profile boundaries.
+
+### S1 — MCP diagnosis and typed bridge evidence
+
+- **Source/static status:** `IMPLEMENTED_UNVERIFIED`; the live first stderr/exit
+  artifact, exact tested artifact, deployment, and MCP canary remain open.
+- **Exact evidence paths:**
+  `packages/ingenium-extension/scripts/mcp-server.ts`,
+  `packages/ingenium-extension/mcp-client.ts`,
+  `packages/ingenium-extension/mcp-client.test.ts`,
+  `services/ingenium-api/lib/mcp-launcher.ts`,
+  `services/ingenium-server/lib/proxy.ts`, and
+  `services/ingenium-server/tests/child-mcp-runtime.test.ts`.
+- **Diagnostic contract:** launcher stages are `local-binding`,
+  `project-preflight`, `authentication`, `import`, and `transport`; parent/
+  bridge stages are `spawn`, `spawntimeout`, `connect`, `initialize`,
+  `tools-list`, `call`, and `close`. Typed failures are `authentication`,
+  `timeout`, `rate_limited`, `revision_conflict`, and `request_failed`, with
+  boundaries `launcher`, `parent-mcp-startup`, `parent-mcp-transport`, and
+  `bridge`; child exit code/signal is optional metadata.
+- **Diagnostic limits:** the extension captures at most 8,192 raw stderr bytes,
+  redacts bearer values, URLs, absolute paths, credential-shaped strings, and
+  control characters, and returns at most 1,024 UTF-8 bytes of sanitized
+  diagnostic text. The child runtime exposes only stable error/diagnostic
+  metadata and a stderr byte count capped at 1,048,576 bytes; it never forwards
+  child stderr.
+- **Remaining gates:** reproduce the distribution/build race before causal
+  repair, capture the first safe live artifact, deploy the exact revision, and
+  prove API health plus MCP `initialize`, `tools/list`, and state-bearing status.
+
+### S2 — Agent authority, Scout, and Ponytail
+
+- **Source/static status:** source/test governance evidence is recorded; full
+  parent activation, actual loaded prompt/tool behavior, and model/session proof
+  remain open.
+- **Exact evidence paths:** `opencode.json`, `.opencode/models.md`,
+  `AGENTS.md`, `.opencode/agents/primary/plan.md`,
+  `.opencode/agents/primary/ingenium-orchestrator.md`,
+  `.opencode/agents/research/ingenium-scout.md`,
+  `.opencode/agents/chat/ingenium-chat.md`,
+  `.opencode/agents/execution/ingenium-docs.md`,
+  `.opencode/agents/execution/ingenium-qa.md`,
+  `.opencode/agents/execution/ingenium-recovery-engineer.md`,
+  `.opencode/agents/execution/ingenium-software-engineer-fast.md`,
+  `.opencode/agents/execution/ingenium-software-engineer-premium.md`,
+  `.opencode/agents/security/ingenium-security-auditor.md`,
+  `packages/ingenium-extension/resource-sync.ts`,
+  `scripts/project-agent-profiles.mjs`,
+  `scripts/project-opencode-global-config.mjs`,
+  `tests/test-agent-validation.sh`, and
+  `packages/ingenium-extension/agent-validation.test.ts`.
+- **Authority contract:** root `opencode.json` carries model/variant mappings;
+  native Markdown profiles carry permissions, metadata, and skills; the
+  built-in Plan inline block is the sole root permission exception. Scout is
+  limited to genuine Docs RAG/context retrieval, every user-facing agent loads
+  `@ponytail`, and the hidden broker remains unmapped and no-tool/default-deny.
+- **Remaining gates:** full-parent restart, independently verified loaded
+  mappings/grants, actual Ponytail prompt evidence, Scout generic-review denial,
+  and runtime broker absence. A restart acknowledgement or source read is not
+  loaded-surface proof.
+
+### S3 — Scoped dispatch and evidence integrity
+
+- **Source/static status:** current policy correction is one distinct subagent
+  per dependency-ready item with exclusive territories and no fixed active-agent
+  or writer ceiling; older six-active/three-writer phase rows remain historical.
+- **Exact evidence paths:** `.opencode/agents/primary/ingenium-orchestrator.md`,
+  `tests/test-orchestrator-scheduler-policy.sh`,
+  `tests/test-agent-validation.sh`,
+  `packages/ingenium-extension/session-coordinator.ts`, and
+  `packages/ingenium-extension/session-coordinator.test.ts`.
+- **Policy contract:** every nonterminal item declares `IN_SCOPE`,
+  `OUT_OF_SCOPE`, acceptance, `STOP_CONDITION`, verification, and escalation;
+  each dispatch records actual counts, exclusive territories, dependencies,
+  waiting reasons, and evidence classes. Subagents do not delegate; reviewers
+  do not reopen work; unknown outcomes reconcile before replay.
+- **Remaining gates:** current executable validator/admission evidence, loaded
+  profile behavior, runtime recovery/activation, and final Todo/roadmap
+  reconciliation. No scheduler source or test result is converted into
+  deployed or model/session proof here.
+
+### S4 — Cloudflare named tunnel and HTTPS audiences
+
+- **Source/static status:** `IMPLEMENTED_UNVERIFIED`; Todo13 remains open.
+- **Exact evidence paths:** `packages/ingenium-core/lib/tools/cloudflare-tunnel.ts`,
+  `services/ingenium-api/lib/cloudflare-connector.ts`,
+  `services/ingenium-api/lib/cloudflare-trusted-ingress.ts`,
+  `services/ingenium-api/lib/cloudflare-tunnel-service.ts`,
+  `services/ingenium-api/lib/routes/cloudflare.ts`,
+  `services/ingenium-dashboard/src/app/components/settings/panels/CloudflarePanel.tsx`,
+  `scripts/start-cloudflare-tunnel.sh`, and `Dockerfile`.
+- **Remaining blocking gaps:** the five audience labels are not yet consumed by
+  production Host/CSP routing; route health does not probe public HTTPS origins;
+  and token/config replacement lacks atomic or compensating rollback. No
+  protected credential or public-route canary was attempted in this turn.
+
+### S5 — Pinned managed Playwright child MCP
+
+- **Source/static status:** `IMPLEMENTED_UNVERIFIED`/`IN_PROGRESS`; Todo14 and
+  the live Playwright gates remain open.
+- **Exact evidence paths:** `packages/ingenium-core/lib/tools/child-mcp-presets.ts`,
+  `packages/ingenium-core/lib/tools/child-mcp-servers.ts`,
+  `packages/ingenium-core/data/migrations/116_child_mcp_description.sql`,
+  `services/ingenium-api/lib/routes/mcp-servers.ts`,
+  `services/ingenium-server/lib/child-mcp-playwright.ts`,
+  `services/ingenium-server/lib/child-mcp-gateway.ts`,
+  `services/ingenium-server/lib/proxy.ts`,
+  `services/ingenium-server/tests/child-mcp-gateway.test.ts`,
+  `services/ingenium-server/tests/child-mcp-runtime.test.ts`, and `Dockerfile`.
+- **Contract facts:** the preset pins `@playwright/mcp@0.0.78`, its integrity,
+  `/app/node_modules/.bin/playwright-mcp`,
+  `/opt/ingenium-playwright/chromium`, isolated headless vision mode, blocked
+  service workers, file output capped at 52,428,800 bytes, and the
+  `ingenium_playwright_*` namespace. Child execution is project-bound and
+  requires `child-mcp:execute`; trusted runtime handoff uses the separate
+  `child-mcp:runtime` audience. Optional `description` metadata persists on
+  the child definition and is displayed by the dashboard.
+- **Remaining gates:** arbitrary definition bypass, passive allow-list
+  enforcement, durable ownership/cancellation/failed-cleanup manifests,
+  managed verifier admission, active-handle containment, exact artifact
+  deployment, review, and any applicable visual proof.
+
+### S6 — Explicit saved memory and cross-surface clients
+
+- **Source/static status:** source/test memory boundary is recorded complete in
+  the current live summary; fresh-session/runtime A/B/C, deployment, visual,
+  and containment acceptance remain open. The older Todo15 source matrix is
+  retained as historical evidence and is not rewritten here.
+- **Exact evidence paths:** `packages/ingenium-core/data/migrations/114_explicit_saved_memory.sql`,
+  `packages/ingenium-core/data/migrations/115_explicit_memory_fts_update_order.sql`,
+  `packages/ingenium-core/lib/tools/explicit-memory.ts`,
+  `packages/ingenium-core/lib/tools/backups.ts`,
+  `services/ingenium-api/lib/routes/memory.ts`,
+  `services/ingenium-server/lib/tools/memory.ts`,
+  `packages/ingenium-extension/explicit-memory.ts`,
+  `packages/ingenium-extension/session-coordinator.ts`,
+  `services/ingenium-dashboard/src/lib/explicit-memory.ts`,
+  `services/ingenium-dashboard/src/app/chat/components/use-memory-capabilities.ts`,
+  `services/ingenium-dashboard/src/app/chat/components/ChatShell.tsx`,
+  `services/ingenium-dashboard/src/app/chat/components/ChatInput.tsx`, and
+  `services/ingenium-dashboard/src/app/context/components/ExplicitMemorySection.tsx`.
+- **Client/API facts:** the seven `ingenium_memory_*` tools expose bounded
+  save/read/list/search/update/forget/operation-status paths. Chat probes the
+  catalog plus a read-only workspace-bound list before enabling controls; read
+  context is capped at 16 items and 2,048 estimated tokens and framed as
+  `untrusted_memory_data`. Save is off by default and occurs only after an
+  explicit current-user request or the explicit Save-message control, after
+  the provider accepts the turn. Receipts are authoritative; unknown mutation
+  outcomes require an operation-status check and must not be blindly replayed.
+- **Migration facts:** migration 115 installs a `BEFORE UPDATE` FTS delete
+  trigger and rebuilds the explicit-memory FTS index; migration 116 adds the
+  nullable persisted child-MCP description column. FTS triggers remain the sole
+  FTS writers, and `checkpointAfterWrite()` remains outside transactions.
+- **Remaining gates:** fresh independent `/chat` and external `/opencode`
+  save/recall/update/forget/restart scenarios, exact deployed API/MCP health,
+  visual changed-route/full-site evidence, strict containment, and final
+  Todo/roadmap reconciliation.
+
+### Current unclosed evidence and verification boundary
+
+Across S1–S6, the following remain open and are not silently converted to
+`PASS`: live MCP first-stage diagnosis and canary; exact artifact rebuild and
+deployment; full-parent activation; Cloudflare public-route/rollback proof;
+Playwright managed admission, cleanup, and containment enforcement; loaded
+agent/Ponytail/Scout runtime behavior; fresh memory A/B/C model/session proof;
+visual R22/R21; deployment R09/R19; activation T29/T35/T36/R20; Todo41 safe
+activation; and final reconciliation/commit R23. The current board also retains
+the inconclusive `backgroundSubagents` capability probe. No source test, API
+liveness result, or static read substitutes for deployed, model/session, visual,
+or cleanup evidence.
+
+**Documentation verification:** **PASS for this documentation boundary.**
+`bash tests/test-doc-config-audit.sh` passed three times (`291` catalog entries / `289`
+server registrations), `git diff --check` passed three times, and the changed sections
+were read back. No QA, security, visual, deployment, restart, or follow-up task
+is requested by this documentation boundary.
+
+### MEMORY-100 / PLAYWRIGHT-100 authenticated runtime attempt (2026-09-09)
+
+- **Status: BLOCKED; existing rollout gates remain OPEN.** The bounded user
+  request prohibited delegation, commits, container/VS Code actions, and restarts.
+  One browser owner/context used an API-authenticated dashboard session; login
+  and session checks returned HTTP 200. No credentials or memory contents are
+  included in the report.
+- **MEMORY-100:** `/chat` lacked both explicit-memory controls. `/opencode`
+  opened the embedded UI without an observed saved-memory panel; the permitted
+  session-cookie fallback `GET /api/v1/memory` for `ingenium` and the bound
+  workspace returned HTTP 403. The installed `dist/mcp-client.js` bridge with
+  the general credential initialized and listed tools, but neither `memory_list`
+  nor `ingenium_memory_list` was present. No synthetic memory was saved; the
+  saved/present/present-v2/absent lifecycle and optional isolation proof remain
+  unproven, not successful negative tests.
+- **PLAYWRIGHT-100: STALE-BACKEND.** Existing definitions were checked first
+  (HTTP 200, no Playwright preset). The single authenticated
+  `POST /api/v1/mcp-servers/presets/playwright?project=ingenium` returned HTTP 404.
+  The item stopped without restart; no preset or child-browser lifecycle was
+  created or proven.
+- **Visual R22/R21: BLOCKED.** Ten screenshots were captured and reviewed at
+  1440x900 and 390x844. Desktop Cloudflare deep-link rendered General settings;
+  desktop fetch failures were recorded. The single passive dual-viewport sweep
+  later encountered HTTP 429; all five mobile captures show account-loading
+  state rather than completed pages. `/vscode` was excluded to honor the explicit
+  prohibition. Document HTTP 200 is not a visual PASS.
+- **Cleanup/strict containment: PASS for this attempt only.** No synthetic
+  memories or presets were created; the browser and bridge closed. The required
+  `npx tsx tests/suite-containment-audit.ts --strict` completed without strict
+  failure: zero active handles, no discovered/unowned processes or artifact
+  residuals, and existing listeners classified as Compose-owned. This is not
+  managed-child lifecycle acceptance or completion of broader containment gates.
+- **Retained evidence:**
+  `tests/artifacts/visual-qa/runtime-1788977286376-auth/report.json` and its ten
+  named PNGs. TodoWrite retains memory and visual acceptance as blocked/open;
+  deployment/activation remains with the existing authorized rollout owner,
+  outside this no-restart request. No broader roadmap item is closed.
+
+### Compatibility MCP bootstrap scoped implementation — first-failure stop (2026-09-09)
+
+**Status: OPEN / BLOCKED — `DEPLOYMENT_BINDING_GUARD_STALE`.** This is source/test
+evidence only, not deployed MCP connection proof or completion of any master item.
+The authorized scope is the compatibility-only bootstrap route, canonical
+`ingenium` / `shared-memory-ingenium` / `/home/brajam/repos/ingenium` binding,
+runtime credential provisioning, retention ACL repair, focused checks, and the
+compatibility rebuild/recreate and live canaries. Delegation, commits, full
+memory/Playwright/visual acceptance, and Docs Workspace mutation are excluded.
+The explicit stop condition is the first real failure, with no unchanged retry.
+
+- **Implemented:** `POST /api/v1/auth/bootstrap-mcp-credential` rejects
+  non-compatibility principals and browser-origin/cookie requests, rejects body
+  and query overrides, and fixes service kind, MCP audience, name, eight scopes,
+  project/workspace/worktree and first-issuance 30-day expiry. Core issuance gains
+  an atomic encrypted replay receipt (migration 117); retries reuse the principal
+  and credential without extending expiry. Revoked/expired replay fails closed.
+- **Container source:** the existing `/workspace` bind is retained alongside the
+  same-path canonical bind. A root one-shot supervised process waits for API
+  readiness, reads the protected installation token in-process, validates the
+  response binding, and installs the scoped token through an exclusive no-follow
+  temporary file and atomic rename. The runtime parent is mode `0700`, UID/GID
+  `1105`; the file is mode `0600`, UID/GID `1105`, at
+  `/run/ingenium-opencode/.ingenium-mcp-credential`, outside immutable `/app`.
+  OpenCode retains its unprivileged user and `env -i` launch. Retention-control
+  directories regain owner-private modes and lose inherited/default ACL grants.
+- **Passed:** bootstrap API 5 tests; existing core credential 9 tests; global
+  projection 7 tests; provisioning/binding 2 tests; API typecheck; affected shell
+  syntax; scoped diff whitespace; Supervisor isolation; actual compatibility ACL
+  fixture, including retention privacy and runtime-directory ownership. The ACL
+  fixture used the existing compatibility image, removed its own containers and
+  volume without `down`, and reported successful cleanup.
+- **First failure:** `bash tests/test-gateway-static.sh` passed its launcher
+  assertions, then `scripts/validate-deployment-config.sh:389` rejected the
+  entrypoint because it still requires the obsolete literal
+  `"INGENIUM_WORKTREE": "/workspace"`. Exact error:
+  `ERROR: required deployment setting is missing from /home/brajam/repos/ingenium/scripts/docker-entrypoint.sh: "INGENIUM_WORKTREE": "/workspace"`.
+  Tool family: Bash; command exit: `1`; current task/session ID is not exposed.
+  The guard was not weakened or retried.
+- **Not run:** compatibility rebuild/recreate, new-container health/services,
+  MCP `connected` canary, nonempty workspaces, authenticated preset `201`, and
+  strict containment. The preflight-only deployment was
+  `ingenium-ingenium-1`, healthy on image
+  `sha256:a8a2d0d049544171f775bade76aa339989a5d482cc85680c78605f18157c1c56`.
+  Image inventory showed one compatibility image (`4.47GB`); no image was built,
+  removed, or pruned and no other-service image was changed.
+- **Owner / next work:** the authorized implementation owner must align the
+  deployment validator with the exact canonical binding, preserving all guards,
+  before a causal proving check and any deployment. A separate bounded security
+  review remains pending; none was delegated or claimed here. TodoWrite keeps
+  verification and live acceptance open and records this same first failure.
+
+## Final acceptance evidence reconciliation — 2026-09-10
+
+This append-only overlay records the final verified state for the bounded
+compatibility MCP bootstrap, memory, and managed-Playwright acceptance wave.
+Newer evidence in this section supersedes stale retained artifacts for current
+state only; no existing roadmap row or historical evidence is deleted or
+renumbered. The broader rollout is not closed by this overlay.
+
+- **MCP bootstrap and deployment — VERIFIED:** The bootstrap credential route,
+  provisioning, canonical `/workspace` mount, protected runtime credential,
+  `INGENIUM_MCP_CREDENTIAL_PURPOSE` handoff, and retention ACL repair landed.
+  Deployed proof is `ingenium.status=connected`.
+- **Memory lifecycle — VERIFIED:** `/chat` memory controls are **ENABLED**.
+  The lifecycle works across `/chat` (`save 201/SAVED`), the authenticated API
+  (`PRESENT→ABSENT`), and the external bridge (`PRESENT→ABSENT`). The chat UI
+  has no update/forget controls; management remains in the Context section as
+  a noted UI-scope item.
+- **Playwright — PASS with a compatibility limit (historical; superseded by completion on 2026-09-10):** The Playwright backend and
+  real integration are **PASS**. Live child discovery is recorded as
+  **COMPAT-LIMIT** and requires the production runtime manager; this retained
+  compatibility-limited state is not the current state after the completion
+  record appended below.
+- **Runtime and preservation evidence — VERIFIED:** strict containment exited
+  `0`; there is one image per service; VS Code was untouched.
+- **Review evidence:** Security is **PASS**, with two follow-ups: encrypted
+  receipt persistence and retained-credential restart readiness. Ponytail is
+  **PASS**, with follow-ups for the credential-helper minor reorder and memory
+  UI breadth; the two documentation drifts in this wave are fixed below. The
+  Premium review **HOLD** is resolved by the `plan.md` gitignore fix.
+- **QA/currentness boundary:** Stale retained artifacts must not be presented
+  as current; newer evidence supersedes them. The strict simultaneous
+  three-window A/B/C + model-response + restart-replay gate remains **OPEN**.
+
+### Canonical documentation drift fixes
+
+- `docs/usage/dashboard.md` now uses the owner-only
+  `.opencode/.ingenium-mcp-credential` protected file with
+  `INGENIUM_MCP_CREDENTIAL_PURPOSE=general` and no rejected inline
+  `INGENIUM_MCP_CREDENTIAL` example.
+- `docs/develop/database.md` now lists migration `117_mcp_credential_receipts.sql`
+  in the 107–117 migration table.
+
+**IN_SCOPE:** This append-only roadmap reconciliation and the two directly
+affected canonical documentation sections above. **OUT_OF_SCOPE:** Source,
+tests, other documentation, commits, deployment, delegation, and Docs Workspace.
+
+**STOP_CONDITION:** The documentation boundary is complete after one static
+readback of the final acceptance overlay and both corrected sections. No shell,
+mutation outside these docs, or follow-up task is required.
+
+**Verification:** Static readback completed once for the roadmap overlay,
+dashboard credential example, and database migration row. No QA, security,
+visual, deployment, restart, or Docs Workspace action was requested.
+
+## Final rollout consolidation — 2026-09-10
+
+This append-only block records the final delivered feature set and the remaining
+acceptance gates for the current rollout. It extends the dated current-board
+overlay above; it does not delete, renumber, or rewrite any prior row, marker,
+contract, evidence record, or history. Evidence classes are kept distinct:
+source/static and source/test evidence is not deployed or model/session proof,
+and deployed/API/bridge evidence is not the strict simultaneous model-session
+gate.
+
+### Delivered feature set and evidence
+
+- **Profile-only tool governance — `SOURCE/STATIC` + `SOURCE/TEST`:** The
+  coordinator tool-execution denial layer was removed. `.opencode/agents/**`
+  profiles are the sole tool authority, and the harness, documentation, and
+  tests are aligned to that boundary.
+- **Agent authority — `SOURCE/STATIC` + `SOURCE/TEST`:** Root `opencode.json`
+  agent entries are model/variant-only. The canonical
+  `.opencode/agents/primary/plan.md` is read-only with Explore-only delegation
+  to `@ingenium-explore` and is no longer hidden by the `.gitignore` negation;
+  Scout is retrieval-only; and `AGENTS.md` records the golden rules plus the
+  Correction, Clarification, and Evidence safeguards.
+- **Ponytail — `SOURCE/PLUGIN` + `IN-SESSION`:** Canonical injection uses
+  `experimental.chat.system.transform`; profiles require loading Ponytail. A
+  live session observed the skill call and `PONYTAIL MODE ACTIVE` at full
+  intensity as a PASS.
+- **MCP stability — `SOURCE/TEST` + `DEPLOYED`:** Typed launcher/bridge
+  diagnostics expose boundary, stage, failure, and `childExit` data with
+  bounded redaction. Transient `429` responses retry using `Retry-After`. The
+  scoped compatibility-only route
+  `POST /api/v1/auth/bootstrap-mcp-credential` uses fixed binding/scopes and
+  idempotent receipts from migration `117_mcp_credential_receipts.sql`.
+  Container provisioning writes
+  `/run/ingenium-opencode/.ingenium-mcp-credential` with mode `0600` and
+  UID/GID `1105`, retains the canonical same-path mount, and gives
+  `INGENIUM_MCP_CREDENTIAL_PURPOSE=general` precedence. Multiple post-restart
+  checks provide deployed proof `ingenium.status: connected`.
+- **Managed Playwright — `SOURCE/TEST` + `INTEGRATION` + `DEPLOYED/API`:** The
+  server-owned preset endpoint
+  `POST /api/v1/mcp-servers/presets/playwright` records the `201`/`204`
+  contract; browser resolution is anchored to `@playwright/mcp`; optional
+  descriptions persist through migration `116_child_mcp_description.sql`;
+  Docker installs browsers at `/opt/ingenium-playwright/browsers`; and the
+  real integration test passes navigate, snapshot, close, reconnect, and
+  cleanup. The earlier live child discovery `COMPAT-LIMIT` is historical and is
+  superseded by the 2026-09-10 local-runtime completion record below.
+- **ChatGPT-like agent memory — `SOURCE/TEST` + `API/BRIDGE LIFECYCLE` +
+  `DASHBOARD`:** Seven `ingenium_memory_*` tools cover save, read, list, search,
+  update, forget, and operation status. The preference-tag default and
+  `source: user-directive` are recorded; secret-shaped content is rejected;
+  project/workspace/owner isolation, versions, receipts, tombstones, and
+  restore suppression are enforced; migrations `114`, `115`, `116`, and `117`
+  are present; and `/chat` memory controls are enabled after workspace
+  confirmation and the MCP-catalog visibility fix for user principals. API and
+  bridge lifecycle is proven as save `201` → restart → fresh-session recall
+  **PRESENT** → forget → **ABSENT** (`404` by ID). Internal `/opencode`
+  model-session recall remains open: the embedded UI requires manual session
+  creation, automation has no input path, and a one-click manual path is
+  available.
+- **Concurrency — `SOURCE/TEST` + `RUNTIME OBSERVATION`:** Allocation is
+  request-scoped with no fixed 6/3 cap; the 20-writer regression and
+  one-agent-per-item policy are recorded. On the reachable runtime,
+  `backgroundSubagents:false` was observed for T-AUX-02; the earlier
+  inconclusive probe remains preserved as history.
+- **Documentation gates — `DOC AUDIT` + `SOURCE/STATIC`:** Documentation audit
+  fixes are recorded, `tests/test-doc-config-audit.sh` is in the validation
+  suite, and the orchestrator profile carries the Documentation Gates policy.
+  The affected READMEs and API, MCP, authentication, database, and testing
+  documentation updates include migration `117` and the corrected dashboard
+  inline-credential example.
+- **Reviews and currentness — `REVIEW`:** Security is PASS with two
+  `FOLLOW_UP` items: encrypted receipt persistence and retained-credential
+  restart readiness. Ponytail is PASS with follow-ups for the credential-helper
+  micro-reorder and memory UI breadth; the documentation drifts were fixed.
+  The final Premium review HOLD is resolved by unignoring `plan.md`. QA notes
+  stale retained artifacts are superseded by newer evidence; the strict
+  simultaneous three-window gate remains open.
+- **Compatibility operations — `DEPLOYED` + `VISUAL/CONTAINMENT`:** The
+  compatibility container was rebuilt/recreated under the one-image-per-service
+  guard with the single `ingenium-ingenium:compat` tag; prior images were
+  removed, dangling-only pruning was used, and no other-service images were
+  touched. VS Code was untouched. The containment audit exited `0`. The visual
+  sweep measured `52/52` routes at HTTP `200` and retained 10 screenshots;
+  non-mail `net::ERR_ABORTED` and `/vscode` wasm `404` results remain recorded
+  as honest findings rather than being converted to a visual PASS.
+
+### Remaining open gates — 2026-09-10
+
+- **`COORD-106` strict simultaneous gate:** external A, external B, and
+  internal C, plus internal model-session recall and typed memory restart
+  replay, remain open.
+- **Internal `/opencode` model recall:** manual session creation is required;
+  no automatable input path was proven.
+- **Playwright live child discovery:** The prior compatibility-limited gate is
+  superseded by the 2026-09-10 local-runtime live acceptance below and is no
+  longer open.
+- **Chat management controls:** update and forget controls are not in the Chat
+  UI; management remains in the Context section.
+- **Review follow-ups:** the two security follow-ups and the two Ponytail
+  follow-ups remain open.
+- **`R23` final scoped commit:** pending explicit user go; the shared worktree
+  is large and mixed across sessions.
+
+**Preservation and boundary:** The delivered evidence above supersedes stale
+retained artifacts only for current-state interpretation. All existing rows,
+markers, item numbers, historical records, and their original evidence classes
+remain intact. This amendment is limited to `docs/reference/ROADMAP.md`; its
+verification is one static readback only, with no source/test rerun, deployment,
+commit, delegation, or Docs Workspace mutation.
+
+### PLAYWRIGHT-100 compatibility local provisioner — first-failure stop (2026-09-10)
+
+**OPEN / BLOCKED — `LOCAL_RUNTIME_POLICY_REGRESSION_FAILED`.** Source changes
+only; no deployment, live child lifecycle, security review, image cleanup, or
+completion claim. The user explicitly required stopping on the first real failure.
+
+- Added a fixed-workspace, installation-principal-only local provisioning route,
+  compatibility/no-manager admission, READY lifecycle transitions with no backend
+  container ID, encrypted scope/epoch-keyed credential receipts, and binding reuse.
+  The general bootstrap credential remains unchanged.
+- Runtime profile: `child-mcp:runtime`, `child-mcp:execute`, `mcp-servers:write`,
+  `coordination:read`, `projects:read`, `runtime:activity`, `memory:read`, plus the
+  existing normal-tool profile's `coordination:write`, `repository:sync`,
+  `documentation:read`, `rag:read`, and `memory:write`. The latter five preserve
+  the single MCP startup authorization binding's normal-tool permissions.
+- Delivery source installs the capability and validated nonsecret launcher
+  environment atomically under `/run/ingenium-runtime`, owner 1105, parent 0700,
+  files 0600. The launcher retains the general credential and uses runtime mode
+  with the canonical `/home/brajam/repos/ingenium` worktree.
+- Source evidence: the initial bootstrap API file passed 7 tests; private delivery
+  and launcher tests passed 3 tests. Adding the real authenticated child-policy
+  regression exposed HTTP 404 instead of 201 at
+  `services/ingenium-api/tests/bootstrap-mcp-credential.test.ts:89`. Command:
+  `npm run test --workspace=ingenium-api -- tests/bootstrap-mcp-credential.test.ts -t 'provisions one READY'`.
+  Result: 1 failed, 6 skipped, exit 1. No retry followed.
+- First actionable source mismatch: `services/ingenium-api/lib/middleware/auth.ts:217-219`
+  requires `/workspace` for every runtime audience, overriding the credential's
+  canonical launcher worktree. The regression sends the canonical binding and
+  is rejected before preset handling. Handoff/discovery/execute checks following
+  that assertion were not reached. No authorization guard was weakened.
+- Next work / owner: Premium must reconcile compatibility versus isolated-runtime
+  launcher attestation across middleware and preflight with a causal regression,
+  finish remaining scope/epoch and deployment checks, then perform the explicitly
+  authorized rebuild and live lifecycle. The separate declared security review
+  remains pending; no delegation or commit occurred. TodoWrite retains the
+  implementation and every verification/deployment/live/image gate as open.
+
+### Compatibility startup recovery — 2026-09-10
+
+- Service-health gate: **PASS**. Live read-only API inspection found the authorized
+  `shared-memory-ingenium` workspace's runtime in `FAILED`, epoch 0, with no backend
+  container. Local provisioning rejected this recoverable state. The provisioner
+  now uses the existing state-machine transitions to recover it; workspace,
+  epoch, backend and capability-resolution checks remain enforced.
+- Startup installs the general credential first, treats optional runtime issuance
+  failure as `MCP_BOOTSTRAP_DEGRADED`, and bounds the launcher's runtime wait to
+  12 iterations before proceeding with general MCP authority. Internal runtime
+  failures log sanitized stage/code, not exception text or credentials.
+- Source evidence: provisioning/launcher tests **4 passed**; API bootstrap tests
+  **8 passed**, including failed-runtime recovery and capability replay; API
+  typecheck passed. Compatibility image build and deployment validation passed.
+- Deployed container `8f6d5eccdd68711205e4d923dded37ede54f07b34e9f1b40ff7c5e9d19f14b3a`,
+  image `8a5e30f750306ade218fadb6955b84d3a41315b535116a9df7f4fc6e86123510`:
+  healthy; `opencode-web`, `ttyd-opencode`, `vscode` RUNNING;
+  `MCP_BOOTSTRAP_READY`; general credential, runtime capability and runtime
+  environment all mode 0600, UID/GID 1105. Authenticated project MCP status:
+  HTTP 200, `ingenium.status: connected`.
+- Live Playwright gate (historical first-failure; superseded by completion below): **STOPPED / NOT PASS** at `RUNTIME_TOOLS_MISSING` in
+  `tests/local-runtime-live-acceptance.mjs`. Initial preset absent; creation 201;
+  refresh 200; discovery returned 30 entries, but the test's name projection was
+  null and its MCP suffix selector found no complete navigate/snapshot/close set.
+  No navigation or snapshot ran. This does not establish whether the remaining
+  defect is catalog shape/selection or runtime tool availability. Runtime-credential
+  deletion returned 403; authorized installation-credential cleanup returned 204,
+  followed by HTTP 200 listing with no residual preset. No live-check retry.
+- Image inventory: one `ingenium-ingenium:compat` tag, Docker list size 4.47 GB
+  (inspect size 1,129,831,825 bytes). No explicit old-image deletion occurred;
+  the superseded image was no longer listed after recreation, so retention through
+  the healthy boundary was not independently proven. Project-label-filtered,
+  dangling-only prune reclaimed 0 B; other-service images were unchanged.
+- Reconciliation: startup implementation, focused verification and service-health
+  deployment complete; the live browser acceptance was unresolved at this
+  historical first-failure STOP and is superseded by the completion record below.
+  Broader rollout remains open. No commits or delegation.
+
+### PLAYWRIGHT-100 completion and compatibility runtime recovery (2026-09-10)
+
+This final append-only record supersedes the earlier `IMPLEMENTED_UNVERIFIED`,
+`COMPAT-LIMIT`, and `RUNTIME_TOOLS_MISSING` Playwright records above for
+current-state reading only.
+Those records, rows, markers, and failure history remain preserved.
+
+- **SOURCE + DEPLOYED + LIVE ACCEPTANCE COMPLETE:** The compatibility local
+  runtime provisioner uses the `bootstrap-local-runtime` route, issues a
+  runtime credential with `kind=runtime` and 12 scopes, installs the capability
+  at `/run/ingenium-runtime/capability` with mode `0600` and UID/GID `1105`,
+  and enters the launcher's runtime branch. That branch attests
+  `runtimeWorktree=/workspace` against the canonical storage binding rather
+  than accepting an unbound path.
+- **Startup-regression recovery:** Bootstrap is fail-open: optional runtime
+  issuance failure emits `MCP_BOOTSTRAP_DEGRADED`, while the general credential
+  keeps `opencode-web` healthy. Runtime readiness uses a bounded 12-iteration wait;
+  sanitized `503` diagnostics expose stage/code without exception text or
+  credentials; and a `FAILED` runtime is recovered through the existing
+  workspace/epoch/backend/capability validation state machine without bypassing
+  validation.
+- **Deployed proof:** Container
+  `8f6d5eccdd68711205e4d923dded37ede54f07b34e9f1b40ff7c5e9d19f14b3a` is
+  healthy on image
+  `8a5e30f750306ade218fadb6955b84d3a41315b535116a9df7f4fc6e86123510`;
+  the provisioner reports `MCP_BOOTSTRAP_READY`; and authenticated project MCP
+  reports HTTP 200 with `ingenium.status: connected`.
+- **Live lifecycle:** `preset create 201` → discovery `ready` with 30 tools
+  (each entry carries `source_name` and `canonical_name`; 10 Playwright tools
+  are enabled by the passive-default policy and 20 are disabled) → navigate
+  exactly once with `isError:false` → snapshot exactly once with
+  `isError:false` → close exactly once with `isError:false` → remove `204` →
+  tools endpoint `404` → zero child/output residual with cleaned ownership
+  records.
+- **Recorded test corrections:** `canonical_name` projection; transport names
+  using `playwright_browser_*`; and the gateway envelope
+  `{project, arguments}`.
+- **Open items:** A bounded security review of this surface is dispatched; its
+  outcome is not yet recorded and must be appended when received. The strict
+  three-window A/B/C model-session gate, internal `/opencode` model recall,
+  Chat UI update/forget UX, encrypted-receipt and retained-credential
+  follow-ups, and the `R23` final scoped commit remain open. These gates do not
+  reopen the completed managed-Playwright source, deployment, or live
+  lifecycle acceptance.
+- **Boundary:** This completion record closes only the managed-Playwright and
+  compatibility runtime-provisioning boundary. The broader rollout remains
+  open; no commit, Docs Workspace mutation, delegation, or additional test or
+  deployment action is claimed by this documentation update.
+
+## Final remediation and deployment verification — 2026-09-10
+
+This append-only record supersedes the earlier `COMPAT-LIMIT`,
+`RUNTIME_TOOLS_MISSING`, and 12-scope runtime-mode notes above for current-state
+reading only. Those records, rows, markers, and failure history remain
+preserved; no item is deleted or renumbered.
+
+### Security-findings remediation wave
+
+- **Runtime credential scope reduction — `SOURCE/TEST`, 12 → 8:** The kept
+  runtime set is:
+  - `child-mcp:runtime` — trusted runtime handoff.
+  - `child-mcp:execute` — authorized child execution.
+  - `mcp-servers:write` — discovery persistence and its implied metadata reads.
+  - `projects:read` — project binding and project-scoped authorization.
+  - `coordination:write` — coordination writes, with read access implied by the
+    write scope.
+  - `memory:write` — memory writes, with read access implied by the write
+    scope.
+  - `documentation:read` — documentation retrieval.
+  - `rag:read` — RAG retrieval.
+- **Removed scopes:** `repository:sync` (unusable with the runtime audience),
+  `runtime:activity` (unproven without `absolute_expires_at`), and
+  `coordination:read` / `memory:read` (implied by their corresponding write
+  scopes).
+- **Degraded-startup stale-file invalidation — `SOURCE/TEST`:** On runtime
+  failure, both the capability and environment files are removed; the launcher
+  requires both files before entering runtime mode; and an inherited runtime ID
+  is unset. Regression coverage verifies that stale files cannot survive
+  degraded startup.
+- **Test log hygiene — `SOURCE/TEST`:** Child tool results log only status,
+  byte-count, and hash; result payloads are not written to test logs.
+- **Deployment validator and fixture alignment — `SOURCE/TEST`:** The
+  deployment validator's scope contract was updated, and the gateway-static
+  fixture was aligned with the new runtime-mode contract.
+
+### Final verified deployment and live acceptance
+
+- **Deployment — `DEPLOYED`:** Container `906bcca9caa6`, image
+  `673a28e84d09…`, healthy; services are `RUNNING`; the provisioner reports
+  `MCP_BOOTSTRAP_READY`. The general credential, runtime capability, and
+  runtime environment are each mode `0600`, UID/GID `1105`.
+- **Parent MCP — `DEPLOYED`:**
+  `/api/v1/opencode/mcp?project=ingenium` is connected.
+- **Managed Playwright — `LIVE ACCEPTANCE`:** preset `201` → discovery
+  `ready` with 30 tools (51 runtime tools, 10 Playwright) → navigate exactly
+  once → snapshot exactly once → close exactly once, all successful → remove
+  `204` → zero residual.
+- **Containment — `PASS`:** strict containment passed.
+
+### Definitive left TODO — 2026-09-10
+
+The following is the definitive remaining list for current-state reading:
+
+- **Image-guard final inventory verification:** in progress at the time of this
+  record.
+- **`COORD-106`:** strict simultaneous external A/B/C model-session acceptance
+  plus the typed restart-replay gate.
+- **Internal `/opencode` model recall:** requires a manually created UI
+  session.
+- **Chat UI update/forget controls:** management remains in Context.
+- **Encrypted-receipt lifecycle and retained-credential follow-ups.**
+- **Optional credential-helper micro-reorder:** skipped; not a required gate.
+- **Git and completion handoff:** the user-requested commit, push, merge to
+  `main`, and completion webhook are pending and are being performed after
+  this consolidation.
+
+This final record supersedes earlier current-state scope and compatibility
+notes only; all prior text and evidence remain historical. The documentation
+update itself is limited to this file and is verified by static readback only;
+it performs no source/test rerun, deployment, commit, Docs Workspace mutation,
+or delegation.

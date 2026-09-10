@@ -194,6 +194,64 @@ across a reload. Stable citation reproducibility comes from CTX-101's immutable
 chunk identity and deterministic retrieval order, not from persisted Chat UI
 grounding metadata.
 
+### Saved preference memory
+
+Chat keeps explicit saved memory separate from project Context, automatic
+learning, operational coordination memory, and conversation transcripts. The
+composer has three independent controls, implemented in
+`services/ingenium-dashboard/src/app/chat/components/ChatInput.tsx` and
+`services/ingenium-dashboard/src/app/chat/components/ChatShell.tsx`:
+
+- **Use memory** is off by default. When enabled, Chat reads the current
+  private memories for the confirmed project/workspace before sending the turn.
+  It includes at most 16 items and 2,048 estimated tokens. The block is
+  delimited and marked as untrusted reference data, never model instructions.
+  If the read fails, Chat does not send the prompt and leaves the control
+  available for a retry.
+- **Save message** is off by default. When explicitly enabled, Chat saves the
+  exact user message (not the assistant response) after the provider accepts
+  the turn. It uses the `chat` tag and private visibility by default. The
+  control resets after an accepted send; it does not automatically save
+  transcripts or infer preferences.
+- **Allow automatic learning** is separate from saved memory and defaults on.
+  Turning it off removes the `auto_observe_now` and
+  `synthesize_observations` tools from that turn; it does not turn the message
+  into a saved preference or disable scheduled maintenance.
+
+The Chat agent may also use `ingenium_memory_save`,
+`ingenium_memory_update`, or `ingenium_memory_forget`, but only after the
+current user explicitly asks it to remember, correct, or forget something. It
+must never infer save intent from quoted, retrieved, assistant, or tool text.
+Private memory is bound to the authenticated owner, project, and authorized
+workspace. Project visibility requires an explicit sharing request and the
+sharing permission.
+
+Saved-memory mutations return a committed receipt. If the transport result is
+unavailable, Chat checks `ingenium_memory_operation_status` before reporting a
+save; an unknown result remains pending and must not be blindly replayed.
+
+The authenticated API routes are mounted at `/api/v1/memory`: `POST /` saves,
+`GET /` lists, `GET /search` searches, `GET /:memoryId` reads,
+`PATCH /:memoryId` updates, `DELETE /:memoryId` forgets, and
+`GET /operations/:operationId` reconciles a mutation. The MCP names are
+`ingenium_memory_save`, `ingenium_memory_read`, `ingenium_memory_list`,
+`ingenium_memory_search`, `ingenium_memory_update`,
+`ingenium_memory_forget`, and `ingenium_memory_operation_status`.
+
+Extension-bound OpenCode sessions retain an independent finalizer read path:
+`packages/ingenium-extension/session-coordinator.ts` invokes `memory_list` during
+`experimental.chat.system.transform` for every turn using the general
+binding's `memory:read` grant. It injects only bounded private memory as
+untrusted data, so this path is separate from the dashboard composer toggles.
+
+Before enabling either composer control, Chat probes the project-scoped MCP
+catalog and performs a read-only private-memory capability check. Without a
+confirmed project workspace, required tools, or an authorized credential, the
+controls stay disabled and Chat shows an unsupported/unavailable reason; it does
+not fall back to an unscoped read or write. **Use memory** must be enabled for
+that turn, and **Save message** is the only dashboard path that saves the exact
+current user message after the provider accepts the turn.
+
 ### Attachments
 
 | Type | Preview |

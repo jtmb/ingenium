@@ -122,6 +122,27 @@ function writeAuthorizedOverflow(outbox: CoordinationOutbox, count = 1) {
 }
 
 describe("protected coordination outbox", () => {
+  it("retries acquisition when the competing owner releases its lock before inspection", () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      let collided = false;
+      fsFaults.open = (path) => {
+        if (!collided && String(path).endsWith("/coordination-outbox-mutation.lock")) {
+          collided = true;
+          throw Object.assign(new Error("competing lock was just released"), { code: "EEXIST" });
+        }
+      };
+
+      expect(outbox.put({ exactKey: "released-lock", kind: "snapshot", sessionHash: "a".repeat(64), failure: "unavailable" }))
+        .toMatchObject({ kind: "snapshot" });
+      expect(collided).toBe(true);
+      expect(outbox.list()).toHaveLength(1);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes an existing owner-controlled protected index before creating the outbox", () => {
     const root = worktree();
     const protectedIndex = join(root, ".opencode", "protected-runtime-index");

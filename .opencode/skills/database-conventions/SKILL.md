@@ -79,5 +79,4 @@ Any upsert into a FK-constrained child table must check for the parent row BEFOR
 ## Cross-References
 
 - **`@development-conventions`** — API design patterns for database-backed services
-- **`@engineering-workflow`** — Debugging database test failures, migration verification
 - **`@skill-maintenance`** — Skill validation checklist for database conventions

@@ -8,7 +8,7 @@
  * 🔴 All functions follow "return sentinel, never throw" pattern — the caller
  *    (sync-engine) is a long-lived background loop and must not crash.
  * 🔴 max_tokens is set to 8192 (never falls back to reasoning_content) per
- *    AGENTS.md HARD RULE #10 — reasoning models may return empty content.
+ *    docs/concepts/conventions.md — reasoning models may return empty content.
  */
 
 import { GmailProvider } from "./providers/gmail.js";

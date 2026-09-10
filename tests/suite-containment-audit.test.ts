@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import {
@@ -12,6 +12,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
   type Dir,
 } from "node:fs";
@@ -42,6 +43,8 @@ import {
 } from "./test-run-process-discovery";
 import {
   auditSuiteContainment,
+  auditProcesses,
+  isListening,
   inspectOwnedMisplacedTestResults,
   removeOwnedMisplacedTestResults,
   historicalOnlyListenerPorts,
@@ -64,6 +67,50 @@ const testComposeOwnership = {
 function auditContainment(options: Parameters<typeof auditSuiteContainment>[0] = {}) {
   return auditSuiteContainment({ ...options, composeOwnership: options.composeOwnership ?? testComposeOwnership });
 }
+
+describe("strict active-handle containment", () => {
+  it("waits for successful and refused probes to close without hiding a live server", async () => {
+    const server = createServer();
+    // Only the outbound probe is under test; the in-process peer closes separately.
+    server.on("connection", (socket) => socket.unref());
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    const before = auditProcesses().activeHandles;
+    expect(before).toBeGreaterThan(0);
+    expect(await isListening(port)).toBe(true);
+    expect(auditProcesses().activeHandles).toBe(before);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const runtime = process as NodeJS.Process & { _getActiveHandles: () => unknown[] };
+    const closed = new Set(runtime._getActiveHandles());
+    expect(await isListening(port)).toBe(false);
+    expect(runtime._getActiveHandles().filter((handle) => !closed.has(handle))).toEqual([]);
+  });
+
+  it("excludes only auditor stdio and parent IPC, not other sockets or servers", () => {
+    const runtime = process as NodeJS.Process & { _getActiveHandles: () => unknown[] };
+    const handles = vi.spyOn(runtime, "_getActiveHandles");
+    try {
+      handles.mockReturnValue([process.stdin, process.stdout, process.stderr, process.channel]);
+      expect(auditProcesses().activeHandles).toBe(0);
+      handles.mockReturnValue([process.stdout, { constructor: { name: "Socket" } }, { constructor: { name: "Server" } }]);
+      expect(auditProcesses().activeHandles).toBe(2);
+    } finally {
+      handles.mockRestore();
+    }
+  });
+
+  it("fails strict evaluation for residual or unavailable handles and accepts zero", async () => {
+    const report = await auditContainment({ portProbe: async () => false, telemetryPaths: [] });
+    for (const count of [1, 4, -1, NaN]) {
+      const failures = strictFailures({ ...report, process: { ...report.process, activeHandles: count } });
+      expect(failures.some((failure) => failure.startsWith("active handles:"))).toBe(true);
+    }
+    expect(strictFailures({ ...report, process: { ...report.process, activeHandles: 0 } })
+      .some((failure) => failure.startsWith("active handles:"))).toBe(false);
+  });
+});
 
 function createContextWithReservedPortRetry(
   options: Parameters<typeof createTestRunContext>[0] = {},
@@ -755,15 +802,18 @@ describe("suite containment audit", () => {
   });
 
   it("does not suppress fresh missing-manifest telemetry or malformed retained evidence", async () => {
+    const repoRoot = temporaryRepository();
     const context = createContextWithReservedPortRetry({
       applyEnvironment: false,
+      repoRoot,
     });
     contexts.push(context);
     rmSync(context.manifestPath, { force: true });
-    const malformedDirectory = join(getTestRunArtifactRoot(process.cwd()), randomUUID());
+    const malformedDirectory = join(getTestRunArtifactRoot(repoRoot), randomUUID());
     const malformedTelemetryPath = join(malformedDirectory, "runner-telemetry.json");
     mkdirSync(malformedDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(malformedTelemetryPath, "not valid telemetry\n");
+    vi.stubEnv("INGENIUM_PLAYWRIGHT_REPO_ROOT", repoRoot);
     try {
       const report = await auditContainment({ includeRepositoryTelemetry: true });
       const current = report.telemetry.find(({ runId }) => runId === context.runId);
@@ -773,7 +823,38 @@ describe("suite containment audit", () => {
       expect(report.telemetryErrors.some((error) => error.includes(malformedTelemetryPath))).toBe(true);
       expect(strictFailures(report).some((failure) => failure.includes(malformedTelemetryPath))).toBe(true);
     } finally {
+      vi.unstubAllEnvs();
       rmSync(malformedDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("retains old unparseable telemetry without trusting it, but fails explicit scope and symlinks", async () => {
+    const repoRoot = temporaryRepository();
+    const directory = join(getTestRunArtifactRoot(repoRoot), randomUUID());
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const path = join(directory, "runner-telemetry.json");
+    writeFileSync(path, "not valid telemetry\n", { mode: 0o600 });
+    chmodSync(path, 0o670);
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(path, old, old);
+    vi.stubEnv("INGENIUM_PLAYWRIGHT_REPO_ROOT", repoRoot);
+    try {
+      const options = { includeRepositoryTelemetry: true, portProbe: async () => false };
+      const report = await auditContainment(options);
+      expect(report.telemetryErrors).toEqual([]);
+      expect(report.telemetry).toEqual([]);
+      expect(report.informational).toContain(
+        `unparseable historical telemetry retained (untrusted, not ownership evidence): ${path}`,
+      );
+      const scoped = await auditContainment({ ...options, telemetryPaths: [path] });
+      expect(scoped.telemetryErrors).toEqual([`${path}: Runner telemetry is not valid JSON`]);
+      renameSync(path, join(directory, "original.json"));
+      symlinkSync(join(directory, "original.json"), path);
+      const unsafe = await auditContainment(options);
+      expect(unsafe.telemetryErrors).toEqual([`${path}: Refusing to read symlinked runner telemetry`]);
+      expect(readFileSync(path, "utf8")).toBe("not valid telemetry\n");
+    } finally {
+      vi.unstubAllEnvs();
     }
   });
 
@@ -954,6 +1035,10 @@ describe("suite containment audit", () => {
       expect(scan.matchingNames).toEqual([matchingName]);
 
       chmodSync(rootPath, 0o755);
+      const searchableRootScan = scanCoordinationTraceResiduals({ rootPath });
+      expect(searchableRootScan.rootUnsafe).toBe(false);
+      expect(searchableRootScan.residuals).toEqual([join(rootPath, matchingName)]);
+      chmodSync(rootPath, 0o775);
       const permissiveRootScan = scanCoordinationTraceResiduals({ rootPath });
       expect(permissiveRootScan.rootUnsafe).toBe(true);
       expect(permissiveRootScan.errors).toEqual([{ kind: "root-metadata-invalid" }]);

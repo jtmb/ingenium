@@ -21,6 +21,9 @@ Step-by-step guides for using the Ingenium dashboard features.
 | [Tasks](tasks.md) | Kanban task board workflow |
 | [Docs Workspace](docs-workspace.md) | Documentation workspace — creating, editing, managing docs |
 
+For the current installed-CLI session snapshot and its limits, see the [CLI
+session-context audit](../reference/session-context-audit-2026-09-09.md).
+
 ## Related
 
 - [Configure MCP Servers](../configure/mcp-servers.md) — Server and tool management

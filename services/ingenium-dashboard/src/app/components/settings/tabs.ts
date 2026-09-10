@@ -18,6 +18,7 @@ export type SettingsTabId =
   | "observations"
   | "personality"
   | "providers"
+  | "cloudflare"
   | "logs";
 
 /** A settings sidebar tab definition. Icon names map to SVG paths in SettingsSidebar. */
@@ -47,6 +48,7 @@ export const ALL_TABS: SettingsTab[] = [
   { id: "observations", label: "Observations", icon: "eye" },
   { id: "personality", label: "Personality", icon: "user" },
   { id: "providers", label: "Providers", icon: "sparkle" },
+  { id: "cloudflare", label: "Cloudflare", icon: "server" },
   { id: "logs", label: "Logs", icon: "terminal" },
 ];
 

@@ -241,7 +241,7 @@ describe("AUTH-107 MCP credentials", () => {
       servicePrincipalId: capability.servicePrincipalId,
       kind: "service",
       audience: "mcp",
-      scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync"],
+      scopes: ["coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync"],
       organizationId: capability.organizationId,
       projectId: capability.projectId,
       projectIds: [capability.projectId],

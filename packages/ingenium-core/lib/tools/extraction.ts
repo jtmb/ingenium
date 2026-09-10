@@ -7,7 +7,7 @@
  *
  * Only LLM output becomes observations. Raw snippets never enter the DB.
  */
-import { getSetting, setSetting } from "./settings.js";
+import { getSetting, isAutomaticLearningEnabled, setSetting } from "./settings.js";
 import { storeObservation } from "./observations.js";
 import { logEvent } from "./pipeline-events.js";
 import { getFullLLMSynthesisConfig, type LLMTextExecutor } from "./synthesis-llm.js";
@@ -399,6 +399,10 @@ export async function runExtraction(
   let highestTimestamp = 0;
 
   try {
+    if (!isAutomaticLearningEnabled(projectId)) {
+      const reason = "Automatic learning is disabled.";
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: getWatermark(projectId), reason };
+    }
     // 1. Prefer an explicitly configured direct endpoint. When it is absent,
     // the API may provide a text-only, tool-denied broker executor.
     const resolvedConfig = getFullLLMSynthesisConfig(projectId);

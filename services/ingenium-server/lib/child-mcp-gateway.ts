@@ -26,6 +26,7 @@ import {
   type ChildMcpToolCallResult,
   type ChildMcpRuntimeDefinition,
 } from "./proxy.js";
+import { ManagedPlaywrightRuntime } from "./child-mcp-playwright.js";
 
 const MAX_PROJECT_NAME_LENGTH = 64;
 /**
@@ -250,6 +251,7 @@ export class ChildMcpGateway {
     private readonly reconcileIntervalMs = CHILD_MCP_RECONCILE_INTERVAL_MS,
     private readonly projectStateAttestor = new ProjectStateAttestor(),
     private readonly parentBinding?: LauncherAuthorizationBinding,
+    private readonly playwright = new ManagedPlaywrightRuntime(),
   ) {
     this.manager = manager ?? new ChildMcpRuntimeManager();
   }
@@ -337,7 +339,13 @@ export class ChildMcpGateway {
 
       try {
         if (definitionChanged) {
-          this.manager.registerServer(definition);
+          const runtimeDefinition = await this.playwright.materialize(definition, this.parentBinding, this.project!);
+          try {
+            this.manager.registerServer(runtimeDefinition);
+          } catch (error) {
+            await this.playwright.cleanup(definition.name);
+            throw error;
+          }
           this.definitions.set(definition.name, fingerprint(definition));
           this.discovery.delete(definition.name);
           await this.manager.startServer(definition.name);
@@ -389,7 +397,14 @@ export class ChildMcpGateway {
     await this.refreshPromise?.catch(() => undefined);
     const changed = this.removeAllTools();
     if (changed) await this.notifyToolsChanged();
-    await this.manager.stopAll();
+    try {
+      await this.playwright.cancelAll();
+      await this.manager.stopAll();
+    } catch (error) {
+      await this.playwright.recordAllCleanupFailures();
+      throw error;
+    }
+    await this.playwright.cleanupAll();
   }
 
   private async removeServer(serverName: string): Promise<boolean> {
@@ -397,8 +412,11 @@ export class ChildMcpGateway {
     this.definitions.delete(serverName);
     this.discovery.delete(serverName);
     try {
+      await this.playwright.cancel(serverName);
       await this.manager.unregisterServer(serverName);
+      await this.playwright.cleanup(serverName);
     } catch (error) {
+      await this.playwright.recordCleanupFailure(serverName);
       logger.warn(
         { child: serverName, boundary: "child-mcp-unregister", code: error instanceof ChildMcpRuntimeError ? error.code : "CHILD_MCP_UNAVAILABLE" },
         "Child MCP runtime removal did not complete cleanly",
@@ -515,7 +533,8 @@ export class ChildMcpGateway {
       return safeError("CHILD_MCP_UNAVAILABLE", "The child MCP server is unavailable.");
     }
     try {
-      return await this.manager.callTool(serverName, sourceToolName, args.arguments ?? {});
+      const result = await this.manager.callTool(serverName, sourceToolName, args.arguments ?? {});
+      return this.playwright.redactResult(serverName, result);
     } catch (error) {
       return runtimeErrorResponse(error);
     }
@@ -546,11 +565,15 @@ export class ChildMcpGateway {
       : error instanceof ChildMcpRuntimeError && error.code === "CHILD_MCP_INVALID_RESPONSE"
         ? "invalid_response"
         : "unavailable";
-    const saved = await this.apiClient.recordDiscovery(this.project!, definition.name, {
-      status: "failed",
-      diagnostic,
-    });
-    if (!saved) logger.warn({ child: definition.name, boundary: "child-mcp-catalog" }, "Child MCP failure metadata was not persisted");
+    try {
+      const saved = await this.apiClient.recordDiscovery(this.project!, definition.name, {
+        status: "failed",
+        diagnostic,
+      });
+      if (!saved) logger.warn({ child: definition.name, boundary: "child-mcp-catalog" }, "Child MCP failure metadata was not persisted");
+    } catch {
+      logger.warn({ child: definition.name, boundary: "child-mcp-catalog" }, "Child MCP failure metadata was unavailable");
+    }
   }
 
   private async notifyToolsChanged(): Promise<void> {

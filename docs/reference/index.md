@@ -16,10 +16,11 @@ Technical reference documents for the Ingenium system.
 | [Roadmap](./ROADMAP.md) | Canonical execution-ready roadmap contracts, gates, dependencies, and work-marker protocol |
 | [Roadmap archive](./archive/ROADMAP-2026-07-31-phase-0.md) | Immutable predecessor of the canonical roadmap |
 | [Reference archive index](./archive/index.md) | Immutable archived reference documents and integrity sidecars |
-| [MCP Tools Reference](./mcp-tools.md) | Built-in 283-tool catalog across 30 baseline categories (281 `ingenium_` entries + 2 extension tools) plus dynamic child tools |
-| [Skill Taxonomy](./skill-taxonomy.md) | Phase 3 consolidation: 36→10 canonical skills with exact mapping and provenance |
+| [MCP Tools Reference](./mcp-tools.md) | Built-in 291-tool catalog across 31 baseline categories (289 `ingenium_` entries + 2 extension tools) plus dynamic child tools |
+| [Skill Taxonomy](./skill-taxonomy.md) | Current 8 active canonical skills; see [`.opencode/skills/`](../../.opencode/skills/) and [`.opencode/SKILL-INDEX.md`](../../.opencode/SKILL-INDEX.md) for the directory and index |
 | [Docs Workspace](./docs-workspace.md) | Full documentation workspace reference: schema, API endpoints, editor modes, security |
 | [Database Migrations](./database-migrations.md) | Migration reference redirecting to the canonical development guide |
+| [CLI Session Context Audit](./session-context-audit-2026-09-09.md) | Verified installed-CLI session-export evidence, provenance, and limits |
 
 ---
 

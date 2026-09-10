@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 import { getDashboardAllowedOrigins } from "../config/index.js";
 import { loadRuntimeGatewayToken } from "../lib/runtime-gateway-auth.js";
+import { cloudflareIngressForHost, cloudflareLauncherOriginAllowed } from "../lib/cloudflare-trusted-ingress.js";
 
 type Audience = "web" | "cli" | "vscode";
 type ActivityKind = "connection_opened" | "connection_closed" | "generation_started" | "generation_finished";
@@ -211,13 +212,17 @@ export function isRuntimeGenerationRequest(request: Pick<IncomingMessage, "metho
   return /^\/session\/[^/]+\/(?:message|prompt|prompt_async|command)$/.test(pathname);
 }
 
-function framePolicy(origin?: string): string {
+function launcherOriginAllowed(origin: string, audience: Audience): boolean {
+  return dashboardOrigins().has(origin) || cloudflareLauncherOriginAllowed(origin, audience);
+}
+
+function framePolicy(origin?: string, audience?: Audience): string {
   if (origin === undefined) return "frame-ancestors 'none'";
-  if (!dashboardOrigins().has(origin)) throw new Error("Dashboard origin is not allowed");
+  if (!dashboardOrigins().has(origin) && !cloudflareLauncherOriginAllowed(origin, audience)) throw new Error("Dashboard origin is not allowed");
   return `frame-ancestors ${origin}`;
 }
 
-function reject(response: ServerResponse, status = 401, message = "Authentication is required", origin?: string): void {
+function reject(response: ServerResponse, status = 401, message = "Authentication is required", origin?: string, audience?: Audience): void {
   response.writeHead(status, {
     ...(origin ? {
       "Access-Control-Allow-Origin": origin,
@@ -226,7 +231,7 @@ function reject(response: ServerResponse, status = 401, message = "Authenticatio
     } : {}),
     "Content-Type": "text/plain; charset=utf-8",
     "Cache-Control": "no-store",
-    "Content-Security-Policy": `${framePolicy(origin)}; default-src 'none'`,
+    "Content-Security-Policy": `${framePolicy(origin, audience)}; default-src 'none'`,
     "X-Content-Type-Options": "nosniff",
   }).end(message);
 }
@@ -250,7 +255,7 @@ export function sanitizedHeaders(headers: IncomingHttpHeaders, scope: RuntimeSco
 
 function exchange(request: IncomingMessage, response: ServerResponse, scope: RuntimeScope): void {
   const requestOrigin = request.headers.origin;
-  if (request.method === "OPTIONS" && requestOrigin && dashboardOrigins().has(requestOrigin)) {
+  if (request.method === "OPTIONS" && requestOrigin && launcherOriginAllowed(requestOrigin, scope.audience)) {
     response.writeHead(204, {
       "Access-Control-Allow-Origin": requestOrigin,
       "Access-Control-Allow-Credentials": "true",
@@ -260,7 +265,7 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
     }).end();
     return;
   }
-  if (request.method !== "POST" || !requestOrigin || !dashboardOrigins().has(requestOrigin)
+  if (request.method !== "POST" || !requestOrigin || !launcherOriginAllowed(requestOrigin, scope.audience)
     || request.headers["content-type"]?.split(";", 1)[0] !== "application/json") {
     reject(response, 403, "Runtime launch origin is not allowed");
     return;
@@ -275,7 +280,7 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
   request.on("end", async () => {
     try {
       const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { proof?: unknown };
-      if (typeof parsed.proof !== "string") return reject(response, 401, "Runtime launch proof is invalid", requestOrigin);
+      if (typeof parsed.proof !== "string") return reject(response, 401, "Runtime launch proof is invalid", requestOrigin, scope.audience);
       const result = await gatewayApi<{ sessionToken?: string; session?: { expiresAt?: string } }>("runtimes/gateway/exchange", {
         exchangeProof: parsed.proof,
         audience: scope.audience,
@@ -285,7 +290,7 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
       });
       const sessionToken = result.data?.sessionToken;
       const expiresAt = result.data?.session?.expiresAt;
-      if (result.status !== 200 || !sessionToken || !expiresAt) return reject(response, 401, "Runtime launch ticket is invalid or expired", requestOrigin);
+      if (result.status !== 200 || !sessionToken || !expiresAt) return reject(response, 401, "Runtime launch ticket is invalid or expired", requestOrigin, scope.audience);
       const maxAge = Math.max(1, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1_000));
       response.writeHead(204, {
         "Access-Control-Allow-Origin": requestOrigin,
@@ -295,7 +300,7 @@ function exchange(request: IncomingMessage, response: ServerResponse, scope: Run
         Vary: "Origin",
       }).end();
     } catch {
-      reject(response, 401, "Runtime launch ticket is invalid or expired", requestOrigin);
+      reject(response, 401, "Runtime launch ticket is invalid or expired", requestOrigin, scope.audience);
     }
   });
 }
@@ -318,7 +323,7 @@ export function proxyResponseHeaders(
     .map((policy) => policy.split(";").map((directive) => directive.trim())
       .filter((directive) => directive && !directive.toLowerCase().startsWith("frame-ancestors ")).join("; "))
     .filter(Boolean);
-  result["content-security-policy"] = [...policies, framePolicy(launcherOrigin)];
+  result["content-security-policy"] = [...policies, framePolicy(launcherOrigin, scope.audience)];
   result["x-content-type-options"] = "nosniff";
   return result;
 }
@@ -362,7 +367,7 @@ async function backendReady(scope: RuntimeScope, backendName: string): Promise<b
 
 async function health(request: IncomingMessage, response: ServerResponse, scope: RuntimeScope): Promise<void> {
   const origin = request.headers.origin;
-  if (!origin || !dashboardOrigins().has(origin)) {
+  if (!origin || !launcherOriginAllowed(origin, scope.audience)) {
     reject(response, 403, "Runtime health origin is not allowed");
     return;
   }
@@ -373,7 +378,7 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
       .filter(Boolean);
     if (request.headers["access-control-request-method"] !== "GET"
       || requestedHeaders.some((header) => header !== "cache-control" && header !== "pragma")) {
-      reject(response, 403, "Runtime health preflight is not allowed", origin);
+      reject(response, 403, "Runtime health preflight is not allowed", origin, scope.audience);
       return;
     }
     response.writeHead(204, {
@@ -387,20 +392,20 @@ async function health(request: IncomingMessage, response: ServerResponse, scope:
     return;
   }
   if (request.method !== "GET") {
-    reject(response, 403, "Runtime health origin is not allowed", origin);
+    reject(response, 403, "Runtime health origin is not allowed", origin, scope.audience);
     return;
   }
   const token = runtimeAudienceSessionCookie(request, scope.audience);
   const resolved = token ? await validate(scope, token).catch(() => undefined) : undefined;
   if (!resolved || origin !== resolved.session.launcherOrigin || !await backendReady(scope, resolved.backendName)) {
-    reject(response, 503, "Runtime audience is unavailable", origin);
+    reject(response, 503, "Runtime audience is unavailable", origin, scope.audience);
     return;
   }
   response.writeHead(204, {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Credentials": "true",
     "Cache-Control": "no-store",
-    "Content-Security-Policy": framePolicy(origin),
+    "Content-Security-Policy": framePolicy(origin, scope.audience),
     Vary: "Origin",
     "X-Content-Type-Options": "nosniff",
   }).end();
@@ -512,9 +517,41 @@ async function proxyWebSocket(request: IncomingMessage, socket: Duplex, head: Bu
   upstream.end();
 }
 
+async function launchFromCloudflareRoot(request: IncomingMessage, response: ServerResponse, audience: Audience): Promise<void> {
+  // Never accept shared-root cookies or put credentials in redirect URLs. The existing
+  // validator binds this bearer to the selected UUID host, audience, owner and session.
+  const authorization = request.headers.authorization;
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined;
+  if (!token || !RUNTIME_SESSION_TOKEN.test(token)) return reject(response);
+  const url = new URL(request.url ?? "/", "https://launcher.invalid");
+  const runtimeId = url.searchParams.get("runtimeId");
+  const scope = runtimeId && new RegExp(`^${UUID}$`).test(runtimeId)
+    ? runtimeScope({ headers: { host: `${audience}--${runtimeId}.${rootDomain()}` } })
+    : undefined;
+  if (request.method !== "GET" || url.pathname !== "/" || !scope || !scope.origin.startsWith("https://")
+    || [...url.searchParams.keys()].some((key) => key !== "runtimeId") || url.searchParams.getAll("runtimeId").length !== 1) {
+    return reject(response, 400, "Runtime launcher request is invalid");
+  }
+  const resolved = await validate(scope, token).catch(() => undefined);
+  if (!resolved) return reject(response);
+  response.writeHead(302, {
+    Location: `${scope.origin}${runtimeBackendHealthPath(audience)}`,
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+    "Content-Security-Policy": `${framePolicy(resolved.session.launcherOrigin, audience)}; default-src 'none'`,
+    "X-Content-Type-Options": "nosniff",
+  }).end();
+}
+
 export function handleRuntimeGatewayRequest(request: IncomingMessage, response: ServerResponse): void {
   const scope = runtimeScope(request);
   if (!scope) {
+    const ingress = cloudflareIngressForHost(request.headers.host);
+    if (ingress?.audience) {
+      void launchFromCloudflareRoot(request, response, ingress.audience)
+        .catch(() => { if (!response.headersSent) reject(response, 503, "Runtime launcher is unavailable"); });
+      return;
+    }
     reject(response, 421, "Runtime host is not recognized");
     return;
   }

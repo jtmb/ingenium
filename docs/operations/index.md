@@ -26,6 +26,10 @@ Deployment, maintenance, and recovery procedures for the Ingenium system.
 
 ## Quick Reference
 
+These shell snippets are **operator-run procedures**. They do not grant any
+agent permission to execute Docker, host, or database commands; agent actions
+remain limited by the active profile and task contract.
+
 ```bash
 # Compatibility — keep the project name stable across rebuilds/restarts
 export IMAGE_REVISION="$(git rev-parse HEAD)"

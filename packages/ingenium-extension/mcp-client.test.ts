@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { preflightApiAuthentication, waitForAuthenticatedApiReadiness } from "./api-auth.js";
 import {
   McpBridgeError,
+  ObservableMcpTransport,
   MCP_LIVE_RELOAD_MAX_TIMEOUT_MS,
   callMcpTool,
   openMcpToolClient,
@@ -43,6 +46,177 @@ afterEach(() => {
 });
 
 describe("extension MCP client bridge", () => {
+  function authenticatedResponse(): Response {
+    return Response.json({ data: {
+      scopes: [], organizationId: "organization", projectId: "project", projectIds: ["project"],
+      audience: "mcp", workspaceId: "mcp-client-workspace", launcherWorktree: worktree,
+      storageMappingHash: "a".repeat(64), restartRequiredOnCredentialChange: true,
+    } });
+  }
+
+  it("retries a transient preflight 429 before authenticating", async () => {
+    prepareWorktree();
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(null, { status: 429 }))
+      .mockImplementation(async () => authenticatedResponse());
+    const sleep = vi.fn(async (_delay: number) => undefined);
+    await expect(preflightApiAuthentication("https://api.test/api/v1", worktree, request, { sleep }))
+      .resolves.toMatchObject({ authenticated: true });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(sleep.mock.calls[0]?.[0]).toBeGreaterThanOrEqual(500);
+    expect(sleep.mock.calls[0]?.[0]).toBeLessThan(600);
+  });
+
+  it("bounds persistent preflight 429s to four requests, retaining the transient reason", async () => {
+    prepareWorktree();
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => new Response(null, { status: 429 }));
+    const delays: number[] = [];
+    await expect(waitForAuthenticatedApiReadiness("https://api.test/api/v1", worktree, {
+      request, sleep: async (delay) => { delays.push(delay); },
+    })).resolves.toMatchObject({ authenticated: false, failure: "unavailable", reason: "rate_limited" });
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(delays).toHaveLength(3);
+    expect(delays[0]).toBeGreaterThanOrEqual(500);
+    expect(delays[0]).toBeLessThan(600);
+    expect(delays[1]).toBeGreaterThanOrEqual(1_000);
+    expect(delays[1]).toBeLessThan(1_100);
+    expect(delays[2]).toBe(2_000);
+  });
+
+  it.each([[401, "authentication"], [403, "scope"]] as const)("does not retry preflight %s", async (status, failure) => {
+    prepareWorktree();
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status }));
+    const sleep = vi.fn(async () => undefined);
+    await expect(waitForAuthenticatedApiReadiness("https://api.test/api/v1", worktree, { request, sleep }))
+      .resolves.toMatchObject({ authenticated: false, failure });
+    expect(request).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it.each([["1", 1_000], ["60", 2_000], ["0", 0], ["Wed, 09 Sep 2099 00:00:00 GMT", 2_000]])(
+    "honors Retry-After %s within the startup cap", async (retryAfter, expectedDelay) => {
+      prepareWorktree();
+      const request = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": retryAfter } }))
+        .mockImplementation(async () => authenticatedResponse());
+      const sleep = vi.fn(async (_delay: number) => undefined);
+      await expect(preflightApiAuthentication("https://api.test/api/v1", worktree, request, { sleep }))
+        .resolves.toMatchObject({ authenticated: true });
+      expect(sleep.mock.calls).toEqual([[expectedDelay]]);
+      expect(request).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("attributes current server startup markers rather than the later close", async () => {
+    prepareWorktree();
+    const stderr = new PassThrough();
+    await expect(withMcpClient(worktree, async () => undefined, {
+      launcherPath: "/package/launcher.js", createTransport: () => ({ stderr, close: async () => undefined }),
+      createClient: () => ({
+        connect: async () => {
+          stderr.write("Startup progress. ".repeat(100));
+          stderr.write('{"boundary":"parent-mcp-startup","stage":"authentication","reason":"startup_failed"}\n');
+          throw new Error("closed");
+        }, callTool: async () => ({}), close: async () => undefined,
+      }),
+    })).rejects.toMatchObject({ failure: "authentication", stage: "authentication", boundary: "parent-mcp-startup" });
+  });
+
+  it("initializes and lists tools over real stdio, attributing a later tools/list exit", async () => {
+    prepareWorktree();
+    const launcher = join(worktree, "protocol.cjs");
+    writeFileSync(launcher, `
+      let listed = false;
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const request = JSON.parse(line);
+        if (request.method === 'initialize') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id,
+          result: { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }
+        }) + '\\n');
+        if (request.method === 'tools/list') {
+          if (listed) process.exit(9);
+          listed = true;
+          process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { tools: [] } }) + '\\n');
+        }
+      });
+    `);
+    await expect(withMcpClient(worktree, async client => {
+      await expect((client as Client).listTools()).resolves.toEqual({ tools: [] });
+      return (client as Client).listTools();
+    }, { launcherPath: launcher }))
+      .rejects.toMatchObject({ stage: "tools-list", childExit: { code: 9, signal: null } });
+  });
+
+  it("redacts credentials split across stderr chunks and bounds multibyte output", async () => {
+    prepareWorktree();
+    const stderr = new PassThrough();
+    const error = await withMcpClient(worktree, async () => undefined, {
+      launcherPath: "/package/launcher.js", createTransport: () => ({ stderr, close: async () => undefined }),
+      createClient: () => ({
+        connect: async () => {
+          stderr.write("Bearer sentinel_");
+          stderr.write("credential_content_123456\n");
+          stderr.write("界".repeat(2_000));
+          throw new Error("closed");
+        }, callTool: async () => ({}), close: async () => undefined,
+      }),
+    }).catch(error => error);
+    expect(error.diagnostic).toContain("Bearer [redacted]");
+    expect(error.diagnostic).not.toContain("credential_content");
+    expect(Buffer.byteLength(error.diagnostic)).toBeLessThanOrEqual(1_024);
+  });
+
+  it.each(["local-binding", "project-preflight", "authentication", "import", "transport"] as const)(
+    "retains the first launcher %s stage across both bridge lifecycles", async (stage) => {
+      prepareWorktree();
+      for (const persistent of [false, true]) {
+        const stderr = new PassThrough();
+        const transport = { stderr, lastExit: { code: 2, signal: null }, close: async () => undefined };
+        const dependencies = {
+          launcherPath: "/package/launcher.js",
+          createTransport: () => transport,
+          createClient: () => ({
+            connect: async () => {
+              stderr.write(JSON.stringify({ boundary: "launcher", stage, reason: stage }));
+              stderr.write(JSON.stringify({ boundary: "launcher", stage: "transport", reason: "transport" }));
+              throw new Error("connection closed");
+            },
+            callTool: async () => ({}), close: async () => undefined,
+          }),
+        };
+        const result = persistent ? openMcpToolClient(worktree, dependencies)
+          : withMcpClient(worktree, async () => undefined, dependencies);
+        await expect(result).rejects.toMatchObject({ stage, boundary: "launcher", childExit: { code: 2, signal: null } });
+      }
+    },
+  );
+
+  it.each([7, "SIGTERM"] as const)("attributes real child close %s before cleanup", async (exit) => {
+    prepareWorktree();
+    const launcher = join(worktree, "exit.cjs");
+    writeFileSync(launcher, typeof exit === "number" ? `process.exit(${exit})` : `process.kill(process.pid, '${exit}')`);
+    await expect(withMcpClient(worktree, async () => undefined, { launcherPath: launcher })).rejects.toMatchObject({
+      stage: "initialize", boundary: "bridge",
+      childExit: { code: typeof exit === "number" ? exit : null, signal: typeof exit === "string" ? exit : null },
+    });
+  });
+
+  it("reports an actual spawn error without claiming initialization", async () => {
+    const transport = new ObservableMcpTransport({ command: "/nonexistent/ingenium-node", args: [], cwd: tmpdir(), env: {}, stderr: "pipe", shell: false });
+    await expect(transport.start()).rejects.toMatchObject({ stage: "spawn" });
+    await vi.waitFor(() => expect(transport.lastExit?.code).toBeTypeOf("number"));
+    await transport.close();
+  });
+
+  it.each(["spawn", "initialize", "tools-list"] as const)("attributes timeout at %s without cleanup exit contamination", async (stage) => {
+    prepareWorktree();
+    const transport = { stage, lastExit: undefined as { code: number | null; signal: NodeJS.Signals | null } | undefined,
+      close: async () => { transport.lastExit = { code: null, signal: "SIGTERM" }; } };
+    await expect(openMcpToolClient(worktree, {
+      timeoutMs: 1, launcherPath: "/package/launcher.js", createTransport: () => transport,
+      createClient: () => ({ connect: () => new Promise<void>(() => {}), callTool: async () => ({}), close: async () => undefined }),
+    })).rejects.toMatchObject({ failure: "timeout", stage: stage === "spawn" ? "spawntimeout" : stage, childExit: undefined });
+  });
+
   it("uses Node rather than the OpenCode executable for short-lived MCP children", () => {
     const directory = mkdtempSync(join(tmpdir(), "ingenium-node-executable-"));
     const executable = join(directory, "node");

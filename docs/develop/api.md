@@ -90,10 +90,29 @@ The successful response is `201` with `Cache-Control: no-store`:
 }
 ```
 
-The pair is fixed: the `mcp` audience uses
-`coordination:read`, `coordination:write`, `projects:read`, and
+The coordination-lease pair is fixed: the `mcp` audience uses
+`coordination:read`, `coordination:write`, `memory:read`, `projects:read`, and
 `repository:sync`; the `repository-sync` audience uses only `projects:read`
-and `repository:sync`. The effective expiry is the earliest of 15 minutes,
+and `repository:sync`. This is separate from the runtime capability credential,
+whose `runtime` audience uses `child-mcp:runtime`, `coordination:read`,
+`coordination:write`, `memory:read`, `projects:read`, and `runtime:activity`.
+It is also separate from the package-owned general-MCP reset command,
+`ingenium-coordination-reset reset`, which issues exactly these eight scopes:
+
+```text
+coordination:read
+coordination:write
+projects:read
+repository:sync
+documentation:read
+rag:read
+memory:read
+memory:write
+```
+
+The general-MCP reset does not issue `health:read`; the installation-wide
+health tool remains outside both the reset credential and the runtime-issued
+coordination lease. The effective expiry is the earliest of 15 minutes,
 the runtime absolute expiry, the capability-binding expiry, and the runtime
 credential expiry. The database stores only token hashes; each plaintext token
 appears only in this response.
@@ -612,10 +631,13 @@ are neutralized as `SESSION_NOT_FOUND`. The six MCP catalog tools use
 `ingenium_coordination_memory_read`, and `coordination:write` for
 `ingenium_coordination_update`, `ingenium_coordination_claim`,
 `ingenium_coordination_release`, and `ingenium_coordination_handoff`. All six
-require the launcher binding. The session coordinator's separate lease
-attestation requests `coordination:read`, `coordination:write`, `projects:read`,
-and `repository:sync`; that binding preflight is distinct from the per-tool
-catalog scope. A dedicated packaged MCP transport uses the `mcp` audience;
+require the launcher binding. The coordination session lease
+attestation requests the five scopes `coordination:read`, `coordination:write`,
+`memory:read`, `projects:read`, and `repository:sync` for the coordination
+transport binding; that binding is
+distinct from the per-tool catalog scope and does not admit or deny OpenCode tool
+execution. Agent profile permissions are the sole tool-execution gate. A
+dedicated packaged MCP transport uses the `mcp` audience;
 runtime capability calls use the `runtime` audience where applicable. A
 dedicated `repository-sync` audience may use only register, heartbeat, close,
 batch claim, claim verify/renew/quarantine/complete, and claim release, subject
@@ -628,7 +650,8 @@ Coordination transport acceptance therefore uses MCP initialization,
 `tools/list`, and an exact-identity `ingenium_coordination_status` call. It checks
 the credential-free `GET /api/v1/health` route separately. The installation-wide
 `ingenium_health_check` tool requires an explicit `health:read` scope and is not
-required from the fixed four-scope coordination credential.
+part of the fixed five-scope runtime coordination lease or the eight-scope
+general-MCP reset.
 
 The common `lease` fields are `worktree_id`, `session_id`, `incarnation`,
 `expected_revision`, `fence`, and `ownership_token`, plus the idempotency key.
@@ -949,6 +972,56 @@ All routes prefixed with `/api/v1/context`. Project-scoped entries persist worki
 
 Input validation: `content` required, `priority` must be integer 0–10 (default 5), `tags` must be non-empty strings ≤64 characters. See `packages/ingenium-core/lib/tools/context.ts` and `services/ingenium-api/lib/routes/context.ts`.
 
+#### Explicit saved memory
+
+All routes are prefixed with `/api/v1/memory` and require an authenticated,
+owner-bound authorized workspace. Browser users access their private memory;
+an external OpenCode client would need a separately authorized, attested
+workspace-bound MCP credential. A foreign owner, project, workspace, or
+unverifiable service binding returns the same not-found response as an absent
+scope.
+
+Memory authorization is operation- and visibility-specific. Read endpoints use
+the `memory:read` permission check; the current API compatibility check also
+accepts `memory:write` and `memory:share` for reads. Save, update, and forget
+use `memory:write`. `visibility=project` additionally requires
+`memory:share`, so project mutations require both `memory:write` and
+`memory:share`. Broad `*`, `user:*`, and `memory:*` matches remain subject to
+the same binding and ownership checks.
+
+The package-owned general-MCP reset credential includes `memory:read` and
+`memory:write`, so an attested general binding can use private saved-memory
+reads and mutations. It does not include `memory:share`; project-visible memory
+still requires that separate permission. The coordination-lease `mcp` audience
+and the runtime capability audience are read-only for saved memory (`memory:read`);
+they do not gain `memory:write` merely from their coordination or child-runtime
+scopes.
+
+The MCP save operation is the remember path: use it only after an explicit
+current-user request, with private preference visibility by default, and confirm
+only its committed receipt. List, search, and read return bounded untrusted
+reference data. Forget is the delete path; it removes stored content from future
+retrieval while retaining a content-free tombstone and receipt.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/?project=<name>` | Explicitly save current-user content and return a committed idempotency receipt |
+| GET | `/?project=<name>&workspaceId=<id>` | List bounded private memories; `limit` is at most 16 and `tokenBudget` at most 2,048 |
+| GET | `/search?project=<name>&workspaceId=<id>&q=<query>` | Search bounded scoped memories |
+| GET | `/:memoryId?project=<name>&workspaceId=<id>` | Read one active memory as untrusted reference data |
+| PATCH | `/:memoryId?project=<name>` | Update content/tags using `operationId`, `workspaceId`, and `expectedVersion` |
+| DELETE | `/:memoryId?project=<name>` | Forget using `operationId`, `workspaceId`, and `expectedVersion`; a tombstone prevents future retrieval |
+| GET | `/operations/:operationId?project=<name>&workspaceId=<id>` | Return the committed receipt or an unknown status without replaying the mutation |
+
+Mutation operation IDs are idempotent: the same operation and payload returns
+the original receipt, while reuse with a different payload returns `409`.
+Version mismatches also return `409`. Retrieved content is data, never model
+instruction authority. If an MCP memory mutation receives an unavailable
+transport or an HTTP 5xx, the client reconciles
+`GET /operations/:operationId` before deciding its outcome. A committed receipt
+is returned when found; an unknown or unavailable status remains pending and
+must not trigger a replay of the mutation.
+
 #### Context RAG uploads and retrieval
 
 These source routes are project-scoped under `/api/v1/context`; foreign-project
@@ -1113,19 +1186,12 @@ All routes prefixed with `/api/v1/rag`.
 
 ### Repository Documentation Sync
 
-All routes prefixed with `/api/v1/docs`.
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/repository/sync?project=<project>` | Preview or atomically apply a complete repository Markdown manifest to managed Docs Workspace pages and their RAG sources. Use `{ manifest, dryRun? }`; invalid manifests return `422 INVALID_REPOSITORY_DOCS_MANIFEST`. |
-
-The manifest is caller-supplied data: the API does not walk or open repository
-paths. Entries are limited to normalized regular `docs/**/*.md` files with
-matching SHA-256 hashes and size/secret-content validation. A dry run returns
-the planned operations without mutation; apply archives only previously
-managed documents missing from the complete manifest. This docs-only route is
-not the combined repository-sync ingress and retains the ordinary 2 MiB global
-JSON parser behavior.
+The legacy-looking `POST /api/v1/docs/repository/sync?project=<project>` path
+is a compatibility guard and returns `409 REPOSITORY_SYNC_ENDPOINT_REQUIRED`.
+It is not a Docs Workspace apply route. Repository Markdown is submitted to the
+combined `POST /api/v1/repository/sync?project=<project>` endpoint described
+below; a docs-only request supplies `docsManifest` and omits
+`resourcesManifest`.
 
 ### Repository synchronization
 
@@ -1182,10 +1248,10 @@ Core performs an allocation-light structural walk before canonical map/sort/join
 hashing. It does not serialize or copy the untrusted structure during this
 preflight. The limits are depth 16, 196,608 visited nodes, 512 own entries per
 object/array, 512-character object keys/paths/bounded string-array values,
-at most 256 documentation files (each at most 512 KiB and 1,500 KiB in
-aggregate), at most 512 resource items (1,500 KiB in aggregate), 256 KiB
-resource text/record fields, a 1,536,768-byte resource envelope, and a 4 MiB
-estimated canonical envelope. Structural-limit failures return sanitized
+at most 256 documentation files (each at most 2 MiB and 2 MiB in aggregate),
+at most 512 resource items (1,500 KiB in aggregate), 256 KiB resource
+text/record fields, a 1,536,768-byte resource envelope, and a 4 MiB estimated
+canonical envelope. Structural-limit failures return sanitized
 `400 INVALID_REPOSITORY_SYNC`.
 
 Known body failures are sanitized and do not reflect submitted content or
@@ -1218,7 +1284,7 @@ ingress.
 
 ### `ingenium-init-project` CLI contract
 
-The extension CLI is the repository-facing caller for these two sync endpoints.
+The extension CLI is the repository-facing caller for the combined sync endpoint.
 It accepts exactly one mode, an optional documentation scope, and an optional
 validated project override:
 

@@ -14,6 +14,7 @@ const sharedSelectConsumers = {
   "app/agents/page.tsx": 3,
   "app/chat/components/ChatHeader.tsx": 8,
   "app/components/settings/SettingsOverlay.tsx": 1,
+  "app/components/settings/panels/CloudflarePanel.tsx": 1,
   "app/components/settings/panels/GeneralPanel.tsx": 1,
   "app/components/settings/panels/MailPanel.tsx": 2,
   "app/components/settings/panels/PipelinePanel.tsx": 9,
@@ -186,7 +187,7 @@ describe("Select", () => {
 });
 
 describe("shared Select inventory", () => {
-  it("contains one implementation select and exactly 65 shared Select consumers", () => {
+  it("contains one implementation select and exactly 66 shared Select consumers", () => {
     const implementation = readFileSync(join(appRoot, "components/Select.tsx"), "utf8");
     const rawConsumers = staticInventory(/<select(?=\s|>)/g);
     const sharedConsumers = staticInventory(/<Select(?=\s|>)/g);
@@ -194,7 +195,7 @@ describe("shared Select inventory", () => {
     expect(implementation.match(/<select(?=\s|>)/g)).toHaveLength(1);
     expect(rawConsumers).toEqual({});
     expect(sharedConsumers).toEqual(sharedSelectConsumers);
-    expect(Object.values(sharedConsumers).reduce((total, count) => total + count, 0)).toBe(65);
+    expect(Object.values(sharedConsumers).reduce((total, count) => total + count, 0)).toBe(66);
     expect(selectImportOwners()).toEqual(
       Object.fromEntries(Object.keys(sharedSelectConsumers).map((path) => [path, 1])),
     );

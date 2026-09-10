@@ -29,6 +29,7 @@ type RuntimeDescriptor = {
   mode: "compatibility" | "isolated";
   status: "ready" | "no_runtime" | "starting" | "unavailable";
   reason: "no_authorized_workspace" | "explicit_start_required" | "runtime_starting" | "runtime_unavailable" | null;
+  workspace?: RuntimeWorkspaceOption | null;
 };
 
 type RuntimeLaunch = { launchUrl: string; status: "ready" };
@@ -127,10 +128,16 @@ export function useRuntimeWorkspace(scope: RuntimeWorkspaceScope, enabled = true
     let active = true;
     const load = async () => {
       try {
-        const descriptor = await request<{ data: RuntimeDescriptor }>("/runtimes/browser/status");
+        const descriptor = await request<{ data: RuntimeDescriptor }>(`/runtimes/browser/status?project=${encodeURIComponent(projectName)}`);
         if (!active) return;
         setMode(descriptor.data.mode);
         if (descriptor.data.mode === "compatibility") {
+          const workspace = descriptor.data.workspace;
+          const confirmed = workspace?.projectName === projectName && workspace.status === "ready" ? workspace : null;
+          setWorkspaces(confirmed ? [confirmed] : []);
+          setSelectedWorkspaceId(confirmed?.id ?? null);
+          setConfirmedWorkspaceId(confirmed?.id ?? null);
+          setConfirmedRuntimeId(null);
           setStatus("ready");
           return;
         }

@@ -383,8 +383,26 @@ Each setting row uses the `SettingRow` component:
 - **MailPanel**: OAuth credentials + sync intervals + window sizes
 - **PipelinePanel**: LLM provider catalog management (repeatable blocks, model lists, primary/backup roles)
 - **ConfigPanel**: Link to /config editor
+- **CloudflarePanel**: Existing named tunnel status, five independent public HTTPS mappings, write-only token controls, and connector lifecycle actions
 - **Route-linked panels**: Projects → `/projects`, Skills → `/skills`, Tasks → `/tasks`, Jobs → `/jobs`, Plugins → `/plugins`, Agents → `/agents`, MCP → `/mcp-servers`, Observations → `/observations`, Personality → `/personality`, and Logs → `/logs`
 - Route-linked panels use `RouteLinkedPanel`: a concise category description plus an **Open {label} workspace** link. They intentionally reuse the dedicated route's data loading, authorization, mutation flows, and responsive UI rather than rendering placeholder content in the overlay.
+
+### Cloudflare Settings Panel
+
+`CloudflarePanel` is a stacked token-surface form for an existing named tunnel.
+Its current layout is:
+
+- A four-column status grid at `sm` width for Desired, Connector,
+  Authentication, and Route inventory.
+- A desired-connector checkbox and read-only tunnel-name field.
+- Five independently gated service rows for Dashboard, OpenCode, CLI, VS Code,
+  and API. Each row has a checkbox, a native `Select` for the trusted public
+  HTTPS origin, and a route-health label.
+- A password-style write-only token field. A configured token is represented by
+  placeholder text; **Clear saved token** requires confirmation.
+- Inline alert/status messages and **Save**, **Validate**, **Connect**, and
+  **Disconnect** actions. Connect is disabled until route inventory status is
+  `ready`; lifecycle buttons disable while an operation is running.
 
 ### Personality Workspace
 - The header uses separate **Established** and **Emerging** counts; established means confidence `≥ 0.30`.
@@ -545,8 +563,10 @@ Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-
 
 - Message, error, prompt, and activity content is centered in one full-width `48rem` rail (`mx-auto w-full max-w-3xl space-y-6`) inside the existing padded scroll container. The message scroller and the full-width composer/fallback outer regions share native `[scrollbar-gutter:stable]` reservation so their centerlines stay aligned with classic scrollbars; the rail remains full-width within mobile padding.
 - The composer keeps project context off by default. Its compact `Context project: {validatedName}` action sits beside Attach, uses token-based hover/selected states, exposes `aria-pressed`, hides only the descriptive prefix on mobile, and keeps the selected project visible with a bounded truncation label plus a full accessible name. It resets only after an accepted send or session remount and remains available after a failed request.
+- Saved-memory use is explicit and defaults off. The **Use memory** and one-shot **Save message** controls sit beside the persistent **Learning tools** control in a wrapping token-based row above the composer input; each exposes `aria-pressed`, remains independent from project Context, and shows truthful saving, saved, queued, or failed status text above the message rail. Learning tools are enabled by default and can be disabled independently.
 - Provider, model, variant, and agent controls remain native labeled selects rendered through the shared `Select` component. Pass compact `className`/`wrapperClassName` values to preserve the toolbar geometry; `Select` owns the 12px decorative chevron and native keyboard/mobile behavior.
 - On mobile, the session sidebar becomes an overlay drawer and the provider/model/variant/agent selectors remain in a horizontally scrollable compact row; the message rail and composer stay full-width within mobile padding without document or composer overflow.
+- The `/context` Saved memory section precedes the conversation browser and uses the standard token-surface card. Memory rows wrap content, display version/update metadata and tags, use labelled edit fields, and require a visible second confirmation action before forget; update, queued, failed, and forgotten states use live status or alert text rather than color alone.
 
 12. **Standard Overlay Size is `w-11/12 max-w-7xl max-h-[90vh]`** — the `Overlay` component default (when `fullScreen` is not set) is `mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]`. This is the canonical size for all overlay panels (skill detail, service detail, pipeline events, logs detail). The `fullScreen` prop (`w-[calc(100%-32px)] h-[calc(100%-32px)]`) is no longer used by any page — the Settings overlay was the last consumer and now also uses the constrained default. Any new overlay MUST NOT set `fullScreen={true}`; use the constrained default. Size customization (e.g., `max-w-2xl` for narrow diagnostic overlays like `ServiceOverlay.tsx` line 240) is acceptable when the overlay is used standalone outside the shared `Overlay` component.
 

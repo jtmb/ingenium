@@ -97,8 +97,8 @@ authorized workspace, runtime capability binding, runtime credential, and
 active service principal. The runtime must be `READY` or `IDLE` and have a
 future absolute expiry. The resulting expiry is capped at 15 minutes and at
 the runtime, binding, and capability expiries. One transaction creates exactly
-two credentials: an `mcp` credential with
-`coordination:read`, `coordination:write`, `projects:read`, and
+two credentials: an `mcp` credential with the five scopes
+`coordination:read`, `coordination:write`, `memory:read`, `projects:read`, and
 `repository:sync`, plus a `repository-sync` credential with only
 `projects:read` and `repository:sync`.
 
@@ -320,6 +320,14 @@ project, workspace, worktree, or scope argument. It reuses the normal login,
 recent-step-up, project authorization, and scoped MCP issuance routes, validates
 the exact configured coordination binding, and atomically replaces the
 owner-only credential file.
+The general-MCP credential issued by this reset has exactly these eight scopes:
+`coordination:read`, `coordination:write`, `projects:read`, `repository:sync`,
+`documentation:read`, `rag:read`, `memory:read`, and `memory:write`. It does not
+include `health:read` or `memory:share`; project-visible saved memory therefore
+requires a separate sharing grant. The coordination-lease `mcp` credential and
+the runtime capability credential are narrower, read-only memory bindings and
+must not be conflated with the reset credential.
+
 When the session-coordinator plugin is already loaded, its exact reset-command
 exception reconnects the MCP client and registers a fresh accepted epoch in the
 same OpenCode process. Lookalike commands and unrelated mutations remain denied.
@@ -614,10 +622,10 @@ rotate it and restart every consumer before continuing.
 
 ## Historical public-JWT incident status
 
-The historical public-JWT exposure was remediated for the current release
-boundary: repository history was rewritten and rescanned, the deployed bearer
-credential was rotated, and the prior bearer was rejected with HTTP `401`.
-There is no remaining release hold for this API-bearer acceptance. Do not infer
-that separately tracked external-provider, cache, or collaborator/CI clone
-actions are complete; see the [Credential Incident Runbook](credential-rotation.md)
-for those follow-ups.
+The [Credential Incident Runbook](credential-rotation.md) preserves a prior
+report that repository history was rewritten and rescanned, the deployed bearer
+credential was rotated, and the prior bearer was rejected with HTTP `401`. This
+documentation task performed no history rewrite, scan, deployment, restart, or
+replay, so it does not independently verify those results or claim live release
+acceptance. Do not infer that separately tracked external-provider, cache, or
+collaborator/CI clone actions are complete.

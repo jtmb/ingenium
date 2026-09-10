@@ -60,7 +60,7 @@ MCP callers, and explicitly authorized workflows.
 | 4 | **Trash endpoints missing** | API | ✅ ROUTE IMPL | `GET /spaces/:spaceId/trash` (list, line 634) and `DELETE /spaces/:spaceId/trash` (purge all, line 646) implemented. Dashboard UI: `TrashPanel` component in right sidebar with archive/restore per page and purge-all button. Soft-delete (`handleArchive`) sends page to trash, restore available from trash tab. |
 | 5 | **Slug-based page lookup broken** | MCP → API | ✅ ROUTE IMPL | `GET /pages?spaceId=&slug=` implemented at line 371, uses core `getPageBySlug()`. MCP handler `docsGetPage` calls correct path at line 71. Dashboard UI: pages selected by URL `?page=<id>` param. |
 | 6 | **Slug-based space lookup broken** | MCP → API | ✅ ROUTE IMPL | `GET /spaces?slug=` implemented at line 201, uses core `getSpaceBySlug()`. MCP handler `docsGetSpace` calls correct path at line 22. Dashboard UI: `/docs?space=<id>` param selects space, `/standalone?page=docs` lists spaces and routes into `/docs?space=...`. |
-| 7 | **DOCS_ENDPOINTS mismatch** — 3 documentation paths missing from the 49-endpoint-string Documentation-category array (not 11+ wrong) | Catalog | 🟢 W1B CALLER ALIGNED | `mcp-tool-catalog.ts:334-384` has 49 endpoint strings shared by 48 Documentation-category tools. Verified: 0 wrong paths. Missing: `GET /pages` (slug lookup), `PUT /pages/:id/comments/:commentId` (non-resolve), and `POST /docs/ai` (docs-ai.ts, separate router). The `POST /docs/repository/sync` route is represented by the separate Repository Sync category. |
+| 7 | **DOCS_ENDPOINTS mismatch** — 3 documentation paths missing from the 49-endpoint-string Documentation-category array (not 11+ wrong) | Catalog | 🟢 W1B CALLER ALIGNED | `mcp-tool-catalog.ts:334-384` has 49 endpoint strings shared by 48 Documentation-category tools. Verified: 0 wrong paths. Missing: `GET /pages` (slug lookup), `PUT /pages/:id/comments/:commentId` (non-resolve), and `POST /docs/ai` (docs-ai.ts, separate router). The repository synchronization contract is represented by the separate Repository Sync category. |
 | 8 | **Project link MCP handler sends `linkedProjectId: number`** | MCP → API | 🟢 W1B CALLER ALIGNED | `docsLinkProject` (line 298) now uses `projectId: string` param and POST `/docs/pages/${pageId}/projects`. `docsUnlinkProject` (line 304) uses DELETE `/docs/pages/${pageId}/projects/${encodeURIComponent(linkedProjectId)}`. Both verified from source. |
 | 9 | **`saveAttachment` uses `INSERT OR REPLACE`** | Core | ✅ FIXED | Changed to `ON CONFLICT(page_id, filename) DO UPDATE` in `docs.ts:986-994`. HARD RULE #11 compliant. Tested. |
 | 10 | **No trash/prune lifecycle** | API | ✅ ROUTE IMPL | `GET /spaces/:spaceId/trash` (line 634), `DELETE /spaces/:spaceId/trash` (line 646). Core `purgeArchivedPages()`, `listArchivedPages()` at lines 376-393. |
@@ -628,33 +628,34 @@ See `indexPublishedDoc()` in `packages/ingenium-core/lib/tools/rag.ts` and its c
 
 ### Repository-authoritative Markdown synchronization
 
-`POST /api/v1/docs/repository/sync?project=<project>` is the authenticated,
-page-backed foundation for synchronizing repository Markdown into the Docs
-Workspace. The API receives a complete manifest and does not read repository
-paths itself; the caller supplies regular `docs/**/*.md` file content, SHA-256
-hashes, and file metadata. This keeps filesystem authority outside the API and
-gives each managed document a stable Docs Workspace page plus a RAG source.
+`POST /api/v1/docs/repository/sync` is a compatibility guard, not an apply
+endpoint; it returns `409 REPOSITORY_SYNC_ENDPOINT_REQUIRED`. Repository
+Markdown is applied through the authenticated combined endpoint
+`POST /api/v1/repository/sync?project=<project>`. The API receives a complete
+manifest and does not read repository paths itself; the caller supplies regular
+`docs/**/*.md` file content, SHA-256 hashes, and file metadata. This keeps
+filesystem authority outside the API and gives each managed document a stable
+Docs Workspace page plus a RAG source.
 
-Send `{ "manifest": { "files": [...] }, "dryRun": true }` to preview changes.
-Omit `dryRun` or set it to `false` to apply the transaction. Manifest entries
-must use normalized `docs/` paths ending in `.md`, be regular non-symlink files,
-contain matching lowercase SHA-256 hashes, and pass the file-count, per-file,
-total-size, and secret-content gates. The result reports created, updated,
-renamed, restored, unchanged, and archived page operations together with RAG
-source changes. Files omitted from a later complete manifest archive only
-documents already managed by that project; unrelated Docs Workspace pages are
-untouched.
+For example, a docs-only projection sends `{ "docsManifest": { "files": [...] }, "dryRun": true, "expectedGeneration": 0 }` and omits `resourcesManifest`; use the current project/worktree generation rather than assuming `0`.
+The all-resources workflow adds the version-2 `resourcesManifest` for skills,
+agents, and plugins. Manifest entries must use normalized `docs/` paths ending
+in `.md`, be regular non-symlink files, contain matching lowercase SHA-256
+hashes, and pass the file-count, size, and secret-content gates. The result
+reports created, updated, renamed, restored, unchanged, and archived page
+operations together with RAG source changes. Files omitted from a later
+complete manifest archive only documents already managed by that project;
+unrelated Docs Workspace pages are untouched.
 
-Invalid manifests return `422 INVALID_REPOSITORY_DOCS_MANIFEST`; unexpected
-apply failures return `500 REPOSITORY_DOCS_SYNC_FAILED`. The route is a
-foundation for repository documentation only. It does not establish agent,
-skill, or plugin synchronization.
+Invalid combined manifests return `422 INVALID_REPOSITORY_SYNC`; unexpected
+apply failures return `500 REPOSITORY_SYNC_FAILED`. The route is a foundation
+for repository synchronization only. It does not provision a project, and the
+docs-only CLI scope omits resource synchronization.
 
 The `ingenium-init-project --docs-only` CLI scope is the repository-facing
-caller for this route. The default `ingenium-init-project --dry-run` /
-`--apply` workflow combines this Markdown projection with the separate
-repository-resource route for skills, agents, and plugins. The docs route alone
-does not provision a project or synchronize those other resource types.
+caller for the docs-only request. The default `ingenium-init-project --dry-run`
+/ `--apply` workflow sends the same combined endpoint with the Markdown and
+resource manifests.
 
 For the older direct file-source ingestion path, `POST /api/v1/rag/ingest` and
 `ingenium_docs_ingest` remain available; those sources are indexed as

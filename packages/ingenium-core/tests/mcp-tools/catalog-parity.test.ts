@@ -9,7 +9,14 @@ import { getSourceDerivedCanonicalRegistrations } from "./source-inventory.js";
 const CATALOG_SOURCE_PATH = join(__dirname, "..", "..", "lib", "tools", "mcp-tool-catalog.ts");
 
 describe("MCP Tool Catalog Parity", () => {
-  it("keeps source inventory within the catalog without certifying runtime state", () => {
+  it("describes disable as retained profile state in both MCP surfaces", () => {
+    const description = "Disable an agent while retaining its .md profile with disable: true.";
+    expect(getCatalogMap().get("ingenium_agent_disable")?.description).toBe(description);
+    const serverSource = readFileSync(join(__dirname, "../../../../services/ingenium-server/scripts/mcp-server.ts"), "utf8");
+    expect(serverSource).toContain(`"agent_disable",\n  { description: "${description}"`);
+  });
+
+  it("matches source inventory exactly to the catalog without certifying runtime state", () => {
     const inventory = getSourceDerivedCanonicalRegistrations();
     const catalog = getCatalogMap();
     const catalogExtensionTools = MCP_TOOL_CATALOG.filter(({ name }) => !name.startsWith("ingenium_"));
@@ -17,12 +24,12 @@ describe("MCP Tool Catalog Parity", () => {
     expect(new Set(inventory.server).size).toBe(inventory.server.length);
     expect(new Set(inventory.extension).size).toBe(inventory.extension.length);
     expect(inventory.all).toHaveLength(inventory.server.length + inventory.extension.length);
-    expect(inventory.all.filter((name) => !catalog.has(name))).toEqual([]);
+    expect([...inventory.all].sort()).toEqual([...catalog.keys()].sort());
     expect(catalogExtensionTools.map(({ name }) => name).sort()).toEqual([...inventory.extension].sort());
     expect(new Set(MCP_TOOL_CATALOG.map(({ name }) => name)).size).toBe(MCP_TOOL_CATALOG.length);
-    expect(MCP_TOOL_CATALOG).toHaveLength(284);
-    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(282);
-    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(30);
+    expect(MCP_TOOL_CATALOG).toHaveLength(291);
+    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(289);
+    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(31);
     for (const name of [
       "ingenium_coordination_status",
       "ingenium_coordination_memory_read",
@@ -55,7 +62,7 @@ describe("MCP Tool Catalog Parity", () => {
       },
     });
     const catalogSource = readFileSync(CATALOG_SOURCE_PATH, "utf8");
-    expect(catalogSource.match(/name: "/g)).toHaveLength(284);
+    expect(catalogSource.match(/name: "/g)).toHaveLength(MCP_TOOL_CATALOG.length);
     expect(catalogSource).toMatch(/name: "ingenium_mcp_report_get",\s+category: "Servers",\s+description: "Get the bounded MCP usefulness report for a project\.",\s+projectScope: "per-project",\s+defaultEnabled: true,\s+apiEndpoints: MCP_REPORT_ENDPOINTS,/);
     expect(catalog.get("ingenium_repository_sync")).toMatchObject({
       category: "Repository Sync",

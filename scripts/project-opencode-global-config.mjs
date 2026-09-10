@@ -6,14 +6,22 @@ import { CANONICAL_PLUGIN_SPECS } from "../packages/ingenium-extension/plugin-sp
 
 const DEFAULT_CONFIG = "opencode.jsonc";
 const REQUIRED_PLUGINS = CANONICAL_PLUGIN_SPECS;
+const MANAGED_AGENT_NAMES = new Set([
+  "plan", "build", "general", "explore",
+  "ingenium-docs", "ingenium-qa",
+  "ingenium-software-engineer-fast", "ingenium-software-engineer-premium",
+  "ingenium-recovery-engineer", "ingenium-orchestrator", "ingenium-explore",
+  "ingenium-scout", "ingenium-chat", "ingenium-security-auditor",
+]);
+const RETIRED_AGENT_NAMES = new Set(["browser-agent"]);
+const RESERVED_BROKER_AGENT = "ingenium-llm-broker";
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function normalizePermissions(value) {
-  if (isRecord(value)) return { ...value };
-  return typeof value === "string" ? { "*": value } : {};
+function hasDefaultDeny(value) {
+  return value === "deny" || (isRecord(value) && value["*"] === "deny");
 }
 
 /** Remove JSONC comments without changing string literal contents. */
@@ -169,20 +177,31 @@ function writeAtomically(configPath, value) {
  */
 export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   const config = readConfig(configPath);
-  const permission = normalizePermissions(config.permission);
-  permission.question = "deny";
-  config.permission = permission;
-
   const agent = isRecord(config.agent) ? { ...config.agent } : {};
   for (const [name, value] of Object.entries(agent)) {
-    const projection = isRecord(value) ? { ...value } : {};
-    const permission = normalizePermissions(isRecord(value) ? projection.permission : value);
-    permission.question = name === "plan" ? "allow" : "deny";
-    if (name !== "plan" && "question" in projection) projection.question = "deny";
-    agent[name] = { ...projection, permission };
+    if (RETIRED_AGENT_NAMES.has(name)) {
+      delete agent[name];
+      continue;
+    }
+    if (!MANAGED_AGENT_NAMES.has(name)) {
+      if (name.startsWith("ingenium-") && name !== RESERVED_BROKER_AGENT
+        && (!isRecord(value) || !hasDefaultDeny(value.permission))) {
+        throw new Error("Permissive unknown Ingenium agent override");
+      }
+      continue;
+    }
+    if (!isRecord(value)) {
+      delete agent[name];
+      continue;
+    }
+    const projection = Object.fromEntries(
+      Object.entries(value).filter(([key]) => key === "model" || key === "variant"),
+    );
+    if (Object.keys(projection).length > 0) agent[name] = projection;
+    else delete agent[name];
   }
-  if (!agent.plan) agent.plan = { permission: { question: "allow" } };
-  config.agent = agent;
+  if (Object.keys(agent).length > 0) config.agent = agent;
+  else delete config.agent;
 
   const mcp = isRecord(config.mcp) ? config.mcp : {};
   delete mcp.ponytail;
@@ -195,11 +214,12 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   delete environment.INGENIUM_API_TOKEN_FILE;
   delete environment.INGENIUM_MCP_CREDENTIAL;
   environment.INGENIUM_API_URL = "http://localhost:4097/api/v1";
-  environment.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+  environment.INGENIUM_MCP_CREDENTIAL_FILE = "/run/ingenium-opencode/.ingenium-mcp-credential";
   environment.INGENIUM_MCP_AUDIENCE = "mcp";
-  environment.INGENIUM_PROJECT = "global-default";
-  environment.INGENIUM_WORKSPACE_ID = "global-default-workspace";
-  environment.INGENIUM_WORKTREE = "/workspace";
+  environment.INGENIUM_MCP_CREDENTIAL_PURPOSE = "general";
+  environment.INGENIUM_PROJECT = "ingenium";
+  environment.INGENIUM_WORKSPACE_ID = "shared-memory-ingenium";
+  environment.INGENIUM_WORKTREE = "/home/brajam/repos/ingenium";
   mcp.ingenium = {
     ...existingIngenium,
     type: "local",

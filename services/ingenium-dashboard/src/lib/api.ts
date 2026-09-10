@@ -548,6 +548,7 @@ export interface ChildMcpServer {
   id: string;
   project_id: string;
   name: string;
+  description?: string | null;
   executable: string;
   args: string[];
   scope: ChildMcpScope;
@@ -563,6 +564,7 @@ export interface ChildMcpServer {
 
 export interface ChildMcpServerInput {
   name: string;
+  description?: string;
   executable: string;
   args?: string[];
   environment?: Record<string, { vault_item_id: string }>;
@@ -780,6 +782,99 @@ export type ContextChatTurnResult = {
   idempotent: boolean;
 };
 
+export type ExplicitMemoryVisibility = "private" | "project";
+
+export type ExplicitMemory = {
+  id: string;
+  organizationId: string;
+  projectId: string;
+  workspaceId: string;
+  ownerUserId: string;
+  visibility: ExplicitMemoryVisibility;
+  content: string;
+  contentHash: string;
+  tags: string[];
+  version: number;
+  state: "active" | "forgotten";
+  originType: "explicit" | "context_archive" | "source";
+  originId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  forgottenAt: string | null;
+};
+
+export type ExplicitMemoryReceipt = {
+  receiptId: string;
+  operationId: string;
+  operation: "save" | "update" | "forget";
+  status: "committed";
+  memoryId: string;
+  version: number;
+  scope: {
+    organizationId: string;
+    projectId: string;
+    workspaceId: string;
+    ownerUserId: string;
+    visibility: ExplicitMemoryVisibility;
+  };
+  committedAt: string;
+};
+
+export type ExplicitMemoryMutationResult = {
+  memory: ExplicitMemory | null;
+  receipt: ExplicitMemoryReceipt;
+  idempotent: boolean;
+  reconciled?: boolean;
+};
+
+export type ExplicitMemoryPending = {
+  status: "pending";
+  operationId: string;
+  nextAction: "memory_operation_status";
+};
+
+export type ExplicitMemoryRetrievalPage = {
+  items: Array<{
+    memory: ExplicitMemory;
+    estimatedTokens: number;
+    contentKind: "untrusted_memory_data";
+    instructionAuthority: false;
+  }>;
+  total: number;
+  nextOffset: number | null;
+  budget: {
+    maxItems: number;
+    maxTokens: number;
+    usedItems: number;
+    usedTokens: number;
+    truncated: boolean;
+  };
+};
+
+async function explicitMemoryMutation(
+  operationId: string,
+  project: string,
+  workspaceId: string,
+  mutate: () => Promise<{ data: ExplicitMemoryMutationResult }>,
+): Promise<{ data: ExplicitMemoryMutationResult | ExplicitMemoryPending }> {
+  try {
+    return await mutate();
+  } catch (error) {
+    if (error instanceof ApiError && error.status < 500) throw error;
+    try {
+      const status = await request<{ data: { status: "committed"; receipt: ExplicitMemoryReceipt } | { status: "unknown"; operationId: string } }>(
+        `/memory/operations/${encodeURIComponent(operationId)}?${new URLSearchParams({ project, workspaceId })}`,
+      );
+      if (status.data.status === "committed") {
+        return { data: { memory: null, receipt: status.data.receipt, idempotent: true, reconciled: true } };
+      }
+    } catch {
+      // The original mutation remains unknown; callers must not report it as committed or replay it.
+    }
+    return { data: { status: "pending", operationId, nextAction: "memory_operation_status" } };
+  }
+}
+
 /** A system log entry from the Ingenium server. */
 export type LogEntry = {
   timestamp: string;
@@ -883,6 +978,34 @@ export interface SettingResponse {
   value: string;
   isSet?: boolean;
   masked?: boolean;
+}
+
+export type CloudflareServiceId = "dashboard" | "opencode" | "cli" | "vscode" | "api";
+export type CloudflareTokenOperation =
+  | { action: "preserve" }
+  | { action: "replace"; value: string }
+  | { action: "clear" };
+
+export interface CloudflareTunnelConfig {
+  enabled: boolean;
+  tunnelName: string;
+  services: Record<CloudflareServiceId, { enabled: boolean; publicUrl: string }>;
+}
+
+export interface CloudflareTunnelStatus {
+  desired: { enabled: boolean; configuration: "valid" | "invalid" };
+  inventory: { status: "ready" | "missing" | "invalid"; error: string | null };
+  config: CloudflareTunnelConfig;
+  token: { configured: boolean; readiness: "ready" | "missing" | "vault_sealed" };
+  connector: { state: "absent" | "stopped" | "starting" | "running" | "error" | "unavailable"; observedAt: string };
+  routes: Array<{
+    service: CloudflareServiceId;
+    enabled: boolean;
+    publicUrl: string;
+    target: string;
+    availableOrigins: string[];
+    health: "disabled" | "blocked" | "unavailable" | "unknown" | "reachable";
+  }>;
 }
 
 export interface TriageResult {
@@ -2323,6 +2446,11 @@ export const api = {
   },
   /** Canonical child MCP definitions and persisted discovery metadata. */
   mcpServers: {
+    createPlaywrightPreset: (project: string, description?: string) =>
+      request<{ data: ChildMcpServer }>(`/mcp-servers/presets/playwright?project=${encodeURIComponent(project)}`, {
+        method: "POST",
+        ...(description !== undefined ? { body: JSON.stringify({ description }) } : {}),
+      }),
     list: (project = DEFAULT_PROJECT) =>
       request<{ data: ChildMcpServer[]; total: number }>(`/mcp-servers?project=${encodeURIComponent(project)}`),
     listTools: (project = DEFAULT_PROJECT) =>
@@ -2368,6 +2496,49 @@ export const api = {
       if (options?.limit) params.set("limit", String(options.limit));
       return request<{ data: any[]; total: number }>(`/pipeline/events?${params}`);
     },
+  },
+  memory: {
+    list: (
+      project: string,
+      workspaceId: string,
+      options: { visibility?: ExplicitMemoryVisibility; limit?: number; tokenBudget?: number; offset?: number } = {},
+    ) => {
+      const params = new URLSearchParams({
+        project,
+        workspaceId,
+        visibility: options.visibility ?? "private",
+        limit: String(options.limit ?? 16),
+        tokenBudget: String(options.tokenBudget ?? 2_048),
+      });
+      if (options.offset !== undefined) params.set("offset", String(options.offset));
+      return request<{ data: ExplicitMemoryRetrievalPage }>(`/memory?${params}`);
+    },
+    save: (
+      project: string,
+      input: { operationId: string; workspaceId: string; content: string; tags?: string[]; visibility?: ExplicitMemoryVisibility; memoryId?: string },
+    ) => explicitMemoryMutation(input.operationId, project, input.workspaceId, () => request<{ data: ExplicitMemoryMutationResult }>(
+      `/memory?project=${encodeURIComponent(project)}`,
+      { method: "POST", body: JSON.stringify(input) },
+    )),
+    update: (
+      project: string,
+      memoryId: string,
+      input: { operationId: string; workspaceId: string; expectedVersion: number; content: string; tags?: string[]; visibility?: ExplicitMemoryVisibility },
+    ) => explicitMemoryMutation(input.operationId, project, input.workspaceId, () => request<{ data: ExplicitMemoryMutationResult }>(
+      `/memory/${encodeURIComponent(memoryId)}?project=${encodeURIComponent(project)}`,
+      { method: "PATCH", body: JSON.stringify(input) },
+    )),
+    forget: (
+      project: string,
+      memoryId: string,
+      input: { operationId: string; workspaceId: string; expectedVersion: number; visibility?: ExplicitMemoryVisibility },
+    ) => explicitMemoryMutation(input.operationId, project, input.workspaceId, () => request<{ data: ExplicitMemoryMutationResult }>(
+      `/memory/${encodeURIComponent(memoryId)}?project=${encodeURIComponent(project)}`,
+      { method: "DELETE", body: JSON.stringify(input) },
+    )),
+    operationStatus: (project: string, workspaceId: string, operationId: string) => request<{
+      data: { status: "committed"; receipt: ExplicitMemoryReceipt } | { status: "unknown"; operationId: string };
+    }>(`/memory/operations/${encodeURIComponent(operationId)}?${new URLSearchParams({ project, workspaceId })}`),
   },
   /** Immutable, project-scoped conversation memory. */
   context: {
@@ -2554,6 +2725,17 @@ export const api = {
       if (accountId) params.set("account_id", accountId);
       return request<{ data: ResponseSuggestion }>(`/emails/suggest?${params}`);
     },
+  },
+  cloudflare: {
+    get: () => request<{ data: CloudflareTunnelStatus }>("/services/cloudflare"),
+    update: (config: CloudflareTunnelConfig, token: CloudflareTokenOperation = { action: "preserve" }) =>
+      request<{ data: CloudflareTunnelStatus }>("/services/cloudflare", {
+        method: "PUT",
+        body: JSON.stringify({ config, token }),
+      }),
+    validate: () => request<{ data: CloudflareTunnelStatus }>("/services/cloudflare/validate", { method: "POST" }),
+    connect: () => request<{ data: CloudflareTunnelStatus }>("/services/cloudflare/connect", { method: "POST" }),
+    disconnect: () => request<{ data: CloudflareTunnelStatus }>("/services/cloudflare/disconnect", { method: "POST" }),
   },
   settings: {
     get: (key: string, project = DEFAULT_PROJECT) => request<{ data: SettingResponse }>(`/settings?project=${encodeURIComponent(project)}&key=${key}`),

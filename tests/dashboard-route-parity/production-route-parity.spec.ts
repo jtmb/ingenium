@@ -257,6 +257,11 @@ test.describe("Production dashboard route parity", () => {
     expect(sorted(inventory.canonicalNavigationRoutes)).toHaveLength(24);
     expect(inventory.settingsDeepLinks.map(({ id }) => id)).toEqual([
       "general",
+      "account",
+      "security",
+      "sessions",
+      "api-tokens",
+      "organizations",
       "projects",
       "skills",
       "tasks",
@@ -269,9 +274,10 @@ test.describe("Production dashboard route parity", () => {
       "observations",
       "personality",
       "providers",
+      "cloudflare",
       "logs",
     ]);
-    expect(inventory.settingsDeepLinks).toHaveLength(14);
+    expect(inventory.settingsDeepLinks).toHaveLength(20);
     expect(inventory.settingsDeepLinks.map(({ panelTestId }) => panelTestId)).toEqual(
       inventory.settingsDeepLinks.map(({ id }) => `settings-panel-${id}`),
     );

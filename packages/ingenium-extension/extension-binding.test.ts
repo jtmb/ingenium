@@ -94,7 +94,7 @@ describe("extension binding resolution", () => {
     expect(resolveExtensionBinding(worktree, { purpose: "learning" }).credentialFile).toBe(explicit);
   });
 
-  it("gives the general operation environment credential path precedence over project config", () => {
+  it("prefers the general environment credential only when its purpose matches", () => {
     prepare();
     token(".ingenium-mcp-credential");
     const privateDirectory = join(worktree, "private");
@@ -114,6 +114,11 @@ describe("extension binding resolution", () => {
     process.env.INGENIUM_MCP_CREDENTIAL_FILE = operationCredential;
 
     expect(resolveExtensionBinding(worktree).credentialFile).toBe(operationCredential);
+    chmodSync(join(worktree, ".opencode"), 0o755);
+    expect(resolveExtensionBinding(worktree).credentialFile).toBe(operationCredential);
+    delete process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
+    expect(resolveExtensionBinding(worktree).credentialFile)
+      .toBe(join(worktree, ".opencode", ".ingenium-mcp-credential"));
   });
 
   it("fails closed instead of falling back when a legacy inline credential is present", () => {

@@ -116,6 +116,5 @@ The Ingenium email client provides MCP tools for IMAP/SMTP email operations:
 
 - **`@development-conventions`** — Web design review workflow that uses Playwright for visual inspection
 - **`@devops-conventions`** — Shell scripts for launching dev servers before testing
-- **`@engineering-workflow`** — Agent configuration and permission lockdown patterns for MCP tools
 
 (End of file - total 89 lines)

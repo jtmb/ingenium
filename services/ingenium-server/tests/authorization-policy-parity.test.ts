@@ -80,6 +80,33 @@ describe("AUTH-102 MCP policy parity", () => {
     expect(byName.get("ingenium_coordination_update")?.authorization?.scopes).toEqual(["coordination:write"]);
     expect(byName.get("ingenium_coordination_handoff")?.authorization?.scopes).toEqual(["coordination:write"]);
     expect(byName.get("ingenium_context_message_retrieve")?.authorization?.target).toBe("private");
+    expect(byName.get("ingenium_memory_save")?.authorization).toMatchObject({
+      permission: "write",
+      target: "private",
+      scopes: ["memory:write"],
+      launcherBinding: "required",
+    });
+    expect(byName.get("ingenium_memory_list")?.authorization).toMatchObject({
+      permission: "read",
+      target: "private",
+      scopes: ["memory:read"],
+      launcherBinding: "required",
+    });
     expect(byName.get("ingenium_project_init")?.authorization?.target).toBe("organization");
+  });
+
+  it("matches all seven private memory permissions to their REST endpoints", () => {
+    const tools = MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_memory_"));
+    expect(tools).toHaveLength(7);
+    for (const tool of tools) {
+      for (const endpoint of tool.apiEndpoints) {
+        const [method, path] = endpoint.split(" ");
+        const rest = policyForRequest({ method, path } as never)!;
+        expect(tool.authorization).toMatchObject({
+          target: "private", resource: rest.resource, permission: rest.permission,
+          scopes: [`memory:${rest.permission}`],
+        });
+      }
+    }
   });
 });

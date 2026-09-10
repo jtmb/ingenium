@@ -60,11 +60,12 @@ vi.mock("./mcp-client.js", () => ({
 
 let worktree = "";
 
-const CANONICAL_SKILLS = [
+const HISTORICAL_CONSOLIDATION_SKILLS = [
   "development-conventions",
   "devops-conventions",
   "database-conventions",
   "engineering-workflow",
+  "local-models",
   "mcp-tooling",
   "security-audit",
   "documentation",
@@ -102,7 +103,7 @@ function createCleanupFixture(root: string, fixtures: CleanupFixtureMapping[]): 
   });
   writeFileSync(
     join(skillsRoot, "consolidation-map.json"),
-    JSON.stringify({ version: "1.0.0", canonicalSkills: CANONICAL_SKILLS, mappings }),
+    JSON.stringify({ version: "1.0.0", canonicalSkills: HISTORICAL_CONSOLIDATION_SKILLS, mappings }),
   );
 }
 
@@ -136,6 +137,9 @@ describe("agent resource sync", () => {
 
     const content = readFileSync(join(worktree, ".opencode", "agents", "execution", "sync-agent.md"), "utf8");
     expect(content).not.toMatch(/^model:/m);
+    expect(content).toMatch(/^disable: false$/m);
+    expect(content).toMatch(/^hidden: false$/m);
+    expect(content).toMatch(/^permission:\n  "\*": deny$/m);
   });
 
   it("writes public agent profiles as 0644 and never follows a profile symlink", () => {
@@ -215,16 +219,17 @@ describe("agent resource sync", () => {
     }
   });
 
-  it("removes stale disk files for disabled API agents instead of resurrecting them", async () => {
+  it("retains disabled API agents on disk with explicit profile state", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
-    expect(writeAgentToDisk(worktree, { name: "disabled-agent", category: "execution", content: "# stale" })).toBe(true);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [{ name: "disabled-agent", content: "# API", category: "execution", enabled: false }] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await syncAgents(worktree, "project", { version: 1, project: "project", lastFullSync: "", resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} } }, { isInitialSync: true });
 
-    expect(result.removed).toBe(1);
-    expect(existsSync(join(worktree, ".opencode", "agents", "execution", "disabled-agent.md"))).toBe(false);
+    expect(result.synced).toBe(1);
+    const profile = readFileSync(join(worktree, ".opencode", "agents", "execution", "disabled-agent.md"), "utf8");
+    expect(profile).toMatch(/^disable: true$/m);
+    expect(profile).toContain("# API");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -270,7 +275,7 @@ describe("agent resource sync", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("imports a disk-only ordinary agent as disabled", async () => {
+  it("imports a disk-only ordinary agent with its explicit profile state", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
     expect(writeAgentToDisk(worktree, { name: "orphan-agent", category: "chat", content: "# local" })).toBe(true);
     const fetchMock = vi.fn()
@@ -280,18 +285,35 @@ describe("agent resource sync", () => {
 
     await syncAgents(worktree, "project", { version: 1, project: "project", lastFullSync: "", resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} } }, { isInitialSync: true });
 
-    expect(JSON.parse(fetchMock.mock.calls[1]![1].body).enabled).toBe(false);
+    expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toMatchObject({
+      enabled: true,
+      permissions: '{"*":"deny"}',
+      metadata: '{"hidden":false}',
+    });
+  });
+
+  it("rejects permissive ordinary disk profiles before API reconciliation", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    const profileDir = join(worktree, ".opencode", "agents", "execution");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      join(profileDir, "permissive-agent.md"),
+      '---\nname: permissive-agent\ndescription: "unsafe"\nmode: subagent\ndisable: false\nhidden: false\npermission:\n  "*": allow\n---\n\n# Unsafe\n',
+    );
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(syncAgents(worktree, "project", { version: 1, project: "project", lastFullSync: "", resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} } }, { isInitialSync: true }))
+      .rejects.toThrow(/not default-deny/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("quarantines disk-only brokers on an empty API without posting an import", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
     const executionDir = join(worktree, ".opencode", "agents", "execution");
-    const researchDir = join(worktree, ".opencode", "agents", "research");
     mkdirSync(executionDir, { recursive: true });
-    mkdirSync(researchDir, { recursive: true });
     const broker = "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Disk-only broker\n";
     writeFileSync(join(executionDir, "ingenium-llm-broker.md"), broker);
-    writeFileSync(join(researchDir, "ingenium-llm-broker.md"), broker);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
     const manifest: SyncManifest = {
@@ -313,7 +335,6 @@ describe("agent resource sync", () => {
     expect(fetchMock.mock.calls[0]![1]?.method).toBeUndefined();
     expect(result).toMatchObject({ pushed: 0, skipped: 1, removed: 1, errors: 0 });
     expect(existsSync(join(executionDir, "ingenium-llm-broker.md"))).toBe(false);
-    expect(existsSync(join(researchDir, "ingenium-llm-broker.md"))).toBe(false);
     expect(manifest.resources.agents["ingenium-llm-broker"]).toBeUndefined();
   });
 
@@ -338,12 +359,9 @@ describe("agent resource sync", () => {
   it("rejects an API-created arbitrary broker profile instead of trusting or writing it", async () => {
     worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
     const executionDir = join(worktree, ".opencode", "agents", "execution");
-    const researchDir = join(worktree, ".opencode", "agents", "research");
     mkdirSync(executionDir, { recursive: true });
-    mkdirSync(researchDir, { recursive: true });
     const weakenedProfile = "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Weak broker\n";
     writeFileSync(join(executionDir, "ingenium-llm-broker.md"), weakenedProfile);
-    writeFileSync(join(researchDir, "ingenium-llm-broker.md"), weakenedProfile);
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -378,7 +396,6 @@ describe("agent resource sync", () => {
     expect(result).toMatchObject({ pushed: 0, synced: 0, skipped: 1, errors: 1, removed: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(existsSync(join(executionDir, "ingenium-llm-broker.md"))).toBe(false);
-    expect(existsSync(join(researchDir, "ingenium-llm-broker.md"))).toBe(false);
     expect(manifest.resources.agents["ingenium-llm-broker"]).toBeUndefined();
   });
 
@@ -401,8 +418,9 @@ describe("agent resource sync", () => {
     expect(result).toMatchObject({ pushed: 1, conflicts: 0, errors: 0 });
     expect(manifest.resources.agents["initial-agent"]).toBe(hashContent(JSON.stringify({
       content: "# Local agent",
-      permissions: "{}",
-      metadata: "{}",
+      permissions: '{"*":"deny"}',
+      metadata: '{"hidden":false}',
+      enabled: true,
     })));
   });
 
@@ -636,6 +654,20 @@ describe("legacy skill tombstone cleanup", () => {
     expect(existsSync(stage)).toBe(false);
     expect(existsSync(join(quarantine, "stage-unknown-12345678-1234-4123-8123-123456789abc"))).toBe(true);
     expect(existsSync(join(skillsRoot, "development-conventions", "SKILL.md"))).toBe(true);
+  });
+
+  it.each(["engineering-workflow", "local-models"])("retains tombstones for retired historical target %s without blocking active cleanup", (target) => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-cleanup-"));
+    createCleanupFixture(worktree, [{ source: "legacy-active" }, { source: "legacy-retired", target }]);
+    const skillsRoot = join(worktree, ".opencode", "skills");
+    rmSync(join(skillsRoot, target), { recursive: true });
+
+    const result = cleanupLegacySkillTombstones(worktree);
+
+    expect(result.removed).toEqual([".opencode/skills/legacy-active"]);
+    expect(result.rejected).toEqual([{ path: ".opencode/skills/legacy-retired", reason: "invalid-target-skill" }]);
+    expect(existsSync(join(skillsRoot, "legacy-retired", "MIGRATED-TO.md"))).toBe(true);
+    expect(existsSync(join(skillsRoot, target))).toBe(false);
   });
 
   it("never accepts a canonical skill name as a cleanup source", () => {

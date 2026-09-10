@@ -10,6 +10,7 @@ import {
   type ChildMcpServerDefinitionInput,
 } from "../schema.js";
 import { getCatalogMap } from "./mcp-tool-catalog.js";
+import { isPlaywrightChildMcpPreset, playwrightChildMcpPreset } from "./child-mcp-presets.js";
 
 const DELETED_VAULT_POLICY = '{"mode":"deleted"}';
 
@@ -60,6 +61,7 @@ function invalid(): never {
 function parseDefinitionInput(input: unknown): ChildMcpServerDefinitionInput {
   const parsed = ChildMcpServerDefinitionInputSchema.safeParse(input);
   if (!parsed.success) invalid();
+  if (parsed.data.name === "playwright" && !isPlaywrightChildMcpPreset(parsed.data)) invalid();
   return parsed.data;
 }
 
@@ -177,9 +179,9 @@ export function createChildMcpServer(projectId: string, input: unknown): ChildMc
     const now = new Date().toISOString();
     db.prepare(
       `INSERT INTO mcp_child_server_definitions
-       (id, project_id, name, executable, args, scope, enabled, discovery_status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
-    ).run(id, projectId, definitionInput.name, definitionInput.executable, JSON.stringify(definitionInput.args), definitionInput.scope, now, now);
+       (id, project_id, name, description, executable, args, scope, enabled, discovery_status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'pending', ?, ?)`,
+    ).run(id, projectId, definitionInput.name, definitionInput.description ?? null, definitionInput.executable, JSON.stringify(definitionInput.args), definitionInput.scope, now, now);
 
     const insertReference = db.prepare(
       "INSERT INTO mcp_child_server_vault_refs (server_id, env_key, vault_item_id) VALUES (?, ?, ?)",
@@ -192,6 +194,10 @@ export function createChildMcpServer(projectId: string, input: unknown): ChildMc
   });
   checkpointAfterWrite();
   return toView(inserted);
+}
+
+export function createPlaywrightChildMcpServer(projectId: string, description?: string): ChildMcpServerView {
+  return createChildMcpServer(projectId, { ...playwrightChildMcpPreset(), description });
 }
 
 /** List the request project's definitions plus enabled-or-disabled global definitions it inherits. */

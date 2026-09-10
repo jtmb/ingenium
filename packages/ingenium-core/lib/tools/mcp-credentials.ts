@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
-import { hashSecurityToken } from "./authentication.js";
+import { decryptAuthSecret, encryptAuthSecret, hashSecurityToken } from "./authentication.js";
 
 export type McpCredentialKind = "service" | "runtime" | "repository-sync";
 export type McpCredentialAudience = "mcp" | "runtime" | "repository-sync";
@@ -65,7 +65,7 @@ export interface CoordinationLeaseCredentials {
 
 export const COORDINATION_LEASE_CREDENTIAL_TTL_MS = 15 * 60_000;
 export const COORDINATION_LEASE_SCOPES = [
-  "coordination:read", "coordination:write", "projects:read", "repository:sync",
+  "coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync",
 ] as const;
 export const REPOSITORY_SYNC_SCOPES = ["projects:read", "repository:sync"] as const;
 
@@ -176,16 +176,45 @@ function newCredentialToken(): { id: string; tokenPrefix: string; token: string 
   return { id, tokenPrefix, token: `${tokenPrefix}_${randomBytes(32).toString("base64url")}` };
 }
 
-export function createMcpCredential(input: CreateMcpCredentialInput): McpCredential & { token: string } {
+export function createMcpCredential(input: CreateMcpCredentialInput, idempotencyKey?: string): McpCredential & { token: string } {
   const { scopes, grants } = validateInput(input);
   const { id, tokenPrefix, token } = newCredentialToken();
+  // The first issuance owns expiry; retries must not extend credential lifetime.
+  const requestHash = createHash("sha256").update(JSON.stringify([
+    input.kind, input.audience, input.name, scopes, input.organizationId, input.projectId,
+    grants, input.workspaceId, input.launcherWorktree, input.createdByUserId,
+  ])).digest("hex");
+  const encryptedToken = idempotencyKey ? encryptAuthSecret(token) : undefined;
   const created = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    if (idempotencyKey) {
+      const receipt = db.prepare("SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE idempotency_key = ?")
+        .get(idempotencyKey) as { request_hash: string; credential_id: string; encrypted_token: string } | undefined;
+      if (receipt) {
+        const row = db.prepare(`${SELECT_CREDENTIAL}
+          JOIN service_principals principal ON principal.id = mcp_credentials.service_principal_id
+          WHERE mcp_credentials.id = ? AND mcp_credentials.revoked_at IS NULL AND mcp_credentials.expires_at > ?
+            AND principal.status = 'active' AND principal.security_epoch = mcp_credentials.security_epoch
+            AND authorized_workspaces.status = 'authorized'
+            AND authorized_workspaces.security_epoch = mcp_credentials.security_epoch`)
+          .get(receipt.credential_id, new Date().toISOString()) as CredentialRow | undefined;
+        if (receipt.request_hash !== requestHash || !row
+          || (input.servicePrincipalId && input.servicePrincipalId !== row.service_principal_id)) {
+          throw new Error("Credential replay is unavailable");
+        }
+        return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
+      }
+    }
     const servicePrincipalId = input.servicePrincipalId ?? insertServicePrincipal(db, input);
-    return insertMcpCredential(db, { ...input, servicePrincipalId }, scopes, grants, id, tokenPrefix, token);
+    const credential = insertMcpCredential(db, { ...input, servicePrincipalId }, scopes, grants, id, tokenPrefix, token);
+    if (idempotencyKey) {
+      db.prepare("INSERT INTO mcp_credential_receipts (idempotency_key, request_hash, credential_id, encrypted_token) VALUES (?, ?, ?, ?)")
+        .run(idempotencyKey, requestHash, id, encryptedToken!);
+    }
+    return { credential, encryptedToken: undefined };
   });
   checkpointAfterWrite();
-  return { ...created, token };
+  return { ...created.credential, token: created.encryptedToken ? decryptAuthSecret(created.encryptedToken) : token };
 }
 
 export function issueCoordinationLeaseCredentials(runtimeId: string, now = new Date()): CoordinationLeaseCredentials {

@@ -67,7 +67,7 @@ chmod 0700 "/home/appuser/.config/opencode/runtime"
 
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/agents
 
-config_file="/home/appuser/.config/opencode/opencode.jsonc"
+config_file="/home/appuser/.config/opencode/runtime/opencode.jsonc"
 cat > "$config_file" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",

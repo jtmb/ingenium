@@ -22,6 +22,7 @@ import { createProject } from "../../../packages/ingenium-core/lib/tools/project
 import * as authentication from "../../../packages/ingenium-core/lib/tools/authentication.js";
 import * as contextConversations from "../../../packages/ingenium-core/lib/tools/context-conversations.js";
 import * as coordination from "../../../packages/ingenium-core/lib/tools/coordination.js";
+import * as explicitMemory from "../../../packages/ingenium-core/lib/tools/explicit-memory.js";
 import * as identity from "../../../packages/ingenium-core/lib/tools/identity.js";
 import * as invitations from "../../../packages/ingenium-core/lib/tools/invitations.js";
 import * as mcpCredentials from "../../../packages/ingenium-core/lib/tools/mcp-credentials.js";
@@ -32,6 +33,7 @@ import * as tasks from "../../../packages/ingenium-core/lib/tools/tasks.js";
 import {
   authorizeRestore,
   authorizeRestoreExecution,
+  captureRestoreExecutionCapsule,
   confirmRestore,
   createSnapshot,
   executeRestore,
@@ -173,6 +175,7 @@ async function snapshotLegacyRestoreDatabase(sourcePath: string): Promise<{ back
 function createLegacyRestoreDatabase(path: string, throughMigration: number): void {
   const database = new Database(path);
   try {
+    database.function("sha256", { deterministic: true }, (value: string) => createHash("sha256").update(value).digest("hex"));
     for (const file of readdirSync(migrationsDirectory)
       .filter((name) => /^\d{3}_.*\.sql$/.test(name)
         && !name.endsWith("_upgrade.sql")
@@ -186,6 +189,95 @@ function createLegacyRestoreDatabase(path: string, throughMigration: number): vo
         ).run(globalProjectId, timestamp, timestamp);
       }
     }
+  } finally {
+    database.close();
+  }
+}
+
+function createForgottenMemory(memoryId: string): {
+  fact: string;
+  ownerId: string;
+  workspaceId: string;
+} {
+  const database = getDb(coreDbPath);
+  const organizationId = (database.prepare(
+    "SELECT organization_id FROM projects WHERE id = ?",
+  ).get(globalProjectId) as { organization_id: string }).organization_id;
+  const owner = identity.createUser(`restore-forget-${randomUUID()}@example.test`, "Restore Forget Owner");
+  organizations.addOrganizationMember(organizationId, owner.id, "admin");
+  const workspaceId = `restore-forget-${randomUUID()}`;
+  runtimes.authorizeWorkspace({
+    id: workspaceId,
+    organizationId,
+    projectId: globalProjectId,
+    ownerUserId: owner.id,
+    storagePath: join(fixtureRoot, workspaceId),
+  });
+  const scope = explicitMemory.resolveExplicitMemoryScope({
+    projectId: globalProjectId,
+    workspaceId,
+    principal: { type: "user", userId: owner.id },
+  });
+  const fact = `Forgotten restore fact ${randomUUID()}`;
+  const saved = explicitMemory.saveExplicitMemory(scope, {
+    operationId: `save-${randomUUID()}`,
+    memoryId,
+    content: fact,
+  });
+  explicitMemory.forgetExplicitMemory(scope, memoryId, {
+    operationId: `forget-${randomUUID()}`,
+    expectedVersion: saved.memory!.version,
+  });
+  return { fact, ownerId: owner.id, workspaceId };
+}
+
+function seedConflictingSourceMemory(path: string, memoryId: string): void {
+  const database = new Database(path);
+  try {
+    database.pragma("foreign_keys = ON");
+    const organizationId = (database.prepare(
+      "SELECT organization_id FROM projects WHERE id = ?",
+    ).get(globalProjectId) as { organization_id: string }).organization_id;
+    const ownerId = randomUUID();
+    const workspaceId = `conflicting-${randomUUID()}`;
+    const timestamp = "2026-09-05T00:00:00.000Z";
+    database.prepare(
+      "INSERT INTO users (id, email_normalized, display_name, created_at, updated_at) VALUES (?, ?, 'Conflicting Owner', ?, ?)",
+    ).run(ownerId, `conflict-${randomUUID()}@example.test`, timestamp, timestamp);
+    database.prepare(
+      "INSERT INTO organization_memberships (organization_id, user_id, role, created_at, updated_at) VALUES (?, ?, 'admin', ?, ?)",
+    ).run(organizationId, ownerId, timestamp, timestamp);
+    database.prepare(
+      `INSERT INTO authorized_workspaces
+       (id, organization_id, project_id, owner_user_id, storage_path, storage_mapping_hash, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      workspaceId,
+      organizationId,
+      globalProjectId,
+      ownerId,
+      `/conflicting-restore/${workspaceId}`,
+      createHash("sha256").update(workspaceId).digest("hex"),
+      timestamp,
+      timestamp,
+    );
+    const content = "Conflicting source memory must never survive the failed merge.";
+    database.prepare(
+      `INSERT INTO explicit_memories
+       (id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+        content, content_hash, tags, version, state, origin_type, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'private', ?, ?, '[]', 1, 'active', 'explicit', ?, ?)`,
+    ).run(
+      memoryId,
+      organizationId,
+      globalProjectId,
+      workspaceId,
+      ownerId,
+      content,
+      createHash("sha256").update(content).digest("hex"),
+      timestamp,
+      timestamp,
+    );
   } finally {
     database.close();
   }
@@ -734,7 +826,105 @@ describe("RESTORE-101 disposable maintenance fixture", () => {
     })).toBe(legacy.preserved);
   });
 
+  it("keeps a parentless forget suppressed when restoring a migration-102 snapshot", async () => {
+    const sourcePath = join(fixtureRoot, "migration-102-before-memory.db");
+    createLegacyRestoreDatabase(sourcePath, 102);
+    const source = await snapshotLegacyRestoreDatabase(sourcePath);
+    const memoryId = randomUUID();
+    const forgotten = createForgottenMemory(memoryId);
+    const legacyRunId = queueRestore(source.backupId, "migration-102-memory");
+    processActions.length = 0;
+
+    const result = await runFixture({
+      INGENIUM_RESTORE_FIXTURE_ROOT: fixtureRoot,
+      INGENIUM_API_PORT: String(healthPort),
+      INGENIUM_API_TOKEN_FILE: join(fixtureRoot, "api-token"),
+      INGENIUM_TRUSTED_ARTIFACT_UID: String(process.getuid?.() ?? 0),
+      INGENIUM_TRUSTED_ARTIFACT_GID: String(process.getgid?.() ?? 0),
+      RESTORE_MAINTENANCE_NODE: process.execPath,
+      RESTORE_MAINTENANCE_SCRIPT: maintenanceScript,
+    });
+
+    expect(result, result.stderr).toMatchObject({ code: 0, stderr: "" });
+    expect(getRestoreExecutionRun(globalProjectId, legacyRunId)).toMatchObject({ state: "completed" });
+    const restored = getDb(coreDbPath);
+    expect(restored.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'explicit_memory_restore_suppressions'",
+    ).get()).toEqual({ count: 1 });
+    expect(restored.prepare(
+      `SELECT memory_id, project_id, workspace_id, owner_user_id, version
+       FROM explicit_memory_restore_suppressions WHERE memory_id = ?`,
+    ).get(memoryId)).toMatchObject({
+      memory_id: memoryId,
+      project_id: globalProjectId,
+      workspace_id: forgotten.workspaceId,
+      owner_user_id: forgotten.ownerId,
+      version: 2,
+    });
+    expect(restored.prepare("SELECT 1 FROM users WHERE id = ?").get(forgotten.ownerId)).toBeUndefined();
+    expect(restored.prepare("SELECT 1 FROM authorized_workspaces WHERE id = ?").get(forgotten.workspaceId)).toBeUndefined();
+    expect(restored.prepare("SELECT 1 FROM explicit_memories WHERE id = ?").get(memoryId)).toBeUndefined();
+    expect(JSON.stringify(restored.prepare(
+      "SELECT * FROM explicit_memory_restore_suppressions WHERE memory_id = ?",
+    ).get(memoryId))).not.toContain(forgotten.fact);
+    const recaptured = captureRestoreExecutionCapsule(globalProjectId, legacyRunId);
+    expect(recaptured.explicitMemoryForgets).toMatchObject({ count: 1 });
+    expect(recaptured.explicitMemoryForgets.entries[0]?.memory.id).toBe(memoryId);
+    expect(JSON.stringify(recaptured.explicitMemoryForgets)).not.toContain(forgotten.fact);
+    expect(restored.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  it("rolls back and leaves users stopped when a forget merge conflicts", async () => {
+    const memoryId = randomUUID();
+    const sourcePath = join(fixtureRoot, "migration-114-conflicting-memory.db");
+    createLegacyRestoreDatabase(sourcePath, 114);
+    seedConflictingSourceMemory(sourcePath, memoryId);
+    const source = await snapshotLegacyRestoreDatabase(sourcePath);
+    const forgotten = createForgottenMemory(memoryId);
+    const conflictRunId = queueRestore(source.backupId, "memory-merge-conflict");
+    processActions.length = 0;
+
+    try {
+      const result = await runFixture({
+        INGENIUM_RESTORE_FIXTURE_ROOT: fixtureRoot,
+        INGENIUM_API_PORT: String(healthPort),
+        INGENIUM_API_TOKEN_FILE: join(fixtureRoot, "api-token"),
+        INGENIUM_TRUSTED_ARTIFACT_UID: String(process.getuid?.() ?? 0),
+        INGENIUM_TRUSTED_ARTIFACT_GID: String(process.getgid?.() ?? 0),
+        RESTORE_MAINTENANCE_NODE: process.execPath,
+        RESTORE_MAINTENANCE_SCRIPT: maintenanceScript,
+      });
+
+      expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining("VERIFY_FAILED") });
+      expect(getRestoreExecutionRun(globalProjectId, conflictRunId)).toMatchObject({
+        state: "rolled_back",
+        errorCode: "VERIFY_FAILED",
+      });
+      expect(existsSync(join(fixtureRoot, "maintenance", "journal.json"))).toBe(false);
+      expect(existsSync(join(fixtureRoot, "maintenance", "lock"))).toBe(false);
+      const archive = join(fixtureRoot, "maintenance", "archive");
+      const journal = readdirSync(archive).find((name) => name.startsWith(`${conflictRunId}.`));
+      expect(journal).toBeDefined();
+      expect(JSON.parse(readFileSync(join(archive, journal!), "utf8"))).toMatchObject({
+        runId: conflictRunId,
+        phase: "rolled_back",
+      });
+      expect(processActions.filter((action) => action.startsWith("start:"))).toEqual([]);
+      expect([...processStates.values()]).toEqual(["STOPPED", "STOPPED", "STOPPED", "STOPPED"]);
+      const restoredLive = getDb(coreDbPath);
+      expect(restoredLive.prepare(
+        "SELECT state, content FROM explicit_memories WHERE id = ?",
+      ).get(memoryId)).toEqual({ state: "forgotten", content: "" });
+      expect(JSON.stringify(restoredLive.prepare(
+        "SELECT * FROM explicit_memory_tombstones WHERE memory_id = ?",
+      ).get(memoryId))).not.toContain(forgotten.fact);
+    } finally {
+      for (const name of ["ttyd-opencode", "vscode", "opencode-web", "ingenium-api"]) processStates.set(name, "RUNNING");
+    }
+  });
+
   it("rejects an ambiguous migration-093 credential group during maintenance preflight", () => {
+    const liveUser = identity.createUser(`restore-preflight-${randomUUID()}@example.test`, "Preflight User");
     const sourcePath = join(fixtureRoot, "partial-migration-094-source.db");
     createLegacyRestoreDatabase(sourcePath, 93);
     const partial = new Database(sourcePath);
@@ -752,7 +942,7 @@ describe("RESTORE-101 disposable maintenance fixture", () => {
     expect(processActions).toEqual([]);
     expect(existsSync(join(fixtureRoot, "maintenance", "journal.json"))).toBe(false);
     expect(existsSync(join(fixtureRoot, "maintenance", "lock"))).toBe(false);
-    expect(getDb(coreDbPath).prepare("SELECT id FROM users WHERE id = ?").get(securityFixture.userId)).toBeDefined();
+    expect(getDb(coreDbPath).prepare("SELECT id FROM users WHERE id = ?").get(liveUser.id)).toEqual({ id: liveUser.id });
   });
 
   it("restricts the non-root test executor to its disposable fixture root", () => {
@@ -772,7 +962,8 @@ describe("RESTORE-101 disposable maintenance fixture", () => {
   });
 
   it("rolls the database pair back when the atomic invalidation audit fails", async () => {
-    const liveSession = authentication.createSession(securityFixture.userId);
+    const liveUser = identity.createUser(`restore-audit-${randomUUID()}@example.test`, "Audit User");
+    const liveSession = authentication.createSession(liveUser.id);
     getDb(coreDbPath).exec(`CREATE TRIGGER restore_test_reject_invalidation_audit
       BEFORE INSERT ON security_audit_events
       WHEN NEW.action = 'restore.tokens_invalidated'
@@ -792,7 +983,9 @@ describe("RESTORE-101 disposable maintenance fixture", () => {
     });
 
     expect(result).toMatchObject({ code: 1, stderr: expect.stringContaining("VERIFY_FAILED") });
-    expect(existsSync(join(fixtureRoot, "maintenance", "journal.json"))).toBe(true);
+    expect(getRestoreExecutionRun(globalProjectId, faultRunId)).toMatchObject({ state: "rolled_back", errorCode: "VERIFY_FAILED" });
+    expect(existsSync(join(fixtureRoot, "maintenance", "journal.json"))).toBe(false);
+    expect(existsSync(join(fixtureRoot, "maintenance", "lock"))).toBe(false);
     const recovery = await runFixture({
       INGENIUM_RESTORE_FIXTURE_ROOT: fixtureRoot,
       RESTORE_FIXTURE_MODE: "recover",

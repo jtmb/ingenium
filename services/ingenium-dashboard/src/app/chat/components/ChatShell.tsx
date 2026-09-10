@@ -5,7 +5,7 @@ import Link from "next/link";
 import ChatSessionSidebar from "./ChatSessionSidebar";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
-import ChatInput, { type Attachment } from "./ChatInput";
+import ChatInput, { type Attachment, type SendOptions } from "./ChatInput";
 import ActivityDrawer from "./ActivityDrawer";
 import EdgeDrawer from "../../components/EdgeDrawer";
 import type { ActivitySelection } from "./chat-activity";
@@ -17,7 +17,7 @@ import {
 } from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
-import { api, ApiError, type ChatConfigResponse, type TaskCaptureResult } from "../../../lib/api";
+import { api, ApiError, type ChatConfigResponse, type ExplicitMemoryReceipt, type TaskCaptureResult } from "../../../lib/api";
 import { useProject } from "../../../lib/ProjectContext";
 import { useOpenCodeClient, useRuntime } from "../../../lib/RuntimeContext";
 import TaskCaptureModal from "../../tasks/components/TaskCaptureModal";
@@ -28,6 +28,26 @@ import {
   combineSystemInstructions,
   unrequestedGrounding,
 } from "../../../lib/chat-grounding";
+import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
+import { useMemoryCapabilities } from "./use-memory-capabilities";
+
+type MemorySaveInput = {
+  operationId: string;
+  workspaceId: string;
+  content: string;
+  tags: string[];
+};
+
+type MemoryNotice = {
+  status: "saving" | "saved" | "failed";
+  message: string;
+} | {
+  status: "queued";
+  message: string;
+  checkedUnknown: boolean;
+  project: string;
+  input: MemorySaveInput;
+};
 
 /* ------------------------------------------------------------------ */
 /*  ChatShell — main layout orchestrator for the Chat mode            */
@@ -52,6 +72,8 @@ export default function ChatShell() {
   const mobileDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [contextSearchError, setContextSearchError] = useState<string | null>(null);
+  const [memoryNotice, setMemoryNotice] = useState<MemoryNotice | null>(null);
+  const [memoryStatusPending, setMemoryStatusPending] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -123,6 +145,13 @@ export default function ChatShell() {
   } = useOpenCodeSessions();
 
   const activeSession = sessions.find((session) => session.id === activeId);
+  const memoryProject = selectedProject;
+  const savedMemoryWorkspaceId = memoryWorkspaceId(
+    selectedProject,
+    runtime.workspace.confirmedProjectName,
+    runtime.workspace.confirmedWorkspaceId,
+  );
+  const memoryCapabilities = useMemoryCapabilities(memoryProject, savedMemoryWorkspaceId, mcpLastRefreshedAt);
   const chat = useOpenCodeChat(activeId, activeId ? {
     project: runtime.projectName ?? selectedProject,
     runtimeId: runtime.runtimeId,
@@ -143,7 +172,9 @@ export default function ChatShell() {
   // selected tool remain visible while a new session is loading.
   useEffect(() => {
     closeActivity();
-  }, [activeId, closeActivity]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMemoryNotice((current) => current?.status === "queued" ? current : null);
+  }, [activeId, closeActivity, memoryProject, savedMemoryWorkspaceId]);
 
   /** Reset dismissed error when error changes to something new. */
   const displayError =
@@ -488,7 +519,7 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, systemPrompt: string, options?: { useProjectContext?: boolean }): Promise<boolean> => {
+    async (text: string, systemPrompt: string, options?: SendOptions): Promise<boolean> => {
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
 
@@ -498,7 +529,22 @@ export default function ChatShell() {
         activeSession?.title === "New conversation";
 
       let grounding = unrequestedGrounding();
-      let system = combineSystemInstructions(systemPrompt);
+      const systemContexts: string[] = [];
+      if ((options?.useSavedMemory && !memoryCapabilities.canRead) || (options?.saveToMemory && !memoryCapabilities.canSave)) {
+        setMemoryNotice({ status: "failed", message: memoryCapabilities.reason ?? "Memory capability is unavailable." });
+        return false;
+      }
+      if (options?.useSavedMemory && savedMemoryWorkspaceId) {
+        try {
+          const result = await api.memory.list(memoryProject, savedMemoryWorkspaceId);
+          const memoryContext = buildExplicitMemoryContext(result.data, memoryProject, savedMemoryWorkspaceId);
+          if (result.data.items.length > 0 && !memoryContext) throw new Error("invalid saved-memory context");
+          if (memoryContext) systemContexts.push(memoryContext);
+        } catch {
+          setMemoryNotice({ status: "failed", message: "Saved memory is unavailable. Try sending again." });
+          return false;
+        }
+      }
       if (options?.useProjectContext) {
         try {
           const result = await api.context.rag.search(
@@ -508,12 +554,13 @@ export default function ChatShell() {
           );
           const context = buildProjectContext(selectedProject, result.data);
           grounding = context.grounding;
-          system = combineSystemInstructions(systemPrompt, context.systemContext);
+          if (context.systemContext) systemContexts.push(context.systemContext);
         } catch {
           setContextSearchError("Project context search is unavailable. Try sending again.");
           return false;
         }
       }
+      const system = combineSystemInstructions(systemPrompt, systemContexts.join("\n\n"));
 
       // Build parts array: text part + file parts from attachments
       const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }> = [
@@ -534,12 +581,39 @@ export default function ChatShell() {
           model: { providerID: providerId, modelID: modelId },
           agent: agentName,
           system,
+          tools: options?.automaticLearning === false
+            ? { auto_observe_now: false, synthesize_observations: false }
+            : undefined,
           grounding,
         });
         if (!accepted) return false;
       } catch {
         // send() handles its own error dispatch
         return false;
+      }
+
+      if (options?.saveToMemory && savedMemoryWorkspaceId) {
+        setMemoryNotice({ status: "saving", message: "Saving this message to memory…" });
+        try {
+          const input: MemorySaveInput = {
+            operationId: newExplicitMemoryOperationId(),
+            workspaceId: savedMemoryWorkspaceId,
+            content: text,
+            tags: ["chat"],
+          };
+          const result = await api.memory.save(memoryProject, input);
+          setMemoryNotice("status" in result.data
+            ? {
+              status: "queued",
+              message: `Memory save outcome is pending (${input.operationId}). Check its status before retrying.`,
+              checkedUnknown: false,
+              project: memoryProject,
+              input,
+            }
+            : { status: "saved", message: `Saved to memory as version ${result.data.receipt.version}. Receipt ${result.data.receipt.receiptId}.` });
+        } catch {
+          setMemoryNotice({ status: "failed", message: "This message was not saved to memory. Try again." });
+        }
       }
 
       // The prompt contract accepted this send; only now may local composer state change.
@@ -554,8 +628,50 @@ export default function ChatShell() {
 
       return true;
     },
-    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel, selectedProject],
+    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel,
+      memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities],
   );
+
+  const memorySavedNotice = useCallback((receipt: ExplicitMemoryReceipt): MemoryNotice => ({
+    status: "saved",
+    message: `Saved to memory as version ${receipt.version}. Receipt ${receipt.receiptId}.`,
+  }), []);
+
+  const handleMemoryStatus = useCallback(async () => {
+    if (memoryNotice?.status !== "queued" || memoryStatusPending) return;
+    const queued = memoryNotice;
+    setMemoryStatusPending(true);
+    try {
+      const result = await api.memory.operationStatus(queued.project, queued.input.workspaceId, queued.input.operationId);
+      setMemoryNotice(result.data.status === "committed"
+        ? memorySavedNotice(result.data.receipt)
+        : {
+          ...queued,
+          checkedUnknown: true,
+          message: `Memory save outcome is still unknown (${queued.input.operationId}). It has not been reported as committed.`,
+        });
+    } catch {
+      setMemoryNotice({ ...queued, message: `Unable to check memory save status. The original outcome remains unknown (${queued.input.operationId}).` });
+    } finally {
+      setMemoryStatusPending(false);
+    }
+  }, [memoryNotice, memorySavedNotice, memoryStatusPending]);
+
+  const handleMemoryReplay = useCallback(async () => {
+    if (memoryNotice?.status !== "queued" || !memoryNotice.checkedUnknown || memoryStatusPending) return;
+    const queued = memoryNotice;
+    setMemoryStatusPending(true);
+    try {
+      const result = await api.memory.save(queued.project, queued.input);
+      setMemoryNotice("status" in result.data
+        ? { ...queued, checkedUnknown: false, message: `Memory save outcome is pending (${queued.input.operationId}). Check its status before retrying.` }
+        : memorySavedNotice(result.data.receipt));
+    } catch {
+      setMemoryNotice({ ...queued, message: `The identical save could not be replayed. The original outcome remains unknown (${queued.input.operationId}).` });
+    } finally {
+      setMemoryStatusPending(false);
+    }
+  }, [memoryNotice, memorySavedNotice, memoryStatusPending]);
 
   const handleStop = useCallback(async () => {
     await chat.stop();
@@ -759,6 +875,27 @@ export default function ChatShell() {
               <path strokeLinecap="round" d="M8 5v3M8 10.5v.5" />
             </svg>
             <span>{contextSearchError}</span>
+          </div>
+        )}
+        {memoryNotice && (
+          <div
+            className={`flex shrink-0 flex-wrap items-center gap-2 px-4 py-2 text-sm ${memoryNotice.status === "failed" ? "text-[var(--color-error-text)]" : "text-[var(--color-text-secondary)]"}`}
+            role={memoryNotice.status === "failed" ? "alert" : "status"}
+            data-testid="chat-memory-notice"
+          >
+            <span className="min-w-0 flex-1">{memoryNotice.message}</span>
+            {memoryNotice.status === "queued" && (
+              <>
+                <button type="button" onClick={() => void handleMemoryStatus()} disabled={memoryStatusPending} className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50">
+                  {memoryStatusPending ? "Checking…" : "Check status"}
+                </button>
+                {memoryNotice.checkedUnknown && (
+                  <button type="button" onClick={() => void handleMemoryReplay()} disabled={memoryStatusPending} className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50">
+                    Retry identical save
+                  </button>
+                )}
+              </>
+            )}
           </div>
         )}
         {/* No-LLM-configured warning */}
@@ -1033,6 +1170,11 @@ export default function ChatShell() {
               onAttachmentsChange={setAttachments}
               hasSelectableModel={hasSelectableModel}
               projectContextProject={selectedProject}
+              memoryWorkspaceId={savedMemoryWorkspaceId}
+              memoryCanRead={memoryCapabilities.canRead}
+              memoryCanSave={memoryCapabilities.canSave}
+              memoryUnavailableReason={memoryCapabilities.reason}
+              memorySavePending={memoryNotice?.status === "queued"}
             />
           </>
         )}

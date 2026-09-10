@@ -71,6 +71,65 @@ afterEach(async () => {
 });
 
 describe("canonical child MCP server API", () => {
+  it.each([undefined, "", "Managed browser"])("round-trips preset description %j through create, list and refresh", async (description) => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-description-route-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    process.env.INGENIUM_HOME = join(directory, "home");
+    projects.createProject("mcp-description-project");
+    const baseUrl = await startRouter();
+    const query = "?project=mcp-description-project";
+    const created = await fetch(`${baseUrl}/mcp-servers/presets/playwright${query}`, {
+      method: "POST",
+      ...(description === undefined ? {} : {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description }),
+      }),
+    });
+    expect(created.status).toBe(201);
+    const expected = { name: "playwright", description: description ?? null };
+    expect(await created.json()).toMatchObject({ data: expected });
+    resetDbForTest();
+    const listing = await fetch(`${baseUrl}/mcp-servers${query}`);
+    expect(await listing.json()).toMatchObject({ data: [expected], total: 1 });
+    const refreshed = await fetch(`${baseUrl}/mcp-servers/playwright/refresh${query}`, { method: "POST" });
+    expect(refreshed.status).toBe(200);
+    expect(await refreshed.json()).toMatchObject({ data: { server: expected, restartRequired: false } });
+  });
+
+  it.each([null, 123, {}])("rejects invalid preset description %j without persisting", async (description) => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-description-route-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    process.env.INGENIUM_HOME = join(directory, "home");
+    projects.createProject("mcp-description-project");
+    const baseUrl = await startRouter();
+    const result = await fetch(`${baseUrl}/mcp-servers/presets/playwright?project=mcp-description-project`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ description }),
+    });
+    expect(result.status).toBe(422);
+    expect(await result.json()).toMatchObject({ error: { code: "INVALID_CHILD_MCP_SERVER" } });
+    const listing = await fetch(`${baseUrl}/mcp-servers?project=mcp-description-project`);
+    expect(await listing.json()).toEqual({ data: [], total: 0 });
+  });
+
+  it("rejects arbitrary Playwright definitions through generic POST without persisting them", async () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-servers-route-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    process.env.INGENIUM_HOME = join(directory, "home");
+    projects.createProject("mcp-route-playwright");
+    const baseUrl = await startRouter();
+    const response = await fetch(`${baseUrl}/mcp-servers?project=mcp-route-playwright`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "playwright", executable: "npx", args: ["@playwright/mcp"] }),
+    });
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_CHILD_MCP_SERVER", message: "Child MCP server definition is invalid." },
+    });
+    const listing = await fetch(`${baseUrl}/mcp-servers?project=mcp-route-playwright`);
+    expect(await listing.json()).toEqual({ data: [], total: 0 });
+  });
+
   it("stores only executable, arguments, and vault references while redacting invalid payload diagnostics", async () => {
     directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-servers-route-"));
     process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
@@ -84,6 +143,7 @@ describe("canonical child MCP server API", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: "calendar",
+        description: "Team calendar",
         executable: "npx",
         args: ["--yes", "@example/calendar"],
         environment: { CALENDAR_TOKEN: { vault_item_id: vaultItemId } },
@@ -93,6 +153,7 @@ describe("canonical child MCP server API", () => {
     expect(created.status).toBe(201);
     expect(createdBody.data).toMatchObject({
       name: "calendar",
+      description: "Team calendar",
       args: ["--yes", "@example/calendar"],
       environment: { CALENDAR_TOKEN: { vault_item_id: vaultItemId } },
     });
@@ -234,15 +295,15 @@ describe("canonical child MCP server API", () => {
 
     const categorized = await (await fetch(`${baseUrl}/mcp-tools?project=mcp-discovery-project&include_categories=true`)).json();
     const childCategory = categorized.data.find((category: { category: string }) => category.category === "Child MCP / calendar");
-    expect(childCategory.tools).toContainEqual({ tool_name: "ingenium_calendar_list_events", enabled: true });
+    expect(childCategory.tools).toContainEqual({ tool_name: "ingenium_calendar_list_events", enabled: false });
 
     const toggled = await fetch(`${baseUrl}/mcp-tools/ingenium_calendar_list_events?project=mcp-discovery-project`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: false }),
+      body: JSON.stringify({ enabled: true }),
     });
     expect(toggled.status).toBe(200);
-    await expect(toggled.json()).resolves.toMatchObject({ data: { tool_name: "ingenium_calendar_list_events", enabled: false } });
+    await expect(toggled.json()).resolves.toMatchObject({ data: { tool_name: "ingenium_calendar_list_events", enabled: true } });
 
     const unknownCategory = await fetch(`${baseUrl}/mcp-tools/category/Unknown%20Category?project=mcp-discovery-project`, {
       method: "PUT",

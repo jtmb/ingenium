@@ -203,6 +203,17 @@ childMcpRuntimeRouter.get("/", (req, res) => {
   res.json({ data: { definitions: runtime.data, unavailable: runtime.unavailable } });
 });
 
+mcpServersRouter.post("/presets/playwright", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const data = childMcpServers.createPlaywrightChildMcpServer(projectId, req.body?.description);
+    res.status(201).json({ data });
+  } catch (error) {
+    if (!sendChildMcpError(error, res)) throw error;
+  }
+});
+
 mcpServersRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

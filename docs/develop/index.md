@@ -20,3 +20,4 @@ Technical documentation for developers working with the Ingenium codebase.
 
 - [Architecture](../concepts/architecture.md) — System architecture and data flow
 - [Conventions](../concepts/conventions.md) — Naming, file organization, git practices
+- [CLI Session Context Audit](../reference/session-context-audit-2026-09-09.md) — Read-only export evidence and verification limits

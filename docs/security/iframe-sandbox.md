@@ -276,9 +276,11 @@ expects links to work when clicking them in an email).
 
 ## 5. Testing the No-Sandbox Configuration
 
-The sandbox attribute has been removed from all OpenCode iframes. This
-configuration is already deployed and verified. No future expansion of
-sandbox tokens is planned for OpenCode iframes.
+The sandbox attribute has been removed from all OpenCode iframes in the current
+source. The steps below are operator verification procedures; source/static
+inspection does not prove a deployed instance, browser behavior, or post-fix
+visual/session evidence. No future expansion of sandbox tokens is planned for
+OpenCode iframes.
 
 ### Step 1: Verify sandbox removal
 
@@ -381,17 +383,17 @@ page still works:
    allow-popups-to-escape-sandbox`, no `allow-scripts`). This should be
    reviewed for completeness.
 
-### ✅ Final runtime verification
+### Historical runtime verification record
 
-The deployed follow-up release verified the explicit workspace picker, positive
-Web/CLI/VS Code launch and activity flow, profile-aware compatibility/production
-aliases, and gateway CSP/frame-ancestor behavior. Runtime reconciler, audience
-cookie, and OpenCode query-mode defects were fixed and rechecked. Dedicated QA
-Vision found the CLI query-mode defect; after that fix its browser tools were
-unavailable twice, so no post-fix QA Vision run is claimed. The configured
-browser-agent fallback plus focused Playwright and deployment evidence covered
-desktop/mobile CLI selection and the positive iframe flow with no console,
-network, overflow, or CSP issues.
+A prior rollout record reported verification of the explicit workspace picker,
+positive Web/CLI/VS Code launch and activity flow, profile-aware
+compatibility/production aliases, and gateway CSP/frame-ancestor behavior. It
+also reported that runtime reconciler, audience-cookie, and OpenCode query-mode
+defects were fixed and rechecked. This documentation task performed no runtime
+or browser verification and does not claim deployment acceptance. The record
+notes that the dedicated visual QA pass found the CLI query-mode defect; after
+that fix its browser tools were unavailable twice, so no post-fix visual QA run
+is claimed.
 
 ### Testing Notes
 

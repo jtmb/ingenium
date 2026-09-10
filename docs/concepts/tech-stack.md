@@ -10,12 +10,12 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on private container port 4096 behind the authenticated host-loopback boundary on 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
 - **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search; see [Database Migrations Reference](../develop/database.md) for the migration inventory and maintenance procedures
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (283 built-in catalog tools across 30 baseline categories; 281 `ingenium_` catalog entries and 2 extension tools, with project-scoped child tools added dynamically)
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (291 built-in catalog tools across 31 baseline categories; 289 `ingenium_` catalog entries and 2 extension tools, with project-scoped child tools added dynamically)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context
 - **Container**: Docker multi-stage build (glibc-based `node:22-slim`), supervisord (10 process definitions, 9 active compatibility processes: API, API boundary, Dashboard, gateway, restore handoff, OpenCode internal auth proxy, OpenCode Web, ttyd-opencode, and private code-server; restore maintenance is on-demand)
-- **Packages**: `ingenium-core` (API-internal DB library), `ingenium-extension` (client-side OpenCode — MCP stdio transport, observer/resource-sync plugins, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
+- **Packages**: `ingenium-core` (API-internal DB library), `ingenium-extension` (client-side OpenCode — MCP stdio transport, observer/resource-sync/auto-observer/session-coordinator plugins, Ponytail adapter), `ingenium-email` (IMAP/SMTP client)
 
 External worktree resources follow the Git-authoritative path
 `Git → @ingenium/extension resource-sync → MCP stdio → authenticated API → DB`.
@@ -43,6 +43,11 @@ extension compatibility test verifies every manifest and lock entry.
 OpenCode **1.18.3+** introduced the root-relative asset/WebSocket behavior
 that requires dedicated root origins rather than a shared dashboard subpath;
 the current implementation is verified against 1.18.9.
+
+The installed CLI used for the 2026-09-09 session-context capture reported
+**1.18.30**. That is retrieval-tool evidence only and does not change the
+supported embedded/container runtime contract of 1.18.9; see the
+[CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
 
 Generated `dist/` directories and TypeScript `*.tsbuildinfo` files are build
 products and remain untracked. The core and server packages expose only their

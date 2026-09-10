@@ -33,12 +33,13 @@ cd ingenium
 
 ## Step 2 — Start the Services
 
-Create the required protected secret files before starting:
+Create the required protected secret files and start the detached compatibility
+profile:
 
 ```bash
 ./scripts/bootstrap-local-secrets.sh
 export IMAGE_REVISION="$(git rev-parse HEAD)"
-docker compose --profile compatibility up --build
+docker compose --profile compatibility -p ingenium up --build -d
 ```
 
 The deployed database is `/app/.ingenium/data` on the `ingenium-data` named
@@ -47,13 +48,7 @@ project name across invocations (for example, always use
 `docker compose --profile compatibility -p ingenium ...`) and never use `docker compose down -v` for a
 normal restart; otherwise Docker can select or create an empty volume.
 
-Seed the internal installation credential before starting the deployment:
-
-```bash
-./scripts/bootstrap-local-secrets.sh
-```
-
-This creates separate owner-only mode-`0600` installation, OpenCode-proxy, and
+The script creates separate owner-only mode-`0600` installation, OpenCode-proxy, and
 email-encryption files below mode-`0700` directories and writes only their paths
 to ignored `.env`. In the container, the entrypoint validates and atomically
 copies each read-only mount into protected `/run` storage. After browser

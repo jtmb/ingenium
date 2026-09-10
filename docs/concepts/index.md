@@ -25,5 +25,6 @@ Architecture and conceptual documentation for the Ingenium system.
 ## Additional References
 
 - [Reference Documentation](../reference/index.md) — Detailed technical references (database, environment variables, API)
+- [CLI Session Context Audit](../reference/session-context-audit-2026-09-09.md) — Verified installed-CLI export evidence and its limits
 - [Operations Guides](../operations/index.md) — Deployment and maintenance procedures
 - [Security](../security/index.md) — Security documentation

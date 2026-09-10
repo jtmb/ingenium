@@ -11,9 +11,12 @@ configure or invoke Ponytail MCP.
   signature on 2026-07-30.
 - License: [MIT](./LICENSE), copied from upstream.
 
-The files below are byte-exact copies from their immutable upstream raw URLs.
-`upstream blob` is Git's upstream blob SHA-1; `SHA-256` is the exact local file
-content hash. `package.json` is the only local shim: it scopes the vendored
+The files below retain their immutable upstream sources, except for the two-line
+broker-prompt exclusion in `.opencode/plugins/ponytail.mjs`. The focused checkout
+test removes only that exact guard before comparing its upstream hash and tests
+that the canonical broker prompt is unchanged by the transform.
+`upstream blob` is Git's upstream blob SHA-1; `SHA-256` is the upstream file
+content hash. `package.json` is a local shim: it scopes the vendored
 CommonJS hooks below this repository's ESM extension package without placing a
 package manifest beside the configured plugin entrypoint.
 

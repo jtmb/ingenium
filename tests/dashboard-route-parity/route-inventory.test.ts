@@ -35,6 +35,29 @@ describe("dashboard route inventory", () => {
       "/vscode",
     ]);
     expect(inventory.compatibilityRoutes).toEqual(["/settings"]);
+    expect(inventory.settingsDeepLinks.map(({ id }) => id)).toEqual([
+      "general",
+      "account",
+      "security",
+      "sessions",
+      "api-tokens",
+      "organizations",
+      "projects",
+      "skills",
+      "tasks",
+      "jobs",
+      "plugins",
+      "mail",
+      "agents",
+      "mcp-servers",
+      "config",
+      "observations",
+      "personality",
+      "providers",
+      "cloudflare",
+      "logs",
+    ]);
+    expect(inventory.supportedSettingsTabs).toHaveLength(20);
     expect(buildPageSpecificQueryVariants({ docsSpaceId: "0", docsPageId: "0", mailAccount: "none" })
       .filter((variant) => variant.name.startsWith("standalone"))
       .map((variant) => variant.path)).toEqual([

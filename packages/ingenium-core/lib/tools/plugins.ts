@@ -28,7 +28,7 @@ function validatePluginPath(filePath: string, projectId?: string): string {
 
 /**
  * 🔴 Convention Requirement: Every plugin lifecycle operation MUST sync opencode.json's
- * `plugin` array (see AGENTS.md HARD RULE #16). This function appends the plugin path to
+ * `plugin` array (see docs/concepts/conventions.md). This function appends the plugin path to
  * the array on disk.
  *
  * The path format differs for global vs project-level configs:

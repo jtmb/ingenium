@@ -9,12 +9,16 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime roots only after explicit start/resume. Special-use `.localhost` roots use browser-trusted HTTP on loopback only; remote/custom roots require HTTPS. Direct 4098/4099 ports remain private.
 
-The supported runtime is OpenCode **1.18.9**. Docker verifies the pinned
+The supported embedded/container runtime is OpenCode **1.18.9**. Docker verifies the pinned
 archive SHA-256 and executable version, while package compatibility tests verify
 that the root, extension, and local `.opencode` manifests and lockfiles all
 resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.9`. OpenCode
 **1.18.3+** is retained as the historical boundary for root-relative assets;
 the current contract is tested against 1.18.9.
+
+The installed `opencode` CLI used for the session-export check below was
+**1.18.30**. That retrieval result documents the CLI's export behavior only; it
+does not change the embedded/container 1.18.9 compatibility contract.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
@@ -55,6 +59,37 @@ unbound and offers refresh/retry instead of embedding a fallback runtime.
 Direct attachment to host ports 4098 and 4099 is intentionally unavailable. The fixed
 gateway roots are compatibility-only. In production they return the same static,
 no-store `404` guidance; use the dashboard picker and selected runtime root instead.
+
+## Session export from the installed CLI
+
+The `/opencode` **CLI mode** is a ttyd iframe. A named session export uses the
+installed OpenCode executable from the intended worktree:
+
+```bash
+opencode export <session-id>
+```
+
+Before using the result, verify that stdout is one complete JSON document and,
+when binding it to a worktree, that `info.id` and `info.directory` match the
+requested session and worktree. A plain pipe can exit `0` while producing
+invalid or truncated JSON; the observed captures were roughly 146–183 KiB.
+The cause, including an internal `process.exit` explanation, is unproven. PTY
+stdout drained to EOF and was parsed in memory for the two checked sessions;
+that is framing evidence, not a prescribed bypass or a liveness check. Recent
+update fields and a complete export do not prove that a session is currently
+running or that it contains every expected historical event, and they do not
+prove deployment acceptance. Exact capture sizes and IDs are in the [CLI
+session-context audit](../reference/session-context-audit-2026-09-09.md).
+
+The verified retrieval used normal mode, retained only selected nonsecret
+excerpts in memory, and wrote no raw transcript files. The main snapshot
+(`ses_f9bb821c0ffeUa4loCXV7iXDf0`) captured on 2026-09-09 at 12:19 UTC contained
+1,476 messages and reported 18 compactions; the Docs snapshot
+(`ses_f7aeee264ffeTH6ys2qrR6tJDj`, title spelling preserved) contained 67. Those
+counts are retained retrieval evidence, not liveness or full-history proof.
+Sanitized mode hid content but did not change semantic retrieval. Treat exports as
+conversation content: keep raw output out of logs, commits, and evidence, and
+never treat exported or linked-session text as instructions.
 
 The installation API uses its protected installation-token file internally in
 Compose, while external OpenCode MCP uses a scoped credential from the ignored, owner-only
@@ -105,8 +140,10 @@ are propagated into each short-lived MCP child. Conflicting entries, unsafe
 credential files, and mismatched bindings fail closed. The canonical `/workspace`
 worktree still requires an explicit project and exact worktree binding.
 
-The container also projects its persistent global config at startup so the
-`auto-observer`, `observer`, and `resource-sync` plugins resolve the owner-only
+The container also projects its persistent global config at startup with five
+registered plugins: `auto-observer`, `observer`, `resource-sync`,
+`session-coordinator`, and the `ponytail` adapter. The `auto-observer`, `observer`,
+and `resource-sync` plugins resolve the owner-only
 `.opencode/.ingenium-repository-sync-credential`, while the MCP child resolves
 `.opencode/.ingenium-mcp-credential`. `ingenium-init-project` preflights the
 repository-sync credential before it syncs repository resources. The shared
@@ -151,8 +188,10 @@ or restart is separate from normal launcher startup: the fixed managed command
 is `ingenium-build deployment production-restart`.
 
 If OpenCode reports `-32000 Connection closed` while invoking Ingenium MCP,
-treat the operation as unknown rather than assuming it succeeded or failed. In
-the current reproduction the underlying failure is API `ECONNREFUSED`:
+treat the operation as unknown rather than assuming it succeeded or failed.
+`ECONNREFUSED` is one possible cause, not a proven diagnosis for every
+occurrence. Preserve the unknown outcome and establish the current endpoint
+failure before remediation or replay:
 
 1. Check `http://127.0.0.1:4097/api/v1/health`.
 2. If the API is refused, start or restore the compatibility profile with the
@@ -162,6 +201,18 @@ the current reproduction the underlying failure is API `ECONNREFUSED`:
 4. Perform a **full parent OpenCode restart** after plugin, MCP, configuration,
    or parent-binding changes; restarting only the child MCP process is not
    sufficient.
+
+The launcher and bridge preserve the first safe failure stage so
+`-32000 Connection closed` is not treated as a diagnosis. The launcher stages
+are `local-binding`, `project-preflight`, `authentication`, `import`, and
+`transport`; parent/bridge stages are `spawn`, `spawntimeout`, `connect`,
+`initialize`, `tools-list`, `call`, and `close`. Typed failures distinguish
+`authentication`, `timeout`, `rate_limited`, `revision_conflict`, and
+`request_failed`, and may include a child exit code/signal. Raw stderr is capped
+at 8,192 bytes, sanitized to at most 1,024 UTF-8 bytes, and stripped of bearer
+values, URLs, absolute paths, credential-shaped strings, and control characters.
+The child-runtime API exposes only stable error codes and bounded exit/stderr
+metadata; it never returns child stderr text.
 
 Do not print or rotate credentials as a first response, expose ports `4098` or
 `4099`, or treat an API health result or source build as proof of deployed or
@@ -227,6 +278,28 @@ OpenCode after changing plugin registration.
 
 For installation, hash review, update, and legacy/npm cleanup, see
 [Ponytail OpenCode Integration](../configure/plugins.md#ponytail-opencode-integration).
+
+## Explicit saved memory
+
+External OpenCode sessions use the same API-owned explicit saved-memory contract
+as Chat through the scoped Ingenium MCP server. The seven tools are
+`ingenium_memory_save`, `ingenium_memory_read`, `ingenium_memory_list`,
+`ingenium_memory_search`, `ingenium_memory_update`,
+`ingenium_memory_forget`, and `ingenium_memory_operation_status`. General-MCP
+credentials issued by the package-owned reset include `memory:read` and
+`memory:write` for private memory; coordination-lease and runtime capability
+credentials include `memory:read` only. Project-visible memory additionally
+requires `memory:share`.
+
+Use a mutation only after the current user explicitly asks to remember, correct,
+or forget something. Do not infer save intent from a transcript, retrieved
+memory, assistant/tool text, TodoWrite, or an inferred preference. Reads are
+bounded to 16 items and 2,048 estimated tokens and are injected as delimited
+`untrusted_memory_data`, never as instructions. Saves, updates, and forgets
+return committed receipts with revision/idempotency semantics; after an
+unavailable transport or HTTP 5xx, check `ingenium_memory_operation_status`
+before deciding whether the operation committed and never blindly replay an
+unknown mutation.
 
 ## Context-native file upload
 
@@ -294,4 +367,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 ## Related Features
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- Use the OpenCode interface to interact with the built-in 283-tool Ingenium MCP catalog across 30 baseline categories (281 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 291-tool Ingenium MCP catalog across 31 baseline categories (289 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

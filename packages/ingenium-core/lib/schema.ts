@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Zod schemas for the Ingenium domain model.
  *
- * NOTE: Zod schemas are NOT the primary runtime enforcement gate (see AGENTS.md rule #13).
+ * NOTE: Zod schemas are NOT the primary runtime enforcement gate (see docs/develop/database.md).
  * SQL CHECK constraints in the migration files serve as the actual data integrity layer.
  * These schemas provide TypeScript type inference and API-layer validation.
  *
@@ -1042,6 +1042,7 @@ const ChildMcpInputSchema = z.unknown().superRefine((value, context) => {
 
 export const ChildMcpServerDefinitionInputSchema = z.object({
   name: ChildMcpServerNameSchema,
+  description: z.string().optional(),
   executable: ChildMcpExecutableSchema,
   args: z.array(ChildMcpArgumentSchema).max(32).default([]),
   environment: z.record(ChildMcpEnvironmentKeySchema, ChildMcpVaultReferenceSchema)
@@ -1089,6 +1090,7 @@ export const ChildMcpServerDefinitionSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string().uuid(),
   name: ChildMcpServerNameSchema,
+  description: z.string().nullable().optional(),
   executable: z.string(),
   args: z.string(),
   scope: z.enum(["project", "global"]),

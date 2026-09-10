@@ -92,6 +92,10 @@ describe("dashboard deployment static contract", () => {
     expect(assets).not.toContain("add_header Cache-Control");
 
     expect(dynamic).toContain("limit_req zone=dashboard_request burst=60 nodelay;");
+    expect(dynamic).toContain("proxy_hide_header Cache-Control;");
+    expect(dynamic).toContain("proxy_hide_header Expires;");
+    expect(dynamic).toContain('add_header Cache-Control "no-store" always;');
+    expect(read("nginx/proxy-common.conf")).toContain("proxy_cache off;");
     expect(api).toContain("limit_req zone=dashboard_api_read burst=360 nodelay;");
     expect(api).toContain("limit_req zone=dashboard_api_strict burst=60 nodelay;");
     expect(api).not.toContain("limit_req zone=dashboard_request");

@@ -1,8 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { isDeepStrictEqual } from "node:util";
+import { dirname, resolve } from "node:path";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import {
   coordinationCredentialPurpose,
@@ -13,8 +12,6 @@ import {
 import { apiRequestHeaders, preflightApiAuthentication, type ApiAuthenticationBinding } from "./api-auth.js";
 import {
   callMcpTool,
-  MCP_LIVE_RELOAD_MAX_TIMEOUT_MS,
-  MCP_LIVE_RELOAD_MIN_TIMEOUT_MS,
   McpBridgeError,
   mcpToolData,
   openMcpToolClient,
@@ -24,16 +21,10 @@ import {
 import {
   CoordinationOutbox,
   type CoordinationOutboxFailure,
-  type CoordinationOutboxFootprint,
   type CoordinationOutboxKind,
-  type CoordinationOutboxMutationEvidence,
-  type CoordinationOutboxRemoteClaim,
 } from "./coordination-outbox.js";
-import {
-  decodeManagedBuildArgv,
-  decodeManagedRepositoryArgv,
-} from "./scripts/managed-command-wrapper.js";
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js";
+import { ExplicitMemoryContextReader } from "./explicit-memory.js";
 import {
   enrollManagedRecoveryParent,
   persistManagedRecoveryJournal,
@@ -46,30 +37,16 @@ import {
 
 const SESSION_TTL_MS = 60_000;
 const HEARTBEAT_MS = 20_000;
-const MAX_IDLE_MUTATION_QUARANTINES = 32;
 const OWNERSHIP_BYTES = 32;
 const SNAPSHOT_VERSION = 1;
 const MAX_CHANGED_PATHS = 32;
 const MAX_PATH_SEGMENT_BYTES = 255;
 const MAX_DIFF_COUNT = 1_000_000;
 const TRACE_ROOT = "/tmp/opencode/";
-const MAX_RESET_DESCRIPTION_BYTES = 256;
 const MAX_TRANSCRIPT_MESSAGES = 16;
 const MAX_TRANSCRIPT_BYTES = 1_572_864;
-const RECOVERY_OWNER_AGENT = "ingenium-recovery-engineer";
-const DEPLOYMENT_OWNER_AGENT = "ingenium-software-engineer-premium";
-const PRODUCTION_RESTART_OWNER_AGENTS = new Set([DEPLOYMENT_OWNER_AGENT, RECOVERY_OWNER_AGENT]);
-const BROWSER_AGENT = "browser-agent";
-const BROWSER_WRAPPER_PATH = ".opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh";
-const BROWSER_WRAPPER_DELIMITER = "EOF";
-const PRECLAIM_ERROR_CODES = new Set([
-  "BASELINE_MISMATCH",
-  "CLAIM_CONFLICT",
-  "EPOCH_QUARANTINED",
-  "RATE_LIMITED",
-  "REVISION_CONFLICT",
-]);
 export const MAX_COORDINATION_TRANSFORM_BYTES = 256 * 1024;
+export const AUTONOMY_REMINDER_V1 = "AUTONOMY_REMINDER_V1: For already-authorized orchestrator work, keep the full masterTodo/roadmap open until evidence-backed completion. A docs or subtask completion, or a user correction, does not replace or cancel the full rollout. While work remains, take the next supported dependency-ready action instead of ending with an apology or status update. Causally repair or recover internal failures; never invent permissions or prohibitions. Always honor user STOP/CANCELLED and real authorization and security boundaries, and never claim a check passed without running it. This applies only to the active orchestrator: reporting-only subagents must report to their caller rather than take over orchestration. It grants no tools, permissions, or capabilities, including to the hidden broker.";
 
 type TraceEvent =
   | "plugin_start"
@@ -77,14 +54,13 @@ type TraceEvent =
   | "hook_exit"
   | "register_success"
   | "consume"
-  | "claim_state"
   | "recoverable_failure"
   | "recover_success"
   | "credential_reset"
   | "drop_session";
-type TraceOperation = "session.created" | "session.idle" | "tool.execute.before" | "tool.execute.after" | "experimental.chat.system.transform";
+type TraceOperation = "session.created" | "session.idle" | "experimental.chat.system.transform";
 type DropReason = "close" | "close_missing" | "heartbeat_failure" | "snapshot_failure" | "consume_failure"
-  | "publish_failure" | "memory_failure" | "status_failure" | "claim_failure";
+  | "memory_failure" | "status_failure";
 
 interface TraceRecord {
   timestamp: string;
@@ -102,9 +78,7 @@ interface TraceRecord {
   cursorAfter?: null;
   reason?: DropReason;
   failure?: "authentication" | "timeout" | "rate_limited" | "revision_conflict" | "request_failed";
-  bridgeStage?: "connect" | "call" | "close";
-  errorCode?: string;
-  claimState?: "claimed" | "claim_failed" | "quarantined" | "quarantine_failed" | "completed" | "released";
+  bridgeStage?: McpBridgeError["stage"];
   resetState?: "accepted" | "rejected";
 }
 
@@ -170,6 +144,15 @@ function captureTransform(
     activity,
     operationalEntries,
   });
+}
+
+function appendAutonomyReminder(system: string[]): void {
+  if (system.includes(AUTONOMY_REMINDER_V1)) return;
+  try {
+    system.push(AUTONOMY_REMINDER_V1);
+  } catch {
+    return;
+  }
 }
 
 interface SessionMutation {
@@ -246,7 +229,40 @@ interface OperationalCheck {
   exitCode: number | null;
 }
 
+export interface ResultManifest {
+  baseCommit: string | null;
+  dirtyHashes: Array<{ pathSegments: string[]; sha256: string | null }>;
+  dependencyResults: Array<{ taskId: string; revision: number; result: "passed" | "failed" | "unknown" }>;
+  exclusivePaths: string[][];
+  profileRevision: string | null;
+  toolRevision: string | null;
+  ownerId: string;
+  fence: number;
+  unresolvedOperations: Array<{ operationId: string; status: "unknown" | "cancelled"; firstFailure: string }>;
+  todoWrite: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; priority: "high" | "medium" | "low" }>;
+  inputHash: string | null;
+  finalized: boolean;
+}
+
+export interface ReviewAdmission {
+  inputManifest: ResultManifest;
+  inputHash: string;
+  outputHash: string;
+  observedInputHash: string;
+  observedOutputHash: string;
+}
+
+export interface AllocationRecord {
+  phaseId: string;
+  mode: "single_todo" | "multi_todo";
+  requestedConcurrency: number;
+  agents: Array<{ agentId: string; todoId: string; writer: boolean; exclusivePaths: string[][] }>;
+}
+
 interface OperationalEntry {
+  manifest?: ResultManifest;
+  reviewAdmission?: ReviewAdmission;
+  allocation?: AllocationRecord;
   version: 1;
   type: "operational";
   entryId: string;
@@ -267,6 +283,7 @@ interface OperationalEntry {
 }
 
 interface SessionState extends SessionMutation {
+  activeAgent?: string;
   worktreeId: string;
   sessionId: string;
   incarnation: number;
@@ -283,11 +300,14 @@ interface SessionState extends SessionMutation {
   checks: OperationalCheck[];
   memoryDirty: boolean;
   replayMemory: OperationalEntry[];
+  manifest: ResultManifest;
+  reviewAdmission?: ReviewAdmission;
+  allocation?: AllocationRecord;
   remoteRegistered: boolean;
 }
 
 type RecoverableOperationalState = Pick<SessionState,
-  "status" | "todos" | "changedPaths" | "currentTaskId" | "actions" | "checks" | "memoryDirty">;
+  "status" | "todos" | "changedPaths" | "currentTaskId" | "actions" | "checks" | "memoryDirty" | "manifest" | "allocation">;
 
 interface OperationalMemoryBatch {
   conversationId: string;
@@ -311,46 +331,7 @@ interface TranscriptBatch {
   acknowledgementRequired: boolean;
 }
 
-interface PendingMutation {
-  sessionId: string;
-  callId: string;
-  clientClaimKey: string;
-  operation: ManagedMutationOperation;
-  paths: string[];
-  baselines: Map<string, string | null>;
-  before: WorktreeSnapshot;
-  acceptedEpoch: number;
-  operationId: string;
-  startedAt: number;
-  remoteClaimed: boolean;
-  deploymentOwner?: true;
-  recoveryEngineer?: true;
-  claimFailure?: CoordinationOutboxFailure;
-  footprint?: CoordinationOutboxFootprint[];
-  remoteProof?: CoordinationOutboxRemoteClaim;
-}
-
-type ManagedMutationOperation = "write" | "edit" | "create" | "delete" | "rename" | "apply_patch" | "repository" | "build";
 type WorktreeSnapshot = Map<string, string | null>;
-
-interface ManagedMutationDescriptor {
-  operation: ManagedMutationOperation;
-  paths: string[];
-  reserved?: "@repository" | "@build";
-  readOnly?: boolean;
-  coordinationReset?: true;
-  reloadTimeoutMs?: number;
-  deploymentOwner?: true;
-  recoveryEngineer?: true;
-}
-
-export interface RepositoryClaimContext {
-  manifestGeneration: number;
-  proof(): Record<string, unknown>;
-  renew(): Promise<void>;
-  verify(): Promise<void>;
-  quarantine(code?: "uncertain_apply" | "dirty_baseline"): Promise<void>;
-}
 
 export interface SessionCoordinatorDependencies {
   binding?: ExtensionBinding;
@@ -376,28 +357,6 @@ function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<
   if (!isRecord(value)) return false;
   const actual = Object.keys(value);
   return actual.length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
-}
-
-function isTrustedResetCommand(args: Record<string, unknown>): boolean {
-  if (Object.keys(args).some((key) => !["command", "description", "timeout"].includes(key))
-    || args.command !== "ingenium-coordination-reset reset") return false;
-  if (args.description !== undefined
-    && (typeof args.description !== "string" || args.description.length < 1
-      || args.description !== args.description.trim()
-      || Buffer.byteLength(args.description, "utf8") > MAX_RESET_DESCRIPTION_BYTES
-      || /[\u0000-\u001f\u007f]/.test(args.description))) return false;
-  if (args.timeout !== undefined && (!Number.isSafeInteger(args.timeout)
-    || (args.timeout as number) < MCP_LIVE_RELOAD_MIN_TIMEOUT_MS
-    || (args.timeout as number) > MCP_LIVE_RELOAD_MAX_TIMEOUT_MS)) return false;
-  return true;
-}
-
-function sanitizedPreclaimError(error: unknown): McpBridgeError | undefined {
-  if (!(error instanceof McpBridgeError)) return undefined;
-  const errorCode = error.errorCode && PRECLAIM_ERROR_CODES.has(error.errorCode)
-    ? error.errorCode
-    : undefined;
-  return new McpBridgeError(error.failure, "", error.stage, error.currentRevision, errorCode);
 }
 
 function mutation(value: unknown): SessionMutation {
@@ -439,12 +398,6 @@ export function isSafeCoordinationPath(value: unknown): value is string {
     || segment === ".git" || segment.startsWith("@") || secret.test(segment));
 }
 
-function relativeToolPath(worktree: string, value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const path = isAbsolute(value) ? relative(resolve(worktree), resolve(value)) : value;
-  return isSafeCoordinationPath(path) ? path : undefined;
-}
-
 function fileBaselineSha256(worktree: string, path: string): string | null {
   const root = realpathSync(resolve(worktree));
   const target = resolve(root, path);
@@ -481,14 +434,6 @@ function git(worktree: string, args: string[]): Buffer {
   });
 }
 
-function repositoryBaselineSha256(worktree: string, path: string): string | null {
-  try {
-    return createHash("sha256").update(git(worktree, ["show", `:${path}`])).digest("hex");
-  } catch {
-    return null;
-  }
-}
-
 function worktreeSnapshot(worktree: string): WorktreeSnapshot {
   const listed = git(worktree, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
   const snapshot: WorktreeSnapshot = new Map();
@@ -504,228 +449,6 @@ function worktreeFootprintHash(worktree: string): string {
   return createHash("sha256").update(JSON.stringify(
     [...worktreeSnapshot(worktree)].sort(([left], [right]) => left.localeCompare(right)),
   )).digest("hex");
-}
-
-function changedFootprint(before: WorktreeSnapshot, after: WorktreeSnapshot) {
-  const entries: Array<{ path?: string; path_sha256: string; before_sha256: string | null; after_sha256: string | null }> = [];
-  for (const path of new Set([...before.keys(), ...after.keys()])) {
-    const beforeSha = before.get(path) ?? null;
-    const afterSha = after.get(path) ?? null;
-    if (beforeSha === afterSha) continue;
-    entries.push({
-      ...(isSafeCoordinationPath(path) ? { path } : {}),
-      path_sha256: createHash("sha256").update(path, "utf8").digest("hex"),
-      before_sha256: beforeSha,
-      after_sha256: afterSha,
-    });
-  }
-  return entries.sort((left, right) => left.path_sha256.localeCompare(right.path_sha256));
-}
-
-function patchPaths(value: unknown): string[] | undefined {
-  if (typeof value !== "string" || value.length > 2 * 1024 * 1024) return undefined;
-  const paths: string[] = [];
-  for (const line of value.split(/\r?\n/)) {
-    const match = /^\*\*\* (?:Add|Update|Delete) File: (.+?)(?:\s+-.*)?$/.exec(line);
-    if (match) paths.push(match[1]!);
-    const move = /^\*\*\* Move to: (.+)$/.exec(line);
-    if (move) paths.push(move[1]!);
-  }
-  return paths.length > 0 ? [...new Set(paths)] : undefined;
-}
-
-function isTrustedManagedWrapperArgs(worktree: string, args: Record<string, unknown>): boolean {
-  if (Object.keys(args).some((key) => !["command", "description", "timeout", "workdir"].includes(key))) return false;
-  if (args.workdir !== undefined && (typeof args.workdir !== "string" || resolve(args.workdir) !== resolve(worktree))) return false;
-  if (args.description !== undefined
-    && (typeof args.description !== "string" || args.description.length < 1 || args.description !== args.description.trim()
-      || Buffer.byteLength(args.description, "utf8") > MAX_RESET_DESCRIPTION_BYTES
-      || /[\u0000-\u001f\u007f]/.test(args.description))) return false;
-  return args.timeout === undefined || (Number.isSafeInteger(args.timeout) && (args.timeout as number) >= 1
-    && (args.timeout as number) <= MCP_LIVE_RELOAD_MAX_TIMEOUT_MS);
-}
-
-function comparableTrustedToolArgs(worktree: string, args: unknown): unknown {
-  if (!isRecord(args) || typeof args.workdir !== "string" || resolve(args.workdir) !== resolve(worktree)) return args;
-  const { workdir: _workdir, ...comparable } = args;
-  return comparable;
-}
-
-function boundBrowserWrapperCommand(worktree: string, args: unknown): string | undefined {
-  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return undefined;
-  let descriptor: number | undefined;
-  try {
-    const root = resolve(worktree);
-    if (realpathSync(root) !== root || (args.workdir !== undefined && args.workdir !== root)) return undefined;
-    const wrapper = resolve(root, BROWSER_WRAPPER_PATH);
-    const before = lstatSync(wrapper);
-    const owner = typeof process.getuid === "function" ? process.getuid() : undefined;
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
-      || (owner !== undefined && before.uid !== owner) || realpathSync(wrapper) !== wrapper) return undefined;
-
-    const prefix = `${BROWSER_WRAPPER_PATH} <<'${BROWSER_WRAPPER_DELIMITER}'\n`;
-    const suffix = `\n${BROWSER_WRAPPER_DELIMITER}`;
-    if (!args.command.startsWith(prefix) || !args.command.endsWith(suffix)) return undefined;
-    const script = args.command.slice(prefix.length, -suffix.length);
-    if (script.length < 1 || Buffer.byteLength(script, "utf8") > MAX_COORDINATION_TRANSFORM_BYTES
-      || script.split("\n").includes(BROWSER_WRAPPER_DELIMITER)
-      || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(script)) return undefined;
-
-    descriptor = openSync(wrapper, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev || opened.ino !== before.ino
-      || (owner !== undefined && opened.uid !== owner) || opened.size < 1
-      || opened.size > MAX_COORDINATION_TRANSFORM_BYTES) return undefined;
-    const bytes = readFileSync(descriptor);
-    const after = lstatSync(wrapper);
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1 || after.dev !== opened.dev || after.ino !== opened.ino
-      || after.size !== opened.size || (owner !== undefined && after.uid !== owner)
-      || createHash("sha256").update(git(root, ["show", `HEAD:${BROWSER_WRAPPER_PATH}`])).digest("hex") !== digest) return undefined;
-    const encodedWrapper = bytes.toString("base64");
-    const encodedScript = Buffer.from(script, "utf8").toString("base64");
-    return `/usr/bin/printf '%s' '${encodedWrapper}' | /usr/bin/base64 --decode | /bin/bash -s -- "$(/usr/bin/printf '%s' '${encodedScript}' | /usr/bin/base64 --decode)"`;
-  } catch {
-    return undefined;
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
-function isBoundBrowserWrapperRequest(worktree: string, args: unknown): boolean {
-  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
-  return /^\/usr\/bin\/printf '%s' '[A-Za-z0-9+/]+={0,2}' \| \/usr\/bin\/base64 --decode \| \/bin\/bash -s -- "\$\(\/usr\/bin\/printf '%s' '[A-Za-z0-9+/]+={0,2}' \| \/usr\/bin\/base64 --decode\)"$/.test(args.command);
-}
-
-function isManagedBuildRequest(worktree: string, args: unknown): boolean {
-  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
-  if (args.command === "ingenium-build deployment production-restart") return true;
-  const wrapper = /^ingenium-build ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
-  if (!wrapper) return false;
-  try {
-    decodeManagedBuildArgv(wrapper[1]!);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isRecoveryCheckpointPath(path: string): boolean {
-  return path === "docs/reference/ROADMAP.md"
-    || /^tests\/artifacts\/tui-recovery\/[A-Za-z0-9_@%+=:,.-]+(?:\/[A-Za-z0-9_@%+=:,.-]+){0,15}$/.test(path);
-}
-
-function recoveryRepositoryMutation(worktree: string, args: unknown): ManagedMutationDescriptor | undefined {
-  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return undefined;
-  const add = /^git add -- ([A-Za-z0-9_@%+=:,./-]+(?: [A-Za-z0-9_@%+=:,./-]+){0,31})$/.exec(args.command);
-  if (add) {
-    const paths = add[1]!.split(" ");
-    if (paths.every((path) => isSafeCoordinationPath(path) && isRecoveryCheckpointPath(path))) {
-      return { operation: "repository", paths: [], reserved: "@repository", recoveryEngineer: true };
-    }
-  }
-  const commit = /^git commit -m '([^'\r\n]{1,100})'$/.exec(args.command);
-  if (commit?.[1] === "recovery evidence checkpoint") {
-    return { operation: "repository", paths: [], reserved: "@repository", recoveryEngineer: true };
-  }
-  return undefined;
-}
-
-function isTrustedReadOnlyShellRequest(worktree: string, args: unknown): boolean {
-  if (!isRecord(args) || !isTrustedManagedWrapperArgs(worktree, args) || typeof args.command !== "string") return false;
-  if (/^(?:pwd|git (?:status(?: --short)?|diff(?: --stat)?|log --oneline(?: -\d+)?|show --stat|rev-parse (?:HEAD|--show-toplevel)))$/.test(args.command)) {
-    return true;
-  }
-  const diff = /^git diff( --cached)? -- ([A-Za-z0-9_@%+=:,./-]+(?: [A-Za-z0-9_@%+=:,./-]+){0,31})$/.exec(args.command);
-  return Boolean(diff && diff[2]!.split(" ").every(isSafeCoordinationPath));
-}
-
-function managedMutation(
-  worktree: string,
-  toolValue: string,
-  args: unknown,
-  deploymentOwner = false,
-  browserAgent = false,
-  recoveryEngineer = false,
-): ManagedMutationDescriptor | undefined {
-  const tool = toolValue.toLowerCase().replace(/[.-]/g, "_");
-  if (!isRecord(args)) return undefined;
-  const path = (value: unknown) => relativeToolPath(worktree, value);
-  if (["write", "file_write"].includes(tool)) {
-    const target = path(args.filePath ?? args.path);
-    return target ? { operation: "write", paths: [target] } : undefined;
-  }
-  if (["edit", "file_edit"].includes(tool)) {
-    const target = path(args.filePath ?? args.path);
-    return target ? { operation: "edit", paths: [target] } : undefined;
-  }
-  if (["create", "file_create"].includes(tool)) {
-    const target = path(args.filePath ?? args.path);
-    return target ? { operation: "create", paths: [target] } : undefined;
-  }
-  if (["delete", "file_delete"].includes(tool)) {
-    const target = path(args.filePath ?? args.path);
-    return target ? { operation: "delete", paths: [target] } : undefined;
-  }
-  if (["rename", "file_rename"].includes(tool)) {
-    const source = path(args.from ?? args.source ?? args.oldPath);
-    const destination = path(args.to ?? args.destination ?? args.newPath);
-    return source && destination && source !== destination ? { operation: "rename", paths: [source, destination] } : undefined;
-  }
-  if (tool === "apply_patch") {
-    const paths = patchPaths(args.patchText ?? args.patch)?.map((entry) => path(entry));
-    return paths && paths.every((entry) => entry !== undefined)
-      ? { operation: "apply_patch", paths: paths as string[] }
-      : undefined;
-  }
-  if (tool === "bash" || tool === "shell") {
-    if (typeof args.command !== "string") return undefined;
-    if (browserAgent && isBoundBrowserWrapperRequest(worktree, args)) {
-      return { operation: "build", paths: [], readOnly: true };
-    }
-    if (isTrustedResetCommand(args)) {
-      return {
-        operation: "build", paths: [], readOnly: true, coordinationReset: true,
-        reloadTimeoutMs: typeof args.timeout === "number" ? args.timeout : undefined,
-      };
-    }
-    if (isTrustedReadOnlyShellRequest(worktree, args)) {
-      return { operation: "build", paths: [], readOnly: true };
-    }
-    const recoveryRepository = recoveryRepositoryMutation(worktree, args);
-    if (recoveryRepository) {
-      if (!recoveryEngineer) throw new Error("Managed shell coordination denied the command");
-      return recoveryRepository;
-    }
-    const fixedProductionRestart = args.command === "ingenium-build deployment production-restart";
-    const wrapper = /^(ingenium-repository|ingenium-build) ([A-Za-z0-9_-]{2,8192})$/.exec(args.command);
-    if (wrapper || fixedProductionRestart) {
-      try {
-        if (!isTrustedManagedWrapperArgs(worktree, args)) throw new Error("invalid wrapper arguments");
-        if (wrapper?.[1] === "ingenium-repository") decodeManagedRepositoryArgv(wrapper[2]!);
-        else {
-          if (!fixedProductionRestart) decodeManagedBuildArgv(wrapper![2]!);
-          if (!deploymentOwner) throw new Error("deployment owner required");
-        }
-        if (fixedProductionRestart && !deploymentOwner) throw new Error("deployment owner required");
-      } catch {
-        throw new Error("Managed shell coordination denied the command");
-      }
-      return wrapper?.[1] === "ingenium-repository"
-        ? { operation: "repository", paths: [], reserved: "@repository" }
-        : {
-            operation: "build", paths: [], reserved: "@build",
-            ...(isManagedBuildRequest(worktree, args) ? { deploymentOwner: true as const } : {}),
-          };
-    }
-    throw new Error("Managed shell coordination denied the command");
-  }
-  return undefined;
-}
-
-function isManagedMutationTool(tool: string): boolean {
-  return ["write", "file_write", "edit", "file_edit", "create", "file_create", "delete", "file_delete",
-    "rename", "file_rename", "apply_patch", "bash", "shell"].includes(tool.toLowerCase().replace(/[.-]/g, "_"));
 }
 
 export function encodeCoordinationPath(path: unknown): string[] | undefined {
@@ -757,25 +480,6 @@ function boundedCount(value: unknown): number | undefined {
     : undefined;
 }
 
-function diffCounts(value: unknown): Pick<ChangedPathSnapshot, "additions" | "deletions"> {
-  if (!isRecord(value)) return { additions: 0, deletions: 0 };
-  const additions = boundedCount(value.additions);
-  const deletions = boundedCount(value.deletions);
-  if (additions !== undefined && deletions !== undefined) return { additions, deletions };
-  if (typeof value.diff !== "string") return { additions: additions ?? 0, deletions: deletions ?? 0 };
-  let countedAdditions = 0;
-  let countedDeletions = 0;
-  for (const line of value.diff.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) countedAdditions += 1;
-    if (line.startsWith("-") && !line.startsWith("---")) countedDeletions += 1;
-    if (countedAdditions >= MAX_DIFF_COUNT && countedDeletions >= MAX_DIFF_COUNT) break;
-  }
-  return {
-    additions: additions ?? Math.min(countedAdditions, MAX_DIFF_COUNT),
-    deletions: deletions ?? Math.min(countedDeletions, MAX_DIFF_COUNT),
-  };
-}
-
 function todoCounts(value: unknown): TodoCounts | undefined {
   if (!Array.isArray(value)) return undefined;
   const counts: TodoCounts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
@@ -803,28 +507,6 @@ function targetHash(tool: string, args: unknown): string {
   let serialized = "unavailable";
   try { serialized = JSON.stringify(args) ?? "unavailable"; } catch { /* hashed fallback stays content-free */ }
   return createHash("sha256").update(tool).update("\0").update(serialized).digest("hex");
-}
-
-function checkKind(tool: string, args: unknown): OperationalCheck["kind"] | undefined {
-  if (tool.toLowerCase() !== "bash" || !isRecord(args) || typeof args.command !== "string") return undefined;
-  const command = args.command.toLowerCase();
-  if (/\b(typecheck|tsc\b)/.test(command)) return "typecheck";
-  if (/\b(eslint|lint\b)/.test(command)) return "lint";
-  if (/\b(prettier|format\b)/.test(command)) return "format";
-  if (/\b(audit|security|snyk)\b/.test(command)) return "security";
-  if (/\b(build|compile)\b/.test(command)) return "build";
-  if (/\b(test|vitest|jest|pytest|playwright)\b/.test(command)) return "test";
-  if (/^\s*git\s+status(?:\s|$)/.test(command)) return "other";
-  return undefined;
-}
-
-function commandExitCode(value: unknown): number | null {
-  if (!isRecord(value)) return null;
-  const metadata = isRecord(value.metadata) ? value.metadata : value;
-  const exitCode = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
-  return Number.isSafeInteger(exitCode) && (exitCode as number) >= 0 && (exitCode as number) <= 255
-    ? exitCode as number
-    : null;
 }
 
 function publishedChecks(checks: OperationalCheck[]): Array<Omit<OperationalCheck, "exitCode">> {
@@ -982,9 +664,97 @@ function safeInjectedPeer(peer: PeerSnapshot): Record<string, unknown> | undefin
   };
 }
 
+export function resultManifestHash(manifest: ResultManifest): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+  return createHash("sha256").update(JSON.stringify(canonical(manifest))).digest("hex");
+}
+
+function stableTodos(value: unknown, prior: ResultManifest["todoWrite"]): ResultManifest["todoWrite"] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error("invalid TodoWrite record");
+  return value.map((todo) => {
+    if (!isRecord(todo) || typeof todo.content !== "string" || !todo.content.trim() || todo.content.length > 2048
+      || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status as string)
+      || (todo.priority !== undefined && !["high", "medium", "low"].includes(todo.priority as string))) throw new Error("invalid TodoWrite record");
+    return {
+      id: typeof todo.id === "string" && todo.id.length > 0 ? todo.id
+        : prior.find((entry) => entry.content === todo.content)?.id ?? `todo-${targetHash("todo", todo.content)}`,
+      content: todo.content, status: todo.status as ResultManifest["todoWrite"][number]["status"],
+      priority: (todo.priority ?? "medium") as ResultManifest["todoWrite"][number]["priority"],
+    };
+  });
+}
+
+function safeManifestRecords(value: Record<string, unknown>): boolean {
+  const hash = (value: unknown) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+  const nullableHash = (value: unknown) => value === null || hash(value);
+  const text = (value: unknown, max = 256) => typeof value === "string" && value.trim().length > 0 && value.length <= max && !value.includes("\0");
+  const list = (value: unknown, max = 32): value is unknown[] => Array.isArray(value) && value.length <= max;
+  const paths = (value: unknown) => list(value) && value.every((path) => decodeCoordinationPath(path) !== undefined)
+    && new Set(value.map((path) => decodeCoordinationPath(path))).size === value.length;
+  if (Object.hasOwn(value, "manifest")) {
+    const m = value.manifest;
+    if (!hasExactKeys(m, ["baseCommit", "dirtyHashes", "dependencyResults", "exclusivePaths", "profileRevision", "toolRevision",
+      "ownerId", "fence", "unresolvedOperations", "todoWrite", "inputHash", "finalized"])
+      || (m.baseCommit !== null && (typeof m.baseCommit !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(m.baseCommit)))
+      || !nullableHash(m.profileRevision) || !nullableHash(m.toolRevision) || !nullableHash(m.inputHash)
+      || typeof m.ownerId !== "string" || !/^actor-[0-9a-f]{64}$/.test(m.ownerId)
+      || !Number.isSafeInteger(m.fence) || (m.fence as number) < 1 || typeof m.finalized !== "boolean"
+      || !paths(m.exclusivePaths) || !list(m.dirtyHashes) || !list(m.dependencyResults)
+      || !list(m.unresolvedOperations) || !list(m.todoWrite, 64)) return false;
+    if (!m.dirtyHashes.every((entry) => hasExactKeys(entry, ["pathSegments", "sha256"])
+      && decodeCoordinationPath(entry.pathSegments) !== undefined && nullableHash(entry.sha256))
+      || !paths(m.dirtyHashes.map((entry) => (entry as Record<string, unknown>).pathSegments))
+      || !m.dependencyResults.every((entry) => hasExactKeys(entry, ["taskId", "revision", "result"]) && text(entry.taskId)
+        && Number.isSafeInteger(entry.revision) && (entry.revision as number) >= 0 && ["passed", "failed", "unknown"].includes(entry.result as string))
+      || !m.unresolvedOperations.every((entry) => hasExactKeys(entry, ["operationId", "status", "firstFailure"])
+        && text(entry.operationId) && text(entry.firstFailure) && ["unknown", "cancelled"].includes(entry.status as string))
+      || !m.todoWrite.every((entry) => hasExactKeys(entry, ["id", "content", "status", "priority"]) && text(entry.id) && text(entry.content, 2048)
+        && ["pending", "in_progress", "completed", "cancelled"].includes(entry.status as string)
+        && ["high", "medium", "low"].includes(entry.priority as string))
+      || new Set(m.todoWrite.map((entry) => (entry as Record<string, unknown>).id)).size !== m.todoWrite.length) return false;
+    if (m.finalized && (m.baseCommit === null || m.inputHash === null || m.profileRevision === null || m.toolRevision === null
+      || m.unresolvedOperations.length > 0 || m.dependencyResults.some((entry) => (entry as { result: string }).result !== "passed"))) return false;
+  }
+  if (Object.hasOwn(value, "reviewAdmission")) {
+    const r = value.reviewAdmission;
+    const m = value.manifest as ResultManifest | undefined;
+    if (!hasExactKeys(r, ["inputManifest", "inputHash", "outputHash", "observedInputHash", "observedOutputHash"])
+      || !safeManifestRecords({ manifest: r.inputManifest })) return false;
+    const inputManifest = r.inputManifest as ResultManifest;
+    if (![r.inputHash, r.outputHash, r.observedInputHash, r.observedOutputHash].every(hash)
+      || !inputManifest.finalized || r.inputHash !== resultManifestHash(inputManifest)
+      || !m?.finalized || r.inputHash !== m.inputHash || r.outputHash !== resultManifestHash(m)
+      || r.inputHash !== r.observedInputHash || r.outputHash !== r.observedOutputHash) return false;
+  }
+  if (Object.hasOwn(value, "allocation")) {
+    const a = value.allocation;
+    if (!hasExactKeys(a, ["phaseId", "mode", "requestedConcurrency", "agents"]) || !text(a.phaseId) || !["single_todo", "multi_todo"].includes(a.mode as string)
+      || !Number.isSafeInteger(a.requestedConcurrency) || (a.requestedConcurrency as number) < 1
+      || !Array.isArray(a.agents) || a.agents.length !== a.requestedConcurrency) return false;
+    const ids = new Set();
+    const territories: string[] = [];
+    for (const agent of a.agents) {
+      if (!hasExactKeys(agent, ["agentId", "todoId", "writer", "exclusivePaths"]) || !text(agent.agentId) || !text(agent.todoId)
+        || typeof agent.writer !== "boolean" || !paths(agent.exclusivePaths) || ids.has(agent.agentId)) return false;
+      ids.add(agent.agentId);
+      const owned = (agent.exclusivePaths as string[][]).map((path) => decodeCoordinationPath(path)!);
+      if (!agent.writer && owned.length > 0) return false;
+      if (agent.writer) {
+        if (owned.length === 0 || owned.some((path) => territories.some((prior) => path === prior
+          || path.startsWith(`${prior}/`) || prior.startsWith(`${path}/`)))) return false;
+        territories.push(...owned);
+      }
+    }
+  }
+  return true;
+}
+
 function safeInjectedMemory(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value) || !safeManifestRecords(value)) return undefined;
   const keys = ["version", "type", "entryId", "actorId", "sourceRevision", "timestamp", "status", "actions", "checks",
-    "todos", "currentTaskId", "contextRevision", "changedPaths", "nextWork"] as const;
+    "todos", "currentTaskId", "contextRevision", "changedPaths", "nextWork",
+    ...["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key))] as const;
   if (!hasExactKeys(value, keys) || value.version !== 1 || value.type !== "operational"
     || typeof value.entryId !== "string" || !/^[0-9a-f-]{36}$/i.test(value.entryId)
     || typeof value.actorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(value.actorId)
@@ -1036,6 +806,7 @@ function safeInjectedMemory(value: unknown): Record<string, unknown> | undefined
     || (value.nextWork.referenceHash !== null
       && (typeof value.nextWork.referenceHash !== "string" || !/^[0-9a-f]{64}$/.test(value.nextWork.referenceHash)))) return undefined;
   return {
+    ...Object.fromEntries(["manifest", "reviewAdmission", "allocation"].filter((key) => Object.hasOwn(value, key)).map((key) => [key, value[key]])),
     ...Object.fromEntries(keys.slice(0, 7).map((key) => [key, value[key]])),
     actions,
     checks,
@@ -1049,6 +820,9 @@ function safeInjectedMemory(value: unknown): Record<string, unknown> | undefined
 
 function modelMemoryEntry(value: OperationalEntry): Record<string, unknown> {
   return {
+    ...(value.manifest ? { manifest: value.manifest } : {}),
+    ...(value.reviewAdmission ? { reviewAdmission: value.reviewAdmission } : {}),
+    ...(value.allocation ? { allocation: value.allocation } : {}),
     entryId: value.entryId,
     actorId: value.actorId,
     sourceRevision: value.sourceRevision,
@@ -1126,6 +900,7 @@ export class SessionCoordinator {
   private readonly preflight: typeof preflightApiAuthentication;
   private readonly request: typeof fetch;
   private readonly outbox?: CoordinationOutbox;
+  private readonly explicitMemory: ExplicitMemoryContextReader;
   private attestation?: Promise<void>;
   private canonicalWorktree?: Promise<string>;
   private readonly sessions = new Map<string, SessionState>();
@@ -1133,10 +908,6 @@ export class SessionCoordinator {
   private readonly registering = new Map<string, Promise<SessionState>>();
   private readonly closingSessions = new Set<string>();
   private readonly snapshotCursors = new Map<string, Map<string, number>>();
-  private readonly pendingMutations = new Map<string, PendingMutation>();
-  private readonly claimingMutations = new Set<string>();
-  private readonly finalizingMutations = new Map<string, Promise<void>>();
-  private readonly credentialResetSessionIds = new Set<string>();
   private readonly publishedTranscriptDigests = new Map<string, Map<string, string>>();
   private readonly now: () => number;
   private readonly token: () => string;
@@ -1146,8 +917,6 @@ export class SessionCoordinator {
   private heartbeat?: NodeJS.Timeout;
   private credentialFingerprint?: string;
   private reconnecting?: Promise<void>;
-  private acceptedCredentialEpoch?: number;
-  private credentialResetActive = false;
   private deferredReload?: { sessionId: string; timeoutMs: number };
   private replayingOutbox = false;
   private disposed = false;
@@ -1172,6 +941,7 @@ export class SessionCoordinator {
     this.heartbeatEnabled = !dependencies.disableHeartbeat;
     this.preflight = dependencies.preflight ?? preflightApiAuthentication;
     this.request = dependencies.request ?? fetch;
+    this.explicitMemory = new ExplicitMemoryContextReader(this.binding, (name, args) => this.invoke(name, args));
     this.credentialFingerprint = this.readCredentialFingerprint();
     try {
       this.outbox = dependencies.outbox ?? new CoordinationOutbox(ctx.worktree, this.now);
@@ -1218,6 +988,12 @@ export class SessionCoordinator {
       checks: recovered?.checks ?? [],
       memoryDirty: recovered?.memoryDirty ?? false,
       replayMemory: [],
+      manifest: recovered?.manifest ?? {
+        baseCommit: null, dirtyHashes: [], dependencyResults: [], exclusivePaths: [], profileRevision: null, toolRevision: null,
+        ownerId: `actor-${createHash("sha256").update(opaqueSession).update("\0").update(String(incarnation)).digest("hex")}`,
+        fence: 1, unresolvedOperations: [], todoWrite: [], inputHash: null, finalized: false,
+      },
+      allocation: recovered?.allocation,
       remoteRegistered: false,
     };
     this.sessions.set(sessionId, state);
@@ -1249,61 +1025,25 @@ export class SessionCoordinator {
     sessionId: string,
     error: unknown,
     options: {
-      exactKey?: string;
-      revision?: number;
       cursor?: number;
-      digest?: string;
       ambiguous?: boolean;
-      mutation?: CoordinationOutboxMutationEvidence;
     } = {},
   ): void {
     if (this.disposed) return;
     const sessionReference = durableSessionReference(sessionId);
     try {
       this.outbox?.put({
-        exactKey: options.exactKey ?? `${kind}:${sessionReference}`,
+        exactKey: `${kind}:${sessionReference}`,
         kind,
         sessionHash: sessionReference,
         failure: this.outboxFailure(error),
-        revision: options.revision,
         cursor: options.cursor,
-        digest: options.digest,
         ambiguous: options.ambiguous,
-        mutation: options.mutation,
       });
     } catch {
       // Local operations do not depend on advisory persistence.
     }
     this.warning(this.failureVisibility(error));
-  }
-
-  private mutationEvidence(
-    pending: PendingMutation,
-    phase: CoordinationOutboxMutationEvidence["phase"],
-  ): CoordinationOutboxMutationEvidence {
-    return {
-      phase,
-      operation: pending.operation,
-      declaredPathSegments: pending.paths.map((path) => encodeCoordinationPath(path)).filter((value): value is string[] => value !== undefined),
-      footprint: pending.footprint ?? [],
-      remoteClaim: phase === "completion_ambiguous" ? pending.remoteProof ?? null : null,
-    };
-  }
-
-  private retainLocalMutation(pending: PendingMutation): void {
-    if (this.disposed) return;
-    try {
-      this.outbox?.put({
-        exactKey: `claim:${durableSessionReference(pending.sessionId)}:${pending.operationId}`,
-        kind: "claim",
-        sessionHash: durableSessionReference(pending.sessionId),
-        failure: pending.claimFailure ?? "unavailable",
-        digest: createHash("sha256").update(pending.operationId).digest("hex"),
-        mutation: this.mutationEvidence(pending, "local_applied"),
-      });
-    } catch {
-      // Durable advisory evidence cannot block the completed local operation.
-    }
   }
 
   private readCredentialFingerprint(): string | undefined {
@@ -1333,10 +1073,12 @@ export class SessionCoordinator {
       actions: state.actions.map((entry) => ({ ...entry, pathSegments: entry.pathSegments ? [...entry.pathSegments] : null })),
       checks: state.checks.map((entry) => ({ ...entry })),
       memoryDirty: state.memoryDirty,
+      manifest: structuredClone(state.manifest),
+      allocation: state.allocation ? structuredClone(state.allocation) : undefined,
     });
   }
 
-  private async attestGeneralBinding(enrollRecoveryParent = true): Promise<ApiAuthenticationBinding | undefined> {
+  private async attestGeneralBinding(): Promise<ApiAuthenticationBinding | undefined> {
     if (this.disposed) return undefined;
     if (this.binding.purpose !== "general") return undefined;
     const result = await this.preflight(this.binding.apiUrl, this.ctx.worktree, this.request, {
@@ -1344,7 +1086,7 @@ export class SessionCoordinator {
     });
     if (this.disposed) return undefined;
     const attested = result.binding;
-    const requiredScopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync"];
+    const requiredScopes = ["coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync"];
     if (!result.authenticated || !attested || attested.audience !== "mcp"
       || attested.projectIds.length !== 1 || attested.projectId !== attested.projectIds[0]
       || attested.workspaceId !== this.binding.workspaceId
@@ -1361,105 +1103,19 @@ export class SessionCoordinator {
     if (payload?.data?.project?.id !== attested.projectId || payload.data.project.name !== this.binding.project) {
       throw new ExtensionBindingError();
     }
-    if (enrollRecoveryParent) {
-      const current = this.sessions.values().next().value as SessionState | undefined;
-      enrollManagedRecoveryParent(this.binding, attested, current
-        ? this.recoveryHandoff(current)
-        : {
-            status: "active",
-            taskHash: null,
-            actions: [],
-            changedPaths: [],
-            checks: [],
-            todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
-            nextWork: { kind: "none", referenceHash: null },
-          });
-    }
+    const current = this.sessions.values().next().value as SessionState | undefined;
+    enrollManagedRecoveryParent(this.binding, attested, current
+      ? this.recoveryHandoff(current)
+      : {
+          status: "active",
+          taskHash: null,
+          actions: [],
+          changedPaths: [],
+          checks: [],
+          todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" },
+          nextWork: { kind: "none", referenceHash: null },
+        });
     return attested;
-  }
-
-  private async hasTrustedAgentCall(
-    sessionId: string,
-    callId: string,
-    tool: string,
-    args: unknown,
-    agent: string | ReadonlySet<string>,
-  ): Promise<boolean> {
-    if (!isRecord(this.ctx.client) || !isRecord(this.ctx.client.session)
-      || typeof this.ctx.client.session.get !== "function" || typeof this.ctx.client.session.messages !== "function") return false;
-    try {
-      const session = await this.ctx.client.session.get({
-        path: { id: sessionId }, query: { directory: this.ctx.worktree },
-      });
-      if (!isRecord(session) || !isRecord(session.data) || session.data.id !== sessionId
-        || resolve(String(session.data.directory)) !== resolve(this.ctx.worktree)) return false;
-      const response = await this.ctx.client.session.messages({
-        path: { id: sessionId }, query: { directory: this.ctx.worktree },
-      });
-      if (!isRecord(response) || !Array.isArray(response.data)) return false;
-      const messages = response.data.filter((entry): entry is Record<string, unknown> => isRecord(entry) && isRecord(entry.info));
-      const parents = new Map(messages.map((entry) => [(entry.info as Record<string, unknown>).id, entry.info as Record<string, unknown>]));
-      const agents = typeof agent === "string" ? new Set([agent]) : agent;
-      return messages.some((entry) => {
-        const info = entry.info as Record<string, unknown>;
-        if (info.role !== "assistant" || info.sessionID !== sessionId || typeof info.mode !== "string" || !agents.has(info.mode)
-          || typeof info.parentID !== "string"
-          || !Array.isArray(entry.parts)) return false;
-        const parent = parents.get(info.parentID);
-        if (!parent || parent.role !== "user" || parent.sessionID !== sessionId || parent.agent !== info.mode) return false;
-        return entry.parts.some((part) => isRecord(part) && part.type === "tool" && part.sessionID === sessionId
-          && part.messageID === info.id && part.callID === callId && part.tool === tool && isRecord(part.state)
-          && (part.state.status === "pending" || part.state.status === "running")
-          && isDeepStrictEqual(
-            comparableTrustedToolArgs(this.ctx.worktree, part.state.input),
-            comparableTrustedToolArgs(this.ctx.worktree, args),
-          ));
-      });
-    } catch {
-      return false;
-    }
-  }
-
-  private async isAuthorizedDeploymentOwner(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
-    if (this.binding.purpose !== "general"
-      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, DEPLOYMENT_OWNER_AGENT)) return false;
-    try {
-      return await this.attestGeneralBinding(false) !== undefined;
-    } catch {
-      return false;
-    }
-  }
-
-  private async isAuthorizedProductionRestartOwner(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
-    if (this.binding.purpose !== "general"
-      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, PRODUCTION_RESTART_OWNER_AGENTS)) return false;
-    try {
-      const attested = await this.attestGeneralBinding(false);
-      const current = this.sessions.get(sessionId);
-      const prefix = `${sessionId}\0`;
-      const activeClaim = [...this.pendingMutations.values()].some((pending) => pending.sessionId === sessionId)
-        || [...this.claimingMutations].some((key) => key.startsWith(prefix))
-        || [...this.finalizingMutations.keys()].some((key) => key.startsWith(prefix));
-      if (!attested || !current || current.state !== "active" || !current.remoteRegistered || activeClaim) return false;
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async isAuthorizedRecoveryEngineer(sessionId: string, callId: string, tool: string, args: unknown): Promise<boolean> {
-    if (this.binding.purpose !== "general"
-      || !await this.hasTrustedAgentCall(sessionId, callId, tool, args, RECOVERY_OWNER_AGENT)) return false;
-    try {
-      return await this.attestGeneralBinding(false) !== undefined;
-    } catch {
-      return false;
-    }
-  }
-
-  private mutationsActive(): boolean {
-    return this.pendingMutations.size > 0 || this.claimingMutations.size > 0
-      || this.finalizingMutations.size > 0;
   }
 
   private async reloadCredential(sessionId: string, timeoutMs: number, force = false): Promise<void> {
@@ -1467,13 +1123,9 @@ export class SessionCoordinator {
     if (this.binding.purpose !== "general") return;
     const fingerprint = this.readCredentialFingerprint();
     if (!fingerprint || (!force && fingerprint === this.credentialFingerprint)) return;
-    if (this.mutationsActive()) {
-      this.deferredReload = { sessionId, timeoutMs };
-      return;
-    }
     if (this.reconnecting) return this.reconnecting;
     const pending = (async () => {
-      const sessionIds = new Set([sessionId, ...this.credentialResetSessionIds, ...this.sessions.keys()]);
+      const sessionIds = new Set([sessionId, ...this.sessions.keys()]);
       for (const [id, state] of this.sessions) this.retainOperationalState(id, state);
       if (this.heartbeat) {
         clearInterval(this.heartbeat);
@@ -1501,7 +1153,7 @@ export class SessionCoordinator {
       this.registering.clear();
       for (const id of sessionIds) {
         this.assertActive();
-        try { await this.register(id, true); } catch (error) { this.retainFailure("register", id, error); }
+        try { await this.register(id); } catch (error) { this.retainFailure("register", id, error); }
       }
       if (this.sessions.get(sessionId)?.remoteRegistered) {
         try {
@@ -1512,8 +1164,6 @@ export class SessionCoordinator {
       }
       await this.replayOutbox();
       this.assertActive();
-      this.credentialResetSessionIds.clear();
-      this.credentialResetActive = false;
       this.deferredReload = undefined;
       this.ensureHeartbeat();
       trace({ event: "credential_reset", resetState: "accepted" });
@@ -1522,7 +1172,6 @@ export class SessionCoordinator {
       this.retainFailure("recovery", sessionId, error);
       this.deferredReload = { sessionId, timeoutMs };
       await this.closeBridge();
-      this.credentialResetActive = false;
       trace({ event: "credential_reset", resetState: "rejected", failure: "authentication" });
     }).finally(() => {
       this.reconnecting = undefined;
@@ -1536,10 +1185,6 @@ export class SessionCoordinator {
     if (this.disposed) return;
     const fingerprint = this.readCredentialFingerprint();
     if (!fingerprint || fingerprint === this.credentialFingerprint) return;
-    if (this.mutationsActive()) {
-      this.deferredReload = { sessionId, timeoutMs };
-      return;
-    }
     void this.reloadCredential(sessionId, timeoutMs);
   }
 
@@ -1548,7 +1193,7 @@ export class SessionCoordinator {
     if (this.reconnecting) await this.reconnecting;
     if (this.disposed) return;
     const deferred = this.deferredReload;
-    if (!deferred || this.mutationsActive()) return;
+    if (!deferred) return;
     await this.reloadCredential(deferred.sessionId, deferred.timeoutMs);
   }
 
@@ -1617,9 +1262,6 @@ export class SessionCoordinator {
       await this.closeBridge();
       this.registering.clear();
       this.closingSessions.clear();
-      this.pendingMutations.clear();
-      this.claimingMutations.clear();
-      this.finalizingMutations.clear();
       this.transformQueues.clear();
     });
     return this.disposal;
@@ -1867,6 +1509,7 @@ export class SessionCoordinator {
             const total = state.todos.pending + state.todos.inProgress + state.todos.completed + state.todos.cancelled;
             result = await this.invoke("coordination_handoff", {
               ...this.lease(state), operation: "memory", memory_entry: {
+                ...this.manifestRecords(state),
                 status: state.status,
                 actions: state.actions,
                 checks: publishedChecks(state.checks),
@@ -1896,6 +1539,9 @@ export class SessionCoordinator {
           this.assertActive();
           this.apply(state, result.session);
           this.assertActive();
+          if (record.kind === "memory_ack" && record.cursor !== null) {
+            state.replayMemory = state.replayMemory.filter((entry) => entry.contextRevision >= record.cursor!);
+          }
           trace({ event: "recover_success", sessionHash: sessionHash(sessionId), mapMember: true, incarnation: state.incarnation });
           return true;
         });
@@ -1971,7 +1617,7 @@ export class SessionCoordinator {
     }
   }
 
-  private dropSession(sessionId: string, reason: DropReason, preserveOperationalState = false): void {
+  private dropSession(sessionId: string, reason: DropReason): void {
     const state = this.sessions.get(sessionId);
     trace({
       event: "drop_session",
@@ -1982,40 +1628,12 @@ export class SessionCoordinator {
     });
     this.sessions.delete(sessionId);
     this.publishedTranscriptDigests.delete(sessionId);
-    if (!preserveOperationalState) this.recoverableOperationalState.delete(sessionId);
+    this.recoverableOperationalState.delete(sessionId);
     this.registering.delete(sessionId);
     this.snapshotCursors.delete(sessionId);
-    for (const [key, pending] of this.pendingMutations) {
-      if (pending.sessionId === sessionId) this.pendingMutations.delete(key);
-    }
     if (this.sessions.size === 0 && this.heartbeat) {
       clearInterval(this.heartbeat);
       this.heartbeat = undefined;
-    }
-  }
-
-  private async closeAfterFailure(sessionId: string, reason: DropReason): Promise<void> {
-    if (this.disposed) return;
-    const failed = this.sessions.get(sessionId);
-    if (failed) {
-      this.retainOperationalState(sessionId, failed);
-    }
-    if (!this.sessions.has(sessionId)) {
-      this.dropSession(sessionId, reason);
-      this.warning();
-      return;
-    }
-    this.closingSessions.add(sessionId);
-    try {
-      await this.serialized(sessionId, async (state) => {
-        const result = await this.invoke("coordination_update", { ...this.lease(state), operation: "close" });
-        this.apply(state, result.session);
-      });
-    } catch {
-      this.warning();
-    } finally {
-      this.closingSessions.delete(sessionId);
-      this.dropSession(sessionId, reason, true);
     }
   }
 
@@ -2065,20 +1683,17 @@ export class SessionCoordinator {
     });
     const kind: Exclude<CoordinationOutboxKind, "overflow"> = reason === "snapshot_failure" ? "snapshot"
       : reason === "memory_failure" ? "memory"
-        : reason === "publish_failure" ? "publication"
-          : reason === "claim_failure" ? "claim"
-            : reason === "heartbeat_failure" ? "heartbeat"
-              : reason === "status_failure" ? "recovery"
-                : reason === "close" || reason === "close_missing" ? "close"
-                  : "ack";
-    this.retainFailure(kind, sessionId, error, { ambiguous: kind === "publication" || kind === "claim" });
+        : reason === "heartbeat_failure" ? "heartbeat"
+          : reason === "status_failure" ? "recovery"
+            : reason === "close" || reason === "close_missing" ? "close"
+              : "ack";
+    this.retainFailure(kind, sessionId, error);
   }
 
-  private async register(sessionId: string, credentialResetInternal = false): Promise<SessionState> {
+  private async register(sessionId: string): Promise<SessionState> {
     this.assertActive();
     const state = this.localSession(sessionId);
     if (state.remoteRegistered) return state;
-    if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
     const inFlight = this.registering.get(sessionId);
     if (inFlight) return inFlight;
     const pending = (async () => {
@@ -2230,14 +1845,6 @@ export class SessionCoordinator {
       resolveQueue();
       this.dropSession(sessionId, "close");
     }
-  }
-
-  private async prepareForCredentialReset(): Promise<void> {
-    if (this.disposed) return;
-    if (this.binding.purpose !== "general") throw new ExtensionBindingError();
-    if (this.credentialResetActive) throw new Error("Coordination reset is already active");
-    this.credentialResetActive = true;
-    for (const sessionId of this.sessions.keys()) this.credentialResetSessionIds.add(sessionId);
   }
 
   private snapshot(state: SessionState): Record<string, unknown> {
@@ -2395,8 +2002,10 @@ export class SessionCoordinator {
       const result = await this.invoke("coordination_handoff", {
         ...this.lease(state), operation: "memory_ack", through_revision: throughRevision,
       });
+      this.assertActive();
       this.apply(state, result.session);
-      state.replayMemory = [];
+      this.assertActive();
+      state.replayMemory = state.replayMemory.filter((entry) => entry.contextRevision >= throughRevision);
     });
   }
 
@@ -2547,233 +2156,6 @@ export class SessionCoordinator {
     }
   }
 
-  private pendingKey(sessionId: string, callId: string): string {
-    return `${sessionId}\0${callId}`;
-  }
-
-  async preclaim(
-    sessionId: string,
-    callId: string,
-    descriptor: ManagedMutationDescriptor,
-    credentialResetInternal = false,
-  ): Promise<void> {
-    if (this.disposed) return;
-    if (this.credentialResetActive && !credentialResetInternal) throw new Error("Coordination reset is active");
-    const key = this.pendingKey(sessionId, callId);
-    const before = worktreeSnapshot(this.ctx.worktree);
-    const baselines = new Map(descriptor.paths.map((path) => [path, fileBaselineSha256(this.ctx.worktree, path)]));
-    const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
-    const localPending: PendingMutation = {
-      sessionId,
-      callId,
-      clientClaimKey,
-      operation: descriptor.operation,
-      paths: descriptor.paths,
-      baselines,
-      before,
-      acceptedEpoch: 0,
-      operationId: randomUUID(),
-      startedAt: this.now(),
-      remoteClaimed: false,
-      ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
-      ...(descriptor.recoveryEngineer ? { recoveryEngineer: true } : {}),
-    };
-    this.pendingMutations.set(key, localPending);
-    this.localSession(sessionId);
-    this.claimingMutations.add(key);
-    try {
-      await this.serialized(sessionId, async (state) => {
-        const result = await this.invoke("coordination_claim", {
-          ...this.lease(state),
-          client_claim_key: clientClaimKey,
-          operation: descriptor.operation,
-          claims: descriptor.reserved
-            ? [{ claim: { kind: "reserved", name: descriptor.reserved } }]
-            : descriptor.paths.map((path) => ({
-              claim: { kind: "path", path },
-              baseline_sha256: baselines.get(path) ?? null,
-              current_sha256: baselines.get(path) ?? null,
-              repository_sha256: repositoryBaselineSha256(this.ctx.worktree, path),
-            })),
-        });
-        this.apply(state, result.session);
-        if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-          || typeof result.operationId !== "string" || !/^[0-9a-f-]{36}$/i.test(result.operationId)) {
-          throw new Error("invalid coordination response");
-        }
-        localPending.acceptedEpoch = result.acceptedEpoch as number;
-        localPending.operationId = result.operationId;
-        localPending.remoteClaimed = true;
-      });
-    } catch (error) {
-      if (this.disposed) return;
-      localPending.claimFailure = this.outboxFailure(error);
-      this.retainFailure("claim", sessionId, error, {
-        exactKey: `claim:${durableSessionReference(sessionId)}:${localPending.operationId}`,
-        digest: createHash("sha256").update(descriptor.operation).update("\0").update(String(descriptor.paths.length)).digest("hex"),
-        mutation: this.mutationEvidence(localPending, "claim_failed"),
-      });
-    } finally {
-      this.claimingMutations.delete(key);
-    }
-    trace({ event: "claim_state", operation: "tool.execute.before", sessionHash: sessionHash(sessionId),
-      mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
-      claimState: localPending.remoteClaimed ? "claimed" : "claim_failed" });
-  }
-
-  private claimProof(state: SessionState, pending: PendingMutation): Record<string, unknown> {
-    return {
-      ...this.lease(state),
-      client_claim_key: pending.clientClaimKey,
-      accepted_epoch: pending.acceptedEpoch,
-    };
-  }
-
-  private async renewPending(sessionId: string, pending: PendingMutation): Promise<void> {
-    if (this.disposed) return;
-    await this.serialized(sessionId, async (state) => {
-      const result = await this.invoke("coordination_claim", {
-        ...this.claimProof(state, pending), action: "renew", ttl_ms: SESSION_TTL_MS,
-      });
-      this.apply(state, result.session);
-    });
-  }
-
-  private capturePendingFootprint(pending: PendingMutation) {
-    const footprint = changedFootprint(pending.before, worktreeSnapshot(this.ctx.worktree));
-    pending.footprint = footprint.map((entry) => ({
-      pathSegments: entry.path ? encodeCoordinationPath(entry.path) ?? null : null,
-      pathSha256: entry.path_sha256,
-      beforeSha256: entry.before_sha256,
-      afterSha256: entry.after_sha256,
-    }));
-    return footprint;
-  }
-
-  private captureRemoteProof(state: SessionState, pending: PendingMutation): void {
-    pending.remoteProof = {
-      worktreeId: state.worktreeId,
-      sessionId: state.sessionId,
-      incarnation: state.incarnation,
-      expectedRevision: state.revision,
-      fence: state.fence,
-      ownershipToken: state.ownershipToken,
-      clientClaimKey: pending.clientClaimKey,
-      acceptedEpoch: pending.acceptedEpoch,
-      remoteOperationId: pending.operationId,
-    };
-  }
-
-  private async quarantinePendingMutation(
-    sessionId: string,
-    pending: PendingMutation,
-    code: "uncertain_apply" | "dirty_baseline" = "uncertain_apply",
-  ): Promise<void> {
-    this.capturePendingFootprint(pending);
-    await this.serialized(sessionId, async (state) => {
-      this.captureRemoteProof(state, pending);
-      const result = await this.invoke("coordination_claim", {
-        ...this.claimProof(state, pending),
-        idempotency_key: `${pending.operationId}:quarantine`,
-        action: "quarantine",
-        code,
-      });
-      this.apply(state, result.session);
-    });
-  }
-
-  private async completePending(sessionId: string, pending: PendingMutation): Promise<void> {
-    if (this.disposed) return;
-    const footprint = this.capturePendingFootprint(pending);
-    if (!pending.remoteClaimed) {
-      this.retainLocalMutation(pending);
-      this.pendingMutations.delete(this.pendingKey(sessionId, pending.callId));
-      return;
-    }
-    await this.serialized(sessionId, async (state) => {
-      this.captureRemoteProof(state, pending);
-      const result = await this.invoke("coordination_claim", {
-        ...this.claimProof(state, pending),
-        idempotency_key: `${pending.operationId}:complete`,
-        action: "complete",
-        operation_id: pending.operationId,
-        operation: pending.operation,
-        footprint,
-      });
-      this.apply(state, result.session);
-    });
-    this.pendingMutations.delete(this.pendingKey(sessionId, pending.callId));
-    trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
-      mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
-      claimState: "completed" });
-  }
-
-  private async finalizePending(sessionId: string, callId: string, outcome: "completed" | "error"): Promise<void> {
-    if (this.disposed) return;
-    const key = this.pendingKey(sessionId, callId);
-    const inFlight = this.finalizingMutations.get(key);
-    if (inFlight) return inFlight;
-    const pending = this.pendingMutations.get(key);
-    if (!pending) return;
-    const finalizing = (async () => {
-      if (outcome === "completed") {
-        try {
-          await this.completePending(sessionId, pending);
-        } catch (error) {
-          this.pendingMutations.delete(key);
-          this.retainFailure("completion", sessionId, error, {
-            exactKey: `completion:${durableSessionReference(sessionId)}:${pending.operationId}`,
-            digest: createHash("sha256").update(pending.operationId).digest("hex"),
-            ambiguous: true,
-            mutation: this.mutationEvidence(pending, "completion_ambiguous"),
-          });
-        }
-        return;
-      }
-      if (!pending.remoteClaimed) {
-        this.pendingMutations.delete(key);
-        return;
-      }
-      await this.quarantinePendingMutation(sessionId, pending);
-      this.pendingMutations.delete(key);
-      trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(sessionId),
-        mapMember: this.sessions.has(sessionId), incarnation: this.sessions.get(sessionId)?.incarnation ?? null,
-        claimState: "quarantined" });
-    })().catch((error) => {
-      this.retainFailure("quarantine", sessionId, error, {
-        exactKey: `quarantine:${durableSessionReference(sessionId)}:${pending.operationId}`,
-        digest: createHash("sha256").update(pending.operationId).digest("hex"),
-        ambiguous: true,
-        ...(pending.remoteProof ? { mutation: this.mutationEvidence(pending, "completion_ambiguous") } : {}),
-      });
-      this.pendingMutations.delete(key);
-    });
-    this.finalizingMutations.set(key, finalizing);
-    try {
-      await finalizing;
-    } finally {
-      if (this.finalizingMutations.get(key) === finalizing) this.finalizingMutations.delete(key);
-    }
-  }
-
-  async releasePending(sessionId: string, callId: string): Promise<PendingMutation | undefined> {
-    if (this.disposed) return undefined;
-    const key = this.pendingKey(sessionId, callId);
-    const pending = this.pendingMutations.get(key);
-    if (!pending) return undefined;
-    await this.finalizePending(sessionId, callId, "error");
-    return pending;
-  }
-
-  private async quarantineSessionMutations(sessionId: string, staleOnly: boolean): Promise<void> {
-    const staleBefore = this.now() - SESSION_TTL_MS;
-    const pending = [...this.pendingMutations.values()]
-      .filter((entry) => entry.sessionId === sessionId && (!staleOnly || entry.startedAt <= staleBefore))
-      .sort((left, right) => left.startedAt - right.startedAt || left.callId.localeCompare(right.callId))
-      .slice(0, staleOnly ? MAX_IDLE_MUTATION_QUARANTINES : undefined);
-    for (const mutation of pending) await this.finalizePending(sessionId, mutation.callId, "error");
-  }
-
   private async unseenPeerSnapshots(sessionId: string): Promise<PeerSnapshot[]> {
     if (this.disposed) return [];
     try {
@@ -2800,143 +2182,56 @@ export class SessionCoordinator {
     }
   }
 
-  async withRepositoryClaim<T>(sessionId: string, action: (claim: RepositoryClaimContext) => Promise<T>): Promise<T | undefined> {
-    if (this.disposed) return undefined;
-    let pending: PendingMutation | undefined;
-    let quarantined = false;
-    const callId = `repository-${randomUUID()}`;
-    const key = this.pendingKey(sessionId, callId);
-    try {
-      if (this.credentialResetActive) throw new Error("Coordination reset is active");
-      this.claimingMutations.add(key);
-      let manifestGeneration = 0;
-      try {
-        const before = worktreeSnapshot(this.ctx.worktree);
-        await this.serialized(sessionId, async (state) => {
-          const clientClaimKey = randomBytes(OWNERSHIP_BYTES).toString("base64url");
-          const result = await this.invoke("coordination_claim", {
-            ...this.lease(state), client_claim_key: clientClaimKey,
-            operation: "repository",
-            claims: [{ claim: { kind: "reserved", name: "@repository" } }],
-          });
-          this.apply(state, result.session);
-          if (!Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-            || !Number.isSafeInteger(result.manifestGeneration) || (result.manifestGeneration as number) < 0
-            || typeof result.operationId !== "string") throw new Error("invalid coordination response");
-          manifestGeneration = result.manifestGeneration as number;
-          pending = {
-            sessionId, callId, clientClaimKey, operation: "repository", paths: [],
-            baselines: new Map(), before, acceptedEpoch: result.acceptedEpoch as number, operationId: result.operationId,
-            startedAt: this.now(), remoteClaimed: true,
-          };
-          this.pendingMutations.set(key, pending);
-        });
-      } finally {
-        this.claimingMutations.delete(key);
-      }
-      const currentPending = pending!;
-      const context: RepositoryClaimContext = {
-        manifestGeneration,
-        proof: () => {
-          this.assertActive();
-          const state = this.sessions.get(sessionId);
-          if (!state) throw new Error("coordination session unavailable");
-          return {
-            worktree_id: state.worktreeId,
-            session_id: state.sessionId,
-            incarnation: state.incarnation,
-            expected_revision: state.revision,
-            fence: state.fence,
-            ownership_token: state.ownershipToken,
-            client_claim_key: currentPending.clientClaimKey,
-            accepted_epoch: currentPending.acceptedEpoch,
-          };
-        },
-        renew: () => this.renewPending(sessionId, currentPending),
-        verify: async () => {
-          if (this.disposed) return;
-          await this.serialized(sessionId, async (state) => {
-            const result = await this.invoke("coordination_claim", {
-              ...this.claimProof(state, currentPending), action: "verify",
-            });
-            this.apply(state, result.session);
-          });
-        },
-        quarantine: async (code = "uncertain_apply") => {
-          if (this.disposed) return;
-          await this.quarantinePendingMutation(sessionId, currentPending, code);
-          this.pendingMutations.delete(key);
-          quarantined = true;
-        },
-      };
-      const value = await action(context);
-      if (!quarantined) await this.completePending(sessionId, currentPending);
-      pending = undefined;
-      return value;
-    } catch (error) {
-      if (this.disposed) return undefined;
-      this.warning();
-      if (pending && !quarantined) {
-        const failedPending = pending;
-        try {
-          await this.quarantinePendingMutation(sessionId, failedPending);
-          this.pendingMutations.delete(key);
-          pending = undefined;
-        } catch (quarantineError) {
-          this.pendingMutations.delete(key);
-          this.retainFailure("quarantine", sessionId, quarantineError, {
-            exactKey: `quarantine:${durableSessionReference(sessionId)}:${failedPending.operationId}`,
-            digest: createHash("sha256").update(failedPending.operationId).digest("hex"),
-            ambiguous: true,
-            ...(failedPending.remoteProof
-              ? { mutation: this.mutationEvidence(failedPending, "completion_ambiguous") }
-              : {}),
-          });
-        }
-      }
-      return undefined;
-    }
+  async recordOperationalResult(sessionId: string, records: {
+    manifest: ResultManifest;
+    reviewAdmission?: ReviewAdmission;
+    allocation?: AllocationRecord;
+  }): Promise<boolean> {
+    if (!safeManifestRecords(records)) throw new Error("invalid operational manifest records");
+    await this.serialized(sessionId, async (state) => {
+      if (records.manifest.ownerId !== state.actorId || records.manifest.fence !== state.fence) throw new Error("foreign or stale manifest owner");
+      this.assertManifestWorktree(records.manifest);
+      state.manifest = structuredClone(records.manifest);
+      state.todos = todoCounts(records.manifest.todoWrite)!;
+      state.reviewAdmission = records.reviewAdmission ? structuredClone(records.reviewAdmission) : undefined;
+      state.allocation = records.allocation ? structuredClone(records.allocation) : undefined;
+      state.memoryDirty = true;
+    });
+    return this.publishMemory(sessionId, "idle");
   }
 
-  private async recordSuccessfulTool(
-    sessionId: string,
-    tool: string,
-    args: unknown,
-    knownPath?: string,
-    result?: unknown,
-  ): Promise<void> {
-    if (this.disposed) return;
-    const state = this.localSession(sessionId);
-    const normalizedTool = tool.toLowerCase();
-    const path = knownPath ?? (isRecord(args) ? relativeToolPath(this.ctx.worktree, args.filePath ?? args.path) : undefined);
-    const patchOperation = path && normalizedTool === "apply_patch"
-      ? state.changedPaths.find((entry) => entry.path === path)?.operation
-      : undefined;
-    const kind: OperationalAction["kind"] = normalizedTool === "read" ? "read"
-      : normalizedTool === "grep" || normalizedTool === "glob" ? "search"
-        : normalizedTool === "write" ? "write"
-          : normalizedTool === "edit" ? "edit"
-            : patchOperation ?? "execute";
-    const encoded = path ? encodeCoordinationPath(path) : undefined;
-    const action: OperationalAction = {
-      kind,
-      result: "succeeded",
-      pathSegments: encoded ?? null,
-      targetHash: encoded ? null : targetHash(normalizedTool, args),
-    };
-    state.actions = [...state.actions, action].slice(-64);
-    const classifiedCheck = checkKind(normalizedTool, args);
-    if (classifiedCheck) {
-      const check: OperationalCheck = {
-        kind: classifiedCheck,
-        result: "passed",
-        targetHash: targetHash(normalizedTool, args),
-        exitCode: commandExitCode(result),
-      };
-      state.checks = [...state.checks, check].slice(-32);
+  private assertManifestWorktree(manifest: ResultManifest): void {
+    const base = git(this.ctx.worktree, ["rev-parse", "HEAD"]).toString("utf8").trim();
+    if (manifest.baseCommit !== base || manifest.dirtyHashes.some((entry) => {
+      const path = decodeCoordinationPath(entry.pathSegments);
+      return path === undefined || fileBaselineSha256(this.ctx.worktree, path) !== entry.sha256;
+    })) throw new Error("stale manifest input");
+  }
+
+  private manifestRecords(state: SessionState): Pick<OperationalEntry, "manifest" | "reviewAdmission" | "allocation"> {
+    let manifest = structuredClone(state.manifest);
+    if (manifest.finalized) {
+      this.assertManifestWorktree(manifest);
+      if (manifest.ownerId !== state.actorId || manifest.fence !== state.fence) throw new Error("stale manifest owner");
+    } else {
+      let baseCommit: string | null = null;
+      try { baseCommit = git(this.ctx.worktree, ["rev-parse", "HEAD"]).toString("utf8").trim(); } catch { /* An unborn worktree has no base commit. */ }
+      const paths = new Set([...manifest.dirtyHashes.map((entry) => decodeCoordinationPath(entry.pathSegments)!),
+        ...state.changedPaths.map((entry) => entry.path)]);
+      manifest = { ...manifest, baseCommit, ownerId: state.actorId, fence: state.fence,
+        dirtyHashes: [...paths].sort().map((path) => ({ pathSegments: encodeCoordinationPath(path)!, sha256: fileBaselineSha256(this.ctx.worktree, path) })) };
     }
-    state.memoryDirty = true;
-    persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(state, state.status));
+    const unresolved = this.outbox?.unresolved().filter((entry) => entry.sessionHash === state.sessionId.slice("session-".length)) ?? [];
+    for (const entry of unresolved) {
+      if (!manifest.unresolvedOperations.some((operation) => operation.operationId === entry.operationId)) {
+        manifest.unresolvedOperations.push({ operationId: entry.operationId, status: "unknown", firstFailure: entry.failure });
+      }
+    }
+    const records = { manifest, ...(state.reviewAdmission ? { reviewAdmission: state.reviewAdmission } : {}),
+      ...(state.allocation ? { allocation: state.allocation } : {}) };
+    if (!safeManifestRecords(records)) throw new Error("invalid operational manifest records");
+    state.manifest = manifest;
+    return records;
   }
 
   private nextWork(state: SessionState): OperationalEntry["nextWork"] {
@@ -3021,6 +2316,7 @@ export class SessionCoordinator {
           ...this.lease(state),
           operation: "memory",
           memory_entry: {
+            ...this.manifestRecords(state),
             status,
             actions: state.actions,
             checks: publishedChecks(state.checks),
@@ -3049,23 +2345,13 @@ export class SessionCoordinator {
 
   hooks(): Hooks {
     return {
+      "chat.message": async ({ sessionID, agent }) => {
+        if (this.disposed) return;
+        // The system-transform hook has no agent field; unknown roles fail closed.
+        this.localSession(sessionID).activeAgent = agent;
+      },
       event: async ({ event }) => {
         if (this.disposed) return;
-        if (event.type === "message.part.updated") {
-          const part = event.properties.part;
-          if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
-            try {
-              await this.finalizePending(part.sessionID, part.callID, part.state.status);
-            } catch {
-              trace({ event: "claim_state", operation: "tool.execute.after", sessionHash: sessionHash(part.sessionID),
-                mapMember: this.sessions.has(part.sessionID), incarnation: this.sessions.get(part.sessionID)?.incarnation ?? null,
-                claimState: part.state.status === "error" ? "quarantine_failed" : "claim_failed" });
-              this.retainFailure(part.state.status === "error" ? "quarantine" : "completion", part.sessionID,
-                new Error("invalid coordination response"), { ambiguous: true });
-            }
-          }
-          return;
-        }
         const sessionId = eventSessionId(event);
         if (!sessionId) return;
         if (event.type === "session.created" || event.type === "session.idle") {
@@ -3090,7 +2376,6 @@ export class SessionCoordinator {
         }
         if (event.type === "session.idle") {
           await this.publishTranscript(sessionId).catch(() => this.warning());
-          await this.quarantineSessionMutations(sessionId, true);
           if (await this.heartbeatSession(sessionId)) {
             await this.publishSnapshot(sessionId, (state) => {
               state.status = "idle";
@@ -3117,7 +2402,6 @@ export class SessionCoordinator {
           return;
         }
         if (event.type === "session.error") {
-          await this.quarantineSessionMutations(sessionId, false);
           await this.publishSnapshot(sessionId, (state) => {
             state.status = "idle";
             state.memoryDirty = true;
@@ -3131,12 +2415,14 @@ export class SessionCoordinator {
           if (todos) {
             await this.publishSnapshot(sessionId, (state) => {
               state.todos = todos;
+              state.manifest.todoWrite = stableTodos(event.properties?.todos, state.manifest.todoWrite);
+              state.manifest.finalized = false;
+              state.reviewAdmission = undefined;
               state.memoryDirty = true;
               this.applySignals(state, event.properties);
             });
-            if (todos.pending === 0 && todos.inProgress === 0 && todos.completed + todos.cancelled > 0) {
-              await this.publishMemory(sessionId, "completed");
-            }
+            await this.publishMemory(sessionId, todos.pending === 0 && todos.inProgress === 0 && todos.completed + todos.cancelled > 0
+              ? "completed" : "working");
           }
           return;
         }
@@ -3166,173 +2452,8 @@ export class SessionCoordinator {
           output.parts.splice(0, output.parts.length, textPart);
         }
       },
-      "tool.execute.before": async ({ tool, sessionID, callID }, output) => {
-        if (this.disposed) return;
-        const boundBrowserCommand = tool === "bash" ? boundBrowserWrapperCommand(this.ctx.worktree, output.args) : undefined;
-        const browserAgent = boundBrowserCommand !== undefined
-          ? await this.hasTrustedAgentCall(sessionID, callID, tool, output.args, BROWSER_AGENT)
-          : false;
-        if (browserAgent && isRecord(output.args)) output.args.command = boundBrowserCommand;
-        const fixedProductionRestart = isRecord(output.args)
-          && output.args.command === "ingenium-build deployment production-restart";
-        const deploymentOwner = isManagedBuildRequest(this.ctx.worktree, output.args)
-          ? fixedProductionRestart
-            ? await this.isAuthorizedProductionRestartOwner(sessionID, callID, tool, output.args)
-            : await this.isAuthorizedDeploymentOwner(sessionID, callID, tool, output.args)
-          : false;
-        const recoveryEngineer = recoveryRepositoryMutation(this.ctx.worktree, output.args)
-          ? await this.isAuthorizedRecoveryEngineer(sessionID, callID, tool, output.args)
-          : false;
-        const descriptor = managedMutation(this.ctx.worktree, tool, output.args, deploymentOwner, browserAgent, recoveryEngineer);
-        if (!descriptor) {
-          if (isManagedMutationTool(tool)) throw new Error("Managed mutation coordination rejected the tool arguments");
-          return;
-        }
-        this.localSession(sessionID);
-        this.checkCredentialFingerprint(sessionID, descriptor.reloadTimeoutMs);
-        if (descriptor.readOnly) {
-          if (descriptor.coordinationReset) await this.prepareForCredentialReset();
-          return;
-        }
-        trace({
-          event: "hook_entry",
-          operation: "tool.execute.before",
-          sessionHash: sessionHash(sessionID),
-          mapMember: this.sessions.has(sessionID),
-          incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
-        });
-        try {
-          await this.preclaim(sessionID, callID, descriptor);
-        } catch (error) {
-          const sanitized = sanitizedPreclaimError(error);
-          trace({ event: "claim_state", operation: "tool.execute.before", sessionHash: sessionHash(sessionID),
-            mapMember: this.sessions.has(sessionID), incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
-            claimState: "claim_failed", failure: error instanceof McpBridgeError ? error.failure : "request_failed",
-            bridgeStage: error instanceof McpBridgeError ? error.stage : undefined,
-            errorCode: sanitized?.errorCode });
-          await this.handleFailure(sessionID, "claim_failure", error);
-          if (!sanitized) this.retainFailure("claim", sessionID, error);
-        }
-        trace({
-          event: "hook_exit",
-          operation: "tool.execute.before",
-          sessionHash: sessionHash(sessionID),
-          mapMember: this.sessions.has(sessionID),
-          incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
-        });
-      },
-      "tool.execute.after": async ({ tool, sessionID, callID, args }, result) => {
-        if (this.disposed) return;
-        const deploymentOwner = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.deploymentOwner === true;
-        const recoveryEngineer = this.pendingMutations.get(this.pendingKey(sessionID, callID))?.recoveryEngineer === true;
-        const descriptor = managedMutation(
-          this.ctx.worktree,
-          tool,
-          args,
-          deploymentOwner,
-          isBoundBrowserWrapperRequest(this.ctx.worktree, args),
-          recoveryEngineer,
-        );
-        if (descriptor?.readOnly) {
-          if (descriptor.coordinationReset) {
-            await this.reconnectAfterCredentialReset(sessionID, descriptor.reloadTimeoutMs ?? 10_000);
-          }
-          await this.recordSuccessfulTool(sessionID, tool, args, undefined, result);
-          return;
-        }
-        if (!isManagedMutationTool(tool)) {
-          await this.recordSuccessfulTool(sessionID, tool, args, undefined, result);
-          return;
-        }
-        trace({
-          event: "hook_entry",
-          operation: "tool.execute.after",
-          sessionHash: sessionHash(sessionID),
-          mapMember: this.sessions.has(sessionID),
-          incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
-        });
-        let pending = this.pendingMutations.get(this.pendingKey(sessionID, callID));
-        if (!pending && descriptor) {
-          const current = worktreeSnapshot(this.ctx.worktree);
-          const reconstructed = new Map(current);
-          for (const path of descriptor.paths) reconstructed.set(path, repositoryBaselineSha256(this.ctx.worktree, path));
-          pending = {
-            sessionId: sessionID,
-            callId: callID,
-            clientClaimKey: randomBytes(OWNERSHIP_BYTES).toString("base64url"),
-            operation: descriptor.operation,
-            paths: descriptor.paths,
-            baselines: new Map(descriptor.paths.map((path) => [path, reconstructed.get(path) ?? null])),
-            before: reconstructed,
-            acceptedEpoch: 0,
-            operationId: randomUUID(),
-            startedAt: this.now(),
-            remoteClaimed: false,
-            ...(descriptor.deploymentOwner ? { deploymentOwner: true } : {}),
-            ...(descriptor.recoveryEngineer ? { recoveryEngineer: true } : {}),
-          };
-          this.pendingMutations.set(this.pendingKey(sessionID, callID), pending);
-        }
-        if (!pending || !descriptor || descriptor.operation !== pending.operation
-          || JSON.stringify([...descriptor.paths].sort()) !== JSON.stringify([...pending.paths].sort())) {
-          this.retainFailure("completion", sessionID, new Error("invalid coordination response"), { ambiguous: true });
-          return;
-        }
-        const counts = diffCounts(result?.metadata);
-        const snapshotPublished = await this.publishSnapshot(sessionID, (state) => {
-          state.status = "working";
-          this.applySignals(state, args);
-          this.applySignals(state, result?.metadata);
-          for (const path of pending.paths) {
-            const changed: ChangedPathSnapshot = {
-              path,
-              operation: pending.operation === "write" || pending.operation === "create"
-                || (pending.operation === "apply_patch" && !pending.before.has(path)) ? "write" : "edit",
-              ...counts,
-              changeRevision: (state.snapshotRevision ?? 0) + 1,
-            };
-            state.changedPaths = [...state.changedPaths.filter((entry) => entry.path !== path), changed]
-              .slice(-MAX_CHANGED_PATHS);
-          }
-          state.memoryDirty = true;
-        });
-        await this.recordSuccessfulTool(sessionID, tool, args, pending.paths[0], result);
-        if (pending.remoteClaimed) {
-          try {
-            await this.renewPending(sessionID, pending);
-          } catch (error) {
-            this.retainFailure("claim", sessionID, error, { ambiguous: true });
-          }
-        }
-        if (snapshotPublished) {
-          try {
-            for (const path of pending.paths) {
-              await this.publish(
-                sessionID,
-                pending.operation === "write" || pending.operation === "create" ? "write" : "edit",
-                path,
-                pending.baselines.get(path) ?? null,
-              );
-            }
-          } catch (error) {
-            this.retainFailure("publication", sessionID, error, {
-              exactKey: `publication:${durableSessionReference(sessionID)}:${pending.operationId}`,
-              digest: createHash("sha256").update(pending.operationId).digest("hex"),
-              ambiguous: true,
-            });
-          }
-        }
-        await this.finalizePending(sessionID, callID, "completed");
-        void this.runDeferredReload();
-        trace({
-          event: "hook_exit",
-          operation: "tool.execute.after",
-          sessionHash: sessionHash(sessionID),
-          mapMember: this.sessions.has(sessionID),
-          incarnation: this.sessions.get(sessionID)?.incarnation ?? null,
-        });
-      },
       "experimental.chat.system.transform": async ({ sessionID, model }, output) => {
+        appendAutonomyReminder(output.system);
         if (this.disposed || !sessionID) return;
         await this.serializedTransform(sessionID, async () => {
           trace({
@@ -3347,6 +2468,13 @@ export class SessionCoordinator {
           const peers = await this.unseenPeerSnapshots(sessionID);
           const memoryBatch = await this.readMemory(sessionID);
           const transcriptBatch = await this.readTranscript(sessionID);
+          const activeAgent = this.sessions.get(sessionID)?.activeAgent;
+          const explicitMemory = activeAgent !== undefined && [
+            "ingenium-chat", "ingenium-orchestrator", "ingenium-software-engineer-premium",
+          ].includes(activeAgent) ? await this.explicitMemory.read().catch(() => {
+            logPluginLifecycle(this.ctx.client, "explicit-memory", "warn", "saved memory: unavailable");
+            return undefined;
+          }) : undefined;
           const handoffs = batch.events.map(safeInjectedHandoff);
           const snapshots = peers.map(safeInjectedPeer);
           const state = this.sessions.get(sessionID);
@@ -3381,7 +2509,8 @@ export class SessionCoordinator {
             })
             : undefined;
           if (transcriptBatch?.messages.length && (!transcript
-            || Buffer.byteLength(activity ?? "", "utf8") + Buffer.byteLength(memory ?? "", "utf8")
+            || Buffer.byteLength(explicitMemory ?? "", "utf8") + Buffer.byteLength(activity ?? "", "utf8")
+              + Buffer.byteLength(memory ?? "", "utf8")
               + Buffer.byteLength(transcript, "utf8") > MAX_COORDINATION_TRANSFORM_BYTES)) {
             transcript = serializeCoordinationBlock("LINKED_SESSION_TRANSCRIPTS_V1", LINKED_SESSION_TRANSCRIPT_TRUST_FRAME, {
               schemaVersion: 1,
@@ -3395,11 +2524,13 @@ export class SessionCoordinator {
           }
           if ((safeHandoffs.length > 0 || safeSnapshots.length > 0) && !activity) return;
           if (safeMemory.length > 0 && !memory) return;
-          if (Buffer.byteLength(activity ?? "", "utf8") + Buffer.byteLength(memory ?? "", "utf8")
+          if (Buffer.byteLength(explicitMemory ?? "", "utf8") + Buffer.byteLength(activity ?? "", "utf8")
+            + Buffer.byteLength(memory ?? "", "utf8")
             + Buffer.byteLength(transcript ?? "", "utf8")
             > MAX_COORDINATION_TRANSFORM_BYTES) return;
           if (this.disposed) return;
           try {
+            if (explicitMemory) output.system.push(explicitMemory);
             if (activity) output.system.push(activity);
             if (memory) output.system.push(memory);
             if (transcript) output.system.push(transcript);
@@ -3407,12 +2538,14 @@ export class SessionCoordinator {
             if (transcript && output.system.at(-1) === transcript) output.system.pop();
             if (memory && output.system.at(-1) === memory) output.system.pop();
             if (activity && output.system.at(-1) === activity) output.system.pop();
+            if (explicitMemory && output.system.at(-1) === explicitMemory) output.system.pop();
             return;
           }
           if (this.disposed) {
             if (transcript && output.system.at(-1) === transcript) output.system.pop();
             if (memory && output.system.at(-1) === memory) output.system.pop();
             if (activity && output.system.at(-1) === activity) output.system.pop();
+            if (explicitMemory && output.system.at(-1) === explicitMemory) output.system.pop();
             return;
           }
           try {
@@ -3494,11 +2627,8 @@ export const SessionCoordinatorPlugin = async (ctx: PluginInput): Promise<Hooks>
   } catch {
     logPluginLifecycle(ctx.client, "session-coordinator", "warn", "coordination: unavailable");
     return {
-      "tool.execute.before": async ({ tool }, output) => {
-        const descriptor = managedMutation(ctx.worktree, tool, output.args);
-        if (!descriptor && isManagedMutationTool(tool)) {
-          throw new Error("Managed mutation coordination rejected the tool arguments");
-        }
+      "experimental.chat.system.transform": async (_input, output) => {
+        appendAutonomyReminder(output.system);
       },
     };
   }

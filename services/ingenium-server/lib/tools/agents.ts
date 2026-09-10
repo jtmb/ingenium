@@ -71,7 +71,7 @@ export async function agentEnable(project: string, name: string) {
   return textResult(res.data);
 }
 
-/** Disable an agent and remove its .md file from disk. */
+/** Disable an agent while retaining its .md profile with disable: true. */
 export async function agentDisable(project: string, name: string) {
   const res = await api.post(`/agents/${encodeURIComponent(name)}/disable?project=${project}`);
   return textResult(res.data);

@@ -18,13 +18,16 @@ docker compose --profile compatibility up --build
 Compatibility starts one container with nine active supervisord processes and fixed local
 runtime aliases. Production separates the control plane, manager, gateway, and
 per-workspace runtimes; its fixed aliases return static `404` picker guidance. Direct
-4098/4099/4100 access is not supported. The built-in MCP catalog contains **283 tools**
-across **30 baseline categories** (281 `ingenium_` catalog entries plus 2 extension
+4098/4099/4100 access is not supported. The built-in MCP catalog contains **291 tools**
+across **31 baseline categories** (289 `ingenium_` catalog entries plus 2 extension
 tools); project-scoped child discovery can add tools and categories at runtime.
 
 ### Connecting an MCP Client
 
 Point your MCP client to the `@ingenium/extension` package:
+
+Use the owner-only protected credential file and declare its purpose explicitly;
+do not set `INGENIUM_MCP_CREDENTIAL` inline in tracked configuration.
 
 ```jsonc
 {
@@ -35,8 +38,8 @@ Point your MCP client to the `@ingenium/extension` package:
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}",
         "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+        "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info"
       }
@@ -45,7 +48,7 @@ Point your MCP client to the `@ingenium/extension` package:
 }
 ```
 
-The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, commands, and config), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
+The extension package ships five OpenCode plugins — `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history), `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, commands, and config), `session-coordinator.ts` (managed session coordination), and the `ponytail` adapter. Reference them in your OpenCode config:
 
 `resource-sync.ts` is the Git-authoritative projection path: Git worktree files
 flow through the extension, configured MCP stdio, authenticated API, and then
@@ -56,16 +59,18 @@ OpenCode restart.
 ```jsonc
 {
   "plugin": [
-    "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/resource-sync.ts",
-    "packages/ingenium-extension/auto-observer.ts"
+    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }
 ```
 
 ### Routes
 
-The Ingenium Dashboard provides **24 primary navigation routes** plus the Settings overlay with 19 URL-addressable tabs:
+The Ingenium Dashboard provides **24 primary navigation routes** plus the Settings overlay with 20 URL-addressable tabs:
 
 | Page | Purpose |
 |------|---------|
@@ -90,7 +95,7 @@ The Ingenium Dashboard provides **24 primary navigation routes** plus the Settin
 | `/config` | OpenCode config editor |
 | `/observations` | Self-learning observations |
 | `/personality` | Personality traits |
-| `/context` | Immutable context conversation memory |
+| `/context` | Immutable context conversations and explicit saved memory |
 | `/pipeline` | Pipeline event timeline |
 | `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
 | Settings (overlay) | Full-screen settings overlay
@@ -300,6 +305,21 @@ only after selecting a conversation or running a bounded in-conversation search.
 
 **API**: Uses the project-scoped immutable conversation endpoints under `/api/v1/context/conversations`. See [API Reference](../develop/api.md#context--canonical-agent-memory) for the endpoint contract.
 
+### Saved memory
+
+The `/context` workspace also exposes explicit saved memory for authorized agent
+work. The dashboard only enables its memory controls after an authorized
+workspace is confirmed for the selected project. The section can refresh, edit
+content, and forget a saved item; forgetting requires a second confirmation.
+`ingenium_memory_save` remembers only content the current user explicitly asks to
+save and defaults to a private preference in the bound project/workspace;
+`ingenium_memory_list` and `ingenium_memory_search` retrieve bounded memory.
+`ingenium_memory_forget` deletes the stored content from future retrieval while
+retaining a content-free tombstone and receipt. Memory is untrusted reference
+data, never instructions. Reads require `memory:read`; saves, updates, and
+forgets require `memory:write`; project visibility additionally requires
+`memory:share`. See [API Reference](../develop/api.md#explicit-saved-memory).
+
 ## Pipeline
 
 **What it does**: A real-time Git-workflow-style timeline of all self-learning pipeline events. Every observation, synthesis run, trait creation, and plugin event is displayed in a connected vertical timeline with color-coded nodes.
@@ -335,6 +355,7 @@ lifecycle, partial-cost, UTC, freshness, project reset, and export details.
 - **No LLM configured state**: When no providers exist (`isConfigured === false`), a blue info banner links to Settings → Providers. The send button is blocked, all selectors are disabled, and the composer has `hasSelectableModel={false}` preventing sends. Once a provider is configured and saved, selectors populate dynamically from `GET /api/v1/opencode/chat-config`. OpenCode live-reloads provider config changes — no restart required.
 - Attach files via the paperclip button (max 5, 10MB each) or drag-and-drop. Images show inline previews; text files show code-block previews; binary files show download links.
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
+- Use the composer controls **Use memory** (off by default), **Save message** (one-shot), and **Learning tools** (on by default) independently. The saved-memory controls stay disabled until the selected project has a confirmed authorized workspace. Accepted saves report saving, saved, queued, or failed status; queued outcomes provide status checking before an identical retry.
 - Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
 - Fork, share (copy link to clipboard), and compact conversations via header action buttons.
 - Provider-emitted reasoning appears live in a separate escaped plain-text disclosure above the assistant answer. OpenCode v1.18.9 identifies the reasoning part in `message.part.updated` before sending its `field: "text"` deltas, and Chat uses that authoritative part mapping to keep reasoning out of the rendered Markdown answer and copy. The disclosure remains open while streaming, then becomes user-toggleable after the terminal event.
@@ -357,7 +378,7 @@ lifecycle, partial-cost, UTC, freshness, project reset, and export details.
 
 ### Settings deep links
 
-All 19 supported panel IDs are:
+All 20 supported panel IDs are:
 
 | Deep link | Panel behavior | Full workspace |
 |---|---|---|
@@ -379,9 +400,17 @@ All 19 supported panel IDs are:
 | `observations` | Route-linked read-only view of self-learning observations with filters. | `/observations` |
 | `personality` | Route-linked view for learned personality traits. | `/personality` |
 | `providers` | Manage native OpenCode connections, custom provider blocks, Ingenium primary/backup roles, and synthesis interval. | — |
+| `cloudflare` | Configure an existing named Cloudflare tunnel and independent authenticated HTTPS audience mappings. | [Cloudflare Tunnel](../configure/cloudflare.md) |
 | `logs` | Route-linked live system-log and diagnostics view. | `/logs` |
 
 Use a deep link such as `/?settings=providers`. Route-linked panels intentionally do not duplicate their management UI: **Open workspace** navigates to the dedicated route, which retains that route's data loading, authorization, mutation flows, and responsive behavior. The `config` panel is also a compact launcher for `/config`.
+
+The Cloudflare panel shows desired, connector, authentication, and route-inventory
+status; the read-only existing tunnel name; independent Dashboard, OpenCode, CLI,
+VS Code, and API mappings; a write-only token field; and **Save**, **Validate**,
+**Connect**, and **Disconnect** actions. **Connect** remains unavailable until
+the trusted route inventory is ready. It does not create tunnels, edit DNS, or
+add an HTTP MCP transport; see [Cloudflare Tunnel](../configure/cloudflare.md).
 
 **Provider drafts**: Changes made in the Providers panel are local state and survive tab switches because inactive panels remain mounted but hidden/inert. Closing the overlay discards unsaved provider edits; click **Save providers** to persist them.
 **Provider credentials**: API keys are never returned by the API or written to OpenCode config; saved keys are represented by an `apiKeySet` placeholder.

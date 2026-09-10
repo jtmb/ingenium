@@ -1858,7 +1858,7 @@ test("rejects every nonallowlisted canary request before side effects and accept
   assert.equal(sideEffects, 1);
 });
 
-test("turns an injected local action failure into the managed error path without changing the file", async () => {
+test("executes profile-allowlisted canary actions directly and propagates local failures without coordinator hooks", async () => {
   const fixture = fixtureRepository();
   mkdirSync(join(fixture.root, "tests", "coordination"), { recursive: true });
   const path = "tests/coordination/local-failure.txt";
@@ -1869,28 +1869,29 @@ test("turns an injected local action failure into the managed error path without
     worktree: fixture.root,
     project: "project-one",
     check: "typecheck",
-    steps: [{ operation: "fail_local", slot: "ambiguous", path, marker: "never-written" }],
+    steps: [
+      { operation: "mutate_only", slot: "a", path: "tests/coordination/direct.txt", marker: "direct-marker" },
+      { operation: "fail_local", slot: "ambiguous", path, marker: "never-written" },
+    ],
   };
   const calls: string[] = [];
   const hooks = {
-    "tool.execute.before": async (_input: unknown, output: { args: Record<string, unknown> }) => {
-      assert.equal(output.args.currentTaskId, plan.nonce);
-      calls.push("claim");
-    },
-    event: async ({ event }: { event: { type: string; properties: { part: { state: { status: string } } } } }) => {
-      assert.equal(event.type, "message.part.updated");
-      assert.equal(event.properties.part.state.status, "error");
-      calls.push("quarantine");
-    },
+    "tool.execute.before": async () => { calls.push("claim"); throw new Error("Coordinator admission must not run"); },
+    event: async () => { calls.push("quarantine"); },
     "tool.execute.after": async () => { calls.push("complete"); },
   };
-  const actions = new RealCanaryActions(plan, hooks as never);
-  await assert.rejects(actions.execute(plan.steps[0]!, {
+  const dispatcher = new CanaryDispatcher(plan, new RealCanaryActions(plan, hooks));
+  const context = {
     sessionId: "session-a",
     messageId: "message-a",
     abort: new AbortController().signal,
-  }), /Injected local canary failure/);
-  assert.deepEqual(calls, ["claim", "quarantine"]);
+  };
+  assert.equal(await dispatcher.dispatch(dispatcher.requestForCurrentStep(plan.nonce, "mutate_only"), context), "direct-marker");
+  assert.equal(readFileSync(join(fixture.root, "tests/coordination/direct.txt"), "utf8"), "direct-marker\n");
+  assert.equal(statSync(join(fixture.root, "tests/coordination/direct.txt")).mode & 0o777, 0o600);
+  await assert.rejects(dispatcher.dispatch(dispatcher.requestForCurrentStep(plan.nonce, "fail_local"), context), /Injected local canary failure/);
+  assert.equal(dispatcher.nextOperation(), "fail_local");
+  assert.deepEqual(calls, []);
   assert.equal(existsSync(join(fixture.root, path)), false);
 });
 

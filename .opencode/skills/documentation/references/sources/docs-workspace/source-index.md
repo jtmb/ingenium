@@ -91,5 +91,5 @@ After creating or moving a page, check backlinks (`ingenium_docs_get_backlinks`)
 ## Cross-References
 
 - **`development-conventions`** — Code and API conventions
-- **`configuring-opencode`** — Agent permission patterns
+- **`.opencode/agents/**` profiles and `opencode.json`** — Agent roster and permission authority
 - **`skill-maintenance`** — Skill lifecycle management

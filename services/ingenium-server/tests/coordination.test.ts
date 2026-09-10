@@ -62,8 +62,8 @@ const handoffEvent = {
   sourceActorId: `actor-${"b".repeat(64)}`,
   sourceIncarnation: 2,
   sourceRevision: 4,
-  currentTaskId: null,
-  currentTaskRevision: null,
+  currentTaskId: `task-${"c".repeat(64)}`,
+  currentTaskRevision: 7,
   contextConversationId: null,
   contextRevision: null,
   timestamp: TIMESTAMP,
@@ -152,6 +152,12 @@ describe("coordination MCP transport adapters", () => {
         ...lease, next_ownership_token: NEXT_TOKEN, ttl_ms: 2_000,
       }],
       ["recovery_state", "post", "/coordination/epoch/recovery-state", lease],
+      ["mint_recovery_admission", "post", "/coordination/recovery-admissions/mint", {
+        ...lease,
+        preflight_digest: "e".repeat(64), head: "f".repeat(40), parent_pid: 42,
+        parent_start: "123456", parent_executable: "/usr/local/bin/opencode",
+        parent_nonce: NEXT_TOKEN, ttl_ms: 2_000,
+      }],
       ["reconcile_epoch", "post", "/coordination/epoch/reconcile", {
         ...lease,
         quarantined_session_id: "session-crashed", quarantined_incarnation: 1, quarantined_fence: 1,
@@ -195,10 +201,16 @@ describe("coordination MCP transport adapters", () => {
         quarantined_actor_id: `actor-${"c".repeat(64)}`,
         accepted_epoch: 1,
         recovery_footprint_hash: "d".repeat(64),
+        preflight_digest: "e".repeat(64),
+        head: "f".repeat(40),
+        parent_pid: 42,
+        parent_start: "123456",
+        parent_executable: "/usr/local/bin/opencode",
+        parent_nonce: NEXT_TOKEN,
       });
       expect(mockApi[method]).toHaveBeenLastCalledWith(path, payload, { project: PROJECT });
     }
-    expect(mockApi.post).toHaveBeenCalledTimes(8);
+    expect(mockApi.post).toHaveBeenCalledTimes(9);
     expect(mockApi.patch).toHaveBeenCalledTimes(1);
   });
 
@@ -259,6 +271,71 @@ describe("coordination MCP transport adapters", () => {
     })).resolves.toMatchObject({ content: [{ text: JSON.stringify(takeoverResponse) }] });
   });
 
+  it("strictly projects the one-time recovery admission minted through coordination_update", async () => {
+    const admission = {
+      schema: "ingenium.recovery-admission",
+      version: 1,
+      action: "production-restart",
+      preflightDigest: "e".repeat(64),
+      head: "f".repeat(40),
+      parent: {
+        pid: 42,
+        start: "123456",
+        executable: "/usr/local/bin/opencode",
+        nonce: NEXT_TOKEN,
+        session: lease.session_id,
+      },
+      project: PROJECT,
+      projectId: SESSION_ID,
+      worktreeId: lease.worktree_id,
+      workspace: "coordination-workspace-main",
+      storage: "d".repeat(64),
+      worktree: "/workspace/ingenium",
+      issuedAt: TIMESTAMP,
+      expiresAt: "2026-08-01T00:01:00.000Z",
+      revision: session.revision,
+      fence: session.fence,
+    };
+    const response = { session, admission, consumeToken: "R".repeat(43) };
+    mockApi.post.mockResolvedValueOnce(success(response));
+
+    const result = await coordination.coordinationUpdate(PROJECT, "mint_recovery_admission", {
+      ...lease,
+      preflight_digest: admission.preflightDigest,
+      head: admission.head,
+      parent_pid: admission.parent.pid,
+      parent_start: admission.parent.start,
+      parent_executable: admission.parent.executable,
+      parent_nonce: admission.parent.nonce,
+      ttl_ms: 2_000,
+    });
+    expect(text(result)).toEqual(response);
+    expect(mockApi.post).toHaveBeenCalledWith("/coordination/recovery-admissions/mint", {
+      ...lease,
+      preflight_digest: admission.preflightDigest,
+      head: admission.head,
+      parent_pid: admission.parent.pid,
+      parent_start: admission.parent.start,
+      parent_executable: admission.parent.executable,
+      parent_nonce: admission.parent.nonce,
+      ttl_ms: 2_000,
+    }, { project: PROJECT });
+
+    mockApi.post.mockResolvedValueOnce(success({ ...response, ownershipToken: TOKEN }));
+    const rejected = await coordination.coordinationUpdate(PROJECT, "mint_recovery_admission", {
+      ...lease,
+      preflight_digest: admission.preflightDigest,
+      head: admission.head,
+      parent_pid: admission.parent.pid,
+      parent_start: admission.parent.start,
+      parent_executable: admission.parent.executable,
+      parent_nonce: admission.parent.nonce,
+      ttl_ms: 2_000,
+    });
+    expect(rejected).toMatchObject({ isError: true });
+    expect(JSON.stringify(rejected)).not.toContain(TOKEN);
+  });
+
   it("POSTs and strictly projects publish, read, acknowledge, and consume handoff operations", async () => {
     mockApi.post.mockResolvedValueOnce(success({ session, event: handoffEvent }));
     const published = await coordination.coordinationHandoff(PROJECT, "publish", {
@@ -306,6 +383,21 @@ describe("coordination MCP transport adapters", () => {
     });
     expect(rejected).toMatchObject({ isError: true });
     expect(JSON.stringify(rejected)).not.toContain(TOKEN);
+
+    mockApi.post.mockResolvedValueOnce(success({
+      session,
+      event: { ...handoffEvent, currentTaskId: `task-${"A".repeat(64)}` },
+    }));
+    const malformedTaskId = await coordination.coordinationHandoff(PROJECT, "publish", {
+      ...lease, operation_kind: "edit", path: handoffEvent.path,
+    });
+    expect(malformedTaskId).toMatchObject({ isError: true });
+    expect(text(malformedTaskId)).toEqual({
+      error: {
+        code: "COORDINATION_INVALID_RESPONSE",
+        message: "The coordination response is invalid.",
+      },
+    });
   });
 
   it("POSTs and strictly projects typed operational memory", async () => {
@@ -489,6 +581,24 @@ describe("coordination MCP transport adapters", () => {
         currentRevision: 9,
       },
     });
+  });
+
+  it.each([
+    ["TARGET_SESSION_NOT_FOUND", 404],
+    ["SESSION_LINK_CONFLICT", 409],
+    ["TRANSCRIPT_CONFLICT", 409],
+  ])("projects the API coordination error %s exactly", async (code, status) => {
+    mockApi.post.mockResolvedValue({
+      ok: false,
+      status,
+      data: { error: { code, message: `upstream secret ${TOKEN}`, detail: TOKEN } },
+    });
+
+    const result = await coordination.coordinationUpdate(PROJECT, "heartbeat", { ...lease, ttl_ms: 2_000 });
+
+    expect(result).toMatchObject({ isError: true });
+    expect(text(result)).toEqual({ error: { code, message: "The coordination request failed." } });
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
   });
 
   it("does not disclose claim ownership or unbounded conflict metadata", async () => {

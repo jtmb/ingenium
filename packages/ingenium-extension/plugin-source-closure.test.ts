@@ -13,6 +13,7 @@ const expectedSources = [
   "api-auth.ts",
   "auto-observer.ts",
   "coordination-outbox.ts",
+  "explicit-memory.ts",
   "extension-binding.ts",
   "mcp-client.ts",
   "mcp-tool-state.ts",
@@ -29,9 +30,11 @@ const expectedSources = [
   "ponytail/hooks/ponytail-instructions.js",
   "project-name.ts",
   "project-resolver.ts",
+  "replacement-first-restart.ts",
   "resource-sync.ts",
-  "scripts/managed-command-wrapper.ts",
+  "scripts/mcp-server.ts",
   "session-coordinator.ts",
+  "tui-recovery.ts",
 ];
 const expectedAssets = [
   "plugin-specs.mjs",

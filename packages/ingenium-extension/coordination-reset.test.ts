@@ -25,6 +25,7 @@ const servicePrincipalId = "00000000-0000-4000-8000-000000000005";
 const coordinationResetModule = fileURLToPath(new URL("./coordination-reset.ts", import.meta.url));
 const generalMcpScopes = [
   "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+  "memory:read", "memory:write",
 ] as const;
 const directories: string[] = [];
 const originalSecretFile = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
@@ -97,8 +98,11 @@ function requestFixture(options: {
   mfa?: boolean;
   stepUp?: boolean;
   launcherWorktree?: string;
+  priorCredentials?: Record<string, unknown>[];
+  existingPrincipal?: boolean;
 } = {}) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const collisions: string[] = [];
   const scopes = options.scopes ?? generalMcpScopes;
   let launcherWorktree = "";
   const request = vi.fn(async (input: string | URL | globalThis.Request, init?: RequestInit) => {
@@ -127,7 +131,7 @@ function requestFixture(options: {
     if (url.endsWith("/projects/ingenium/detail")) {
       return response({ project: { id: projectId, organization_id: organizationId, name: "ingenium" } });
     }
-    if (url.endsWith("/auth/mcp-credentials") && !init?.method) return response([{
+    if (url.endsWith("/auth/mcp-credentials") && !init?.method) return response(options.priorCredentials ?? [{
       id: "00000000-0000-4000-8000-000000000004",
       servicePrincipalId,
       revokedAt: null,
@@ -139,6 +143,10 @@ function requestFixture(options: {
       scopes,
     }]);
     if (url.endsWith("/auth/mcp-credentials") && init?.method === "POST") {
+      if (options.existingPrincipal && JSON.parse(String(init.body)).servicePrincipalId !== servicePrincipalId) {
+        collisions.push("UNIQUE constraint failed: service_principals.organization_id, service_principals.name");
+        return response({ code: "VALIDATION_ERROR" }, 422);
+      }
       launcherWorktree = JSON.parse(String(init.body)).launcherWorktree;
       return response({
       id: "00000000-0000-4000-8000-000000000003",
@@ -163,7 +171,7 @@ function requestFixture(options: {
     if (url.includes("/auth/mcp-credentials/") && init?.method === "DELETE") return new Response(null, { status: 204 });
     throw new Error("unexpected request");
   }) as unknown as typeof fetch;
-  return { request, calls };
+  return { request, calls, collisions };
 }
 
 function expectContentFreeInstallFailure(error: unknown, forbidden: readonly string[]): void {
@@ -188,6 +196,52 @@ function expectNoCredentialQuarantine(worktree: string): void {
 }
 
 describe("protected coordination reset", () => {
+  it.each(["active", "revoked", "preflight failure"])("reuses the principal across the six-to-eight scope upgrade (%s)", async (scenario) => {
+    const { worktree, credential } = fixture();
+    const { request, calls, collisions } = requestFixture({
+      existingPrincipal: true,
+      priorCredentials: [{
+        id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
+        name: "Ingenium coordination", organizationId, projectId,
+        kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
+        launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6),
+        revokedAt: scenario === "revoked" ? "2026-08-01T00:00:00Z" : null,
+      }],
+    });
+
+    const reset = resetCoordinationCredential(worktree, {
+      request: async (input, init) => {
+        const result = await request(input, init);
+        return scenario === "preflight failure" && String(input).endsWith("/auth/preflight")
+          ? response({}, 403) : result;
+      },
+      sourceFingerprint: () => Buffer.from("same"),
+    });
+    if (scenario === "preflight failure") await expect(reset).rejects.toMatchObject({ failure: "binding" });
+    else await expect(reset).resolves.toEqual({ status: "completed" });
+
+    expect(collisions).toEqual([]);
+    const issues = calls.filter(({ init }) => init?.method === "POST" && String(init.body).includes('"kind":"service"'));
+    expect(issues).toHaveLength(1);
+    expect(JSON.parse(String(issues[0]!.init!.body))).toMatchObject({ servicePrincipalId, scopes: generalMcpScopes });
+    expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+    expect(readFileSync(credential, "utf8")).toBe(`${scenario === "preflight failure" ? oldToken : newToken}\n`);
+  });
+
+  it.each(["none", "other name", "other organization"])("creates a principal when the listing has %s", async (scenario) => {
+    const { worktree } = fixture();
+    const { request, calls } = requestFixture({ priorCredentials: scenario === "none" ? [] : [{
+      id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
+      name: scenario === "other name" ? "Ingenium learning" : "Ingenium coordination",
+      organizationId: scenario === "other organization" ? "other-org" : organizationId,
+      projectId, kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
+      launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6), revokedAt: null,
+    }] });
+    await resetCoordinationCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") });
+    const issue = calls.find(({ url, init }) => url.endsWith("/auth/mcp-credentials") && init?.method === "POST");
+    expect(JSON.parse(String(issue?.init?.body))).not.toHaveProperty("servicePrincipalId");
+  });
+
   it.each([
     ["0400", 0o400],
     ["0600", 0o600],
@@ -440,8 +494,10 @@ describe("protected coordination reset", () => {
     chmodSync(credential, mode);
 
     expect(() => installCoordinationCredentialAtomically(worktree, newToken)).toThrow(CoordinationResetError);
-    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
     expect(statSync(credential).mode & 0o777).toBe(mode);
+    chmodSync(credential, 0o600);
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    chmodSync(credential, mode);
     expectNoCredentialQuarantine(worktree);
   });
 
@@ -539,7 +595,7 @@ describe("protected coordination reset", () => {
     const { worktree, credential } = fixture(false);
     execFileSync("mkfifo", [credential], { timeout: 1_000 });
     const result = execFileSync(process.execPath, [
-      "--experimental-strip-types",
+      "--experimental-transform-types",
       "--input-type=module",
       "--eval",
       `import { CoordinationResetError, installCoordinationCredentialAtomically } from ${JSON.stringify(coordinationResetModule)};
@@ -619,10 +675,8 @@ try {
     }
 
     expect(stdout).not.toHaveBeenCalled();
-    expect(stderr).toHaveBeenCalledTimes(1);
-    expect(stderr).toHaveBeenCalledWith("coordination reset: failed (credential_install:existing_target)\n");
     expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join(""))
-      .toMatch(/^coordination reset: failed \(credential_install:(?:ancestor|existing_target|temporary_create|temporary_write|rename|directory_sync|readback|rollback)\)\n$/);
+      .toBe("coordination reset: failed (credential_install:existing_target)\n");
   });
 
   it("allows one concurrent reset winner", async () => {

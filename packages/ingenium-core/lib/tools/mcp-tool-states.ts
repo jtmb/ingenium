@@ -9,6 +9,9 @@ import {
 } from "./mcp-tool-catalog.js";
 import { listEffectiveChildMcpTools } from "./child-mcp-servers.js";
 import { childMcpAuthorizationPolicy } from "./mcp-authorization-policy.js";
+import { PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS } from "./child-mcp-presets.js";
+
+const defaultEnabledChildTools = new Set<string>(PLAYWRIGHT_CHILD_MCP_PASSIVE_TOOL_PERMISSIONS);
 
 /**
  * MCP tool state — per-project enable/disable persistence for individual tools.
@@ -39,7 +42,7 @@ export function getAllTools(projectId?: string) {
       category: tool.category,
       description: tool.description,
       projectScope: tool.scope === "global" ? "global" : "per-project",
-      defaultEnabled: true,
+      defaultEnabled: defaultEnabledChildTools.has(tool.canonical_name),
       apiEndpoints: [],
       authorization: childMcpAuthorizationPolicy(),
     });

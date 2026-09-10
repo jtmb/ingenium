@@ -1,32 +1,40 @@
 ---
 title: Skill Taxonomy Migration
-description: Phase 3 consolidation mapping — 36 legacy skills to 10 canonical skills with exact mapping and provenance.
+description: Current 8 active canonical skills with retired-target provenance and exact source mapping.
 ---
 
 # Skill Taxonomy Migration — Phase 3 (2026-07-16)
 
 ## Migration Summary
 
-The Phase 3 taxonomy consolidation reduced **36 legacy skills → 10 canonical skills** on 2026-07-16. Every legacy skill was either:
-- **Archived** (28 legacy skills): marked `archived_at` in DB, SKILL.md removed from discovery path, content preserved under `references/sources/<legacy-name>/` in the absorbing canonical skill.
-- **Kept as canonical** (8 pre-existing canonical skills + 2 promoted): remained active with their original names.
+The Phase 3 taxonomy map records 10 historical target names; the current
+worktree exposes **8 active canonical skills**, and two former targets are
+retired from the checked-in active canonical set. Legacy material was either
+absorbed into an active canonical skill or retained as retired historical
+provenance.
 
-### 10 Canonical Skills
+The active/retired labels below describe checked-in taxonomy and source-path
+state only; they do not establish loaded-profile or runtime-retirement proof.
+The extension-provided Ponytail skill is outside this repository canonical set
+and is not part of the consolidation map.
+
+### 8 Active Canonical Skills
 
 | # | Canonical Skill | Absorbed Sources | Role |
 |---|----------------|------------------|------|
 | 1 | `development-conventions` | 5 (api-aggregation-patterns, ingenium-ops, language-conventions, mail-app-ui-conventions, visual-standards-conventions) | Code conventions, API design, testing, refactoring |
 | 2 | `devops-conventions` | 4 (git-history-hygiene, github-cli, onboard-existing-repo, parallel-session-hygiene) | Docker, Kubernetes, git, CLI toolkit |
 | 3 | `database-conventions` | 3 (database-migration-management, sqlite-migration-patterns, sqlite-wal-safety) | SQLite WAL, FTS5, migration management |
-| 4 | `engineering-workflow` | 9 (agent-execution-quality, agent-workflow-patterns, debugging-patterns, configuring-opencode, logging-visibility, orchestrator-primer, per-project-scoping, supervision-logging, uncensored-direct-response) | Agent pipeline, debugging, orchestrator, logging |
-| 5 | `mcp-tooling` | 2 (browsing-the-web, dashboard-screenshots) | MCP integration, browser automation, Docs RAG |
-| 6 | `local-models` | 0 | Local model profiles, command safety |
-| 7 | `security-audit` | 1 (security-audit-workflow) | Surface scan, git-history leak scan, remediation |
-| 8 | `documentation` | 3 (docs-workspace, documentation-architecture, documentation-audit-workflow) | Docs workspace, architecture conventions, audit |
-| 9 | `self-learning` | 0 | Observation pipeline, personality traits, synthesis |
-| 10 | `skill-maintenance` | 1 (local-persistence) | Skill lifecycle: detection, creation, indexing, audit |
+| 4 | `mcp-tooling` | 2 (browsing-the-web, dashboard-screenshots) | MCP integration, browser automation, Docs RAG |
+| 5 | `security-audit` | 1 (security-audit-workflow) | Surface scan, git-history leak scan, remediation |
+| 6 | `documentation` | 3 (docs-workspace, documentation-architecture, documentation-audit-workflow) | Docs workspace, architecture conventions, audit |
+| 7 | `self-learning` | 0 | Observation pipeline, personality traits, synthesis |
+| 8 | `skill-maintenance` | 1 (local-persistence) | Skill lifecycle: detection, creation, indexing, audit |
 
-### Exact Mapping (Legacy → Canonical)
+### Active Mapping (Legacy → Canonical)
+
+Retired target mappings remain immutable history in
+`.opencode/skills/consolidation-map.json`; they are not active canonical skills.
 
 | Legacy Name | Absorbed Into | Source Hash |
 |-------------|---------------|-------------|
@@ -42,15 +50,6 @@ The Phase 3 taxonomy consolidation reduced **36 legacy skills → 10 canonical s
 | `database-migration-management` | `database-conventions` | `5723aca4` |
 | `sqlite-migration-patterns` | `database-conventions` | `f19da459` |
 | `sqlite-wal-safety` | `database-conventions` | `a47860fc` |
-| `agent-execution-quality` | `engineering-workflow` | `344c4ee7` |
-| `agent-workflow-patterns` | `engineering-workflow` | `5596f91a` |
-| `debugging-patterns` | `engineering-workflow` | `c4ad7dd0` |
-| `configuring-opencode` | `engineering-workflow` | `abd783b9` |
-| `logging-visibility` | `engineering-workflow` | `c9a0e89a` |
-| `orchestrator-primer` | `engineering-workflow` | `b34580d7` |
-| `per-project-scoping` | `engineering-workflow` | `ea103d5e` |
-| `supervision-logging` | `engineering-workflow` | `b50abce3` |
-| `uncensored-direct-response` | `engineering-workflow` | `0a7c6f34` |
 | `browsing-the-web` | `mcp-tooling` | `eebd628a` |
 | `dashboard-screenshots` | `mcp-tooling` | `1a477933` |
 | `security-audit-workflow` | `security-audit` | `9904557b` |
@@ -79,7 +78,7 @@ Cleanup is intentionally narrow and fail-closed. A directory is removable only
 when all of these are true:
 
 - its name has one unique entry in the valid consolidation map, whose canonical
-  skill set exactly matches the 10 names above and whose source hash is 64-digit
+  skill set exactly matches the 8 active names above and whose source hash is 64-digit
   lowercase hexadecimal;
 - the candidate is a contained, regular directory rather than a symlink;
 - its only child is a regular `MIGRATED-TO.md` whose canonical target and
@@ -116,7 +115,7 @@ permission:
   skill:
     "*": deny
     "development-conventions": allow
-    "engineering-workflow": allow
+    "documentation": allow
 ```
 
 The hidden `ingenium-llm-broker` is the exception and remains wildcard-denied
@@ -133,10 +132,6 @@ block is being migrated:
 
 | Legacy mention | Replacement mention | `permission.skill` key |
 |---------------|--------------------|----------------------|
-| `@debugging-patterns` | `@engineering-workflow` | `engineering-workflow` |
-| `@configuring-opencode` | `@engineering-workflow` | `engineering-workflow` |
-| `@agent-workflow-patterns` | `@engineering-workflow` | `engineering-workflow` |
-| `@agent-execution-quality` | `@engineering-workflow` | `engineering-workflow` |
 | `@github-cli` | `@devops-conventions` | `devops-conventions` |
 | `@git-history-hygiene` | `@devops-conventions` | `devops-conventions` |
 | `@browsing-the-web` | `@mcp-tooling` | `mcp-tooling` |

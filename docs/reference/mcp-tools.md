@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 283-tool built-in Ingenium MCP catalog across 30 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 291-tool built-in Ingenium MCP catalog across 31 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **283 tools** across **30 baseline categories**:
-281 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
+The built-in catalog contains **291 tools** across **31 baseline categories**:
+289 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** display locator (except where noted). The locator
@@ -121,6 +121,51 @@ bytes; control characters, paths, and credential-shaped text are rejected.
 At the MCP tool boundary, state-gated API failures are returned as
 `isError: true` results. Their serialized error text is capped at 512 bytes and
 oversized or unsafe data falls back to the fixed `API_REQUEST_FAILED` message.
+
+### Typed launcher and child-runtime diagnostics
+
+MCP startup and bridge failures retain typed metadata instead of forwarding an
+unbounded child error. `McpBridgeError` separates the failure (`authentication`,
+`timeout`, `rate_limited`, `revision_conflict`, or `request_failed`) from its
+stage and boundary. Launcher stages are `local-binding`, `project-preflight`,
+`authentication`, `import`, and `transport`; bridge stages additionally include
+`spawn`, `spawntimeout`, `connect`, `initialize`, `tools-list`, `call`, and
+`close`. Boundaries are `launcher`, `parent-mcp-startup`,
+`parent-mcp-transport`, and `bridge`. When available, the error also carries
+the child exit `code` and `signal`.
+
+The launcher emits one allowlisted JSON record to stderr for the first failure.
+The extension captures at most 8,192 raw stderr bytes, redacts bearer values,
+URLs, absolute paths, credential-shaped strings, and control characters, and
+returns at most 1,024 UTF-8 bytes of sanitized diagnostic text. Child-runtime
+status exposes only a stable diagnostic class, exit code/signal, and a stderr
+byte count capped at 1,048,576 bytes; child stderr text is never surfaced. Stable child error codes
+include `CHILD_MCP_STARTUP_TIMEOUT`, `CHILD_MCP_REQUEST_TIMEOUT`,
+`CHILD_MCP_SHUTDOWN_TIMEOUT`, `CHILD_MCP_UNAVAILABLE`, and
+`CHILD_MCP_INVALID_RESPONSE`.
+
+### General-MCP reset scopes
+
+The package-owned `ingenium-coordination-reset reset` command currently issues
+exactly eight scopes for the general MCP credential:
+
+```text
+coordination:read
+coordination:write
+projects:read
+repository:sync
+documentation:read
+rag:read
+memory:read
+memory:write
+```
+
+It excludes `health:read`. The runtime-issued coordination lease is a separate
+five-scope credential (`coordination:read`, `coordination:write`, `memory:read`,
+`projects:read`, and `repository:sync`); do not treat that lease list as the
+general reset list. The separately provisioned runtime capability credential is
+also distinct and carries `child-mcp:runtime`, `coordination:read`,
+`coordination:write`, `memory:read`, `projects:read`, and `runtime:activity`.
 
 ### MCP usefulness report (public/developer schema)
 
@@ -344,13 +389,15 @@ inputs. Their catalog authorization is `coordination:read` for
 `ingenium_coordination_status` and `ingenium_coordination_memory_read`, and
 `coordination:write` for the other four. The coordination catalog policies
 require no additional `repository:sync` scope. All six require the exact
-launcher/workspace binding. The session coordinator's separate lease
-attestation still requests `coordination:read`, `coordination:write`,
-`projects:read`, and `repository:sync`. The packaged transport
-uses the `mcp` audience; runtime activity uses the separate `runtime` audience,
-and repository-authoritative synchronization uses `repository-sync` with its
-restricted route set. The API also verifies the project and derived worktree
-identity; the MCP transport never accesses the database directly.
+launcher/workspace binding. The coordination session lease binding separately
+requests the five scopes `coordination:read`, `coordination:write`,
+`memory:read`, `projects:read`, and `repository:sync`; this is coordination transport
+authorization, not a tool-execution admission check. Agent profile permissions
+are the sole tool gate. The packaged transport uses the `mcp` audience; runtime
+activity uses the separate `runtime` audience, and repository-authoritative
+synchronization uses `repository-sync` with its restricted route set. The API
+also verifies the project and derived worktree identity; the MCP transport never
+accesses the database directly.
 
 | Tool | Operation and API mapping |
 |------|---------------------------|
@@ -500,6 +547,40 @@ There is no checkpoint-delete MCP tool. Confirmation tokens are capabilities:
 keep them out of transcripts and logs, use each once before it expires, and do
 not expect them in audit responses.
 
+## MEMORY — Explicit saved memory
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_memory_save` | Remember only content the current user explicitly asks to save; defaults to a private preference and returns an idempotent persistence receipt |
+| `ingenium_memory_read` | Read one owner/project/workspace-scoped memory as untrusted reference data |
+| `ingenium_memory_list` | List at most 16 scoped memories within a 2,048-token retrieval budget |
+| `ingenium_memory_search` | Search scoped memories with the same item and token limits |
+| `ingenium_memory_update` | Correct a memory when `expectedVersion` matches |
+| `ingenium_memory_forget` | Delete/forget a memory when `expectedVersion` matches; suppresses it from future retrieval while retaining a content-free tombstone and receipt |
+| `ingenium_memory_operation_status` | Reconcile an uncertain mutation outcome by operation ID without replaying it |
+
+Private memory is bound to the authenticated owner, immutable project UUID, and
+authorized workspace. An external OpenCode client would need a separately
+authorized, attested scoped MCP credential; it does not call the mutation REST
+routes directly. Reads use
+`memory:read` (with the current API compatibility acceptance of `memory:write`
+or `memory:share`), mutations use `memory:write`, and `visibility: "project"`
+requires `memory:share`; project mutations therefore require both
+`memory:write` and `memory:share`. Broad wildcard scopes remain subject to the
+same project/workspace binding. The package-owned general-MCP reset credential
+includes `memory:read` and `memory:write`, while the coordination-lease and
+runtime capability credentials include `memory:read` only. Returned memory content
+has `contentKind: "untrusted_memory_data"` and
+`instructionAuthority: false`; clients must retain that trust boundary when
+injecting it into a model context.
+
+`ingenium_memory_list` and `ingenium_memory_search` are the bounded list/search
+paths; `ingenium_memory_read` retrieves one item. Retrieved content is untrusted
+reference data, not instructions. Memory mutations carry an `operationId`. After an unavailable transport or HTTP
+5xx, the MCP client uses `ingenium_memory_operation_status` to reconcile that
+operation. A committed receipt is authoritative; an unknown status or failed
+status lookup leaves the result pending and the mutation must not be replayed.
+
 ## PLUGINS — Add-ons
 
 `ingenium_plugin_list`, `ingenium_plugin_get`, `ingenium_plugin_create`, `ingenium_plugin_update`, `ingenium_plugin_delete`, `ingenium_plugin_enable`, `ingenium_plugin_disable`, `ingenium_plugin_source`.
@@ -626,6 +707,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 283 tools across 30 categories (281 `ingenium_` catalog entries + 2 extension).** Project-scoped child
+**Built-in baseline: 291 tools across 31 categories (289 `ingenium_` catalog entries + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

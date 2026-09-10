@@ -6,6 +6,7 @@ name: ingenium
 services:
   ingenium:
     profiles: ["compatibility"]
+    image: ingenium-ingenium:compat
     build:
       context: .
       target: compatibility
@@ -66,11 +67,13 @@ services:
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
+      - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
       - ./opencode.json:/app/opencode.json:ro
       # Compose must be started from a WSL/Linux shell with HOME set. The
       # complete host repository root is the workspace contract; do not replace
       # it with a checkout-specific path.
       - "${HOME:?HOME must be set for the /workspace bind mount}/repos:/workspace"
+      - "${HOME}/repos/ingenium:/home/brajam/repos/ingenium"
       - ${HOME:-~}/.local/share/opencode:/var/opencode:ro
     logging:
       driver: local
@@ -148,6 +151,7 @@ services:
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
+      - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
       - ./opencode.json:/app/opencode.json:ro
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
       - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-gateway/token:ro"

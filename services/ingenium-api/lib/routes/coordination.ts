@@ -53,6 +53,48 @@ const heartbeatSchema = z.object({
   ttl_ms: positiveInteger,
   ...idempotencyField,
 }).strict();
+const recoveryAdmissionSchema = z.object({
+  schema: z.literal(coordination.RECOVERY_ADMISSION_SCHEMA),
+  version: z.literal(1),
+  action: z.literal("production-restart"),
+  preflightDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  parent: z.object({
+    pid: positiveInteger,
+    start: z.string().min(1).max(128),
+    executable: z.string().min(1).max(1_024),
+    nonce: z.string(),
+    session: opaqueId,
+  }).strict(),
+  project: z.string().min(1).max(64),
+  projectId: opaqueId,
+  worktreeId: opaqueId,
+  workspace: z.string().min(1).max(256),
+  storage: z.string().regex(/^[0-9a-f]{64}$/),
+  worktree: z.string().min(1).max(1_024),
+  issuedAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  revision: nonnegativeInteger,
+  fence: positiveInteger,
+}).strict();
+const mintRecoveryAdmissionSchema = z.object({
+  ...leaseFields,
+  preflight_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  parent_pid: positiveInteger,
+  parent_start: z.string().min(1).max(128),
+  parent_executable: z.string().min(1).max(1_024),
+  parent_nonce: z.string(),
+  ttl_ms: positiveInteger,
+  ...idempotencyField,
+}).strict();
+const consumeRecoveryAdmissionSchema = z.object({
+  ...identityFields,
+  expected_revision: nonnegativeInteger,
+  fence: positiveInteger,
+  consume_token: z.string(),
+  admission: recoveryAdmissionSchema,
+}).strict();
 const claimSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("path"), path: z.string() }).strict(),
   z.object({ kind: z.literal("tree"), path: z.string() }).strict(),
@@ -294,6 +336,21 @@ function coordinationPrincipal(req: Request): string {
   return req.principal.id;
 }
 
+function coordinationBinding(req: Request, worktreeId: string) {
+  requireBoundWorktree(req, worktreeId);
+  const principal = req.principal;
+  if (principal?.type !== "service" || !principal.workspaceId || !principal.storageMappingHash
+    || !principal.launcherWorktree) {
+    throw new coordination.CoordinationError("SESSION_NOT_FOUND");
+  }
+  return {
+    principalId: principal.id,
+    workspace: principal.workspaceId,
+    storage: principal.storageMappingHash,
+    worktree: principal.launcherWorktree,
+  };
+}
+
 function sessionDto(session: coordination.CoordinationSessionMutationResult) {
   return {
     actorId: session.actorId,
@@ -429,6 +486,7 @@ function sendCoordinationError(res: Response, error: unknown): boolean {
     TARGET_SESSION_NOT_FOUND: 404,
     SESSION_LINK_CONFLICT: 409,
     TRANSCRIPT_CONFLICT: 409,
+    RECOVERY_ADMISSION_CONFLICT: 409,
     COORDINATION_INTEGRITY_ERROR: 500,
   };
   const messageByCode: Record<coordination.CoordinationErrorCode, string> = {
@@ -456,6 +514,7 @@ function sendCoordinationError(res: Response, error: unknown): boolean {
     TARGET_SESSION_NOT_FOUND: "Target coordination session not found",
     SESSION_LINK_CONFLICT: "Coordination sessions are already linked",
     TRANSCRIPT_CONFLICT: "Transcript message identity already has different content",
+    RECOVERY_ADMISSION_CONFLICT: "Recovery admission does not match current coordination state",
     COORDINATION_INTEGRITY_ERROR: "Coordination integrity verification failed",
   };
   res.status(statusByCode[responseCode]).json({
@@ -539,6 +598,49 @@ coordinationRouter.patch("/update", route((req, res) => {
     contextRevision: current.context_revision,
   });
   res.json({ data: { session: sessionDto(session) } });
+}));
+
+coordinationRouter.post("/recovery-admissions/mint", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(mintRecoveryAdmissionSchema, req);
+  const binding = coordinationBinding(req, body.worktree_id);
+  const resolvedProjectId = projectId(query.project);
+  const result = coordination.mintRecoveryAdmission(resolvedProjectId, {
+    ...lease(resolvedProjectId, body, req),
+    project: query.project,
+    ...binding,
+    preflightDigest: body.preflight_digest,
+    head: body.head,
+    parentPid: body.parent_pid,
+    parentStart: body.parent_start,
+    parentExecutable: body.parent_executable,
+    parentNonce: body.parent_nonce,
+    ttlMs: body.ttl_ms,
+  });
+  res.set("Cache-Control", "no-store");
+  res.status(201).json({
+    data: {
+      session: sessionDto(result.session),
+      admission: result.admission,
+      consumeToken: result.consumeToken,
+    },
+  });
+}));
+
+coordinationRouter.post("/recovery-admissions/consume", route((req, res) => {
+  const query = parseQuery(projectQuerySchema, req);
+  const body = parseBody(consumeRecoveryAdmissionSchema, req);
+  const binding = coordinationBinding(req, body.worktree_id);
+  const result = coordination.consumeRecoveryAdmission(projectId(query.project), {
+    ...identity(body),
+    expectedRevision: body.expected_revision,
+    fence: body.fence,
+    principalId: binding.principalId,
+    consumeToken: body.consume_token,
+    admission: body.admission,
+  });
+  res.set("Cache-Control", "no-store");
+  res.json({ data: { session: sessionDto(result.session), receipt: result.receipt } });
 }));
 
 coordinationRouter.post("/heartbeat", route((req, res) => {

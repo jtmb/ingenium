@@ -10,11 +10,14 @@ import {
   isOAuthClientSecretKey,
 } from "./protected-settings.js";
 
+export const AUTOMATIC_LEARNING_SETTING_KEY = "automatic_learning_enabled";
+
 /**
  * Get a setting value by project and key.
  * @returns The stored value, or `defaultVal` if the key is not set.
  */
 export function getSetting(projectId: string, key: string, defaultVal?: string): string | undefined {
+  if (key === "cloudflare_tunnel_token") return defaultVal;
   if (isOAuthClientSecretKey(key)) {
     return getOAuthClientSecret(projectId, key) ?? defaultVal;
   }
@@ -23,11 +26,19 @@ export function getSetting(projectId: string, key: string, defaultVal?: string):
   return row?.value ?? defaultVal;
 }
 
+export function isAutomaticLearningEnabled(projectId: string): boolean {
+  const value = getSetting(projectId, AUTOMATIC_LEARNING_SETTING_KEY);
+  return value === undefined || value === "true";
+}
+
 /**
  * Set a setting value (upsert). Returns the set value.
  * Uses ON CONFLICT ... DO UPDATE SET for atomic upsert — avoids a separate SELECT + branch.
  */
 export function setSetting(projectId: string, key: string, value: string): string {
+  if (key === "cloudflare_tunnel_token") {
+    throw new Error("Cloudflare tunnel tokens must be stored in protected vault storage");
+  }
   if (isOAuthClientSecretKey(key)) {
     throw new Error("OAuth client secrets must be stored in protected vault storage");
   }

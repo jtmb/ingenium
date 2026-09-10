@@ -143,4 +143,3 @@ docker compose ps
 ## Cross-References
 
 - **`@development-conventions`** — Python/Next.js conventions that pair with Docker/K8s deployments
-- **`@engineering-workflow`** — Agent configuration, orchestrator pipeline

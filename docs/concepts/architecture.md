@@ -160,7 +160,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **281 built-in catalog entries** across **30 baseline categories**. Two extension-registered tools bring the built-in catalog to **283**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **289 server registrations** across **31 baseline categories**. Two extension-registered tools bring the built-in catalog to **291**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **24 primary navigation routes plus the 19-tab Settings overlay**. It talks to the API over HTTP.
 
 ### Resource tenancy (AUTH-104)
@@ -514,17 +514,20 @@ unmanaged remote resources are excluded from this initialization contract.
 The presence of this procedure is not a claim that live onboarding has been
 performed.
 
-The dashboard sync log captures this condition and prompts the user to restart OpenCode. Ordinary skill and agent projection does not require a restart; plugin registration and config changes do because OpenCode loads them at startup.
+The dashboard sync log captures this condition and prompts the user to restart OpenCode. Projection alone is not activation evidence: changes to loaded agent profiles, skills, plugins, or configuration require a full safe parent OpenCode restart. Restarting only the MCP child is insufficient.
 
 ### Skill Seeds
 
-9 active canonical skill directories (plus absorbed legacy source archives under
+8 active canonical skill directories (plus surviving legacy source indexes under
 `references/sources/`) live at `.opencode/skills/` and are projected by the
 Git-authoritative resource-sync path. The Phase 3 migration (2026-07-16)
-consolidated 36 legacy skills into 10 canonical skills with full provenance
-tracking. Legacy content is preserved under `references/sources/<legacy-name>/`.
+consolidated 36 legacy skills into the canonical skill system; the immutable
+consolidation map records that provenance. The current active set is 8 skills,
+and 19 source indexes survive under active skills. Agent behavior lives in each
+respective `.opencode/agents/**` profile. Retired skill targets are not active
+authorities.
 
-The MCP server provides 25 skill tools (11 core CRUD + 14 governance). The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
+The MCP server provides 28 skill tools (12 core + 16 governance). The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
 
 ### Skill Governance & Lifecycle Architecture
 
@@ -569,6 +572,36 @@ system prompts and registers six commands, but adds no MCP tools or execution
 permissions. Its mode state is stored beside the OpenCode config in
 `.ponytail-active`; plugin or config changes require an OpenCode restart. The
 checkout's `PROVENANCE.md` records upstream file hashes for update review.
+
+### Agent profile and model authority
+
+OpenCode agent configuration has two separate authorities:
+
+1. Root `opencode.json` contains the case-sensitive `agent.<name>` runtime
+   mappings, limited to `model` and `variant`, with the built-in Plan entry's
+   inline permission block as the sole root-mapping permission exception.
+2. The uniquely named native Markdown profile under
+   `.opencode/agents/<category>/` owns prompt content, lifecycle metadata,
+   named skills, and tool permissions. Resource sync requires default-deny
+   permissions, explicit lifecycle booleans, and rejects orphan or duplicate
+   profiles.
+
+Every user-facing active profile explicitly loads `@ponytail` during preflight. The
+Scout profile is retrieval-only for genuine Docs RAG/context work. The hidden
+`ingenium-llm-broker` is the exception: its managed prompt reference is
+protected, while the profile remains immutable, unmapped in the repository
+root, and wildcard-denied with no tools. A profile, mapping, plugin, MCP, or
+OpenCode configuration change requires a full parent restart; restarting only
+the child MCP process does not reload the parent configuration.
+
+### CLI session evidence boundary
+
+A named `opencode export <session-id>` is a read-only snapshot of the installed
+CLI's returned JSON. Require one complete JSON document and identity-check the
+session and worktree before using it. A successful pipe exit, a recent update
+field, or a complete export does not prove liveness, complete history, deployment,
+or actual model/session acceptance. The retained 2026-09-09 capture is recorded in
+the [CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
 
 ## Self-Learning Pipeline
 
@@ -856,13 +889,19 @@ case returns an empty catalog as though no providers were configured.
 - **"No LLM" state**: When no provider is configured and no builtin is available, the response returns `{ configured: false }` with `defaultSelection: null`. The Chat page shows a banner linking to Settings → Providers.
 - **Live reload**: Saving provider blocks triggers an OpenCode config reload in-process — no restart required. Provider changes take effect for new sessions immediately.
 
-### Agent Model Inheritance
+### Agent Model and Chat Selection
 
-The `ingenium-chat` agent uses **no hardcoded `model` field** — it inherits the model from the Chat request's `modelID` parameter at send time. The agent also sets `hidden: true` to prevent it from appearing in OpenCode's non-Chat agent lists (e.g., the OpenCode Web/CLI agent selector).
+The `ingenium-chat` Markdown profile intentionally has no `model` field. The
+root `opencode.json` supplies its runtime mapping (`deepseek/deepseek-v4-flash`,
+variant `max`), while the Dashboard Chat page sends the validated provider/model
+pair selected from `chat-config` with each prompt. The profile also sets
+`hidden: true`, keeping it out of OpenCode's general agent selectors.
 
 | Property | Value | Reason |
 |----------|-------|--------|
-| `model` | (not set) | Inherits from Chat request at runtime |
+| Markdown `model` | (not set) | Profile metadata does not own model assignment |
+| Root mapping | `deepseek/deepseek-v4-flash`, `max` | Runtime model/variant mapping |
+| Chat turn | Selected `providerID`/`modelID` | ChatShell sends the catalog-validated pair |
 | `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
 
 ## Chat Project Context (CHAT-100)
@@ -1250,7 +1289,7 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 281 built-in catalog tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 289 server registrations. Two extension tools bring the built-in catalog to 291; project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 24 primary navigation routes plus the 19-tab Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
@@ -1301,8 +1340,8 @@ Additional `page.tsx` entrypoints support `/account`, the `/settings` redirect, 
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **283 tools** across **30 baseline
-categories** (**281 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **291 tools** across **31 baseline
+categories** (**289 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -1318,7 +1357,7 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
 | Health | 1 | health_check |
 | OpenCode | 1 | opencode_messages |
-| Tasks | 30 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_update, coordination_claim, coordination_release |
+| Tasks | 32 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff |
 | Plans (Context) | 3 | save, search, list |
 | Projects | 10 | list, init, delete, restore, list_archived, purge, set_global, rename, detail, migrate_workspace |
 | Plugins | 8 | list, get, enable, disable, create, delete, update, source |

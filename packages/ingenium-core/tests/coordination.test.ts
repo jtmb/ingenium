@@ -19,8 +19,12 @@ import {
   claimCoordinationBatch,
   completeManagedMutation,
   closeCoordinationSession,
+  consumeRecoveryAdmission,
   consumeCoordinationHandoffs,
   coordinationWorktreeId,
+  coordinationManifestHash,
+  type CoordinationResultManifest,
+  type CoordinationAllocation,
   ensureCoordinationMemory,
   getCoordinationEpochRecoveryState,
   getCoordinationSession,
@@ -28,6 +32,7 @@ import {
   heartbeatCoordinationSession,
   linkCoordinationSession,
   markCoordinationClaims,
+  mintRecoveryAdmission,
   publishCoordinationHandoff,
   publishCoordinationMemory,
   publishCoordinationTranscript,
@@ -1373,6 +1378,83 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(memory.id).not.toBe(legacy.id);
   });
 
+  it.each([1, 20])("persists manifests, review admission and requested %i-writer allocations", (requestedConcurrency) => {
+    const { alpha } = setup();
+    const memory = ensureCoordinationMemory(alpha.id, MAIN.worktreeId);
+    let session = registerCoordinationSession(alpha.id, {
+      ...MAIN, ownershipToken: TOKEN_A, ttlMs: 60_000, idempotencyKey: "manifest-register",
+      contextConversationId: memory.id, contextRevision: memory.revision,
+    });
+    const path = (value: string) => value.split("/").map((part) => Buffer.from(part).toString("base64url"));
+    const manifest: CoordinationResultManifest = {
+      baseCommit: "a".repeat(40), dirtyHashes: [{ pathSegments: path("src/result.ts"), sha256: "b".repeat(64) }],
+      dependencyResults: [{ taskId: "R15-foundation", revision: 2, result: "passed" }], exclusivePaths: [path("src/result.ts")],
+      profileRevision: "c".repeat(64), toolRevision: "d".repeat(64), ownerId: session.actorId, fence: session.fence,
+      unresolvedOperations: [{ operationId: "uncertain-operation", status: "unknown", firstFailure: "unavailable" }],
+      todoWrite: [{ id: "R15", content: "Finish source gaps", status: "in_progress", priority: "high" }],
+      inputHash: "e".repeat(64), finalized: false,
+    };
+    const baseEntry = {
+      status: "working" as const, actions: [], checks: [],
+      todos: { total: 1, pending: 0, inProgress: 1, completed: 0, cancelled: 0, state: "in_progress" as const },
+      currentTaskId: null, changedPaths: [], nextWork: { kind: "continue_task" as const, referenceHash: null },
+    };
+    let operation = 0;
+    const publish = (records: object) => publishCoordinationMemory(alpha.id, {
+      ...lease(MAIN, session, TOKEN_A, `manifest-${++operation}`), entry: { ...baseEntry, ...records },
+    });
+    const draft = publish({ manifest });
+    session = draft.session;
+    expect(draft.memory.entry.manifest).toEqual(manifest);
+    for (const bad of [
+      { ...manifest, fence: session.fence + 1 }, { ...manifest, ownerId: `actor-${"f".repeat(64)}` },
+      { ...manifest, rawCommand: "extra" }, { ...manifest, todoWrite: [...manifest.todoWrite, ...manifest.todoWrite] },
+      { ...manifest, dirtyHashes: [{ pathSegments: ["../bad"], sha256: null }] },
+      { ...manifest, finalized: true },
+    ]) expectCode(() => publish({ manifest: bad }), "INVALID_COORDINATION_INPUT");
+    const inputManifest = { ...manifest, unresolvedOperations: [], finalized: true };
+    const finalized = { ...inputManifest, inputHash: coordinationManifestHash(inputManifest) };
+    const outputHash = coordinationManifestHash(finalized);
+    const reviewAdmission = { inputManifest, inputHash: finalized.inputHash!, outputHash, observedInputHash: finalized.inputHash!, observedOutputHash: outputHash };
+    expectCode(() => publish({ manifest: finalized, reviewAdmission: { ...reviewAdmission, inputManifest: manifest } }), "INVALID_COORDINATION_INPUT");
+    expectCode(() => publish({ manifest, reviewAdmission }), "INVALID_COORDINATION_INPUT");
+    expectCode(() => publish({ manifest: finalized, reviewAdmission: { ...reviewAdmission, observedInputHash: "f".repeat(64) } }), "INVALID_COORDINATION_INPUT");
+    expectCode(() => publish({ manifest: finalized, reviewAdmission: { ...reviewAdmission, observedOutputHash: "f".repeat(64) } }), "INVALID_COORDINATION_INPUT");
+    for (const drift of [{ baseCommit: "f".repeat(40) }, { toolRevision: "f".repeat(64) },
+      { dirtyHashes: [{ pathSegments: path("src/result.ts"), sha256: "f".repeat(64) }] }]) {
+      expectCode(() => publish({ manifest: { ...finalized, ...drift }, reviewAdmission }), "INVALID_COORDINATION_INPUT");
+    }
+    const allocation: CoordinationAllocation = {
+      phaseId: "R15-review", mode: "multi_todo", requestedConcurrency, agents: Array.from({ length: requestedConcurrency }, (_, i) => ({
+        agentId: `agent-${i}`, todoId: `todo-${i}`, writer: true,
+        exclusivePaths: [path(`src/territory-${i}`)],
+      })),
+    };
+    for (const bad of [
+      ...[undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, requestedConcurrency + 1].map((count) => ({ ...allocation, requestedConcurrency: count })),
+      { ...allocation, agents: [] },
+      { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0], allocation.agents[0]] },
+      ...["src/territory-0", "src/territory-0/child", "src"].map((territory) => ({
+        ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
+          { ...allocation.agents[0], agentId: "overlap", exclusivePaths: [path(territory)] }],
+      })),
+      ...[{ todoId: "" }, { agentId: "" }, { exclusivePaths: [] }, { writer: false },
+        { exclusivePaths: [path("src/duplicate"), path("src/duplicate")] }].map((invalid) => ({
+        ...allocation, requestedConcurrency: 1, agents: [{ ...allocation.agents[0], ...invalid }],
+      })),
+    ]) expectCode(() => publish({ manifest: finalized, allocation: bad }), "INVALID_COORDINATION_INPUT");
+    const reviewed = publish({ manifest: finalized, reviewAdmission, allocation });
+    session = reviewed.session;
+    const single = publish({ manifest: finalized, allocation: { phaseId: "one", mode: "single_todo", requestedConcurrency: 1,
+      agents: [{ ...allocation.agents[0]!, writer: false, exclusivePaths: [] }] } });
+    expect(single.memory.entry.allocation?.agents).toHaveLength(1);
+    register(alpha.id, NEXT_INCARCINATION, TOKEN_C, "manifest-restart");
+    const replay = readCoordinationMemory(alpha.id, MAIN.worktreeId).entries;
+    expect(replay[0]?.manifest?.unresolvedOperations).toEqual(manifest.unresolvedOperations);
+    expect(replay[0]?.manifest?.todoWrite).toEqual(manifest.todoWrite);
+    expect(replay[1]).toMatchObject({ manifest: finalized, reviewAdmission, allocation });
+  });
+
   it("appends exact-schema operational entries without lost updates and replays them after restart", () => {
     const { db, alpha } = setup();
     const coordinationMemory = ensureCoordinationMemory(alpha.id, MAIN.worktreeId);
@@ -2070,6 +2152,161 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(migrated.prepare(
       "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'coordination_%'",
     ).get()).toEqual({ count: 13 });
+  });
+
+  it("mints one hashed recovery admission and atomically consumes it once", () => {
+    const { db, alpha } = setup();
+    const principalId = "service-principal-recovery";
+    const session = registerCoordinationSession(alpha.id, {
+      ...MAIN,
+      principalId,
+      ownershipToken: TOKEN_A,
+      ttlMs: 2_000,
+      idempotencyKey: "recovery-admission-register",
+    });
+    const claimed = claimCoordinationBatch(alpha.id, {
+      ...lease(MAIN, session, TOKEN_A, "recovery-admission-claim"),
+      clientClaimKey: claimKey("recovery-admission-claim"),
+      claims: [{ claim: { kind: "path", path: "recovery/owned" } }],
+    });
+    const mintInput = {
+      ...lease(MAIN, claimed.session, TOKEN_A, "recovery-admission-mint"),
+      project: alpha.name,
+      principalId,
+      workspace: "coordination-workspace-main",
+      storage: "f".repeat(64),
+      worktree: "/workspace/ingenium",
+      preflightDigest: "b".repeat(64),
+      head: "a".repeat(40),
+      parentPid: 42,
+      parentStart: "123456",
+      parentExecutable: "/usr/local/bin/opencode",
+      parentNonce: TOKEN_C,
+      ttlMs: 1_000,
+    };
+    const minted = mintRecoveryAdmission(alpha.id, mintInput);
+    const snapshot = JSON.parse((db.prepare(
+      "SELECT snapshot_json FROM coordination_sessions WHERE id = ?",
+    ).get(session.id) as { snapshot_json: string }).snapshot_json) as Record<string, unknown>;
+    const mintReceipt = db.prepare(
+      "SELECT result_json FROM coordination_mutation_receipts WHERE project_id = ? AND idempotency_key = ?",
+    ).get(alpha.id, mintInput.idempotencyKey) as { result_json: string };
+
+    expect(minted).toMatchObject({
+      session: { state: "active", revision: claimed.session.revision + 1 },
+      admission: {
+        schema: "ingenium.recovery-admission",
+        version: 1,
+        action: "production-restart",
+        project: alpha.name,
+        projectId: alpha.id,
+        worktreeId: MAIN.worktreeId,
+        revision: claimed.session.revision + 1,
+        fence: claimed.session.fence,
+        parent: { pid: 42, session: MAIN.sessionId, nonce: TOKEN_C },
+      },
+      consumeToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
+    const consumeTokenHash = createHash("sha256").update(minted.consumeToken).digest("hex");
+    expect(JSON.stringify(snapshot)).toContain(consumeTokenHash);
+    expect(JSON.stringify(snapshot)).not.toContain(minted.consumeToken);
+    expect(mintReceipt.result_json).not.toContain(minted.consumeToken);
+    expect(mintReceipt.result_json).not.toContain(consumeTokenHash);
+    expect(JSON.stringify(getCoordinationSession(alpha.id, session.id))).not.toContain(consumeTokenHash);
+    expectCode(() => mintRecoveryAdmission(alpha.id, mintInput), "RECOVERY_ADMISSION_CONFLICT");
+    expectCode(() => consumeRecoveryAdmission(alpha.id, {
+      ...MAIN,
+      expectedRevision: minted.session.revision,
+      fence: minted.session.fence,
+      principalId,
+      consumeToken: "Z".repeat(43),
+      admission: minted.admission,
+    }), "SESSION_NOT_FOUND");
+    expectCode(() => consumeRecoveryAdmission(alpha.id, {
+      ...MAIN,
+      expectedRevision: minted.session.revision,
+      fence: minted.session.fence,
+      principalId,
+      consumeToken: minted.consumeToken,
+      admission: { ...minted.admission, head: "c".repeat(40) },
+    }), "RECOVERY_ADMISSION_CONFLICT");
+
+    const consumed = consumeRecoveryAdmission(alpha.id, {
+      ...MAIN,
+      expectedRevision: minted.session.revision,
+      fence: minted.session.fence,
+      principalId,
+      consumeToken: minted.consumeToken,
+      admission: minted.admission,
+    });
+    expect(consumed).toMatchObject({
+      session: { state: "closed", revision: minted.session.revision + 1 },
+      receipt: {
+        schema: "ingenium.recovery-admission-receipt",
+        version: 1,
+        action: "production-restart",
+        admissionDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    expect(status(alpha.id)?.claims).toEqual([expect.objectContaining({ state: "released" })]);
+    expect((JSON.parse((db.prepare(
+      "SELECT snapshot_json FROM coordination_sessions WHERE id = ?",
+    ).get(session.id) as { snapshot_json: string }).snapshot_json) as Record<string, unknown>).recoveryAdmission).toBeUndefined();
+    expectCode(() => consumeRecoveryAdmission(alpha.id, {
+      ...MAIN,
+      expectedRevision: minted.session.revision,
+      fence: minted.session.fence,
+      principalId,
+      consumeToken: minted.consumeToken,
+      admission: minted.admission,
+    }), "RECOVERY_ADMISSION_CONFLICT");
+  });
+
+  it("fails recovery admission mint and consume closed across tenant and principal boundaries", () => {
+    const { alpha, beta } = setup();
+    const principalId = "service-principal-recovery";
+    const session = registerCoordinationSession(alpha.id, {
+      ...MAIN,
+      principalId,
+      ownershipToken: TOKEN_A,
+      ttlMs: 2_000,
+      idempotencyKey: "recovery-boundary-register",
+    });
+    const mintInput = {
+      ...lease(MAIN, session, TOKEN_A, "recovery-boundary-mint"),
+      project: alpha.name,
+      principalId,
+      workspace: "coordination-workspace-main",
+      storage: "f".repeat(64),
+      worktree: "/workspace/ingenium",
+      preflightDigest: "d".repeat(64),
+      head: "e".repeat(64),
+      parentPid: 43,
+      parentStart: "654321",
+      parentExecutable: "/usr/local/bin/opencode",
+      parentNonce: TOKEN_C,
+      ttlMs: 1_000,
+    };
+    expectCode(() => mintRecoveryAdmission(alpha.id, {
+      ...mintInput,
+      principalId: "service-principal-foreign",
+      idempotencyKey: "recovery-boundary-foreign-mint",
+    }), "SESSION_NOT_FOUND");
+    const minted = mintRecoveryAdmission(alpha.id, mintInput);
+    const consume = {
+      ...MAIN,
+      expectedRevision: minted.session.revision,
+      fence: minted.session.fence,
+      principalId,
+      consumeToken: minted.consumeToken,
+      admission: minted.admission,
+    };
+    expectCode(() => consumeRecoveryAdmission(beta.id, consume), "SESSION_NOT_FOUND");
+    expectCode(() => consumeRecoveryAdmission(alpha.id, {
+      ...consume,
+      principalId: "service-principal-foreign",
+    }), "SESSION_NOT_FOUND");
+    expect(getCoordinationSession(alpha.id, session.id)).toMatchObject({ state: "active", revision: minted.session.revision });
   });
 
   it("links principal-bound sessions and durably replays exact transcript envelopes", () => {

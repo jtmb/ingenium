@@ -23,6 +23,7 @@ import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
+import { memoryRouter } from "../lib/routes/memory.js";
 import {
   CONTEXT_SNAPSHOT_INGEST_PATH,
   contextSnapshotIngestRouter,
@@ -49,6 +50,7 @@ import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } f
 import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
+import { cloudflareRouter } from "../lib/routes/cloudflare.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
 import { vaultRouter } from "../lib/routes/vault.js";
 import { router as docsRouter } from "../lib/routes/docs.js";
@@ -185,6 +187,7 @@ app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/coordination", coordinationRateLimit);
 app.use("/api/v1/coordination", coordinationRouter);
 app.use("/api/v1/context", contextRouter);
+app.use("/api/v1/memory", memoryRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
 app.use("/api/v1/mcp-servers", mcpServersRouter);
@@ -207,6 +210,7 @@ app.use("/api/v1/opencode", runtimeOpenCodeContext, opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
 
+app.use("/api/v1/services/cloudflare", cloudflareRouter);
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);

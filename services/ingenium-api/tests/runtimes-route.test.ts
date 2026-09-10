@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { authentication, coordination, getDb, identity, mcpCredentials, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
+import { authentication, coordination, explicitMemory, getDb, identity, mcpCredentials, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -71,7 +71,7 @@ function createRuntimeCapability(id: string, registerPeer = true) {
     kind: "runtime",
     audience: "runtime",
     name: id,
-    scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
+    scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
     organizationId: scope.organizationId,
     projectId: scope.project.id,
     workspaceId: workspace.id,
@@ -139,6 +139,8 @@ beforeAll(async () => {
     const match = /^\/v1\/runtimes\/([0-9a-f-]+)(?:\/stop)?$/.exec(request.url ?? "");
     const runtimeId = match?.[1] ?? "11111111-1111-4111-8111-111111111111";
     const finish = () => response.writeHead(request.url === "/v1/runtimes" ? 202 : 200).end(JSON.stringify({ data: {
+      runtimeId,
+      imageRevision: "b".repeat(40),
       backendId: "a".repeat(64),
       backendName: `ingenium-runtime-${runtimeId.replaceAll("-", "")}`,
       state: request.url?.endsWith("/stop") ? "exited" : managerRuntimeState,
@@ -227,7 +229,7 @@ describe("AUTH-108 runtime routes", () => {
   });
 
   it("idempotently provisions one runtime per authorized workspace", async () => {
-    createWorkspace("runtime-route-ok");
+    const { user } = createWorkspace("runtime-route-ok");
     const first = await fetch(`${apiBase}/api/v1/runtimes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -235,6 +237,10 @@ describe("AUTH-108 runtime routes", () => {
     });
     expect(first.status).toBe(202);
     await expect(first.json()).resolves.toMatchObject({ data: { state: "STARTING", backendContainerId: "a".repeat(64) } });
+    expect(mcpCredentials.listMcpCredentials(user.id).filter((credential) => credential.kind === "runtime")
+      .map((credential) => credential.scopes)).toEqual([
+      ["child-mcp:execute", "child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
+    ]);
 
     const duplicate = await fetch(`${apiBase}/api/v1/runtimes`, {
       method: "POST",
@@ -641,6 +647,47 @@ describe("AUTH-108 runtime routes", () => {
 
     expect(status.status).toBe(200);
     await expect(status.json()).resolves.toEqual({ data: { mode: "compatibility", status: "ready", reason: null } });
+    expect(managerRequests).toEqual([]);
+  });
+
+  it("confirms only an unambiguous authorized compatibility project workspace for memory", async () => {
+    const scope = createWorkspace("ingenium");
+    runtimes.revokeAuthorizedWorkspace("ingenium");
+    runtimes.authorizeWorkspace({
+      id: "shared-memory-ingenium", organizationId: scope.organizationId, projectId: scope.project.id,
+      ownerUserId: scope.user.id, storagePath: new URL("../../../", import.meta.url).pathname.replace(/\/$/, ""),
+    });
+    browserSession = authentication.createSession(scope.user.id);
+    process.env.INGENIUM_DEPLOYMENT_MODE = "compatibility";
+    const readStatus = async (project: string) => (await fetch(
+      `${apiBase}/api/v1/runtimes/browser/status?project=${project}`,
+    )).json();
+    const bound = await readStatus("ingenium");
+    expect(bound.data.workspace).toMatchObject({ id: "shared-memory-ingenium", projectName: "ingenium", status: "ready", runtimeId: null });
+    const listed = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces?project=ingenium`);
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toEqual({ data: [bound.data.workspace] });
+    createWorkspace("foreign-project");
+    for (const query of ["?project=foreign-project", "?project=unbound-project", ""]) {
+      const response = await fetch(`${apiBase}/api/v1/runtimes/browser/workspaces${query}`);
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ data: [] });
+    }
+    const memoryScope = explicitMemory.resolveExplicitMemoryScope({
+      projectId: scope.project.id,
+      workspaceId: bound.data.workspace.id,
+      principal: { type: "user", userId: scope.user.id },
+    });
+    expect(memoryScope.workspaceId).toBe("shared-memory-ingenium");
+    expect((await readStatus("unauthorized-project")).data.workspace).toBeNull();
+    authorizeAdditionalWorkspace(scope, "ambiguous-workspace");
+    expect((await readStatus("ingenium")).data.workspace).toBeNull();
+    runtimes.revokeAuthorizedWorkspace("ambiguous-workspace");
+    runtimes.revokeAuthorizedWorkspace("shared-memory-ingenium");
+    expect((await readStatus("ingenium")).data.workspace).toBeNull();
+    expect(() => explicitMemory.resolveExplicitMemoryScope({
+      projectId: scope.project.id, workspaceId: "shared-memory-ingenium", principal: { type: "user", userId: scope.user.id },
+    })).toThrow();
     expect(managerRequests).toEqual([]);
   });
 

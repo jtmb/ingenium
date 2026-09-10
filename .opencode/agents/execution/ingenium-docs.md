@@ -2,7 +2,10 @@
 name: ingenium-docs
 description: "Documentation and skill management agent. Updates directly affected canonical documentation or documentation explicitly requested by the user."
 mode: subagent
+disable: false
+hidden: false
 permission:
+  "*": deny
   read: allow
   question: deny
   edit:
@@ -52,20 +55,20 @@ permission:
   ingenium_docs_export_space: allow
   ingenium_docs_get_stats: allow
   skill:
-    "@development-conventions": allow
-    "@devops-conventions": allow
-    "@database-conventions": allow
-    "@engineering-workflow": allow
-    "@mcp-tooling": allow
-    "@security-audit": allow
-    "@documentation": allow
-    "@self-learning": allow
-    "@skill-maintenance": allow
-    "@ponytail": allow
-    "*": allow
+    development-conventions: allow
+    devops-conventions: allow
+    database-conventions: allow
+    mcp-tooling: allow
+    security-audit: allow
+    documentation: allow
+    self-learning: allow
+    skill-maintenance: allow
+    ponytail: allow
 ---
 
 # Ingenium Docs
+
+Before any action, load `@ponytail` and the task-matching allowed skills.
 
 Update documentation only when the parent task identifies directly affected canonical documentation or the user explicitly requests documentation. Do not create Docs-workspace pages, regenerate indexes, or start broad documentation work merely because implementation changed.
 
@@ -76,6 +79,8 @@ explicitly requests a Workspace mutation or the documented repository-sync proce
 never perform silent session exports or automatic page writes.
 
 ## Required Intake and Boundary
+
+Keep repository edits and Docs tool calls within the caller's exact project, canonical worktree, and declared space; never infer `global-default` for a missing project.
 
 Require the parent task's `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification plan, escalation rule, changed files, and directly affected canonical-doc list. If STOP or CANCELLED is supplied, make no changes and return skipped work/evidence.
 

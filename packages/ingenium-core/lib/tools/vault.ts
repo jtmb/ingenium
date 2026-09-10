@@ -705,7 +705,7 @@ export function createItem(
     // material. The item ID is sufficient to correlate an audited operation.
     insertAudit(projectId, "secret_created", id, actor, {});
   });
-  checkpointAfterWrite();
+  if (!getDb(dbPath()).inTransaction) checkpointAfterWrite();
   return id;
 }
 
@@ -754,7 +754,7 @@ export function decryptItem(projectId: string, itemId: string, actor: VaultActor
       dek.fill(0);
     }
   });
-  if (result !== null) checkpointAfterWrite();
+  if (result !== null && !getDb(dbPath()).inTransaction) checkpointAfterWrite();
   return result;
 }
 
@@ -794,7 +794,7 @@ export function updateItem(projectId: string, itemId: string, value: string, act
     ).run(encrypted, wrappedDek, new Date().toISOString(), projectId, itemId, DELETED_POLICY);
     if (changed.changes > 0) insertAudit(projectId, "secret_updated", itemId, actor, {});
   });
-  checkpointAfterWrite();
+  if (!getDb(dbPath()).inTransaction) checkpointAfterWrite();
 }
 
 /** Update non-sensitive metadata for an active vault item. */
@@ -852,7 +852,7 @@ export function deleteItem(projectId: string, itemId: string, actor: VaultActor 
     ).run(DELETED_POLICY, new Date().toISOString(), projectId, itemId, DELETED_POLICY);
     if (changed.changes > 0) insertAudit(projectId, "secret_deleted", itemId, actor, {});
   });
-  checkpointAfterWrite();
+  if (!getDb(dbPath()).inTransaction) checkpointAfterWrite();
 }
 
 /** Persist an auditable vault event. */

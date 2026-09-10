@@ -12,4 +12,4 @@ description: "Visual design and UI standardization rules for overlays, cards, an
 - INFO-badge CSS variable must be used for overlay styling
 
 ## 🔴 Orchestration Visual Validation
-- Visual validation is required during orchestration testing. Follow the canonical `@engineering-workflow` visual-validation protocol for changed UI routes and the final all-primary-routes desktop/mobile sweep.
+- Follow the assigned visual gate in the orchestrator and `@ingenium-qa` profile; `@ingenium-qa` owns changed-route and batch desktop/mobile validation.

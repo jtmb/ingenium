@@ -7,14 +7,20 @@ description: Redacted response record and future remediation steps for the histo
 
 > **Handling:** Redacted operational documentation. Do not add token values, hashes, or other secret material here.
 
+> **Evidence boundary:** The statuses below preserve a historical remediation
+> record. This documentation task performed no history rewrite, remote update,
+> scan, deployment, restart, or replay, so it does not independently re-verify
+> the checked items.
+
 ## Incident status
 
-- **History remediation:** The history rewrite was completed from an isolated mirror.
-- **Affected paths:** The affected paths were removed from historical history.
-- **Remote refs:** `origin` branches `main` and `the-next-level` were force-updated to the reported sanitized refs.
-- **Current scans:** Local and current scans are clean.
-- **Historical credential comparison:** No historical JWT matched the current local credentials.
-- **Deployed bearer rotation:** Complete; the prior bearer was rejected with HTTP `401`.
+- **History remediation:** The historical report says the history rewrite was completed from an isolated mirror.
+- **Affected paths:** The historical report says the affected paths were removed from historical history.
+- **Remote refs:** The historical report says `origin` branches `main` and `the-next-level` were force-updated to sanitized refs.
+- **Current scans:** The historical report says local and current scans are clean.
+- **Historical credential comparison:** The historical report says no historical JWT matched the current local credentials.
+- **Deployed bearer rotation:** The historical report says complete; no current
+  deployment, restart, or HTTP `401` verification is claimed here.
 - **Local email key:** Unchanged.
 - **Separate follow-up:** External provider revocation, cache invalidation, and collaborator/CI clone-reset actions remain tracked here and were not inferred from the local bearer check.
 
@@ -36,15 +42,23 @@ evidence rather than attempting to resurrect old tokens.
 
 ### 1. Credential verification
 
-The deployed Ingenium API bearer was rotated and the prior bearer was rejected with HTTP `401`. External provider revocation and related cache invalidation remain separate follow-up checks. No credential values are recorded here.
+The historical record reports that the deployed Ingenium API bearer was rotated
+and the prior bearer was rejected with HTTP `401`. This task does not re-verify
+that deployment result. External provider revocation and related cache
+invalidation remain separate follow-up checks. No credential values are recorded here.
 
 ### 2. History rewrite
 
-The rewrite was performed from an isolated mirror. Affected paths were removed historically, and `origin/main` and `origin/the-next-level` were force-updated to the reported sanitized refs.
+The historical record reports that the rewrite was performed from an isolated
+mirror, affected paths were removed historically, and `origin/main` and
+`origin/the-next-level` were force-updated to sanitized refs.
 
 ### 3. Local verification
 
-Local and current scans are clean. No historical JWT matched the current local credentials. The local email key was not changed. Keep local secret material out of commits, build contexts, issue reports, and shell history.
+The historical record reports clean local/current scans and no historical JWT
+match to current local credentials. This task ran no scan. The local email key
+was not changed. Keep local secret material out of commits, build contexts,
+issue reports, and shell history.
 
 ### 4. Add ongoing secret scanning
 
@@ -56,13 +70,13 @@ Local and current scans are clean. No historical JWT matched the current local c
 
 ## Verification checklist
 
-- [x] History rewritten from an isolated mirror.
-- [x] Affected paths removed from historical history.
-- [x] `origin/main` and `origin/the-next-level` force-updated to the reported sanitized refs.
-- [x] Local and current scans clean.
-- [x] No historical JWT matched current local credentials.
-- [x] Deployed bearer rotated and prior bearer rejected with HTTP `401`.
-- [x] Local email key unchanged.
+- [x] Historical report: history rewritten from an isolated mirror.
+- [x] Historical report: affected paths removed from historical history.
+- [x] Historical report: `origin/main` and `origin/the-next-level` force-updated to sanitized refs.
+- [x] Historical report: local and current scans clean.
+- [x] Historical report: no historical JWT matched current local credentials.
+- [x] Historical report: deployed bearer rotated and prior bearer rejected with HTTP `401`.
+- [x] Historical report: local email key unchanged.
 - [ ] External provider revocation verified.
 - [ ] External provider caches invalidated or confirmed clear.
 - [ ] Collaborators and CI re-cloned or reset from the rewritten history.

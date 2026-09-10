@@ -15,3 +15,5 @@ description: "Mail app UI/UX standards for sync operations — automatic job-bas
 - email_suggestions cache: folder must pass through unchanged from email.folder (no defaulting)
 - noreply senders matching /no[-_.]?reply|do[-_.]?not[-_.]?reply patterns must be handled correctly
 - mail_smart_replies_enabled checkbox setting must be documented and applied
+- Parse RFC 2822/MIME headers with `mailparser.simpleParser`, never handwritten address regexes.
+- Smart replies use an 8192-token budget for reasoning models and never expose or fall back to `reasoning_content`; empty or failed responses return the established safe sentinel without crashing the sync loop.

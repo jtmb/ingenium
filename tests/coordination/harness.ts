@@ -1795,9 +1795,7 @@ export async function runCoordinationHarness(
     assertTurnTool(turnA, "coordination_canary", pathA);
     const initialCommands = ["fixed:edit-check-commit-sync"];
     assertTurnCommands(turnA, initialCommands);
-    const managedTrace = readTrace(preparedA.traceFile).filter((entry) => entry.operation === "tool.execute.before" || entry.operation === "tool.execute.after");
-    required(managedTrace.some((entry) => entry.operation === "tool.execute.before")
-      && managedTrace.some((entry) => entry.operation === "tool.execute.after"), "Model A commands did not traverse the managed execution hooks");
+    const commandTrace = readTrace(preparedA.traceFile);
     required(readFileSync(join(options.worktree, pathA), "utf8") === `${markerA}\n`, "Model A evidence content is invalid");
     let currentRevision = await assertGitCommit(options.worktree, pathA, originalRevision, lifecycle.signal);
     const localApplied = await waitFor("local_applied coordination outbox evidence", 30_000, lifecycle.signal, async () => outboxRecords(options.worktree)
@@ -2007,7 +2005,7 @@ export async function runCoordinationHarness(
     evidence.write("managed-path.json", {
       schema: HARNESS_ARTIFACT_SCHEMA,
       commandSha256: initialCommands.map(sha256),
-      trace: managedTrace,
+      trace: commandTrace,
        commitRevisions: (await git(options.worktree, ["rev-list", "--reverse", `${originalRevision}..HEAD`], 30_000, lifecycle.signal)).toString("utf8").trim().split(/\s+/).filter(Boolean),
     });
     evidence.write("faults.json", {

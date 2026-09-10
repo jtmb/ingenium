@@ -286,12 +286,14 @@ function parseExpectedPorts(): Set<number> {
   return new Set(ports);
 }
 
-function isListening(port: number): Promise<boolean> {
+export function isListening(port: number): Promise<boolean> {
   return new Promise((resolveResult) => {
     const socket = connect({ host: "127.0.0.1", port });
+    let result = false;
+    socket.once("close", () => resolveResult(result));
     const finish = (listening: boolean) => {
+      result = listening;
       socket.destroy();
-      resolveResult(listening);
     };
     socket.setTimeout(750, () => finish(false));
     socket.once("connect", () => finish(true));
@@ -442,7 +444,10 @@ export function scanCoordinationTraceResiduals(
   try {
     try {
       opened = fstatSync(descriptor, { bigint: true });
-      if (!opened.isDirectory() || opened.uid !== euid || (opened.mode & 0o777n) !== 0o700n) {
+      // This is a read-only inventory of names, not the private trace writer.
+      // The documented shared root may be searchable, but never writable by others.
+      if (!opened.isDirectory() || opened.uid !== euid
+        || (opened.mode & 0o700n) !== 0o700n || (opened.mode & 0o022n) !== 0n) {
         report.rootUnsafe = true;
         recordError("root-metadata-invalid");
       }
@@ -524,12 +529,15 @@ export function scanCoordinationTraceResiduals(
   return report;
 }
 
-function auditProcesses(): { activeHandles: number; rssBytes: number } {
+export function auditProcesses(): { activeHandles: number; rssBytes: number } {
   const processWithHandles = process as NodeJS.Process & {
     _getActiveHandles?: () => unknown[];
   };
   return {
-    activeHandles: processWithHandles._getActiveHandles?.().length ?? -1,
+    // The auditor's own stdio and parent IPC channel are not suite leaks.
+    activeHandles: processWithHandles._getActiveHandles?.().filter((handle) =>
+      handle !== process.stdin && handle !== process.stdout && handle !== process.stderr
+      && handle !== process.channel).length ?? -1,
     rssBytes: process.memoryUsage().rss,
   };
 }
@@ -950,6 +958,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   const scopedTelemetry = scopedTelemetryPaths(loadedManifest.manifest, options);
   const telemetry: TestRunTelemetry[] = [];
   const telemetryErrors: string[] = [];
+  const historicalUnreadableTelemetry: string[] = [];
   const retentionTransitions: string[] = [];
   const retentionErrors: string[] = [];
   const activeRetentionRuns = new Map<string, Extract<ArtifactRetentionTransitionInspection, { state: "valid" }>>();
@@ -1021,6 +1030,18 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
           }
           continue;
         }
+      }
+      // Unparseable old artifacts cannot authenticate ownership or recovery.
+      // Retain them separately; live processes and temp manifests are still audited.
+      const metadata = optionalLstat(path);
+      if (telemetryError === "Runner telemetry is not valid JSON"
+        && options.includeRepositoryTelemetry === true && !scopedTelemetry.has(path)
+        && metadata?.isFile() && !metadata.isSymbolicLink()
+        && realpathSync(path) === path && metadata.uid === process.geteuid?.()
+        && Date.now() - metadata.mtimeMs >= HISTORICAL_INERT_EVIDENCE_AFTER_MS
+        && inspectTestRunArtifactLock(artifactRoot, runId).state === "missing") {
+        historicalUnreadableTelemetry.push(`unparseable historical telemetry retained (untrusted, not ownership evidence): ${path}`);
+        continue;
       }
       telemetryErrors.push(`${path}: ${telemetryError}`);
     }
@@ -1182,6 +1203,7 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     informational: [
       ...legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
       ...inertHistoricalEvidence,
+      ...historicalUnreadableTelemetry,
       ...preexistingUnownedProcesses.map((candidate) =>
         `pre-existing unowned candidate retained: ${candidate.pid} listening on ${candidate.listeningPorts.join(",")}`),
       ...tempAudit.manifestless.map((path) => `manifestless temp evidence retained (unowned, not deleted): ${path}`),
@@ -1200,6 +1222,11 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
 
 export function strictFailures(report: ContainmentAuditReport, manifestError?: string): string[] {
   const failures: string[] = [];
+  if (!Number.isSafeInteger(report.process.activeHandles) || report.process.activeHandles < 0) {
+    failures.push("active handles: inspection unavailable");
+  } else if (report.process.activeHandles > 0) {
+    failures.push(`active handles: ${report.process.activeHandles} unexpected handles remain`);
+  }
   const configuredManifestPath = report.manifestPath
     && isAbsolute(report.manifestPath)
     && resolve(report.manifestPath) === report.manifestPath

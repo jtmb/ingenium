@@ -198,7 +198,8 @@ describe("container OpenCode global-config projection", () => {
         "operator-agent": { "model": "operator/model", "question": "allow", "permission": "ask" },
         "non-plan-agent": { "permission": { "bash": "allow", "question": "allow" } },
         "ingenium-llm-broker": { "hidden": true, "permission": { "*": "deny", "question": "allow" } },
-        "plan": { "variant": "operator-plan", "permission": "ask" }
+        "plan": { "variant": "operator-plan", "permission": "ask", "prompt": "legacy", "disable": true, "hidden": true },
+        "ingenium-orchestrator": { "model": "openai/model", "variant": "high", "permission": { "*": "deny" }, "prompt": "legacy", "disable": true, "mode": "primary" }
       },
       "mcp": {
         "other": { "command": ["other"] },
@@ -234,8 +235,8 @@ describe("container OpenCode global-config projection", () => {
     const raw = readFileSync(configPath, "utf8");
     const config = JSON.parse(raw) as {
       provider: { example: { enabled: boolean } };
-      permission: Record<string, string>;
-      agent: Record<string, { permission: Record<string, string>; [key: string]: unknown }>;
+      permission: string;
+      agent: Record<string, { [key: string]: unknown }>;
       mcp: {
         other: unknown;
         ponytail?: unknown;
@@ -246,26 +247,23 @@ describe("container OpenCode global-config projection", () => {
     };
     expect(raw).not.toContain(inlineToken);
     expect(config.provider).toEqual({ example: { enabled: true } });
-    expect(config.permission).toEqual({ "*": "ask", question: "deny" });
+    expect(config.permission).toBe("ask");
     expect(config.agent["operator-agent"]).toEqual({
       model: "operator/model",
-      question: "deny",
-      permission: { "*": "ask", question: "deny" },
+      question: "allow",
+      permission: "ask",
     });
     expect(config.agent["non-plan-agent"]).toEqual({
-      permission: { bash: "allow", question: "deny" },
+      permission: { bash: "allow", question: "allow" },
     });
     expect(config.agent["ingenium-llm-broker"]).toEqual({
       hidden: true,
-      permission: { "*": "deny", question: "deny" },
+      permission: { "*": "deny", question: "allow" },
     });
     expect(config.agent.plan).toEqual({
       variant: "operator-plan",
-      permission: { "*": "ask", question: "allow" },
     });
-    for (const [name, projection] of Object.entries(config.agent)) {
-      expect(projection.permission.question).toBe(name === "plan" ? "allow" : "deny");
-    }
+    expect(config.agent["ingenium-orchestrator"]).toEqual({ model: "openai/model", variant: "high" });
     expect(config.mcp.other).toEqual({ command: ["other"] });
     expect(config.mcp["unrelated-ponytail"]).toEqual({ command: ["unrelated-ponytail"] });
     expect(config.mcp.ponytail).toBeUndefined();
@@ -276,11 +274,11 @@ describe("container OpenCode global-config projection", () => {
     expect(config.mcp.ingenium.environment).toMatchObject({
       CUSTOM_VALUE: "preserved",
       INGENIUM_API_URL: "http://localhost:4097/api/v1",
-      INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
+      INGENIUM_MCP_CREDENTIAL_FILE: "/run/ingenium-opencode/.ingenium-mcp-credential",
       INGENIUM_MCP_AUDIENCE: "mcp",
-      INGENIUM_PROJECT: "global-default",
-      INGENIUM_WORKSPACE_ID: "global-default-workspace",
-      INGENIUM_WORKTREE: "/workspace",
+      INGENIUM_PROJECT: "ingenium",
+      INGENIUM_WORKSPACE_ID: "shared-memory-ingenium",
+      INGENIUM_WORKTREE: "/home/brajam/repos/ingenium",
     });
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN).toBeUndefined();
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN_FILE).toBeUndefined();
@@ -293,5 +291,47 @@ describe("container OpenCode global-config projection", () => {
       ...CANONICAL_PLUGIN_SPECS,
     ]);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
+  });
+
+  it("retires only the exact browser-agent mapping and is idempotent", () => {
+    const configPath = temporaryConfigPath();
+    writeFileSync(configPath, JSON.stringify({
+      agent: {
+        "browser-agent": { model: "legacy/browser", variant: "max", permission: { "*": "allow" } },
+        "browser-agent-helper": { model: "operator/helper", permission: { "*": "allow" } },
+        "operator-agent": { model: "operator/model", question: "allow" },
+        "ingenium-chat": {
+          model: "deepseek/deepseek-v4-flash",
+          variant: "max",
+          prompt: "profile-owned",
+        },
+        "ingenium-llm-broker": { hidden: true, permission: { "*": "deny" } },
+      },
+    }), { mode: 0o600 });
+
+    projectOpenCodeGlobalConfig(configPath);
+    const firstProjection = readFileSync(configPath, "utf8");
+    const agent = (JSON.parse(firstProjection) as { agent: Record<string, unknown> }).agent;
+
+    expect(agent).not.toHaveProperty("browser-agent");
+    expect(agent["browser-agent-helper"]).toEqual({ model: "operator/helper", permission: { "*": "allow" } });
+    expect(agent["operator-agent"]).toEqual({ model: "operator/model", question: "allow" });
+    expect(agent["ingenium-chat"]).toEqual({ model: "deepseek/deepseek-v4-flash", variant: "max" });
+    expect(agent["ingenium-llm-broker"]).toEqual({ hidden: true, permission: { "*": "deny" } });
+
+    projectOpenCodeGlobalConfig(configPath);
+    expect(readFileSync(configPath, "utf8")).toBe(firstProjection);
+  });
+
+  it("rejects permissive unknown Ingenium agent orphans without changing the config", () => {
+    const configPath = temporaryConfigPath();
+    const source = JSON.stringify({
+      provider: { retained: true },
+      agent: { "ingenium-unknown": { model: "operator/model", permission: { "*": "allow" } } },
+    });
+    writeFileSync(configPath, source, { mode: 0o600 });
+
+    expect(() => projectOpenCodeGlobalConfig(configPath)).toThrow(/Permissive unknown Ingenium agent override/);
+    expect(readFileSync(configPath, "utf8")).toBe(source);
   });
 });

@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   api,
+  ApiError,
+  request,
   type CategorizedMcpTool,
   type ChildMcpScope,
   type ChildMcpServer,
@@ -229,6 +231,7 @@ export default function McpServerManager() {
 
   const [showForm, setShowForm] = useState(true);
   const [serverName, setServerName] = useState("");
+  const [description, setDescription] = useState("");
   const [executable, setExecutable] = useState("");
   const [argsText, setArgsText] = useState("");
   const [scope, setScope] = useState<ChildMcpScope>("project");
@@ -367,6 +370,7 @@ export default function McpServerManager() {
 
   const resetForm = () => {
     setServerName("");
+    setDescription("");
     setExecutable("");
     setArgsText("");
     setScope("project");
@@ -382,6 +386,7 @@ export default function McpServerManager() {
     try {
       await api.mcpServers.create({
         name: serverName.trim(),
+        description: description.trim(),
         executable: executable.trim(),
         args: argsText.split(/\r?\n/).map((arg) => arg.trim()).filter(Boolean),
         environment: makeEnvironment(environmentRows),
@@ -392,6 +397,19 @@ export default function McpServerManager() {
       await loadData();
     } catch (error) {
       setServerError(getSafeMcpErrorMessage(error, "create"));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const addPlaywrightPreset = async () => {
+    setBusyAction("preset:playwright");
+    setServerError(null);
+    try {
+      await api.mcpServers.createPlaywrightPreset(project, description.trim());
+      await loadData();
+    } catch (error) {
+      setServerError(error instanceof ApiError ? error.message : getSafeMcpErrorMessage(error, "create"));
     } finally {
       setBusyAction(null);
     }
@@ -411,17 +429,15 @@ export default function McpServerManager() {
     }
   };
 
-  const connectOrDisconnect = async (server: ChildMcpServer, connected: boolean) => {
-    if (!opencode) {
-      setLifecycleError("Select and start an authorized workspace before changing MCP connections.");
-      return;
-    }
-    const action = connected ? "disconnect" : "connect";
+  const setServerEnabled = async (server: ChildMcpServer, enabled: boolean) => {
+    const action = enabled ? "connect" : "disconnect";
     setBusyAction(`${action}:${server.name}`);
     setLifecycleError(null);
     try {
-      if (connected) await opencode.mcp.disconnect(server.name);
-      else await opencode.mcp.connect(server.name);
+      await request(
+        `/mcp-servers/${encodeURIComponent(server.name)}/${action}?project=${encodeURIComponent(project)}`,
+        { method: "POST" },
+      );
       await loadData();
     } catch (error) {
       setLifecycleError(getSafeMcpErrorMessage(error, action));
@@ -546,6 +562,26 @@ export default function McpServerManager() {
             </button>
           </div>
 
+          <section className="flex flex-col gap-3 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-semibold">Playwright browser preset</h2>
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Adds the server-managed Playwright preset with an isolated headless Chromium profile and run-owned output.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void addPlaywrightPreset()}
+              disabled={loading || refreshing || Boolean(busyAction) || servers.some((server) => server.name === "playwright")}
+              className="shrink-0 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {servers.some((server) => server.name === "playwright")
+                ? "Playwright added"
+                : busyAction === "preset:playwright" ? "Adding…" : "Add Playwright"}
+            </button>
+          </section>
+
+          {serverError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{serverError}</p>}
           {showForm && (
             <form onSubmit={createServer} className="space-y-4 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -561,6 +597,10 @@ export default function McpServerManager() {
                 </label>
               </div>
 
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium">Description</span>
+                <input aria-label="Description" value={description} onChange={(event) => setDescription(event.target.value)} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm" />
+              </label>
               <label className="block space-y-1 text-sm">
                 <span className="font-medium">Arguments</span>
                 <textarea aria-label="Arguments" value={argsText} onChange={(event) => setArgsText(event.target.value)} rows={3} placeholder={'--yes\n@example/calendar'} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm" />
@@ -597,17 +637,15 @@ export default function McpServerManager() {
                   {busyAction === "create" ? "Registering…" : "Register server"}
                 </button>
               </div>
-              {serverError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{serverError}</p>}
             </form>
           )}
 
-          {loading && servers.length === 0 && <p className="text-sm text-[var(--color-text-muted)]">Loading MCP servers…</p>}
+          {loading && servers.length === 0 && <p role="status" className="text-sm text-[var(--color-text-muted)]">Loading MCP servers…</p>}
           {!loading && servers.length === 0 && <div className="rounded border border-dashed border-[var(--color-border)] p-8 text-center text-sm text-[var(--color-text-muted)]">No child MCP servers are configured.</div>}
 
           <div className="space-y-3">
             {servers.map((server) => {
               const runtime = runtimeByName.get(server.name);
-              const connected = runtime?.connected ?? false;
               const toolCount = getServerToolsCount(server, discoveredTools);
               return (
                 <article key={server.id} className="space-y-4 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
@@ -616,16 +654,18 @@ export default function McpServerManager() {
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-semibold">{server.name}</h3>
                         <span className="rounded bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]">{server.scope}</span>
+                        <span className="rounded bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]">{server.enabled ? "Enabled" : "Disabled"}</span>
                         <span className={`rounded px-2 py-0.5 text-xs font-medium ${discoveryTone(server)}`}>{discoveryLabel(server)}</span>
                         <span className={`rounded px-2 py-0.5 text-xs font-medium ${connectionTone(runtime)}`}>{runtime ? getMcpStatusLabel(runtime.status) : "Not connected"}</span>
                       </div>
+                      {server.description && <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{server.description}</p>}
                       <p className="mt-2 break-all font-mono text-sm text-[var(--color-text-secondary)]">
                         {server.executable}{server.args.length ? ` ${server.args.join(" ")}` : ""}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">
-                      <button type="button" onClick={() => void connectOrDisconnect(server, connected)} disabled={busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}`} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-50">
-                        {busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}` ? "Working…" : connected ? "Disconnect" : "Connect"}
+                      <button type="button" onClick={() => void setServerEnabled(server, !server.enabled)} disabled={busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}`} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:cursor-wait disabled:opacity-50">
+                        {busyAction === `connect:${server.name}` || busyAction === `disconnect:${server.name}` ? "Working…" : server.enabled ? "Disable" : "Enable"}
                       </button>
                       <button type="button" onClick={() => void refreshAll()} disabled={refreshing || reportLoading} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:opacity-50">Refresh</button>
                       <button type="button" onClick={() => void removeServer(server)} disabled={busyAction === `remove:${server.name}`} className="rounded border border-[var(--color-error-border)] px-3 py-2 text-sm text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] disabled:opacity-50">Remove</button>
@@ -717,7 +757,7 @@ export default function McpServerManager() {
             )}
           </section>
           {toolError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{toolError}</p>}
-          {loading && categories.length === 0 && <p className="text-sm text-[var(--color-text-muted)]">Loading MCP tool catalog…</p>}
+          {loading && categories.length === 0 && <p role="status" className="text-sm text-[var(--color-text-muted)]">Loading MCP tool catalog…</p>}
           <div className="space-y-3">
             {filteredCategories.map((category) => {
               const allEnabled = category.enabled_count === category.total_count;

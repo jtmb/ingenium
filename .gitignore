@@ -45,6 +45,7 @@ build/
 .opencode/.ingenium-api-token
 .opencode/.ingenium-mcp-credential
 .opencode/.ingenium-coordination-owner-provider.json
+.opencode/coordination-owner-input/
 .opencode/.ingenium-learning-credential
 .opencode/.ingenium-repository-sync-credential
 .opencode/.ingenium-runtime-credential
@@ -86,6 +87,7 @@ next-steps-plan/
 email-plan.md
 *.plan.md
 plan.md
+!.opencode/agents/**/plan.md
 servers-page.yml
 # Repository-root screenshots
 /*.png

@@ -72,6 +72,8 @@ export default async ({ client } = {}) => {
 
     // Append the ruleset to the system prompt every turn.
     'experimental.chat.system.transform': async (_input, output) => {
+      // The system-transform hook has no agent field; the protected broker supplies this canonical prompt marker.
+      if (output.system.some((prompt) => prompt.includes('This agent is reserved for system use. Do not invoke directly.'))) return;
       const mode = readMode();
       if (mode === 'off') return;
       const instructions = getPonytailInstructions(mode);

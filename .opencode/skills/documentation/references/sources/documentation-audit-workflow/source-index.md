@@ -5,7 +5,13 @@ alwaysApply: true
 tags: ["llm-synthesized", "auto-generated"]
 ---
 
-# 🔴 HARD RULEs
+# Historical audit provenance
+
+This migrated record is historical only. Its retired instruction-file targets,
+agent commands, model choices, and mandatory workflow are not executable guidance.
+Use the respective active agent profile and the documentation skill for current work.
+
+## Former rules
 
 1. **Always run agent exploration FIRST** before making documentation updates
 2. **Categorize issues by type**: tool counts, Docker processes, mandatory skills, missing commands, environment variables, file paths

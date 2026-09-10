@@ -35,3 +35,17 @@ Only the selected settings panel is mounted. Inactive panels therefore do not
 start API or provider-discovery requests. A panel render failure is contained
 inside that panel and offers a retry action without removing the settings
 sidebar or the rest of the dashboard.
+
+## Cloudflare
+
+The `cloudflare` tab (`/?settings=cloudflare`) manages an existing named
+Cloudflare tunnel, write-only vault token state, and independent preconfigured
+routes for the Dashboard, OpenCode, CLI, VS Code, and API audiences. It does
+not create tunnels, edit DNS, expose compatibility HTTP routes, or add an HTTP
+MCP transport. The panel shows desired, connector, authentication, and
+inventory status; keeps the tunnel name read-only; and offers **Save**,
+**Validate**, **Connect**, and **Disconnect**. Saving a blank token preserves
+the stored token; clearing it requires an explicit confirmation. Connect is
+disabled until the trusted route inventory is ready. See the [Cloudflare Tunnel
+guide](cloudflare.md) for the inventory schema, fixed authenticated targets,
+lifecycle preconditions, and current unverified status.

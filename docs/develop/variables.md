@@ -57,6 +57,44 @@ fixed ignored `.opencode/.ingenium-coordination-owner-provider.json` path. This
 is not an environment setting: it contains only absolute references to a
 protected key and an authenticated ciphertext bundle outside the worktree.
 
+### TUI recovery and restart markers
+
+These values are launcher-owned recovery bindings. They are not general
+configuration or user-selected credential inputs.
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `INGENIUM_OPENCODE_EXECUTABLE` | `/usr/local/bin/opencode` | `tui-recovery.ts` | Optional recovery executable override. The resolved file must be named `opencode`; shell commands and arbitrary executable names are rejected. |
+| `INGENIUM_RESTART_NONCE` | _(launcher-injected)_ | `tui-recovery.ts`, `scripts/production-restart.ts` | Per-parent/child restart identity used to match replacement ownership and reject stale processes. |
+| `INGENIUM_OPENCODE_PORT` | _(launcher-injected)_ | `tui-recovery.ts`, `scripts/production-restart.ts` | Reserved OpenCode listener port passed through the fixed recovery handoff; recovery owns the port rather than accepting a caller-supplied `--port`. |
+| `INGENIUM_MANAGED_COMMAND_NONCE` | _(wrapper-injected)_ | `scripts/managed-command-wrapper.ts` | Process-ownership marker used to match a managed command to its launcher. |
+| `INGENIUM_RECOVERY_ATTESTED_CONTEXT` | _(wrapper-injected)_ | `scripts/managed-command-wrapper.ts`, `scripts/recovery-bootstrap.ts` | Serialized verified recovery context passed only through the fixed bootstrap handoff. |
+| `INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256` | _(wrapper-injected)_ | `scripts/recovery-bootstrap.ts` | SHA-256 of the generated bootstrap used to verify that the invoked recovery program is the expected one. |
+| `INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED` | _(fixed-launcher injected)_ | `scripts/recovery-bootstrap.ts`, `scripts/production-restart.ts` | SHA-256 guard proving the production-restart script passed the fixed bootstrap verification. |
+| `INGENIUM_RECOVERY_CANONICAL_WORKTREE` | _(fixed-launcher injected)_ | `scripts/recovery-bootstrap.ts`, `scripts/production-restart.ts` | Exact canonical worktree path checked against the launcher binding before recovery proceeds. |
+| `INGENIUM_ADMITTED_RECOVERY_CONTEXT` | _(fixed-launcher injected)_ | `scripts/recovery-bootstrap.ts`, `scripts/production-restart.ts` | Serialized context admitted by the recovery authorization boundary; it is consumed and removed by the fixed restart path. |
+
+### Internal recovery handoff
+
+The managed command wrapper passes these 11 `INGENIUM_*` values through the
+trusted recovery handoff. They are command-owned, non-user-configurable
+bindings; this table documents their purpose only and never their credential or
+nonce values.
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `INGENIUM_API_URL` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | API authority inherited by the recovery command; not a caller-selected recovery override. |
+| `INGENIUM_MCP_AUDIENCE` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | Attested MCP audience for the recovery child; the recovery path requires `mcp`. |
+| `INGENIUM_MCP_CREDENTIAL_FILE` | _(launcher-injected owner-only path)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | Owner-only scoped-credential locator inherited by the recovery child; credential contents are never part of the handoff documentation. |
+| `INGENIUM_MCP_CREDENTIAL_PURPOSE` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | Credential-purpose binding inherited by the recovery child; it is not a user-selected scope grant. |
+| `INGENIUM_PROJECT` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | Display/project locator bound to the recovery identity; it does not replace credential authority. |
+| `INGENIUM_PROJECT_ID` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js` | Immutable project UUID bound to the recovery identity. |
+| `INGENIUM_RECOVERY_OWNER_NONCE` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js`, `tui-recovery.ts` | Owner nonce used to match the recovery process to its live owner; never caller-supplied. |
+| `INGENIUM_RECOVERY_OWNER_PID` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js`, `tui-recovery.ts` | Owner process ID used for recovery ownership and fencing. |
+| `INGENIUM_RECOVERY_OWNER_START_TICKS` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js`, `tui-recovery.ts` | Owner process start-time identity used with the owner PID to reject stale recovery ownership. |
+| `INGENIUM_STORAGE_MAPPING_HASH` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js`, `scripts/production-restart.ts` | Attested workspace-storage mapping hash; it is never caller-selected. |
+| `INGENIUM_WORKSPACE_ID` | _(launcher-injected)_ | `managed-command-wrapper.ts`, `recovery-bootstrap.js`, `scripts/production-restart.ts` | Immutable workspace binding carried into recovery. |
+
 ## API (`services/ingenium-api`)
 
 | Variable | Default | Used By | Description |
@@ -73,6 +111,8 @@ protected key and an authenticated ciphertext bundle outside the worktree.
 | `CORS_ORIGIN` | _(legacy single-origin fallback only)_ | `config/index.ts` | Backward-compatible non-container fallback when `DASHBOARD_ALLOWED_ORIGINS` is unset. New deployments must configure the explicit allowlist. |
 | `TZ` | `UTC` in the supervised API launcher | `scripts/run-api.sh` | API process time-zone setting; the launcher supplies a bounded default while clearing unrelated inherited environment. |
 | `INGENIUM_AUTH_ENCRYPTION_KEY_FILE` | `/app/.ingenium/auth-encryption-key` in Docker | `scripts/docker-entrypoint.sh`, `scripts/run-api.sh`, `packages/ingenium-core/lib/tools/authentication.ts` | Persistent root-owned mode-`0600` regular file containing exactly one base64url-encoded 256-bit key. The entrypoint atomically provisions it, then gives the private API an owner-only ephemeral copy. Used for authentication factors and transient OIDC PKCE encryption; independent of vault seal state. |
+| `INGENIUM_CLOUDFLARE_ROUTES_FILE` | Unset; Compose uses `/dev/null` when unset and mounts the selected file at `/etc/ingenium/cloudflare-routes.json` | `docker-compose.yml`, `services/ingenium-api/lib/cloudflare-trusted-ingress.ts` | Nonsecret host path to the operator-managed trusted Cloudflare ingress inventory. Compose mounts it read-only; the API uses the fixed container path outside tests, while `NODE_ENV=test` may use this variable as a test override. The inventory describes routes already configured in Cloudflare; it does not grant DNS management. |
+| `INGENIUM_CLOUDFLARE_CREDENTIAL_HANDOFF_FILE` | `/run/ingenium-secrets/api/cloudflare-tunnel.handoff` | `services/ingenium-api/lib/cloudflare-tunnel-service.ts` | Test-only override for the short-lived Cloudflare token handoff path. Production uses the fixed API-owned path, removes the handoff after connector start/stop, and never exposes the token in responses. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | `scheduler.ts` | Scheduled synthesis + extraction interval (15 min), 0 = disabled |
 | `USAGE_SYNC_INTERVAL_MS` | `300000` | `scheduler.ts` | Scheduled metadata-only OpenCode usage sync interval (5 min), 0 = disabled. Explicit source-project mappings control project ownership; this never falls back to `global-default`. |
 | `SYNTHESIS_MODEL` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis model name (used when no provider config is saved in DB) |
@@ -84,6 +124,7 @@ protected key and an authenticated ciphertext bundle outside the worktree.
 | `INGENIUM_API_DISABLE_MAIL_MAINTENANCE` | _(unset)_ | `runtime-mode.ts` | Test/one-shot API override; `1` or `true` suppresses mail maintenance. Normal deployments leave it unset; the fixed production API launcher does not propagate arbitrary inherited values. |
 | `INGENIUM_API_DISABLE_MAIL` | _(unset)_ | `runtime-mode.ts` | Test/one-shot API override; `1` or `true` suppresses mail maintenance. Normal deployments leave it unset; the fixed production API launcher does not propagate arbitrary inherited values. |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | extraction engine | OpenCode SQLite DB path for server-side extraction |
+| `INGENIUM_JOB_RUN_NONCE` | _(API-generated per job)_ | `job-runner.ts` | Run-owned nonce passed to a job child so cancellation and process inspection match only that job's process group. |
 | `INGENIUM_DEPLOYMENT_MODE` | `compatibility` | API runtime mode, entrypoint, restore executor | `compatibility`, `control-plane`, or internal `user-runtime`. Control-plane restore refuses to run while any runtime is non-terminal. |
 | `INGENIUM_RUNTIME_MANAGER_URL` | _(required in control-plane mode)_ | `runtime-manager-client.ts` | Private HTTP origin for the runtime manager; credentials and paths in the URL are rejected. |
 | `INGENIUM_RUNTIME_MANAGER_BOOTSTRAP_TOKEN_FILE` | `/run/ingenium-bootstrap/runtime-manager-token` in Compose | runtime-manager control entrypoint | Read-only host bootstrap token path for the manager; the root entrypoint copies it to the service-owned runtime token before dropping to `ingenium-runtime-manager`. |
@@ -178,7 +219,7 @@ protected key and an authenticated ciphertext bundle outside the worktree.
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `HOME` | `/home/appuser` for job children without a vault runtime; inherited locally otherwise | `job-runner.ts` | Home directory passed to job children. Vault-backed runs receive their run-owned home instead. |
+| `HOME` | `/home/appuser` for job children without a vault runtime; inherited locally otherwise | `job-runner.ts`, `tui-recovery.ts`, `scripts/production-restart.ts` | Home directory passed to job children and used by TUI recovery to resolve the parent data home. Vault-backed runs receive their run-owned home instead. |
 | `PATH` | inherited; `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` for job children when unset | extension MCP client, job runner | Executable search path. Job children receive an allowlisted fallback rather than the API's unrestricted environment. |
 | `USER` | `appuser` for job children when unset | `job-runner.ts` | Non-secret user identity passed to job children. |
 | `SHELL` | `/bin/sh` for job children when unset | `job-runner.ts` | Shell identity passed to job children. |
@@ -186,13 +227,14 @@ protected key and an authenticated ciphertext bundle outside the worktree.
 | `LANG` | `C.UTF-8` for job children when unset | `job-runner.ts` | Locale value passed to job children. |
 | `LC_ALL` | _(unset)_ | `job-runner.ts` | Forwarded to job children only when explicitly present. |
 | `LC_CTYPE` | _(unset)_ | `job-runner.ts` | Forwarded to job children only when explicitly present. |
-| `XDG_DATA_HOME` | `/home/appuser/.local/share` | `job-runner.ts` | XDG data root for job children; vault-backed runs use their run-owned root. |
+| `XDG_DATA_HOME` | `/home/appuser/.local/share` | `job-runner.ts`, `tui-recovery.ts`, `scripts/production-restart.ts` | XDG data root for job children and TUI recovery; when unset, recovery falls back to `$HOME/.local/share`. Vault-backed runs use their run-owned root. |
 | `XDG_CACHE_HOME` | `/home/appuser/.cache` | `job-runner.ts` | XDG cache root for job children; vault-backed runs use their run-owned root. |
 
 ## Test suites
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
+| `VITEST` | _(set by Vitest)_ | `packages/ingenium-core/lib/tools/agents.ts` | Test-runner marker that selects the isolated protected-artifact paths used by Vitest; it is not a deployment setting. |
 | `INGENIUM_E2E_PROJECT` | _(none)_ | `tests/ingenium-dashboard/docker-active-project.ts` | Optional external Docker-suite project. It must be an existing active project returned by the deployment's same-origin project-list preflight. When unset, the Docker suite requires exactly one active global project. The suite never creates or deletes a project. |
 | `INGENIUM_E2E_API_URL` | `http://localhost:4097` | `tests/ingenium-dashboard/suite-containment.ts`, explicit external Playwright suites | Optional external API root used by suites that do not own an integrated fixture. |
 | `INGENIUM_API_TEST_MODE` | _(unset)_ | isolated API/dashboard fixture | Enables test-only server contracts in manifest-owned fixture processes. Never set in a deployed application. |
@@ -223,6 +265,10 @@ protected key and an authenticated ciphertext bundle outside the worktree.
 | `INGENIUM_AUDIT_TEMP_PREFIX` | `ingenium-playwright-` | `tests/suite-containment-audit.ts`, `tests/suite-containment-audit.test.ts` | Test-only prefix used to identify containment-audit temporary directories. |
 | `INGENIUM_AUDIT_OCI_REVISION` | _(unset)_ | `tests/suite-containment-audit.ts` | Optional test-only expected OCI image revision used to verify Compose ownership during containment auditing. |
 | `INGENIUM_AUDIT_RSS_LIMIT` | `536870912` | `tests/suite-containment-audit.ts` | Test-only maximum resident-set size in bytes accepted by strict containment auditing. |
+| `INGENIUM_COORDINATION_CANARY_PLAN_FILE` | _(runner-injected)_ | `tests/coordination/process-lifecycle.ts` | Test-only path to the run-owned coordination canary plan; it is not a deployment configuration surface. |
+| `INGENIUM_COORDINATION_HANG_ACTION_PORT` | _(canary-injected)_ | `tests/coordination/canary-action-runner.ts` | Test-only port for the intentionally hanging coordination-action fixture. |
+| `INGENIUM_COORDINATION_HANG_ACTION_TEST` | _(unset)_ | `tests/coordination/canary-action-runner.ts` | Test-only marker that enables the intentionally hanging coordination-action fixture. |
+| `INGENIUM_TEST_OPERATOR_VALUE` | _(test-injected)_ | `packages/ingenium-extension/managed-command-wrapper.test.ts` | Test-only sentinel used to verify the managed-command environment boundary; it is not an operator credential or setting. |
 
 ## Backups
 

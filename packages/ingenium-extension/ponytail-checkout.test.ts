@@ -74,9 +74,15 @@ describe("Ponytail immutable checkout integration", () => {
     await plugin["experimental.chat.system.transform"]({}, output);
     expect(output.system).toHaveLength(1);
     expect(output.system[0]).toContain("PONYTAIL MODE ACTIVE — level: full");
+
+    const brokerProfile = readFileSync(join(repositoryRoot, ".opencode/agents/execution/ingenium-llm-broker.md"), "utf8");
+    const brokerPrompt = brokerProfile.split("\n---\n")[1]!.trim();
+    const brokerOutput = { system: [brokerPrompt, "Request-specific system instructions"] };
+    await plugin["experimental.chat.system.transform"]({}, brokerOutput);
+    expect(brokerOutput.system).toEqual([brokerPrompt, "Request-specific system instructions"]);
   });
 
-  it("preserves each official source file and records its immutable provenance", () => {
+  it("preserves upstream provenance apart from the explicit broker-isolation guard", () => {
     const provenance = readFileSync(join(checkoutRoot, "PROVENANCE.md"), "utf8");
 
     expect(provenance).toContain("16f29800fd2681bdf24f3eb4ccffe38be3baec6b");
@@ -84,7 +90,14 @@ describe("Ponytail immutable checkout integration", () => {
     for (const [relativePath, expectedHash] of Object.entries(upstreamHashes)) {
       const filePath = join(checkoutRoot, relativePath);
       expect(existsSync(filePath), relativePath).toBe(true);
-      expect(createHash("sha256").update(readFileSync(filePath)).digest("hex"), relativePath).toBe(expectedHash);
+      let source = readFileSync(filePath, "utf8");
+      if (relativePath === ".opencode/plugins/ponytail.mjs") {
+        const guard = "      // The system-transform hook has no agent field; the protected broker supplies this canonical prompt marker.\n"
+          + "      if (output.system.some((prompt) => prompt.includes('This agent is reserved for system use. Do not invoke directly.'))) return;\n";
+        expect(source).toContain(guard);
+        source = source.replace(guard, "");
+      }
+      expect(createHash("sha256").update(source).digest("hex"), relativePath).toBe(expectedHash);
       expect(provenance).toContain(expectedHash);
     }
   });

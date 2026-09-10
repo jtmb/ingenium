@@ -266,6 +266,8 @@ function hasApiEnforcedIdempotency(path: string, method: string): boolean {
 
 function canRetry(path: string, opts: RequestOptions): boolean {
   const method = opts.method.toUpperCase();
+  const route = path.split("?", 1)[0] ?? path;
+  if (route === "/memory" || route.startsWith("/memory/")) return false;
   return RETRYABLE_METHODS.has(method)
     || (opts.idempotencyKey !== undefined && hasApiEnforcedIdempotency(path, method));
 }

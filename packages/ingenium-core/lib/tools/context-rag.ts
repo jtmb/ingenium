@@ -271,7 +271,7 @@ const LIKELY_CONTEXT_SOURCE_SECRET_PATTERNS = [
   /\b(?:api[_-]?(?:key|token)|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_+\/=.-]{24,}/i,
 ];
 
-function hasLikelyContextSourceSecret(value: string): boolean {
+export function hasLikelyContextSourceSecret(value: string): boolean {
   return LIKELY_CONTEXT_SOURCE_SECRET_PATTERNS.some((pattern) => pattern.test(value));
 }
 

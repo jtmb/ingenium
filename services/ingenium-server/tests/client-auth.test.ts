@@ -12,6 +12,8 @@ const originalRuntimeCredential = process.env.INGENIUM_RUNTIME_CREDENTIAL;
 const originalMcpCredential = process.env.INGENIUM_MCP_CREDENTIAL;
 const originalMcpCredentialFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
 const originalMcpAudience = process.env.INGENIUM_MCP_AUDIENCE;
+const originalMcpCredentialPurpose = process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
+const originalWorktree = process.env.INGENIUM_WORKTREE;
 
 function errorResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status });
@@ -32,6 +34,10 @@ afterEach(() => {
   else process.env.INGENIUM_MCP_CREDENTIAL_FILE = originalMcpCredentialFile;
   if (originalMcpAudience === undefined) delete process.env.INGENIUM_MCP_AUDIENCE;
   else process.env.INGENIUM_MCP_AUDIENCE = originalMcpAudience;
+  if (originalMcpCredentialPurpose === undefined) delete process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE;
+  else process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = originalMcpCredentialPurpose;
+  if (originalWorktree === undefined) delete process.env.INGENIUM_WORKTREE;
+  else process.env.INGENIUM_WORKTREE = originalWorktree;
   vi.unstubAllGlobals();
   vi.resetModules();
 });
@@ -272,6 +278,7 @@ describe("Ingenium API client authentication", () => {
     process.chdir(worktree);
     delete process.env.INGENIUM_API_TOKEN;
     process.env.INGENIUM_API_TOKEN_FILE = ".opencode/.ingenium-api-token";
+    process.env.INGENIUM_WORKTREE = worktree;
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -302,6 +309,7 @@ describe("Ingenium API client authentication", () => {
     delete process.env.INGENIUM_MCP_CREDENTIAL;
     process.env.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-repository-sync-credential";
     process.env.INGENIUM_MCP_AUDIENCE = "repository-sync";
+    process.env.INGENIUM_WORKTREE = worktree;
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -317,6 +325,66 @@ describe("Ingenium API client authentication", () => {
       expect(headers.get("Authorization")).toBe("Bearer repository-token");
       expect(headers.get("X-Ingenium-Audience")).toBe("repository-sync");
       expect(headers.has("X-Ingenium-Internal-Service")).toBe(false);
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
+
+  it("anchors a relative scoped credential to the launcher worktree instead of server cwd", async () => {
+    const originalCwd = process.cwd();
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-server-worktree-auth-"));
+    const serverCwd = mkdtempSync(join(tmpdir(), "ingenium-server-cwd-auth-"));
+    const opencodeDir = join(worktree, ".opencode");
+    mkdirSync(opencodeDir);
+    writeFileSync(join(opencodeDir, ".ingenium-mcp-credential"), "worktree-token\n", { mode: 0o600 });
+    process.env.INGENIUM_WORKTREE = worktree;
+    process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = "general";
+    process.env.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+    process.env.INGENIUM_MCP_AUDIENCE = "mcp";
+    process.chdir(serverCwd);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { ok: true } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const { api } = await import("../lib/client.js");
+      await api.get("/health");
+
+      expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer worktree-token");
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(worktree, { recursive: true, force: true });
+      rmSync(serverCwd, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a relative launcher worktree instead of resolving it from server cwd", async () => {
+    const originalCwd = process.cwd();
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-server-relative-worktree-"));
+    const opencodeDir = join(worktree, ".opencode");
+    mkdirSync(opencodeDir);
+    writeFileSync(join(opencodeDir, ".ingenium-mcp-credential"), "must-not-load\n", { mode: 0o600 });
+    process.env.INGENIUM_WORKTREE = ".";
+    process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = "general";
+    process.env.INGENIUM_MCP_CREDENTIAL_FILE = ".opencode/.ingenium-mcp-credential";
+    process.env.INGENIUM_MCP_AUDIENCE = "mcp";
+    process.chdir(worktree);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { ok: true } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const { api } = await import("../lib/client.js");
+      await api.get("/health");
+
+      expect(new Headers(fetchMock.mock.calls[0]![1].headers).has("Authorization")).toBe(false);
     } finally {
       process.chdir(originalCwd);
       rmSync(worktree, { recursive: true, force: true });

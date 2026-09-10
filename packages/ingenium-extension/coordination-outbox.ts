@@ -751,7 +751,7 @@ export class CoordinationOutbox {
           } catch {
             live = true;
           }
-          if (!live) throw new Error("Coordination outbox mutation lock has a stale owner");
+          if (retained && !live) throw new Error("Coordination outbox mutation lock has a stale owner");
           if (Date.now() >= deadline) throw new Error("Coordination outbox mutation is busy");
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         }

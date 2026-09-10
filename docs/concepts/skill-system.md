@@ -13,19 +13,25 @@ patterns that agents load at session startup to guide their behavior.
 
 ## Canonical Taxonomy
 
-The repository currently exposes **9 canonical skills**:
+The repository currently exposes **8 canonical skills**. Agent behavior instructions
+live in each respective `.opencode/agents/**` profile, not a shared workflow skill.
 
 | Skill | Domain | Inherits From |
 |-------|--------|---------------|
 | `development-conventions` | Code conventions, API design, testing, refactoring | api-aggregation-patterns, ingenium-ops, language-conventions, mail-app-ui-conventions, visual-standards-conventions |
 | `devops-conventions` | Docker, K8s, git, CLI toolkit | git-history-hygiene, github-cli, onboard-existing-repo, parallel-session-hygiene |
 | `database-conventions` | SQLite WAL, FTS5, migrations | database-migration-management, sqlite-migration-patterns, sqlite-wal-safety |
-| `engineering-workflow` | Agent pipeline, debugging, orchestrator | agent-execution-quality, agent-workflow-patterns, debugging-patterns, configuring-opencode, logging-visibility, orchestrator-primer, per-project-scoping, supervision-logging, uncensored-direct-response |
 | `mcp-tooling` | MCP integration, browser automation | browsing-the-web, dashboard-screenshots |
 | `security-audit` | Security scanning, leak detection | security-audit-workflow |
 | `documentation` | Docs workspace, conventions, audit | docs-workspace, documentation-architecture, documentation-audit-workflow |
 | `self-learning` | Observations, traits, synthesis | — |
 | `skill-maintenance` | Skill lifecycle management | local-persistence |
+
+“Canonical” and “active” here describe checked-in repository paths and catalog
+state. Source inspection alone does not establish a running session’s loaded
+profiles or runtime retirement. The extension-provided Ponytail skill is
+separately vendored at `packages/ingenium-extension/ponytail/` and is outside
+this eight-skill taxonomy.
 
 ## On-Disk Format
 
@@ -95,7 +101,8 @@ projection, the extension removes only marker-only legacy directories proven by
 `.opencode/skills/consolidation-map.json`. Docs-only sync skips this step. Dry-run
 reports candidates without deleting them.
 
-The cleanup requires an exact canonical-skill set, unique safe mapping names, a
+The cleanup validates the immutable historical canonical-skill set separately
+from the current active target allowlist. It requires unique safe mapping names, a
 64-digit lowercase hexadecimal source hash, a contained non-symlink directory
 whose only child is a regular and exact `MIGRATED-TO.md`, an existing canonical
 target `SKILL.md`, and the exact regular canonical source-index path. It
@@ -105,8 +112,9 @@ otherwise unproven candidate fails closed and remains on disk. The consolidation
 map and canonical `references/sources/*/source-index.md` lineage are preserved.
 
 The canonical worktree currently contains zero `MIGRATED-TO.md` markers and zero
-root-level legacy skill directories named by the mappings; all 28 source indexes
-remain under the canonical skills that absorbed them.
+root-level legacy skill directories named by the mappings. The map retains all
+28 historical mappings; 19 source indexes survive under active skills. Retired
+targets do not invalidate history or authorize cleanup without an active target.
 
 ## Maintenance Locks
 

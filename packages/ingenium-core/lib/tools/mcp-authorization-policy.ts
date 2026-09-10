@@ -25,6 +25,7 @@ const READ = new Set([
   "observation_search", "observation_list", "observation_stats", "observation_get", "personality", "personality_traits", "synthesis_status",
   "task_list", "task_next", "task_search", "task_activity", "task_board_config_get", "task_notifications", "task_get", "task_comments_list", "task_links_list", "task_tree", "coordination_status", "coordination_memory_read",
   "plan_search", "plan_list", "context_get", "context_batch_get", "context_conversation_get", "context_conversation_list", "context_message_list", "context_message_search", "context_message_retrieve", "context_message_batch_retrieve", "context_checkpoint_list", "context_checkpoint_get", "context_checkpoint_maintenance_preview", "context_checkpoint_audit_list",
+  "memory_read", "memory_list", "memory_search", "memory_operation_status",
   "project_list", "project_list_archived", "project_detail", "plugin_list", "plugin_get", "plugin_source", "command_list", "command_get", "config_get", "server_list", "mcp_report_get", "agent_list", "agent_get",
   "logs_list", "logs_sources", "email_list", "email_search", "email_read", "email_folders", "email_accounts", "email_patterns", "email_watch_status", "email_summarize", "email_sync_status", "email_attachment_get",
   "job_list", "job_runs", "job_run_logs", "job_get", "pipeline_events", "pipeline_timeline", "service_status", "service_application_detail", "service_process_detail", "service_process_logs", "health_check", "opencode_messages", "dashboard_summary",
@@ -52,6 +53,7 @@ const EXECUTE = new Set([
 
 const PRIVATE = new Set([
   "plan_save", "plan_search", "plan_list", "context_get", "context_update", "context_delete", "context_batch_get", "context_upload_file", "context_conversation_create", "context_conversation_get", "context_conversation_list", "context_message_append", "context_message_list", "context_message_search", "context_message_retrieve", "context_message_batch_retrieve", "context_checkpoint_create", "context_checkpoint_list", "context_checkpoint_get", "context_checkpoint_restore", "context_checkpoint_maintenance_preview", "context_checkpoint_maintenance_authorize", "context_conversation_archive", "context_conversation_unarchive", "context_checkpoint_audit_list",
+  "memory_save", "memory_read", "memory_list", "memory_search", "memory_update", "memory_forget", "memory_operation_status",
   "email_list", "email_search", "email_read", "email_send", "email_draft", "email_folders", "email_accounts", "email_triage", "email_suggest", "email_draft_response", "email_patterns", "email_watch_start", "email_watch_status", "email_account_create", "email_account_delete", "email_account_test", "email_oauth_url", "email_oauth_exchange", "email_summarize", "email_review_draft", "email_move", "email_set_flags", "email_delete", "email_sync", "email_sync_status", "email_watch_stop", "email_attachment_get",
 ]);
 
@@ -73,6 +75,7 @@ const WRITE = new Set([
   "setting_set", "skill_create", "skill_update", "skill_lineage_create", "skill_proposal_create", "skill_proposal_submit", "observe", "observation_update", "observation_enrich", "personality_set_trait", "personality_trait_dismiss",
   "task_create", "task_move", "task_complete", "task_update", "task_comment", "task_link", "task_board_config_set", "task_subtask_create", "task_comment_edit", "task_comment_react", "task_notification_read", "task_bulk_update", "coordination_update", "coordination_claim", "coordination_release", "coordination_handoff",
   "plan_save", "context_update", "context_upload_file", "context_conversation_create", "context_message_append", "context_checkpoint_create", "project_init", "plugin_create", "plugin_update", "command_create", "command_update", "config_set", "server_add", "server_remove", "agent_create", "agent_update",
+  "memory_save", "memory_update", "memory_forget",
   "email_draft", "email_account_create", "email_move", "email_set_flags", "job_create", "job_update", "pipeline_event_log", "docs_create_space", "docs_update_space", "docs_create_page", "docs_update_page", "docs_publish_page", "docs_move_page", "docs_save_draft", "docs_create_comment", "docs_resolve_comment", "docs_add_tag", "docs_remove_tag", "docs_create_template", "docs_update_template", "docs_link_project", "docs_unlink_project", "docs_toggle_favorite", "docs_import_pages", "docs_ingest", "docs_rag_reingest", "vault_item_create", "vault_item_update", "backup_create",
   "synthesize_observations", "auto_observe_now",
 ]);

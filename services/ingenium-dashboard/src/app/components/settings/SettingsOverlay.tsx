@@ -11,6 +11,7 @@ import GeneralPanel from "./panels/GeneralPanel";
 import MailPanel from "./panels/MailPanel";
 import PipelinePanel from "./panels/PipelinePanel";
 import ConfigPanel from "./panels/ConfigPanel";
+import CloudflarePanel from "./panels/CloudflarePanel";
 import type { ComponentType } from "react";
 import RouteLinkedPanel from "./RouteLinkedPanel";
 import PanelErrorBoundary from "./PanelErrorBoundary";
@@ -29,7 +30,7 @@ type SettingsPanelDefinition = ComponentType | RouteLinkedPanelDefinition;
 /**
  * Registry mapping every declared Settings tab to a functional panel.
  *
- * The four compact settings forms live directly in the overlay. The remaining
+ * Compact settings forms live directly in the overlay. The remaining
  * categories deliberately link to their existing full dashboard workspaces so
  * the established API authorization, mutation flows, and responsive views are
  * reused rather than reimplemented in a modal.
@@ -79,6 +80,7 @@ const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
     description: "Review and manage learned personality traits in the Personality workspace.",
   },
   providers: PipelinePanel,
+  cloudflare: CloudflarePanel,
   config: ConfigPanel,
   logs: {
     destination: "/logs",

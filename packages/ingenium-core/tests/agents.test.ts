@@ -103,21 +103,38 @@ afterEach(() => {
 });
 
 describe("centralized agent runtime configuration", () => {
-  it("keeps model and disable state in opencode.json, never agent markdown", () => {
+  it("keeps models in opencode.json and disable state in retained agent markdown", () => {
     const agent = createAgent(projectId, "runtime-agent", "# Runtime agent", "test", "execution", "subagent", "deepseek/test-model");
     const configPath = join(root, "opencode.json");
     const agentPath = join(root, ".opencode", "agents", "execution", "runtime-agent.md");
 
+    expect(agent.permissions).toBe('{"*":"deny"}');
     expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model" });
     expect(readFileSync(agentPath, "utf-8")).not.toMatch(/^model:/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: false$/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^permission:\n  "\*": deny$/m);
 
+    saveConfig(projectId, "project", JSON.stringify({
+      agent: {
+        [agent.name]: {
+          model: "deepseek/test-model",
+          variant: "max",
+          permission: { "*": "allow" },
+          prompt: "legacy",
+          disable: true,
+          hidden: true,
+        },
+      },
+    }));
     disableAgent(projectId, agent.name);
-    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model", disable: true });
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model", variant: "max" });
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: true$/m);
 
     updateAgent(projectId, agent.name, { model: "deepseek/updated-model" });
     enableAgent(projectId, agent.name);
-    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/updated-model" });
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/updated-model", variant: "max" });
     expect(readFileSync(agentPath, "utf-8")).not.toMatch(/^model:/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: false$/m);
 
     expect(deleteAgent(projectId, agent.name)).toBe(true);
     expect(JSON.parse(readFileSync(configPath, "utf-8")).agent).toBeUndefined();
@@ -127,17 +144,88 @@ describe("centralized agent runtime configuration", () => {
     const agentsDir = join(root, ".opencode", "agents", "execution");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(join(root, "opencode.json"), JSON.stringify({ agent: { "disk-agent": { model: "deepseek/runtime" } } }));
-    writeFileSync(join(agentsDir, "disk-agent.md"), "---\nname: disk-agent\ndescription: \"disk\"\nmode: subagent\nmodel: legacy/markdown\npermission:\n  read: allow\n---\n\n# Disk agent\n");
+    writeFileSync(join(agentsDir, "disk-agent.md"), "---\nname: disk-agent\ndescription: \"disk\"\nmode: subagent\nmodel: legacy/markdown\ndisable: false\nhidden: false\npermission:\n  \"*\": deny\n  read: allow\n---\n\n# Disk agent\n");
 
     const agent = syncAgentFromDisk(projectId, "disk-agent");
     expect(agent?.model).toBe("deepseek/runtime");
   });
 
-  it("preserves a centralized model when enabling an agent whose DB model is null", () => {
+  it("repairs an existing profile to explicit default deny without dropping specific grants", () => {
+    const agent = createAgent(
+      projectId,
+      "legacy-permission-agent",
+      "# Original",
+      "",
+      "execution",
+      "subagent",
+      undefined,
+      true,
+      JSON.stringify({ read: "allow" }),
+    );
+    const agentPath = join(root, ".opencode", "agents", "execution", "legacy-permission-agent.md");
+    writeFileSync(agentPath, readFileSync(agentPath, "utf-8").replace('  "*": deny\n', "  write: allow\n").replace("# Original", "# Local"));
+
+    updateAgent(projectId, agent.name, { content: "# Updated" });
+
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^permission:\n  "\*": deny\n  write: allow\n  read: allow$/m);
+  });
+
+  it("keeps an explicitly revoked grant removed through lifecycle and disk import", () => {
+    const agent = createAgent(
+      projectId,
+      "revoked-permission-agent",
+      "# Original body",
+      "",
+      "execution",
+      "subagent",
+      undefined,
+      true,
+      JSON.stringify({ read: "allow", write: "allow", skill: { "*": "allow" } }),
+    );
+    const agentPath = join(root, ".opencode", "agents", "execution", "revoked-permission-agent.md");
+    const handwrittenProfile = readFileSync(agentPath, "utf-8")
+      .replace("hidden: false\n", "hidden: false\nfuture-option:\n  nested: keep\n")
+      .replace("# Original body", "# Handwritten body");
+    writeFileSync(agentPath, handwrittenProfile);
+    const revokedPermissionMap = {
+      read: "allow",
+      bash: { "*": "deny", "npm run typecheck*": "allow" },
+      skill: { "*": "allow" },
+    };
+    const revokedPermissions = JSON.stringify(revokedPermissionMap);
+    const canonicalRevokedPermissions = JSON.stringify({ "*": "deny", ...revokedPermissionMap });
+
+    expect(updateAgent(projectId, agent.name, { permissions: revokedPermissions })?.permissions)
+      .toBe(canonicalRevokedPermissions);
+    disableAgent(projectId, agent.name);
+    enableAgent(projectId, agent.name);
+
+    const profile = readFileSync(agentPath, "utf-8");
+    expect(profile).toContain([
+      "permission:",
+      '  "*": deny',
+      "  read: allow",
+      "  bash:",
+      '    "*": deny',
+      '    "npm run typecheck*": allow',
+      "  skill:",
+      '    "*": allow',
+    ].join("\n"));
+    expect(profile).not.toMatch(/^  write:/m);
+    expect(profile).toContain("future-option:\n  nested: keep");
+    expect(profile).toContain("# Handwritten body");
+
+    const imported = syncAgentFromDisk(projectId, agent.name);
+    expect(imported?.permissions).toBe(canonicalRevokedPermissions);
+    expect(imported?.content).toBe("# Handwritten body");
+    expect(readFileSync(agentPath, "utf-8")).toContain("future-option:\n  nested: keep");
+  });
+
+  it.each([enableAgent, disableAgent])("preserves a centralized model during lifecycle changes when the DB model is null (%#)", (transition) => {
     const agent = createAgent(projectId, "config-agent", "# Agent", "test");
     saveConfig(projectId, "project", JSON.stringify({ untouched: { keep: true }, agent: { "config-agent": { model: "central/model" }, sibling: { model: "sibling/model" } } }));
 
-    enableAgent(projectId, agent.name);
+    transition(projectId, agent.name);
 
     expect(JSON.parse(readFileSync(join(root, "opencode.json"), "utf-8"))).toEqual({
       untouched: { keep: true },
@@ -209,16 +297,35 @@ describe("agent path and category integrity", () => {
     legacy.close();
   });
 
-  it("does not reactivate a disabled agent from a stale disk file", () => {
+  it("uses explicit profile disable state during disk sync", () => {
     const agent = createAgent(projectId, "disabled-agent", "# Original");
     disableAgent(projectId, agent.name);
     const diskPath = join(root, ".opencode", "agents", "execution", "disabled-agent.md");
     mkdirSync(join(root, ".opencode", "agents", "execution"), { recursive: true });
-    writeFileSync(diskPath, "---\nname: disabled-agent\nmode: subagent\n---\n\n# Stale\n");
+    writeFileSync(diskPath, "---\nname: disabled-agent\nmode: subagent\ndisable: true\nhidden: false\npermission:\n  \"*\": deny\n---\n\n# Updated\n");
 
     const synced = syncAgentFromDisk(projectId, agent.name);
     expect(Boolean(synced?.enabled)).toBe(false);
-    expect(synced?.content).toBe("# Original");
+    expect(synced?.content).toBe("# Updated");
+
+    writeFileSync(diskPath, readFileSync(diskPath, "utf-8").replace("disable: true", "disable: false"));
+    expect(Boolean(syncAgentFromDisk(projectId, agent.name)?.enabled)).toBe(true);
+  });
+
+  it.each([
+    ['  "*": deny\n', '  "*": allow\n'],
+    ['  "*": deny\n', ''],
+    ['disable: false\n', ''],
+    ['hidden: false\n', ''],
+  ])("rejects unsafe disk authority or lifecycle metadata without importing or rewriting it (%#)", (original, replacement) => {
+    const agent = createAgent(projectId, "permissive-disk-agent", "# Original");
+    const diskPath = join(root, ".opencode", "agents", "execution", "permissive-disk-agent.md");
+    const permissive = readFileSync(diskPath, "utf-8").replace(original, replacement);
+    writeFileSync(diskPath, permissive);
+
+    expect(syncAgentFromDisk(projectId, agent.name)).toBeUndefined();
+    expect(getAgent(projectId, agent.name)?.content).toBe("# Original");
+    expect(readFileSync(diskPath, "utf-8")).toBe(permissive);
   });
 
   it("rejects broker lifecycle changes and fails closed on a changed deployment profile", () => {

@@ -101,8 +101,8 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const latestMigration = "112_atomic_epoch_recovery.sql";
-    const expected = Array.from({ length: 112 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const latestMigration = "116_child_mcp_description.sql";
+    const expected = Array.from({ length: 116 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) =>
           file.startsWith(`${number}_`) && file.endsWith(".sql") && !file.endsWith("_upgrade.sql"),

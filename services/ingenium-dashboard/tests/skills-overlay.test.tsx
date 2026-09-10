@@ -169,6 +169,14 @@ describe("SkillsPage detail overlay", () => {
     vi.unstubAllGlobals();
   });
 
+  it("distinguishes historical consolidation from active skills", async () => {
+    render(<SkillsPage />);
+    fireEvent.click(screen.getByRole("button", { name: /Consolidated/i }));
+    expect(await screen.findByText(/28 historical mappings, not the current active skill list/)).toBeTruthy();
+    expect(screen.getByText(/8 active canonical skills; the engineering workflow target is retired/)).toBeTruthy();
+    expect(screen.getByTestId("consolidated-row-agent-execution-quality")).toBeTruthy();
+  });
+
   it("shows loading without presenting an unverified zero count", async () => {
     let resolveSkills!: (value: { data: Skill[] }) => void;
     listSkills.mockReset().mockReturnValue(new Promise((resolve) => {

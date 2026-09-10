@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listServers: vi.fn(),
   listDiscoveredTools: vi.fn(),
   createServer: vi.fn(),
+  createPlaywrightPreset: vi.fn(),
   removeServer: vi.fn(),
   listCategories: vi.fn(),
   report: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   mcpStatus: vi.fn(),
   mcpConnect: vi.fn(),
   mcpDisconnect: vi.fn(),
+  request: vi.fn(),
 }));
 
 const runtimeClient = {
@@ -24,12 +26,15 @@ const runtimeClient = {
   },
 };
 
-vi.mock("../src/lib/api", () => ({
+vi.mock("../src/lib/api", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../src/lib/api")>(),
+  request: mocks.request,
   api: {
     mcpServers: {
       list: mocks.listServers,
       listTools: mocks.listDiscoveredTools,
       create: mocks.createServer,
+      createPlaywrightPreset: mocks.createPlaywrightPreset,
       remove: mocks.removeServer,
     },
     mcpTools: {
@@ -127,11 +132,13 @@ beforeEach(() => {
   mocks.report.mockResolvedValue(reportResponse());
   mocks.mcpStatus.mockResolvedValue({ calendar: { status: "connected", tools: 2 } });
   mocks.createServer.mockResolvedValue({ data: server });
+  mocks.createPlaywrightPreset.mockResolvedValue({ data: { ...server, name: "playwright" } });
   mocks.removeServer.mockResolvedValue(undefined);
   mocks.toggleTool.mockResolvedValue({ data: { tool_name: "ingenium_calendar_list_events", enabled: false } });
   mocks.toggleCategory.mockResolvedValue({ data: { category: "Child MCP / calendar", enabled: false, tools_changed: 1 } });
   mocks.mcpConnect.mockResolvedValue({ accepted: true });
   mocks.mcpDisconnect.mockResolvedValue({ accepted: true });
+  mocks.request.mockResolvedValue({ data: { restartRequired: false } });
 });
 
 afterEach(() => {
@@ -140,6 +147,17 @@ afterEach(() => {
 });
 
 describe("MCP-004 dashboard", () => {
+  it("announces initial server and tool catalog loading states", () => {
+    mocks.listServers.mockReturnValue(new Promise(() => {}));
+    mocks.report.mockReturnValue(new Promise(() => {}));
+
+    render(<McpServerManager />);
+    expect(screen.getByRole("status")).toHaveTextContent("Loading MCP servers…");
+
+    fireEvent.click(screen.getByRole("button", { name: /Tools/ }));
+    expect(screen.getByText("Loading MCP tool catalog…")).toHaveAttribute("role", "status");
+  });
+
   it("renders canonical command, vault references, discovery health/count, and lifecycle controls", async () => {
     render(<McpServerManager />);
 
@@ -148,12 +166,51 @@ describe("MCP-004 dashboard", () => {
     expect(screen.getByText("Healthy")).toBeTruthy();
     expect(screen.getByText("CALENDAR_TOKEN = 12345678…9abc")).toBeTruthy();
     expect(screen.getByText("Connected")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.getByText("Enabled")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disable" })).toBeTruthy();
     expect(screen.getByText("Discovered tools")).toBeTruthy();
     expect(screen.getByText("Runtime tools")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-    await waitFor(() => expect(mocks.mcpDisconnect).toHaveBeenCalledWith("calendar"));
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(
+      "/mcp-servers/calendar/disconnect?project=mcp-dashboard-project",
+      { method: "POST" },
+    ));
+    expect(mocks.mcpDisconnect).not.toHaveBeenCalled();
+  });
+
+  it.each(["", "Managed browser"])("adds Playwright with description %j and reloads its persisted description", async (description) => {
+    render(<McpServerManager />);
+    await screen.findByText("calendar");
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), { target: { value: description } });
+    mocks.listServers.mockResolvedValue({ data: [{ ...server, name: "playwright", description }], total: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Add Playwright" }));
+
+    await waitFor(() => expect(mocks.createPlaywrightPreset).toHaveBeenCalledWith(
+      "mcp-dashboard-project",
+      description,
+    ));
+    expect(mocks.createServer).not.toHaveBeenCalled();
+    expect(await screen.findByText("playwright")).toBeTruthy();
+    if (description) expect(screen.getByText(description)).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh MCP servers" })).not.toBeDisabled());
+    const previousReads = mocks.listServers.mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Refresh MCP servers" }));
+    await waitFor(() => expect(mocks.listServers.mock.calls.length).toBeGreaterThan(previousReads));
+    expect(await screen.findByText("playwright")).toBeTruthy();
+    if (description) expect(screen.getByText(description)).toBeTruthy();
+  });
+
+  it("enables a disabled child through the existing managed lifecycle endpoint", async () => {
+    mocks.listServers.mockResolvedValue({ data: [{ ...server, enabled: false }], total: 1 });
+    render(<McpServerManager />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Enable" }));
+
+    await waitFor(() => expect(mocks.request).toHaveBeenCalledWith(
+      "/mcp-servers/calendar/connect?project=mcp-dashboard-project",
+      { method: "POST" },
+    ));
   });
 
   it("submits executable arguments and vault references using the canonical input shape", async () => {
@@ -169,6 +226,7 @@ describe("MCP-004 dashboard", () => {
 
     await waitFor(() => expect(mocks.createServer).toHaveBeenCalledWith({
       name: "weather",
+      description: "",
       executable: "node",
       args: ["server.js", "--stdio"],
       environment: { WEATHER_TOKEN: { vault_item_id: "00000000-0000-0000-0000-000000000001" } },

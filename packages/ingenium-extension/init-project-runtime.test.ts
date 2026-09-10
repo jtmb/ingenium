@@ -135,6 +135,11 @@ function createRuntimeWorktree(): string {
   copyFileSync(join(repositoryRoot, "opencode.json"), join(worktree, "opencode.json"));
   cpSync(join(repositoryRoot, ".opencode", "skills"), join(worktree, ".opencode", "skills"), { recursive: true });
   cpSync(join(repositoryRoot, ".opencode", "agents"), join(worktree, ".opencode", "agents"), { recursive: true });
+  const agentsRoot = join(worktree, ".opencode", "agents");
+  for (const path of readdirSync(agentsRoot, { recursive: true, encoding: "utf8" })) {
+    if (path.endsWith(".md")) chmodSync(join(agentsRoot, path), 0o644);
+  }
+  writeFileSync(join(worktree, ".opencode", "agents", "sync-diagnostics.md"), "# Sync diagnostic\n", "utf8");
   for (const pluginPath of extensionPluginPaths) {
     const target = join(worktree, pluginPath);
     mkdirSync(dirname(target), { recursive: true });
@@ -396,9 +401,9 @@ describe("ingenium-init-project production runtime contract", () => {
             manifestHash,
             docs: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
             resources: { summary: {
-            skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
+            skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 8 },
             agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
-            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
+            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 5 },
           } } } }));
           return;
         }
@@ -437,9 +442,11 @@ describe("ingenium-init-project production runtime contract", () => {
         agents: Array<{ path: string; name: string }>;
         plugins: Array<{ path: string; source: string }>;
       } };
-      expect(payload.resourcesManifest.skills).toHaveLength(10);
+      expect(payload.resourcesManifest.skills).toHaveLength(8);
       expect(payload.resourcesManifest.skills.every((entry) => /\.opencode\/skills\/[^/]+\/SKILL\.md$/.test(entry.path))).toBe(true);
-      expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/browser-agent-errors.md");
+      expect(payload.resourcesManifest.agents).toHaveLength(11);
+      expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/sync-diagnostics.md");
+      expect(payload.resourcesManifest.agents.map((entry) => entry.name)).not.toContain("browser-agent");
       expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
       for (const plugin of payload.resourcesManifest.plugins) {
         expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
@@ -493,7 +500,7 @@ describe("ingenium-init-project production runtime contract", () => {
           docs: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } },
           resources: { summary: {
           skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
-          agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
+          agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 15 },
             plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
         } } } }));
         return;

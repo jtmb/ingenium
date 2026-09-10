@@ -289,7 +289,7 @@ Migration 084 adds a second short-lived, one-time execution token bound to the
 ready stage plus an immutable, phase-CAS execution ledger. API and MCP only
 queue the fixed `restore-maintenance` Supervisor program; no request can choose
 a command, argument, path, or environment. That process uses a separate
-root-owned HMAC journal key and root:root `0700` journal/buffer root, stops
+`ingenium-restore`-owned HMAC journal key and a `0700` maintenance/journal root, stops
 every database user, rejects open holders by device/inode, locks target parents
 during the swap, verifies each target, and zeroes transient buffers. The API
 does not read journal key material or journal contents. Interrupted runs either

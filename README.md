@@ -9,8 +9,8 @@
 Integrates native AI chat, embedded OpenCode Web/CLI, project management, Kanban tasks, email with AI drafting, documentation workspace with RAG, encrypted secrets vault, scheduled jobs, backup management, service observability, agent profiles, MCP tool management, and a self-learning pipeline — served through a single Docker container.
 
 <p>
-  <img src="https://img.shields.io/badge/MCP%20tools-283-blue?style=flat-square" alt="283 MCP tools" />
-  <img src="https://img.shields.io/badge/agents-13-orange?style=flat-square" alt="13 agents" />
+  <img src="https://img.shields.io/badge/MCP%20tools-291-blue?style=flat-square" alt="291 MCP tools" />
+  <img src="https://img.shields.io/badge/agents-11-orange?style=flat-square" alt="11 mapped agent entries" />
   <img src="https://img.shields.io/badge/dashboard%20views-24-8A2BE2?style=flat-square" alt="24 dashboard views" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
@@ -21,7 +21,7 @@ Integrates native AI chat, embedded OpenCode Web/CLI, project management, Kanban
 
 **Ingenium** packages a full AI-enhanced developer workspace into a single container. It combines a Next.js dashboard (24 primary navigation routes plus a 19-tab Settings overlay) with an Express API, an embedded OpenCode instance, and background services — all managed by supervisord. The MCP stdio server is bundled separately in the `@ingenium/extension` package and launched as a child process by the MCP client. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
-Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extension package and gain 283 catalogued tools — 281 `ingenium_`-prefixed server registrations plus 2 extension-registered tools — covering projects, skills, tasks, mail, secrets, backups, jobs, agents, MCP servers, config, observations, personality traits, the synthesis pipeline, and the documentation workspace.
+Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extension package and gain 291 catalogued tools — 289 `ingenium_`-prefixed server registrations plus 2 extension-registered tools — covering projects, skills, tasks, memory, mail, secrets, backups, jobs, agents, MCP servers, config, observations, personality traits, the synthesis pipeline, and the documentation workspace.
 
 ## What It Brings Together
 
@@ -30,8 +30,8 @@ Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extens
 | **AI Chat** | Conversational agent interface at `/chat` with session management |
 | **OpenCode** | Embedded Web/CLI dual mode through dedicated root gateways on loopback port `3000`; private upstreams remain on `:4098`/`:4099`. Toggle with `Ctrl+Shift+\``; session persists across tabs. Container mounts `~/repos` → `/workspace` |
 | **Projects** | Name→UUID multi-project isolation, archive/restore/purge lifecycle, per-project skills and observations |
-| **Skills** | 10 canonical skills in split-skill format (SKILL.md + metadata.json + references/) under `.opencode/skills/`. Dashboard split-pane viewer with syntax-highlighted editing, collapsible file tree. Conflict-aware bidirectional sync via SHA-256 manifest |
-| **Tasks** | Kanban board (todo → in_progress → review → done) with dependency tracking, priority scoring, full audit history, and 30 MCP tools |
+| **Skills** | 8 active canonical skills in split-skill format (SKILL.md + metadata.json + references/) under `.opencode/skills/`. Dashboard split-pane viewer with syntax-highlighted editing, collapsible file tree. Conflict-aware bidirectional sync via SHA-256 manifest |
+| **Tasks** | Kanban board (todo → in_progress → review → done) with dependency tracking, priority scoring, full audit history, and 32 MCP tools |
 | **Mail** | 3-pane email client — Gmail/Outlook OAuth2 + IMAP/SMTP with OAuth auto/code modes. AI smart replies integrated in the compose panel. 27 MCP tools. Auth-error circuit breaker with degraded-health reporting |
 | **Docs & RAG** | Documentation workspace with spaces/pages, templates, version history, trash. Stores deterministic 384-dimensional character-trigram vector embeddings with hybrid BM25/vector scoring; exposed REST search uses FTS5/BM25 full-text for citation-based Q&A |
 | **Secrets** | Encrypted vault (scrypt key derivation, AES-256-GCM) with full audit trail of access and mutations |
@@ -40,11 +40,16 @@ Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extens
 | **Observations** | FTS5-searchable log of 10 observation types from the self-learning pipeline. Full type/status filtering |
 | **Personality** | 10 trait dimensions with confidence model (≥0.30 display threshold, time decay, dismiss). Traits inform agent behaviour |
 | **Synthesis Pipeline** | API-side extraction engine reads OpenCode messages, regex pre-filter + LLM candidate batching creates observations. Phase 1 consolidates traits; Phase 2 proposes new skills (governed — requires approval). 15-minute autoscheduler with backup provider fallback. Cross-project synthesis shares patterns |
-| **Agents** | 13 logical agents: 12 user-facing agents (2 primary + 10 subagents) plus 1 hidden system-internal broker, with model assignment and skill permissions. The Chat primary is user-facing even when hidden from general selectors; the broker is never directly invocable, and the chat compatibility mirror is not a separate agent. |
-| **MCP Tools** | 283 catalogued tools in 30 baseline categories: 281 `ingenium_`-prefixed server registrations plus 2 extension tools. Per-tool and per-category enable/disable toggles. Disabled tools return `TOOL_DISABLED` before execution |
+| **Agents** | The `agent` map in root `opencode.json` is authoritative and contains 11 mapped entries, including built-in Plan. The hidden `ingenium-llm-broker` is system-internal and has no root mapping. Managed Playwright/browser automation is generic, and passive visual QA is owned by mapped `@ingenium-qa`. The Chat primary may be hidden from general selectors, and the chat compatibility mirror is not a separate agent. Agents can explicitly remember user-requested preferences through the scoped memory tools; retrieved memory is untrusted reference data. |
+| **MCP Tools** | 291 catalogued tools in 31 baseline categories: 289 `ingenium_`-prefixed server registrations plus 2 extension tools. Explicit memory uses `ingenium_memory_save`, `ingenium_memory_read`, `ingenium_memory_list`, `ingenium_memory_search`, `ingenium_memory_update`, `ingenium_memory_forget`, and `ingenium_memory_operation_status`; reads require `memory:read`, writes require `memory:write`, and project visibility requires `memory:share`. Per-tool and per-category enable/disable toggles. Disabled tools return `TOOL_DISABLED` before execution |
 | **Plugins** | OpenCode plugin lifecycle (enable, disable, configure) with auto-config sync between DB and `opencode.json` |
 | **Config** | Tabbed editor for `opencode.json` (project) and `opencode.jsonc` (global). Sync from disk, save to DB + disk |
 | **Logs & Status** | Structured log viewer with level filtering. Supervisord process states, uptime, restart counts |
+
+The installed OpenCode CLI can provide a named-session snapshot, but a complete
+export is not liveness, complete-history, deployment, or model/session proof.
+The retained 2026-09-09 capture and framing caveats are documented in the
+[CLI session-context audit](docs/reference/session-context-audit-2026-09-09.md).
 
 The dedicated `ingenium-recovery-engineer` is mapped to
 `openai/gpt-5.6-sol` / `high` with profile
@@ -117,19 +122,21 @@ separately issued scoped credential. Do not print or commit either value.
 }
 ```
 
-Plugins ship inside the `@ingenium/extension` package. Reference them from your OpenCode config:
+Plugins ship inside the `@ingenium/extension` package. Reference the five registered plugins from your OpenCode config:
 
 ```jsonc
 {
   "plugin": [
-    "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/resource-sync.ts",
-    "packages/ingenium-extension/auto-observer.ts"
+    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The complete catalog contains 283 baseline tools: 281 `ingenium_`-prefixed server registrations plus 2 extension tools. No HTTP port, no network configuration.
+**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The complete catalog contains 291 tools: 289 `ingenium_`-prefixed server registrations plus 2 extension tools. No HTTP port, no network configuration.
 
 > **Local development under WSL:** OpenCode's MCP client must use a **native Linux Node.js 22** runtime, not Windows `node.exe`/npm interop. Install Node.js 22 with `nvm` or your distribution package manager and ensure its `node` and `playwright-mcp` executables are available on the MCP process `PATH`.
 >
@@ -166,14 +173,11 @@ ingenium/
 ├── packages/
 │   ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, Zod schemas, tool modules, pipeline events
 │   ├── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser) with OAuth2
-│   └── ingenium-extension/   # Client-side npm package: MCP stdio server, plugins (observer, resource-sync, auto-observer)
+│   └── ingenium-extension/   # Client-side npm package: MCP stdio server, plugins (observer, resource-sync, auto-observer, session-coordinator, ponytail)
 ├── services/
 │   ├── ingenium-api/         # Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority.
-│   ├── ingenium-server/      # MCP stdio server — 281 prefixed registrations. Calls API via HTTP. Zero DB access.
+│   ├── ingenium-server/      # MCP stdio server — 289 prefixed registrations. Calls API via HTTP. Zero DB access.
 │   └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
-├── seed/
-│   ├── skills/               # Canonical skill sources in split-skill format
-│   └── plugins/              # Seed plugin .ts files
 ├── .opencode/
 │   ├── skills/               # Skills written to disk from DB
 │   ├── plugins/              # Plugin .ts files synced from DB
@@ -272,12 +276,12 @@ The MCP stdio server is not a supervisord process — it is bundled in the `@ing
 | Docs Workspace Reference | [docs/reference/docs-workspace.md](docs/reference/docs-workspace.md) |
 | Extension Architecture | [docs/concepts/architecture.md](docs/concepts/architecture.md#resource-sync-engine) |
 | Dashboard Styling Guide | [services/ingenium-dashboard/STYLING-GUIDE.md](services/ingenium-dashboard/STYLING-GUIDE.md) |
-| Agent Protocol | [AGENTS.md](AGENTS.md) |
+| Agent Behavior and Permissions | Respective [agent profiles](.opencode/agents/) |
 
 ## How Major Systems Work
 
 ### MCP Tool System
-Built-in server tools use a single `ingenium_` prefix: `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). Transport registrations in the MCP server are unprefixed (`skill_list`); the catalog maps them automatically to the `ingenium_` form. The two extension-registered plugin tools are `synthesize_observations` and `auto_observe_now`. The complete catalog contains 283 tools: 281 `ingenium_`-prefixed server registrations plus those 2 extension tools. It is defined in `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts` and verified by a parity test that ensures every registered transport has a catalog entry and vice versa.
+Built-in server tools use a single `ingenium_` prefix: `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). Transport registrations in the MCP server are unprefixed (`skill_list`); the catalog maps them automatically to the `ingenium_` form. The two extension-registered plugin tools are `synthesize_observations` and `auto_observe_now`. The complete catalog contains 291 tools: 289 `ingenium_`-prefixed server registrations plus those 2 extension tools. It is defined in `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts` and verified by a parity test that ensures every registered transport has a catalog entry and vice versa.
 
 ### Skill System
 Skills live at `.opencode/skills/<name>/` in split-skill format: `SKILL.md` (rules + patterns), `metadata.json` (name, description, file type triggers, framework detection, slash commands), and `references/` (supporting files). The `file_tree` column in the DB stores a JSON map of relative paths → content for complete data round-trips. The `resource-sync.ts` plugin uses a SHA-256 hash manifest for conflict-aware bidirectional sync on `session.created` and `session.idle`.

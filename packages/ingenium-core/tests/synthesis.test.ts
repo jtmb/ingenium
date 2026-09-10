@@ -6,11 +6,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
 import { getObservations, storeObservation } from "../lib/tools/observations.js";
-import { runSynthesis, getSynthesisStatus } from "../lib/tools/synthesis.js";
+import { runCrossProjectSynthesis, runSynthesis, getSynthesisStatus } from "../lib/tools/synthesis.js";
 import { getTraits, upsertTrait } from "../lib/tools/personality.js";
 import { setSetting } from "../lib/tools/settings.js";
 import { listSkills, createSkill } from "../lib/tools/skills.js";
 import { listProposals } from "../lib/tools/skill-governance.js";
+import { getEvents } from "../lib/tools/pipeline-events.js";
 
 let tempDir: string;
 let projectId: string;
@@ -119,6 +120,43 @@ beforeEach(() => {
 });
 
 describe("synthesis pipeline", () => {
+  it("leaves pending observations untouched when automatic learning is disabled", async () => {
+    const disabledProject = createProject("disabled-synthesis-project");
+    setSetting(disabledProject.id, "automatic_learning_enabled", "false");
+    const observation = storeObservation(
+      disabledProject.id,
+      "preference",
+      "User prefers this synthetic observation to remain pending while learning is disabled",
+      8,
+    );
+    let llmCalled = false;
+
+    const result = await runSynthesis(disabledProject.id, undefined, {
+      llmExecutor: async () => {
+        llmCalled = true;
+        return { ok: true, content: "{}" };
+      },
+    });
+
+    expect(result).toMatchObject({ observations_processed: 0, summary: "Automatic learning is disabled." });
+    expect(llmCalled).toBe(false);
+    expect(getObservations(disabledProject.id).find(({ id }) => id === observation.id)?.status).toBe("pending");
+  });
+
+  it("does not start cross-project synthesis when global automatic learning is disabled", async () => {
+    const startedBefore = getEvents(globalProjectId, { type: "synthesis_started" }).length;
+    setSetting(globalProjectId, "automatic_learning_enabled", "false");
+    try {
+      expect(await runCrossProjectSynthesis()).toMatchObject({
+        observations_processed: 0,
+        summary: "Automatic learning is disabled for the global project.",
+      });
+      expect(getEvents(globalProjectId, { type: "synthesis_started" })).toHaveLength(startedBefore);
+    } finally {
+      setSetting(globalProjectId, "automatic_learning_enabled", "true");
+    }
+  });
+
   it("returns empty result when no observations exist", async () => {
     const result = await runSynthesis(projectId);
     expect(result.observations_processed).toBe(0);

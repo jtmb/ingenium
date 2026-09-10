@@ -31,6 +31,7 @@ const OWNER_PROVIDER_REFERENCE = ".opencode/.ingenium-coordination-owner-provide
 const OWNER_EMAIL = "bootstrap-admin@localhost";
 const COORDINATION_SCOPES = [
   "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+  "memory:read", "memory:write",
 ] as const;
 const LEARNING_SCOPES = [
   "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
@@ -144,6 +145,8 @@ interface IssuedCredential {
 interface PriorCredential {
   id: string;
   servicePrincipalId: string;
+  name?: string;
+  organizationId?: string;
   revokedAt: string | null;
   kind: string;
   audience: string;
@@ -623,7 +626,7 @@ function credentialTarget(
       const owner = currentOwner();
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1
         || (owner !== undefined && metadata.uid !== owner)
-        || (metadata.mode & 0o400) === 0 || (metadata.mode & 0o077) !== 0) {
+        || (metadata.mode & 0o077) !== 0) {
         return fail("credential_install", substage);
       }
       return metadata;
@@ -1075,7 +1078,11 @@ async function resetCredential(
     const session = await ownerSession(request, secret);
     const identity = await projectIdentity(request, session);
     const prior = await priorCredentials(request, session);
-    const servicePrincipalId = prior.find((entry) => matchesBinding(entry, identity, binding, profile))?.servicePrincipalId;
+    // Scope changes and credential revocation do not remove the uniquely named principal.
+    // The issuance API validates that the reused principal is active in this organization.
+    const servicePrincipalId = (prior.find((entry) => matchesBinding(entry, identity, binding, profile))
+      ?? prior.find((entry) => entry.kind === "service" && entry.audience === "mcp"
+        && entry.name === profile.name && entry.organizationId === identity.organizationId))?.servicePrincipalId;
     const issued = await issueCredential(
       request, session, identity, binding, profile, (dependencies.now ?? Date.now)(), servicePrincipalId,
     );

@@ -1,6 +1,70 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { getDb, mcpCredentials, runtimes } from "ingenium-core";
 import { provisionManagedRuntime, removeManagedRuntime } from "./runtime-manager-client.js";
+import { deploymentMode } from "./runtime-mode.js";
+
+export const LOCAL_RUNTIME_SCOPES = [
+  "child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write",
+  "projects:read", "documentation:read", "rag:read", "memory:write",
+].sort();
+
+export function provisionLocalRuntime(workspaceId: string) {
+  let stage = "mode";
+  try {
+    if (deploymentMode() !== "compatibility" || process.env.INGENIUM_RUNTIME_MANAGER_URL?.trim()) {
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    stage = "workspace";
+    const workspace = runtimes.getAuthorizedWorkspace(workspaceId);
+    if (!workspace || workspace.status !== "authorized") throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    stage = "instance";
+    let runtime = getOrCreateRuntime(workspace);
+    stage = "lifecycle";
+    if (runtime.securityEpoch !== workspace.securityEpoch || runtime.backendContainerId !== null
+      || !["ABSENT", "FAILED", "STOPPED", "PROVISIONING", "STARTING", "READY", "IDLE"].includes(runtime.state)) {
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    for (const [from, toState] of [
+      ["FAILED", "PROVISIONING"], ["STOPPED", "PROVISIONING"], ["ABSENT", "PROVISIONING"],
+      ["PROVISIONING", "STARTING"], ["STARTING", "READY"], ["IDLE", "READY"],
+    ] as const) {
+      if (runtime.state === from) runtime = runtimes.transitionRuntime({
+        id: runtime.id, expectedRevision: runtime.revision, toState,
+        actorType: "system", actorId: "compatibility-provisioner", backendContainerId: null,
+      });
+    }
+    const name = `Runtime ${runtime.id}`;
+    stage = "credential";
+    const profile = createHash("sha256").update(JSON.stringify(LOCAL_RUNTIME_SCOPES)).digest("hex");
+    const credential = mcpCredentials.createMcpCredential({
+      servicePrincipalId: runtimeServicePrincipalId(runtime, name), servicePrincipalName: name,
+      kind: "runtime", audience: "runtime", name, scopes: [...LOCAL_RUNTIME_SCOPES],
+      organizationId: runtime.organizationId, projectId: runtime.projectId, workspaceId: runtime.workspaceId,
+      // Credential storage binding stays canonical; runtime HTTP attestation uses /workspace.
+      launcherWorktree: workspace.storagePath, createdByUserId: runtime.ownerUserId,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+    }, `compatibility-runtime:${runtime.id}:${runtime.securityEpoch}:${profile}`);
+    stage = "binding";
+    const bound = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT mcp_credential_id FROM runtime_capability_bindings WHERE runtime_id = ? AND revoked_at IS NULL",
+    ).get(runtime.id) as { mcp_credential_id: string } | undefined;
+    // Rebinding the same credential would revoke it; receipt replay must not mutate the binding.
+    if (bound?.mcp_credential_id !== credential.id) runtimes.bindRuntimeCapability(runtime.id, credential.id);
+    stage = "resolution";
+    if (!mcpCredentials.resolveMcpCredential(credential.token, "runtime")) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    return { runtime, credential };
+  } catch (error) {
+    throw new LocalRuntimeProvisionError(stage, error instanceof runtimes.RuntimeConflictError ? error.code
+      : error instanceof Error && error.message === "Credential replay is unavailable" ? "CREDENTIAL_REPLAY_UNAVAILABLE"
+      : "PREREQUISITE_FAILED");
+  }
+}
+
+export class LocalRuntimeProvisionError extends Error {
+  constructor(readonly stage: string, readonly code: string) {
+    super("Local runtime provisioning failed");
+  }
+}
 
 const inFlight = new Map<string, Promise<runtimes.RuntimeInstance>>();
 
@@ -82,7 +146,7 @@ async function provision(workspaceId: string): Promise<runtimes.RuntimeInstance>
       kind: "runtime",
       audience: "runtime",
       name: principalName,
-      scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "projects:read", "runtime:activity"],
+      scopes: ["child-mcp:execute", "child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
       organizationId: runtime.organizationId,
       projectId: runtime.projectId,
       workspaceId: runtime.workspaceId,

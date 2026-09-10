@@ -12,6 +12,30 @@ optionally creates pending governed skill proposals via an LLM (Phase 2). Approv
 proposals apply skill changes. It runs automatically every 15 minutes (configurable)
 and can be triggered manually.
 
+## Explicit Saved Memory Is Separate
+
+Synthesis does not create, classify, or update explicit saved preferences.
+`ingenium_memory_save` is the direct, user-directed remember path; it defaults to
+private visibility in the bound project/workspace and returns its own committed
+receipt. `ingenium_memory_list` and `ingenium_memory_search` return bounded
+untrusted reference data, while `ingenium_memory_update` and
+`ingenium_memory_forget` use version checks. The authenticated API surface is
+mounted at `/api/v1/memory`; the current implementation is
+`packages/ingenium-core/lib/tools/explicit-memory.ts` behind
+`services/ingenium-api/lib/routes/memory.ts`.
+
+In Chat, **Save message** is an explicit control that saves the accepted user
+message; **Use memory** reads that separate store. **Allow automatic learning**
+controls only the learning tools offered for that Chat turn. It does not turn a
+saved preference into an observation, and disabling it does not disable the
+scheduled extraction/synthesis cycle. Coordination memory, Context/documents,
+and linked transcripts are separate stores as well.
+
+The Synthesis LLM configuration remains relevant to inferred observations,
+personality/skill synthesis, email suggestions and summaries, Docs AI, RAG Ask,
+and job suggestions. Those consumers do not silently write explicit saved
+memory.
+
 ## Managing LLM Providers
 
 To enable Phase 2 (LLM-driven skill synthesis):

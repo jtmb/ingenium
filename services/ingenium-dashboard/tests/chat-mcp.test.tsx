@@ -36,7 +36,11 @@ vi.mock("../src/lib/RuntimeContext", () => ({
     mcp: { status: mocks.mcpStatus, connect: mocks.connect, disconnect: mocks.disconnect },
     sessions: { compact: vi.fn() },
   }),
-  useRuntime: () => ({ runtimeId: "11111111-1111-4111-8111-111111111111", projectName: "runtime-project" }),
+  useRuntime: () => ({
+    runtimeId: "11111111-1111-4111-8111-111111111111",
+    projectName: "runtime-project",
+    workspace: { mode: "isolated", confirmedWorkspaceId: "runtime-workspace" },
+  }),
 }));
 
 vi.mock("../src/lib/ProjectContext", () => ({

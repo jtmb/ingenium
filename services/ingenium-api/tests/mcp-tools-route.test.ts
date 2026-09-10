@@ -44,7 +44,34 @@ afterEach(async () => {
 });
 
 describe("MCP tool state API", () => {
-  it("shows a bootstrap owner all non-private canonical tools through the selected project's organization", async () => {
+  it.each([
+    [[], []],
+    [["memory:read"], ["list", "operation_status", "read", "search"]],
+    [["memory:write"], ["forget", "list", "operation_status", "read", "save", "search", "update"]],
+    [["memory:read", "memory:write"], ["forget", "list", "operation_status", "read", "save", "search", "update"]],
+  ])("filters private memory tools by service scopes %j", async (scopes, operations) => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-private-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    resetDbForTest();
+    const owner = await bootstrap.claimBootstrap({
+      email: "private-catalog@example.test", displayName: "Owner", password: "correct horse battery staple",
+    });
+    const project = projects.createProject("private-catalog", false, owner.organizationId);
+    const principal = { type: "service", id: "service", audience: "mcp", scopes,
+      projectId: project.id, projectIds: [project.id], organizationId: owner.organizationId };
+    const catalog = authorizedCatalog({ authorizationPolicy: {}, principal } as any, project.id);
+    expect([...catalog.values()].filter((tool) => tool.authorization?.target === "private").map((tool) => tool.name).sort())
+      .toEqual(operations.map((operation) => `ingenium_memory_${operation}`));
+    const crossProject = projects.createProject("other-private-catalog", false, owner.organizationId);
+    expect([...authorizedCatalog({ authorizationPolicy: {}, principal } as any, crossProject.id).values()]
+      .some((tool) => tool.authorization?.target === "private")).toBe(false);
+    const otherPrivate = authorizedCatalog({ authorizationPolicy: {}, principal: { ...principal, scopes: ["email:read"] } } as any, project.id);
+    expect(otherPrivate.has("ingenium_email_read")).toBe(true);
+    expect(otherPrivate.has("ingenium_email_send")).toBe(false);
+    expect(otherPrivate.has("ingenium_memory_read")).toBe(false);
+  });
+
+  it("shows a browser owner authorized memory tools but not other private tools", async () => {
     directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-tools-owner-"));
     process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
     resetDbForTest();
@@ -59,7 +86,7 @@ describe("MCP tool state API", () => {
       principal: { type: "user", id: owner.userId, scopes: ["user:*"], session: { id: "browser-session" } },
     } as any, project.id);
 
-    expect(catalog.size).toBe(232);
+    expect(catalog.size).toBe(239);
     expect(catalog.has("ingenium_coordination_handoff")).toBe(true);
     expect(catalog.has("ingenium_coordination_memory_read")).toBe(true);
     expect(catalog.has("ingenium_context_get")).toBe(false);
@@ -67,15 +94,24 @@ describe("MCP tool state API", () => {
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "project")).toHaveLength(151);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "installation")).toHaveLength(32);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "organization")).toHaveLength(49);
-    expect(Array.from(catalog.values()).some((tool) => tool.authorization?.target === "private")).toBe(false);
+    expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "private").map((tool) => tool.name).sort())
+      .toEqual(["forget", "list", "operation_status", "read", "save", "search", "update"].map((operation) => `ingenium_memory_${operation}`));
+    for (const principal of [undefined,
+      { type: "user", id: owner.userId, scopes: ["user:*"] },
+      { type: "user", id: owner.userId, scopes: ["projects:read"], session: { id: "limited" } },
+      { type: "user", id: "non-member", scopes: ["user:*"], session: { id: "outsider" } },
+    ]) {
+      expect([...authorizedCatalog({ authorizationPolicy: {}, principal } as any, project.id).keys()]
+        .some((name) => name.startsWith("ingenium_memory_"))).toBe(false);
+    }
 
     const baseUrl = await startRouter({ type: "user", id: owner.userId, scopes: ["user:*"], session: { id: "browser-session" } });
     const response = await fetch(`${baseUrl}/mcp-tools?project=${project.name}&include_categories=true`);
     const body = await response.json();
     expect(response.status).toBe(200);
-    expect(body.total).toBe(232);
-    expect(body.data).toHaveLength(27);
-    expect(body.counts).toEqual({ visibleTools: 232, visibleCategories: 27 });
+    expect(body.total).toBe(239);
+    expect(body.data).toHaveLength(28);
+    expect(body.counts).toEqual({ visibleTools: 239, visibleCategories: 28 });
     expect(body.counts).not.toHaveProperty("canonicalTools");
     expect(body.counts).not.toHaveProperty("hiddenTools");
     expect(body.counts).not.toHaveProperty("canonicalCategories");
@@ -99,12 +135,12 @@ describe("MCP tool state API", () => {
     const authorizedNames = new Set(catalog.keys());
     const excludedNames = Array.from(mcpToolStates.getAllTools(project.id).keys()).filter((name) => !authorizedNames.has(name));
     expect(reportResponse.status).toBe(200);
-    expect(report.total).toBe(232);
-    expect(report.data.tools).toHaveLength(232);
+    expect(report.total).toBe(239);
+    expect(report.data.tools).toHaveLength(239);
     expect(report.data.catalog).toEqual({
       status: "conformant",
       issues: [],
-      authorizedVisibleExpected: { toolCount: 232, categoryCount: 27 },
+      authorizedVisibleExpected: { toolCount: 239, categoryCount: 28 },
     });
     expect(report.data.tools.every((tool: { name: string }) => authorizedNames.has(tool.name))).toBe(true);
     expect(excludedNames.some((name) => JSON.stringify(report).includes(name))).toBe(false);

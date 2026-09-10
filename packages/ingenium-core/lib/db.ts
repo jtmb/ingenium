@@ -1122,6 +1122,68 @@ function inspectLinkedSessionTranscriptMigration(db: Database.Database): Authent
   return { any: principalColumn || state.any, complete: principalColumn && missing.length === 0, missing };
 }
 
+function inspectExplicitMemoryFtsUpdateOrderMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  const trigger = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = ?")
+    .get("explicit_memories_fts_update_delete") as { sql: string } | undefined;
+  const complete = trigger?.sql.includes("BEFORE UPDATE ON explicit_memories") ?? false;
+  return { any: complete, complete, missing: complete ? [] : ["explicit_memories_fts_update_delete BEFORE UPDATE trigger"] };
+}
+
+function inspectExplicitSavedMemoryMigration(db: Database.Database): AuthenticationFoundationMigrationState {
+  return inspectMigrationComponents(db, {
+    explicit_memories: [
+      "id", "organization_id", "project_id", "workspace_id", "owner_user_id", "visibility",
+      "content", "content_hash", "tags", "version", "state", "origin_type", "origin_id",
+      "created_at", "updated_at", "forgotten_at",
+    ],
+    explicit_memory_operation_receipts: [
+      "id", "organization_id", "project_id", "workspace_id", "owner_user_id", "operation_id",
+      "operation", "request_hash", "result_json", "status", "created_at",
+    ],
+    explicit_memory_versions: [
+      "id", "memory_id", "organization_id", "project_id", "workspace_id", "owner_user_id",
+      "version", "operation", "content_hash", "tags_hash", "receipt_id", "created_at",
+    ],
+    explicit_memory_tombstones: [
+      "memory_id", "organization_id", "project_id", "workspace_id", "owner_user_id",
+      "version", "prior_content_hash", "receipt_id", "forgotten_at",
+    ],
+    explicit_memory_restore_suppressions: [
+      "memory_id", "organization_id", "project_id", "workspace_id", "owner_user_id", "visibility",
+      "version", "prior_content_hash", "receipt_id", "operation_id", "request_hash", "result_json",
+      "entry_json", "entry_hash", "forgotten_at",
+    ],
+    explicit_memories_fts: ["content", "tags"],
+  }, [
+    "idx_explicit_memories_private_active",
+    "idx_explicit_memories_project_active",
+    "idx_explicit_memory_receipts_scope",
+    "idx_explicit_memory_versions_memory",
+    "idx_explicit_memory_tombstones_scope",
+    "idx_explicit_memory_restore_suppressions_scope",
+  ], [
+    "explicit_memories_scope_insert",
+    "explicit_memories_tags_insert",
+    "explicit_memories_tags_update",
+    "explicit_memories_revision_update",
+    "explicit_memories_immutable_delete",
+    "explicit_memory_receipts_scope_insert",
+    "explicit_memory_receipts_immutable_update",
+    "explicit_memory_receipts_immutable_delete",
+    "explicit_memory_versions_scope_insert",
+    "explicit_memory_versions_immutable_update",
+    "explicit_memory_versions_immutable_delete",
+    "explicit_memory_tombstones_scope_insert",
+    "explicit_memory_tombstones_immutable_update",
+    "explicit_memory_tombstones_immutable_delete",
+    "explicit_memory_restore_suppressions_immutable_update",
+    "explicit_memory_restore_suppressions_immutable_delete",
+    "explicit_memories_fts_insert",
+    "explicit_memories_fts_update_delete",
+    "explicit_memories_fts_update_insert",
+  ]);
+}
+
 /** Probe JOB-100 as one append-only boundary; a partial event catalog is unsafe. */
 function inspectTrustedJobEventsMigration(db: Database.Database): TrustedJobEventsMigrationState {
   const table = "trusted_job_events";
@@ -3651,7 +3713,8 @@ export function getDb(dbPath?: string): Database.Database {
   // stops appuser processes. Running schema migrations at that point can
   // rebuild a table while those processes still hold the database open. The
   // executor swaps a previously validated snapshot; its explicit restore-only
-  // upgrader handles 094-102, while ordinary startup migration remains disabled.
+  // upgrader handles its narrow allowlist, while ordinary startup migration
+  // remains disabled.
   const isRootRestoreMaintenance = process.env.INGENIUM_RESTORE_MAINTENANCE_MODE === "execute"
     && typeof process.getuid === "function" && process.getuid() === 0;
   if (!isRootRestoreMaintenance) runMigrations(db);
@@ -3680,7 +3743,7 @@ type RestoreMaintenanceMigration = {
   inspect: (database: Database.Database) => AuthenticationFoundationMigrationState;
 };
 
-const RESTORE_MAINTENANCE_SECURITY_MIGRATIONS: readonly RestoreMaintenanceMigration[] = [
+const RESTORE_MAINTENANCE_MIGRATIONS: readonly RestoreMaintenanceMigration[] = [
   { version: "094", file: "094_authentication.sql", inspect: inspectAuthenticationMigration },
   { version: "095", file: "095_authorization_audit.sql", inspect: inspectAuthorizationAuditMigration },
   { version: "096", file: "096_resource_ownership.sql", inspect: inspectResourceOwnershipMigration },
@@ -3690,6 +3753,9 @@ const RESTORE_MAINTENANCE_SECURITY_MIGRATIONS: readonly RestoreMaintenanceMigrat
   { version: "100", file: "100_mcp_credentials.sql", inspect: inspectMcpCredentialMigration },
   { version: "101", file: "101_runtime_isolation.sql", inspect: inspectRuntimeIsolationMigration },
   { version: "102", file: "102_runtime_browser_sessions.sql", inspect: inspectRuntimeBrowserMigration },
+  { version: "109", file: "109_runtime_workspace_supersession.sql", inspect: inspectRuntimeWorkspaceSupersessionMigration },
+  { version: "114", file: "114_explicit_saved_memory.sql", inspect: inspectExplicitSavedMemoryMigration },
+  { version: "115", file: "115_explicit_memory_fts_update_order.sql", inspect: inspectExplicitMemoryFtsUpdateOrderMigration },
 ];
 
 function requireRestoreMaintenanceProcess(databasePath: string): void {
@@ -3724,7 +3790,7 @@ function pendingRestoreMaintenanceMigrations(database: Database.Database): reado
 
   let missingPredecessor: string | null = null;
   const pending: RestoreMaintenanceMigration[] = [];
-  for (const migration of RESTORE_MAINTENANCE_SECURITY_MIGRATIONS) {
+  for (const migration of RESTORE_MAINTENANCE_MIGRATIONS) {
     const state = migration.inspect(database);
     if (state.any && !state.complete) {
       throw restoreMigrationPartialStateError(migration.version, state.missing);
@@ -3763,7 +3829,7 @@ export function validateRestoreSecuritySchemaForMaintenance(databasePath: string
   }
 }
 
-/** Upgrade only the supported migration-093-through-102 restore security lineage. */
+/** Upgrade only the restore executor's explicit migration allowlist. */
 export function upgradeRestoreSecuritySchemaForMaintenance(databasePath: string): void {
   requireRestoreMaintenanceProcess(databasePath);
   const database = openRestoreMaintenanceDatabase(databasePath, false);
@@ -4598,6 +4664,14 @@ function runMigrations(db: Database.Database): void {
       logger.info("db", "Applied migration 062_child_mcp_definitions.sql");
     }
 
+    const childMcpDescriptionColumns = db.prepare(
+      "PRAGMA table_info(mcp_child_server_definitions)",
+    ).all() as Array<{ name: string }>;
+    if (!childMcpDescriptionColumns.some((column) => column.name === "description")) {
+      db.exec(readFileSync(resolve(migrationsDir, "116_child_mcp_description.sql"), "utf-8"));
+      logger.info("db", "Applied migration 116_child_mcp_description.sql");
+    }
+
     // Migration 063: immutable conversation/checkpoint/message records are
     // intentionally separate from mutable context_entries. Migration 067 owns
     // a forward-only transactional repair for historical partial 063 shapes,
@@ -5360,6 +5434,37 @@ function runMigrations(db: Database.Database): void {
     logger.info("db", "Applied migration 113_linked_session_transcripts.sql");
   }
 
+  const explicitSavedMemory = inspectExplicitSavedMemoryMigration(db);
+  if (explicitSavedMemory.any && !explicitSavedMemory.complete) {
+    throw restoreMigrationPartialStateError("114", explicitSavedMemory.missing);
+  }
+  if (!explicitSavedMemory.complete) {
+    if (!inspectRuntimeWorkspaceSupersessionMigration(db).complete) {
+      throw restoreMigrationPartialStateError("114", ["migration 109 prerequisite schema"]);
+    }
+    db.exec(readFileSync(resolve(migrationsDir, "114_explicit_saved_memory.sql"), "utf-8"));
+    const applied = inspectExplicitSavedMemoryMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("114", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 114_explicit_saved_memory.sql");
+  }
+
+  if (!explicitSavedMemory.complete || !inspectExplicitMemoryFtsUpdateOrderMigration(db).complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "115_explicit_memory_fts_update_order.sql"), "utf-8"));
+    const applied = inspectExplicitMemoryFtsUpdateOrderMigration(db);
+    if (!applied.complete || db.prepare("PRAGMA foreign_key_check").all().length > 0) {
+      throw restoreMigrationPartialStateError("115", [...applied.missing, "foreign key integrity"]);
+    }
+    logger.info("db", "Applied migration 115_explicit_memory_fts_update_order.sql");
+  }
+
+  if (tableCount.count === 0) {
+    db.exec(readFileSync(resolve(migrationsDir, "116_child_mcp_description.sql"), "utf-8"));
+    logger.info("db", "Applied migration 116_child_mcp_description.sql");
+  }
+
+  db.exec(readFileSync(resolve(migrationsDir, "117_mcp_credential_receipts.sql"), "utf-8"));
   enforceReservedBrokerInvariant(db);
 }
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 IMAGE="${1:?runtime image is required}"
+ENTRYPOINT_SOURCE="${2:-}"
 RUN_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-runtime-entrypoint.XXXXXX")"
 
 cleanup() {
@@ -19,6 +20,9 @@ mkdir -p \
 
 cat > "$RUN_ROOT/bin/supervisord" <<'EOF'
 #!/bin/sh
+test -f /home/appuser/.config/opencode/runtime/opencode.jsonc
+test ! -e /home/appuser/.config/opencode/opencode.jsonc
+grep -q '"INGENIUM_MCP_AUDIENCE": "runtime"' /home/appuser/.config/opencode/runtime/opencode.jsonc
 printf 'RUNTIME_ENTRYPOINT_OK\n'
 EOF
 chmod 0555 "$RUN_ROOT/bin/supervisord"
@@ -36,7 +40,11 @@ EOF
 
 runtime() {
   local workspace="$1"
+  local entrypoint_mount=()
   shift
+  if [[ -n "$ENTRYPOINT_SOURCE" ]]; then
+    entrypoint_mount=(--mount "type=bind,src=$ENTRYPOINT_SOURCE,dst=/app/scripts/runtime-entrypoint.sh,readonly")
+  fi
   docker run --rm -i \
     --user 1000:1000 \
     --workdir /workspace \
@@ -49,6 +57,7 @@ runtime() {
     --tmpfs /tmp:rw,noexec,nosuid,nodev,size=67108864,uid=1000,gid=1000,mode=0700 \
     --mount "type=bind,src=$RUN_ROOT/bin,dst=/test-bin,readonly" \
     --mount "type=bind,src=$workspace,dst=/workspace" \
+    "${entrypoint_mount[@]}" \
     -e PATH=/test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     -e HOME=/home/appuser \
     -e XDG_CONFIG_HOME=/home/appuser/.config \

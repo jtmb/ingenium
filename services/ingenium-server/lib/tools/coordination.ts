@@ -9,6 +9,7 @@ export type CoordinationUpdateOperation =
   | "register"
   | "recover"
   | "recovery_state"
+  | "mint_recovery_admission"
   | "reconcile_epoch"
   | "recover_epoch"
   | "update"
@@ -46,6 +47,12 @@ export interface CoordinationUpdateInput {
   recovery_footprint_hash?: string;
   runtime_id?: string;
   observed_at?: string;
+  preflight_digest?: string;
+  head?: string;
+  parent_pid?: number;
+  parent_start?: string;
+  parent_executable?: string;
+  parent_nonce?: string;
 }
 
 export interface CoordinationClaimBatchInput {
@@ -146,6 +153,10 @@ const ALLOWED_ERROR_CODES = new Set([
   "MANIFEST_GENERATION_CONFLICT",
   "POINTER_NOT_FOUND",
   "POINTER_REVISION_CONFLICT",
+  "TARGET_SESSION_NOT_FOUND",
+  "SESSION_LINK_CONFLICT",
+  "TRANSCRIPT_CONFLICT",
+  "RECOVERY_ADMISSION_CONFLICT",
   "COORDINATION_INTEGRITY_ERROR",
 ]);
 
@@ -205,6 +216,12 @@ const HANDOFF_PUBLISH_KEYS = ["session", "event"] as const;
 const HANDOFF_CONSUME_KEYS = ["session", "events"] as const;
 const HANDOFF_READ_KEYS = ["session", "events", "throughSequence", "acknowledgementRequired"] as const;
 const REGISTER_KEYS = ["session", "memory"] as const;
+const RECOVERY_ADMISSION_KEYS = [
+  "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
+  "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
+] as const;
+const RECOVERY_ADMISSION_PARENT_KEYS = ["pid", "start", "executable", "nonce", "session"] as const;
+const RECOVERY_ADMISSION_MINT_KEYS = ["session", "admission", "consumeToken"] as const;
 const MEMORY_WINDOW_KEYS = ["conversationId", "revision", "entries", "throughRevision", "acknowledgementRequired"] as const;
 const MEMORY_PUBLISH_KEYS = ["session", "memory"] as const;
 const MEMORY_PUBLISHED_KEYS = ["conversationId", "revision", "entry"] as const;
@@ -546,6 +563,39 @@ function projectRegisterResponse(data: unknown): Record<string, unknown> | undef
   return session && memory ? { session, memory } : undefined;
 }
 
+function recoveryAdmission(value: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(value, RECOVERY_ADMISSION_KEYS)
+    || value.schema !== "ingenium.recovery-admission" || value.version !== 1 || value.action !== "production-restart"
+    || typeof value.preflightDigest !== "string" || !/^[0-9a-f]{64}$/.test(value.preflightDigest)
+    || typeof value.head !== "string" || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value.head)
+    || !hasExactKeys(value.parent, RECOVERY_ADMISSION_PARENT_KEYS)
+    || !isSafePositiveInteger(value.parent.pid)
+    || typeof value.parent.start !== "string" || value.parent.start.length < 1 || value.parent.start.length > 128
+    || typeof value.parent.executable !== "string" || !value.parent.executable.startsWith("/")
+    || value.parent.executable.length > 1_024
+    || typeof value.parent.nonce !== "string" || !/^[A-Za-z0-9_-]{32,512}$/.test(value.parent.nonce)
+    || !isOpaqueId(value.parent.session)
+    || typeof value.project !== "string" || value.project.length < 1 || value.project.length > 64
+    || !isOpaqueId(value.projectId) || !isOpaqueId(value.worktreeId)
+    || typeof value.workspace !== "string" || value.workspace.length < 1 || value.workspace.length > 256
+    || typeof value.storage !== "string" || !/^[0-9a-f]{64}$/.test(value.storage)
+    || typeof value.worktree !== "string" || !value.worktree.startsWith("/") || value.worktree.length > 1_024
+    || !isTimestamp(value.issuedAt) || !isTimestamp(value.expiresAt)
+    || Date.parse(value.expiresAt) <= Date.parse(value.issuedAt)
+    || !isSafeNonnegativeInteger(value.revision) || !isSafePositiveInteger(value.fence)) return undefined;
+  return Object.fromEntries(RECOVERY_ADMISSION_KEYS.map((key) => [key, value[key]]));
+}
+
+function projectRecoveryAdmissionMintResponse(data: unknown): Record<string, unknown> | undefined {
+  if (!hasExactKeys(data, RECOVERY_ADMISSION_MINT_KEYS)
+    || typeof data.consumeToken !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(data.consumeToken)) return undefined;
+  const projectedSession = mutationSession(data.session);
+  const admission = recoveryAdmission(data.admission);
+  return projectedSession && admission
+    ? { session: projectedSession, admission, consumeToken: data.consumeToken }
+    : undefined;
+}
+
 function projectMemoryPublishResponse(data: unknown): Record<string, unknown> | undefined {
   if (!hasExactKeys(data, MEMORY_PUBLISH_KEYS) || !hasExactKeys(data.memory, MEMORY_PUBLISHED_KEYS)
     || !isUuid(data.memory.conversationId) || !isSafePositiveInteger(data.memory.revision)) return undefined;
@@ -634,7 +684,7 @@ function handoffEvent(value: unknown): Record<string, unknown> | undefined {
     || typeof value.sourceActorId !== "string" || !/^actor-[0-9a-f]{64}$/.test(value.sourceActorId)
     || !isSafePositiveInteger(value.sourceIncarnation)
     || !isSafePositiveInteger(value.sourceRevision)
-    || !isNullable(value.currentTaskId, isUuid)
+    || !isNullable(value.currentTaskId, (entry) => typeof entry === "string" && /^task-[0-9a-f]{64}$/.test(entry))
     || !isNullable(value.currentTaskRevision, isSafeNonnegativeInteger)
     || !isNullable(value.contextConversationId, isUuid)
     || !isNullable(value.contextRevision, isSafeNonnegativeInteger)
@@ -827,6 +877,20 @@ export async function coordinationUpdate(
       return request(
         () => api.settled.post("/coordination/epoch/recovery-state", leaseBody(input), { project }),
         projectEpochRecoveryStateResponse,
+      );
+    case "mint_recovery_admission":
+      return request(
+        () => api.settled.post("/coordination/recovery-admissions/mint", {
+          ...leaseBody(input),
+          preflight_digest: input.preflight_digest,
+          head: input.head,
+          parent_pid: input.parent_pid,
+          parent_start: input.parent_start,
+          parent_executable: input.parent_executable,
+          parent_nonce: input.parent_nonce,
+          ttl_ms: input.ttl_ms,
+        }, { project }),
+        projectRecoveryAdmissionMintResponse,
       );
     case "reconcile_epoch":
     case "recover_epoch":

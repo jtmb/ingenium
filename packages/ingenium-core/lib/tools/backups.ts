@@ -2402,6 +2402,7 @@ export function getRestoreExecutionRun(projectId: string, runId: string): Restor
  * no raw authorization/owner/fence tokens or database bytes.
  */
 export type RestoreExecutionCapsule = {
+  explicitMemoryForgets: ExplicitMemoryForgetLedger;
   plan: StoredRestorePlan;
   legacyRevisions: StoredPlanRevision[];
   legacyAuthorizations: StoredAuthorization[];
@@ -2415,6 +2416,518 @@ export type RestoreExecutionCapsule = {
   sourceRecord: BackupRecord;
   safetyRecord: BackupRecord | null;
 };
+
+type ExplicitMemoryForgetEntry = {
+  memory: {
+    id: string;
+    organization_id: string;
+    project_id: string;
+    workspace_id: string;
+    owner_user_id: string;
+    visibility: "private" | "project";
+    version: number;
+    origin_type: "explicit" | "context_archive" | "source";
+    origin_id: string | null;
+    created_at: string;
+    forgotten_at: string;
+  };
+  receipt: {
+    id: string;
+    operation_id: string;
+    request_hash: string;
+    result_json: string;
+    created_at: string;
+  };
+  revision: {
+    id: string;
+    content_hash: string;
+    tags_hash: string;
+    created_at: string;
+  };
+  tombstone: {
+    prior_content_hash: string;
+    forgotten_at: string;
+  };
+};
+
+type ExplicitMemoryForgetLedger = {
+  version: 1;
+  count: number;
+  entries: ExplicitMemoryForgetEntry[];
+  sha256: string;
+};
+
+const MAX_EXPLICIT_MEMORY_FORGETS = 4_096;
+const MAX_EXPLICIT_MEMORY_FORGET_LEDGER_BYTES = 8 * 1_024 * 1_024;
+
+const EXPLICIT_MEMORY_TABLES = [
+  "explicit_memories",
+  "explicit_memory_operation_receipts",
+  "explicit_memory_versions",
+  "explicit_memory_tombstones",
+  "explicit_memory_restore_suppressions",
+] as const;
+
+function explicitMemorySchemaAvailable(db: Database.Database): boolean {
+  const present = EXPLICIT_MEMORY_TABLES.filter((table) => db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table));
+  if (present.length !== 0 && present.length !== EXPLICIT_MEMORY_TABLES.length) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  if (present.length === 0) return false;
+  const revisionColumns = (db.prepare("PRAGMA table_info('explicit_memory_versions')").all() as Array<{ name: string }>)
+    .map(({ name }) => name);
+  const contentFreeRevisionColumns = [
+    "id", "memory_id", "organization_id", "project_id", "workspace_id", "owner_user_id",
+    "version", "operation", "content_hash", "tags_hash", "receipt_id", "created_at",
+  ];
+  if (canonicalJson(revisionColumns) !== canonicalJson(contentFreeRevisionColumns)) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  return true;
+}
+
+function validateExplicitMemoryForgetEntry(entry: ExplicitMemoryForgetEntry): void {
+  if (!entry || typeof entry !== "object"
+    || !UUID.test(entry.memory?.id)
+    || !Number.isSafeInteger(entry.memory?.version) || entry.memory.version < 2
+    || !SHA256.test(entry.receipt?.request_hash)
+    || !SHA256.test(entry.revision?.content_hash)
+    || !SHA256.test(entry.revision?.tags_hash)
+    || !SHA256.test(entry.tombstone?.prior_content_hash)
+    || entry.revision.content_hash !== entry.tombstone.prior_content_hash
+    || entry.revision.tags_hash !== sha256("[]")
+    || entry.tombstone.forgotten_at !== entry.memory.forgotten_at) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  let receipt: unknown;
+  try {
+    receipt = JSON.parse(entry.receipt.result_json);
+  } catch {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  const expectedReceipt = {
+    receiptId: entry.receipt.id,
+    operationId: entry.receipt.operation_id,
+    operation: "forget",
+    status: "committed",
+    memoryId: entry.memory.id,
+    version: entry.memory.version,
+    scope: {
+      organizationId: entry.memory.organization_id,
+      projectId: entry.memory.project_id,
+      workspaceId: entry.memory.workspace_id,
+      ownerUserId: entry.memory.owner_user_id,
+      visibility: entry.memory.visibility,
+    },
+    committedAt: entry.receipt.created_at,
+  };
+  if (canonicalJson(receipt) !== canonicalJson(expectedReceipt)) throw new BackupError("BACKUP_INVALID");
+}
+
+function canonicalExplicitMemoryForgetEntries(entries: ExplicitMemoryForgetEntry[]): string {
+  if (entries.length > MAX_EXPLICIT_MEMORY_FORGETS) throw new BackupError("BACKUP_INVALID");
+  const canonical = canonicalJson(entries);
+  if (Buffer.byteLength(canonical, "utf8") > MAX_EXPLICIT_MEMORY_FORGET_LEDGER_BYTES) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  return canonical;
+}
+
+function captureExplicitMemoryForgetLedger(db: Database.Database): ExplicitMemoryForgetLedger {
+  if (!explicitMemorySchemaAvailable(db)) {
+    const entries: ExplicitMemoryForgetEntry[] = [];
+    return { version: 1, count: 0, entries, sha256: sha256(canonicalExplicitMemoryForgetEntries(entries)) };
+  }
+  const tombstones = db.prepare(
+    `SELECT memory_id, prior_content_hash, receipt_id, forgotten_at
+     FROM explicit_memory_tombstones ORDER BY memory_id LIMIT ?`,
+  ).all(MAX_EXPLICIT_MEMORY_FORGETS + 1) as Array<{
+    memory_id: string;
+    prior_content_hash: string;
+    receipt_id: string;
+    forgotten_at: string;
+  }>;
+  const entries = tombstones.map((tombstone): ExplicitMemoryForgetEntry => {
+    const memory = db.prepare(
+      `SELECT id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+              version, state, content, content_hash, tags, origin_type, origin_id, created_at, forgotten_at
+       FROM explicit_memories WHERE id = ?`,
+    ).get(tombstone.memory_id) as (ExplicitMemoryForgetEntry["memory"] & {
+      state: string; content: string; content_hash: string; tags: string;
+    }) | undefined;
+    const receipt = db.prepare(
+      `SELECT id, operation_id, operation, request_hash, result_json, status, created_at
+       FROM explicit_memory_operation_receipts WHERE id = ?`,
+    ).get(tombstone.receipt_id) as (ExplicitMemoryForgetEntry["receipt"] & { operation: string; status: string }) | undefined;
+    const revision = db.prepare(
+      `SELECT id, version, operation, content_hash, tags_hash, receipt_id, created_at
+       FROM explicit_memory_versions WHERE memory_id = ? AND version = ?`,
+    ).get(tombstone.memory_id, memory?.version) as (ExplicitMemoryForgetEntry["revision"] & {
+      version: number; operation: string; receipt_id: string;
+    }) | undefined;
+    if (!memory || !receipt || !revision
+      || memory.state !== "forgotten" || memory.content !== "" || memory.content_hash !== sha256("") || memory.tags !== "[]"
+      || memory.forgotten_at !== tombstone.forgotten_at
+      || receipt.operation !== "forget" || receipt.status !== "committed"
+      || revision.version !== memory.version || revision.operation !== "forget" || revision.receipt_id !== receipt.id) {
+      throw new BackupError("BACKUP_INVALID");
+    }
+    const entry: ExplicitMemoryForgetEntry = {
+      memory: {
+        id: memory.id,
+        organization_id: memory.organization_id,
+        project_id: memory.project_id,
+        workspace_id: memory.workspace_id,
+        owner_user_id: memory.owner_user_id,
+        visibility: memory.visibility,
+        version: memory.version,
+        origin_type: memory.origin_type,
+        origin_id: memory.origin_id,
+        created_at: memory.created_at,
+        forgotten_at: memory.forgotten_at,
+      },
+      receipt: {
+        id: receipt.id,
+        operation_id: receipt.operation_id,
+        request_hash: receipt.request_hash,
+        result_json: receipt.result_json,
+        created_at: receipt.created_at,
+      },
+      revision: {
+        id: revision.id,
+        content_hash: revision.content_hash,
+        tags_hash: revision.tags_hash,
+        created_at: revision.created_at,
+      },
+      tombstone: {
+        prior_content_hash: tombstone.prior_content_hash,
+        forgotten_at: tombstone.forgotten_at,
+      },
+    };
+    validateExplicitMemoryForgetEntry(entry);
+    return entry;
+  });
+  const suppressions = db.prepare(
+    `SELECT memory_id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+            version, prior_content_hash, receipt_id, operation_id, request_hash, result_json,
+            entry_json, entry_hash, forgotten_at
+     FROM explicit_memory_restore_suppressions ORDER BY memory_id LIMIT ?`,
+  ).all(MAX_EXPLICIT_MEMORY_FORGETS + 1) as Array<Record<string, unknown> & { entry_json: string }>;
+  for (const suppression of suppressions) {
+    let entry: ExplicitMemoryForgetEntry;
+    try {
+      entry = JSON.parse(suppression.entry_json) as ExplicitMemoryForgetEntry;
+    } catch {
+      throw new BackupError("BACKUP_INVALID");
+    }
+    validateExplicitMemoryForgetEntry(entry);
+    if (canonicalJson(suppression) !== canonicalJson(explicitMemoryRestoreSuppressionRow(entry))) {
+      throw new BackupError("BACKUP_INVALID");
+    }
+    entries.push(entry);
+  }
+  entries.sort((left, right) => left.memory.id < right.memory.id ? -1 : left.memory.id > right.memory.id ? 1 : 0);
+  for (let index = 1; index < entries.length; index++) {
+    if (entries[index - 1]!.memory.id === entries[index]!.memory.id) throw new BackupError("BACKUP_INVALID");
+  }
+  const canonical = canonicalExplicitMemoryForgetEntries(entries);
+  return { version: 1, count: entries.length, entries, sha256: sha256(canonical) };
+}
+
+function explicitMemoryScopeAvailable(db: Database.Database, entry: ExplicitMemoryForgetEntry): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1 FROM authorized_workspaces workspace
+     JOIN projects project ON project.id = workspace.project_id
+     WHERE workspace.id = ? AND workspace.organization_id = ? AND workspace.project_id = ?
+       AND workspace.owner_user_id = ? AND workspace.status = 'authorized'
+       AND project.organization_id = ? AND project.archived_at IS NULL`,
+  ).get(
+    entry.memory.workspace_id,
+    entry.memory.organization_id,
+    entry.memory.project_id,
+    entry.memory.owner_user_id,
+    entry.memory.organization_id,
+  ));
+}
+
+function applyExplicitMemoryForgetState(
+  db: Database.Database,
+  entry: ExplicitMemoryForgetEntry,
+  createMissing: boolean,
+): void {
+  const scope = entry.memory;
+  const existingMemory = db.prepare(
+    `SELECT id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+            content, content_hash, tags, version, state, origin_type, origin_id,
+            created_at, updated_at, forgotten_at
+     FROM explicit_memories WHERE id = ?`,
+  ).get(scope.id) as Record<string, unknown> | undefined;
+  const expectedIdentity = {
+    id: scope.id,
+    organization_id: scope.organization_id,
+    project_id: scope.project_id,
+    workspace_id: scope.workspace_id,
+    owner_user_id: scope.owner_user_id,
+    visibility: scope.visibility,
+    origin_type: scope.origin_type,
+    origin_id: scope.origin_id,
+    created_at: scope.created_at,
+  };
+  const expectedForgottenMemory = {
+    ...expectedIdentity,
+    content: "",
+    content_hash: sha256(""),
+    tags: "[]",
+    version: scope.version,
+    state: "forgotten",
+    updated_at: scope.forgotten_at,
+    forgotten_at: scope.forgotten_at,
+  };
+  if (!existingMemory) {
+    if (!createMissing) return;
+    db.prepare(
+      `INSERT INTO explicit_memories
+       (id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+        content, content_hash, tags, version, state, origin_type, origin_id,
+        created_at, updated_at, forgotten_at)
+       VALUES (?, ?, ?, ?, ?, ?, '', ?, '[]', ?, 'forgotten', ?, ?, ?, ?, ?)`,
+    ).run(
+      scope.id, scope.organization_id, scope.project_id, scope.workspace_id, scope.owner_user_id,
+      scope.visibility, sha256(""), scope.version, scope.origin_type, scope.origin_id,
+      scope.created_at, scope.forgotten_at, scope.forgotten_at,
+    );
+    return;
+  }
+  if (existingMemory["state"] === "active") {
+    const actualIdentity = Object.fromEntries(Object.keys(expectedIdentity).map((key) => [key, existingMemory[key]]));
+    const restoredVersion = existingMemory["version"];
+    if (canonicalJson(actualIdentity) !== canonicalJson(expectedIdentity)
+      || !Number.isSafeInteger(restoredVersion) || (restoredVersion as number) >= scope.version
+      || ((restoredVersion as number) === scope.version - 1
+        && existingMemory["content_hash"] !== entry.tombstone.prior_content_hash)) {
+      throw new BackupError("BACKUP_INVALID");
+    }
+    // A backup may precede updates that happened before the forget; advance the
+    // immutable row one revision at a time before applying the terminal step.
+    for (let version = restoredVersion as number; version < scope.version - 1; version++) {
+      const advanced = db.prepare(
+        `UPDATE explicit_memories SET version = version + 1, updated_at = ?
+         WHERE id = ? AND version = ? AND state = 'active'`,
+      ).run(scope.forgotten_at, scope.id, version);
+      if (advanced.changes !== 1) throw new BackupError("BACKUP_INVALID");
+    }
+    const changed = db.prepare(
+      `UPDATE explicit_memories
+       SET content = '', content_hash = ?, tags = '[]', version = ?, state = 'forgotten',
+           updated_at = ?, forgotten_at = ?
+       WHERE id = ? AND version = ? AND state = 'active'`,
+    ).run(
+      sha256(""), scope.version, scope.forgotten_at, scope.forgotten_at,
+      scope.id, scope.version - 1,
+    );
+    if (changed.changes !== 1) throw new BackupError("BACKUP_INVALID");
+    return;
+  }
+  if (canonicalJson(existingMemory) !== canonicalJson(expectedForgottenMemory)) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+}
+
+function explicitMemoryRestoreSuppressionRow(entry: ExplicitMemoryForgetEntry) {
+  const scope = entry.memory;
+  const entryJson = canonicalJson(entry);
+  return {
+    memory_id: scope.id,
+    organization_id: scope.organization_id,
+    project_id: scope.project_id,
+    workspace_id: scope.workspace_id,
+    owner_user_id: scope.owner_user_id,
+    visibility: scope.visibility,
+    version: scope.version,
+    prior_content_hash: entry.tombstone.prior_content_hash,
+    receipt_id: entry.receipt.id,
+    operation_id: entry.receipt.operation_id,
+    request_hash: entry.receipt.request_hash,
+    result_json: entry.receipt.result_json,
+    entry_json: entryJson,
+    entry_hash: sha256(entryJson),
+    forgotten_at: entry.tombstone.forgotten_at,
+  };
+}
+
+function mergeExplicitMemoryRestoreSuppression(
+  db: Database.Database,
+  entry: ExplicitMemoryForgetEntry,
+): void {
+  const scope = entry.memory;
+  const expected = explicitMemoryRestoreSuppressionRow(entry);
+  if (db.prepare("SELECT 1 FROM explicit_memories WHERE id = ?").get(scope.id)) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  const existing = db.prepare(
+    `SELECT memory_id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+            version, prior_content_hash, receipt_id, operation_id, request_hash, result_json,
+            entry_json, entry_hash, forgotten_at
+     FROM explicit_memory_restore_suppressions WHERE memory_id = ?`,
+  ).get(scope.id);
+  if (existing) {
+    if (canonicalJson(existing) !== canonicalJson(expected)) throw new BackupError("BACKUP_INVALID");
+    return;
+  }
+  db.prepare(
+    `INSERT INTO explicit_memory_restore_suppressions
+     (memory_id, organization_id, project_id, workspace_id, owner_user_id, visibility,
+      version, prior_content_hash, receipt_id, operation_id, request_hash, result_json,
+      entry_json, entry_hash, forgotten_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    expected.memory_id,
+    expected.organization_id,
+    expected.project_id,
+    expected.workspace_id,
+    expected.owner_user_id,
+    expected.visibility,
+    expected.version,
+    expected.prior_content_hash,
+    expected.receipt_id,
+    expected.operation_id,
+    expected.request_hash,
+    expected.result_json,
+    expected.entry_json,
+    expected.entry_hash,
+    expected.forgotten_at,
+  );
+}
+
+function mergeExplicitMemoryForgetLedger(db: Database.Database, ledger: ExplicitMemoryForgetLedger): void {
+  if (!ledger || ledger.version !== 1 || !Number.isSafeInteger(ledger.count)
+    || ledger.count < 0 || ledger.count > MAX_EXPLICIT_MEMORY_FORGETS
+    || !Array.isArray(ledger.entries) || ledger.count !== ledger.entries.length || !SHA256.test(ledger.sha256)
+    || !timingSafeHexEqual(ledger.sha256, sha256(canonicalExplicitMemoryForgetEntries(ledger.entries)))) {
+    throw new BackupError("BACKUP_INVALID");
+  }
+  let priorMemoryId = "";
+  for (const entry of ledger.entries) {
+    validateExplicitMemoryForgetEntry(entry);
+    if (entry.memory.id <= priorMemoryId) throw new BackupError("BACKUP_INVALID");
+    priorMemoryId = entry.memory.id;
+  }
+  if (ledger.entries.length === 0) return;
+  if (!explicitMemorySchemaAvailable(db)) throw new BackupError("BACKUP_INVALID");
+
+  for (const entry of ledger.entries) {
+    const scope = entry.memory;
+    if (db.prepare("SELECT 1 FROM explicit_memory_restore_suppressions WHERE memory_id = ?").get(scope.id)) {
+      mergeExplicitMemoryRestoreSuppression(db, entry);
+      continue;
+    }
+    const scopeAvailable = explicitMemoryScopeAvailable(db, entry);
+    applyExplicitMemoryForgetState(db, entry, scopeAvailable);
+    if (!scopeAvailable) {
+      mergeExplicitMemoryRestoreSuppression(db, entry);
+      continue;
+    }
+    const expectedReceipt = {
+      id: entry.receipt.id,
+      organization_id: scope.organization_id,
+      project_id: scope.project_id,
+      workspace_id: scope.workspace_id,
+      owner_user_id: scope.owner_user_id,
+      operation_id: entry.receipt.operation_id,
+      operation: "forget",
+      request_hash: entry.receipt.request_hash,
+      result_json: entry.receipt.result_json,
+      status: "committed",
+      created_at: entry.receipt.created_at,
+    };
+    const existingReceipt = db.prepare(
+      `SELECT id, organization_id, project_id, workspace_id, owner_user_id, operation_id,
+              operation, request_hash, result_json, status, created_at
+       FROM explicit_memory_operation_receipts WHERE id = ?`,
+    ).get(entry.receipt.id);
+    if (existingReceipt) {
+      if (canonicalJson(existingReceipt) !== canonicalJson(expectedReceipt)) throw new BackupError("BACKUP_INVALID");
+    } else {
+      db.prepare(
+        `INSERT INTO explicit_memory_operation_receipts
+         (id, organization_id, project_id, workspace_id, owner_user_id, operation_id,
+          operation, request_hash, result_json, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'forget', ?, ?, 'committed', ?)`,
+      ).run(
+        entry.receipt.id, scope.organization_id, scope.project_id, scope.workspace_id,
+        scope.owner_user_id, entry.receipt.operation_id, entry.receipt.request_hash,
+        entry.receipt.result_json, entry.receipt.created_at,
+      );
+    }
+
+    const expectedRevision = {
+      id: entry.revision.id,
+      memory_id: scope.id,
+      organization_id: scope.organization_id,
+      project_id: scope.project_id,
+      workspace_id: scope.workspace_id,
+      owner_user_id: scope.owner_user_id,
+      version: scope.version,
+      operation: "forget",
+      content_hash: entry.revision.content_hash,
+      tags_hash: entry.revision.tags_hash,
+      receipt_id: entry.receipt.id,
+      created_at: entry.revision.created_at,
+    };
+    const existingRevision = db.prepare(
+      `SELECT id, memory_id, organization_id, project_id, workspace_id, owner_user_id,
+              version, operation, content_hash, tags_hash, receipt_id, created_at
+       FROM explicit_memory_versions WHERE memory_id = ? AND version = ?`,
+    ).get(scope.id, scope.version);
+    if (existingRevision) {
+      if (canonicalJson(existingRevision) !== canonicalJson(expectedRevision)) throw new BackupError("BACKUP_INVALID");
+    } else {
+      db.prepare(
+        `INSERT INTO explicit_memory_versions
+         (id, memory_id, organization_id, project_id, workspace_id, owner_user_id,
+          version, operation, content_hash, tags_hash, receipt_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'forget', ?, ?, ?, ?)`,
+      ).run(
+        entry.revision.id, scope.id, scope.organization_id, scope.project_id, scope.workspace_id,
+        scope.owner_user_id, scope.version, entry.revision.content_hash, entry.revision.tags_hash,
+        entry.receipt.id, entry.revision.created_at,
+      );
+    }
+
+    const expectedTombstone = {
+      memory_id: scope.id,
+      organization_id: scope.organization_id,
+      project_id: scope.project_id,
+      workspace_id: scope.workspace_id,
+      owner_user_id: scope.owner_user_id,
+      version: scope.version,
+      prior_content_hash: entry.tombstone.prior_content_hash,
+      receipt_id: entry.receipt.id,
+      forgotten_at: entry.tombstone.forgotten_at,
+    };
+    const existingTombstone = db.prepare(
+      `SELECT memory_id, organization_id, project_id, workspace_id, owner_user_id,
+              version, prior_content_hash, receipt_id, forgotten_at
+       FROM explicit_memory_tombstones WHERE memory_id = ?`,
+    ).get(scope.id);
+    if (existingTombstone) {
+      if (canonicalJson(existingTombstone) !== canonicalJson(expectedTombstone)) throw new BackupError("BACKUP_INVALID");
+    } else {
+      db.prepare(
+        `INSERT INTO explicit_memory_tombstones
+         (memory_id, organization_id, project_id, workspace_id, owner_user_id,
+          version, prior_content_hash, receipt_id, forgotten_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        scope.id, scope.organization_id, scope.project_id, scope.workspace_id, scope.owner_user_id,
+        scope.version, entry.tombstone.prior_content_hash, entry.receipt.id, entry.tombstone.forgotten_at,
+      );
+    }
+  }
+  if (db.prepare("PRAGMA foreign_key_check").all().length > 0) throw new BackupError("BACKUP_INVALID");
+}
 
 export type RestoreSecuritySchemaGeneration =
   | "pre_auth"
@@ -2627,6 +3140,7 @@ export function captureRestoreExecutionCapsule(projectId: string, runId: string)
   if (!stage || !authorization || !sourceRecord) throw new BackupError("BACKUP_INVALID");
   const db = getDb(backupDbPath());
   return {
+    explicitMemoryForgets: captureExplicitMemoryForgetLedger(db),
     plan,
     legacyRevisions: db.prepare(
       "SELECT project_id, plan_id, backup_id, revision, from_state, to_state, stage_hash, created_at FROM backup_restore_plan_revisions WHERE project_id = ? AND plan_id = ? ORDER BY revision ASC",
@@ -2673,6 +3187,7 @@ function insertBackupRecordIfMissing(record: BackupRecord): void {
 export function rehydrateRestoreExecutionCapsule(capsule: RestoreExecutionCapsule): RestoreExecutionRun {
   const result = execTransaction(() => {
     const db = getDb(backupDbPath());
+    mergeExplicitMemoryForgetLedger(db, capsule.explicitMemoryForgets);
     const existing = getExecutionRunRecord(capsule.run.project_id, capsule.run.id);
     if (existing) return existing;
     insertBackupRecordIfMissing(capsule.sourceRecord);

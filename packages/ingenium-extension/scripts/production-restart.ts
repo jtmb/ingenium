@@ -68,6 +68,7 @@ const MAX_SESSION_EXPORT_BYTES = 32 * 1024 * 1024;
 const LINUX_O_TMPFILE = 0o20000000 | constants.O_DIRECTORY;
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 const SAFE_SESSION_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
@@ -77,6 +78,7 @@ export const PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY = COORDINATION_OUTBOX_AU
 const OVERFLOW_AUTHORIZATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
+export const ADMITTED_RECOVERY_CONTEXT = "INGENIUM_ADMITTED_RECOVERY_CONTEXT";
 const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
   handoffMs: 5_000,
   launchMs: 30_000,
@@ -93,6 +95,29 @@ export type ProductionRestartBinding = ReplacementFirstRestartRequest["binding"]
   project: string;
   credentialFile: string;
 };
+
+export interface AdmittedRecoveryContext {
+  readonly schemaVersion: 1;
+  readonly action: "production-restart";
+  readonly preflightDigest: string;
+  readonly head: string;
+  readonly parent: Readonly<RestartProcessIdentity & { sessionId: string }>;
+  readonly binding: Readonly<{
+    project: string;
+    projectId: string;
+    workspaceId: string;
+    storageMappingHash: string;
+    worktree: string;
+  }>;
+  readonly receipt: Readonly<{
+    id: string;
+    schema: "ingenium.recovery-admission-receipt";
+    version: 1;
+    action: "production-restart";
+    admissionDigest: string;
+    consumedAt: string;
+  }>;
+}
 
 export interface ProductionRestartParentCandidate {
   binding: ReplacementFirstRestartRequest["binding"];
@@ -199,6 +224,65 @@ function hasExactKeys(value: unknown, keys: readonly string[]): value is Record<
 
 function hash(value: string | Buffer): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isCanonicalRfc3339(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = RFC3339.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const calendar = new Date(0);
+  calendar.setUTCFullYear(year, month - 1, day);
+  calendar.setUTCHours(hour, minute, second, 0);
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed)
+    && calendar.getUTCFullYear() === year && calendar.getUTCMonth() === month - 1
+    && calendar.getUTCDate() === day && calendar.getUTCHours() === hour
+    && calendar.getUTCMinutes() === minute && calendar.getUTCSeconds() === second;
+}
+
+export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process.env): AdmittedRecoveryContext {
+  const serialized = source[ADMITTED_RECOVERY_CONTEXT];
+  let value: unknown;
+  try { value = serialized ? JSON.parse(serialized) : undefined; } catch { value = undefined; }
+  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "receipt"])
+    || value.schemaVersion !== 1 || value.action !== "production-restart"
+    || typeof value.preflightDigest !== "string" || !SHA256.test(value.preflightDigest)
+    || typeof value.head !== "string" || !/^[0-9a-f]{40,64}$/.test(value.head)
+    || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "sessionId"])
+    || !Number.isSafeInteger(value.parent.pid) || Number(value.parent.pid) < 2
+    || !Number.isSafeInteger(value.parent.startTimeTicks) || Number(value.parent.startTimeTicks) < 1
+    || typeof value.parent.executableSha256 !== "string" || !SHA256.test(value.parent.executableSha256)
+    || typeof value.parent.nonceSha256 !== "string" || !SHA256.test(value.parent.nonceSha256)
+    || typeof value.parent.sessionId !== "string" || !SAFE_SESSION_ID.test(value.parent.sessionId)
+    || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
+    || typeof value.binding.project !== "string" || value.binding.project.length < 1 || value.binding.project.length > 64
+    || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
+    || typeof value.binding.workspaceId !== "string"
+    || value.binding.workspaceId.length < 1 || value.binding.workspaceId.length > 128
+    || typeof value.binding.storageMappingHash !== "string" || !SHA256.test(value.binding.storageMappingHash)
+    || typeof value.binding.worktree !== "string" || !isAbsolute(value.binding.worktree)
+    || resolve(value.binding.worktree) !== value.binding.worktree
+    || !hasExactKeys(value.receipt, ["id", "schema", "version", "action", "admissionDigest", "consumedAt"])
+    || typeof value.receipt.id !== "string" || !UUID.test(value.receipt.id)
+    || value.receipt.schema !== "ingenium.recovery-admission-receipt"
+    || value.receipt.version !== 1 || value.receipt.action !== "production-restart"
+    || typeof value.receipt.admissionDigest !== "string" || !SHA256.test(value.receipt.admissionDigest)
+    || !isCanonicalRfc3339(value.receipt.consumedAt)) {
+    throw new Error("Production restart admitted context is unavailable");
+  }
+  const context = value as unknown as AdmittedRecoveryContext;
+  return Object.freeze({
+    ...context,
+    parent: Object.freeze({ ...context.parent }),
+    binding: Object.freeze({ ...context.binding }),
+    receipt: Object.freeze({ ...context.receipt }),
+  });
 }
 
 function restartIdentitySha256(identity: RestartProcessIdentity): string {
@@ -659,9 +743,17 @@ function validateParentCandidate(
 
 export async function runProductionRestartAdapter<Session>(
   dependencies: ProductionRestartAdapterDependencies<Session>,
+  admittedContext?: AdmittedRecoveryContext,
 ): Promise<ReplacementFirstRestartResult> {
-  const worktree = dependencies.canonicalWorktree();
+  const worktree = admittedContext?.binding.worktree ?? dependencies.canonicalWorktree();
   const binding = await dependencies.resolveBinding(worktree);
+  if (admittedContext && (binding.project !== admittedContext.binding.project
+    || binding.projectId !== admittedContext.binding.projectId
+    || binding.workspaceId !== admittedContext.binding.workspaceId
+    || binding.storageMappingHash !== admittedContext.binding.storageMappingHash
+    || binding.launcherWorktree !== admittedContext.binding.worktree || binding.audience !== "mcp")) {
+    throw new Error("Production restart binding changed after admission");
+  }
   const candidates = await dependencies.readParentCandidates(worktree);
   const admitted: ProductionRestartParentCandidate[] = [];
   const admit = async (value: unknown, requireNonce: boolean): Promise<ProductionRestartParentCandidate | undefined> => {
@@ -673,6 +765,13 @@ export async function runProductionRestartAdapter<Session>(
       return undefined;
     }
     if (!bindingsMatch(candidate.binding, binding)) {
+      await dependencies.retainCandidateRejection(worktree, value, "binding_mismatch");
+      return undefined;
+    }
+    if (admittedContext && (candidate.oldProcess.pid !== admittedContext.parent.pid
+      || candidate.oldProcess.startTimeTicks !== admittedContext.parent.startTimeTicks
+      || candidate.oldProcess.executableSha256 !== admittedContext.parent.executableSha256
+      || candidate.oldProcess.nonceSha256 !== admittedContext.parent.nonceSha256)) {
       await dependencies.retainCandidateRejection(worktree, value, "binding_mismatch");
       return undefined;
     }
@@ -694,7 +793,7 @@ export async function runProductionRestartAdapter<Session>(
   }
   if (admitted.length > 1) throw new Error("Production restart parent identity is absent or ambiguous");
   let parent = admitted[0];
-  if (!parent && dependencies.enrollParentCandidate) {
+  if (!parent && !admittedContext && dependencies.enrollParentCandidate) {
     const enrolled = await dependencies.enrollParentCandidate(worktree, binding);
     if (enrolled) parent = await admit(enrolled, false);
   }
@@ -2266,7 +2365,12 @@ export async function runProductionRestartCli(
   const expectedSha256 = process.env[RECOVERY_BOOTSTRAP_GUARD];
   delete process.env[RECOVERY_BOOTSTRAP_GUARD];
   const verifiedSha256 = verifyProductionRestartScript(expectedSha256, scriptPath);
-  const result = await runProductionRestartAdapter(dependencies ?? productionRestartDependencies(verifiedSha256));
+  const admittedContext = parseAdmittedRecoveryContext(process.env);
+  delete process.env[ADMITTED_RECOVERY_CONTEXT];
+  const result = await runProductionRestartAdapter(
+    dependencies ?? productionRestartDependencies(verifiedSha256),
+    admittedContext,
+  );
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

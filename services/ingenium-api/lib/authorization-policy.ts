@@ -49,6 +49,7 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
+  if (req.method === "DELETE" && req.path.startsWith("/api/v1/memory/")) return "write";
   if (req.method === "POST" && req.path === "/api/v1/coordination/memory/read") return "read";
   if (req.method === "POST" && req.path === "/api/v1/coordination/epoch/recover") return "write";
   if (/\/(run|sync|execute|test|connect|disconnect|prompt|command|abort|compact|fork|revert|unrevert)(?:\/|$)/.test(req.path)) return "execute";
@@ -117,6 +118,10 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.path.startsWith("/api/v1/docs")) {
     const permission = permissionFor(req as Request);
     return { action: `docs.${permission}`, resource: "docs", permission, target: "organization", sensitive: permission !== "read" };
+  }
+  if (req.path === "/api/v1/memory" || req.path.startsWith("/api/v1/memory/")) {
+    const permission = permissionFor(req as Request);
+    return { action: `memory.${permission}`, resource: "memory", permission, target: "private", sensitive: true };
   }
   if (req.method === "GET" && req.path === "/api/v1/vault/empty-reset") {
     return {
@@ -358,9 +363,22 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
         ? { allowed: true, visible: true }
         : { allowed: false, visible: true };
     }
+    if (policy.target === "private" && req.path.startsWith("/api/v1/memory") && req.principal.type === "service") {
+      const project = requestedProject(req);
+      const attestation = req.attestedCoordinationIdentity;
+      decision = project && project.id === req.principal.projectId
+        && req.principal.projectIds?.includes(project.id)
+        && attestation?.credentialId === req.principal.tokenId
+        && attestation.workspaceId === req.principal.workspaceId
+        && attestation.storageMappingHash === req.principal.storageMappingHash
+        ? authorization.requireProjectPermission(principal, project.id, policy.resource, policy.permission)
+        : { allowed: false, visible: false };
+    }
     if (policy.target === "private" && !req.path.startsWith("/api/v1/auth/")) {
       const browserUser = principal.type === "browser-user";
-      decision = { allowed: browserUser, visible: browserUser };
+      if (req.principal.type !== "service" || !req.path.startsWith("/api/v1/memory")) {
+        decision = { allowed: browserUser, visible: browserUser };
+      }
     }
   } else if (policy.target === "organization") {
     const organizationId = requestedOrganizationId(req, req.principal);

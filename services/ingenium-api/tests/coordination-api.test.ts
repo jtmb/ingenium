@@ -415,6 +415,89 @@ describe("COORD-102 coordination API", () => {
     expect(closed).toMatchObject({ response: { status: 200 }, body: { data: { session: { state: "closed" } } } });
   });
 
+  it("mints a principal-bound recovery admission and gives exactly one consumer the restart receipt", async () => {
+    const registered = await register({ idempotency_key: "recovery-admission-register" });
+    const claimed = await request("/claims/batch", "POST", {
+      ...lease(registered, TOKEN_A, "recovery-admission-claim"),
+      client_claim_key: claimKey("recovery-admission-claim"),
+      claims: [{ claim: { kind: "path", path: "recovery/owned" } }],
+    });
+    const minted = await request("/recovery-admissions/mint", "POST", {
+      ...lease(claimed.body.data.session, TOKEN_A, "recovery-admission-mint"),
+      preflight_digest: "b".repeat(64),
+      head: "a".repeat(40),
+      parent_pid: 42,
+      parent_start: "123456",
+      parent_executable: "/usr/local/bin/opencode",
+      parent_nonce: TOKEN_C,
+      ttl_ms: 30_000,
+    });
+    expect(minted).toMatchObject({
+      response: { status: 201 },
+      body: { data: {
+        session: { state: "active", revision: claimed.body.data.session.revision + 1 },
+        admission: {
+          schema: "ingenium.recovery-admission",
+          version: 1,
+          action: "production-restart",
+          project: PROJECT_A,
+          projectId: primaryProjectId,
+          worktreeId: IDENTITY.worktree_id,
+          workspace: MAIN_BINDING.workspaceId,
+          storage: MAIN_BINDING.storageMappingHash,
+          worktree: MAIN_BINDING.launcherWorktree,
+          parent: { pid: 42, session: IDENTITY.session_id, nonce: TOKEN_C },
+        },
+        consumeToken: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+      } },
+    });
+    expect(minted.response.headers.get("cache-control")).toBe("no-store");
+    const consumeBody = {
+      ...IDENTITY,
+      expected_revision: minted.body.data.session.revision,
+      fence: minted.body.data.session.fence,
+      consume_token: minted.body.data.consumeToken,
+      admission: minted.body.data.admission,
+    };
+    expect(await request("/recovery-admissions/consume", "POST", consumeBody, { authorization: "" }))
+      .toMatchObject({ response: { status: 401 }, body: { error: { code: "UNAUTHORIZED" } } });
+    expect(await request("/recovery-admissions/consume", "POST", consumeBody, { principal: "service-b" }))
+      .toMatchObject({ response: { status: 404 }, body: { error: { code: "SESSION_NOT_FOUND" } } });
+    expect(await request("/recovery-admissions/consume", "POST", {
+      ...consumeBody,
+      admission: { ...consumeBody.admission, head: "c".repeat(40) },
+    })).toMatchObject({ response: { status: 409 }, body: { error: { code: "RECOVERY_ADMISSION_CONFLICT" } } });
+
+    const attempts = await Promise.all([
+      request("/recovery-admissions/consume", "POST", consumeBody),
+      request("/recovery-admissions/consume", "POST", consumeBody),
+    ]);
+    expect(attempts.map(({ response }) => response.status).sort()).toEqual([200, 409]);
+    const winner = attempts.find(({ response }) => response.status === 200)!;
+    const loser = attempts.find(({ response }) => response.status === 409)!;
+    expect(winner.body).toMatchObject({ data: {
+      session: { state: "closed", revision: minted.body.data.session.revision + 1 },
+      receipt: {
+        schema: "ingenium.recovery-admission-receipt",
+        version: 1,
+        action: "production-restart",
+        admissionDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    } });
+    expect(winner.response.headers.get("cache-control")).toBe("no-store");
+    expect(loser.body).toMatchObject({ error: { code: "RECOVERY_ADMISSION_CONFLICT" } });
+    const persisted = getDb(databasePath).prepare(
+      `SELECT session.snapshot_json, group_concat(receipt.result_json, '') AS receipts
+       FROM coordination_sessions session
+       LEFT JOIN coordination_mutation_receipts receipt ON receipt.project_id = session.project_id
+       WHERE session.project_id = ? AND session.session_id = ?`,
+    ).get(primaryProjectId, IDENTITY.session_id) as { snapshot_json: string; receipts: string };
+    expect(JSON.stringify(persisted)).not.toContain(minted.body.data.consumeToken);
+    expect(JSON.parse(persisted.snapshot_json)).not.toHaveProperty("recoveryAdmission");
+    expect((await request("/snapshot", "GET", undefined, snapshotOptions())).body)
+      .toMatchObject({ data: { session: { state: "closed" }, claims: [{ state: "released" }] } });
+  });
+
   it("transports ordered sanitized peer handoffs once without cross-project visibility", async () => {
     const source = await register({ idempotency_key: "handoff-source-register" });
     const peerIdentity = { ...IDENTITY, session_id: "session-peer" };

@@ -65,6 +65,7 @@ function measureStructure(
   depth: number,
   parentKey: string | undefined,
   state: { nodes: number; seen: WeakSet<object> },
+  documentation = false,
 ): number {
   state.nodes += 1;
   if (state.nodes > MAX_REPOSITORY_SYNC_NODES || depth > MAX_REPOSITORY_SYNC_DEPTH) structuralLimit();
@@ -76,7 +77,7 @@ function measureStructure(
     } else {
       const limit = RESOURCE_TEXT_FIELDS.has(parentKey ?? "")
         ? MAX_REPOSITORY_RESOURCE_FILE_BYTES
-        : MAX_REPOSITORY_DOC_FILE_BYTES;
+        : documentation && parentKey === "content" ? MAX_REPOSITORY_DOC_FILE_BYTES : 512 * 1024;
       if (bytes > limit) structuralLimit();
     }
     return jsonStringBytes(value);
@@ -94,7 +95,7 @@ function measureStructure(
     if (value.length > MAX_REPOSITORY_SYNC_CONTAINER_ENTRIES) structuralLimit();
     let bytes = 2 + Math.max(0, value.length - 1);
     for (let index = 0; index < value.length; index += 1) {
-      bytes += measureStructure(value[index], depth + 1, parentKey, state);
+      bytes += measureStructure(value[index], depth + 1, parentKey, state, documentation);
       if (bytes > MAX_REPOSITORY_SYNC_CANONICAL_BYTES) structuralLimit();
     }
     return bytes;
@@ -109,7 +110,7 @@ function measureStructure(
     if (entries > 1) bytes += 1;
     const childKey = parentKey === "fileTree" ? "fileTreeContent" : key;
     bytes += jsonStringBytes(key) + 1
-      + measureStructure((value as Record<string, unknown>)[key], depth + 1, childKey, state);
+      + measureStructure((value as Record<string, unknown>)[key], depth + 1, childKey, state, documentation);
     if (bytes > MAX_REPOSITORY_SYNC_CANONICAL_BYTES) structuralLimit();
   }
   if (RESOURCE_RECORD_FIELDS.has(parentKey ?? "") && bytes > MAX_REPOSITORY_RESOURCE_FILE_BYTES) structuralLimit();
@@ -149,7 +150,7 @@ export function assertRepositorySyncStructure(
 
   const state = { nodes: 0, seen: new WeakSet<object>() };
   let bytes = 2 + jsonStringBytes("docsManifest") + 1
-    + measureStructure(input.docsManifest, 0, "docsManifest", state);
+    + measureStructure(input.docsManifest, 0, "docsManifest", state, true);
   if (input.resourcesManifest !== undefined) {
     const resourceBytes = measureStructure(input.resourcesManifest, 0, "resourcesManifest", state);
     if (resourceBytes > MAX_REPOSITORY_RESOURCE_ENVELOPE_BYTES) structuralLimit();

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IMAGE="${1:-ingenium-ingenium:latest}"
+IMAGE="${1:-ingenium-ingenium:compat}"
 ENTRYPOINT_SOURCE="$(realpath "${2:-scripts/docker-entrypoint.sh}")"
 TEMP_PARENT="${TMPDIR:-/tmp}"
 TEMP_PARENT="${TEMP_PARENT%/}"
@@ -23,9 +23,12 @@ printf 'FIXTURE: Compose project %s at %s\n' "$PROJECT" "$RUN_ROOT"
 cleanup() {
   status=$?
   trap - EXIT
-  if [[ "$resources_created" -eq 1 ]] && ! "${compose[@]}" down --volumes --remove-orphans; then
+  if [[ "$resources_created" -eq 1 ]] && ! "${compose[@]}" rm --force --stop; then
     printf 'RETAINED: Compose project %s and fixture evidence at %s\n' "$PROJECT" "$RUN_ROOT" >&2
     exit 1
+  fi
+  if [[ "$resources_created" -eq 1 ]]; then
+    docker volume rm "${PROJECT}_bootstrap"
   fi
   if [[ "$RUN_ROOT" != "$TEMP_PARENT/ingenium-compatibility-acl."* ]]; then
     printf 'RETAINED: unexpected fixture path %s\n' "$RUN_ROOT" >&2
@@ -54,6 +57,13 @@ for credential_name in .ingenium-mcp-credential .ingenium-learning-credential .i
 done
 : > "$collaboration_file"
 chmod 0600 "$collaboration_file"
+printf 'SYNTHETIC=value\n' > "$RUN_ROOT/workspace/repo/.env"
+chmod 0670 "$RUN_ROOT/workspace/repo/.env"
+retention_root="$RUN_ROOT/workspace/repo/tests/artifacts/test-runs/.retention-control"
+mkdir -p "$retention_root/quarantine"
+printf 'private-retention-fixture\n' > "$retention_root/quarantine/receipt.json"
+chmod 0700 "$retention_root" "$retention_root/quarantine"
+chmod 0600 "$retention_root/quarantine/receipt.json"
 
 cat > "$RUN_ROOT/bin/find" <<'EOF'
 #!/bin/sh
@@ -68,6 +78,9 @@ cat > "$RUN_ROOT/bin/run-entrypoint" <<'EOF'
 #!/bin/sh
 set -eu
 opencode_root=/workspace/.opencode
+printf 'SYNTHETIC=value\n' > /workspace/.env
+chown appuser:appuser /workspace/.env
+chmod 0670 /workspace/.env
 mkdir -p "$opencode_root/protected-runtime-index/coordination-outbox" "$opencode_root/protected-runtime-index/tui-recovery"
 : > "$opencode_root/protected-runtime-index/coordination-outbox/record.json"
 chown -R appuser:appuser "$opencode_root/protected-runtime-index"
@@ -91,6 +104,16 @@ fail() {
   printf 'ERROR: %s\n' "$1" >&2
   exit 1
 }
+for env_path in /workspace/.env /workspace/repo/.env; do
+  test "$(stat -c '%a:%u:%g' "$env_path")" = 600:1000:1000 \
+    || fail "env metadata changed: $env_path"
+  test "$(cat "$env_path")" = 'SYNTHETIC=value' || fail "env content changed"
+  for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
+    if runuser -u "$identity" -- test -r "$env_path"; then
+      fail "$identity can read $env_path"
+    fi
+  done
+done
 for opencode_root in /workspace/.opencode /workspace/repo/.opencode; do
   protected_index="$opencode_root/protected-runtime-index"
   for protected_directory in "$protected_index" "$protected_index/coordination-outbox" "$protected_index/tui-recovery"; do
@@ -128,6 +151,18 @@ for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
   runuser -u "$identity" -- test -w "$collaboration_file" \
     || fail "$identity cannot write the collaboration file"
 done
+retention_root=/workspace/repo/tests/artifacts/test-runs/.retention-control
+for directory in "$retention_root" "$retention_root/quarantine"; do
+  test "$(stat -c '%a:%u:%g' "$directory")" = 700:1000:1000 || fail 'retention directory privacy changed'
+  if getfacl -cp "$directory" | grep -q '^default:'; then fail 'retention default ACL survived'; fi
+done
+test "$(stat -c '%a:%u:%g' "$retention_root/quarantine/receipt.json")" = 600:1000:1000 || fail 'retention receipt privacy changed'
+for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
+  if runuser -u "$identity" -- test -r "$retention_root/quarantine/receipt.json"; then
+    fail "$identity can read retention state"
+  fi
+done
+test "$(stat -c '%a:%u:%g' /run/ingenium-opencode)" = 700:1105:1105 || fail 'MCP runtime directory is not private'
 printf 'COMPATIBILITY_ENTRYPOINT_ACL_OK\n'
 EOF
 chmod 0555 "$RUN_ROOT/bin/find" "$RUN_ROOT/bin/run-entrypoint" "$RUN_ROOT/bin/supervisord"

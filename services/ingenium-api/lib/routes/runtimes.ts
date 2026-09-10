@@ -157,7 +157,15 @@ runtimesRouter.get("/browser/status", (req, res) => {
     const principal = browserPrincipal(req);
     res.set("Cache-Control", "no-store");
     if (deploymentMode() === "compatibility") {
-      res.json({ data: { mode: "compatibility", status: "ready", reason: null } });
+      const project = typeof req.query.project === "string" ? req.query.project : undefined;
+      const candidates = project ? browserWorkspaceRows(principal.id).filter((workspace) => workspace.project_name === project) : [];
+      const workspace = candidates.length === 1 ? candidates[0] : undefined;
+      res.json({ data: { mode: "compatibility", status: "ready", reason: null,
+        ...(project === undefined ? {} : { workspace: workspace ? {
+          id: workspace.id, organizationName: workspace.organization_name, projectName: workspace.project_name,
+          status: "ready", runtimeId: null,
+        } : null }),
+      } });
       return;
     }
     if (deploymentMode() !== "control-plane") {
@@ -181,7 +189,15 @@ runtimesRouter.get("/browser/workspaces", (req, res) => {
   try {
     const principal = browserPrincipal(req);
     res.set("Cache-Control", "no-store");
-    res.json({ data: deploymentMode() === "control-plane" ? browserWorkspaceRows(principal.id).map(browserWorkspaceDto) : [] });
+    const mode = deploymentMode();
+    const project = typeof req.query.project === "string" ? req.query.project : undefined;
+    const workspaces = mode === "control-plane" || (mode === "compatibility" && project)
+      ? browserWorkspaceRows(principal.id).filter((workspace) => project === undefined || workspace.project_name === project)
+      : [];
+    res.json({ data: workspaces.map((workspace) => mode === "compatibility" ? {
+      id: workspace.id, organizationName: workspace.organization_name, projectName: workspace.project_name,
+      status: "ready", runtimeId: null,
+    } : browserWorkspaceDto(workspace)) });
   } catch (error) {
     runtimeError(res, error);
   }

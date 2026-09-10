@@ -7,11 +7,22 @@ import {
   credentialPurposeFromEnvironment,
   resolveExtensionBinding,
 } from "../extension-binding.js";
-import { ensureExtensionProject, resolveExtensionProject } from "../project-resolver.js";
+import {
+  classifyExtensionProjectFailure,
+  ensureExtensionProject,
+  resolveExtensionProject,
+} from "../project-resolver.js";
+
+export type McpLauncherFailureStage =
+  | "local-binding"
+  | "project-preflight"
+  | "authentication"
+  | "import"
+  | "transport";
 
 export type McpLauncherPreflight =
   | { ok: true; project: string }
-  | { ok: false; message: string };
+  | { ok: false; stage: McpLauncherFailureStage; message: string };
 
 export interface McpLauncherOptions {
   /** Injectable only so the preflight-to-transport environment handoff is testable. */
@@ -22,7 +33,15 @@ export interface McpLauncherOptions {
 
 const MISSING_TOKEN_MESSAGE = "Ingenium MCP could not read a protected scoped credential. Configure INGENIUM_MCP_CREDENTIAL_FILE.";
 const INVALID_PROJECT_MESSAGE = "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.";
+const LOCAL_BINDING_MESSAGE = "Ingenium MCP could not resolve its protected local binding.";
+const PROJECT_PREFLIGHT_MESSAGE = "Ingenium MCP project preflight rejected the configured project binding.";
+const AUTHENTICATION_MESSAGE = "Ingenium MCP authentication failed during project preflight.";
+const API_TRANSPORT_MESSAGE = "Ingenium MCP API transport was unavailable during project preflight.";
 const TRANSPORT_LOAD_MESSAGE = "Ingenium MCP launcher is incomplete. Build @ingenium/extension before starting OpenCode.";
+
+function writeLauncherFailure(stage: McpLauncherFailureStage, message: string): void {
+  process.stderr.write(`${JSON.stringify({ boundary: "launcher", stage, reason: stage, message })}\n`);
+}
 
 /**
  * Validate the non-secret prerequisites before loading the packaged stdio
@@ -36,18 +55,18 @@ export function preflightMcpLauncher(
   let project: string;
   try {
     const purpose = credentialPurposeFromEnvironment();
-    const binding = resolveExtensionBinding(resolvedWorktree, { purpose });
+    const binding = resolveExtensionBinding(resolvedWorktree, { purpose, allowMissingCredential: true });
     project = resolveExtensionProject(resolvedWorktree, binding.project);
     if (!apiRequestHeaders(resolvedWorktree, undefined, { binding }).has("Authorization")) {
-      return { ok: false, message: MISSING_TOKEN_MESSAGE };
+      return { ok: false, stage: "authentication", message: MISSING_TOKEN_MESSAGE };
     }
   } catch {
     try {
       resolveExtensionProject(resolvedWorktree);
     } catch {
-      return { ok: false, message: INVALID_PROJECT_MESSAGE };
+      return { ok: false, stage: "project-preflight", message: INVALID_PROJECT_MESSAGE };
     }
-    return { ok: false, message: MISSING_TOKEN_MESSAGE };
+    return { ok: false, stage: "local-binding", message: LOCAL_BINDING_MESSAGE };
   }
 
   return { ok: true, project };
@@ -77,36 +96,63 @@ export async function runMcpLauncher(
 ): Promise<number> {
   const preflight = preflightMcpLauncher(worktree);
   if (!preflight.ok) {
-    process.stderr.write(`[ingenium-mcp] ${preflight.message}\n`);
+    writeLauncherFailure(preflight.stage, preflight.message);
     return 2;
   }
 
+  const resolvedWorktree = resolve(worktree);
+  let binding: ReturnType<typeof resolveExtensionBinding>;
   try {
-    // The packaged transport resolves its project from the process environment.
-    // Preserve the validated preflight result rather than repeating resolution
-    // after its dynamic import has started.
-    const ensureProject = options.ensureProject ?? ((resolvedWorktree: string, apiBase: string, project: string) =>
-      ensureExtensionProject(resolvedWorktree, apiBase, project, {
-        credentialPurpose: credentialPurposeFromEnvironment(),
-      }));
-    const resolvedWorktree = resolve(worktree);
-    const binding = resolveExtensionBinding(resolvedWorktree, { purpose: credentialPurposeFromEnvironment() });
-    const project = await ensureProject(
+    binding = resolveExtensionBinding(resolvedWorktree, { purpose: credentialPurposeFromEnvironment() });
+  } catch {
+    writeLauncherFailure("local-binding", LOCAL_BINDING_MESSAGE);
+    return 2;
+  }
+
+  const ensureProject = options.ensureProject ?? ((candidateWorktree: string, apiBase: string, project: string) =>
+    ensureExtensionProject(candidateWorktree, apiBase, project, {
+      credentialPurpose: binding.purpose,
+    }));
+  let project: string;
+  try {
+    project = await ensureProject(
       resolvedWorktree,
       binding.apiUrl,
       preflight.project,
     );
-    process.env.INGENIUM_PROJECT = project;
-    process.env.INGENIUM_WORKTREE = resolvedWorktree;
-    process.env.INGENIUM_API_URL = binding.apiUrl;
-    process.env.INGENIUM_API_URL_TRUSTED = "1";
+  } catch (error) {
+    const failure = classifyExtensionProjectFailure(error);
+    const stage = failure === "authentication" || failure === "scope"
+      ? "authentication"
+      : failure === "unavailable"
+        ? "transport"
+        : "project-preflight";
+    writeLauncherFailure(
+      stage,
+      stage === "authentication"
+        ? AUTHENTICATION_MESSAGE
+        : stage === "transport"
+          ? API_TRANSPORT_MESSAGE
+          : PROJECT_PREFLIGHT_MESSAGE,
+    );
+    return 2;
+  }
+
+  process.env.INGENIUM_PROJECT = project;
+  process.env.INGENIUM_WORKTREE = resolvedWorktree;
+  process.env.INGENIUM_API_URL = binding.apiUrl;
+  process.env.INGENIUM_API_URL_TRUSTED = "1";
+  process.env.INGENIUM_MCP_AUDIENCE = binding.audience;
+  process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = binding.purpose;
+  if (binding.purpose === "runtime") process.env.INGENIUM_RUNTIME_CREDENTIAL_FILE = binding.credentialFile;
+  else process.env.INGENIUM_MCP_CREDENTIAL_FILE = binding.credentialFile;
+
+  try {
     const importTransport = options.importTransport ?? ((transportUrl: URL) => import(transportUrl.href));
     await importTransport(getMcpTransportUrl());
     return 0;
   } catch {
-    // The transport import can reveal source paths or dependency details. Keep
-    // the operator message actionable without exposing runtime topology.
-    process.stderr.write(`[ingenium-mcp] ${TRANSPORT_LOAD_MESSAGE}\n`);
+    writeLauncherFailure("import", TRANSPORT_LOAD_MESSAGE);
     return 1;
   }
 }
@@ -115,7 +161,7 @@ if (isMcpLauncherMain()) {
   runMcpLauncher().then((code) => {
     process.exitCode = code;
   }).catch(() => {
-    process.stderr.write(`[ingenium-mcp] ${TRANSPORT_LOAD_MESSAGE}\n`);
+    writeLauncherFailure("transport", API_TRANSPORT_MESSAGE);
     process.exitCode = 1;
   });
 }

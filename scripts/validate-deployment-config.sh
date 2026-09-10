@@ -26,6 +26,7 @@ vault_secret_root_validator="${repo_root}/scripts/validate-vault-job-secret-root
 runtime_gateway="${repo_root}/services/ingenium-api/scripts/runtime-gateway.ts"
 protected_token_reader="${repo_root}/scripts/read-protected-api-token.mjs"
 root_entrypoint_validator="${repo_root}/scripts/validate-root-entrypoint-chain.mjs"
+cloudflare_runner="${repo_root}/scripts/start-cloudflare-tunnel.sh"
 
 require_file() {
   path="$1"
@@ -82,7 +83,7 @@ reject_path() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_theme_validator" "$plugin_closure_validator" "$plugin_load_smoke" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$control_plane_supervisor_config" "$runtime_supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$vscode_runner" "$vscode_theme_manifest" "$vscode_theme_validator" "$plugin_closure_validator" "$plugin_load_smoke" "$vscode_proxy" "$vault_secret_root_validator" "$runtime_gateway" "$protected_token_reader" "$root_entrypoint_validator" "$cloudflare_runner"; do
   require_file "$path"
 done
 
@@ -112,6 +113,13 @@ reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
 require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
+require_literal "$dockerfile" "ARG CLOUDFLARED_VERSION=2026.8.3"
+require_literal "$dockerfile" "ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e"
+require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /etc/ingenium'
+require_literal "$dockerfile" 'PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers'
+require_literal "$dockerfile" 'ln -s "$browser_path" /opt/ingenium-playwright/chromium'
+reject_literal "$dockerfile" '"mcp":{"playwright"'
+reject_literal "$dockerfile" '"command":["npx","-y","@playwright/mcp'
 require_literal "$dockerfile" "https://github.com/coder/code-server/releases/download/v4.131.0/code-server-4.131.0-linux-amd64.tar.gz"
 require_literal "$dockerfile" "f6316f0b14ef5c12ed6e67e0154dd02ccf5e66112064687d7e93c51763105361"
 require_literal "$dockerfile" "tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1"
@@ -348,6 +356,13 @@ require_literal "$supervisor_config" "command=/app/scripts/run-restore-handoff.s
 require_literal "$supervisor_config" "user=ingenium-restore"
 require_literal "$supervisor_config" "autostart=false"
 require_literal "$supervisor_config" "stopasgroup=true"
+require_literal "$supervisor_config" "[program:cloudflare-tunnel]"
+require_literal "$supervisor_config" "command=/app/scripts/start-cloudflare-tunnel.sh"
+require_literal "$control_plane_supervisor_config" "[program:cloudflare-tunnel]"
+require_literal "$control_plane_supervisor_config" "command=/app/scripts/start-cloudflare-tunnel.sh"
+require_literal "$cloudflare_runner" 'setpriv --reuid=1111 --regid=1111 --clear-groups'
+require_literal "$cloudflare_runner" '/usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file "$credential_file"'
+reject_literal "$cloudflare_runner" 'TUNNEL_TOKEN='
 require_literal "$dockerfile" "scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh"
 require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/"
 reject_literal "$supervisor_config" "environment="
@@ -371,7 +386,13 @@ reject_literal "$runtime_entrypoint" '"INGENIUM_MCP_CREDENTIAL":'
 require_literal "$runtime_entrypoint" 'import("file:///app/packages/ingenium-core/dist/lib/index.js")'
 require_literal "$runtime_entrypoint" 'trustedAgents.validateProtectedOpenCodeDeployment()'
 reject_literal "$runtime_entrypoint" 'from "ingenium-core"'
-require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
+require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/home/brajam/repos/ingenium"'
+for binding in 'INGENIUM_PROJECT ingenium' 'INGENIUM_WORKSPACE_ID shared-memory-ingenium' 'INGENIUM_MCP_AUDIENCE mcp' 'INGENIUM_MCP_CREDENTIAL_PURPOSE general' 'INGENIUM_MCP_CREDENTIAL_FILE /run/ingenium-opencode/.ingenium-mcp-credential' 'INGENIUM_WORKTREE /home/brajam/repos/ingenium'; do
+  name=${binding%% *}
+  value=${binding#* }
+  require_literal "$entrypoint" "\"$name\": \"$value\""
+  require_literal "${repo_root}/scripts/project-opencode-global-config.mjs" "environment.$name = \"$value\";"
+done
 require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts"'
 require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"'
 require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
@@ -380,11 +401,21 @@ require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY 
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
 require_literal "$entrypoint" '[ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE=".opencode/.ingenium-repository-sync-credential"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="repository-sync"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKSPACE_ID="global-default-workspace"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="mcp"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_PURPOSE="general"'
+reject_literal "${repo_root}/scripts/start-opencode-web.sh" '.ingenium-repository-sync-credential'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/home/brajam/repos/ingenium"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKSPACE_ID="${INGENIUM_WORKSPACE_ID:-shared-memory-ingenium}"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_PROJECT="${INGENIUM_PROJECT:-ingenium}"'
+for identity in PROJECT_ID ORGANIZATION_ID RUNTIME_ID RUNTIME_OWNER_ID STORAGE_MAPPING_HASH; do
+  require_literal "${repo_root}/scripts/start-opencode-web.sh" "INGENIUM_${identity}=\"\$INGENIUM_${identity}\""
+done
+require_literal "${repo_root}/scripts/start-opencode-web.sh" '"$@"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime"'
+require_literal "$entrypoint" 'install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-runtime'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" '. /run/ingenium-runtime/environment'
+require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'
 require_literal "${repo_root}/scripts/start-runtime-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'attempts=10'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'

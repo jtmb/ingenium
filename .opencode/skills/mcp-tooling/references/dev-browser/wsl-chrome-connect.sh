@@ -1,30 +1,36 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # wsl-chrome-connect.sh — Drive Windows Chrome from WSL via dev-browser on Windows
 #
 # Usage:
-#   ./wsl-chrome-connect.sh 'const page = await browser.getPage("x"); ...'   # inline script
-#   ./wsl-chrome-connect.sh < /path/to/script.js                             # pipe from file
-#   echo '...' | ./wsl-chrome-connect.sh                                     # pipe from stdin
-#   ./wsl-chrome-connect.sh <<'EOF' ... EOF                                  # heredoc
+#   ./wsl-chrome-connect.sh [--json] 'const page = await browser.getPage("x"); ...'
+#   ./wsl-chrome-connect.sh [--json] < /path/to/script.js
+#   echo '...' | ./wsl-chrome-connect.sh [--json]
+#   ./wsl-chrome-connect.sh [--json] <<'EOF' ... EOF
 #
-# Requirements:
-#   - WSL2 with access to /mnt/c/ (Windows C: drive)
-#   - Chrome installed on Windows at default path
-#   - Node.js and npm on Windows (for dev-browser install)
+# --json requires stdout to contain exactly one JSON value. Without it, any nonempty stdout is valid.
 #
 # Exit codes:
-#   0 — Wrapper completed, including a usage-only invocation
+#   0 — Nonempty output satisfied the selected mode, or usage completed
 #   1 — Chrome binary is missing or failed to start
-#   3 — Output is missing or dev-browser reported an error
+#   2 — The configured timeout is invalid
+#   3 — Output is missing, or --json output is not exactly one JSON value
+#   124 — The owned cmd.exe/dev-browser command exceeded the wall timeout
+#   other — Preserved cmd.exe/dev-browser failure status
 
-# Avoid `set -e` so command results can be inspected before choosing a user-facing status.
-
-# Capture piped input before invoking any Windows command; those commands can consume the caller's stdin.
-WIN_USER="james"  # Seed the capture path until the Windows username is known.
-SCRIPT_TEMP_DIR="/mnt/c/Users/${WIN_USER}/AppData/Local/Temp"
+WIN_USER="${WIN_USER:-james}"
+SCRIPT_TEMP_DIR="${WSL_CHROME_TEMP_DIR:-/mnt/c/Users/${WIN_USER}/AppData/Local/Temp}"
 SCRIPT_FILE="wsl-chrome-stdin-$$.js"
 SCRIPT_STDIN_CAPTURE="${SCRIPT_TEMP_DIR}/${SCRIPT_FILE}"
+JSON_MODE=0
 
+if [ "${1:-}" = "--json" ]; then
+  JSON_MODE=1
+  shift
+fi
+
+# Capture piped input before invoking Windows commands, which can consume the caller's stdin.
 if [ $# -ge 1 ]; then
   SCRIPT_CONTENT="$1"
   PIPE_MODE="echo"
@@ -35,16 +41,17 @@ else
   PIPE_MODE="none"
 fi
 
-# The username lookup runs only after piped input is captured, avoiding stdin contention.
-DETECTED_USER="$(powershell.exe -Command '[Environment]::UserName' 2>/dev/null < /dev/null | tr -d '\r\n')"
+if ! DETECTED_USER="$(powershell.exe -Command '[Environment]::UserName' 2>/dev/null < /dev/null | tr -d '\r\n')"; then
+  DETECTED_USER=""
+fi
 WIN_USER="${DETECTED_USER:-james}"
 
-SCRIPT_TEMP_DIR="/mnt/c/Users/${WIN_USER}/AppData/Local/Temp"
+SCRIPT_TEMP_DIR="${WSL_CHROME_TEMP_DIR:-/mnt/c/Users/${WIN_USER}/AppData/Local/Temp}"
 SCRIPT_STDIN_CAPTURE="${SCRIPT_TEMP_DIR}/${SCRIPT_FILE}"
 
-CHROME_PATH="/mnt/c/Program Files/Google/Chrome/Application/chrome.exe"
+CHROME_PATH="${CHROME_PATH:-/mnt/c/Program Files/Google/Chrome/Application/chrome.exe}"
 CHROME_PORT=9222
-SCRIPT_TIMEOUT_SECONDS=30
+SCRIPT_TIMEOUT_SECONDS="${SCRIPT_TIMEOUT_SECONDS:-30}"
 DEV_BROWSER_NPM_PACKAGE="dev-browser"
 
 DEV_BROWSER_CMD="C:\\Users\\${WIN_USER}\\AppData\\Roaming\\npm\\dev-browser.cmd"
@@ -55,6 +62,11 @@ info()  { echo -e "${CYAN}🔷${NC} $*" >&2; }
 ok()    { echo -e "${GREEN}✅${NC} $*" >&2; }
 warn()  { echo -e "${YELLOW}⚠️${NC} $*" >&2; }
 err()   { echo -e "${RED}❌${NC} $*" >&2; }
+
+if ! [[ "$SCRIPT_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  err "SCRIPT_TIMEOUT_SECONDS must be a positive integer."
+  exit 2
+fi
 
 if [ ! -f "$CHROME_PATH" ]; then
   err "Chrome not found at: $CHROME_PATH"
@@ -76,15 +88,7 @@ check_chrome() {
 CHROME_STATUS=$(check_chrome)
 
 if [ "$CHROME_STATUS" = "NOT_RUNNING" ]; then
-  info "Chrome not running on port ${CHROME_PORT}. Launching..."
-
-  # Clear existing Chrome processes so the debug port can be rebound.
-  powershell.exe -Command "
-    Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force
-  " 2>/dev/null < /dev/null || true
-  sleep 2
-
-  # Use a separate temporary profile so the debug session does not reuse the normal Chrome profile.
+  info "Chrome not running on port ${CHROME_PORT}. Launching an isolated session..."
   "$CHROME_PATH" \
     --remote-debugging-port=${CHROME_PORT} \
     --remote-allow-origins=* \
@@ -94,7 +98,6 @@ if [ "$CHROME_STATUS" = "NOT_RUNNING" ]; then
     --no-first-run \
     --new-window about:blank > /dev/null 2>&1 &
 
-  # Wait for Chrome to be ready (poll from Windows side)
   info "Waiting for Chrome to start..."
   for i in $(seq 1 15); do
     sleep 2
@@ -128,17 +131,10 @@ fi
 
 if [ "${PIPE_MODE}" = "none" ] && [ $# -eq 0 ]; then
   echo ""
-  echo "  Usage: $0 '<script>'           # inline script"
-  echo "         $0 < script.js           # pipe from file"
-  echo "         echo '...' | $0          # pipe from stdin"
-  echo "         $0 <<'EOF' ... EOF       # heredoc"
-  echo ""
-  echo "  Examples:"
-  echo "    $0 'const p = await browser.getPage(\"x\");" >&2
-  echo "    await p.goto(\"https://example.com\");" >&2
-  echo "    console.log(await p.title());'"
-  echo ""
-  echo "    echo 'console.log(1+1)' | $0"
+  echo "  Usage: $0 [--json] '<script>'           # inline script"
+  echo "         $0 [--json] < script.js           # pipe from file"
+  echo "         echo '...' | $0 [--json]          # pipe from stdin"
+  echo "         $0 [--json] <<'EOF' ... EOF       # heredoc"
   echo ""
   exit 0
 fi
@@ -147,40 +143,64 @@ info "Executing script via dev-browser on Windows..."
 info "Timeout: ${SCRIPT_TIMEOUT_SECONDS}s"
 
 if [ "${PIPE_MODE}" = "echo" ]; then
-  # cmd.exe reads the script by Windows path, so inline input is materialized in the shared temp directory.
   WIN_SCRIPT="C:\\Users\\${WIN_USER}\\AppData\\Local\\Temp\\wsl-chrome-run-$$.js"
   WSL_SCRIPT="${SCRIPT_TEMP_DIR}/wsl-chrome-run-$$.js"
   echo "$SCRIPT_CONTENT" > "$WSL_SCRIPT"
 else
-  # Reuse the captured file so no later Windows command reads the caller's stdin.
   WIN_SCRIPT="C:\\Users\\${WIN_USER}\\AppData\\Local\\Temp\\${SCRIPT_FILE}"
   WSL_SCRIPT="$SCRIPT_STDIN_CAPTURE"
 fi
 
-OUTPUT=$(cmd.exe /c "type ${WIN_SCRIPT} | ${DEV_BROWSER_CMD} --connect http://localhost:9222 --timeout ${SCRIPT_TIMEOUT_SECONDS}" 2>&1) || true
+if OUTPUT=$(timeout --kill-after=2s -- "${SCRIPT_TIMEOUT_SECONDS}s" \
+  cmd.exe /c "type ${WIN_SCRIPT} | ${DEV_BROWSER_CMD} --connect http://localhost:9222 --timeout ${SCRIPT_TIMEOUT_SECONDS}"); then
+  COMMAND_STATUS=0
+else
+  COMMAND_STATUS=$?
+fi
 
-rm -f "$SCRIPT_STDIN_CAPTURE" "$WSL_SCRIPT" 2>/dev/null || true
+rm -f "$SCRIPT_STDIN_CAPTURE" "$WSL_SCRIPT" || true
 
-# Drop benign cmd.exe warnings caused by starting from a WSL UNC working directory.
-OUTPUT=$(echo "$OUTPUT" | grep -v "CMD.EXE was started" | grep -v "UNC paths are not supported" | grep -v "Defaulting to Windows directory" | grep -v "wsl.localhost" || true)
+OUTPUT_IS_JSON=0
+if [ "$JSON_MODE" -eq 1 ] && [ -n "$OUTPUT" ] && printf '%s' "$OUTPUT" | python3 -c '
+import json
+import sys
+
+def reject_nonstandard_constant(value):
+    raise ValueError(value)
+
+try:
+    json.load(sys.stdin, parse_constant=reject_nonstandard_constant)
+except (ValueError, UnicodeError):
+    raise SystemExit(1)
+'; then
+  OUTPUT_IS_JSON=1
+fi
+
+if [ "$COMMAND_STATUS" -ne 0 ]; then
+  if [ -n "$OUTPUT" ]; then
+    if [ "$JSON_MODE" -eq 0 ] || [ "$OUTPUT_IS_JSON" -eq 1 ]; then
+      printf '%s\n' "$OUTPUT"
+    else
+      err "dev-browser returned ${#OUTPUT} characters of non-JSON stdout; content withheld."
+    fi
+  fi
+  if [ "$COMMAND_STATUS" -eq 124 ]; then
+    err "dev-browser exceeded the ${SCRIPT_TIMEOUT_SECONDS}s wall timeout; cleanup of the owned cmd.exe process tree is unconfirmed. Chrome was not signaled."
+  else
+    err "dev-browser exited with status ${COMMAND_STATUS}."
+  fi
+  exit "$COMMAND_STATUS"
+fi
 
 if [ -z "$OUTPUT" ]; then
-  err "No output from dev-browser. Script may have timed out or failed."
+  err "No output from dev-browser."
   exit 3
 fi
 
-if echo "$OUTPUT" | grep -qi "Error:"; then
-  err "dev-browser reported an error:"
-  echo "$OUTPUT" >&2
+if [ "$JSON_MODE" -eq 1 ] && [ "$OUTPUT_IS_JSON" -eq 0 ]; then
+  err "dev-browser returned ${#OUTPUT} characters of invalid JSON; content withheld."
   exit 3
 fi
 
-# Emit the filtered command output on stdout; wrapper status messages use stderr.
-echo "$OUTPUT"
-
-# The JSON check is informational; non-JSON output can still complete successfully.
-if echo "$OUTPUT" | python3 -m json.tool > /dev/null 2>&1; then
-  ok "Script completed successfully"
-fi
-
-exit 0
+printf '%s\n' "$OUTPUT"
+ok "Script completed successfully"

@@ -38,7 +38,10 @@ ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
 ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
 ENV NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN=${NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN}
 ENV NEXT_PUBLIC_RUNTIME_SCHEME=${NEXT_PUBLIC_RUNTIME_SCHEME}
-RUN npm run build
+# The image builder is already isolated; keep its /app artifact paths for runtime COPY.
+# Source COPY can retain group-writable directories; distribution security checks require owner-controlled packages.
+RUN find . -type d -name node_modules -prune -o -type d -exec chmod g-w,o-w {} +
+RUN npm run build --workspaces --if-present
 
 RUN npm prune --omit=dev
 
@@ -58,6 +61,8 @@ LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
 
 ARG OPENCODE_VERSION=1.18.9
 ARG OPENCODE_SHA256=a0fa4b7b8bdacbd013e79a5f69d4220d36b545cd3ea296ba765f3016fa501b5b
+ARG CLOUDFLARED_VERSION=2026.8.3
+ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor nginx curl ca-certificates tzdata git acl libcap2-bin && \
     rm -rf /var/lib/apt/lists/*
@@ -68,6 +73,11 @@ RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/re
     test "$(opencode --version)" = "${OPENCODE_VERSION}" && \
     opencode --version && \
     rm /tmp/opencode.tar.gz
+RUN curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" && \
+    echo "${CLOUDFLARED_SHA256}  /tmp/cloudflared" | sha256sum -c - && \
+    install -o root -g root -m 0555 /tmp/cloudflared /usr/local/bin/cloudflared && \
+    cloudflared --version | grep -F "cloudflared version ${CLOUDFLARED_VERSION}" && \
+    rm /tmp/cloudflared
 RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/releases/download/v4.131.0/code-server-4.131.0-linux-amd64.tar.gz" && \
     echo "f6316f0b14ef5c12ed6e67e0154dd02ccf5e66112064687d7e93c51763105361  /tmp/code-server.tar.gz" | sha256sum -c - && \
     mkdir -p /usr/local/lib/code-server && \
@@ -121,7 +131,9 @@ RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appus
     groupadd --system --gid 1108 ingenium-restore && useradd --system --uid 1108 --gid 1108 --groups ingenium-api,ingenium-restore-data,ingenium-opencode-restore --home-dir /home/ingenium-restore --shell /usr/sbin/nologin ingenium-restore && \
     groupadd --system --gid 1109 ingenium-runtime-manager && useradd --system --uid 1109 --gid 1109 --home-dir /home/ingenium-runtime-manager --shell /usr/sbin/nologin ingenium-runtime-manager && \
     groupadd --system --gid 1110 ingenium-runtime-gateway && useradd --system --uid 1110 --gid 1110 --home-dir /home/ingenium-runtime-gateway --shell /usr/sbin/nologin ingenium-runtime-gateway && \
+    groupadd --system --gid 1111 ingenium-cloudflare && useradd --system --uid 1111 --gid 1111 --home-dir /nonexistent --shell /usr/sbin/nologin ingenium-cloudflare && \
     install -d -o root -g root -m 0755 /usr/local/share/ingenium && \
+    install -d -o root -g root -m 0555 /etc/ingenium && \
     id -u appuser > /usr/local/share/ingenium/appuser-uid && id -g appuser > /usr/local/share/ingenium/appuser-gid && \
     id -u ingenium-api > /usr/local/share/ingenium/api-uid && id -g ingenium-api > /usr/local/share/ingenium/api-gid && \
     id -u ingenium-dashboard > /usr/local/share/ingenium/dashboard-uid && id -g ingenium-dashboard > /usr/local/share/ingenium/dashboard-gid && \
@@ -141,6 +153,7 @@ RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appus
     install -d -o ingenium-restore -g ingenium-restore -m 0700 /home/ingenium-restore && \
     install -d -o ingenium-runtime-manager -g ingenium-runtime-manager -m 0700 /home/ingenium-runtime-manager && \
     install -d -o ingenium-runtime-gateway -g ingenium-runtime-gateway -m 0700 /home/ingenium-runtime-gateway && \
+    install -d -o ingenium-cloudflare -g ingenium-cloudflare -m 0700 /run/ingenium-secrets/cloudflare && \
     install -d -o root -g root -m 0755 /usr/local/libexec && \
     install -o root -g ingenium-restore -m 0750 /usr/local/bin/node /usr/local/libexec/ingenium-restore-node && \
     setcap cap_chown,cap_fowner=ep /usr/local/libexec/ingenium-restore-node && \
@@ -149,6 +162,12 @@ RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appus
 WORKDIR /app
 
 COPY --from=builder --chown=root:root /app/node_modules ./node_modules
+RUN playwright_cli="$(node -e 'const r = require("node:module").createRequire(require.resolve("@playwright/mcp")); process.stdout.write(require("node:path").join(require("node:path").dirname(r.resolve("playwright/package.json")), "cli.js"))')" && \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers node "$playwright_cli" install --with-deps chromium && \
+    browser_path="$(PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers node -e 'process.stdout.write(require("node:module").createRequire(require.resolve("@playwright/mcp"))("playwright").chromium.executablePath())')" && \
+    test -x "$browser_path" && \
+    ln -s "$browser_path" /opt/ingenium-playwright/chromium && \
+    test "$(realpath /opt/ingenium-playwright/chromium)" = "$browser_path"
 # Fail the image build if the copied native binding cannot load on the runtime
 # libc. This protects the API from a delayed better-sqlite3 startup failure.
 RUN node -e 'require("better-sqlite3")'
@@ -198,9 +217,10 @@ COPY --chown=root:root supervisord.conf control-plane-supervisord.conf runtime-s
 COPY --chown=root:root --chmod=0555 scripts/docker-entrypoint.sh ./entrypoint.sh
 # `/dev/shm` is a container-runtime tmpfs. Do not create this VAULT-101 root at
 # build time: the entrypoint provisions and validates it on every container start.
-COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
+COPY --chown=root:root scripts/api-boundary-proxy.mjs scripts/generate-dashboard-safe-read-policy.mjs scripts/opencode-auth-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/provision-dashboard-bootstrap-token.mjs scripts/read-protected-api-token.mjs scripts/restore-handoff.mjs scripts/runtime-control-entrypoint.sh scripts/runtime-gateway-healthcheck.mjs scripts/runtime-manager-healthcheck.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.sh scripts/run-gateway.sh scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh scripts/start-cloudflare-tunnel.sh scripts/start-opencode-auth-proxy.sh scripts/start-opencode-web.sh scripts/start-runtime-opencode-web.sh scripts/start-vscode.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/runtime-healthcheck.sh scripts/runtime-entrypoint.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/validate-root-entrypoint-chain.mjs ./scripts/
 COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf
 COPY --chown=root:root --chmod=0555 scripts/run-restore-handoff.sh scripts/run-restore-maintenance.sh scripts/recover-restore-maintenance.sh ./scripts/
+COPY --chown=root:root --chmod=0444 scripts/provision-opencode-mcp-credential.mjs ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh scripts/validate-process-isolation.sh ./scripts/
 COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
@@ -258,7 +278,7 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
- RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json

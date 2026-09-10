@@ -7,7 +7,7 @@ description: Database backup and restore procedures, automated backup scheduling
 
 This document covers backup and restore procedures for the Ingenium SQLite database and associated data.
 
-The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by signed v2 manifests and the RESTORE-100/RESTORE-101 lifecycle. RESTORE-100 validates and stages a plan; RESTORE-101 separately authorizes and queues the fixed root-only maintenance executor. API and MCP routes never apply snapshot bytes directly.
+The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by signed v2 manifests and the RESTORE-100/RESTORE-101 lifecycle. RESTORE-100 validates and stages a plan; RESTORE-101 separately authorizes and queues the fixed `ingenium-restore` maintenance executor. API and MCP routes never apply snapshot bytes directly.
 
 ## RESTORE-100 Contract
 
@@ -23,9 +23,11 @@ confirmed.
 Migration 083 stores immutable plan identities, append-only revisions and audit
 events, one-time hash-only authorizations, tamper-evident stages, and bounded
 idempotency receipts. The only successful terminal preparation state is
-`ready_for_executor`. The source backup remains preserved and referenced; there
-is no active DB replacement, WAL operation, executor process, rollback action, or
-off-host/resource restore in this contract.
+`ready_for_executor`. The source backup remains preserved and referenced. Active
+database replacement, WAL/sidecar handling, rollback, and service restart belong
+to the separate RESTORE-101 fixed executor; RESTORE-100/API/MCP preparation does
+not perform those privileged operations. Off-host/resource restore is outside
+this local executor contract.
 
 ---
 
@@ -304,7 +306,7 @@ restore plan. Use preview → authorize → confirm above, then stop at
 Never copy bundle files over the live databases. After a plan reaches
 `ready_for_executor`, issue the separate execution authorization and submit its
 one-time token to the RESTORE-101 execute endpoint or MCP tool. It returns
-`202` only after the fixed root-only Supervisor executor accepts the handoff;
+`202` only after the fixed `ingenium-restore` Supervisor executor accepts the handoff;
 an unavailable Supervisor produces a durable terminal `SUPERVISOR_FAILED`
 outcome and a `503` response rather than a stranded queue. The request never
 accepts a file path, command, or target override. The executor creates a safety
@@ -320,7 +322,7 @@ Before stopping database users or swapping files, the executor accepts only a
 complete, contiguous migration-093-through-102 security lineage. Migration 093
 is the oldest supported snapshot; its existing `users.updated_at` column is
 baseline identity schema, not evidence of a partial authentication migration.
-After the paired swap, the root maintenance process applies only the missing
+After the paired swap, the fixed maintenance process applies only the missing
 guarded 094–102 files, verifies database and foreign-key integrity, rehydrates
 the restore ledger, and atomically invalidates restored local capabilities
 before the journal may record `rehydrated`. It never invokes ordinary startup
@@ -401,6 +403,8 @@ curl --config "${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf" \
 
 1. **Always back up before running migrations** — especially 015, 024, and 025 which involve table rebuilds
 2. **Use `.backup` command** for consistent snapshots — never just `cp` a database while it's under write load without WAL checkpoint first
-3. **Remove WAL/SHM files after restore** — stale WAL files can cause corruption when replayed against a different DB state
+3. **Let RESTORE-101 handle WAL/SHM sidecars** — never remove them manually from
+   an active database; supported file-level procedures must stop database users
+   and preserve the paired-file contract
 4. **Run `PRAGMA integrity_check` after any restore** to verify the database is healthy
 5. **Keep at least 3 backup rotations** — daily snapshots for the last week, weekly for the last month

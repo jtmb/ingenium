@@ -2,8 +2,10 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiRequest = vi.hoisted(() => vi.fn());
+const memoryApi = vi.hoisted(() => ({ list: vi.fn(), catalog: vi.fn() }));
 vi.mock("../src/lib/api", () => ({
   request: apiRequest,
+  api: { memory: { list: memoryApi.list }, mcpTools: { list: memoryApi.catalog } },
   ApiError: class ApiError extends Error {
     constructor(readonly status: number) { super("API request failed"); }
   },
@@ -11,6 +13,7 @@ vi.mock("../src/lib/api", () => ({
 
 import RuntimeWorkspacePicker from "../src/app/components/RuntimeWorkspacePicker";
 import OpenCodeToolbar from "../src/app/components/OpenCodeToolbar";
+import { useMemoryCapabilities } from "../src/app/chat/components/use-memory-capabilities";
 import {
   RUNTIME_START_MAX_ATTEMPTS,
   runtimeWorkspacePreferenceKey,
@@ -55,6 +58,8 @@ beforeEach(() => localStorage.clear());
 afterEach(() => {
   cleanup();
   apiRequest.mockReset();
+  memoryApi.list.mockReset();
+  memoryApi.catalog.mockReset();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -85,10 +90,43 @@ describe("RUNTIME-100 dashboard runtime selection", () => {
 
     expect(result.current.launch.url).toBe("http://opencode.localhost:3000/");
     expect(apiRequest).toHaveBeenCalledTimes(2);
-    expect(apiRequest).toHaveBeenCalledWith("/runtimes/browser/status");
+    expect(apiRequest).toHaveBeenCalledWith(`/runtimes/browser/status?project=${encodeURIComponent(scope.projectName)}`);
     expect(apiRequest).toHaveBeenCalledWith("/runtimes/browser/health?audience=web");
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("confirms the server-authorized compatibility workspace without inventing an isolated runtime", async () => {
+    apiRequest.mockResolvedValue({ data: { mode: "compatibility", status: "ready", reason: null,
+      workspace: { ...workspace, status: "ready" } } });
+    memoryApi.list.mockResolvedValue({ data: [] });
+    memoryApi.catalog.mockResolvedValue({ project: scope.projectName, data: [{ tools:
+      ["ingenium_memory_list", "ingenium_memory_save", "ingenium_memory_operation_status"].map((tool_name) => ({ tool_name, enabled: true })) }] });
+    const { result } = renderHook(() => {
+      const binding = useRuntimeWorkspace(scope);
+      return { binding, memory: useMemoryCapabilities(scope.projectName, binding.confirmedWorkspaceId, null) };
+    });
+    await waitFor(() => expect(result.current.memory.canSave).toBe(true));
+    expect(result.current.memory.canRead).toBe(true);
+    expect(memoryApi.list).toHaveBeenCalledWith(scope.projectName, workspace.id, { limit: 1, tokenBudget: 1 });
+    expect(result.current.binding.confirmedProjectName).toBe(scope.projectName);
+    expect(result.current.binding.confirmedRuntimeId).toBeNull();
+  });
+
+  it.each([null, { ...workspace, projectName: "unauthorized-project", status: "ready" }])(
+    "does not confirm an unbound or foreign compatibility workspace", async (binding) => {
+      apiRequest.mockResolvedValue({ data: { mode: "compatibility", status: "ready", reason: null, workspace: binding } });
+      const { result } = renderHook(() => {
+        const workspace = useRuntimeWorkspace(scope);
+        return { workspace, memory: useMemoryCapabilities(scope.projectName, workspace.confirmedWorkspaceId, null) };
+      });
+      await waitFor(() => expect(result.current.workspace.status).toBe("ready"));
+      expect(result.current.workspace.confirmedWorkspaceId).toBeNull();
+      expect(result.current.workspace.confirmedProjectName).toBeNull();
+      expect(result.current.memory.canSave).toBe(false);
+      expect(result.current.memory.canRead).toBe(false);
+      expect(memoryApi.list).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["web", "cli", "vscode"] as const)("requires an explicit authorized workspace before launching %s", async (audience) => {
     const origin = runtimeOrigin(audience);

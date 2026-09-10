@@ -1,5 +1,5 @@
 /**
- * Project CRUD — manages the two-project identity model (see AGENTS.md).
+ * Project CRUD — manages the two-project identity model (see docs/concepts/architecture.md).
  *
  * Every project gets a UUID-based ID and a named directory under INGENIUM_HOME/projects/.
  * Global projects (is_global=1) serve as shared resource roots; normal projects are

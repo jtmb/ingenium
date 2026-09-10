@@ -15,7 +15,8 @@ function findRepositoryRoot(): string {
   let candidate = resolve(process.cwd());
   while (true) {
     if (
-      existsSync(join(candidate, "AGENTS.md"))
+      existsSync(join(candidate, "package.json"))
+      && existsSync(join(candidate, "opencode.json"))
       && existsSync(join(candidate, "services", "ingenium-dashboard"))
     ) {
       return candidate;
@@ -100,6 +101,36 @@ interface RouteManifestEntry {
 export const CANONICAL_SETTINGS_DEEP_LINKS = [
   { id: "general", label: "General", panelTestId: "settings-panel-general" },
   {
+    id: "account",
+    label: "Account",
+    panelTestId: "settings-panel-account",
+    routeLink: { testId: "settings-route-link-account", destination: "/account" },
+  },
+  {
+    id: "security",
+    label: "Security",
+    panelTestId: "settings-panel-security",
+    routeLink: { testId: "settings-route-link-security", destination: "/account#security" },
+  },
+  {
+    id: "sessions",
+    label: "Sessions",
+    panelTestId: "settings-panel-sessions",
+    routeLink: { testId: "settings-route-link-sessions", destination: "/account#sessions" },
+  },
+  {
+    id: "api-tokens",
+    label: "API tokens",
+    panelTestId: "settings-panel-api-tokens",
+    routeLink: { testId: "settings-route-link-api-tokens", destination: "/account#api-tokens" },
+  },
+  {
+    id: "organizations",
+    label: "Organizations",
+    panelTestId: "settings-panel-organizations",
+    routeLink: { testId: "settings-route-link-organizations", destination: "/organizations" },
+  },
+  {
     id: "projects",
     label: "Projects",
     panelTestId: "settings-panel-projects",
@@ -156,6 +187,7 @@ export const CANONICAL_SETTINGS_DEEP_LINKS = [
     routeLink: { testId: "settings-route-link-personality", destination: "/personality" },
   },
   { id: "providers", label: "Providers", panelTestId: "settings-panel-providers" },
+  { id: "cloudflare", label: "Cloudflare", panelTestId: "settings-panel-cloudflare" },
   {
     id: "logs",
     label: "Logs",
@@ -221,8 +253,8 @@ export function discoverCanonicalNavigationRoutes(): readonly string[] {
 
 /** Return the explicit settings deep-link contract used by the parity suite. */
 export function discoverSettingsDeepLinks(): readonly SettingsDeepLink[] {
-  if (CANONICAL_SETTINGS_DEEP_LINKS.length !== 14) {
-    throw new Error("The settings deep-link inventory must contain exactly 14 canonical IDs");
+  if (CANONICAL_SETTINGS_DEEP_LINKS.length !== 20) {
+    throw new Error("The settings deep-link inventory must contain exactly 20 canonical IDs");
   }
 
   const ids = CANONICAL_SETTINGS_DEEP_LINKS.map(({ id }) => id);

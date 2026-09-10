@@ -134,12 +134,15 @@ async function applyOpenCode1189V1Server(mod: Record<string, unknown>, spec: str
 }
 
 describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
+  let fixtureWorktree: string | undefined;
   const originalProject = process.env.INGENIUM_PROJECT;
   const originalToken = process.env.INGENIUM_API_TOKEN;
   const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
   const originalStorageMappingHash = process.env.INGENIUM_STORAGE_MAPPING_HASH;
 
   afterEach(() => {
+    if (fixtureWorktree) rmSync(fixtureWorktree, { recursive: true, force: true });
+    fixtureWorktree = undefined;
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     mockCallMcpTool.mockReset();
@@ -291,6 +294,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
   });
 
   it("registers existing lifecycle hooks through the V1 wrappers", async () => {
+    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-v1-"));
     process.env.INGENIUM_PROJECT = "plugin-loader-v1-test";
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
       const path = new URL(String(url)).pathname;
@@ -307,7 +311,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
       import("./plugins/resource-sync.js"),
     ]);
     const input = {
-      worktree: "/safe/plugin-loader-v1-worktree",
+      worktree: fixtureWorktree,
       client: {
         app: { log: vi.fn() },
         session: { messages: vi.fn() },
@@ -405,6 +409,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
   });
 
   it("keeps unavailable binding failures from every V1 lifecycle wrapper off stdio", async () => {
+    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-v1-failure-"));
     process.env.INGENIUM_PROJECT = "plugin-loader-v1-failure";
     process.env.INGENIUM_API_TOKEN = "a".repeat(32);
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -420,7 +425,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
       import("./plugins/resource-sync.js"),
     ]);
     const log = vi.fn().mockRejectedValue(new Error("logger rejected Bearer secret-token"));
-    const input = { worktree: "/safe/plugin-loader-v1-failure", client: { app: { log } } };
+    const input = { worktree: fixtureWorktree, client: { app: { log } } };
 
     const autoHooks = await applyOpenCode1189V1Server(autoWrapper, wrapperSpecs[0], input) as { event: (input: unknown) => Promise<void> };
     const observerHooks = await applyOpenCode1189V1Server(observerWrapper, wrapperSpecs[1], input) as { event: (input: unknown) => Promise<void> };

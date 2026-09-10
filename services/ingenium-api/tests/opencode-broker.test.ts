@@ -577,7 +577,7 @@ describe("brokerExecute — mocked lifecycle", () => {
 });
 
 describe("ingenium-llm-broker permission contract", () => {
-  it("is wildcard-denied with no capability exceptions", () => {
+  it("is wildcard-denied with no capability exceptions", async () => {
     const profile = readFileSync(
       new URL("../../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url),
       "utf8",
@@ -596,12 +596,30 @@ describe("ingenium-llm-broker permission contract", () => {
       permission?: Record<string, string>;
       agent?: Record<string, { permission?: Record<string, unknown> }>;
     };
-    expect(rootConfig.permission).toEqual({ "*": "deny", question: "deny" });
-    expect(rootConfig.agent?.["ingenium-orchestrator"]?.permission).toMatchObject({
-      "*": "deny",
-      read: "allow",
-      question: "deny",
-    });
     expect(rootConfig.agent).not.toHaveProperty(LLM_BROKER_AGENT);
+
+    const managedConfig = JSON.parse(readFileSync(
+      new URL("../../../config/opencode-managed/opencode.json", import.meta.url), "utf8",
+    ));
+    const deniedPermissions = {
+      "*": "deny",
+      external_directory: {
+        "/home/appuser/.local/share/opencode/tool-output/*": "deny",
+        "/home/ingenium-opencode/.local/share/opencode/tool-output/*": "deny",
+      },
+    };
+    expect(managedConfig.agent[LLM_BROKER_AGENT].permission).toEqual(deniedPermissions);
+    const pluginUrl = new URL("../../../config/opencode-managed/enforce-reserved-broker.mjs", import.meta.url);
+    const { ProtectedBrokerPlugin } = await import(pluginUrl.href);
+    const plugin = await ProtectedBrokerPlugin({}, {
+      profilePath: new URL("../../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url).pathname,
+    });
+    const config = {
+      permission: { "*": "allow" },
+      agent: { [LLM_BROKER_AGENT]: { permission: { "*": "allow", question: "allow" } } },
+    };
+    await plugin.config(config);
+    expect(config.agent[LLM_BROKER_AGENT]).toMatchObject({ hidden: true, permission: deniedPermissions });
+    expect(config.agent[LLM_BROKER_AGENT].permission).toEqual(deniedPermissions);
   });
 });

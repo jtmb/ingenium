@@ -327,6 +327,7 @@ const representativeByCategory: Record<string, { name: string; arguments: Record
   Tasks: { name: "ingenium_task_list", arguments: { project: PROJECT } },
   Plans: { name: "ingenium_plan_list", arguments: { project: PROJECT } },
   Context: { name: "ingenium_context_conversation_list", arguments: { project: PROJECT } },
+  Memory: { name: "ingenium_memory_list", arguments: { project: PROJECT, workspaceId: "fixture-workspace" } },
   Projects: { name: "ingenium_project_list", arguments: {} },
   Plugins: { name: "ingenium_plugin_list", arguments: { project: PROJECT } },
   Providers: { name: "ingenium_provider_list", arguments: { project: PROJECT } },
@@ -357,12 +358,12 @@ async function callRepresentative(client: Client, representative: { name: string
 }
 
 describe("MCP-102 provider-free live acceptance", () => {
-  it("connects all 30 categories with exact catalog accounting and enforces policy, project, error, disabled, and child inheritance boundaries", async () => {
-    expect(MCP_TOOL_CATALOG).toHaveLength(283);
-    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(281);
+  it("connects all 31 categories with exact catalog accounting and enforces policy, project, error, disabled, and child inheritance boundaries", async () => {
+    expect(MCP_TOOL_CATALOG).toHaveLength(290);
+    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(288);
     expect(MCP_TOOL_CATALOG.filter((tool) => !tool.name.startsWith("ingenium_")).map((tool) => tool.name).sort())
       .toEqual([...EXTENSION_TOOL_NAMES].sort());
-    expect(new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))).toHaveLength(30);
+    expect(new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))).toHaveLength(31);
     expect(Object.keys(representativeByCategory).sort())
       .toEqual([...new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))].sort());
 
@@ -380,7 +381,7 @@ describe("MCP-102 provider-free live acceptance", () => {
     const categoryCalls = await Promise.all(Object.values(representativeByCategory).map((representative) => (
       callRepresentative(connection.client, representative)
     )));
-    expect(categoryCalls).toHaveLength(30);
+    expect(categoryCalls).toHaveLength(31);
     expect(fixture.requests.filter((request) => /^POST \/api\/v1\/(?!mcp-servers\/fixture\/discovery)/.test(request))).toEqual([]);
 
     fixture.setPolicyValid("ingenium_setting_get", false);

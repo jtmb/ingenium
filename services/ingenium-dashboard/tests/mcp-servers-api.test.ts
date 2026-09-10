@@ -15,12 +15,45 @@ function response(body: unknown, status = 200): Response {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("canonical child MCP API client", () => {
+  it("requests the server-owned Playwright preset without a duplicated definition", async () => {
+    const server = { name: "playwright", description: "Managed browser" };
+    const fetchMock = vi.fn().mockResolvedValue(response({ data: server }, 201));
+    installDashboardFetchMock(fetchMock);
+    await expect(api.mcpServers.createPlaywrightPreset("dashboard project")).resolves.toEqual({ data: server });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/mcp-servers/presets/playwright?project=dashboard%20project",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock.mock.calls[0]?.[1].body).toBeUndefined();
+  });
+
+  it("preserves a preset API failure without falling back to generic creation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response({ error: { code: "PRESET_UNAVAILABLE", message: "Managed browser is unavailable." } }, 503));
+    installDashboardFetchMock(fetchMock);
+    await expect(api.mcpServers.createPlaywrightPreset("project")).rejects.toMatchObject({ status: 503, message: "Managed browser is unavailable." });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["", "Managed browser"])("forwards and returns explicit preset description %j", async (description) => {
+    const server = { name: "playwright", description };
+    const fetchMock = vi.fn().mockResolvedValue(response({ data: server }, 201));
+    installDashboardFetchMock(fetchMock);
+    await expect(api.mcpServers.createPlaywrightPreset("dashboard project", description)).resolves.toEqual({ data: server });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/mcp-servers/presets/playwright?project=dashboard%20project",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ description }) }),
+    );
+    fetchMock.mockResolvedValue(response({ data: [server], total: 1 }));
+    await expect(api.mcpServers.list("dashboard project")).resolves.toEqual({ data: [server], total: 1 });
+  });
+
   it("uses /mcp-servers and preserves the backend command/args/vault-ref contract", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({ data: { id: "server-id" } }));
     installDashboardFetchMock(fetchMock);
 
     await api.mcpServers.create({
       name: "calendar",
+      description: "Team calendar",
       executable: "npx",
       args: ["--yes", "@example/calendar"],
       environment: { CALENDAR_TOKEN: { vault_item_id: "00000000-0000-0000-0000-000000000001" } },
@@ -33,6 +66,7 @@ describe("canonical child MCP API client", () => {
         method: "POST",
         body: JSON.stringify({
           name: "calendar",
+          description: "Team calendar",
           executable: "npx",
           args: ["--yes", "@example/calendar"],
           environment: { CALENDAR_TOKEN: { vault_item_id: "00000000-0000-0000-0000-000000000001" } },

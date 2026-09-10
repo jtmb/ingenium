@@ -7,7 +7,7 @@ description: "Patterns for creating and maintaining definitive reference documen
 
 ## 🔴 HARD RULEs
 - Always create a definitive reference file (e.g., ARCHITECTURE.md) for key system decisions.
-- Update related documentation (e.g., AGENTS.md) to include cross-references to the definitive reference.
+- Update related documentation (e.g., `docs/concepts/architecture.md`) to include cross-references to the definitive reference.
 - Place reference files in the appropriate package directory (e.g., packages/ingenium-extension/).
 
 ## Reference Files

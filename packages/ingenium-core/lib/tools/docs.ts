@@ -1034,7 +1034,7 @@ export function getAttachment(attId: number): DocAttachment | undefined {
 /**
  * Save or update an attachment record.
  * Uses ON CONFLICT DO UPDATE (not INSERT OR REPLACE) so FK-referenced child
- * rows are preserved (see 🔴 HARD RULE #11 in AGENTS.md).
+ * rows are preserved (see .opencode/skills/database-conventions/SKILL.md).
  * Parent-existence check via `defendChildPage` prevents FK corruption.
  */
 export function saveAttachment(
