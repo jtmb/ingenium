@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { usage } from "ingenium-core";
+import { usage, coordination } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { getOpenCodeUsageSourceInstance, getUsageSyncInterval, syncUsageFromOpenCode } from "../usage-sync.js";
 
@@ -14,6 +14,8 @@ function sendUsageError(res: Response, error: unknown): void {
   }
   const statusByCode: Record<usage.UsageError["code"], number> = {
     INVALID_USAGE_INPUT: 422,
+    EXTERNAL_USAGE_BINDING_REJECTED: 403,
+    EXTERNAL_USAGE_SOURCE_CONFLICT: 409,
     INVALID_USAGE_QUERY: 422,
     INVALID_USAGE_THRESHOLD_INPUT: 422,
     PROJECT_NOT_FOUND: 404,
@@ -24,6 +26,8 @@ function sendUsageError(res: Response, error: unknown): void {
   };
   const messageByCode: Record<usage.UsageError["code"], string> = {
     INVALID_USAGE_INPUT: "Invalid usage metadata.",
+    EXTERNAL_USAGE_BINDING_REJECTED: "External session binding rejected.",
+    EXTERNAL_USAGE_SOURCE_CONFLICT: "Completed usage metadata conflicts with the retained event.",
     INVALID_USAGE_QUERY: "Usage filters, range, or pagination are invalid.",
     INVALID_USAGE_THRESHOLD_INPUT: "Usage advisory thresholds are invalid.",
     PROJECT_NOT_FOUND: "Project not found.",
@@ -245,6 +249,28 @@ function csvCell(value: string | number | null): string {
   const spreadsheetSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
   return `"${spreadsheetSafe.replace(/"/g, '""')}"`;
 }
+
+usageRouter.post("/external", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const parsed = usage.ExternalUsageSchema.safeParse(req.body);
+    if (!parsed.success) throw new usage.UsageError("INVALID_USAGE_INPUT");
+    const principal = req.principal;
+    if (principal?.type !== "service" || principal.audience !== "mcp"
+      || principal.projectId !== projectId || !principal.projectIds?.includes(projectId)
+      || !principal.workspaceId || !principal.storageMappingHash
+      || principal.launcherWorktree !== parsed.data.worktree || req.get("x-ingenium-ui") !== undefined) {
+      throw new usage.UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
+    }
+    const result = usage.ingestExternalUsage(projectId,
+      coordination.coordinationWorktreeId(principal.workspaceId, principal.storageMappingHash), parsed.data);
+    res.status(result.created ? 201 : 200).location(`/api/v1/usage/events?project=${encodeURIComponent(projectId)}`)
+      .json({ data: { created: result.created, event: eventDto(result.event) } });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
 
 usageRouter.get("/summary", (req, res) => {
   const projectId = requireProject(req, res);

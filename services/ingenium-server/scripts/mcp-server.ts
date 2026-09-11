@@ -64,6 +64,7 @@ import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
 import { repositorySync } from "../lib/tools/repository.js";
+import { externalUsageSchema, usageIngest } from "../lib/tools/usage.js";
 
 const projectStateAttestor = new ProjectStateAttestor();
 const observationSourceSchema = z.enum([
@@ -784,6 +785,15 @@ server.registerTool(
     inputSchema: { project: projectParam, external: externalExtractionSchema.optional() },
   },
   wrapHandler(C("extraction_run"), async ({ project, external }) => extractionRun(project, external, launcherProject)),
+);
+
+server.registerTool(
+  "usage_ingest",
+  {
+    description: "Ingest metadata-only usage from one completed assistant message in an exact launcher-bound external session. Durable deduplication rejects conflicting replay; absent metrics remain unknown.",
+    inputSchema: { project: projectParam, event: externalUsageSchema },
+  },
+  wrapHandler(C("usage_ingest"), async ({ project, event }) => usageIngest(project, event, launcherProject)),
 );
 
 const taskRevisionParam = z.number().int().nonnegative();

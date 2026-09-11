@@ -10,6 +10,7 @@ import type { ApiAuthenticationPreflightResult } from "./api-auth.js";
 import { McpBridgeError } from "./mcp-client.js";
 import { CoordinationOutbox } from "./coordination-outbox.js";
 import { ContextAutoUploader } from "./context-upload.js";
+import { ExternalUsageCollector } from "./external-usage.js";
 import {
   AUTONOMY_REMINDER_V1,
   decodeCoordinationPath,
@@ -275,6 +276,24 @@ async function created(coordinator: ProductionSessionCoordinator, sessionID: str
 }
 
 describe("SessionCoordinatorPlugin hooks", () => {
+  it("collects usage only after registration of the exact external idle session, never for internal sessions", async () => {
+    const sync = vi.spyOn(ExternalUsageCollector.prototype, "sync").mockResolvedValue();
+    const fixture = coordinationFixture();
+    const coordinator = new SessionCoordinator(processHarness("usage-hook"), { callTool: fixture.callTool });
+    try {
+      await created(coordinator, "ses_usage");
+      expect(sync).not.toHaveBeenCalled();
+      await coordinator.hooks().event!({ event: { type: "session.idle", properties: { sessionID: "ses_usage" } } } as any);
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(sync).toHaveBeenCalledWith("ses_usage");
+      const runtime = runtimeHarness();
+      const internal = new SessionCoordinator(runtime.context, { preflight: runtime.preflight, request: runtime.request });
+      try {
+        await internal.hooks().event!({ event: { type: "session.idle", properties: { sessionID: "ses_internal" } } } as any);
+        expect(sync).toHaveBeenCalledTimes(1);
+      } finally { await internal.dispose(); }
+    } finally { await coordinator.dispose(); sync.mockRestore(); }
+  });
   it("invokes the separate Context uploader only on the exact idle session", async () => {
     const sync = vi.spyOn(ContextAutoUploader.prototype, "sync").mockResolvedValue();
     const fixture = coordinationFixture();

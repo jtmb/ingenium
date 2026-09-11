@@ -72,6 +72,7 @@ const PROJECT = new Set([
 const ORGANIZATION = new Set(["project_init"]);
 const UNBOUND = new Set(["project_list", "project_init", "project_delete", "project_restore", "project_list_archived", "project_purge", "project_set_global", "project_rename", "project_detail", "project_migrate_workspace", "health_check"]);
 const WRITE = new Set([
+  "usage_ingest",
   "setting_set", "skill_create", "skill_update", "skill_lineage_create", "skill_proposal_create", "skill_proposal_submit", "observe", "observation_update", "observation_enrich", "personality_set_trait", "personality_trait_dismiss",
   "task_create", "task_move", "task_complete", "task_update", "task_comment", "task_link", "task_board_config_set", "task_subtask_create", "task_comment_edit", "task_comment_react", "task_notification_read", "task_bulk_update", "coordination_update", "coordination_claim", "coordination_release", "coordination_handoff",
   "plan_save", "context_update", "context_upload_file", "context_conversation_create", "context_message_append", "context_checkpoint_create", "project_init", "plugin_create", "plugin_update", "command_create", "command_update", "config_set", "server_add", "server_remove", "agent_create", "agent_update",

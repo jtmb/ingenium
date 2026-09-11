@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
 import { ContextAutoUploader } from "./context-upload.js";
+import { ExternalUsageCollector } from "./external-usage.js";
 import {
   coordinationCredentialPurpose,
   ExtensionBindingError,
@@ -903,6 +904,7 @@ export class SessionCoordinator {
   private readonly request: typeof fetch;
   private readonly outbox?: CoordinationOutbox;
   private readonly explicitMemory: ExplicitMemoryContextReader;
+  private readonly externalUsage: ExternalUsageCollector;
   private attestation?: Promise<void>;
   private canonicalWorktree?: Promise<string>;
   private readonly sessions = new Map<string, SessionState>();
@@ -945,6 +947,7 @@ export class SessionCoordinator {
     this.request = dependencies.request ?? fetch;
     this.explicitMemory = new ExplicitMemoryContextReader(this.binding, (name, args) => this.invoke(name, args));
     this.contextUploader = new ContextAutoUploader(this.binding.project, ctx.worktree, ctx.client, (name, args) => this.invoke(name, args));
+    this.externalUsage = new ExternalUsageCollector(this.binding.project, ctx.worktree, ctx.client, (name, args) => this.invoke(name, args));
     this.credentialFingerprint = this.readCredentialFingerprint();
     try {
       this.outbox = dependencies.outbox ?? new CoordinationOutbox(ctx.worktree, this.now);
@@ -2381,6 +2384,9 @@ export class SessionCoordinator {
           if (this.binding.audience === "mcp") await this.contextUploader.sync(sessionId);
           await this.publishTranscript(sessionId).catch(() => this.warning());
           if (await this.heartbeatSession(sessionId)) {
+            if (this.binding.audience === "mcp" && this.binding.launcherWorktree === this.ctx.worktree) {
+              await this.externalUsage.sync(sessionId).catch(() => this.warning());
+            }
             await this.publishSnapshot(sessionId, (state) => {
               state.status = "idle";
               this.applySignals(state, event.properties);

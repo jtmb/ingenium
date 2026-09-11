@@ -1,4 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
+import { redactContextText } from "@ingenium/extension/context-upload-codec";
+import { requireExternalObservationSession } from "./observations.js";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 
 export const USAGE_STATUS_VALUES = ["success", "error", "partial", "unknown"] as const;
@@ -22,6 +25,8 @@ export type UsageAttentionFreshness = typeof USAGE_ATTENTION_FRESHNESS_VALUES[nu
 export type UsageAttentionTransition = typeof USAGE_ATTENTION_TRANSITION_VALUES[number];
 export type UsageErrorCode =
   | "INVALID_USAGE_INPUT"
+  | "EXTERNAL_USAGE_BINDING_REJECTED"
+  | "EXTERNAL_USAGE_SOURCE_CONFLICT"
   | "INVALID_USAGE_QUERY"
   | "INVALID_USAGE_THRESHOLD_INPUT"
   | "PROJECT_NOT_FOUND"
@@ -63,6 +68,75 @@ export interface UsageEvent extends UsageEventInput {
   id: string;
   createdAt: string;
   updatedAt: string;
+}
+
+const externalUsageId = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/)
+  .refine((value) => redactContextText(value) === value);
+const reportedTokens = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional();
+export const ExternalUsageSchema = z.object({
+  worktree: z.string().min(1).max(1024),
+  sessionId: externalUsageId,
+  messageId: externalUsageId,
+  role: z.literal("assistant"),
+  completedAt: z.string().datetime(),
+  providerId: externalUsageId.nullable().optional(),
+  modelId: externalUsageId.nullable().optional(),
+  agentId: externalUsageId.nullable().optional(),
+  totalTokens: reportedTokens,
+  inputTokens: reportedTokens,
+  outputTokens: reportedTokens,
+  reasoningTokens: reportedTokens,
+  cacheReadTokens: reportedTokens,
+  cacheWriteTokens: reportedTokens,
+  costAmount: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+}).strict();
+
+export function ingestExternalUsage(projectId: string, worktreeId: string, input: unknown) {
+  const parsed = ExternalUsageSchema.safeParse(input);
+  if (!parsed.success) throw new UsageError("INVALID_USAGE_INPUT");
+  const metadata = parsed.data;
+  const event = normalizeUsageEvent({
+    projectId,
+    sourceInstance: `external-assistant-v1:${projectId}:${worktreeId}`,
+    sourcePartId: createHash("sha256").update(JSON.stringify([metadata.sessionId, metadata.messageId])).digest("hex"),
+    sourceProjectId: worktreeId,
+    sourceSessionId: metadata.sessionId,
+    sourceMessageId: metadata.messageId,
+    providerId: metadata.providerId ?? null,
+    modelId: metadata.modelId ?? null,
+    agentId: metadata.agentId ?? null,
+    status: "success",
+    occurredAt: metadata.completedAt,
+    totalTokens: metadata.totalTokens ?? null,
+    inputTokens: metadata.inputTokens ?? null,
+    outputTokens: metadata.outputTokens ?? null,
+    reasoningTokens: metadata.reasoningTokens ?? null,
+    cacheReadTokens: metadata.cacheReadTokens ?? null,
+    cacheWriteTokens: metadata.cacheWriteTokens ?? null,
+    costAmount: metadata.costAmount ?? null,
+    costStatus: metadata.costAmount == null ? "unavailable" : "known",
+  });
+  const result = execTransaction(() => {
+    try { requireExternalObservationSession(projectId, worktreeId, metadata.sessionId); }
+    catch (error) {
+      if (error instanceof Error && error.message === "EXTERNAL_OBSERVATION_BINDING_REJECTED") {
+        throw new UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
+      }
+      throw error;
+    }
+    const row = getDb().prepare("SELECT * FROM usage_events WHERE source_instance = ? AND source_part_id = ?")
+      .get(event.sourceInstance, event.sourcePartId);
+    if (row) {
+      const existing = readEvent(row);
+      if (JSON.stringify(normalizeUsageEvent(existing)) !== JSON.stringify(event)) {
+        throw new UsageError("EXTERNAL_USAGE_SOURCE_CONFLICT");
+      }
+      return { created: false, event: existing };
+    }
+    return { created: true, event: persistUsageEvent(event) };
+  });
+  if (result.created) checkpointAfterWrite();
+  return result;
 }
 
 export interface UsageProjectMapping {
@@ -666,6 +740,12 @@ export function listOpenCodeProjectMappings(projectId: string): UsageProjectMapp
 }
 
 export function upsertUsageEvent(input: UsageEventInput): UsageEvent {
+  const event = persistUsageEvent(input);
+  checkpointAfterWrite();
+  return event;
+}
+
+function persistUsageEvent(input: UsageEventInput): UsageEvent {
   const event = normalizeUsageEvent(input);
   assertProjectExists(event.projectId);
   const timestamp = now();
@@ -728,7 +808,6 @@ export function upsertUsageEvent(input: UsageEventInput): UsageEvent {
     );
     return getDb().prepare("SELECT * FROM usage_events WHERE id = ?").get(id);
   });
-  checkpointAfterWrite();
   return readEvent(result);
 }
 

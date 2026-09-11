@@ -824,6 +824,15 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: SYNTHESIS_ENDPOINTS,
   },
 
+  {
+    name: "ingenium_usage_ingest",
+    category: "Usage",
+    description: "Ingest metadata-only usage from one completed assistant message in an exact launcher-bound external session. Durable deduplication rejects conflicting replay; absent metrics remain unknown.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: ["POST /api/v1/usage/external"],
+  },
+
   // ── Extraction + Auto-Observer (2) ───────────────────
   {
     name: "ingenium_extraction_run",
