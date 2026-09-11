@@ -313,7 +313,11 @@ for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.
 done
 require_file "${repo_root}/scripts/normalize-agent-profiles.sh"
 require_file "${repo_root}/scripts/project-agent-profiles.mjs"
-require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (entry.name === RESERVED_BROKER_PROFILE) continue;'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (removeWorkspaceAcls) removeAcl(directoryFd, "-k");'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (entry.name === RESERVED_BROKER_PROFILE && !removeWorkspaceAcls) continue;'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (removeWorkspaceAcls) removeAcl(profile.fd, "-b");'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" '} else if (args[0] === "--remove-workspace-acls" && args.length === 2) {'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'normalizeAgentProfiles(args[1], true);'
 reject_literal "${repo_root}/scripts/project-agent-profiles.mjs" '["execution", "ingenium-llm-broker.md"]'
 require_literal "${repo_root}/scripts/run-api.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "${repo_root}/scripts/run-api.sh" 'backup_dir="${INGENIUM_BACKUPS_DIR:-}"'
@@ -399,7 +403,8 @@ require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/pon
 require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups'
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'
-require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
+require_line_before "$entrypoint" 'secure_persistent_path file "$credential_path" - - 0600' '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"'
 require_literal "$entrypoint" '[ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="mcp"'
