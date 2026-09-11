@@ -283,6 +283,7 @@ export function canonicalOwnedDirectory(path, _label, owner = ownerUid(), option
 
 export function readTrustedRegularFile(path, label, options = {}) {
   const owner = options.expectedOwner ?? ownerUid();
+  const requireNonWritable = options.allowWritableData !== true || options.executable || options.expectedMode !== undefined;
   const requested = resolve(path);
   const fail = (reason) => { throw new TrustedRegularFileError(label, reason); };
   let reference;
@@ -313,7 +314,7 @@ export function readTrustedRegularFile(path, label, options = {}) {
     if (opened.nlink !== 1 || before.nlink !== 1) fail("link_count");
     if (opened.dev !== before.dev || opened.ino !== before.ino) fail("identity");
     if (opened.uid !== owner || before.uid !== owner) fail("owner");
-    if ((opened.mode & 0o022) !== 0 || (before.mode & 0o022) !== 0) fail("writable");
+    if (requireNonWritable && ((opened.mode & 0o022) !== 0 || (before.mode & 0o022) !== 0)) fail("writable");
     try {
       if (realpathSync(canonical) !== canonical || (!options.allowReferenceSymlink && canonical !== requested)) fail("realpath");
     } catch {
@@ -333,7 +334,7 @@ export function readTrustedRegularFile(path, label, options = {}) {
       || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size
       || afterPath.mtimeMs !== opened.mtimeMs || afterPath.ctimeMs !== opened.ctimeMs) fail("identity");
     if (afterDescriptor.uid !== owner || afterPath.uid !== owner) fail("owner");
-    if ((afterDescriptor.mode & 0o022) !== 0 || (afterPath.mode & 0o022) !== 0) fail("writable");
+    if (requireNonWritable && ((afterDescriptor.mode & 0o022) !== 0 || (afterPath.mode & 0o022) !== 0)) fail("writable");
     try {
       if (realpathSync(canonical) !== canonical || (!options.allowReferenceSymlink && canonical !== requested)) fail("realpath");
     } catch {
@@ -2862,7 +2863,8 @@ export function createPrivateRecoveryStage(root, head, parent = privateTemporary
     const path = resolve(workspace, entry.path);
     const bytes = readTrustedRegularFile(path, "Archived source", { expectedOwner: owner }).bytes;
     const oid = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-    const original = readTrustedRegularFile(resolve(root, entry.path), "Canonical source input", { expectedOwner: owner });
+    // Shared checkout bytes are compared as data; only the blob-verified private archive is built.
+    const original = readTrustedRegularFile(resolve(root, entry.path), "Canonical source input", { expectedOwner: owner, allowWritableData: true });
     if (oid !== entry.oid || !bytes.equals(original.bytes)) throw new Error("Git archive/source hash mismatch");
     files[entry.path] = { sha256: sha256(bytes), mode: entry.mode };
   }

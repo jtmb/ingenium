@@ -10033,3 +10033,71 @@ separately required parent replacement/restart or any parent/final gate.
   `replaces an opaque relative npm symlink and restores its exact inode after
   post-adoption failure` passed `1` with `38 skipped`. QA/security were not
   rerun; commit, deploy, and live retry remain pending.
+- **6772154b deployment boundary (2026-09-11; deployment evidence only):** Full
+  revision `6772154b65517dca68bf85f5e0b80d237924d1f1`, image
+  `sha256:4ac33370ebf51b0b4b4a37097f85522f8e0d594e4bf4195472375098d5be7afc`,
+  container prefix `6380c47f8947`, rollback tag
+  `ingenium-ingenium:rollback-f9c2d3b7-6772154b`, and passing runtime, MCP,
+  binding, scanner, and ACL checks were recorded. No release-closure claim is
+  added.
+- **Host-install rejection and causal source remediation (2026-09-11):** One
+  install failed with `Canonical source input failed trust validation: writable`
+  at `.dockerignore`, before host mutation, release, backup, or lock. Failed
+  receipt path:
+  `/home/brajam/.local/state/ingenium-build-install-c4acd96c-c5d6-4e79-9469-eb925a548ada.json`;
+  receipt hash
+  `d4a418329ace2d3c9387b4338b1a8fcfc95509f0e8e17ee8efc94497a5ca2287`.
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js` and
+  `packages/ingenium-extension/install-host-build.test.ts` now allow writable
+  shared tracked metadata only for archive comparison while retaining
+  ownership, no-follow, inode/nlink, stable-readback, byte-equality, and Git
+  blob checks. The named regression
+  `constructs the archive release closure from writable tracked metadata and rejects archive tree mismatch`
+  passed `1` with `39 skipped`. Commit, deploy, and install remain pending.
+
+## Append-only T57 ordering amendment and linked Current Todos 58–61 — 2026-09-11
+
+This block appends to Todo 57 and does not rewrite its earlier text or evidence.
+
+- **Todo 57 ordering amendment:** Only after all existing gates and Todos 58–61
+  pass, perform in order: (1) the redacted exact chat/session export and its
+  completeness/redaction check; (2) commit the intended evidence; (3) make the
+  authorized non-force/non-amend push; and (4) send exactly one protected
+  webhook using an ephemeral/protected credential path. Never include or record
+  the endpoint or token.
+- **Todo 58 — instructional UI/application walkthrough:** `OPEN`; produce the
+  final instructional walkthrough GIF and concise usage instructions. This is a
+  final product deliverable required before release closure.
+- **Todo 59 — final Ponytail simplicity/YAGNI review:** `OPEN`; review the final
+  product for unnecessary complexity and perform only in-scope `BLOCKING`
+  remediation. No broad refactor or follow-up work is admitted by this item.
+- **Todo 60 — final documentation audit:** `OPEN`; run exactly one final audit
+  after the canonical documentation and Todo 58 walkthrough are final. The
+  audit is a release gate, not permission for broad documentation regeneration.
+- **Todo 61 — generated/secret/recovery/export/visual artifact ignore audit:**
+  `OPEN`; audit `.gitignore` coverage for generated, secret, recovery, export,
+  and visual/GIF artifacts, applying only concrete leak remediation. No secret
+  value or artifact payload is recorded.
+
+## Linked Current Todo 62 — evidence-derived skill maintenance before final release closure — 2026-09-11
+
+- **Status:** `OPEN`; this is a linked finalization gate, and this documentation
+  append performs no skill implementation or research.
+- **Order/dependencies:** After product, recovery, and acceptance are final, the
+  Todo 58 visual walkthrough, Todo 59 Ponytail review, and Todo 61 `.gitignore`
+  audit must be final. Todo 62 then precedes Todo 60's final documentation
+  audit and Todo 57's redacted export, intended-evidence commit, authorized
+  non-force/non-amend push, and exactly one protected webhook.
+- **IN_SCOPE:** Deeply analyze this exact chat and retained task/run/evidence
+  artifacts; identify recurring application-development workflows or failure
+  patterns; reuse or update existing canonical skill categories first; create a
+  new skill only for a durable gap; add complete canonical frontmatter/meta
+  tags, category/index/cross-references, concise actionable instructions, and
+  safe redacted examples; run skill-maintenance validation and exactly one
+  documentation audit after the final skill output.
+- **OUT_OF_SCOPE for this append:** Skill implementation/research now, other
+  docs/files, Docs Workspace mutation, and any webhook, passphrase, credential,
+  or transcript secret/value.
+- **Acceptance:** The future T62 output is canonical, non-speculative, and
+  actionable with no secret material; this roadmap amendment is accepted by
+  concise append, readback, and scoped diff check only.

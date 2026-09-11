@@ -60,6 +60,45 @@ function fixture() {
 }
 
 describe("private host build installer", () => {
+  it("constructs the archive release closure from writable tracked metadata and rejects archive tree mismatch", async () => {
+    const f = fixture();
+    for (const name of ["scripts/recovery-bootstrap.js", "scripts/managed-command-wrapper.ts", "scripts/build-command.ts",
+      "replacement-first-restart.ts", "context-upload-codec.mjs", "package.json"]) {
+      writeFileSync(join(f.extension, name), readFileSync(new URL(name, import.meta.url)), { mode: 0o644 });
+    }
+    const metadata = [join(f.root, ".dockerignore"), join(f.extension, "package.json")];
+    writeFileSync(metadata[0]!, "node_modules\n# $Format:%H$\n", { mode: 0o644 });
+    f.git(["add", "."]);
+    f.git(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "archive sources"]);
+    const head = f.git(["rev-parse", "HEAD"]);
+    for (const path of metadata) chmodSync(path, 0o674);
+    expect(f.git(["status", "--porcelain=v1"])).toBe("");
+    const prepareDependencies = vi.fn((_node: string, _args: string[], options: { cwd: string }) => {
+      expect(options.cwd.startsWith(`${f.state}/git-stage-`)).toBe(true);
+      expect(lstatSync(options.cwd).mode & 0o7777).toBe(0o700);
+      for (const path of metadata) {
+        const archived = join(options.cwd, path.slice(f.root.length + 1));
+        expect(lstatSync(archived).mode & 0o7777).toBe(0o600);
+        expect(readFileSync(archived)).toEqual(readFileSync(path));
+      }
+      const compiler = join(options.cwd, "node_modules/typescript/lib");
+      mkdirSync(compiler, { recursive: true, mode: 0o700 });
+      cpSync(new URL("../../node_modules/typescript/lib/typescript.js", import.meta.url), join(compiler, "typescript.js"));
+    });
+    const result = await buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies);
+    expect(Object.keys(result).sort()).toEqual(Object.keys(f.material).sort());
+    expect(result["dist/scripts/build-command.js"].toString()).toContain('runManagedCommandCli("build")');
+    for (const path of metadata) expect(lstatSync(path).mode & 0o7777).toBe(0o674);
+    expect(prepareDependencies).toHaveBeenCalledOnce();
+    expect(existsSync(join(f.extension, "dist"))).toBe(false);
+
+    writeFileSync(join(f.root, ".git/info/attributes"), ".dockerignore export-subst\n");
+    expect(f.git(["status", "--porcelain=v1"])).toBe("");
+    await expect(buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies))
+      .rejects.toThrow("Git archive/source hash mismatch");
+    expect(prepareDependencies).toHaveBeenCalledOnce();
+  });
+
   it("builds the real ESM closure from archived source with distinct private npm configuration", async () => {
     const f = fixture();
     for (const name of ["scripts/recovery-bootstrap.js", "scripts/managed-command-wrapper.ts", "scripts/build-command.ts",
