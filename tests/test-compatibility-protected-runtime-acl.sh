@@ -65,6 +65,8 @@ for (const relative of fs.readdirSync(`${repo}/.opencode/agents`, { recursive: t
   count++;
 }
 if (count !== 11) throw new Error(`Expected 11 mapped profiles, got ${count}`);
+if (mapped.includes('ingenium-llm-broker')) throw new Error('Reserved broker must remain unmapped');
+fs.copyFileSync(`${repo}/.opencode/agents/execution/ingenium-llm-broker.md`, `${root}/workspace/repo/.opencode/agents/execution/ingenium-llm-broker.md`);
 fs.writeFileSync(`${root}/expected-agents.json`, JSON.stringify(mapped));
 NODE
 cat > "$RUN_ROOT/bin/normalize-agent-profiles" <<'EOF'
@@ -194,6 +196,12 @@ for pass in 1 2; do
     for profile do
       test "$(stat -c %a "$profile")" = 644
       test "$(getfacl -cp "$profile")" = "$(printf "user::rw-\ngroup::r--\nother::r--")"
+      for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
+        runuser -u "$identity" -- test -r "$profile"
+        if runuser -u "$identity" -- test -w "$profile"; then
+          echo "ERROR: $identity can write $profile" >&2; exit 1
+        fi
+      done
     done
   ' sh {} +
   test "$(stat -c %a /tmp/agent-sentinel/outside.md)" = 600

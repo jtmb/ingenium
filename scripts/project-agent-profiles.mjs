@@ -329,7 +329,7 @@ function normalizeDirectory(directoryFd, removeWorkspaceAcls = false) {
       continue;
     }
     if (!entry.name.endsWith(".md")) continue;
-    if (entry.name === RESERVED_BROKER_PROFILE) continue;
+    if (entry.name === RESERVED_BROKER_PROFILE && !removeWorkspaceAcls) continue;
     const profile = openRegularFileAt(directoryFd, entry.name, `agent profile ${entry.name}`);
     try {
       assertExclusiveRegularFile(fstatSync(profile.fd), `agent profile ${entry.name}`);
