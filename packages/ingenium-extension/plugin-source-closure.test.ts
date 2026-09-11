@@ -12,9 +12,11 @@ const temporaryDirectories: string[] = [];
 const expectedSources = [
   "api-auth.ts",
   "auto-observer.ts",
+  "context-upload.ts",
   "coordination-outbox.ts",
   "explicit-memory.ts",
   "extension-binding.ts",
+  "external-usage.ts",
   "mcp-client.ts",
   "mcp-tool-state.ts",
   "observer-core.ts",
@@ -37,6 +39,7 @@ const expectedSources = [
   "tui-recovery.ts",
 ];
 const expectedAssets = [
+  "context-upload-codec.mjs",
   "plugin-specs.mjs",
   "ponytail/.opencode/command/ponytail-audit.md",
   "ponytail/.opencode/command/ponytail-debt.md",

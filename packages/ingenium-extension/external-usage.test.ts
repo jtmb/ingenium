@@ -60,7 +60,7 @@ describe("external completed assistant usage", () => {
     const invoke = vi.fn(async () => ({ created: false }));
     const collector = new ExternalUsageCollector("ingenium", worktree, client, invoke);
     await collector.sync("ses-usage");
-    expect(messages.mock.calls[1][0].query).toEqual({ directory: worktree, limit: 100, before: "msg-0" });
+    expect(messages).toHaveBeenNthCalledWith(2, expect.objectContaining({ query: { directory: worktree, limit: 100, before: "msg-0" } }));
     expect(invoke).toHaveBeenCalledTimes(2);
     messages.mockResolvedValue({ data: page });
     await expect(collector.sync("ses-usage")).rejects.toThrow("BINDING_REJECTED");
