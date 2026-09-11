@@ -152,16 +152,54 @@ describe("private host build installer", () => {
     expect(hash(f.target)).toBe(f.originalHash);
   });
 
-  it.each(["bin-mode", "parent-link", "target-directory", "target-hardlink", "target-relative", "target-writable"])("rejects unsafe %s", async (failure) => {
+  it.each(["bin-mode", "parent-link", "target-directory", "target-hardlink", "target-writable"])("rejects unsafe %s", async (failure) => {
     const f = fixture();
     if (failure === "bin-mode") chmodSync(f.bin, 0o777);
     if (failure === "parent-link") { renameSync(join(f.home, ".local"), join(f.home, "elsewhere")); symlinkSync(join(f.home, "elsewhere"), join(f.home, ".local")); }
     if (failure === "target-directory") { unlinkSync(f.target); mkdirSync(f.target); }
     if (failure === "target-hardlink") linkSync(f.target, join(f.home, "linked"));
     if (failure === "target-writable") chmodSync(f.target, 0o777);
-    if (failure === "target-relative") { renameSync(f.target, join(f.home, "old")); symlinkSync("../../old", f.target); }
     await expect(installHostBuild(f.head, f.options)).rejects.toThrow();
     expect(f.build).not.toHaveBeenCalled();
+  });
+
+  it("replaces an opaque relative npm symlink and restores its exact inode after post-adoption failure", async () => {
+    const link = Buffer.from("../lib/node_modules/@ingenium/extension/dist/scripts/build-command.js");
+    for (const failAfterAdoption of [false, true]) {
+      const f = fixture();
+      unlinkSync(f.target);
+      symlinkSync(link, f.target);
+      const before = lstatSync(f.target);
+      const metadata = Object.fromEntries(["dev", "ino", "uid", "gid", "mode", "nlink", "size", "mtimeMs"].map(
+        (key) => [key, before[key as keyof typeof before]],
+      ));
+      const assertOriginal = (path: string) => {
+        expect(lstatSync(path)).toMatchObject(metadata);
+        expect(readlinkSync(path, { encoding: "buffer" })).toEqual(link);
+      };
+      const afterAdoption = vi.fn(() => {
+        expect(lstatSync(f.target).isFile()).toBe(true);
+        expect(lstatSync(f.target).mode & 0o7777).toBe(0o500);
+        assertOriginal(f.manifest().backup);
+        expect(f.manifest().prior.linkBytes).toBe(link.toString("base64"));
+        expect(f.manifest().prior).not.toHaveProperty("sha256");
+        if (failAfterAdoption) throw Error("injected post-adoption failure");
+      });
+      const installation = installHostBuild(f.head, { ...f.options, afterAdoption });
+      if (failAfterAdoption) {
+        await expect(installation).rejects.toThrow("injected post-adoption failure");
+        assertOriginal(f.target);
+        expect(f.manifest().status).toBe("rolled_back");
+        expect(readdirSync(f.bin).some((name) => name.endsWith(".previous"))).toBe(false);
+      } else {
+        const installed = await installation;
+        expect(installed.status).toBe("installed");
+        expect(lstatSync(f.target).isFile()).toBe(true);
+        assertOriginal(installed.backup);
+      }
+      expect(afterAdoption).toHaveBeenCalledOnce();
+      expect(existsSync(join(f.state, "ingenium-build-install.lock"))).toBe(false);
+    }
   });
 
   it.each(["regular", "symlink", "absent"])("rolls back a prior %s target after a completed rename loses acknowledgement", async (kind) => {
@@ -229,21 +267,22 @@ describe("private host build installer", () => {
     expect(f.manifest().status).toBe("rollback_failed");
   });
 
-  it("preserves a shared prior symlink and refuses adoption if its backing bytes change", async () => {
+  it("preserves a shared prior symlink without treating its backing bytes as authority", async () => {
     const f = fixture();
     const shared = join(f.extension, "dist");
     mkdirSync(shared, { mode: 0o700 });
     const old = join(shared, "old.js");
     renameSync(f.target, old); symlinkSync(old, f.target);
     chmodSync(shared, 0o575);
-    await expect(installHostBuild(f.head, { ...f.options, build: () => {
+    const installed = await installHostBuild(f.head, { ...f.options, build: () => {
       writeFileSync(old, "external mutation");
       return f.build();
-    } })).rejects.toThrow("rollback requires reconciliation");
-    expect(readlinkSync(f.target)).toBe(old);
+    } });
+    expect(readlinkSync(installed.backup)).toBe(old);
+    expect(lstatSync(f.target).isFile()).toBe(true);
     expect(readFileSync(old, "utf8")).toBe("external mutation");
     expect(lstatSync(shared).mode & 0o7777).toBe(0o575);
-    expect(f.manifest().status).toBe("rollback_failed");
+    expect(f.manifest().status).toBe("installed");
   });
 
   it.each(["hash", "file-mode", "directory-mode", "extra-file", "manifest-key", "manifest-link", "node", "worktree", "head"])("rejects malformed private %s before entry execution", async (failure) => {

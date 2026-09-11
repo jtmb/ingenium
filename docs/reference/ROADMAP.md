@@ -10016,3 +10016,20 @@ separately required parent replacement/restart or any parent/final gate.
   `1` with `38` skipped. Extension typecheck and `git diff --check` passed.
   QA, security, commit, deploy, live install, and recovery remain pending;
   no runtime acceptance or completion claim is added.
+- **f9c deployment boundary (2026-09-11; deployment evidence only):** Full
+  revision `f9c2d3b72d95583d0b71c616b064c2f69fede226`, image
+  `sha256:6b485618cda872d504d35dae194f4a583af3b951b1fcfa6b1e57bc1ae8548fa6`,
+  container prefix `ef7205bc93ee`, healthy routes/MCP/scanner, and rollback tag
+  `ingenium-ingenium:rollback-b064d885-f9c2d3b7` were recorded. No acceptance
+  claim is added.
+- **Installer rejection and causal remediation (2026-09-11):** One installer
+  invocation failed with `Unsafe target symlink resolution` before lock,
+  manifest, release, or backup; the prior npm relative symlink inode, target,
+  and hash were unchanged. In
+  `packages/ingenium-extension/scripts/install-host-build.mjs` and
+  `packages/ingenium-extension/install-host-build.test.ts`, the prior final
+  symlink is treated as opaque owned metadata, never resolved or executed, and
+  the rename backup restores the exact inode/target. The named regression
+  `replaces an opaque relative npm symlink and restores its exact inode after
+  post-adoption failure` passed `1` with `38 skipped`. QA/security were not
+  rerun; commit, deploy, and live retry remain pending.

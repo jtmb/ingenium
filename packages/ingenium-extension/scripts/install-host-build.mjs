@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, linkSync, lstatSync, openSync,
+import { closeSync, constants, fchmodSync, fstatSync, fsyncSync, lstatSync, openSync,
   mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -193,21 +193,22 @@ export async function installHostBuild(expectedHead, {
   let target;
   let adoptionAttempted = false;
   let rollbackFailed = false;
-  let priorLinked = false;
-  const inspectTarget = (path, links = 1) => {
+  let backupAttempted = false;
+  const inspectTarget = (path) => {
     const stat = present(path);
     if (!stat) return null;
-    if (stat.uid !== owner || stat.nlink !== links) throw new Error("Unsafe existing target");
+    if (stat.uid !== owner || stat.nlink !== 1) throw new Error("Unsafe existing target");
     if (stat.isSymbolicLink()) {
-      const link = readlinkSync(path);
-      if (resolve(link) !== link || realpathSync(path) !== link) throw new Error("Unsafe target symlink resolution");
-      const parent = openDirectory(dirname(link), descriptors, owner, true);
-      const file = readRegular(`${parent.anchored}/${link.slice(dirname(link).length + 1)}`, owner);
-      checkDirectory(parent);
-      if (!same(identity(lstatSync(path)), identity(stat)) || readlinkSync(path) !== link) throw new Error("Target symlink changed");
-      return { ...identity(stat), link, sha256: file.sha256 };
+      // The prior link is rollback metadata, never authority for executable bytes.
+      const bytes = readlinkSync(path, { encoding: "buffer" });
+      const repeated = readlinkSync(path, { encoding: "buffer" });
+      const after = lstatSync(path);
+      if (!same(identity(after), identity(stat)) || after.size !== stat.size
+        || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs
+        || !repeated.equals(bytes)) throw new Error("Target symlink changed");
+      return { ...identity(stat), link: bytes.toString(), linkBytes: bytes.toString("base64") };
     }
-    const file = readRegular(path, owner, undefined, links);
+    const file = readRegular(path, owner);
     return { ...identity(stat), sha256: file.sha256 };
   };
   const releaseLock = () => {
@@ -277,14 +278,7 @@ export async function installHostBuild(expectedHead, {
       artifacts: {}, releasePath, prior, backup: prior ? join(bin.path, `.ingenium-build-${id}.previous`) : null,
       candidate: join(bin.path, `.ingenium-build-${id}.candidate`), timestamp: new Date().toISOString() };
     save("preparing");
-    if (prior) {
-      if (!same(inspectTarget(target), prior)) throw new Error("Prior target changed");
-      linkSync(target, backup);
-      priorLinked = true;
-      if (!same(inspectTarget(backup, 2), { ...prior, nlink: 2 })) throw new Error("Prior backup changed");
-      manifest.backupMetadata = prior;
-      fsyncSync(bin.fd);
-    } else manifest.backupMetadata = null;
+    manifest.backupMetadata = prior;
     save("building");
     const result = build ? await build(root.path) : await buildPrivateClosure(root.path, expectedHead,
       dirname(parent.path), verifiedSource.bytes);
@@ -348,12 +342,17 @@ export async function installHostBuild(expectedHead, {
     finally { closeSync(candidateFd); }
     candidateStat = identity(lstatSync(candidate));
     fsyncSync(bin.fd);
-    const currentPrior = inspectTarget(target, prior ? 2 : 1);
-    const expectedPrior = prior ? { ...prior, nlink: 2 } : null;
-    if (!same(currentPrior, expectedPrior) || readRegular(candidate, owner, 0o500).sha256 !== sha256(launcher)) throw new Error("Target changed before adoption");
+    if (!same(inspectTarget(target), prior) || readRegular(candidate, owner, 0o500).sha256 !== sha256(launcher)) throw new Error("Target changed before adoption");
     manifest.candidateIdentity = candidateStat;
     save("prepared");
     checkDirectory(bin); verifyArtifacts();
+    if (!same(inspectTarget(target), prior) || present(backup)) throw new Error("Prior target changed before backup");
+    if (prior) {
+      backupAttempted = true;
+      renameSync(target, backup);
+      fsyncSync(bin.fd);
+      if (present(target) || !same(inspectTarget(backup), prior)) throw new Error("Prior backup changed");
+    }
     adoptionAttempted = true;
     rename(candidate, target);
     fsyncSync(bin.fd);
@@ -371,30 +370,25 @@ export async function installHostBuild(expectedHead, {
   } catch (error) {
     try {
       // A rename can complete and still report failure: inspect the pinned directory, never replay it.
-      if (adoptionAttempted) {
-        const current = present(target);
-        if (current && same(identity(current), candidateStat)) {
-          if (prior && (!same(identity(lstatSync(backup)), identity(manifest.backupMetadata))
-            || (prior.link ? readlinkSync(backup) !== prior.link
-              : readRegular(backup, owner).sha256 !== prior.sha256))) throw new Error("Backup changed before rollback");
-          if (prior) {
+      if (backupAttempted || adoptionAttempted) {
+        const current = inspectTarget(target);
+        if (prior) {
+          if (same(inspectTarget(backup), prior)) {
+            if (current && !same(identity(current), candidateStat)) throw new Error("Unknown adoption outcome; retained backup and lock");
             try { renameSync(backup, target); } catch (failure) {
-              if (present(backup) || !same(identity(lstatSync(target)), identity(prior))) throw failure;
+              if (present(backup) || !same(inspectTarget(target), prior)) throw failure;
             }
-            priorLinked = false;
+          } else if (present(backup) || !same(current, prior)) {
+            throw new Error("Backup changed before rollback");
           }
-          else unlinkSync(target);
-          fsyncSync(bin.fd);
-          if (prior?.link ? readlinkSync(target) !== prior.link : prior
-            ? readRegular(target, owner).sha256 !== prior.sha256 : present(target) !== null) throw new Error("Rollback readback failed");
-          checkDirectory(bin);
-        } else if (!same(inspectTarget(target, priorLinked ? 2 : 1), priorLinked ? { ...prior, nlink: 2 } : prior)) {
+        } else if (current && same(identity(current), candidateStat)) {
+          unlinkSync(target);
+        } else if (current) {
           throw new Error("Unknown adoption outcome; retained backup and lock");
         }
-      }
-      if (priorLinked) {
-        if (!same(inspectTarget(backup, 2), { ...prior, nlink: 2 })) throw new Error("Prior backup changed during rollback");
-        unlinkSync(backup); priorLinked = false; fsyncSync(bin.fd);
+        fsyncSync(bin.fd);
+        if (!same(inspectTarget(target), prior)) throw new Error("Rollback readback failed");
+        checkDirectory(bin);
       }
       if (manifest && !same(inspectTarget(target), prior)) throw new Error("Pre-build host entry was not restored");
       if (manifest) save(adoptionAttempted ? "rolled_back" : "failed");
