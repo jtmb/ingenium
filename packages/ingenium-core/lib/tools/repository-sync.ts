@@ -169,7 +169,10 @@ function stable(value: unknown): string {
 }
 
 function manifestHash(input: Pick<RepositorySyncApplyInput, "docsManifest" | "resourcesManifest">): string {
-  return createHash("sha256").update(stable(input)).digest("hex");
+  return createHash("sha256").update(stable({
+    docsManifest: input.docsManifest,
+    resourcesManifest: input.resourcesManifest,
+  })).digest("hex");
 }
 
 export function applyRepositorySync(projectId: string, input: RepositorySyncApplyInput) {

@@ -224,6 +224,44 @@ describe("repository resource sync", () => {
     }
   });
 
+  it("hashes repository content independently of phase, generation, and worktree controls", () => {
+    const document = (content: string) => ({
+      path: "docs/fixture.md", content, sha256: createHash("sha256").update(content).digest("hex"),
+      fileType: "regular", isSymlink: false,
+    });
+    const docsManifest = { files: [document("# Fixture\n")] };
+    const resourcesManifest = manifest();
+    const input = { docsManifest, resourcesManifest, dryRun: true, expectedGeneration: 0, worktreeId: `worktree-${"a".repeat(64)}` };
+    const preview = repositorySync.applyRepositorySync(projectId, input);
+    expect(preview.manifestHash).toBe(hash({ docsManifest, resourcesManifest }));
+    expect(repositorySync.applyRepositorySync(projectId, { ...input, dryRun: false })).toMatchObject({
+      manifestHash: preview.manifestHash, generation: 1,
+    });
+    const next = { ...input, expectedGeneration: 1 };
+    expect(repositorySync.applyRepositorySync(projectId, next).manifestHash).toBe(preview.manifestHash);
+    expect(repositorySync.applyRepositorySync(projectId, { ...next, dryRun: false })).toMatchObject({
+      manifestHash: preview.manifestHash, generation: 2,
+    });
+    expect(repositorySync.applyRepositorySync(projectId, { ...input, worktreeId: `worktree-${"b".repeat(64)}` }).manifestHash)
+      .toBe(preview.manifestHash);
+    const current = { ...input, expectedGeneration: 2 };
+    expect(repositorySync.applyRepositorySync(projectId, { ...current, docsManifest: { files: [document("# Changed\n")] } }).manifestHash)
+      .not.toBe(preview.manifestHash);
+    const { identity, sha256: _sha256, ...semantic } = plugin();
+    const changed = { ...semantic, source: "export const fixture = false;\n" };
+    expect(repositorySync.applyRepositorySync(projectId, {
+      ...current, resourcesManifest: manifest({ plugins: [{ identity, sha256: hash(changed), ...changed }] }),
+    }).manifestHash).not.toBe(preview.manifestHash);
+    const { resourcesManifest: _resourcesManifest, ...docsOnly } = current;
+    const omitted = repositorySync.applyRepositorySync(projectId, docsOnly);
+    expect(omitted.resources).toBeUndefined();
+    expect(omitted.manifestHash).toBe(hash({ docsManifest, resourcesManifest: undefined }));
+    expect(repositorySync.applyRepositorySync(projectId, { ...docsOnly, resourcesManifest: undefined }).manifestHash)
+      .toBe(omitted.manifestHash);
+    expect(() => repositorySync.applyRepositorySync(projectId, { ...docsOnly, resourcesManifest: null }))
+      .toThrow(repositoryResources.RepositoryResourcesManifestError);
+  });
+
   it("applies generation CAS per authenticated worktree identity and reports the bounded current generation", () => {
     const worktreeId = `worktree-${"a".repeat(64)}`;
     const input = {
