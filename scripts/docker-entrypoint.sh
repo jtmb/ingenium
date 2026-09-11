@@ -715,6 +715,11 @@ for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
     secure_persistent_path file "$credential_path" - - 0600
   done
 done
+# Protect every worktree before malformed profiles can abort startup.
+for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
+  # Directory access grants remain; inherited/file ACLs would defeat exact profile modes.
+  /app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"
+done
 # Seed OpenCode config with Ingenium MCP on first start
 OC_CONFIG="/home/ingenium-opencode/.config/opencode/opencode.jsonc"
 if [ ! -f "$OC_CONFIG" ]; then
@@ -834,7 +839,7 @@ done
 # Mounted repositories can retain historical root-owned mode-0600 profiles.
 # Repair only regular non-symlink Markdown profiles before appuser runs
 # repository initialization; the reserved broker remains deployment-read-only.
-/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"
+/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"
 fi
 
 # Persistent setup must not weaken or replace any executable root-owned startup artifact.
