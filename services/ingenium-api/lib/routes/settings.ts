@@ -152,7 +152,13 @@ settingsRouter.post("/", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "key and value are required" } });
     return;
   }
-  settings.setSetting(projectId, key, value);
+  if (key === "context_auto_upload_enabled" || key === "context_upload_last_sync") {
+    try { settings.setSetting(projectId, key, value); }
+    catch {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid Context upload setting." } });
+      return;
+    }
+  } else settings.setSetting(projectId, key, value);
 
   res.json({
     data: isSensitiveSettingKey(key)

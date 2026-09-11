@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./context-upload-codec": "./context-upload-codec.mjs",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -61,7 +62,7 @@
     "ingenium-coordination-reset": "./dist/scripts/coordination-reset.js",
     "ingenium-opencode": "./dist/scripts/opencode.js"
   },
-  "files": ["dist/", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/"],
+  "files": ["dist/", "context-upload-codec.mjs", "context-upload-codec.d.mts", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/"],
   "scripts": {
     "build": "node scripts/build-distributions.mjs",
     "test": "vitest run",

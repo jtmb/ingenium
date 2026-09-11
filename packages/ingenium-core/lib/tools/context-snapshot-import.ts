@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import { redactContextText } from "@ingenium/extension/context-upload-codec";
+import { getSetting } from "./settings.js";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import {
   ContextConversationSchema,
@@ -17,6 +19,7 @@ import type { ContextConversationSummary } from "./context-conversations.js";
 
 export type ContextSnapshotImportErrorCode =
   | "INVALID_CONTEXT_SNAPSHOT"
+  | "CONTEXT_UPLOAD_DISABLED"
   | "SNAPSHOT_HASH_MISMATCH"
   | "PROJECT_NOT_FOUND"
   | "CONVERSATION_NOT_FOUND"
@@ -55,6 +58,8 @@ interface SnapshotEntry {
 }
 
 interface SnapshotInput {
+  startSequence?: number;
+  automatic?: boolean;
   sourceKey: string;
   sourceSessionId?: string;
   title: string;
@@ -138,18 +143,34 @@ function normalizeTags(tags: string[]): string[] {
 function sourceFingerprint(sourceKey: string, entry: SnapshotEntry): string {
   if (entry.fingerprint !== undefined) return entry.fingerprint;
   if (entry.sourceMessageId === undefined) throw new ContextSnapshotImportError("INVALID_CONTEXT_SNAPSHOT");
-  return sha256(`context-conversation-snapshot-source-message-v1\u0000${sourceKey}\u0000${entry.sourceMessageId}`);
+  return sha256(`context-conversation-snapshot-source-message-v1\u0000${sourceKey}\u0000${redactContextText(entry.sourceMessageId)}`);
+}
+
+function redactMetadata(value: ContextMetadata): ContextMetadata {
+  function visit(value: unknown): unknown {
+    if (typeof value === "string") return redactContextText(value);
+    if (Array.isArray(value)) return value.map(visit);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [redactContextText(key), visit(entry)]));
+    return value;
+  }
+  return visit(value) as ContextMetadata;
 }
 
 function normalizeUnsignedSnapshot(input: unknown): Omit<NormalizedSnapshot, "snapshotHash"> {
   const parsed = ContextConversationSnapshotUnsignedInputSchema.safeParse(input);
   if (!parsed.success) throw new ContextSnapshotImportError("INVALID_CONTEXT_SNAPSHOT");
   const value = parsed.data as Omit<SnapshotInput, "snapshotHash">;
-  const entries = value.entries.map((entry) => ({
-    ...entry,
-    contentHash: sha256(entry.content),
-    sourceFingerprint: sourceFingerprint(value.sourceKey, entry),
-  }));
+  if ((value.automatic || value.sourceKey.startsWith("context-upload-file:"))
+    && (value.sourceKey !== `context-upload-file:${value.sourceSessionId}` || !value.sourceSessionId
+      || value.sourceSessionId.length > 128)) throw new ContextSnapshotImportError("INVALID_CONTEXT_SNAPSHOT");
+  value.title = redactContextText(value.title);
+  value.tags = value.tags.map(redactContextText);
+  value.metadata = redactMetadata(value.metadata);
+  const entries = value.entries.map((entry) => {
+    const content = redactContextText(entry.content);
+    return { ...entry, metadata: redactMetadata(entry.metadata), content,
+      contentHash: sha256(content), sourceFingerprint: sourceFingerprint(value.sourceKey, entry) };
+  });
   if (new Set(entries.map((entry) => entry.sourceFingerprint)).size !== entries.length) {
     throw new ContextSnapshotImportError("INVALID_CONTEXT_SNAPSHOT");
   }
@@ -164,6 +185,8 @@ function normalizeUnsignedSnapshot(input: unknown): Omit<NormalizedSnapshot, "sn
 function snapshotHashPayload(snapshot: Omit<NormalizedSnapshot, "snapshotHash">): object {
   return {
     version: "context-conversation-snapshot-v1",
+    ...(snapshot.startSequence === undefined ? {} : { startSequence: snapshot.startSequence }),
+    ...(snapshot.automatic === undefined ? {} : { automatic: snapshot.automatic }),
     sourceKey: snapshot.sourceKey,
     sourceSessionId: snapshot.sourceSessionId,
     title: snapshot.title,
@@ -478,8 +501,9 @@ function appendSnapshotEntries(
       source_fingerprint, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  for (let sequence = startSequence; sequence < snapshot.entries.length; sequence += 1) {
-    const entry = snapshot.entries[sequence]!;
+  const offset = snapshot.startSequence ?? 0;
+  for (let sequence = startSequence; sequence < offset + snapshot.entries.length; sequence += 1) {
+    const entry = snapshot.entries[sequence - offset]!;
     const messageId = randomUUID();
     const metadata = messageMetadata(snapshot, entry, sequence);
     const createdAt = entry.createdAt ?? importedAt;
@@ -563,6 +587,9 @@ export function importContextConversationSnapshot(
       prefixQueryMs = toBoundedContextSnapshotTimingMs(performance.now() - prefixQueryStartedAt);
     };
     const organizationId = requireProject(db, projectId);
+    if (snapshot.automatic && getSetting(projectId, "context_auto_upload_enabled") !== "true") {
+      throw new ContextSnapshotImportError("CONTEXT_UPLOAD_DISABLED");
+    }
     const existingMappingRow = db.prepare(
       `SELECT * FROM context_conversation_sources
        WHERE project_id = ? AND source_key = ?`,
@@ -574,6 +601,39 @@ export function importContextConversationSnapshot(
       if (mapping.source_session_id !== snapshot.sourceSessionId
         || (snapshot.existingConversationId !== undefined && snapshot.existingConversationId !== mapping.conversation_id)) {
         throw new ContextSnapshotImportError("SOURCE_KEY_REUSED");
+      }
+      if (snapshot.startSequence !== undefined) {
+        const start = snapshot.startSequence;
+        const end = start + snapshot.entries.length;
+        if (!Number.isSafeInteger(end)) throw new ContextSnapshotImportError("INVALID_CONTEXT_SNAPSHOT");
+        if (conversationSummary(db, projectId, mapping.conversation_id).revision !== mapping.entry_count) {
+          throw new ContextSnapshotImportError("SNAPSHOT_DIVERGED");
+        }
+        if (start > mapping.entry_count) throw new ContextSnapshotImportError("SNAPSHOT_DIVERGED");
+        const overlap = Math.min(end, mapping.entry_count) - start;
+        const evidence = db.prepare(`SELECT s.sequence, s.role, s.content_hash, s.source_fingerprint,
+          m.content_hash AS message_hash FROM context_conversation_source_messages s
+          JOIN context_messages m ON m.project_id = s.project_id AND m.id = s.message_id
+          WHERE s.project_id = ? AND s.source_id = ? AND s.sequence >= ? AND s.sequence < ?
+          ORDER BY s.sequence`).all(projectId, mapping.id, start, start + overlap) as Array<{
+            sequence: number; role: string; content_hash: string; source_fingerprint: string; message_hash: string;
+          }>;
+        if (evidence.length !== overlap || evidence.some((row, index) => {
+          const entry = snapshot.entries[index]!;
+          return row.sequence !== start + index || row.role !== entry.role || row.content_hash !== entry.contentHash
+            || row.message_hash !== entry.contentHash || row.source_fingerprint !== entry.sourceFingerprint;
+        })) throw new ContextSnapshotImportError("SNAPSHOT_DIVERGED");
+        const appended = Math.max(0, end - mapping.entry_count);
+        if (appended > 0) {
+          requireActiveConversation(db, projectId, mapping.conversation_id);
+          appendSnapshotEntries(db, projectId, mapping.id, mapping.conversation_id, snapshot, mapping.entry_count, importedAt);
+          db.prepare(`UPDATE context_conversation_sources SET snapshot_hash = ?, entry_count = ?, updated_at = ?
+            WHERE project_id = ? AND id = ?`).run(snapshot.snapshotHash, end, importedAt, projectId, mapping.id);
+        }
+        finishPrefixQueryTiming();
+        return { conversation: conversationSummary(db, projectId, mapping.conversation_id), snapshotHash: snapshot.snapshotHash,
+          appended, revision: Math.max(end, mapping.entry_count), created: false, adopted: false,
+          idempotent: appended === 0, written: appended > 0 };
       }
       const messages = conversationMessages(db, projectId, mapping.conversation_id);
       const evidence = sourceEvidence(db, projectId, mapping.id);
@@ -624,6 +684,7 @@ export function importContextConversationSnapshot(
     }
 
     let conversationId: string;
+    if ((snapshot.startSequence ?? 0) !== 0) throw new ContextSnapshotImportError("SNAPSHOT_DIVERGED");
     let existingMessages: ContextMessage[] = [];
     let created = false;
     const adopted = snapshot.existingConversationId !== undefined;

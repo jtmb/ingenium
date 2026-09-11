@@ -2,10 +2,10 @@
 
 /**
  * Create one complete OpenCode export that is safe for context_upload_file.
- * Export stdout is written directly to a private file descriptor so large
- * exports never pass through a process buffer or command-substitution result.
+ * Raw stdout stays in bounded memory; only redacted visible text reaches disk.
  */
 import { spawn } from "node:child_process";
+import { visibleContextExport } from "../packages/ingenium-extension/context-upload-codec.mjs";
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -19,6 +19,7 @@ import {
   readFileSync,
   realpathSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -261,18 +262,17 @@ function terminateProcessGroup(child, signal) {
   }
 }
 
-function runExport(worktree, session, descriptor, timeoutMs) {
+function runExport(worktree, session, timeoutMs) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn("opencode", ["export", session], {
+      child = spawn("opencode", ["export", session, "--pure"], {
         cwd: worktree,
         // POSIX descendants share a group so timeout cleanup reaches helpers;
         // Windows falls back to terminating the direct child.
         detached: process.platform !== "win32",
-        // Keep session arguments literal and stream stdout to the validated file.
         shell: false,
-        stdio: ["ignore", descriptor, "ignore"],
+        stdio: ["ignore", "pipe", "ignore"],
         // This non-interactive helper must not open a console window on Windows.
         windowsHide: true,
       });
@@ -283,6 +283,17 @@ function runExport(worktree, session, descriptor, timeoutMs) {
 
     let settled = false;
     let timedOut = false;
+    let oversized = false;
+    let size = 0;
+    const chunks = [];
+    child.stdout.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_EXPORT_BYTES) {
+        oversized = true;
+        chunks.length = 0;
+        terminateProcessGroup(child, "SIGKILL");
+      } else if (!oversized) chunks.push(chunk);
+    });
     let forceKillTimer;
     const settle = (result) => {
       if (settled) return;
@@ -300,7 +311,8 @@ function runExport(worktree, session, descriptor, timeoutMs) {
     }, timeoutMs);
 
     child.once("error", () => settle({ code: null, signal: null, spawned: false, timedOut }));
-    child.once("close", (code, signal) => settle({ code, signal, spawned: true, timedOut }));
+    child.once("close", (code, signal) => settle({ code, signal, spawned: true, timedOut,
+      oversized, bytes: oversized ? undefined : Buffer.concat(chunks) }));
   });
 }
 
@@ -369,9 +381,15 @@ async function main() {
     const outputPath = join(prepareUploadDirectory(worktree), outputBasename);
     owned = createOwnedOutputFile(outputPath);
 
-    const result = await runExport(worktree, session, owned.descriptor, arguments_.timeoutMs);
-    closeOwnedDescriptor(owned);
+    const result = await runExport(worktree, session, arguments_.timeoutMs);
+    if (result.oversized) fail("EXPORT_TOO_LARGE");
     if (!result.spawned || result.timedOut || result.code !== 0 || result.signal !== null) fail("EXPORT_FAILED");
+    let visible;
+    try {
+      visible = visibleContextExport(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.bytes)), session, worktree);
+    } catch { fail("INVALID_EXPORT"); }
+    writeFileSync(owned.descriptor, JSON.stringify(visible));
+    closeOwnedDescriptor(owned);
 
     const verified = validateCompleteExport(owned);
     process.stdout.write(`${JSON.stringify({

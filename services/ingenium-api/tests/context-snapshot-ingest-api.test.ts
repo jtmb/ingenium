@@ -15,6 +15,8 @@ import {
 import { appendContextMessage, createContextConversation } from "ingenium-core/lib/tools/context-conversations";
 import { calculateContextConversationSnapshotHash } from "ingenium-core/lib/tools/context-snapshot-import";
 import { projects } from "ingenium-core";
+import { getSetting, setSetting } from "ingenium-core/lib/tools/settings";
+import { settingsRouter } from "../lib/routes/settings.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import {
@@ -166,6 +168,7 @@ beforeEach(async () => {
   app.use(express.json({ limit: "2mb" }));
   app.use(authMiddleware);
   app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
+  app.use("/api/v1/settings", settingsRouter);
   app.use(errorHandler);
   server = createServer(app);
   origin = await listenOnLoopback(server);
@@ -188,6 +191,26 @@ afterEach(async () => {
 });
 
 describe("protected context snapshot ingest API", () => {
+  it("enforces opt-in for each batch, persists sync status and rejects invalid settings", async () => {
+    const project = projects.getProject(primaryProjectName)!;
+    const source = { sourceKey: "context-upload-file:ses_exact", sourceSessionId: "ses_exact", automatic: true };
+    const initial = snapshot(makeEntries(1), { ...source, startSequence: 0 });
+    const send = (body: unknown) => postSnapshot(body, { authorization: `Bearer ${API_TOKEN}` });
+    expect((await send(initial)).status).toBe(409);
+    const save = (value: string) => fetch(`${origin}/api/v1/settings?project=${primaryProjectName}`, { method: "POST",
+      headers: { ...compatibilityAuthHeaders(API_TOKEN), "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "context_auto_upload_enabled", value }) });
+    expect((await save("yes")).status).toBe(422);
+    expect((await save("true")).status).toBe(200);
+    expect((await send(initial)).status).toBe(201);
+    const next = snapshot(makeEntries(1, 1), { ...source, startSequence: 1 });
+    expect((await send(next)).status).toBe(200);
+    expect((await (await send(initial)).json()).data).toMatchObject({ revision: 2, appended: 0, idempotent: true });
+    expect(JSON.parse(getSetting(project.id, "context_upload_last_sync")!)).toMatchObject({ status: "synced", session: "ses_exact", revision: 2 });
+    expect(getSetting(projects.getProject(secondaryProjectName)!.id, "context_auto_upload_enabled")).toBeUndefined();
+    expect((await save("false")).status).toBe(200);
+    expect((await send(snapshot(makeEntries(1, 2), { ...source, startSequence: 2 }))).status).toBe(409);
+  });
   it("imports 1,001 messages in one request, replays idempotently, and appends a verified suffix", async () => {
     const initial = snapshot(makeEntries(1_001));
     const firstResponse = await postSnapshot(gzipSync(Buffer.from(JSON.stringify(initial))), {

@@ -3,6 +3,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, rea
 import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
+import { ContextAutoUploader } from "./context-upload.js";
 import {
   coordinationCredentialPurpose,
   ExtensionBindingError,
@@ -892,6 +893,7 @@ function mergeOperationalMemory(
 }
 
 export class SessionCoordinator {
+  private readonly contextUploader: ContextAutoUploader;
   private readonly binding: ExtensionBinding;
   private readonly callTool?: typeof callMcpTool;
   private readonly openClient: (worktree: string) => Promise<McpToolClient>;
@@ -942,6 +944,7 @@ export class SessionCoordinator {
     this.preflight = dependencies.preflight ?? preflightApiAuthentication;
     this.request = dependencies.request ?? fetch;
     this.explicitMemory = new ExplicitMemoryContextReader(this.binding, (name, args) => this.invoke(name, args));
+    this.contextUploader = new ContextAutoUploader(this.binding.project, ctx.worktree, ctx.client, (name, args) => this.invoke(name, args));
     this.credentialFingerprint = this.readCredentialFingerprint();
     try {
       this.outbox = dependencies.outbox ?? new CoordinationOutbox(ctx.worktree, this.now);
@@ -2375,6 +2378,7 @@ export class SessionCoordinator {
           return;
         }
         if (event.type === "session.idle") {
+          if (this.binding.audience === "mcp") await this.contextUploader.sync(sessionId);
           await this.publishTranscript(sessionId).catch(() => this.warning());
           if (await this.heartbeatSession(sessionId)) {
             await this.publishSnapshot(sessionId, (state) => {

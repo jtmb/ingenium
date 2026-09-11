@@ -16,6 +16,8 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { performance } from "node:perf_hooks";
+import { randomUUID } from "node:crypto";
+import { calculateContextConversationSnapshotHash } from "../../../packages/ingenium-core/lib/tools/context-snapshot-import.js";
 
 const mockApi = {
   postOctetStream: vi.fn(),
@@ -48,6 +50,16 @@ function fixturePath(name: string): string {
 
 function writeUpload(name: string, content: string | Uint8Array, mode = 0o600): string {
   const path = fixturePath(name);
+  if (name.endsWith(".json") && typeof content === "string") {
+    try {
+      const value = JSON.parse(content);
+      if (value.info && Array.isArray(value.messages)) {
+        value.info = { ...value.info, id: session, directory: worktree };
+        for (const message of value.messages) message.info.sessionID = session;
+        content = JSON.stringify(value);
+      }
+    } catch { /* Malformed fixtures deliberately exercise parsing failures. */ }
+  }
   writeFileSync(path, content, { mode });
   chmodSync(path, mode);
   return path;
@@ -65,12 +77,13 @@ function writeGeneratedLargeOpenCodeExport(name: string): string {
   const ignoredPayload = "large non-visible payload ".padEnd(36 * 1024, "x");
   let first = true;
   const writeMessage = (message: unknown) => {
+    (message as { info: Record<string, unknown> }).info.sessionID = session;
     writeSync(descriptor, `${first ? "" : ","}${JSON.stringify(message)}`);
     first = false;
   };
 
   try {
-    writeSync(descriptor, '{"info":{"id":"large-export"},"messages":[');
+    writeSync(descriptor, `{"info":${JSON.stringify({ id: session, directory: worktree })},"messages":[`);
     for (let index = 0; index < 500; index += 1) {
       writeMessage({
         info: { id: `large-user-${index}`, role: "user" },
@@ -251,6 +264,51 @@ afterEach(() => {
 });
 
 describe("context file upload", () => {
+  it("redacts before fingerprints and rejects mismatched exported session identity", () => {
+    const prepare = (value: string) => prepareContextUploadSnapshot(project, session, writeUpload("redacted.json", JSON.stringify({
+      info: {}, messages: [{ info: { id: "m1", role: "user" }, parts: [{ type: "text", text: `api_key=${value}` }] }],
+    })));
+    const first = prepare(randomUUID());
+    const second = prepare(randomUUID());
+    expect(first.sourceFileHash).toBe(second.sourceFileHash);
+    expect(first.snapshotHash).toBe(second.snapshotHash);
+    const { snapshotHash, ...unsigned } = snapshotBody(first.bytes);
+    expect(snapshotHash).toBe(calculateContextConversationSnapshotHash(unsigned));
+    const mismatch = fixturePath("mismatch.json");
+    writeFileSync(mismatch, JSON.stringify({ info: { id: "other", directory: worktree }, messages: [] }), { mode: 0o600 });
+    expect(() => prepareContextUploadSnapshot(project, session, mismatch)).toThrow();
+  });
+
+  it("batches complete large visible messages without truncation and stops on an uncertain request", async () => {
+    const text = "Unicode 雪😀 and escaped \"text\"\n".repeat(330_000);
+    const input = writeUpload("large-visible.json", JSON.stringify({ info: {}, messages: [
+      { info: { id: "m1", role: "user" }, parts: [{ type: "text", text }] },
+    ] }));
+    const prepared = prepareContextUploadSnapshot(project, session, input);
+    expect(prepared.batches.length).toBeGreaterThan(1);
+    let sequence = 0;
+    let complete = "";
+    for (const bytes of prepared.batches) {
+      expect(bytes.byteLength).toBeLessThanOrEqual(CONTEXT_UPLOAD_MAX_FILE_BYTES);
+      const { snapshotHash, ...unsigned } = snapshotBody(bytes);
+      expect(unsigned.startSequence).toBe(sequence);
+      expect(snapshotHash).toBe(calculateContextConversationSnapshotHash(unsigned));
+      const entries = unsigned.entries as Array<{ content: string }>;
+      complete += entries.map((entry) => entry.content).join("");
+      sequence += entries.length;
+    }
+    expect(complete === text).toBe(true);
+    mockApi.postOctetStream.mockResolvedValueOnce({ ok: true, data: { appended: 1 } }).mockRejectedValueOnce(new Error("connection lost"));
+    expect(resultBody(await uploadContextFile(project, session, input, {}, project))).toEqual({ error: { code: "CONTEXT_UPLOAD_UNAVAILABLE" } });
+    expect(mockApi.postOctetStream).toHaveBeenCalledTimes(2);
+  });
+
+  it("carries all entries beyond the per-request entry budget", () => {
+    const entries = Array.from({ length: 10_001 }, (_, index) => ({ id: `m${index}`, role: "user", content: "visible" }));
+    const prepared = prepareContextUploadSnapshot(project, session, writeUpload("many.json", JSON.stringify({ entries })));
+    expect(prepared.entryCount).toBe(10_001);
+    expect(prepared.batches.map((bytes) => (snapshotBody(bytes).entries as unknown[]).length)).toEqual([10_000, 1]);
+  });
   it("filters 1,000+ OpenCode export messages to ordered visible user/complete-assistant text and posts one snapshot", async () => {
     const messages: unknown[] = [];
     for (let index = 0; index < 500; index += 1) {

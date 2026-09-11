@@ -3,7 +3,7 @@
  *
  * The MCP process is allowed to read only an owner-private file from the
  * launcher-bound project's dedicated context-upload directory. The resulting
- * complete snapshot is sent once to the API; this module never writes Context
+ * redacted snapshot is sent in bounded batches; this module never writes Context
  * entries or talks to the database directly.
  */
 import { createHash } from "node:crypto";
@@ -21,6 +21,7 @@ import {
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 import { api } from "../client.js";
+import { redactContextText, visibleContextExport } from "@ingenium/extension/context-upload-codec";
 
 export const CONTEXT_UPLOAD_MAX_FILE_BYTES = 8 * 1024 * 1024;
 /** OpenCode CLI exports include non-visible diagnostic payloads before filtering. */
@@ -67,6 +68,7 @@ export interface PreparedContextUploadSnapshot {
   snapshotHash: string;
   entryCount: number;
   bytes: Uint8Array;
+  batches: Uint8Array[];
 }
 
 interface ContextUploadTiming {
@@ -84,7 +86,6 @@ interface PreparedContextUpload {
 
 interface ProtectedFileRead {
   bytes: Uint8Array;
-  sourceFileHash: string;
 }
 
 export type ContextUploadErrorCode =
@@ -133,7 +134,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function boundedString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length <= CONTEXT_UPLOAD_MAX_FILE_BYTES
+  return typeof value === "string" && value.length <= CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES
     ? value
     : undefined;
 }
@@ -312,29 +313,25 @@ function verifyFileParents(root: string, filePath: string): void {
 }
 
 /**
- * Read exactly the initially fstat'd size from one descriptor while producing
- * the source hash. The snapshot needs these bytes to parse, so this is its one
- * source-sized allocation.
+ * Read exactly the initially fstat'd size. Raw bytes must never be fingerprinted.
  */
-function readAndHashDescriptor(descriptor: number, size: number): ProtectedFileRead {
+function readDescriptor(descriptor: number, size: number): ProtectedFileRead {
   const bytes = Buffer.allocUnsafe(size);
-  const hash = createHash("sha256");
   let offset = 0;
   while (offset < size) {
     const bytesRead = readSync(descriptor, bytes, offset, size - offset, offset);
     if (!Number.isSafeInteger(bytesRead) || bytesRead <= 0 || bytesRead > size - offset) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    hash.update(bytes.subarray(offset, offset + bytesRead));
     offset += bytesRead;
   }
-  return { bytes, sourceFileHash: hash.digest("hex") };
+  return { bytes };
 }
 
-/** Re-hash the same open descriptor without allocating another source-sized buffer. */
-function hashDescriptorStream(descriptor: number, size: number): string {
+/** Compare bytes without producing a fingerprint of unredacted input. */
+function verifyDescriptorStream(descriptor: number, original: Uint8Array): void {
+  const size = original.byteLength;
   const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size));
-  const hash = createHash("sha256");
   let offset = 0;
   while (offset < size) {
     const expected = Math.min(chunk.byteLength, size - offset);
@@ -342,10 +339,11 @@ function hashDescriptorStream(descriptor: number, size: number): string {
     if (!Number.isSafeInteger(bytesRead) || bytesRead <= 0 || bytesRead > expected) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    hash.update(chunk.subarray(0, bytesRead));
+    if (!chunk.subarray(0, bytesRead).equals(original.subarray(offset, offset + bytesRead))) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
+    }
     offset += bytesRead;
   }
-  return hash.digest("hex");
 }
 
 /** Read the regular file through one O_NOFOLLOW descriptor after pre/post checks. */
@@ -371,21 +369,18 @@ function readProtectedUploadFile(project: string, inputPath: string, maxBytes: n
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
     if (opened.size > BigInt(maxBytes)) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
-    const source = readAndHashDescriptor(descriptor, Number(opened.size));
+    const source = readDescriptor(descriptor, Number(opened.size));
     const afterRead = fstatSync(descriptor, { bigint: true });
     if (!isPrivateRegularFile(afterRead) || !equalFileIdentity(opened, afterRead)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    const secondHash = hashDescriptorStream(descriptor, Number(opened.size));
+    verifyDescriptorStream(descriptor, source.bytes);
     const finalStat = fstatSync(descriptor, { bigint: true });
     if (!isPrivateRegularFile(finalStat) || !equalFileIdentity(opened, finalStat)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
     if (source.bytes.byteLength > maxBytes || source.bytes.byteLength !== Number(opened.size)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
-    }
-    if (source.sourceFileHash !== secondHash) {
-      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
     return source;
   } catch (error) {
@@ -517,7 +512,7 @@ function decodeUtf8(bytes: Uint8Array): string {
   }
 }
 
-function parseSourceFile(filePath: string, bytes: Uint8Array): { format: UploadFormat; entries: RawEntry[] } {
+function parseSourceFile(filePath: string, bytes: Uint8Array, session: string, worktree: string): { format: UploadFormat; entries: RawEntry[]; automatic?: boolean } {
   const text = decodeUtf8(bytes);
   const extension = extname(filePath).toLowerCase();
   if (extension === ".jsonl" || extension === ".ndjson") {
@@ -532,7 +527,8 @@ function parseSourceFile(filePath: string, bytes: Uint8Array): { format: UploadF
     }
     const record = asRecord(parsed);
     if (record && isRecord(record.info) && Array.isArray(record.messages)) {
-      return { format: "opencode", entries: parseOpenCodeMessages(record.messages) };
+      const visible = visibleContextExport(record, session, worktree);
+      return { format: "opencode", entries: parseOpenCodeMessages(visible.messages), automatic: visible.info.contextUploadAutomatic };
     }
     if (bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
@@ -546,7 +542,8 @@ function parseSourceFile(filePath: string, bytes: Uint8Array): { format: UploadF
         const parsed = JSON.parse(text);
         const record = asRecord(parsed);
         if (record && isRecord(record.info) && Array.isArray(record.messages)) {
-          return { format: "opencode", entries: parseOpenCodeMessages(record.messages) };
+          const visible = visibleContextExport(record, session, worktree);
+          return { format: "opencode", entries: parseOpenCodeMessages(visible.messages), automatic: visible.info.contextUploadAutomatic };
         }
         return { format: "json", entries: parseSimpleJson(parsed) };
       } catch {
@@ -567,7 +564,7 @@ function splitText(content: string): string[] {
     if (end < content.length && /[\uD800-\uDBFF]/.test(content.charAt(end - 1))) end -= 1;
     if (end <= cursor) end = Math.min(content.length, cursor + CONTEXT_UPLOAD_MAX_MESSAGE_CHARS);
     const segment = content.slice(cursor, end);
-    if (segment.trim().length > 0) segments.push(segment);
+    segments.push(segment);
     cursor = end;
   }
   return segments;
@@ -576,13 +573,10 @@ function splitText(content: string): string[] {
 function snapshotEntries(session: string, raw: RawEntry[]): SnapshotEntry[] {
   const entries: SnapshotEntry[] = [];
   for (let sourceIndex = 0; sourceIndex < raw.length; sourceIndex += 1) {
-    const entry = raw[sourceIndex]!;
-    const sourceIdentity = entry.sourceId ?? `${sourceIndex}:${entry.role}:${sha256(entry.content)}`;
+    const entry = { ...raw[sourceIndex]!, content: redactContextText(raw[sourceIndex]!.content) };
+    const sourceIdentity = entry.sourceId ? redactContextText(entry.sourceId) : `${sourceIndex}:${entry.role}:${sha256(entry.content)}`;
     const chunks = splitText(entry.content);
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-      if (entries.length >= CONTEXT_UPLOAD_MAX_ENTRIES) {
-        throw new ContextUploadFileError("CONTEXT_UPLOAD_SNAPSHOT_TOO_LARGE");
-      }
       entries.push({
         role: entry.role,
         content: chunks[chunkIndex]!,
@@ -644,9 +638,13 @@ function snapshotHash(
   priority: number,
   metadata: Record<string, string>,
   entries: SnapshotEntry[],
+  startSequence?: number,
+  automatic?: boolean,
 ): string {
   const payload = {
     version: "context-conversation-snapshot-v1",
+    ...(startSequence === undefined ? {} : { startSequence }),
+    ...(automatic === undefined ? {} : { automatic }),
     sourceKey,
     sourceSessionId,
     title,
@@ -683,41 +681,62 @@ function prepareContextUpload(
   );
 
   const parseFilterSnapshotPreparationStartedAt = performance.now();
-  const parsed = parseSourceFile(safePath, source.bytes);
+  const root = resolveVerifiedUploadRoot(safeProject, safePath);
+  const parsed = parseSourceFile(safePath, source.bytes, safeSourceSession, resolve(root, "../.."));
   if (parsed.format !== "opencode" && source.bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
     throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
   }
   const entries = snapshotEntries(safeSourceSession, parsed.entries);
   if (entries.length === 0) throw new ContextUploadFileError("CONTEXT_UPLOAD_EMPTY");
   const sourceKey = `${SOURCE_KEY_PREFIX}${safeSourceSession}`;
-  const tags = normalizedTags(options.tags);
+  const tags = normalizedTags(options.tags?.map(redactContextText));
   const priority = normalizedPriority(options.priority);
   const metadata = { importer: "context_upload_file" };
-  const hash = snapshotHash(sourceKey, safeSourceSession, safeSourceSession, tags, priority, metadata, entries);
-  const request = {
-    sourceKey,
-    sourceSessionId: safeSourceSession,
-    title: safeSourceSession,
-    ...(options.conversationId === undefined ? {} : { existingConversationId: options.conversationId }),
-    entries,
-    tags,
-    priority,
-    metadata,
-    snapshotHash: hash,
+  const makeBatch = (batch: SnapshotEntry[], startSequence: number) => {
+    const hash = snapshotHash(sourceKey, safeSourceSession, safeSourceSession, tags, priority, metadata, batch, startSequence, parsed.automatic);
+    return Buffer.from(JSON.stringify({
+      startSequence,
+      ...(parsed.automatic === undefined ? {} : { automatic: parsed.automatic }),
+      sourceKey,
+      sourceSessionId: safeSourceSession,
+      title: safeSourceSession,
+      ...(options.conversationId === undefined ? {} : { existingConversationId: options.conversationId }),
+      entries: batch,
+      tags,
+      priority,
+      metadata,
+      snapshotHash: hash,
+    }), "utf8");
   };
-  const bytes = Buffer.from(JSON.stringify(request), "utf8");
-  if (bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
-    throw new ContextUploadFileError("CONTEXT_UPLOAD_SNAPSHOT_TOO_LARGE");
+  const batches: Uint8Array[] = [];
+  let batch: SnapshotEntry[] = [];
+  let startSequence = 0;
+  let batchBytes = 0;
+  for (const entry of entries) {
+    const size = Buffer.byteLength(JSON.stringify(entry));
+    if (batch.length && (batchBytes + size > 4 * 1024 * 1024 || batch.length === CONTEXT_UPLOAD_MAX_ENTRIES)) {
+      batches.push(makeBatch(batch, startSequence));
+      startSequence += batch.length;
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(entry);
+    batchBytes += size + 1;
   }
+  batches.push(makeBatch(batch, startSequence));
+  if (batches.some((bytes) => bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES)) throw new ContextUploadFileError("CONTEXT_UPLOAD_SNAPSHOT_TOO_LARGE");
+  const bytes = batches[0]!;
+  const hash = JSON.parse(Buffer.from(batches.at(-1)!).toString("utf8")).snapshotHash as string;
   return {
     snapshot: {
       format: parsed.format,
-      sourceFileHash: source.sourceFileHash,
+      sourceFileHash: sha256(JSON.stringify(entries)),
       sourceKey,
       sourceSessionId: safeSourceSession,
       snapshotHash: hash,
       entryCount: entries.length,
       bytes,
+      batches,
     },
     pathOpenStatReadMs,
     parseFilterSnapshotPreparationMs: boundedElapsedMs(
@@ -813,7 +832,7 @@ function uploadTimingMetadata(timing: ContextUploadTiming, data: unknown) {
 }
 
 /**
- * Validate launcher binding, create one complete request body, and submit it
+ * Validate launcher binding, create complete bounded batches, and submit them
  * through the raw protected API boundary. Response content is never relayed.
  */
 export async function uploadContextFile(
@@ -835,15 +854,21 @@ export async function uploadContextFile(
   }
 
   try {
-    // This is intentionally the only Context API write made by this tool.
     const apiRequestStartedAt = performance.now();
-    const response = await api.settled.postOctetStream(
-      CONTEXT_UPLOAD_SNAPSHOT_PATH,
-      prepared.snapshot.bytes,
-      { project },
-    );
+    let data: unknown;
+    let appended = 0;
+    for (const bytes of prepared.snapshot.batches) {
+      const response = await api.settled.postOctetStream(
+        CONTEXT_UPLOAD_SNAPSHOT_PATH,
+        bytes,
+        { project },
+      );
+      if (!response.ok) return safeResultError("CONTEXT_UPLOAD_REJECTED");
+      data = response.data;
+      const count = asRecord(data)?.appended;
+      if (typeof count === "number") appended += count;
+    }
     const apiRequestMs = boundedElapsedMs(apiRequestStartedAt, CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS);
-    if (!response.ok) return safeResultError("CONTEXT_UPLOAD_REJECTED");
     const timing: ContextUploadTiming = {
       pathOpenStatReadMs: prepared.pathOpenStatReadMs,
       parseFilterSnapshotPreparationMs: prepared.parseFilterSnapshotPreparationMs,
@@ -864,8 +889,10 @@ export async function uploadContextFile(
           snapshotHash: prepared.snapshot.snapshotHash,
           format: prepared.snapshot.format,
           entryCount: prepared.snapshot.entryCount,
-          ...apiMetadata(response.data),
-          metadata: uploadTimingMetadata(timing, response.data),
+          ...apiMetadata(data),
+          appended,
+          batchCount: prepared.snapshot.batches.length,
+          metadata: uploadTimingMetadata(timing, data),
         }),
       }],
     };

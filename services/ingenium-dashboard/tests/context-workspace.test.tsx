@@ -50,6 +50,7 @@ vi.mock("../src/lib/RuntimeContext", () => ({
 
 vi.mock("../src/lib/api", () => ({
   api: {
+    settings: { get: vi.fn(async () => ({ data: { value: undefined } })), set: vi.fn() },
     context: {
       sources: {
         list: mocks.listSources,

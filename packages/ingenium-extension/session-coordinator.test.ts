@@ -9,6 +9,7 @@ import { ExtensionBindingError } from "./extension-binding.js";
 import type { ApiAuthenticationPreflightResult } from "./api-auth.js";
 import { McpBridgeError } from "./mcp-client.js";
 import { CoordinationOutbox } from "./coordination-outbox.js";
+import { ContextAutoUploader } from "./context-upload.js";
 import {
   AUTONOMY_REMINDER_V1,
   decodeCoordinationPath,
@@ -274,6 +275,24 @@ async function created(coordinator: ProductionSessionCoordinator, sessionID: str
 }
 
 describe("SessionCoordinatorPlugin hooks", () => {
+  it("invokes the separate Context uploader only on the exact idle session", async () => {
+    const sync = vi.spyOn(ContextAutoUploader.prototype, "sync").mockResolvedValue();
+    const fixture = coordinationFixture();
+    const coordinator = new SessionCoordinator(processHarness("context-hook"), { callTool: fixture.callTool });
+    try {
+      await created(coordinator, "ses_exact");
+      expect(sync).not.toHaveBeenCalled();
+      await coordinator.hooks().event!({ event: { type: "session.idle", properties: { sessionID: "ses_exact" } } } as any);
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(sync).toHaveBeenCalledWith("ses_exact");
+      const runtime = runtimeHarness();
+      const internal = new SessionCoordinator(runtime.context, { preflight: runtime.preflight, request: runtime.request });
+      try {
+        await internal.hooks().event!({ event: { type: "session.idle", properties: { sessionID: "ses_internal" } } } as any);
+        expect(sync).toHaveBeenCalledTimes(1);
+      } finally { await internal.dispose(); }
+    } finally { await coordinator.dispose(); sync.mockRestore(); }
+  });
   it.each([
     "ingenium-chat", "ingenium-orchestrator", "ingenium-software-engineer-premium",
     "ingenium-software-engineer-fast", "ingenium-qa", "ingenium-scout", "ingenium-explore",

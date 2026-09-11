@@ -12,6 +12,7 @@ import {
   type ContextConversationSnapshotImportResult,
 } from "ingenium-core/lib/tools/context-snapshot-import";
 import { getProject, isValidProjectName } from "ingenium-core/lib/tools/projects";
+import { setSetting } from "ingenium-core/lib/tools/settings";
 
 /**
  * This dedicated binary route is a bearer-authenticated MCP-to-API transport
@@ -187,6 +188,7 @@ function parseSnapshotBody(body: unknown): unknown | null {
 
 function sendImportError(res: Response, error: ContextSnapshotImportError): void {
   const contract: Record<ContextSnapshotImportError["code"], { status: number; code: string; message: string }> = {
+    CONTEXT_UPLOAD_DISABLED: { status: 409, code: "CONTEXT_UPLOAD_DISABLED", message: "Automatic Context upload is disabled." },
     INVALID_CONTEXT_SNAPSHOT: {
       status: 422,
       code: "INVALID_CONTEXT_SNAPSHOT",
@@ -300,6 +302,10 @@ contextSnapshotIngestRouter.post(
       // snapshot; API code never iterates or appends individual messages.
       const coreImportStartedAt = performance.now();
       const result = importContextConversationSnapshot(projectId, parsed.data);
+      if (parsed.data.sourceKey.startsWith("context-upload-file:") && parsed.data.sourceSessionId) {
+        setSetting(projectId, "context_upload_last_sync", JSON.stringify({ status: "synced",
+          at: new Date().toISOString(), session: parsed.data.sourceSessionId, revision: result.revision }));
+      }
       const coreImportMs = toBoundedContextSnapshotTimingMs(performance.now() - coreImportStartedAt);
       res.status(result.created ? 201 : 200).json({
         data: snapshotResponse(result, snapshotIngestTiming(req, jsonValidationMs, coreImportMs)),

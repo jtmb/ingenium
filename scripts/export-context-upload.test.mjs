@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -32,7 +32,9 @@ async function write(value) {
 }
 
 async function writeExport(megabytes) {
-  await write('{"info":{"id":"fake-export"},"messages":[{"info":{"id":"message","role":"user"},"parts":[{"type":"text","text":"');
+  await write(JSON.stringify({ info: { id: process.argv[3], directory: process.cwd() } }).slice(0, -1)
+    + ',"messages":[{"info":' + JSON.stringify({ id: "message", sessionID: process.argv[3], role: "user" })
+    + ',"parts":[{"type":"text","text":"');
   const chunk = "x".repeat(1024 * 1024);
   for (let index = 0; index < megabytes; index += 1) await write(chunk);
   await write('"}]}]}');
@@ -41,6 +43,15 @@ async function writeExport(megabytes) {
 async function main() {
   if (process.argv[2] !== "export" || !process.argv[3]) process.exit(97);
   switch (process.env.FAKE_EXPORT_MODE) {
+    case "redaction":
+      await write(JSON.stringify({ info: { id: process.argv[3], directory: process.cwd() }, messages: [
+        { info: { id: "m1", sessionID: process.argv[3], role: "user" }, parts: [
+          { type: "text", text: "token=" + process.env.FAKE_VALUE },
+          { type: "reasoning", text: "not retained" },
+        ] },
+        { info: { id: "m2", sessionID: process.argv[3], role: "assistant" }, parts: [{ type: "text", text: "unfinished" }] },
+      ] }));
+      return;
     case "large":
       await writeExport(51);
       return;
@@ -154,7 +165,7 @@ async function waitForProcessExit(pid) {
   assert.fail(`timed-out exporter descendant ${pid} is still running`);
 }
 
-test("streams a 50+ MiB export directly to a 0600 context-upload file without truncation", async () => {
+test("retains a complete 50+ MiB visible export in a 0600 context-upload file", async () => {
   const fixture = createFixture();
   try {
     const result = await runHelper(fixture, { output: "large.json", mode: "large" });
@@ -176,6 +187,21 @@ test("streams a 50+ MiB export directly to a 0600 context-upload file without tr
     fixture.cleanup();
   }
 }, 30_000);
+
+test("redacts before writing or hashing and excludes unfinished and non-visible content", async () => {
+  const fixture = createFixture();
+  try {
+    const value = randomUUID();
+    const result = await runHelper(fixture, { mode: "redaction", extraEnvironment: { FAKE_VALUE: value } });
+    assert.equal(result.code, 0);
+    const bytes = readFileSync(outputPath(fixture, "export.json"));
+    assert.equal(bytes.toString().includes(value), false);
+    const exported = JSON.parse(bytes);
+    assert.equal(exported.messages.length, 1);
+    assert.deepEqual(exported.messages[0].parts, [{ type: "text", text: "token= [REDACTED]" }]);
+    assert.equal(JSON.parse(result.stdout).sha256, createHash("sha256").update(bytes).digest("hex"));
+  } finally { fixture.cleanup(); }
+});
 
 test("removes owned output files after partial, nonzero, invalid, and oversize exports", async () => {
   const fixture = createFixture();

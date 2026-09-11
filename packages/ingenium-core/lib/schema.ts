@@ -689,8 +689,7 @@ const ContextSnapshotMetadataInputSchema = z.unknown().superRefine((value, conte
 /** A file-snapshot entry may retain an opaque source ID or provide its own hash, never both. */
 export const ContextConversationSnapshotEntryInputSchema = z.object({
   role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(CONTEXT_MESSAGE_CONTENT_MAX_LENGTH)
-    .refine((value) => value.trim().length > 0, "Message content is required"),
+  content: z.string().min(1).max(CONTEXT_MESSAGE_CONTENT_MAX_LENGTH),
   sourceMessageId: ContextSnapshotSourceMessageIdSchema.optional(),
   fingerprint: ContextHashSchema.optional(),
   createdAt: z.string().datetime().optional(),
@@ -707,6 +706,8 @@ export const ContextConversationSnapshotEntryInputSchema = z.object({
 export type ContextConversationSnapshotEntryInput = z.input<typeof ContextConversationSnapshotEntryInputSchema>;
 
 const ContextConversationSnapshotBaseInputSchema = z.object({
+  startSequence: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+  automatic: z.boolean().optional(),
   sourceKey: ContextSnapshotSourceKeySchema,
   sourceSessionId: ContextSnapshotSourceIdentifierSchema.optional(),
   title: z.string().trim().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH),
