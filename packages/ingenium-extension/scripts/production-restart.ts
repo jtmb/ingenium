@@ -22,6 +22,7 @@ import {
 import { createServer, type Server } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
   preflightApiAuthentication,
 } from "../api-auth.js";
@@ -39,6 +40,7 @@ import {
   decodeReplacementFirstRestartRequest,
   isSafeRestartHandoffPath,
   parseRedactedRestartHandoff,
+  stableRestartTodos,
   runReplacementFirstRestart,
   type RedactedRestartHandoff,
   type ReplacementFirstRestartDependencies,
@@ -58,6 +60,7 @@ import {
   readRecoveryServerAuthentication,
   reconcileManagedRecoveryReplacement,
   recoveryServerAuthenticationPath,
+  verifyRecoveryMcpCanary,
   type RecoveryServerAuthentication,
 } from "../tui-recovery.js";
 
@@ -179,6 +182,7 @@ export interface RestartHandoffPublisher {
   ownershipToken: string;
   revision: number;
   fence: number;
+  acceptedMemory?: Record<string, unknown>;
 }
 
 interface RestartCaptureClaim extends RestartHandoffPublisher {
@@ -331,6 +335,8 @@ export function typedMemoryAcknowledgementEvidence(input: {
   return {
     schemaVersion: 1,
     handoffSha256: input.handoffSha256,
+    originalSessionSha256: input.handoff.replay.sessionIdSha256,
+    todoReplaySha256: hash(JSON.stringify(input.handoff.replay.todos)),
     actionCount: handoff.actionCount,
     changedPathCount: handoff.changedPathCount,
     checkCount: handoff.checkCount,
@@ -771,7 +777,8 @@ export async function runProductionRestartAdapter<Session>(
     if (admittedContext && (candidate.oldProcess.pid !== admittedContext.parent.pid
       || candidate.oldProcess.startTimeTicks !== admittedContext.parent.startTimeTicks
       || candidate.oldProcess.executableSha256 !== admittedContext.parent.executableSha256
-      || candidate.oldProcess.nonceSha256 !== admittedContext.parent.nonceSha256)) {
+      || candidate.oldProcess.nonceSha256 !== admittedContext.parent.nonceSha256
+      || candidate.handoff.replay.sessionIdSha256 !== hash(admittedContext.parent.sessionId))) {
       await dependencies.retainCandidateRejection(worktree, value, "binding_mismatch");
       return undefined;
     }
@@ -1207,15 +1214,14 @@ function redactedHandoffFromSession(
 ): RedactedRestartHandoff | undefined {
   const list = messageList(messages);
   if (!list) return undefined;
-  let todos: unknown[] = [];
-  for (const message of [...list].reverse()) {
+  let todos: RedactedRestartHandoff["replay"]["todos"] = [];
+  for (const message of list) {
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
-    const part = [...message.parts].reverse().find((entry) => isRecord(entry) && entry.type === "tool"
-      && entry.tool === "todowrite" && isRecord(entry.state) && entry.state.status === "completed"
-      && isRecord(entry.state.input) && Array.isArray(entry.state.input.todos));
-    if (isRecord(part) && isRecord(part.state) && isRecord(part.state.input)) {
-      todos = part.state.input.todos as unknown[];
-      break;
+    for (const part of message.parts) {
+      if (isRecord(part) && part.type === "tool" && part.tool === "todowrite" && isRecord(part.state)
+        && part.state.status === "completed" && isRecord(part.state.input)) {
+        todos = stableRestartTodos(part.state.input.todos, todos);
+      }
     }
   }
   const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
@@ -1291,6 +1297,7 @@ function redactedHandoffFromSession(
         : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
           : { kind: "none" as const, referenceHash: null };
   return parseRedactedRestartHandoff({
+    replay: { sessionIdSha256: hash(sessionId), todos },
     status: operationalStatus,
     taskHash,
     actions: boundedActions,
@@ -1498,10 +1505,18 @@ async function attestProductionParent(parent: ProductionRestartParentCandidate):
         && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff)));
 }
 
-export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Record<string, unknown> {
+export function restartHandoffMemoryEntry(
+  handoff: RedactedRestartHandoff,
+  owner: { actorId: string; fence: number },
+): Record<string, unknown> {
   const validated = parseRedactedRestartHandoff(handoff);
   const pathSegments = (path: string) => path.split("/").map((segment) => Buffer.from(segment, "utf8").toString("base64url"));
   return {
+    manifest: {
+      baseCommit: null, dirtyHashes: [], dependencyResults: [], exclusivePaths: [], profileRevision: null, toolRevision: null,
+      ownerId: owner.actorId, fence: owner.fence, unresolvedOperations: [], todoWrite: validated.replay.todos,
+      inputHash: hash(JSON.stringify(validated.replay)), finalized: false,
+    },
     status: validated.status,
     actions: validated.actions.map((action) => ({
       kind: action.kind,
@@ -1517,25 +1532,35 @@ export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Reco
   };
 }
 
-function hasCapturedHandoff(
+export function hasCapturedHandoff(
   path: string,
   expectedHandoff: RedactedRestartHandoff,
   expectedSha256: string,
   offset: number,
+  acceptedMemory: Record<string, unknown>,
+  sessionId: string,
 ): boolean {
   let source: Buffer;
-  try { source = readFileSync(path); } catch { return false; }
+  try { source = readPrivateProductionRestartFile(path, MAX_SESSION_EXPORT_BYTES); } catch { return false; }
+  if (!Number.isSafeInteger(offset) || offset < 0 || !SAFE_SESSION_ID.test(sessionId)) return false;
   if (source.length <= offset) return false;
   if (hash(JSON.stringify(expectedHandoff)) !== expectedSha256) return false;
-  const expectedEntry = restartHandoffMemoryEntry(expectedHandoff);
+  if (typeof acceptedMemory.actorId !== "string" || !UUID.test(String(acceptedMemory.entryId))
+    || !Number.isSafeInteger(acceptedMemory.sourceRevision) || Number(acceptedMemory.sourceRevision) < 1
+    || !isRecord(acceptedMemory.manifest)) return false;
+  const expectedEntry = restartHandoffMemoryEntry(expectedHandoff, {
+    actorId: acceptedMemory.actorId, fence: Number(acceptedMemory.manifest.fence),
+  });
+  if (!isDeepStrictEqual(Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, acceptedMemory[key]])), expectedEntry)) return false;
   for (const line of source.subarray(offset).toString("utf8").split(/\r?\n/).filter(Boolean).reverse()) {
     let capture: unknown;
     try { capture = JSON.parse(line); } catch { continue; }
-    if (!isRecord(capture) || !Array.isArray(capture.operationalEntries)) continue;
+    if (!isRecord(capture) || capture.sessionIdSha256 !== hash(sessionId) || !Array.isArray(capture.operationalEntries)) continue;
     for (const entry of [...capture.operationalEntries].reverse()) {
-      if (!isRecord(entry)) continue;
+      if (!isRecord(entry) || entry.entryId !== acceptedMemory.entryId || entry.actorId !== acceptedMemory.actorId
+        || entry.sourceRevision !== acceptedMemory.sourceRevision) continue;
       const projected = Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, entry[key]]));
-      if (JSON.stringify(projected) === JSON.stringify(expectedEntry)) return true;
+      if (isDeepStrictEqual(projected, expectedEntry)) return true;
     }
   }
   return false;
@@ -1727,6 +1752,7 @@ export async function publishRestartHandoff(
   handoff: RedactedRestartHandoff,
   openClient: typeof openMcpToolClient = openMcpToolClient,
 ): Promise<RestartHandoffPublisher> {
+  handoff = parseRedactedRestartHandoff(handoff);
   const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
   const identity = {
     project: binding.project,
@@ -1747,6 +1773,8 @@ export async function publishRestartHandoff(
     })));
     const registeredSession = restartPublisherMutation(registered?.session);
     registeredPublisher = { client, identity, ownershipToken, ...registeredSession };
+    const actorId = `actor-${hash(`${identity.session_id}\0${identity.incarnation}`)}`;
+    const memoryEntry = restartHandoffMemoryEntry(handoff, { actorId, fence: registeredSession.fence });
     const response = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
       ...identity,
       operation: "memory",
@@ -1754,13 +1782,18 @@ export async function publishRestartHandoff(
       expected_revision: registeredSession.revision,
       fence: registeredSession.fence,
       idempotency_key: randomUUID(),
-      memory_entry: {
-        ...restartHandoffMemoryEntry(handoff),
-      },
+      memory_entry: memoryEntry,
     })));
     const publishedSession = restartPublisherMutation(response?.session);
+    const memory = responseRecord(response?.memory);
+    const acceptedMemory = responseRecord(memory?.entry);
+    if (!acceptedMemory || acceptedMemory.actorId !== actorId || !UUID.test(String(acceptedMemory.entryId))
+      || acceptedMemory.sourceRevision !== publishedSession.revision
+      || !isDeepStrictEqual(Object.fromEntries(Object.keys(memoryEntry).map((key) => [key, acceptedMemory[key]])), memoryEntry)) {
+      throw new Error("Production restart typed handoff was not accepted");
+    }
     published = true;
-    return { client, identity, ownershipToken, ...publishedSession };
+    return { client, identity, ownershipToken, ...publishedSession, acceptedMemory };
   } finally {
     if (!published) {
       if (registeredPublisher) await closeRestartHandoffPublisher(registeredPublisher, true);
@@ -1912,7 +1945,7 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
   };
 }
 
-function productionDependencies(state: ProductionPreparedState): ReplacementFirstRestartDependencies<ReplacementSession> {
+export function productionDependencies(state: ProductionPreparedState): ReplacementFirstRestartDependencies<ReplacementSession> {
   const baseUrl = `http://127.0.0.1:${state.port}`;
   const headers = { "content-type": "application/json" };
   const request = (url: string, init: RequestInit, signal: AbortSignal) =>
@@ -2051,7 +2084,8 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       if (![200, 202, 204].includes(prompted.status)) throw new Error("Replacement acknowledgement prompt failed");
       while (true) {
         signal.throwIfAborted();
-        if (hasCapturedHandoff(state.captureFile, state.parent.handoff, handoffSha256, session.captureOffset)) {
+        if (state.handoffPublisher?.acceptedMemory && hasCapturedHandoff(state.captureFile, state.parent.handoff,
+          handoffSha256, session.captureOffset, state.handoffPublisher.acceptedMemory, session.id)) {
           return { status: "acknowledged", handoffSha256, transactionSha256 };
         }
         await wait(100, signal);
@@ -2092,6 +2126,10 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       }
     },
     prepareRecoveryOwner: async (identity, session, handoffSha256, transactionSha256, signal) => {
+      verifyRecoveryMcpCanary(join(state.runDirectory, "home", ".local", "share"), {
+        project: state.binding.project, projectId: state.binding.projectId, workspaceId: state.binding.workspaceId,
+        launcherWorktree: state.worktree, storageMappingHash: state.binding.storageMappingHash,
+      }, identity, state.port);
       await prepareManagedRecoveryReplacement(
         state.worktree,
         state.parent.oldProcess,

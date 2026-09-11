@@ -139,11 +139,11 @@ describe("extension MCP client bridge", () => {
         }
       });
     `);
-    await expect(withMcpClient(worktree, async client => {
-      await expect((client as Client).listTools()).resolves.toEqual({ tools: [] });
-      return (client as Client).listTools();
-    }, { launcherPath: launcher }))
-      .rejects.toMatchObject({ stage: "tools-list", childExit: { code: 9, signal: null } });
+    const client = await openMcpToolClient(worktree, { launcherPath: launcher });
+    try {
+      await expect(client.listTools!()).resolves.toEqual({ tools: [] });
+      await expect(client.listTools!()).rejects.toMatchObject({ stage: "tools-list", childExit: { code: 9, signal: null } });
+    } finally { await client.close(); }
   });
 
   it("redacts credentials split across stderr chunks and bounds multibyte output", async () => {

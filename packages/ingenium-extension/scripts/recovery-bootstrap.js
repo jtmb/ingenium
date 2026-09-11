@@ -1172,6 +1172,90 @@ function enrollmentClassification(parent, binding, recovery) {
     && enrolled.port === parent.port ? "enrolled" : "ambiguous";
 }
 
+// The stdin-attested bootstrap cannot import generated extension code before admission.
+export function readCurrentParentSummary(worktree, parent, binding, head, now = Date.now(), handoff) {
+  const empty = (status) => ({ status, role: null, project: null, enrollmentSha256: null });
+  const directory = resolve(worktree, ".opencode/protected-runtime-index/tui-recovery");
+  try {
+    for (const path of [resolve(worktree, ".opencode"), dirname(directory), directory]) {
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== ownerUid() || realpathSync(path) !== path
+        || (path !== resolve(worktree, ".opencode") && (stat.mode & 0o777) !== 0o700)) return empty("invalid");
+    }
+    const namesAt = () => readdirSync(directory).filter((name) => name.startsWith("current-parent-") && name.endsWith(".json")).sort();
+    const names = namesAt();
+    if (!names.length) return empty("missing");
+    if (names.length > 128 || !parent || !binding) return empty("invalid");
+    const records = names.map((name) => readOnlyRegularFile(resolve(directory, name), 64 * 1024, false, 0o600));
+    const candidates = [];
+    for (const [index, bytes] of records.entries()) {
+      const record = JSON.parse(bytes.toString("utf8"));
+      if (!hasExactKeys(record, ["schemaVersion", "binding", "runtimeId", "parent", "controlPlane", "sourceHead",
+        "sourceClean", "expiresAt", "sessions", "enrollmentSha256"]) || record.schemaVersion !== 1
+        || !UUID.test(record.runtimeId ?? "") || names[index] !== `current-parent-${record.runtimeId}.json`
+        || !hasExactKeys(record.binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
+        || record.binding.project !== binding.project || record.binding.projectId !== binding.projectId
+        || record.binding.workspaceId !== binding.workspaceId || record.binding.storageMappingHash !== binding.storageMappingHash
+        || record.binding.launcherWorktree !== worktree || binding.worktree !== worktree
+        || !hasExactKeys(record.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+        || !safeRecoveryIdentity(record.parent) || record.parent.nonceSha256 === "0".repeat(64)
+        || !GIT_OID.test(record.sourceHead ?? "") || typeof record.sourceClean !== "boolean"
+        || !Number.isSafeInteger(record.expiresAt) || record.expiresAt > now + 60_000
+        || !Array.isArray(record.sessions) || record.sessions.length > 1) return empty("invalid");
+      const { enrollmentSha256, ...payload } = record;
+      if (!HASH.test(enrollmentSha256 ?? "") || sha256(JSON.stringify(payload)) !== enrollmentSha256) return empty("invalid");
+      const url = new URL(record.controlPlane);
+      if (url.origin !== record.controlPlane || !["http:", "https:"].includes(url.protocol)
+        || !["127.0.0.1", "[::1]", "localhost"].includes(url.hostname) || url.username || url.password) return empty("invalid");
+      for (const session of record.sessions) {
+        if (!hasExactKeys(session, ["role", "sessionId", "coordinationSessionId", "worktreeId", "incarnation", "revision", "fence",
+          "epoch", "claimReferenceSha256", "handoff"]) || typeof session.role !== "string" || !SAFE_ID.test(session.role)
+          || typeof session.sessionId !== "string" || !SAFE_SESSION.test(session.sessionId)
+          || session.coordinationSessionId !== `session-${sha256(session.sessionId)}`
+          || session.worktreeId !== `worktree-${sha256(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`
+          || !Number.isSafeInteger(session.incarnation) || session.incarnation < 1
+          || !Number.isSafeInteger(session.revision) || session.revision < 0
+          || !Number.isSafeInteger(session.fence) || session.fence < 1
+          || !(session.epoch === null || Number.isSafeInteger(session.epoch) && session.epoch > 0)
+          || !(session.claimReferenceSha256 === null || typeof session.claimReferenceSha256 === "string" && HASH.test(session.claimReferenceSha256))
+          || session.epoch === null && session.claimReferenceSha256 !== null) return empty("invalid");
+        const h = session.handoff;
+        if (!hasExactKeys(h, ["status", "taskHash", "actionsSha256", "changedPathsSha256", "checks", "todos", "nextWork"])
+          || !HASH.test(h.actionsSha256 ?? "") || !HASH.test(h.changedPathsSha256 ?? "")
+          || !Array.isArray(h.todos) || h.todos.length > 256
+          || h.todos.some((todo) => !hasExactKeys(todo, ["idSha256", "status"]) || !HASH.test(todo.idSha256 ?? "")
+            || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status))
+          || new Set(h.todos.map((todo) => todo.idSha256)).size !== h.todos.length
+          || !hasExactKeys(h.nextWork, ["kind", "referenceHash"])
+          || !safeHandoffSummary({ ...h, actions: [], changedPaths: [],
+            todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" } })) return empty("invalid");
+      }
+      if (record.expiresAt <= now || !record.sessions.length) continue;
+      if (!record.sourceClean || record.sourceHead !== head
+        || Object.keys(record.parent).some((key) => record.parent[key] !== parent[key])
+        || record.sessions[0].sessionId !== parent.sessionId
+        || parent.port !== null && Number(url.port) !== parent.port) return empty("invalid");
+      if (handoff) {
+        const current = record.sessions[0].handoff;
+        const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
+        for (const todo of current.todos) counts[todo.status === "in_progress" ? "inProgress" : todo.status] += 1;
+        if (current.status !== handoff.status || current.taskHash !== handoff.taskHash
+          || current.checks.length !== handoff.checkCount || current.todos.length !== handoff.todos.total
+          || Object.keys(counts).some((key) => counts[key] !== handoff.todos[key])
+          || canonicalJson(current.nextWork) !== canonicalJson(handoff.nextWork)) return empty("invalid");
+      }
+      candidates.push(record);
+    }
+    if (JSON.stringify(namesAt()) !== JSON.stringify(names)
+      || names.some((name, index) => !records[index].equals(readOnlyRegularFile(resolve(directory, name), 64 * 1024, false, 0o600)))) return empty("invalid");
+    if (candidates.length !== 1) return empty("invalid");
+    const record = candidates[0];
+    return { status: "validated", role: record.sessions[0].role, project: record.binding.project, enrollmentSha256: record.enrollmentSha256 };
+  } catch (error) {
+    return empty(error?.code === "ENOENT" ? "missing" : "invalid");
+  }
+}
+
 export async function collectRecoveryPreflight(options = {}) {
   const environment = options.environment ?? process.env;
   const sourcePath = resolve(options.sourcePath ?? MODULE_ATTESTATION?.sourcePath ?? fileURLToPath(import.meta.url));
@@ -1210,6 +1294,9 @@ export async function collectRecoveryPreflight(options = {}) {
     ? collectGitSummary(worktree, source.path, source.bytes)
     : { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
   const protectedIndex = worktree ? resolve(worktree, ".opencode/protected-runtime-index") : null;
+  const currentParent = worktree ? readCurrentParentSummary(worktree, parent, binding,
+    gitSummary.dirtyPaths.length === 0 ? gitSummary.head : null, Date.now(), recovery.summary.handoff)
+    : { status: "invalid", role: null, project: null, enrollmentSha256: null };
   const coordination = protectedIndex ? summarizeCoordinationOutboxState(protectedIndex) : {
     outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
     disposition: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
@@ -1229,6 +1316,7 @@ export async function collectRecoveryPreflight(options = {}) {
   if (!source) failures.push("source");
   if (ancestry.status !== "exact" || !parent) failures.push("parent_identity");
   if (!binding) failures.push("binding");
+  if (currentParent.status === "invalid") failures.push("current_parent");
   if (gitSummary.status !== "validated") failures.push("git");
   if (recovery.summary.status !== "validated") failures.push("recovery_handoff");
   if (recovery.summary.state && recovery.summary.state.phase !== "enrolled") failures.push("recovery_phase");
@@ -1267,6 +1355,7 @@ export async function collectRecoveryPreflight(options = {}) {
     binding,
     git: gitSummary,
     recovery: recovery.summary,
+    currentParent,
     outbox,
     disposition,
     freeze,

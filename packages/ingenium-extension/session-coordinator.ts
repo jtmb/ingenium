@@ -32,11 +32,15 @@ import {
   persistManagedRecoveryJournal,
   currentRecoverySource,
   publishCurrentParentRecovery,
+  isValidRecoveryRole,
+  publishRecoveryMcpCanary,
   type ManagedRecoveryBinding,
   type ManagedRecoveryJournalInput,
 } from "./tui-recovery.js";
 import {
   isSafeRestartHandoffPath,
+  stableRestartTodos,
+  type RestartTodo,
   type RedactedRestartHandoff,
 } from "./replacement-first-restart.js";
 
@@ -138,6 +142,7 @@ function trace(record: Omit<TraceRecord, "timestamp">): void {
 }
 
 function captureTransform(
+  sessionId: string,
   memory: string | null,
   activity: string | null,
   operationalEntries: Record<string, unknown>[] = [],
@@ -145,6 +150,7 @@ function captureTransform(
   if (process.env.INGENIUM_COORDINATION_TRANSFORM_CAPTURE !== "1" || (!memory && !activity)) return;
   appendPrivateRecord(process.env.INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE, {
     schemaVersion: 1,
+    sessionIdSha256: durableSessionReference(sessionId),
     memory,
     activity,
     operationalEntries,
@@ -244,7 +250,7 @@ export interface ResultManifest {
   ownerId: string;
   fence: number;
   unresolvedOperations: Array<{ operationId: string; status: "unknown" | "cancelled"; firstFailure: string }>;
-  todoWrite: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; priority: "high" | "medium" | "low" }>;
+  todoWrite: RestartTodo[];
   inputHash: string | null;
   finalized: boolean;
 }
@@ -680,21 +686,6 @@ export function resultManifestHash(manifest: ResultManifest): string {
   return createHash("sha256").update(JSON.stringify(canonical(manifest))).digest("hex");
 }
 
-function stableTodos(value: unknown, prior: ResultManifest["todoWrite"]): ResultManifest["todoWrite"] {
-  if (!Array.isArray(value) || value.length > 64) throw new Error("invalid TodoWrite record");
-  return value.map((todo) => {
-    if (!isRecord(todo) || typeof todo.content !== "string" || !todo.content.trim() || todo.content.length > 2048
-      || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status as string)
-      || (todo.priority !== undefined && !["high", "medium", "low"].includes(todo.priority as string))) throw new Error("invalid TodoWrite record");
-    return {
-      id: typeof todo.id === "string" && todo.id.length > 0 ? todo.id
-        : prior.find((entry) => entry.content === todo.content)?.id ?? `todo-${targetHash("todo", todo.content)}`,
-      content: todo.content, status: todo.status as ResultManifest["todoWrite"][number]["status"],
-      priority: (todo.priority ?? "medium") as ResultManifest["todoWrite"][number]["priority"],
-    };
-  });
-}
-
 function safeManifestRecords(value: Record<string, unknown>): boolean {
   const hash = (value: unknown) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
   const nullableHash = (value: unknown) => value === null || hash(value);
@@ -903,7 +894,7 @@ function mergeOperationalMemory(
 
 export class SessionCoordinator {
   private readonly recoveryRuntimeId = randomUUID();
-  private readonly recoveryNonce = randomBytes(32).toString("base64url");
+  private readonly recoveryNonce = process.env.INGENIUM_RESTART_NONCE ?? randomBytes(32).toString("base64url");
   private recoveryBinding?: ManagedRecoveryBinding;
   private readonly recoverySource?: { head: string; clean: boolean };
   private readonly contextUploader: ContextAutoUploader;
@@ -1129,10 +1120,12 @@ export class SessionCoordinator {
       project: this.binding.project, projectId: attested.projectId, workspaceId: attested.workspaceId,
       launcherWorktree: attested.launcherWorktree, storageMappingHash: attested.storageMappingHash,
     };
+    await publishRecoveryMcpCanary(this.recoveryBinding);
     const current = this.sessions.values().next().value as SessionState | undefined;
     enrollManagedRecoveryParent(this.binding, attested, current
       ? this.recoveryHandoff(current)
       : {
+          replay: { sessionIdSha256: durableSessionReference("unenrolled"), todos: [] },
           status: "active",
           taskHash: null,
           actions: [],
@@ -2303,6 +2296,7 @@ export class SessionCoordinator {
   private recoveryHandoff(state: SessionState, status: RedactedRestartHandoff["status"] = state.status): RedactedRestartHandoff {
     const total = state.todos.pending + state.todos.inProgress + state.todos.completed + state.todos.cancelled;
     return {
+      replay: { sessionIdSha256: state.sessionId.slice("session-".length), todos: state.manifest.todoWrite.map((todo) => ({ ...todo })) },
       status,
       taskHash: state.currentTaskId?.slice(5) ?? null,
       actions: state.actions.map((action) => {
@@ -2347,14 +2341,15 @@ export class SessionCoordinator {
 
   private publishRecoveryIdentity(invalidate = false): void {
     if (!this.recoveryBinding || !this.recoverySource || !this.ctx.serverUrl) return;
-    const unavailable = [...this.sessions.values()].some((state) => state.recoveryUnavailable || !state.remoteRegistered);
+    const unavailable = [...this.sessions.values()].some((state) => state.recoveryUnavailable || !state.remoteRegistered
+      || (state.state === "active" && !isValidRecoveryRole(state.activeAgent)));
     try {
       publishCurrentParentRecovery({
         binding: this.recoveryBinding, runtimeId: this.recoveryRuntimeId, nonce: this.recoveryNonce,
         controlPlane: this.ctx.serverUrl.origin, source: this.recoverySource,
         sessions: this.disposed || invalidate || unavailable ? [] : [...this.sessions].filter(([, state]) => state.state === "active")
           .map(([sessionId, state]) => ({
-            sessionId, coordinationSessionId: state.sessionId, worktreeId: state.worktreeId,
+            role: state.activeAgent!, sessionId, coordinationSessionId: state.sessionId, worktreeId: state.worktreeId,
             incarnation: state.incarnation, revision: state.revision, fence: state.fence,
             epoch: state.recoveryEpochRevision === state.revision ? state.recoveryEpoch ?? null : null,
             claimReferenceSha256: state.recoveryEpochRevision === state.revision ? state.recoveryClaimReference ?? null : null,
@@ -2421,6 +2416,7 @@ export class SessionCoordinator {
         if (this.disposed) return;
         // The system-transform hook has no agent field; unknown roles fail closed.
         this.localSession(sessionID).activeAgent = agent;
+        this.publishRecoveryIdentity();
       },
       event: async ({ event }) => {
         if (this.disposed) return;
@@ -2491,7 +2487,7 @@ export class SessionCoordinator {
           if (todos) {
             await this.publishSnapshot(sessionId, (state) => {
               state.todos = todos;
-              state.manifest.todoWrite = stableTodos(event.properties?.todos, state.manifest.todoWrite);
+              state.manifest.todoWrite = stableRestartTodos(event.properties?.todos, state.manifest.todoWrite);
               state.manifest.finalized = false;
               state.reviewAdmission = undefined;
               state.memoryDirty = true;
@@ -2645,7 +2641,7 @@ export class SessionCoordinator {
             this.retainFailure("memory_ack", sessionID, new Error("invalid coordination response"), {
               cursor: memoryBatch?.throughRevision,
             });
-            captureTransform(null, activity ?? null);
+            captureTransform(sessionID, null, activity ?? null);
             return;
           }
           try {
@@ -2657,7 +2653,7 @@ export class SessionCoordinator {
             this.warning();
             return;
           }
-          captureTransform(memory ?? null, activity ?? null, safeMemory as Record<string, unknown>[]);
+          captureTransform(sessionID, memory ?? null, activity ?? null, safeMemory as Record<string, unknown>[]);
           trace({
             event: "hook_exit",
             operation: "experimental.chat.system.transform",

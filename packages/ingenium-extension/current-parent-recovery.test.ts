@@ -3,6 +3,9 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+const { readCurrentParentSummary, collectRecoveryPreflight } = await import(
+  /* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href
+);
 import {
   currentRecoverySource, publishCurrentParentRecovery, readCurrentParentRecoveryCandidate,
   type CurrentRecoverySession, type ManagedRecoveryBinding,
@@ -31,10 +34,11 @@ beforeEach(() => {
   binding = { project: "ingenium", projectId: randomUUID(), workspaceId: "shared-memory-ingenium",
     launcherWorktree: root, storageMappingHash: digest("mapping") };
   const session: CurrentRecoverySession = {
+    role: "ingenium-orchestrator",
     sessionId: "ses_exact", coordinationSessionId: `session-${digest("ses_exact")}`,
     worktreeId: `worktree-${digest(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`, incarnation: 2, revision: 4, fence: 3,
     epoch: 7, claimReferenceSha256: digest("claim"),
-    handoff: { status: "working", taskHash: digest("task"),
+    handoff: { replay: { sessionIdSha256: digest("ses_exact"), todos: [{ id: "TODO-STABLE-1", content: "Continue recovery", status: "in_progress", priority: "high" }] }, status: "working", taskHash: digest("task"),
       actions: [{ kind: "edit", result: "succeeded", path: "src/component.ts", targetHash: null }],
       changedPaths: [{ path: "src/component.ts", operation: "edit", additions: 1, deletions: 0, changeRevision: 1 }],
       checks: [{ name: "test", status: "completed", result: "passed", exitCode: 0, targetHash: digest("check") }],
@@ -49,6 +53,27 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("current parent recovery discovery", () => {
+  it("corroborates only the independently bound parent and never admits restart from the record alone", async () => {
+    const path = publishCurrentParentRecovery(input);
+    const record = readCurrentParentRecoveryCandidate(binding);
+    const parent = { ...record.parent, sessionId: "ses_exact", port: 4098 };
+    const exactBinding = { ...binding, worktree: root };
+    const summary = readCurrentParentSummary(root, parent, exactBinding, input.source.head);
+    expect(summary).toEqual({ status: "validated", role: "ingenium-orchestrator", project: "ingenium", enrollmentSha256: record.enrollmentSha256 });
+    expect(readCurrentParentSummary(root, null, exactBinding, input.source.head).status).toBe("invalid");
+    expect(readCurrentParentSummary(root, { ...parent, sessionId: "ses_foreign" }, exactBinding, input.source.head).status).toBe("invalid");
+    expect(readCurrentParentSummary(root, parent, exactBinding, input.source.head, Date.now(), {
+      status: "idle", taskHash: null, checkCount: 0, todos: { total: 0 }, nextWork: { kind: "none", referenceHash: null },
+    }).status).toBe("invalid");
+    const preflight = await collectRecoveryPreflight({ environment: { INGENIUM_WORKTREE: root } });
+    expect(preflight.admissible).toBe(false);
+    expect(preflight.failures).toContain("parent_identity");
+    rewrite(path, (value) => { value.sessions[0].role = ""; });
+    expect(readCurrentParentSummary(root, parent, exactBinding, input.source.head).status).toBe("invalid");
+    publishCurrentParentRecovery(input);
+    publishCurrentParentRecovery({ ...input, runtimeId: randomUUID() });
+    expect(readCurrentParentSummary(root, parent, exactBinding, input.source.head).status).toBe("invalid");
+  });
   it("atomically publishes an owner-private content-free binding discoverable by an independent reader", () => {
     const path = publishCurrentParentRecovery(input);
     const firstInode = lstatSync(path).ino;
@@ -76,6 +101,10 @@ describe("current parent recovery discovery", () => {
   });
 
   it.each([
+    ["missing role", (r: any) => { delete r.sessions[0].role; }],
+    ["empty role", (r: any) => { r.sessions[0].role = ""; }],
+    ["unbounded role", (r: any) => { r.sessions[0].role = "a".repeat(129); }],
+    ["content in role", (r: any) => { r.sessions[0].role = "private role text"; }],
     ["PID", (r: any) => { r.parent.pid = 2147483647; }],
     ["start", (r: any) => { r.parent.startTimeTicks += 1; }],
     ["executable", (r: any) => { r.parent.executableSha256 = digest("foreign executable"); }],
@@ -124,7 +153,8 @@ describe("current parent recovery discovery", () => {
     expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("Ambiguous recovery parents");
     rmSync(second);
     publishCurrentParentRecovery({ ...input, sessions: [...input.sessions,
-      { ...input.sessions[0]!, sessionId: "ses_second", coordinationSessionId: `session-${digest("ses_second")}` }] });
+      { ...input.sessions[0]!, sessionId: "ses_second", coordinationSessionId: `session-${digest("ses_second")}`,
+        handoff: { ...input.sessions[0]!.handoff, replay: { ...input.sessions[0]!.handoff.replay, sessionIdSha256: digest("ses_second") } } }] });
     expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("Ambiguous recovery sessions");
     publishCurrentParentRecovery({ ...input, sessions: [] });
     expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");

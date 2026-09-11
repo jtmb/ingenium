@@ -9795,3 +9795,49 @@ separately required parent replacement/restart or any parent/final gate.
 - **Verification:** Current-section read, append-only edit, appended-block
   readback, and the roadmap `git diff --check` are the only checks for this
   documentation record.
+
+### Current recovery checkpoint — 2026-09-11
+
+- **Checkpoint/deployment:** Commit `01c44c6c64c1f4f4edc28215c3d8c0599f64d9a8`,
+  image `sha256:af3961c338b7e078b75d1b700ddb3638355438bb0b88125c3603bed2465eca33`,
+  container prefix `788cc4433191`, and rollback tag
+  `ingenium-ingenium:rollback-11dcbf37-01c44c6c`. Nine services/routes were
+  healthy.
+- **Live binding:** Project UUID `b4c1feae-1bf3-4c69-a171-c6dea5a96d92`,
+  workspace `shared-memory-ingenium`, canonical worktree
+  `/home/brajam/repos/ingenium`, and storage hash
+  `7f974be496b11344a6cf803cf224260dd16117841c32f8633ba3943fd7bea31d`.
+- **Recovery state:** Failure signature
+  `CURRENT_PARENT_ROLE_UNATTESTED`; validator invocation count `0`; candidate
+  metadata `UNKNOWN`; protected access succeeded.
+- **Owner/nextWork:** `@ingenium-orchestrator` / recovery-contract owner;
+  `nextWork=source/config diagnostic`.
+- **Open boundary:** No parent admission or restart is marked complete. Recovery
+  remains open; prior history and stable Todo markers are unchanged, and this
+  record makes no overall completion claim.
+- **Pre-wave reproducible source diagnosis (`SOURCE ONLY`):** `chat.message`
+  knew the role, but publication omitted it; recovery preflight did not consume
+  the current-parent record; the handoff retained Todo counts only; and
+  successor MCP canaries were absent. This reproduces
+  `CURRENT_PARENT_ROLE_UNATTESTED`.
+- **Premium implementation wave:** One Premium wave changed exactly these 11
+  extension paths: `packages/ingenium-extension/current-parent-recovery.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/mcp-client.test.ts`,
+  `packages/ingenium-extension/mcp-client.ts`,
+  `packages/ingenium-extension/replacement-first-restart.ts`,
+  `packages/ingenium-extension/recovery-handoff.test.ts`,
+  `packages/ingenium-extension/scripts/production-restart.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`,
+  `packages/ingenium-extension/session-coordinator.test.ts`,
+  `packages/ingenium-extension/session-coordinator.ts`, and
+  `packages/ingenium-extension/tui-recovery.ts`.
+- **Source remediation:** The wave records role-bound publication with
+  corroborating current-parent preflight, stable typed Todo/original-session
+  replay, exact handoff/transaction acknowledgement, and successor MCP
+  `initialize`, `tools/list`, and exact project binding.
+- **Source checks:** 138 focused tests passed; 59 narrowed wrapper tests passed;
+  extension typecheck passed; and `git diff --check` passed. This is source
+  evidence only: QA, security, deployment, and recovery acceptance remain
+  pending. No deployed/runtime PASS or completion claim is added; prior entries
+  and stable IDs remain unchanged.

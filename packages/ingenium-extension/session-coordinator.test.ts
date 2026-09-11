@@ -286,12 +286,23 @@ describe("SessionCoordinatorPlugin hooks", () => {
     git(["-c", "user.name=Recovery Test", "-c", "user.email=recovery@example.invalid", "commit", "-m", "fixture"]);
     const context = { ...processHarness("ingenium", {}, worktree), serverUrl: new URL("http://127.0.0.1:4098") };
     const fixture = coordinationFixture();
+    const priorNonce = process.env.INGENIUM_RESTART_NONCE;
+    process.env.INGENIUM_RESTART_NONCE = "n".repeat(43);
     const coordinator = new SessionCoordinator(context, { callTool: fixture.callTool });
     const binding = { project: context.binding.project, projectId: "00000000-0000-4000-8000-000000000001",
       workspaceId: context.binding.workspaceId, launcherWorktree: worktree, storageMappingHash: context.binding.storageMappingHash! };
     try {
       await created(coordinator, "ses_current_parent");
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_current_parent", agent: "ingenium-orchestrator" } as any, {} as any);
       const first = readCurrentParentRecoveryCandidate(binding);
+      expect(first.parent.nonceSha256).toBe(durableSessionReference("n".repeat(43)));
+      expect(first.sessions[0]!.role).toBe("ingenium-orchestrator");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_current_parent", agent: "ingenium-scout" } as any, {} as any);
+      expect(readCurrentParentRecoveryCandidate(binding).sessions[0]!.role).toBe("ingenium-scout");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_current_parent", agent: "" } as any, {} as any);
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_current_parent", agent: "ingenium-orchestrator" } as any, {} as any);
       expect(first.sessions[0]).toMatchObject({ sessionId: "ses_current_parent", epoch: null, claimReferenceSha256: null });
       await coordinator.hooks().event!({ event: { type: "todo.updated", properties: { sessionID: "ses_current_parent",
         todos: [{ id: "TODO-EXACT", content: "sensitive task body", status: "in_progress", priority: "high" }] } } as any });
@@ -308,6 +319,8 @@ describe("SessionCoordinatorPlugin hooks", () => {
       await coordinator.hooks()["chat.message"]!({ sessionID: "ses_another_parent_session" } as any, {} as any);
       expect.soft(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
       await created(coordinator, "ses_another_parent_session");
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_another_parent_session", agent: "ingenium-scout" } as any, {} as any);
       expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("Ambiguous recovery sessions");
       fixture.callTool.mockRejectedValueOnce(new Error("unavailable"));
       expect(await coordinator.heartbeatSession("ses_current_parent")).toBe(false);
@@ -322,6 +335,8 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
     } finally {
       await coordinator.dispose();
+      if (priorNonce === undefined) delete process.env.INGENIUM_RESTART_NONCE;
+      else process.env.INGENIUM_RESTART_NONCE = priorNonce;
       rmSync(worktree, { recursive: true, force: true });
     }
   }, 15_000);

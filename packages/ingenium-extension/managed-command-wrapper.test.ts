@@ -498,6 +498,11 @@ function recoveryPaths(worktree: string): { state: string; journal: string; even
 
 function recoveryHandoff(): RedactedRestartHandoff {
   return {
+    replay: { sessionIdSha256: sha256("recovery-session"), todos: [
+      { id: "TODO-1", content: "Verify recovery", status: "pending", priority: "high" },
+      { id: "TODO-2", content: "Implement recovery", status: "in_progress", priority: "high" },
+      { id: "TODO-3", content: "Inspect recovery", status: "completed", priority: "medium" },
+    ] },
     status: "working",
     taskHash: sha256("recovery-task"),
     actions: [{ kind: "edit", result: "succeeded", path: "src/recovery.ts", targetHash: null }],
@@ -605,6 +610,10 @@ function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
       expectedIdentity: { executableSha256: hash("b"), nonceSha256: hash("d") },
     },
     handoff: {
+      replay: { sessionIdSha256: sha256("ses_admitted_parent"), todos: [
+        { id: "TODO-1", content: "Verify restart", status: "pending", priority: "high" },
+        { id: "TODO-2", content: "Implement restart", status: "in_progress", priority: "high" },
+      ] },
       status: "working",
       taskHash: hash("e"),
       actions: [{ kind: "edit", result: "succeeded", path: "src/restart.ts", targetHash: null }],
@@ -1003,6 +1012,7 @@ describe("managed command wrappers", () => {
       ]) expect(() => parseLegacyRecoveryOwnerPayload(encoded(invalid))).toThrow();
 
       const emptyHandoff = {
+        replay: { sessionIdSha256: sha256("recovery-session"), todos: [] },
         status: "active",
         taskHash: null,
         actions: [],
@@ -3124,7 +3134,11 @@ describe("managed command wrappers", () => {
 
   it("projects the exact captured handoff arrays into typed coordination memory", () => {
     const handoff = recoveryHandoff();
-    expect(restartHandoffMemoryEntry(handoff)).toEqual({
+    const owner = { actorId: `actor-${sha256("owner")}`, fence: 1 };
+    expect(restartHandoffMemoryEntry(handoff, owner)).toEqual({
+      manifest: { baseCommit: null, dirtyHashes: [], dependencyResults: [], exclusivePaths: [], profileRevision: null,
+        toolRevision: null, ownerId: owner.actorId, fence: 1, unresolvedOperations: [], todoWrite: handoff.replay.todos,
+        inputHash: sha256(JSON.stringify(handoff.replay)), finalized: false },
       status: handoff.status,
       actions: [{ kind: "edit", result: "succeeded", pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], targetHash: null }],
       checks: [{ kind: "test", result: "passed", targetHash: sha256("recovery-check") }],
@@ -3171,6 +3185,8 @@ describe("managed command wrappers", () => {
       captureFile: "/tmp/opencode/recovery/capture.jsonl",
       captureOffset: 128,
       successorSessionSha256: sha256("successor-session"),
+      originalSessionSha256: handoff.replay.sessionIdSha256,
+      todoReplaySha256: sha256(JSON.stringify(handoff.replay.todos)),
       replacementIdentitySha256: recoveryIdentitySha256(replacementIdentity),
       transactionSha256: sha256("transaction"),
       assistantResult: "completed",
@@ -3257,6 +3273,10 @@ describe("managed command wrappers", () => {
       const storageMappingHash = sha256("legacy-storage");
       const sessionId = "legacy-session";
       const handoff = {
+        replay: { sessionIdSha256: sha256(sessionId), todos: [
+          { id: "TODO-1", content: "Verify restart", status: "pending" as const, priority: "high" as const },
+          { id: "TODO-2", content: "Implement restart", status: "in_progress" as const, priority: "high" as const },
+        ] },
         status: "working" as const,
         taskHash: sha256("current-task"),
         actions: [{ kind: "read" as const, result: "succeeded" as const, path: "src/current.ts", targetHash: null }],
@@ -3274,8 +3294,8 @@ describe("managed command wrappers", () => {
               type: "tool",
               tool: "todowrite",
               state: { status: "completed", input: { todos: [
-                { content: "capture", status: "completed", priority: "high" },
-                { content: "restart", status: "in_progress", priority: "high" },
+                { id: "CAPTURE", content: "capture", status: "completed", priority: "high" },
+                { id: "RESTART", content: "restart", status: "in_progress", priority: "high" },
               ] } },
             },
             {
