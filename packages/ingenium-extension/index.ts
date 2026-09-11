@@ -16,5 +16,7 @@ export { ResourceSyncPlugin } from "./resource-sync.js";
 /** Coordinates sanitized peer-write handoffs between concurrent OpenCode sessions. */
 export { SessionCoordinatorPlugin } from "./session-coordinator.js";
 
+export { readCurrentParentRecoveryCandidate, type CurrentParentRecoveryRecord } from "./tui-recovery.js";
+
 /** Builds bounded, untrusted explicit-memory context for fresh authorized turns. */
 export { buildExplicitMemoryContext, ExplicitMemoryContextReader } from "./explicit-memory.js";

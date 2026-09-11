@@ -11,6 +11,7 @@ import { McpBridgeError } from "./mcp-client.js";
 import { CoordinationOutbox } from "./coordination-outbox.js";
 import { ContextAutoUploader } from "./context-upload.js";
 import { ExternalUsageCollector } from "./external-usage.js";
+import { readCurrentParentRecoveryCandidate } from "./tui-recovery.js";
 import {
   AUTONOMY_REMINDER_V1,
   decodeCoordinationPath,
@@ -276,6 +277,55 @@ async function created(coordinator: ProductionSessionCoordinator, sessionID: str
 }
 
 describe("SessionCoordinatorPlugin hooks", () => {
+  it("publishes current parent identity from exact lifecycle events and invalidates it on disposal", async () => {
+    const worktree = mkdtempSync("/tmp/opencode/recovery-lifecycle-");
+    const git = (args: string[]) => execFileSync("git", args, { cwd: worktree, stdio: "pipe" });
+    git(["init"]);
+    writeFileSync(join(worktree, ".gitignore"), ".opencode/\n");
+    git(["add", ".gitignore"]);
+    git(["-c", "user.name=Recovery Test", "-c", "user.email=recovery@example.invalid", "commit", "-m", "fixture"]);
+    const context = { ...processHarness("ingenium", {}, worktree), serverUrl: new URL("http://127.0.0.1:4098") };
+    const fixture = coordinationFixture();
+    const coordinator = new SessionCoordinator(context, { callTool: fixture.callTool });
+    const binding = { project: context.binding.project, projectId: "00000000-0000-4000-8000-000000000001",
+      workspaceId: context.binding.workspaceId, launcherWorktree: worktree, storageMappingHash: context.binding.storageMappingHash! };
+    try {
+      await created(coordinator, "ses_current_parent");
+      const first = readCurrentParentRecoveryCandidate(binding);
+      expect(first.sessions[0]).toMatchObject({ sessionId: "ses_current_parent", epoch: null, claimReferenceSha256: null });
+      await coordinator.hooks().event!({ event: { type: "todo.updated", properties: { sessionID: "ses_current_parent",
+        todos: [{ id: "TODO-EXACT", content: "sensitive task body", status: "in_progress", priority: "high" }] } } as any });
+      const updated = readCurrentParentRecoveryCandidate(binding);
+      expect(updated.parent).toEqual(first.parent);
+      expect(updated.runtimeId).toBe(first.runtimeId);
+      expect(updated.sessions[0]!.revision).toBeGreaterThan(first.sessions[0]!.revision);
+      expect(updated.sessions[0]!.handoff.todos).toEqual([{ idSha256: durableSessionReference("TODO-EXACT"), status: "in_progress" }]);
+      expect(JSON.stringify(updated)).not.toContain("sensitive task body");
+      await coordinator.hooks().event!({ event: { type: "session.status", properties: {
+        sessionID: "ses_current_parent", status: { type: "idle" },
+      } } as any });
+      expect.soft(readCurrentParentRecoveryCandidate(binding).sessions[0]!.handoff.status).toBe("idle");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_another_parent_session" } as any, {} as any);
+      expect.soft(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      await created(coordinator, "ses_another_parent_session");
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("Ambiguous recovery sessions");
+      fixture.callTool.mockRejectedValueOnce(new Error("unavailable"));
+      expect(await coordinator.heartbeatSession("ses_current_parent")).toBe(false);
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      expect(await coordinator.heartbeatSession("ses_another_parent_session")).toBe(true);
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+      expect(await coordinator.heartbeatSession("ses_current_parent")).toBe(true);
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("Ambiguous recovery sessions");
+      await coordinator.closeSession("ses_another_parent_session");
+      expect(readCurrentParentRecoveryCandidate(binding).sessions[0]!.sessionId).toBe("ses_current_parent");
+      await coordinator.dispose();
+      expect(() => readCurrentParentRecoveryCandidate(binding)).toThrow("No live recovery candidate");
+    } finally {
+      await coordinator.dispose();
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("collects usage only after registration of the exact external idle session, never for internal sessions", async () => {
     const sync = vi.spyOn(ExternalUsageCollector.prototype, "sync").mockResolvedValue();
     const fixture = coordinationFixture();

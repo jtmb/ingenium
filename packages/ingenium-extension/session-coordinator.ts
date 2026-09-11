@@ -30,6 +30,9 @@ import { ExplicitMemoryContextReader } from "./explicit-memory.js";
 import {
   enrollManagedRecoveryParent,
   persistManagedRecoveryJournal,
+  currentRecoverySource,
+  publishCurrentParentRecovery,
+  type ManagedRecoveryBinding,
   type ManagedRecoveryJournalInput,
 } from "./tui-recovery.js";
 import {
@@ -285,6 +288,11 @@ interface OperationalEntry {
 }
 
 interface SessionState extends SessionMutation {
+  recoveryUnavailable?: boolean;
+  recoveryEpoch?: number;
+  recoveryEpochRevision?: number;
+  recoveryClaimReference?: string;
+  recoveryStatus?: RedactedRestartHandoff["status"];
   activeAgent?: string;
   worktreeId: string;
   sessionId: string;
@@ -349,7 +357,7 @@ export interface SessionCoordinatorDependencies {
   outbox?: CoordinationOutbox;
 }
 
-type CoordinatorContext = { worktree: string; client: unknown };
+type CoordinatorContext = { worktree: string; client: unknown; serverUrl?: URL };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -894,6 +902,10 @@ function mergeOperationalMemory(
 }
 
 export class SessionCoordinator {
+  private readonly recoveryRuntimeId = randomUUID();
+  private readonly recoveryNonce = randomBytes(32).toString("base64url");
+  private recoveryBinding?: ManagedRecoveryBinding;
+  private readonly recoverySource?: { head: string; clean: boolean };
   private readonly contextUploader: ContextAutoUploader;
   private readonly binding: ExtensionBinding;
   private readonly callTool?: typeof callMcpTool;
@@ -927,6 +939,9 @@ export class SessionCoordinator {
   private disposal?: Promise<void>;
 
   constructor(private readonly ctx: CoordinatorContext, dependencies: SessionCoordinatorDependencies = {}) {
+    if (ctx.serverUrl) {
+      try { this.recoverySource = currentRecoverySource(ctx.worktree); } catch { /* Unborn source cannot be a recovery candidate. */ }
+    }
     this.binding = dependencies.binding ?? resolveExtensionBinding(ctx.worktree, {
       purpose: coordinationCredentialPurpose(),
       allowMissingCredential: true,
@@ -1003,6 +1018,7 @@ export class SessionCoordinator {
       remoteRegistered: false,
     };
     this.sessions.set(sessionId, state);
+    this.publishRecoveryIdentity();
     this.snapshotCursors.set(sessionId, new Map());
     this.recoverableOperationalState.delete(sessionId);
     this.ensureHeartbeat();
@@ -1109,6 +1125,10 @@ export class SessionCoordinator {
     if (payload?.data?.project?.id !== attested.projectId || payload.data.project.name !== this.binding.project) {
       throw new ExtensionBindingError();
     }
+    this.recoveryBinding = {
+      project: this.binding.project, projectId: attested.projectId, workspaceId: attested.workspaceId,
+      launcherWorktree: attested.launcherWorktree, storageMappingHash: attested.storageMappingHash,
+    };
     const current = this.sessions.values().next().value as SessionState | undefined;
     enrollManagedRecoveryParent(this.binding, attested, current
       ? this.recoveryHandoff(current)
@@ -1256,6 +1276,7 @@ export class SessionCoordinator {
   dispose(): Promise<void> {
     if (this.disposal) return this.disposal;
     this.disposed = true;
+    this.publishRecoveryIdentity();
     this.attestation = undefined;
     this.canonicalWorktree = undefined;
     this.deferredReload = undefined;
@@ -1379,6 +1400,17 @@ export class SessionCoordinator {
     if (!allowDisposing) this.assertActive();
     const result = mcpToolData(raw);
     if (!isRecord(result)) throw new Error("invalid coordination response");
+    if (Number.isSafeInteger(result.acceptedEpoch) && (result.acceptedEpoch as number) > 0
+      && isRecord(result.session) && Number.isSafeInteger(result.session.revision)) {
+      const state = [...this.sessions.values()].find((entry) => entry.sessionId === args.session_id
+        && entry.incarnation === args.incarnation);
+      if (state) {
+        state.recoveryEpoch = result.acceptedEpoch as number;
+        state.recoveryEpochRevision = result.session.revision as number;
+        state.recoveryClaimReference = typeof result.operationId === "string"
+          ? durableSessionReference(result.operationId) : undefined;
+      }
+    }
     return result;
   }
 
@@ -1582,6 +1614,7 @@ export class SessionCoordinator {
   private apply(state: SessionState, value: unknown): void {
     if (this.disposed) return;
     Object.assign(state, mutation(value));
+    state.recoveryUnavailable = false;
   }
 
   private nextIncarnation(): number {
@@ -1633,6 +1666,7 @@ export class SessionCoordinator {
       reason,
     });
     this.sessions.delete(sessionId);
+    this.publishRecoveryIdentity();
     this.publishedTranscriptDigests.delete(sessionId);
     this.recoverableOperationalState.delete(sessionId);
     this.registering.delete(sessionId);
@@ -1722,6 +1756,7 @@ export class SessionCoordinator {
       state.contextRevision = replay.revision;
       state.replayMemory = replay.entries;
       state.remoteRegistered = true;
+      this.publishRecoveryIdentity();
       trace({
         event: "register_success",
         sessionHash: sessionHash(sessionId),
@@ -1754,7 +1789,13 @@ export class SessionCoordinator {
     await predecessor;
     try {
       this.assertActive();
-      return await action(state);
+      const result = await action(state);
+      this.publishRecoveryIdentity();
+      return result;
+    } catch (error) {
+      state.recoveryUnavailable = true;
+      this.publishRecoveryIdentity(true);
+      throw error;
     } finally {
       resolveQueue();
     }
@@ -1876,6 +1917,7 @@ export class SessionCoordinator {
     if (this.disposed) return false;
     const local = this.localSession(sessionId);
     update(local);
+    local.recoveryStatus = local.status;
     persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(local, local.status));
     const snapshotRevision = (local.snapshotRevision ?? 0) + 1;
     local.snapshotRevision = snapshotRevision;
@@ -2303,6 +2345,29 @@ export class SessionCoordinator {
     };
   }
 
+  private publishRecoveryIdentity(invalidate = false): void {
+    if (!this.recoveryBinding || !this.recoverySource || !this.ctx.serverUrl) return;
+    const unavailable = [...this.sessions.values()].some((state) => state.recoveryUnavailable || !state.remoteRegistered);
+    try {
+      publishCurrentParentRecovery({
+        binding: this.recoveryBinding, runtimeId: this.recoveryRuntimeId, nonce: this.recoveryNonce,
+        controlPlane: this.ctx.serverUrl.origin, source: this.recoverySource,
+        sessions: this.disposed || invalidate || unavailable ? [] : [...this.sessions].filter(([, state]) => state.state === "active")
+          .map(([sessionId, state]) => ({
+            sessionId, coordinationSessionId: state.sessionId, worktreeId: state.worktreeId,
+            incarnation: state.incarnation, revision: state.revision, fence: state.fence,
+            epoch: state.recoveryEpochRevision === state.revision ? state.recoveryEpoch ?? null : null,
+            claimReferenceSha256: state.recoveryEpochRevision === state.revision ? state.recoveryClaimReference ?? null : null,
+            handoff: this.recoveryHandoff(state, state.recoveryStatus ?? state.status),
+            todos: state.manifest.todoWrite.map(({ id, status }) => ({ id, status })),
+          })),
+      });
+    } catch {
+      if (!invalidate) this.publishRecoveryIdentity(true);
+      this.warning();
+    }
+  }
+
   private async publishMemory(
     sessionId: string,
     status: OperationalEntry["status"],
@@ -2311,6 +2376,7 @@ export class SessionCoordinator {
     try {
       return await this.serialized(sessionId, async (state) => {
         if (!state.memoryDirty) return false;
+        state.recoveryStatus = status;
         persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(state, status));
         const changedPaths = state.changedPaths.map(({ path, ...entry }) => {
           const pathSegments = encodeCoordinationPath(path);
