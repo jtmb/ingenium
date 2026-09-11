@@ -17,6 +17,48 @@ const docsManifest = {
 };
 const resourcesManifest = { version: 2, skills: [], agents: [], plugins: [] };
 describe("repository sync MCP tool adapter", () => {
+  it.each(["retained corpus", "exact byte limits"])("accepts documents at %s", async (size) => {
+    const roadmap = "x".repeat(805_779 - 802) + "é".repeat(802);
+    expect(roadmap.length).toBe(805_779);
+    expect(Buffer.byteLength(roadmap)).toBe(806_581);
+    const contents = size === "retained corpus"
+      ? [roadmap, "x".repeat(600_000), "x".repeat(1_873_484 - 806_581 - 600_000)]
+      : Array.from({ length: 3 }, () => "é".repeat(512 * 1024));
+    expect(contents.reduce((total, content) => total + Buffer.byteLength(content), 0))
+      .toBe(size === "retained corpus" ? 1_873_484 : 3 * 1024 * 1024);
+    const manifest = { files: contents.map((content, index) => ({
+      ...docsManifest.files[0], path: `docs/${index}.md`, content,
+    })) };
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: true, generation: 0, manifestHash: "a".repeat(64), docs: { summary: {} },
+    } });
+
+    const result = await repositorySync("ingenium", manifest, undefined, 0, true);
+
+    expect(result).not.toHaveProperty("isError");
+    expect(mockPost).toHaveBeenCalledWith("/repository/sync", {
+      docsManifest: manifest, resourcesManifest: undefined, expectedGeneration: 0, dryRun: true,
+    }, { project: "ingenium" });
+  });
+
+  it.each([
+    ["file byte", ["é".repeat(512 * 1024) + "x"]],
+    ["file character", ["x".repeat(1024 * 1024 + 1)]],
+    ["aggregate byte", [...Array.from({ length: 3 }, () => "é".repeat(512 * 1024)), "x"]],
+  ])("rejects documents one %s over the limit before forwarding", async (_label, contents) => {
+    const manifest = { files: contents.map((content, index) => ({
+      ...docsManifest.files[0], path: `docs/${index}.md`, content,
+    })) };
+
+    const result = await repositorySync("ingenium", manifest, undefined, 0, true);
+
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid." },
+    });
+  });
+
   it("forwards command resources and returns only bounded command counters", async () => {
     const resources = { ...resourcesManifest, commands: [{ source: "Run checks" }] };
     mockPost.mockResolvedValueOnce({ ok: true, data: {

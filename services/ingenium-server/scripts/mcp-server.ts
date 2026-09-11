@@ -63,7 +63,7 @@ import * as ragTools from "../lib/tools/rag.js";
 import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
-import { repositorySync } from "../lib/tools/repository.js";
+import { REPOSITORY_MAX_DOC_FILE_BYTES, repositorySync } from "../lib/tools/repository.js";
 import { externalUsageSchema, usageIngest } from "../lib/tools/usage.js";
 
 const projectStateAttestor = new ProjectStateAttestor();
@@ -193,7 +193,7 @@ const projectParam = z.string().min(1).max(64).refine(
 const repositoryDocEntryParam = z.object({
   path: z.string().min(1).max(512),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  content: z.string().max(512 * 1024),
+  content: z.string().max(REPOSITORY_MAX_DOC_FILE_BYTES),
   fileType: z.literal("regular"),
   isSymlink: z.literal(false),
 }).strict();
