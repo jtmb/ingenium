@@ -9841,3 +9841,41 @@ separately required parent replacement/restart or any parent/final gate.
   evidence only: QA, security, deployment, and recovery acceptance remain
   pending. No deployed/runtime PASS or completion claim is added; prior entries
   and stable IDs remain unchanged.
+- **Latest deployed evidence:** Revision `6afe6e47542da3fef627a4f2b6e8a1b29ff02f76`,
+  image `sha256:410b491e7326eaa9df0a3468db7256f4921a113cbc4de4e28a423d896e89c27d`,
+  container prefix `9148e3bc04a2`, and rollback tag
+  `ingenium-ingenium:rollback-01c44c6c-6afe6e47`. Routes, MCP, artifact,
+  ACL, and scanner evidence are healthy/passing.
+- **Latest recovery preflight (nonmutating):** Digest/hash
+  `9fb1eda1213d150d9666cc850b1612f59ed7333240e9346997e334a5b339de7c`;
+  `admissible=false`; source/clean footprint present; binding `stale/live=null`;
+  parent, current-parent, session, and enrollment absent or ambiguous; handoff
+  stale and count-only; outbox count `193` with `1` ambiguous record. Wrapper
+  evidence is absent for OCI/API/supervisor/replacement/reconnect/rollback/
+  fencing. Exact failures are `binding`, `nonce_enrollment`, `outbox`,
+  `parent_identity`, and `recovery_handoff`. No restart, signal, or admission
+  artifact exists.
+- **Owner/nextWork:** `@ingenium-orchestrator` / recovery-contract owner;
+  `nextWork=source/config diagnostic`. Deployment owner: `N/A`.
+- **Open boundary:** Recovery remains **OPEN**. Deployment evidence does not
+  prove recovery, parent admission, restart, reconnect, rollback, or fencing;
+  prior history and stable Todo markers remain unchanged.
+- **Second recovery-source boundary (`SOURCE ONLY`):** A source wave changed
+  exactly these five extension paths: `packages/ingenium-extension/scripts/recovery-bootstrap.js`,
+  `packages/ingenium-extension/scripts/production-restart.ts`,
+  `packages/ingenium-extension/session-coordinator.ts`,
+  `packages/ingenium-extension/session-coordinator.test.ts`, and new
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`. Recovery now
+  resolves the configured authenticated MCP binding and independently
+  corroborates it with API preflight/project detail and OCI image/container
+  evidence; legacy process/session/active-role capture fails closed and emits
+  only typed operational references, with explicit nonce provenance. Outbox
+  disposition acceptance requires exact schema-v2 record key/hash/count/
+  operation matching and persisted authorization matching; the independent
+  systemd recovery-owner status contract remains non-authorizing and checks
+  exact job, invocation, process, lease, fence, binding, source, nonce, and
+  health evidence.
+- **Source checks:** 200 focused tests passed; extension typecheck passed; and
+  `git diff --check` passed. This remains source-only: QA, security review,
+  commit, deploy, live preflight, and restart are pending; no live acceptance
+  or completion claim is made.

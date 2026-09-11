@@ -24,6 +24,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
+  apiRequestHeaders,
   preflightApiAuthentication,
 } from "../api-auth.js";
 import {
@@ -2195,9 +2196,14 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
 async function resolveProductionBinding(worktree: string): Promise<ProductionRestartBinding> {
   const purpose = coordinationCredentialPurpose();
   if (purpose === "general") hardenLegacyProductionCredentialPermissions(worktree);
+  return inspectProductionRestartBinding(worktree);
+}
+
+export async function inspectProductionRestartBinding(worktree: string, request: typeof fetch = fetch): Promise<ProductionRestartBinding> {
+  const purpose = coordinationCredentialPurpose();
   const local = resolveExtensionBinding(worktree, { purpose });
   if (local.audience !== "mcp") throw new Error("Production restart requires an MCP binding");
-  const authentication = await preflightApiAuthentication(local.apiUrl, worktree, fetch, {
+  const authentication = await preflightApiAuthentication(local.apiUrl, worktree, request, {
     credentialPurpose: purpose,
     timeoutMs: 5_000,
   });
@@ -2207,6 +2213,13 @@ async function resolveProductionBinding(worktree: string): Promise<ProductionRes
     || attested.workspaceId !== local.workspaceId || attested.launcherWorktree !== local.launcherWorktree) {
     throw new Error("Production restart binding is unavailable");
   }
+  const response = await request(`${local.apiUrl}/projects/${encodeURIComponent(local.project)}/detail`, {
+    method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
+    headers: apiRequestHeaders(worktree, undefined, { binding: local }),
+  });
+  const detail = responseRecord(await response.json());
+  if (response.status !== 200 || !isRecord(detail?.project) || detail.project.id !== attested.projectId
+    || detail.project.name !== local.project) throw new Error("Production restart project binding is unavailable");
   return {
     apiUrl: local.apiUrl,
     project: local.project,

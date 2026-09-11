@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionBinding } from "./extension-binding.js";
@@ -277,6 +277,29 @@ async function created(coordinator: ProductionSessionCoordinator, sessionID: str
 }
 
 describe("SessionCoordinatorPlugin hooks", () => {
+  it("does not invent a parent enrollment nonce for an unenrolled process", async () => {
+    const worktree = mkdtempSync("/tmp/opencode/recovery-unenrolled-");
+    const git = (args: string[]) => execFileSync("git", args, { cwd: worktree, stdio: "pipe" });
+    git(["init"]);
+    writeFileSync(join(worktree, ".gitignore"), ".opencode/\n");
+    git(["add", ".gitignore"]);
+    git(["-c", "user.name=Recovery Test", "-c", "user.email=recovery@example.invalid", "commit", "-m", "fixture"]);
+    const prior = process.env.INGENIUM_RESTART_NONCE;
+    delete process.env.INGENIUM_RESTART_NONCE;
+    const context = { ...processHarness("ingenium", {}, worktree), serverUrl: new URL("http://127.0.0.1:4098") };
+    const coordinator = new SessionCoordinator(context, { callTool: coordinationFixture().callTool });
+    try {
+      await created(coordinator, "ses_legacy");
+      await coordinator.hooks()["chat.message"]!({ sessionID: "ses_legacy", agent: "ingenium-orchestrator" } as any, {} as any);
+      expect(readdirSync(join(worktree, ".opencode/protected-runtime-index/tui-recovery"))
+        .filter((name) => name.startsWith("current-parent-"))).toEqual([]);
+    } finally {
+      if (prior === undefined) delete process.env.INGENIUM_RESTART_NONCE;
+      else process.env.INGENIUM_RESTART_NONCE = prior;
+      await coordinator.dispose();
+      rmSync(worktree, { recursive: true, force: true });
+    }
+  });
   it("publishes current parent identity from exact lifecycle events and invalidates it on disposal", async () => {
     const worktree = mkdtempSync("/tmp/opencode/recovery-lifecycle-");
     const git = (args: string[]) => execFileSync("git", args, { cwd: worktree, stdio: "pipe" });

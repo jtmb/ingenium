@@ -894,7 +894,7 @@ function mergeOperationalMemory(
 
 export class SessionCoordinator {
   private readonly recoveryRuntimeId = randomUUID();
-  private readonly recoveryNonce = process.env.INGENIUM_RESTART_NONCE ?? randomBytes(32).toString("base64url");
+  private readonly recoveryNonce = process.env.INGENIUM_RESTART_NONCE;
   private recoveryBinding?: ManagedRecoveryBinding;
   private readonly recoverySource?: { head: string; clean: boolean };
   private readonly contextUploader: ContextAutoUploader;
@@ -2340,7 +2340,7 @@ export class SessionCoordinator {
   }
 
   private publishRecoveryIdentity(invalidate = false): void {
-    if (!this.recoveryBinding || !this.recoverySource || !this.ctx.serverUrl) return;
+    if (!this.recoveryBinding || !this.recoverySource || !this.ctx.serverUrl || !this.recoveryNonce) return;
     const unavailable = [...this.sessions.values()].some((state) => state.recoveryUnavailable || !state.remoteRegistered
       || (state.state === "active" && !isValidRecoveryRole(state.activeAgent)));
     try {

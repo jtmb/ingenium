@@ -653,7 +653,8 @@ function inspectAncestry(worktree) {
     const { argv, ...member } = inspected;
     ancestry.push(member);
     const sessionId = commandLineSession(argv);
-    if (inspected.commandName === "opencode" && inspected.cwd === worktree && sessionId) {
+    const sessionArgument = argv.some((arg) => arg === "-s" || arg === "--session" || arg.startsWith("--session="));
+    if (inspected.commandName === "opencode" && inspected.cwd === worktree && (sessionId || !sessionArgument)) {
       const environment = processEnvironment(pid);
       const dataHomeCandidate = environment?.XDG_DATA_HOME
         ?? (environment?.HOME ? resolve(environment.HOME, ".local/share") : undefined);
@@ -668,7 +669,7 @@ function inspectAncestry(worktree) {
           executableSha256: inspected.executableSha256,
           cwd: inspected.cwd,
           cmdlineSha256: inspected.cmdlineSha256,
-          sessionId,
+          sessionId: sessionId ?? null,
           dataHome,
           port: ports[0] ?? null,
           nonceSha256: nonce ? sha256(nonce) : "0".repeat(64),
@@ -907,8 +908,37 @@ export function summarizeCoordinationOutboxState(protectedIndex) {
     && value.recordKey === LEGACY_DISPOSITION_KEY
     && value.recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256
     && value.operationId === LEGACY_DISPOSITION_OPERATION_ID);
+  const versionedDisposed = ({ sha256: recordSha256, value: record }) => {
+    if (record.kind !== "overflow" || record.ambiguous !== true || !/^0+$/.test(record.sessionHash)
+      || record.mutation !== null || record.key !== "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0") return false;
+    const matches = inspectedDisposition.entries.filter(({ value }) => value.schemaVersion === 2
+      && value.recordKey === record.key && value.recordSha256 === recordSha256
+      && value.recordCount === record.count && value.operationId === record.operationId);
+    if (matches.length !== 1 || inspectedDisposition.summary.status !== "validated") return false;
+    try {
+      const directory = resolve(protectedIndex, "coordination-outbox-authorizations");
+      const stat = lstatSync(directory);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== ownerUid()
+        || (stat.mode & 0o777) !== 0o700 || realpathSync(directory) !== directory) return false;
+      const bytes = readOnlyRegularFile(resolve(directory, `${record.key}.json`), 16 * 1024, false, 0o600);
+      const disposition = matches[0].value;
+      if (sha256(bytes) !== disposition.authorizationSha256) return false;
+      const authorization = JSON.parse(bytes);
+      const authorityHash = sha256(`explicit_user_authorization\0abandon_identityless_overflow\0${record.key}\0exact_key_same_record_family\0nonrecoverable_identityless_overflow`);
+      const issued = Date.parse(authorization.issuedAt);
+      const expires = Date.parse(authorization.expiresAt);
+      const disposed = Date.parse(disposition.createdAt);
+      return hasExactKeys(authorization, ["schemaVersion", "authorizationId", "recordKey", "mode", "authority", "scope", "reason", "issuedAt", "expiresAt"])
+        && authorization.schemaVersion === 1 && authorization.authorizationId === authorityHash
+        && authorization.recordKey === record.key && authorization.mode === "abandon_identityless_overflow"
+        && authorization.authority === disposition.authority && authorization.scope === "exact_key_same_record_family"
+        && authorization.reason === disposition.reason && Number.isFinite(issued) && Number.isFinite(expires)
+        && expires > issued && expires - issued <= 24 * 60 * 60 * 1_000 && issued <= disposed && disposed < expires;
+    } catch { return false; }
+  };
   const ambiguousCount = inspectedOutbox.entries.filter(({ sha256: recordSha256, value }) =>
     (value.ambiguous === true || value.kind === "overflow")
+    && !versionedDisposed({ sha256: recordSha256, value })
     && !(legacyDisposed && value.key === LEGACY_DISPOSITION_KEY
       && value.operationId === LEGACY_DISPOSITION_OPERATION_ID
       && recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256)).length;
@@ -963,6 +993,103 @@ async function collectApiHealth(environment, request) {
   } catch {
     return { status: "unavailable", httpStatus: null };
   }
+}
+
+export function inspectRecoveryDeployment(worktree, head, run = execFileSync) {
+  try {
+    const docker = (args) => run("/usr/bin/docker", ["--host", "unix:///var/run/docker.sock", ...args], {
+      encoding: "utf8", timeout: 5_000, maxBuffer: 1024 * 1024, env: { PATH: "/usr/bin:/bin" },
+    });
+    const ids = docker(["ps", "--filter", `label=com.docker.compose.project.working_dir=${worktree}`,
+      "--filter", "label=com.docker.compose.service=ingenium", "--format", "{{.ID}}"])
+      .trim().split("\n").filter(Boolean);
+    if (ids.length !== 1 || !/^[0-9a-f]{12,64}$/.test(ids[0])) throw new Error("ambiguous deployment");
+    const containers = JSON.parse(docker(["inspect", ids[0]]));
+    if (!Array.isArray(containers) || containers.length !== 1) throw new Error("ambiguous deployment");
+    const container = containers[0];
+    const labels = container.Config?.Labels;
+    if (!HASH.test(container.Id ?? "") || !container.Id.startsWith(ids[0])
+      || labels?.["com.docker.compose.project.working_dir"] !== worktree
+      || labels?.["com.docker.compose.service"] !== "ingenium" || !/^sha256:[0-9a-f]{64}$/.test(container.Image ?? "")
+      || container.State?.Running !== true || container.State?.Health?.Status !== "healthy") throw new Error("unhealthy deployment");
+    const images = JSON.parse(docker(["image", "inspect", container.Image]));
+    if (!Array.isArray(images) || images.length !== 1 || images[0].Id !== container.Image
+      || images[0].Config?.Labels?.["org.opencontainers.image.revision"] !== head
+      || !GIT_OID.test(head ?? "")) throw new Error("foreign deployment source");
+    return { status: "attested", provider: "docker-local", revision: head, image: container.Image, container: container.Id };
+  } catch { return { status: "unavailable", provider: "docker-local", revision: null }; }
+}
+
+export function prepareRecoveryOwnerContract(binding, sourceHead) {
+  if (!hasExactKeys(binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
+    || !SAFE_PROJECT.test(binding.project) || !UUID.test(binding.projectId) || !SAFE_ID.test(binding.workspaceId)
+    || !HASH.test(binding.storageMappingHash) || resolve(binding.worktree) !== binding.worktree || !GIT_OID.test(sourceHead ?? "")) {
+    throw new Error("Recovery owner preparation binding is invalid");
+  }
+  return { schemaVersion: 1, kind: "recovery-owner-preparation", authorizesRestart: false,
+    provider: "systemd-user", job: "ingenium-recovery-owner.service", binding: { ...binding }, sourceHead,
+    maximumLeaseMs: 60_000, nonceTarget: "successor_or_supervisor_only" };
+}
+
+export function inspectRecoveryOwnerStatus(contract, options = {}) {
+  const unavailable = { status: "unavailable", authorizesRestart: false };
+  try {
+    if (canonicalJson(contract) !== canonicalJson(prepareRecoveryOwnerContract(contract.binding, contract.sourceHead))) return unavailable;
+    const directory = resolve(contract.binding.worktree, ".opencode/protected-runtime-index/tui-recovery");
+    for (const path of [dirname(directory), directory]) {
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== ownerUid()
+        || (stat.mode & 0o777) !== 0o700 || realpathSync(path) !== path) return unavailable;
+    }
+    const bytes = readOnlyRegularFile(resolve(directory, "owner-status.json"), 16 * 1024, false, 0o600);
+    const value = JSON.parse(bytes);
+    const now = options.now ?? Date.now();
+    if (!hasExactKeys(value, ["schemaVersion", "job", "invocationId", "binding", "sourceHead", "scriptSha256", "owner", "fence", "lease", "health"])
+      || value.schemaVersion !== 1 || value.job !== contract.job || !/^[0-9a-f]{32}$/.test(value.invocationId ?? "")
+      || canonicalJson(value.binding) !== canonicalJson(contract.binding) || value.sourceHead !== contract.sourceHead
+      || !HASH.test(value.scriptSha256 ?? "") || !hasExactKeys(value.owner, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+      || !safeRecoveryIdentity(value.owner) || value.owner.nonceSha256 === "0".repeat(64)
+      || !Number.isSafeInteger(value.fence) || value.fence < 1 || value.health !== "ready"
+      || !hasExactKeys(value.lease, ["issuedAt", "expiresAt"]) || !Number.isSafeInteger(value.lease.issuedAt)
+      || !Number.isSafeInteger(value.lease.expiresAt) || value.lease.issuedAt > now || value.lease.expiresAt <= now
+      || value.lease.expiresAt - value.lease.issuedAt > contract.maximumLeaseMs) return unavailable;
+    const stateBytes = readOnlyRegularFile(resolve(directory, "state.json"), 64 * 1024, false, 0o600);
+    const state = JSON.parse(stateBytes);
+    if (!hasExactKeys(state, ["schemaVersion", "owner", "fence", "generation", "phase", "activeParent", "replacement", "updatedAt"])
+      || state.schemaVersion !== 1 || !Number.isSafeInteger(state.generation) || state.generation < 1
+      || !["owner_ready", "enrolled"].includes(state.phase) || state.replacement !== null
+      || (state.phase === "owner_ready" ? state.activeParent !== null : !safeEnrolledParent(state.activeParent))
+      || !isCanonicalRfc3339(state.updatedAt) || state.fence !== value.fence
+      || canonicalJson(state.owner) !== canonicalJson(value.owner)) return unavailable;
+    const run = options.run ?? execFileSync;
+    const unit = run("/usr/bin/systemctl", ["--user", "show", contract.job,
+      "--property=MainPID,InvocationID,ActiveState,SubState"], { encoding: "utf8", timeout: 5_000, maxBuffer: 16 * 1024,
+      env: { PATH: "/usr/bin:/bin", XDG_RUNTIME_DIR: `/run/user/${ownerUid()}`,
+        DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${ownerUid()}/bus` } });
+    const properties = Object.fromEntries(unit.trim().split("\n").map((line) => {
+      const index = line.indexOf("=");
+      return [line.slice(0, index), line.slice(index + 1)];
+    }));
+    if (properties.MainPID !== String(value.owner.pid) || properties.InvocationID !== value.invocationId
+      || properties.ActiveState !== "active" || properties.SubState !== "running") return unavailable;
+    const inspect = options.inspect ?? inspectAncestor;
+    const environment = (options.environment ?? processEnvironment)(value.owner.pid);
+    const owner = inspect(value.owner.pid);
+    const script = resolve(contract.binding.worktree, "packages/ingenium-extension/dist/scripts/recovery-owner.js");
+    if (!owner || owner.startTimeTicks !== value.owner.startTimeTicks || owner.executableSha256 !== value.owner.executableSha256
+      || owner.cwd !== contract.binding.worktree || owner.commandName !== "node" || owner.argv.length !== 3 || owner.argv[1] !== script
+      || !OPAQUE_TOKEN.test(environment?.INGENIUM_RECOVERY_OWNER_NONCE ?? "")
+      || sha256(environment.INGENIUM_RECOVERY_OWNER_NONCE) !== value.owner.nonceSha256
+      || environment.INGENIUM_RECOVERY_OWNER_SOURCE_HEAD !== contract.sourceHead
+      || environment.INGENIUM_RECOVERY_OWNER_SCRIPT_SHA256 !== value.scriptSha256
+      || readTrustedRegularFile(script, "Recovery owner executable").sha256 !== value.scriptSha256) return unavailable;
+    if (!bytes.equals(readOnlyRegularFile(resolve(directory, "owner-status.json"), 16 * 1024, false, 0o600))
+      || !stateBytes.equals(readOnlyRegularFile(resolve(directory, "state.json"), 64 * 1024, false, 0o600))
+      || canonicalJson(inspect(value.owner.pid)) !== canonicalJson(owner)) return unavailable;
+    return { status: "attested", authorizesRestart: false, job: value.job, invocationId: value.invocationId,
+      owner: value.owner, fence: value.fence, lease: value.lease, health: value.health,
+      binding: value.binding, sourceHead: value.sourceHead, evidenceSha256: sha256(bytes) };
+  } catch { return unavailable; }
 }
 
 function responseValue(value) {
@@ -1139,25 +1266,141 @@ async function readLiveRecoverySummary(parent, worktree, request) {
       todos: { total: todos.length, ...todoCounts, state: todoState },
       nextWork,
     };
-    return { status: "validated", state: null, handoff: { ...handoff, sha256: sha256(canonicalJson(handoff)) } };
+    const assistant = [...messages].reverse().find((message) => message?.info?.role === "assistant");
+    const role = assistant?.info?.agent;
+    const typedTodos = todos.map((todo) => ({ idSha256: typeof todo.id === "string" && todo.id.length > 0 ? sha256(todo.id)
+      : typeof todo.content === "string" && todo.content.trim() && todo.content.length <= 2048
+        ? sha256(`todo-${sha256(`todo\0${JSON.stringify(todo.content)}`)}`) : null, status: todo.status }));
+    const operational = SAFE_ID.test(role ?? "") && typedTodos.length <= 64
+      && typedTodos.every((todo) => todo.idSha256 !== null) && new Set(typedTodos.map((todo) => todo.idSha256)).size === typedTodos.length
+      ? { role, status, taskHash, actionsSha256: sha256(canonicalJson(boundedActions)),
+        changedPathsSha256: sha256(canonicalJson(boundedChangedPaths)), checks: boundedChecks, todos: typedTodos, nextWork }
+      : null;
+    return { status: "validated", state: null, handoff: { ...handoff, sha256: sha256(canonicalJson(handoff)) }, operational };
   } catch {
     return undefined;
   }
 }
 
-function bindingFromParent(parent, worktree) {
-  const environment = parent?.environment;
-  if (!environment || !SAFE_PROJECT.test(environment.INGENIUM_PROJECT ?? "")
-    || !UUID.test(environment.INGENIUM_PROJECT_ID ?? "") || !SAFE_ID.test(environment.INGENIUM_WORKSPACE_ID ?? "")
-    || !HASH.test(environment.INGENIUM_STORAGE_MAPPING_HASH ?? "")
-    || environment.INGENIUM_WORKTREE !== worktree) return null;
-  return {
-    project: environment.INGENIUM_PROJECT,
-    projectId: environment.INGENIUM_PROJECT_ID,
-    workspaceId: environment.INGENIUM_WORKSPACE_ID,
-    storageMappingHash: environment.INGENIUM_STORAGE_MAPPING_HASH,
-    worktree,
+export async function captureLegacyRecoveryPreAdmission(parent, binding, source, request = fetch,
+  inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) })) {
+  try { prepareRecoveryOwnerContract(binding, source?.head); } catch { return null; }
+  if (!parent || !binding || !source || source.status !== "validated" || source.dirtyPaths.length !== 0
+    || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree
+    || !safeRecoveryIdentity(parent) || parent.port === null || parent.nonceSha256 !== "0".repeat(64)) return null;
+  const sameProcess = () => {
+    const actual = inspect(parent.pid);
+    return actual && actual.commandName === "opencode" && actual.pid === parent.pid
+      && actual.startTimeTicks === parent.startTimeTicks && actual.executableSha256 === parent.executableSha256
+      && actual.cwd === binding.worktree && actual.cmdlineSha256 === parent.cmdlineSha256
+      && actual.nonce === undefined && actual.ports?.length === 1 && actual.ports[0] === parent.port;
   };
+  if (!sameProcess()) return null;
+  const password = parent.environment?.OPENCODE_SERVER_PASSWORD;
+  const username = parent.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
+  if (!OPAQUE_TOKEN.test(password ?? "") || !/^[A-Za-z0-9._-]{1,64}$/.test(username)) return null;
+  try {
+    const headers = { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
+    const get = async (path) => {
+      const response = await request(`http://127.0.0.1:${parent.port}${path}`, {
+        method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(5_000),
+      });
+      if (response.status !== 200) throw new Error("Legacy capture unavailable");
+      return responseValue(await response.json());
+    };
+    const [sessions, statuses] = await Promise.all([get("/session"), get("/session/status")]);
+    if (!Array.isArray(sessions) || !isRecord(statuses)) return null;
+    const matches = sessions.filter((session) => session?.directory === binding.worktree && !session.parentID
+      && ["busy", "retry", "working"].includes(statuses[session.id]?.type));
+    if (matches.length !== 1 || !SAFE_SESSION.test(matches[0].id ?? "")
+      || parent.sessionId !== null && parent.sessionId !== matches[0].id) return null;
+    const sessionId = matches[0].id;
+    const live = await readLiveRecoverySummary({ ...parent, sessionId }, binding.worktree, request);
+    if (!live?.operational || !sameProcess()) return null;
+    const config = JSON.parse(readOnlyRegularFile(resolve(binding.worktree, "opencode.json"), 1024 * 1024));
+    if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
+      || config.agent[live.operational.role]?.disable === true) return null;
+    const confirmed = await get("/session/status");
+    if (canonicalJson(confirmed) !== canonicalJson(statuses)) return null;
+    const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
+    const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
+      nonceProvenance: "absent_process_environment", sessionId, binding, sourceHead: source.head,
+      operational: live.operational };
+    return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
+  } catch { return null; }
+}
+
+export function recoveryConfiguredEnvironment(worktree, inherited = {}) {
+  const config = JSON.parse(readOnlyRegularFile(resolve(worktree, "opencode.json"), 1024 * 1024));
+  const candidates = Object.entries(config.mcp ?? {}).filter(([name, entry]) => name === "ingenium"
+    || entry?.environment?.INGENIUM_MCP_AUDIENCE !== undefined
+    || entry?.command?.some?.((part) => typeof part === "string" && part.endsWith("/packages/ingenium-extension/dist/scripts/mcp-server.js")));
+  if (candidates.length !== 1 || candidates[0][0] !== "ingenium") throw new Error("Recovery binding is unavailable");
+  const entry = candidates[0][1];
+  const configured = entry.environment;
+  if (entry.type !== "local" || entry.enabled === false || !isRecord(configured)
+    || Object.values(configured).some((value) => typeof value !== "string")
+    || configured.INGENIUM_MCP_CREDENTIAL !== undefined || inherited.INGENIUM_MCP_CREDENTIAL !== undefined
+    || configured.INGENIUM_TRUSTED_API_URL !== undefined) throw new Error("Recovery binding is unavailable");
+  const keys = ["INGENIUM_PROJECT", "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID", "INGENIUM_WORKTREE",
+    "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_API_URL", "INGENIUM_MCP_AUDIENCE", "INGENIUM_MCP_CREDENTIAL_FILE"];
+  if (keys.some((key) => inherited[key] !== undefined && configured[key] !== undefined && inherited[key] !== configured[key])) {
+    throw new Error("Recovery binding conflicts with configured binding");
+  }
+  const environment = { ...inherited, ...configured };
+  environment.INGENIUM_WORKTREE ??= worktree;
+  environment.INGENIUM_API_URL ??= "http://localhost:4097/api/v1";
+  environment.INGENIUM_MCP_CREDENTIAL_FILE ??= ".opencode/.ingenium-mcp-credential";
+  const url = new URL(environment.INGENIUM_API_URL);
+  if (!SAFE_PROJECT.test(environment.INGENIUM_PROJECT ?? "") || !SAFE_ID.test(environment.INGENIUM_WORKSPACE_ID ?? "")
+    || environment.INGENIUM_WORKTREE !== worktree || realpathSync(worktree) !== worktree
+    || environment.INGENIUM_MCP_AUDIENCE !== "mcp"
+    || (environment.INGENIUM_PROJECT_ID !== undefined && !UUID.test(environment.INGENIUM_PROJECT_ID))
+    || (environment.INGENIUM_STORAGE_MAPPING_HASH !== undefined && !HASH.test(environment.INGENIUM_STORAGE_MAPPING_HASH))
+    || url.username || url.password || url.search || url.hash
+    || !["http://localhost:4097/api/v1", "http://127.0.0.1:4097/api/v1"].includes(environment.INGENIUM_API_URL)
+    || basename(environment.INGENIUM_MCP_CREDENTIAL_FILE) !== ".ingenium-mcp-credential") {
+    throw new Error("Recovery binding is unavailable");
+  }
+  return environment;
+}
+
+export async function corroborateRecoveryBinding(worktree, environment, request = fetch) {
+  const token = readRecoveryApiToken(worktree, environment);
+  const get = async (path) => {
+    const response = await request(`${environment.INGENIUM_API_URL}${path}`, {
+      method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
+      headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Audience": "mcp",
+        "X-Ingenium-Workspace": environment.INGENIUM_WORKSPACE_ID, "X-Ingenium-Launcher-Worktree": worktree },
+    });
+    if (response.status !== 200) throw new Error("Recovery binding authority is unavailable");
+    return responseValue(await response.json());
+  };
+  const authority = await get("/auth/preflight");
+  if (!isRecord(authority) || authority.audience !== "mcp" || !UUID.test(authority.projectId ?? "")
+    || !HASH.test(authority.storageMappingHash ?? "") || !authority.projectIds?.includes(authority.projectId)
+    || authority.workspaceId !== environment.INGENIUM_WORKSPACE_ID || authority.launcherWorktree !== worktree
+    || (environment.INGENIUM_PROJECT_ID !== undefined && authority.projectId !== environment.INGENIUM_PROJECT_ID)
+    || (environment.INGENIUM_STORAGE_MAPPING_HASH !== undefined && authority.storageMappingHash !== environment.INGENIUM_STORAGE_MAPPING_HASH)) {
+    throw new Error("Recovery binding authority mismatch");
+  }
+  const detail = await get(`/projects/${encodeURIComponent(environment.INGENIUM_PROJECT)}/detail`);
+  if (detail?.project?.id !== authority.projectId || detail.project.name !== environment.INGENIUM_PROJECT) {
+    throw new Error("Recovery project authority mismatch");
+  }
+  return { project: environment.INGENIUM_PROJECT, projectId: authority.projectId,
+    workspaceId: authority.workspaceId, storageMappingHash: authority.storageMappingHash, worktree };
+}
+
+export function recoveryEnvironmentForBinding(binding, inherited = process.env) {
+  const environment = recoveryConfiguredEnvironment(binding.worktree, inherited);
+  for (const [key, value] of Object.entries({ INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
+    INGENIUM_WORKSPACE_ID: binding.workspaceId, INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
+    INGENIUM_WORKTREE: binding.worktree })) {
+    if (environment[key] !== undefined && environment[key] !== value) throw new Error("Recovery admission binding changed");
+    environment[key] = value;
+  }
+  return environment;
 }
 
 function enrollmentClassification(parent, binding, recovery) {
@@ -1259,7 +1502,7 @@ export function readCurrentParentSummary(worktree, parent, binding, head, now = 
 export async function collectRecoveryPreflight(options = {}) {
   const environment = options.environment ?? process.env;
   const sourcePath = resolve(options.sourcePath ?? MODULE_ATTESTATION?.sourcePath ?? fileURLToPath(import.meta.url));
-  const declaredWorktree = environment.INGENIUM_WORKTREE;
+  const declaredWorktree = environment.INGENIUM_WORKTREE ?? resolve(dirname(sourcePath), "../../..");
   let worktree;
   try {
     worktree = declaredWorktree && realpathSync(declaredWorktree);
@@ -1279,7 +1522,19 @@ export async function collectRecoveryPreflight(options = {}) {
   const ancestry = worktree ? inspectAncestry(worktree) : { status: "ambiguous", members: [], parent: null };
   const parentInternal = ancestry.parent;
   const parent = parentInternal ? Object.fromEntries(Object.entries(parentInternal).filter(([key]) => key !== "environment")) : null;
-  const binding = worktree ? bindingFromParent(parentInternal, worktree) : null;
+  let configuredEnvironment;
+  let binding = null;
+  if (worktree) try {
+    configuredEnvironment = recoveryConfiguredEnvironment(worktree, environment);
+    const parentEnvironment = parentInternal?.environment ?? {};
+    for (const key of ["INGENIUM_PROJECT", "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID", "INGENIUM_WORKTREE", "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_API_URL"]) {
+      if (parentEnvironment[key] !== undefined && configuredEnvironment[key] !== undefined
+        && parentEnvironment[key] !== configuredEnvironment[key]) throw new Error("Recovery parent binding mismatch");
+    }
+    binding = await corroborateRecoveryBinding(worktree, configuredEnvironment, options.request ?? fetch);
+    if (parentEnvironment.INGENIUM_PROJECT_ID !== undefined && parentEnvironment.INGENIUM_PROJECT_ID !== binding.projectId
+      || parentEnvironment.INGENIUM_STORAGE_MAPPING_HASH !== undefined && parentEnvironment.INGENIUM_STORAGE_MAPPING_HASH !== binding.storageMappingHash) binding = null;
+  } catch {}
   let recovery = worktree ? readRecoverySummary(worktree) : {
     summary: { status: "invalid", state: null, handoff: null }, enrollment: null,
   };
@@ -1297,6 +1552,12 @@ export async function collectRecoveryPreflight(options = {}) {
   const currentParent = worktree ? readCurrentParentSummary(worktree, parent, binding,
     gitSummary.dirtyPaths.length === 0 ? gitSummary.head : null, Date.now(), recovery.summary.handoff)
     : { status: "invalid", role: null, project: null, enrollmentSha256: null };
+  const preAdmissionCapture = currentParent.status === "missing"
+    ? await captureLegacyRecoveryPreAdmission(parentInternal, binding, gitSummary, options.request ?? fetch) : null;
+  if (preAdmissionCapture) {
+    parent.sessionId = preAdmissionCapture.snapshot.sessionId;
+    recovery.summary = { status: "validated", state: recovery.summary.state, handoff: preAdmissionCapture.summary };
+  }
   const coordination = protectedIndex ? summarizeCoordinationOutboxState(protectedIndex) : {
     outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
     disposition: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
@@ -1306,25 +1567,28 @@ export async function collectRecoveryPreflight(options = {}) {
     ? summarizeFreeze(resolve(protectedIndex, "coordination-outbox-mutation.lock"))
     : { status: "invalid", sha256: null };
   const classification = enrollmentClassification(parentInternal, binding, recovery);
-  const apiHealth = await collectApiHealth(parentInternal?.environment ?? environment, options.request ?? fetch);
-  const imageRevision = parentInternal?.environment?.IMAGE_REVISION ?? environment.IMAGE_REVISION;
-  const ociRevision = /^[0-9a-f]{40}$/.test(imageRevision ?? "")
-    ? { status: "attested", revision: imageRevision }
-    : { status: "unconfigured", revision: null };
+  const apiHealth = await collectApiHealth(configuredEnvironment ?? {}, options.request ?? fetch);
+  const ociRevision = binding && gitSummary.status === "validated"
+    ? inspectRecoveryDeployment(worktree, gitSummary.head, options.inspectDeploymentCommand)
+    : { status: "unavailable", provider: "docker-local", revision: null };
+  const ownerPreparation = binding && gitSummary.status === "validated" ? prepareRecoveryOwnerContract(binding, gitSummary.head) : null;
+  const recoveryOwner = ownerPreparation ? inspectRecoveryOwnerStatus(ownerPreparation) : { status: "unavailable", authorizesRestart: false };
   const failures = [];
   if (!worktree) failures.push("worktree");
   if (!source) failures.push("source");
   if (ancestry.status !== "exact" || !parent) failures.push("parent_identity");
   if (!binding) failures.push("binding");
-  if (currentParent.status === "invalid") failures.push("current_parent");
+  if (currentParent.status !== "validated" && !preAdmissionCapture) failures.push("current_parent");
   if (gitSummary.status !== "validated") failures.push("git");
   if (recovery.summary.status !== "validated") failures.push("recovery_handoff");
   if (recovery.summary.state && recovery.summary.state.phase !== "enrolled") failures.push("recovery_phase");
   if (classification === "ambiguous") failures.push("nonce_enrollment");
+  if (recoveryOwner.status !== "attested") failures.push("recovery_owner");
   if (outbox.status === "invalid" || outbox.ambiguousCount > 0) failures.push("outbox");
   if (disposition.status === "invalid") failures.push("disposition");
   if (freeze.status === "invalid" || freeze.status === "present") failures.push("freeze");
-  if (["invalid", "unavailable", "unhealthy"].includes(apiHealth.status)) failures.push("api_health");
+  if (apiHealth.status !== "healthy") failures.push("api_health");
+  if (ociRevision.status !== "attested") failures.push("oci_revision");
   return {
     schemaVersion: 1,
     action: "production-restart",
@@ -1351,11 +1615,15 @@ export async function collectRecoveryPreflight(options = {}) {
     },
     ancestry: { status: ancestry.status, members: ancestry.members },
     parent,
-    nonceEnrollment: { classification },
+    nonceEnrollment: { classification, provenance: parent?.nonceSha256 === "0".repeat(64)
+      ? "absent_process_environment" : parent ? "process_environment" : "unavailable" },
     binding,
     git: gitSummary,
     recovery: recovery.summary,
     currentParent,
+    preAdmissionCapture,
+    ownerPreparation,
+    recoveryOwner,
     outbox,
     disposition,
     freeze,
@@ -2173,6 +2441,7 @@ async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
   const npmConfiguration = privateNpmConfiguration(owner);
   try {
     const recoveryEnvironment = {
+      ...selectedEnvironment(recoveryEnvironmentForBinding(context.binding), RECOVERY_ENVIRONMENT),
       [CANONICAL_WORKTREE]: repoRoot,
       INGENIUM_WORKTREE: repoRoot,
       [ADMITTED_RECOVERY_CONTEXT]: canonicalJson(context),
@@ -2267,7 +2536,9 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
     const expectedContext = expectedAdmittedRecoveryContext(current, digest);
     sourceHandle.revalidate();
     const context = validatedAdmittedRecoveryContext(
-      await (dependencies.consumeAdmission ?? consumeRecoveryAdmission)(admission, expectedContext),
+      await (dependencies.consumeAdmission ?? ((record, expected) => consumeRecoveryAdmission(record, expected, {
+        environment: recoveryEnvironmentForBinding(expected.binding),
+      })))(admission, expectedContext),
       expectedContext,
       admission.admission,
     );
