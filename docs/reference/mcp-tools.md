@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 291-tool built-in Ingenium MCP catalog across 31 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 292-tool built-in Ingenium MCP catalog across 32 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **291 tools** across **31 baseline categories**:
-289 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
+The built-in catalog contains **292 tools** across **32 baseline categories**:
+290 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** display locator (except where noted). The locator
@@ -294,9 +294,10 @@ coordination claim proof.
 
 The input requires `project`, a `docsManifest.files` array of at most 256 regular
 non-symlink files, and a nonnegative `expectedGeneration`. The optional
-`resourcesManifest` is version `2` and contains skills, agents, and plugins with
-at most 512 total resources. `dryRun` validates and previews without advancing the
-generation. The operation calls `POST /api/v1/repository/sync`; a stale generation
+`resourcesManifest` is version `2` and contains skills, agents, plugins, and
+direct-child command Markdown with at most 512 total resources. `dryRun` validates
+and previews without advancing the generation. The operation calls
+`POST /api/v1/repository/sync`; a stale generation
 returns `409 MANIFEST_GENERATION_CONFLICT` with the current generation.
 
 `/api/v1/docs/repository/sync` and `/api/v1/repository/resources/sync` are not
@@ -522,8 +523,9 @@ The dashboard Context workspace makes imported conversations visible at
 `ingenium_context_message_search`,
 `ingenium_context_message_retrieve`, and
 `ingenium_context_message_batch_retrieve` to load ordered content. There is no
-external Thread service or bridge, and no old current-session or OpenCode-session
-import tool surface.
+external Thread service or bridge. The Context workspace's automatic
+external-session upload uses this same `ingenium_context_upload_file` handoff;
+there is no separate generic unbounded transcript-import surface.
 
 Context entries are project-isolated, taggable, priority-ranked (0–10), and FTS5-searchable. They persist working context across sessions — the task management and plan surface reads from the same `context_entries` table. The `plan_*` tools remain supported for backward compatibility; `context_*` tools provide the canonical CRUD surface. See `services/ingenium-api/lib/routes/context.ts` and `packages/ingenium-core/lib/tools/context.ts`.
 
@@ -707,6 +709,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 291 tools across 31 categories (289 `ingenium_` catalog entries + 2 extension).** Project-scoped child
+**Built-in baseline: 292 tools across 32 categories (290 `ingenium_` catalog entries + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

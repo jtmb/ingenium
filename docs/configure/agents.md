@@ -119,10 +119,10 @@ The protected `ingenium-llm-broker` intentionally has no root mapping.
 | `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
 | `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
-| `ingenium-software-engineer-fast` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
+| `ingenium-software-engineer-fast` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
 | `ingenium-software-engineer-premium` | `openai/gpt-6-astra` | `medium` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
 | `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
-| `ingenium-orchestrator` | `deepseek/deepseek-v4-flash` | `max` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/primary/ingenium-orchestrator.md` |
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
 | `ingenium-chat` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
 | `ingenium-security-auditor` | `openai/gpt-6-astra` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |

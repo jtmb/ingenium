@@ -639,9 +639,11 @@ Docs Workspace page plus a RAG source.
 
 For example, a docs-only projection sends `{ "docsManifest": { "files": [...] }, "dryRun": true, "expectedGeneration": 0 }` and omits `resourcesManifest`; use the current project/worktree generation rather than assuming `0`.
 The all-resources workflow adds the version-2 `resourcesManifest` for skills,
-agents, and plugins. Manifest entries must use normalized `docs/` paths ending
-in `.md`, be regular non-symlink files, contain matching lowercase SHA-256
-hashes, and pass the file-count, size, and secret-content gates. The result
+agents, plugins, and commands. Command entries use direct-child
+`.opencode/commands/*.md` paths. Documentation entries use normalized
+`docs/` paths ending in `.md`; each resource type has its own canonical path
+rule. All entries must be regular non-symlink files, contain matching lowercase
+SHA-256 hashes, and pass the file-count, size, and secret-content gates. The result
 reports created, updated, renamed, restored, unchanged, and archived page
 operations together with RAG source changes. Files omitted from a later
 complete manifest archive only documents already managed by that project;
@@ -655,7 +657,8 @@ docs-only CLI scope omits resource synchronization.
 The `ingenium-init-project --docs-only` CLI scope is the repository-facing
 caller for the docs-only request. The default `ingenium-init-project --dry-run`
 / `--apply` workflow sends the same combined endpoint with the Markdown and
-resource manifests.
+resource manifests, including commands. Project/global configuration remains
+outside this repository projection.
 
 For the older direct file-source ingestion path, `POST /api/v1/rag/ingest` and
 `ingenium_docs_ingest` remain available; those sources are indexed as

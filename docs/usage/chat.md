@@ -22,6 +22,11 @@ before mounting the Chat shell; an invalid, missing, or archived selection never
 falls back to another project. URL query values are encoded with
 `URLSearchParams`.
 
+The **Use project context** control is a button in the ChatInput action row above
+the text composer. It shows the selected Context project (or `Unavailable`) and
+is separate from the top-navigation project selector and Chat's global tool
+authority.
+
 If the URL or stored selection is no longer valid, Chat fails closed with
 **Project context unavailable** and mounts no project-scoped Chat content. Use
 **Clear project selection and use server default** to remove the invalid URL and
@@ -167,14 +172,14 @@ The composer bar sits at the bottom of the chat area with a `rounded-2xl` border
 
 ### Optional Project Context
 
-The **Use project context** checkbox is an explicit per-send control and is off
+The **Use project context** button is an explicit per-send control and is off
 by default. After an accepted send, it resets to off. The selected project is
 validated before Chat mounts and is the authority for this optional Context
 search; Chat tools and provider/model selection remain owned by the active
 global project.
 
 The request binds the validated Context project to that send. Retrieval is sent
-only when the checkbox is enabled; a failed search leaves the prompt unsent so
+only when the button is enabled; a failed search leaves the prompt unsent so
 the user can retry. The API rechecks the project at request time, so an archive
 race is rejected rather than serving another project's context. Context source
 contents and excerpts are not written to logs.
@@ -188,7 +193,7 @@ title, the persisted chunk UUID as `citationId`, `sourceId`, `sourceHash`,
 optional source reference. It never renders the source excerpt.
 
 If retrieval finds no matches, the original prompt is still sent without
-grounding. If the search fails, Chat preserves the prompt and the checkbox so
+grounding. If the search fails, Chat preserves the prompt and the button state so
 you can retry. Citation metadata is live per-turn UI state and is not durable
 across a reload. Stable citation reproducibility comes from CTX-101's immutable
 chunk identity and deterministic retrieval order, not from persisted Chat UI

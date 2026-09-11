@@ -10,6 +10,24 @@ It preserves conversations, messages, checkpoints, checkpoint source links, and
 RAG citation snapshots. Do not use direct SQLite writes or attempt checkpoint
 deletion.
 
+## Automatic external-session upload
+
+The Context workspace can enable **Automatically upload external sessions** for
+the current project. It is off unless `context_auto_upload_enabled` is explicitly
+`true`; disabling it stops future uploads and retains existing Context. On
+`session.idle`, an `mcp`-bound external session may submit one protected snapshot
+containing only visible user and completed assistant text. Hidden, synthetic,
+ignored, errored, and unfinished assistant entries are excluded; secrets,
+credential-shaped values, bearer tokens, and sensitive URLs are redacted.
+
+The extension writes the bounded redacted snapshot to an owner-only temporary
+file, sends it through `ingenium_context_upload_file`, and removes the file
+afterward. Upload failures are recorded only as bounded status metadata and do
+not block the session or enable a fallback import path. To retire a conversation
+after a rollout, first prove import and fresh retrieval of the required
+conversation; archive is reversible and auditable, not a substitute for that
+proof.
+
 ## Safe workflow
 
 1. **Preview candidates** with `ingenium_context_checkpoint_maintenance_preview`.

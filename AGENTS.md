@@ -18,7 +18,7 @@ This file is the short orientation map for people and agents working in the Inge
 Ingenium is a local-first, self-hosted AI developer workspace built around OpenCode. It is an npm-workspace monorepo with these boundaries:
 
 - **Packages:** `ingenium-core` is the shared SQLite-WAL/FTS5 and Zod library; `ingenium-email` provides IMAP/SMTP and OAuth2; `ingenium-extension` is the installable client MCP server and plugin package.
-- **Services:** `ingenium-api` is the REST and authenticated `:4097` API boundary and sole database authority; `ingenium-server` is MCP stdio (291 catalogued tools: 289 server registrations plus 2 extension tools, zero DB access); `ingenium-dashboard` is the Next.js 16 App Router frontend on `:3000`, also zero DB access.
+- **Services:** `ingenium-api` is the REST and authenticated `:4097` API boundary and sole database authority; `ingenium-server` is MCP stdio (292 catalogued tools: 290 server registrations plus 2 extension tools across 32 baseline categories, zero DB access); `ingenium-dashboard` is the Next.js 16 App Router frontend on `:3000`, also zero DB access.
 - **Deployment:** the compatibility profile is one Docker container managed by supervisord with six primary service processes (API, API boundary, dashboard, Nginx gateway, OpenCode Web, and ttyd); the current compatibility configuration also defines support processes such as restore handoff, the OpenCode auth proxy, and code-server. Private OpenCode upstreams are `:4098` and `:4099`; the OAuth callback proxy listens on `:1455`.
 - **Database:** migration files live in [`packages/ingenium-core/data/migrations`](packages/ingenium-core/data/migrations). Runtime consumers reach the database through the API, not by opening the database themselves.
 
@@ -49,9 +49,9 @@ The authoritative agent list is the `agent` map in root [`opencode.json`](openco
 | Agent | Role and current model/variant | Mode / hidden | Writer? |
 |---|---|---|---|
 | `plan` | Built-in coordination, read-only; questions allowed; task only `ingenium-explore`; `openai/gpt-6-astra / max` | built-in / n/a | No |
-| `ingenium-orchestrator` | Primary coordination; never edits; TodoWrite; scoped Git/GitHub Bash; `deepseek/deepseek-v4-flash / max` | primary / visible | No |
+| `ingenium-orchestrator` | Primary coordination; never edits; TodoWrite; scoped Git/GitHub Bash; `openai/gpt-5.6-sol / medium` | primary / visible | No |
 | `ingenium-chat` | Read-only chat primary; `openai/gpt-5.6-luna / max` | primary / hidden | No |
-| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-5.6-sol / medium` | subagent / visible | Yes |
+| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-5.6-sol / high` | subagent / visible | Yes |
 | `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-astra / medium` | subagent / visible | Yes |
 | `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-5.6-luna / max` | subagent / visible | Yes |
 | `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-5.6-sol / high` | subagent / visible | Yes, scoped |

@@ -9472,3 +9472,61 @@ This ten-item opening changes no source, configuration, template, credential,
 runtime, deployment, Context state, or Docs Workspace page. No work-started or
 work-complete marker is added by this append; all ten linked Todos remain
 `OPEN`.
+
+## Documentation consolidation evidence — 2026-09-11
+
+- **Scope:** Existing repository Markdown, repository-facing command/reference
+  prose, canonical model/count references, `.env.example`, package/service
+  READMEs, and this append-only roadmap record. No Docs Workspace mutation,
+  source/test/configuration implementation, runtime/session mutation, deployment,
+  commit, or push was performed.
+- **Static source inventory:** `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`
+  currently contains 292 catalog names across 32 categories: 290
+  `ingenium_` entries plus `auto_observe_now` and `synthesize_observations`.
+  The current server-source registration pattern finds 290 registrations. This
+  is source/static evidence only, not live MCP `tools/list` or deployment proof.
+- **Count discrepancy:** retained historical evidence and
+  `packages/ingenium-extension/mcp-transport-parity.test.ts` still contain the
+  older 291/289 expectation. No test or source change was authorized here; the
+  stale test expectation is recorded as **FOLLOW_UP**, not silently treated as a
+  passing parity gate.
+- **Todo 47:** canonical Chat docs now identify the action-row button and its
+  separation from Context management; runtime, accessibility, and visual gates
+  remain `OPEN`.
+- **Todo 48:** repository-sync docs now include direct-child command Markdown in
+  the v2 manifest and default projection; dry-run/apply/repeat/isolation proof
+  remains `OPEN`.
+- **Todo 49:** redacted automatic Context upload, default-off setting, protected
+  handoff, and archive-before-proof policy are documented; import, fresh
+  retrieval, and archive evidence remain `OPEN`.
+- **Todo 50:** external observation/extraction provenance, redaction, binding,
+  and dedupe behavior are documented; live observation-to-synthesis proof remains
+  `OPEN`.
+- **Todo 51:** external usage ingestion and metadata-only `/usage` behavior are
+  documented; API/ledger and rendered deployed `/usage` proof remains `OPEN`.
+- **Todo 52:** project-local plugin descriptions, validation, and migration are
+  documented; sync/reload/cross-project readback remains `OPEN`.
+- **Todo 53:** retained parent evidence records the prerequisite as **PASS**:
+  preset `48e53676-9e73-4869-bc8a-fbcfb40e05dc` is retained and enabled; 30
+  tools were discovered, 10 were enabled, and managed navigate/snapshot/close
+  succeeded after source-repair commit `97040b69`. Later full-merged restart
+  retention remains in **GATE-3**, so the Todo remains `OPEN`.
+- **Todo 54:** retained parent evidence records dashboard credentials/login and
+  `.env` mode-`0600` checks as **PASS**. The vault is initialized and sealed with
+  zero accessible items, but the existing passphrase is missing from protected
+  sources, so the vault canary is blocked. No reset or mutation was performed;
+  no secret value is recorded, and the remaining gate stays `OPEN`.
+- **Todo 55:** retained parent source validation for the exact-file Docs grant is
+  **PASS** at commit `d5135699`. Full-parent-restart activation and the template
+  edit remain pending, so the Todo remains `OPEN`.
+- **Todo 56:** no full-acceptance or final-reconciliation work was performed;
+  the Todo remains `OPEN`.
+- **Writer verification/evidence boundary:** this correction used only exact
+  block readback and `git diff --check`; no new runtime, browser, security,
+  credential, template, source, or test operation was performed here. The
+  retained parent evidence above is not new evidence from this docs correction.
+- **Mechanical audit result:** `bash tests/test-doc-config-audit.sh` was run once
+  and failed because its stale negative-pattern fixture treats the now-correct
+  `290` registration count as drift. The test was not edited under this
+  documentation-only boundary; retain the failure as the same **FOLLOW_UP**
+  count/parity drift rather than claiming an audit pass.

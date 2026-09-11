@@ -139,7 +139,8 @@ Once everything is running:
   `/usr/local/bin/ingenium-init-project`. This is a documented procedure, not
   evidence that onboarding has been run in the current session.
 - The default projection includes `docs/**/*.md`, eligible skills and agents,
-  and configured local plugin sources. It excludes commands, MCP server
+  configured local plugin sources, and direct-child `.opencode/commands/*.md`.
+  It excludes MCP server
   definitions, project/global config, incomplete agent notes, migrated skill
   directories, the reserved `ingenium-llm-broker`, symlinks, and secret-like
   plugin paths or option keys. The production image preserves configured plugin

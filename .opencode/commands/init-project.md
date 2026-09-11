@@ -59,9 +59,10 @@ The `all` scope is repository-authoritative for exactly:
 - `.opencode/agents/**` (including linked compatibility mirrors; never the
   immutable broker)
 - configured local plugin sources and `.opencode/plugins/**`
+- `.opencode/commands/*.md`
 
-Commands, MCP server definitions, project/global config, and any manual or
-unmanaged remote resource are not initialization inputs in this workflow.
+MCP server definitions, project/global config, and any manual or unmanaged
+remote resource are not initialization inputs in this workflow.
 
 ### Scanner boundaries
 
@@ -79,8 +80,10 @@ unmanaged remote resource are not initialization inputs in this workflow.
   and its compatibility mirrors must have matching semantic content.
 - **Plugins** include only regular `.ts`, `.js`, `.mjs`, or `.cjs` sources from
   `.opencode/plugins/` or paths explicitly listed in the local `opencode.json`
-  plugin array. Secret-like paths and secret-like option keys are rejected;
-  commands and configuration are not scanned as resources.
+  plugin array. Secret-like paths and secret-like option keys are rejected.
+- **Commands** include only regular, direct-child `.md` files under
+  `.opencode/commands/`. Their names, paths, content, and hashes are validated;
+  configuration is not scanned as a repository resource.
 
 The production image must retain the configured plugin source files at their
 repository paths. The runtime image therefore packages the extension

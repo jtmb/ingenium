@@ -18,8 +18,8 @@ docker compose --profile compatibility up --build
 Compatibility starts one container with nine active supervisord processes and fixed local
 runtime aliases. Production separates the control plane, manager, gateway, and
 per-workspace runtimes; its fixed aliases return static `404` picker guidance. Direct
-4098/4099/4100 access is not supported. The built-in MCP catalog contains **291 tools**
-across **31 baseline categories** (289 `ingenium_` catalog entries plus 2 extension
+4098/4099/4100 access is not supported. The built-in MCP catalog contains **292 tools**
+across **32 baseline categories** (290 `ingenium_` catalog entries plus 2 extension
 tools); project-scoped child discovery can add tools and categories at runtime.
 
 ### Connecting an MCP Client
@@ -48,12 +48,12 @@ do not set `INGENIUM_MCP_CREDENTIAL` inline in tracked configuration.
 }
 ```
 
-The extension package ships five OpenCode plugins — `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history), `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, commands, and config), `session-coordinator.ts` (managed session coordination), and the `ponytail` adapter. Reference them in your OpenCode config:
+The extension package ships five OpenCode plugins — `auto-observer.ts` (thin session-idle trigger for server-side behavior extraction), `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, and commands), `session-coordinator.ts` (managed session coordination), and the `ponytail` adapter. Reference them in your OpenCode config:
 
 `resource-sync.ts` is the Git-authoritative projection path: Git worktree files
 flow through the extension, configured MCP stdio, authenticated API, and then
 the database. Skill CRUD and `ingenium_skill_sync*` are admin repair/import
-operations only. Plugin/config changes require an extension rebuild and
+operations only. Agent/plugin changes require an extension rebuild and
 OpenCode restart.
 
 ```jsonc
@@ -246,7 +246,7 @@ semantics, keyboard-focusable tables, and responsive mobile cards.
 
 ## Plugins
 
-**What it does**: Manage OpenCode plugin lifecycle — enable, disable, and configure plugins. When creating a plugin, the API auto-populates source from disk if `sourceContent` is omitted.
+**What it does**: Manage OpenCode plugin lifecycle — enable, disable, configure, and describe project plugins. Descriptions are project-local metadata; executable source/path updates remain separate. When creating a plugin, the API auto-populates source from disk if `sourceContent` is omitted.
 
 **How to use**:
 - View all plugins with their current status

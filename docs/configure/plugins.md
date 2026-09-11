@@ -84,8 +84,9 @@ remove the single registration, delete the checkout, remove any legacy
 4. Click **Upload & Create** to register the plugin and write it to disk
 5. Each plugin card shows:
    - **Plugin name** and **file path**
+   - **Description** — project-local editable metadata (maximum 2,000 characters; NUL is rejected)
    - **Source content preview** (first 120 characters in monospace)
-   - **Edit** button — modify file path or source content
+   - **Edit** button — modify the description or executable file path/source content; these updates are mutually exclusive
    - **Enabled/Disabled** toggle — writes or removes the configured source file from `.opencode/plugins/`
    - **Delete** button — permanently removes the plugin (requires confirmation)
 
@@ -98,7 +99,7 @@ All endpoints require `?project=<name>` query parameter.
 | `POST` | `/api/v1/plugins` | Create plugin (`{ name, file_path, source_content }`) |
 | `GET` | `/api/v1/plugins/:name` | Get a single plugin |
 | `GET` | `/api/v1/plugins/:name/source` | Read the current plugin source |
-| `PUT` | `/api/v1/plugins/:name` | Update plugin (`{ file_path?, source_content? }`) |
+| `PUT` | `/api/v1/plugins/:name` | Update either `{ description }` (up to 2,000 characters, no NUL) or `{ file_path?, source_content? }`; the forms are mutually exclusive |
 | `DELETE` | `/api/v1/plugins/:name` | Delete plugin |
 | `POST` | `/api/v1/plugins/:name/enable` | Enable plugin (writes the configured source file to disk) |
 | `POST` | `/api/v1/plugins/:name/disable` | Disable plugin (removes the configured source file from disk) |
@@ -110,7 +111,7 @@ All endpoints require `?project=<name>` query parameter.
 | `ingenium_plugin_list` | `project` | List all plugins |
 | `ingenium_plugin_create` | `project, name, filePath, sourceContent?` | Create a new plugin |
 | `ingenium_plugin_get` | `project, name` | Get a single plugin |
-| `ingenium_plugin_update` | `project, name, { file_path?, source_content? }` | Update plugin |
+| `ingenium_plugin_update` | `project, name, { description }` or `{ file_path?, source_content? }` | Update plugin metadata or executable content |
 | `ingenium_plugin_delete` | `project, name` | Delete plugin |
 | `ingenium_plugin_enable` | `project, name` | Enable plugin |
 | `ingenium_plugin_disable` | `project, name` | Disable plugin |

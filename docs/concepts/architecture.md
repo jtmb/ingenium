@@ -160,7 +160,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **289 server registrations** across **31 baseline categories**. Two extension-registered tools bring the built-in catalog to **291**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **290 server registrations** across **32 baseline categories**. Two extension-registered tools bring the built-in catalog to **292**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **24 primary navigation routes plus the 19-tab Settings overlay**. It talks to the API over HTTP.
 
 ### Resource tenancy (AUTH-104)
@@ -440,10 +440,10 @@ This means a skill can contain any number of auxiliary files (reference docs, ex
 ### Resource Sync Engine
 
 The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides
-the Git-authoritative projection of repository Markdown, skills, agents, and
-plugins from the local worktree through the configured MCP stdio transport and
-authenticated API. It supersedes the former `skill-sync.ts` and
-`onboarding-sync.ts`; commands and config are intentionally outside this
+the Git-authoritative projection of repository Markdown, skills, agents, plugins,
+and commands from the local worktree through the configured MCP stdio transport
+and authenticated API. It supersedes the former `skill-sync.ts` and
+`onboarding-sync.ts`; project and global config are intentionally outside this
 repository-sync lifecycle.
 
 #### Architecture
@@ -488,7 +488,12 @@ The plugin is self-registering — the `@ingenium/extension` package exports `Re
 
 #### Restart Requirement
 
-When the sync engine detects changes to **plugins** or **config** (opencode.json), the response includes `restartRequired: true`. A human-readable message is logged: `"⚡ OpenCode restart required (plugin/config changes)"`. This is because OpenCode loads plugins and config at startup — runtime changes to the plugin array or config content do not take effect until the next session restart.
+When the sync engine detects changes to **agents** or **plugins**, the response
+includes `restartRequired: true`. A human-readable message is logged: `"⚡
+OpenCode restart required (agent/plugin changes)"`. This is because OpenCode
+loads those resources at startup. Command projection is included in the sync
+result but does not itself set this restart flag; configuration changes remain
+outside the repository-authoritative sync lifecycle.
 
 #### Repository-authoritative initialization
 
@@ -506,11 +511,12 @@ workspace `.bin` directory.
   confirms the corresponding apply.
 - The default scope covers `docs/**/*.md`, `.opencode/skills/**`,
   `.opencode/agents/**` (including linked compatibility mirrors), and configured
-  local plugin sources under `.opencode/plugins/**`.
+  local plugin sources under `.opencode/plugins/**` plus direct-child command
+  files under `.opencode/commands/*.md`.
 - `--docs-only` limits the projection to repository Markdown.
 
-Commands, MCP server definitions, project/global configuration, and manual or
-unmanaged remote resources are excluded from this initialization contract.
+MCP server definitions, project/global configuration, and manual or unmanaged
+remote resources are excluded from this initialization contract.
 The presence of this procedure is not a claim that live onboarding has been
 performed.
 
@@ -892,7 +898,7 @@ case returns an empty catalog as though no providers were configured.
 ### Agent Model and Chat Selection
 
 The `ingenium-chat` Markdown profile intentionally has no `model` field. The
-root `opencode.json` supplies its runtime mapping (`deepseek/deepseek-v4-flash`,
+root `opencode.json` supplies its runtime mapping (`openai/gpt-5.6-luna`,
 variant `max`), while the Dashboard Chat page sends the validated provider/model
 pair selected from `chat-config` with each prompt. The profile also sets
 `hidden: true`, keeping it out of OpenCode's general agent selectors.
@@ -900,14 +906,15 @@ pair selected from `chat-config` with each prompt. The profile also sets
 | Property | Value | Reason |
 |----------|-------|--------|
 | Markdown `model` | (not set) | Profile metadata does not own model assignment |
-| Root mapping | `deepseek/deepseek-v4-flash`, `max` | Runtime model/variant mapping |
+| Root mapping | `openai/gpt-5.6-luna`, `max` | Runtime model/variant mapping |
 | Chat turn | Selected `providerID`/`modelID` | ChatShell sends the catalog-validated pair |
 | `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
 
 ## Chat Project Context (CHAT-100)
 
 Chat's optional project-context grounding is an explicit per-send choice. The
-control starts off and resets after an accepted send. ProjectProvider validates
+**Use project context** button is in the ChatInput action row above the text
+composer; it starts off and resets after an accepted send. ProjectProvider validates
 the selected dashboard project before Chat mounts; that selected project is the
 Context search authority. This does not change Chat's global authority for
 Chat-owned tools or provider/model selection.
@@ -1161,8 +1168,9 @@ writes.
 Imported conversations are visible in the dashboard Context workspace. The UI
 uses the existing project-scoped conversation list/get and message
 list/search/retrieve/batch surfaces for metadata, search, and explicit content
-loading. No external Thread service or bridge exists, and the retired
-current-session/OpenCode-session import surfaces are not part of the system.
+loading. No external Thread service or bridge exists; automatic external-session
+upload uses this same protected handoff. There is no generic unbounded transcript
+import surface.
 
 ## RAG Indexing Architecture (Phase 3)
 
@@ -1289,7 +1297,7 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 289 server registrations. Two extension tools bring the built-in catalog to 291; project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 290 server registrations. Two extension tools bring the built-in catalog to 292; project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 24 primary navigation routes plus the 19-tab Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
@@ -1340,18 +1348,20 @@ Additional `page.tsx` entrypoints support `/account`, the `/settings` redirect, 
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **291 tools** across **31 baseline
-categories** (**289 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **292 tools** across **32 baseline
+categories** (**290 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
 |----------|-------|-------|
+| Repository Sync | 1 | repository_sync |
 | Settings | 3 | get, set, test_llm |
 | Skills | 28 (12 core + 16 governance) | **Core:** list, load, search, create, update, delete, enable, disable, sync, consolidate, sync_all, sync_all_preview. **Governance:** archive, restore, list_archived, versions, rollback, lineage_create, lineage_list, proposal_create, proposal_list, proposal_page, proposal_counts, proposal_get, proposal_submit, proposal_approve, proposal_reject, proposal_rollback |
 | Observe | 1 | observe |
 | Observations | 8 | search, list, stats, get, update, enrich, delete, delete_by_source |
 | Personality | 7 | personality, personality_traits, set_trait, trait_dismiss, trait_disable, trait_delete, traits_delete_all |
 | Synthesis | 4 | run, status, cross_project, synthesize_observations |
+| Usage | 1 | usage_ingest |
 | Extraction | 2 | extraction_run, auto_observe_now |
 | Pipeline | 3 | events, timeline, event_log |
 | Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
@@ -1359,19 +1369,25 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | OpenCode | 1 | opencode_messages |
 | Tasks | 32 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff |
 | Plans (Context) | 3 | save, search, list |
+| Context | 22 | get, update, delete, batch_get, upload_file, conversation_create, conversation_get, conversation_list, message_append, message_list, message_search, message_retrieve, message_batch_retrieve, checkpoint_create, checkpoint_list, checkpoint_get, checkpoint_restore, checkpoint_maintenance_preview, checkpoint_maintenance_authorize, conversation_archive, conversation_unarchive, checkpoint_audit_list |
+| Memory | 7 | memory_save, memory_read, memory_list, memory_search, memory_update, memory_forget, memory_operation_status |
 | Projects | 10 | list, init, delete, restore, list_archived, purge, set_global, rename, detail, migrate_workspace |
 | Plugins | 8 | list, get, enable, disable, create, delete, update, source |
+| Providers | 4 | provider_list, provider_connect, provider_disconnect, provider_status |
 | Commands | 5 | list, get, create, update, delete |
 | Config | 3 | get, set, sync |
-| Servers | 5 | list, add, remove, update, sync_all |
+| Servers | 6 | list, add, remove, update, sync_all, mcp_report_get |
 | Agents | 8 | list, get, create, update, delete, enable, disable, sync |
 | Email | 27 | list, search, read, send, draft, folders, accounts, triage, suggest, draft_response, patterns, watch_start, watch_status, account_create, account_delete, account_test, oauth_url, oauth_exchange, summarize, review_draft, move, set_flags, delete, sync, sync_status, watch_stop, attachment_get |
 | Logs | 2 | list, sources |
 | Jobs | 10 | list, create, update, delete, run, runs, run_logs, run_cancel, get, suggest |
 | Dashboard | 1 | dashboard_summary |
+| Vault | 10 | vault_status, vault_unseal, vault_seal, vault_item_list, vault_item_create, vault_item_get, vault_item_update, vault_item_delete, vault_password_gen, vault_audit_list |
+| Backups | 14 | backup_create, backup_list, backup_get, backup_download, backup_delete, backup_restore_preview, backup_restore_authorize, backup_restore_start, backup_restore_execution_authorize, backup_restore_execute, backup_restore_status, backup_restore_audit_list, backup_schedule_get, backup_schedule_set |
+| RAG | 8 | docs_search_semantic, docs_ask, docs_ingest, docs_rag_sources_list, docs_rag_source_get, docs_rag_source_delete, docs_rag_reingest, docs_rag_stats |
 | Documentation | 48 | list_spaces, get_space, create_space, update_space, delete_space, list_pages, get_page_tree, get_page, create_page, update_page, delete_page, restore_page, move_page, search, get_draft, save_draft, delete_draft, list_versions, get_version, restore_version, list_comments, create_comment, resolve_comment, delete_comment, list_tags, get_page_tags, add_tag, remove_tag, get_backlinks, list_attachments, delete_attachment, list_templates, get_template, create_template, update_template, delete_template, link_project, unlink_project, get_projects, toggle_favorite, get_favorites, import_pages, export_space, get_stats, publish_page, trash_list, trash_purge, attachment_download |
 
-The category table counts server registrations; the two extension tools are
+The category table counts catalog entries; the two extension tools are
 `synthesize_observations` and `auto_observe_now`.
 
 ---

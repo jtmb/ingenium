@@ -330,7 +330,8 @@ replays are idempotent, matching extensions append and refresh the suffix, and
 shorter or divergent snapshots are rejected. Imported conversations become
 visible in the dashboard `/context` workspace, whose existing search, read, and
 batch message surfaces load content explicitly. There is no external Thread
-service or bridge, and no current-session/OpenCode-session import tool.
+service or bridge; automatic external-session upload uses this same protected
+handoff, rather than a separate generic transcript-import surface.
 
 ## Gateway boundaries
 
@@ -367,4 +368,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 ## Related Features
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- Use the OpenCode interface to interact with the built-in 291-tool Ingenium MCP catalog across 31 baseline categories (289 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 292-tool Ingenium MCP catalog across 32 baseline categories (290 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

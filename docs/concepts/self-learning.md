@@ -192,7 +192,7 @@ User interacts with OpenCode (:4098)
 | **Extraction Engine** (extraction.ts) | **Server-side**: Reads OpenCode messages via API, watermark-gated + content-hash dedup, regex pre-filter selects candidates, LLM batch extraction creates durable behavior rule observations. Runs in the scheduler. |
 | **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
 | **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, calls Ingenium MCP, which invokes the authenticated extraction API route. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
-| **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, commands, and config on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
+| **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, and commands on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
 | **Synthesis Pipeline** | Processes observations via LLM consolidation (CONFIRM/CREATE/IGNORE), generates normalized personality traits (Phase 1), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion |
 | **API Layer** | REST endpoints for all operations (sole DB authority). New: `POST /api/v1/extraction/run`, DELETE observations/personality endpoints |
 | **MCP Server** | Tool handlers that forward to API layer |
@@ -345,6 +345,14 @@ Auto-Observer Plugin (auto-observer.ts)
 ```
 
 If the plugin fails to load in OpenCode, the scheduler covers extraction anyway — plugin loading is no longer a dependency. The plugin requires no `better-sqlite3` dependency since it only makes HTTP calls.
+
+External OpenCode sessions can call the same extraction boundary through
+`ingenium_extraction_run` with a strict `external` payload. The request must be
+bound to the active `mcp` launcher session and may include only one redacted,
+visible user message (up to 6,000 characters). Without a message it only checks
+learning eligibility. Operational/task text is excluded, automatic learning
+off is a no-op, and session/message plus content-fingerprint receipts make
+replays idempotent without storing raw source text.
 
 The extraction trigger does not report observations created at request time.
 Check pipeline status after the asynchronous work completes. When a session

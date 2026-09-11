@@ -300,6 +300,7 @@ truncated.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
+| POST | `/api/v1/usage/external` | Ingest one completed assistant-message usage record from an exact launcher-bound external MCP session. New events return `201`; an identical replay returns `200`. |
 | GET | `/api/v1/usage/summary` | Totals, complete UTC daily series, and freshness metadata. Cost and metric availability distinguish `known`, `partial`, and `unavailable`; cache and reasoning-token counts are nullable and no hit rate is invented. |
 | GET | `/api/v1/usage/breakdown` | Provider/model/assistant-agent breakdown for the filtered UTC range. Raw provider and model IDs are preserved; assistant-agent attribution is nullable. |
 | GET | `/api/v1/usage/events` | Bounded metadata-only event page with `pagination.nextCursor`, `hasMore`, and `total`. |
@@ -317,6 +318,18 @@ truncated.
 The scheduler runs the same bounded collector every five minutes by default.
 Unmapped OpenCode projects are quarantined without usage-event insertion until a
 project owner creates an explicit mapping.
+
+`POST /usage/external` accepts strict metadata only: the launcher `worktree`,
+external `sessionId` and `messageId`, `role: "assistant"`, `completedAt`,
+optional provider/model/agent IDs, nullable token/cache fields, and optional
+provider-reported `costAmount`. It requires an `mcp` service credential whose
+project, workspace, storage mapping, launcher worktree, and active coordination
+session match. Missing metrics remain unknown; prompt text, reasoning content,
+tool payloads, credentials, and upstream envelopes are never accepted. An
+identical replay is idempotent; a conflicting replay returns `409
+EXTERNAL_USAGE_SOURCE_CONFLICT`, and a foreign or inactive binding returns `403
+EXTERNAL_USAGE_BINDING_REJECTED`. The MCP adapter is
+`ingenium_usage_ingest`.
 
 #### Advisory thresholds (USAGE-100)
 
@@ -429,6 +442,16 @@ in SQL before returning rows.
 | GET | `/api/v1/observations/:id` | Get a project-owned observation |
 | PATCH | `/api/v1/observations/:id` | Update a project-owned observation |
 | POST | `/api/v1/extraction/run` | Trigger server-side extraction |
+
+The extraction trigger also accepts one external-session request in the strict
+shape `{ "external": { "worktree", "sessionId", "message?" } }`. It requires
+the same active `mcp` launcher binding. The optional message is one redacted,
+visible user message (maximum 6,000 characters); omitting it only probes
+learning eligibility. External source receipts are keyed by session/message
+identity and content fingerprint, so a replay does not create a second
+observation. Disabled automatic learning returns a no-op. Operational data,
+task markers, foreign sessions, and raw prompt/secret material are not stored
+as user behavior.
 
 ### Personality
 | Method | Endpoint | Purpose |
@@ -1110,14 +1133,25 @@ only their suffix and refresh the mapping, and shorter or divergent snapshots
 return a conflict without partial writes. The response is metadata only.
 
 This is the only Context-native OpenCode file import surface. There is no
-external Thread service or bridge and no current-session/OpenCode-session import
-tool. Imported conversations appear in the dashboard `/context` workspace,
+external Thread service or bridge and no separate generic transcript import API;
+the extension's automatic external-session path uses this same
+`ingenium_context_upload_file` transport. Imported conversations appear in the dashboard `/context` workspace,
 which uses the existing conversation and message list/get/search/retrieve/batch
 surfaces rather than this internal transport for browsing.
 
 Context checkpoint links freeze their referenced RAG source/chunks and persist a
 citation snapshot. Attempts to re-ingest or delete such a source are rejected;
 normal checkpoint and source ownership checks remain project-scoped.
+
+The Context workspace exposes **Automatically upload external sessions** through
+the project settings keys `context_auto_upload_enabled` and
+`context_upload_last_sync` (`GET`/`POST /api/v1/settings?project=<name>&key=...`). The setting
+defaults to disabled. When enabled, the extension handles `session.idle` for an
+exact `mcp` launcher/worktree binding, filters to visible user and completed
+assistant text, redacts secrets and sensitive URLs, and submits one complete
+snapshot. Upload failures are non-blocking and write only bounded status metadata
+to `context_upload_last_sync`; disabling the setting stops future uploads without
+deleting imported Context.
 
 #### Live OpenCode chat checkpoints
 
@@ -1210,7 +1244,8 @@ The request body contains exactly these top-level fields:
     "version": 2,
     "skills": [],
     "agents": [],
-    "plugins": []
+    "plugins": [],
+    "commands": []
   },
   "dryRun": true,
   "expectedGeneration": 0
@@ -1270,14 +1305,15 @@ All routes prefixed with `/api/v1/repository`.
 |--------|----------|---------|
 | POST | `/resources/sync?project=<project>` | Retired near path. Returns `409 REPOSITORY_SYNC_ENDPOINT_REQUIRED`; use `/api/v1/repository/sync` for the combined docs/resources request. |
 
-The v2 resource manifest accepts exactly `skills`, `agents`, and `plugins`.
+The v2 resource manifest accepts `skills`, `agents`, `plugins`, and `commands`.
 Each item carries stable identity, normalized path, and SHA-256 of its full
 semantic projection. It preserves skill frontmatter/metadata/file trees, agent
 permissions/hidden/skills plus compatibility-mirror paths, and plugin source,
-order, enabled state, and options. The immutable `ingenium-llm-broker` cannot
-be imported. Missing entries archive/remove only resources previously recorded
-as repository-managed; manual, unmanaged, and system resources are untouched.
-Commands and project/global configuration are deliberately excluded.
+order, enabled state, and options, plus regular direct-child command Markdown.
+The immutable `ingenium-llm-broker` cannot be imported. Missing entries
+archive/remove only resources previously recorded as repository-managed;
+manual, unmanaged, and system resources are untouched. Project/global
+configuration is deliberately excluded.
 This legacy near path, like other non-exact paths and methods, retains the
 ordinary 2 MiB global JSON parser and does not use the 4 MiB repository-sync
 ingress.
@@ -1299,7 +1335,8 @@ manifest. `--apply` provisions the validated project when necessary, applies the
 projection, and advances the local repository baseline only after API
 confirmation. The `all` scope covers repository Markdown plus `.opencode/skills`,
 `.opencode/agents` (including compatibility mirrors), and configured/local
-`.opencode/plugins` sources. `--docs-only` submits only the Markdown manifest.
+`.opencode/plugins` sources and direct-child `.opencode/commands/*.md` files.
+`--docs-only` submits only the Markdown manifest.
 `--project` is validated and takes precedence over `INGENIUM_PROJECT`, which
 takes precedence over the validated worktree basename; the CLI never defaults
 to `global-default`. In the production image, the command is on `PATH` at the

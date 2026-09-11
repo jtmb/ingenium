@@ -164,6 +164,8 @@ another Compose project volume.
 | 115 | `115_explicit_memory_fts_update_order.sql` | Replaces the explicit-memory FTS update-delete trigger with a `BEFORE UPDATE` delete trigger and rebuilds the FTS index to repair terms lost to same-phase trigger ordering. |
 | 116 | `116_child_mcp_description.sql` | Adds the nullable operator description column to `mcp_child_server_definitions`. |
 | 117 | `117_mcp_credential_receipts.sql` | Adds encrypted replay receipts keyed by idempotency key and request hash, bound to the issued MCP credential so bootstrap retries reuse it without persisting plaintext. |
+| 118 | `118_repository_command_resources.sql` | Rebuilds repository-managed resource state so the resource type includes `command`, preserving existing project-scoped identities and hashes. |
+| 119 | `119_plugin_description.sql` | Adds project-local editable plugin descriptions and backfills the bundled plugin labels without changing plugin source or global authority. |
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.
