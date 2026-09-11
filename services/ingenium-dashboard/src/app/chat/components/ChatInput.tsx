@@ -461,6 +461,45 @@ export default function ChatInput({
           >
             Learning tools
           </button>
+          <button
+            type="button"
+            onClick={() => setUseProjectContext((value) => !value)}
+            disabled={isLoading || sending}
+            className={[
+              "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
+              useProjectContext
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+            ].join(" ")}
+            aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
+            aria-pressed={useProjectContext}
+            title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
+            data-testid="chat-use-project-context"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
+              />
+            </svg>
+            <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
+            <span
+              className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
+              data-testid="chat-context-project"
+            >
+              {projectContextProject ?? "Unavailable"}
+            </span>
+          </button>
         </div>
         {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
         <div className="flex min-w-0 items-end gap-2 px-3 py-2">
@@ -545,46 +584,6 @@ export default function ChatInput({
               </svg>
             </button>
 
-            {/* Project context toggle */}
-            <button
-              type="button"
-              onClick={() => setUseProjectContext((value) => !value)}
-              disabled={isLoading || sending}
-              className={[
-                "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
-                useProjectContext
-                  ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-                "disabled:cursor-not-allowed disabled:opacity-40",
-              ].join(" ")}
-              aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
-              aria-pressed={useProjectContext}
-              title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
-              data-testid="chat-use-project-context"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.25"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
-                />
-              </svg>
-              <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
-              <span
-                className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
-                data-testid="chat-context-project"
-              >
-                {projectContextProject ?? "Unavailable"}
-              </span>
-            </button>
           </div>
 
           {/* Textarea */}

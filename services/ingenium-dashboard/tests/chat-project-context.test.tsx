@@ -283,6 +283,10 @@ describe("CHAT-100 project context sends", () => {
     expect(screen.getByTestId("chat-global-project").textContent).toContain("Chat tools run through global project:");
     expect(screen.getByTestId("chat-global-project").textContent).toContain("global-default");
     const contextButton = screen.getByRole("button", { name: /Use project context/ });
+    const topActionRow = screen.getByRole("button", { name: "Allow automatic learning tools" }).parentElement;
+    expect(contextButton.parentElement).toBe(topActionRow);
+    expect(topActionRow?.className).toContain("flex-wrap");
+    expect(topActionRow?.contains(screen.getByTestId("chat-composer"))).toBe(false);
     expect(screen.getByTestId("chat-context-project").textContent).toContain("selected-project");
     expect(screen.getByTestId("chat-context-project").className).toContain("truncate");
     expect(screen.getByTestId("chat-context-project").className).toContain("max-w-[32vw]");
