@@ -404,6 +404,12 @@ require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'
 require_line_before "$entrypoint" 'secure_persistent_path file "$credential_path" - - 0600' '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "$entrypoint" 'for workspace_root in /workspace /workspace/*; do'
+recovery_normalization='/app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"'
+require_line_before "$entrypoint" 'secure_persistent_path file "$credential_path" - - 0600' "$recovery_normalization"
+require_line_before "$entrypoint" "$recovery_normalization" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'const suffix = "/packages/ingenium-extension/scripts/recovery-bootstrap.js";'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'fail("recovery bootstrap path is not allowlisted");'
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"'
 require_literal "$entrypoint" '[ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential"'

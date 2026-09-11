@@ -716,6 +716,10 @@ for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
   done
 done
 # Protect every worktree before malformed profiles can abort startup.
+for workspace_root in /workspace /workspace/*; do
+  [ -d "$workspace_root" ] || continue
+  /app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"
+done
 for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
   # Directory access grants remain; inherited/file ACLs would defeat exact profile modes.
   /app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"

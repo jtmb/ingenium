@@ -94,6 +94,10 @@ mkdir -p "$retention_root/quarantine"
 printf 'private-retention-fixture\n' > "$retention_root/quarantine/receipt.json"
 chmod 0700 "$retention_root" "$retention_root/quarantine"
 chmod 0600 "$retention_root/quarantine/receipt.json"
+mkdir -p "$RUN_ROOT/workspace/packages/ingenium-extension/scripts" \
+  "$RUN_ROOT/workspace/repo/packages/ingenium-extension/scripts" \
+  "$RUN_ROOT/workspace/unrelated/packages" \
+  "$RUN_ROOT/workspace/missing-leaf/packages/ingenium-extension/scripts"
 
 cat > "$RUN_ROOT/bin/find" <<'EOF'
 #!/bin/sh
@@ -124,12 +128,40 @@ for credential_name in .ingenium-mcp-credential .ingenium-learning-credential .i
   chmod 0670 "$opencode_root/$credential_name"
 done
 mkdir -p /workspace/.opencode/agents
+for repository in /workspace /workspace/repo; do
+  scripts="$repository/packages/ingenium-extension/scripts"
+  mkdir -p "$scripts"
+  chmod 0755 "$repository/packages" "$repository/packages/ingenium-extension" "$scripts"
+  setfacl -m d:u:ingenium-opencode:rwx "$scripts"
+  printf 'repository-owned recovery fixture\n' > "$scripts/recovery-bootstrap.js"
+  chown appuser:appuser "$scripts/recovery-bootstrap.js"
+  chmod 0674 "$scripts/recovery-bootstrap.js"
+  getfacl -cp "$scripts/recovery-bootstrap.js" | grep -q '^user:ingenium-opencode:'
+  stat -c '%d:%i:%u:%g' "$scripts/recovery-bootstrap.js" > "/tmp/recovery-$(basename "$repository")-identity"
+done
+mkdir -p /workspace/unrelated/packages /workspace/missing-leaf/packages/ingenium-extension/scripts
+assert_recovery_bootstraps() {
+  for repository in /workspace /workspace/repo; do
+    bootstrap="$repository/packages/ingenium-extension/scripts/recovery-bootstrap.js"
+    test "$(stat -c %a "$bootstrap")" = 644
+    test "$(stat -c '%d:%i:%u:%g' "$bootstrap")" = "$(cat "/tmp/recovery-$(basename "$repository")-identity")"
+    test "$(cat "$bootstrap")" = 'repository-owned recovery fixture'
+    test "$(getfacl -cp "$bootstrap")" = "$(printf 'user::rw-\ngroup::r--\nother::r--')"
+    for identity in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-runtime-manager ingenium-runtime-gateway; do
+      runuser -u "$identity" -- test -r "$bootstrap"
+      if runuser -u "$identity" -- test -w "$bootstrap"; then
+        echo "ERROR: $identity can write recovery bootstrap" >&2; exit 1
+      fi
+    done
+  done
+}
 mkfifo /workspace/.opencode/agents/failing.md
 if timeout 15 /test-bin/workspace-acls; then
   echo 'ERROR: startup accepted FIFO profile' >&2; exit 1
 else
   test "$?" -eq 1
 fi
+assert_protected_files() {
 for protected_root in /workspace/.opencode /workspace/repo/.opencode; do
   protected_index="$protected_root/protected-runtime-index"
   for directory in "$protected_index" "$protected_index/coordination-outbox" "$protected_index/tui-recovery"; do
@@ -156,6 +188,9 @@ for protected_root in /workspace/.opencode /workspace/repo/.opencode; do
     esac
   done
 done
+}
+assert_protected_files
+assert_recovery_bootstraps
 rm /workspace/.opencode/agents/failing.md
 printf 'FAILED_AGENT_NORMALIZATION_PROTECTED_FILES_OK\n'
 agents=/workspace/repo/.opencode/agents
@@ -180,6 +215,9 @@ ln -s /tmp/agent-sentinel/outside.md "$agents/linked.md"
 mkfifo "$agents/ignored-pipe"
 for pass in 1 2; do
   /test-bin/workspace-acls
+  assert_recovery_bootstraps
+  assert_protected_files
+  printf 'RECOVERY_BOOTSTRAP_ACL_PASS_%s_OK\n' "$pass"
   sha256sum -c /tmp/profile-contents
   find "$agents" -type f -name '*.md' -exec stat -c '%n:%u:%g' {} + > /tmp/current-owners
   cmp /tmp/profile-owners /tmp/current-owners
@@ -210,6 +248,42 @@ for pass in 1 2; do
   printf 'AGENT_ACL_PASS_%s_OK\n' "$pass"
 done
 rm "$agents/linked-category" "$agents/linked.md" "$agents/ignored-pipe"
+bootstrap=/workspace/packages/ingenium-extension/scripts/recovery-bootstrap.js
+saved_bootstrap=/workspace/recovery-bootstrap-saved
+mv "$bootstrap" "$saved_bootstrap"
+for malformed in symlink hardlink fifo directory parent-symlink; do
+  case "$malformed" in
+    symlink) ln -s /tmp/agent-sentinel/outside.md "$bootstrap" ;;
+    hardlink) ln "$saved_bootstrap" "$bootstrap" ;;
+    fifo) mkfifo "$bootstrap" ;;
+    directory) mkdir "$bootstrap" ;;
+    parent-symlink)
+      mv /workspace/packages/ingenium-extension/scripts /workspace/packages/ingenium-extension/saved-scripts
+      ln -s /tmp/agent-sentinel /workspace/packages/ingenium-extension/scripts ;;
+  esac
+  if timeout 15 /test-bin/workspace-acls; then
+    echo "ERROR: startup accepted $malformed recovery bootstrap" >&2; exit 1
+  else
+    test "$?" -eq 1
+  fi
+  assert_protected_files
+  test "$(stat -c %a /tmp/agent-sentinel/outside.md)" = 600
+  test "$(cat /tmp/agent-sentinel/outside.md)" = untouched
+  test "$(stat -c '%u:%g' /tmp/agent-sentinel/outside.md)" = "$(cat /tmp/sentinel-owner)"
+  test "$(cat "$saved_bootstrap")" = 'repository-owned recovery fixture'
+  case "$malformed" in
+    directory) rmdir "$bootstrap" ;;
+    parent-symlink)
+      rm /workspace/packages/ingenium-extension/scripts
+      mv /workspace/packages/ingenium-extension/saved-scripts /workspace/packages/ingenium-extension/scripts ;;
+    *) rm "$bootstrap" ;;
+  esac
+  printf 'MALFORMED_RECOVERY_%s_PROTECTED_FILES_OK\n' "$malformed"
+done
+mv "$saved_bootstrap" "$bootstrap"
+if /test-bin/normalize-agent-profiles --normalize-recovery-bootstrap /tmp/agent-sentinel/outside.md; then
+  echo 'ERROR: recovery normalization accepted non-allowlisted path' >&2; exit 1
+fi
 mkdir /tmp/unsafe-agents
 mkfifo /tmp/unsafe-agents/pipe.md
 if timeout 5 /test-bin/normalize-agent-profiles --remove-workspace-acls /tmp/unsafe-agents; then

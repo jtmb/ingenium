@@ -13,10 +13,12 @@ import {
   fchownSync,
   fstatSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
@@ -311,6 +313,55 @@ function removeAcl(fd, option) {
   execFileSync("setfacl", [option, "/proc/self/fd/3"], { stdio: ["ignore", "inherit", "inherit", fd] });
 }
 
+function normalizeRecoveryBootstrap(target) {
+  const suffix = "/packages/ingenium-extension/scripts/recovery-bootstrap.js";
+  const root = target.slice(0, -suffix.length);
+  if (!target.endsWith(suffix) || resolve(target) !== target
+    || (root !== "/workspace" && (root.split("/").length !== 3 || !root.startsWith("/workspace/")))) {
+    fail("recovery bootstrap path is not allowlisted");
+  }
+  let directoryFd = openDirectoryPath(root);
+  let directoryPath = root;
+  let file;
+  try {
+    for (const component of ["packages", "ingenium-extension", "scripts"]) {
+      if (realpathSync(`/proc/self/fd/${directoryFd}`) !== directoryPath) fail("recovery bootstrap parent moved");
+      let childFd;
+      try {
+        childFd = openDirectoryAt(directoryFd, component, "recovery bootstrap parent");
+      } catch (error) {
+        if (isMissing(error)) return;
+        throw error;
+      }
+      closeSync(directoryFd);
+      directoryFd = childFd;
+      directoryPath += `/${component}`;
+    }
+    if (realpathSync(`/proc/self/fd/${directoryFd}`) !== directoryPath) fail("recovery bootstrap parent moved");
+    file = openRegularFileAt(directoryFd, "recovery-bootstrap.js", target, { optional: true });
+    if (!file) return;
+    const contents = readStableFile(file);
+    const verify = () => {
+      const current = fstatSync(file.fd);
+      assertExclusiveRegularFile(current, target);
+      assertSameOwner(current, file.stat, target);
+      const linked = lstatSync(target);
+      if (realpathSync(target) !== target || linked.dev !== current.dev || linked.ino !== current.ino
+        || current.size !== file.stat.size || current.mtimeMs !== file.stat.mtimeMs
+        || !readFileSync(`/proc/self/fd/${file.fd}`).equals(contents)) fail("recovery bootstrap changed");
+    };
+    verify();
+    removeAcl(file.fd, "-b");
+    fchmodSync(file.fd, PROFILE_MODE);
+    fsyncSync(file.fd);
+    verify();
+    if ((fstatSync(file.fd).mode & 0o7777) !== PROFILE_MODE) fail("recovery bootstrap mode is not 0644");
+  } finally {
+    closeQuietly(file?.fd);
+    closeSync(directoryFd);
+  }
+}
+
 function normalizeDirectory(directoryFd, removeWorkspaceAcls = false) {
   if (removeWorkspaceAcls) removeAcl(directoryFd, "-k");
   for (const entry of readdirSync(`/proc/self/fd/${directoryFd}`, { withFileTypes: true })) {
@@ -361,7 +412,7 @@ function normalizeAgentProfiles(path, removeWorkspaceAcls = false) {
 }
 
 function usage() {
-  fail("usage: project-agent-profiles.mjs [--remove-workspace-acls] AGENTS_DIR | --project-server-owned SOURCE_AGENTS_DIR TARGET_AGENTS_DIR");
+  fail("usage: project-agent-profiles.mjs [--remove-workspace-acls] AGENTS_DIR | --project-server-owned SOURCE_AGENTS_DIR TARGET_AGENTS_DIR | --normalize-recovery-bootstrap WORKSPACE_BOOTSTRAP_FILE");
 }
 
 try {
@@ -371,6 +422,8 @@ try {
     projectServerOwnedProfiles(args[1], args[2]);
   } else if (args[0] === "--remove-workspace-acls" && args.length === 2) {
     normalizeAgentProfiles(args[1], true);
+  } else if (args[0] === "--normalize-recovery-bootstrap" && args.length === 2) {
+    normalizeRecoveryBootstrap(args[1]);
   } else if (args.length === 1) {
     normalizeAgentProfiles(args[0]);
   } else {
