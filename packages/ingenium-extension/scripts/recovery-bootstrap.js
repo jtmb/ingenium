@@ -330,7 +330,8 @@ export function readTrustedRegularFile(path, label, options = {}) {
     if (afterDescriptor.nlink !== 1 || afterPath.nlink !== 1) fail("link_count");
     if (afterDescriptor.dev !== opened.dev || afterDescriptor.ino !== opened.ino || afterDescriptor.size !== opened.size
       || afterDescriptor.mtimeMs !== opened.mtimeMs || afterDescriptor.ctimeMs !== opened.ctimeMs
-      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino) fail("identity");
+      || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino || afterPath.size !== opened.size
+      || afterPath.mtimeMs !== opened.mtimeMs || afterPath.ctimeMs !== opened.ctimeMs) fail("identity");
     if (afterDescriptor.uid !== owner || afterPath.uid !== owner) fail("owner");
     if ((afterDescriptor.mode & 0o022) !== 0 || (afterPath.mode & 0o022) !== 0) fail("writable");
     try {
@@ -2815,6 +2816,106 @@ export function privateNpmConfiguration(owner = ownerUid()) {
   };
 }
 
+export function createPrivateRecoveryStage(root, head, parent = privateTemporaryRoot(ownerUid())) {
+  if (realpathSync(root) !== root || !/^[0-9a-f]{40}$/.test(head)
+    || git(root, ["rev-parse", "--show-toplevel"], "utf8").trim() !== root
+    || git(root, ["rev-parse", "HEAD"], "utf8").trim() !== head
+    || gitConfiguration(root).some(isExecutableGitConfiguration)
+    || git(root, ["status", "--porcelain=v1", "--untracked-files=all"]).length
+    || git(root, ["ls-files", "-v", "-z"], "utf8").split("\0").some((line) => line && line[0] !== "H")) {
+    throw new Error("Private staging requires exact clean Git HEAD");
+  }
+  const owner = ownerUid();
+  canonicalOwnedDirectory(parent, "Private build parent", owner);
+  if ((lstatSync(parent).mode & 0o7777) !== 0o700) throw new Error("Private build parent mode is invalid");
+  if (parent === root || parent.startsWith(`${root}/`)) throw new Error("Private build parent is inside the shared worktree");
+  for (let path = parent; ; path = dirname(path)) {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || realpathSync(path) !== path || ![0, owner].includes(stat.uid)
+      || ((stat.mode & 0o022) !== 0 && !(stat.uid === 0 && (stat.mode & 0o1000)))) {
+      throw new Error("Private build parent ancestry is unsafe");
+    }
+    if (path === dirname(path)) break;
+  }
+  const directory = mkdtempSync(resolve(parent, "git-stage-"));
+  const workspace = resolve(directory, "workspace");
+  mkdirSync(workspace, { mode: 0o700 });
+  const entries = git(root, ["ls-tree", "-rz", "--full-tree", head], "utf8").split("\0").filter(Boolean).map((line) => {
+    const match = /^(100644|100755) blob ([0-9a-f]{40})\t(.+)$/.exec(line);
+    if (!match || !safeHandoffPath(match[3]) || match[3].split("/").some((part) => ["node_modules", ".git"].includes(part))) {
+      throw new Error("Git archive contains an unsupported entry");
+    }
+    return { mode: match[1] === "100755" ? 0o700 : 0o600, oid: match[2], path: match[3] };
+  });
+  const archive = execFileSync(GIT, ["-C", root, "-c", "tar.umask=0077", "archive", "--format=tar", head], {
+    env: gitEnvironment(), timeout: 30_000, maxBuffer: 256 * 1024 * 1024,
+  });
+  const archivePath = resolve(directory, "source.tar");
+  writeFileSync(archivePath, archive, { flag: "wx", mode: 0o400 });
+  const archiveFd = openSync(archivePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try { fsyncSync(archiveFd); } finally { closeSync(archiveFd); }
+  execFileSync("/usr/bin/tar", ["--extract", "--no-same-owner", "--no-same-permissions", "--file", archivePath, "--directory", workspace], {
+    env: { PATH: "/usr/bin:/bin" }, timeout: 30_000,
+  });
+  const files = {};
+  for (const entry of entries) {
+    const path = resolve(workspace, entry.path);
+    const bytes = readTrustedRegularFile(path, "Archived source", { expectedOwner: owner }).bytes;
+    const oid = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+    const original = readTrustedRegularFile(resolve(root, entry.path), "Canonical source input", { expectedOwner: owner });
+    if (oid !== entry.oid || !bytes.equals(original.bytes)) throw new Error("Git archive/source hash mismatch");
+    files[entry.path] = { sha256: sha256(bytes), mode: entry.mode };
+  }
+  const inspect = (path, prefix = "") => {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.uid !== owner || realpathSync(path) !== path || (stat.mode & 0o7777) !== 0o700) {
+      throw new Error("Git archive directory is not private");
+    }
+    for (const name of readdirSync(path)) {
+      const child = resolve(path, name);
+      const key = prefix + name;
+      if (lstatSync(child).isDirectory()) inspect(child, `${key}/`);
+      else {
+        if (!files[key]) throw new Error("Git archive has an unexpected entry");
+        const value = readTrustedRegularFile(child, "Archived source", { expectedMode: files[key].mode });
+        if (value.sha256 !== files[key].sha256) throw new Error("Git archive changed");
+        const fd = openSync(child, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try { fsyncSync(fd); } finally { closeSync(fd); }
+      }
+    }
+    const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  };
+  inspect(workspace);
+  if (git(root, ["rev-parse", "HEAD"], "utf8").trim() !== head) throw new Error("Git HEAD changed during staging");
+  // A shallow, private object database lets checkpoint tests inspect HEAD without attaching to shared Git state.
+  const objects = [head, git(root, ["rev-parse", `${head}^{tree}`], "utf8").trim(),
+    ...git(root, ["ls-tree", "-rtz", head], "utf8").split("\0").filter(Boolean).map((line) => line.split("\t")[0].split(" ")[2])];
+  const pack = execFileSync(GIT, ["-C", root, "pack-objects", "--stdout"], {
+    input: [...new Set(objects)].join("\n") + "\n", env: gitEnvironment(), timeout: 30_000, maxBuffer: 256 * 1024 * 1024,
+  });
+  const mask = process.umask(0o077);
+  try {
+    git(workspace, ["init", "--quiet", "--template="]);
+    execFileSync(GIT, ["-C", workspace, "unpack-objects", "-q"], { input: pack, env: gitEnvironment(), timeout: 30_000 });
+    writeFileSync(resolve(workspace, ".git/shallow"), `${head}\n`, { flag: "wx", mode: 0o600 });
+    git(workspace, ["update-ref", "HEAD", head]);
+    git(workspace, ["read-tree", head]);
+  } finally { process.umask(mask); }
+  const nodePath = realpathSync(process.execPath);
+  if (![0, owner].includes(lstatSync(nodePath).uid)) throw new Error("Stage Node runtime owner is not trusted");
+  const node = readTrustedRegularFile(nodePath, "Stage Node runtime", { executable: true, expectedOwner: lstatSync(nodePath).uid });
+  const manifest = { schemaVersion: 1, repositoryRoot: root, head, archiveSha256: sha256(archive),
+    node: { path: node.path, sha256: node.sha256 }, files };
+  const manifestPath = resolve(directory, "stage.json");
+  writeFileSync(manifestPath, canonicalJson(manifest) + "\n", { flag: "wx", mode: 0o400 });
+  for (const path of [manifestPath, directory, parent]) {
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  }
+  return { directory, workspace, manifestPath, manifest, manifestSha256: sha256(readFileSync(manifestPath)) };
+}
+
 async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
   if (argv.length !== 2) throw new Error("Recovery bootstrap shim accepts no arguments");
   if (!Object.isFrozen(context) || !Object.isFrozen(context.parent) || !Object.isFrozen(context.binding)
@@ -2836,14 +2937,9 @@ async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
     }
     throw new Error("Recovery bootstrap shim requires the attested canonical worktree");
   }
-  const { repoRoot, packageRoot, scriptsPath } = hardenCanonicalRepositoryDirectories(
-    sourcePath,
-    declaredWorktree,
-    owner,
-    { retainAudit: (audits) => retainCanonicalDirectoryAudit(audits, owner) },
-  );
-  const source = { path: sourcePath, bytes: attestedSource.bytes };
-  verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
+  const repoRoot = declaredWorktree;
+  const stage = createPrivateRecoveryStage(repoRoot, context.head);
+  const packageRoot = resolve(stage.workspace, "packages/ingenium-extension");
 
   const runtimeOwner = lstatSync(realpathSync(process.execPath)).uid;
   if (runtimeOwner !== 0 && runtimeOwner !== owner) throw new Error("Node runtime owner is not trusted");
@@ -2857,27 +2953,46 @@ async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
     expectedOwner: runtimeOwner,
   }).path;
   const npmConfiguration = privateNpmConfiguration(owner);
+  const record = (status) => {
+    const path = resolve(stage.directory, "execution.json");
+    const temporary = `${path}.tmp`;
+    const fd = openSync(temporary, "wx", 0o600);
+    try { writeFileSync(fd, canonicalJson({ status, head: context.head, stageSha256: stage.manifestSha256 }) + "\n"); fsyncSync(fd); }
+    finally { closeSync(fd); }
+    renameSync(temporary, path);
+    const parent = openSync(stage.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try { fsyncSync(parent); } finally { closeSync(parent); }
+  };
   try {
     const recoveryEnvironment = {
       ...selectedEnvironment(recoveryEnvironmentForBinding(context.binding), RECOVERY_ENVIRONMENT),
       [CANONICAL_WORKTREE]: repoRoot,
       INGENIUM_WORKTREE: repoRoot,
       [ADMITTED_RECOVERY_CONTEXT]: canonicalJson(context),
+      INGENIUM_RECOVERY_STAGE_DIRECTORY: stage.directory,
+      INGENIUM_RECOVERY_STAGE_SHA256: stage.manifestSha256,
     };
+    const buildEnvironment = childEnvironment(BUILD_ENVIRONMENT, runtime, {
+      HOME: stage.directory,
+      NPM_CONFIG_GLOBALCONFIG: npmConfiguration.globalConfig,
+      NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
+      NPM_CONFIG_USERCONFIG: npmConfiguration.userConfig,
+      NPM_CONFIG_CACHE: resolve(stage.directory, "npm-cache"),
+    });
+    record("installing");
+    const installed = await runFixed(runtime, [npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--include=dev"],
+      BUILD_TIMEOUT_MS, buildEnvironment, stage.workspace);
+    if (!propagate(installed, "Private recovery dependency preparation")) { record(installed.timedOut ? "unknown" : "failed"); return; }
+    record("building");
     const build = await runFixed(
-      npm,
-      ["run", "build", "--workspace=packages/ingenium-extension"],
+      runtime,
+      [npm, "run", "build", "--workspace=packages/ingenium-extension"],
       BUILD_TIMEOUT_MS,
-      childEnvironment(BUILD_ENVIRONMENT, runtime, {
-        ...recoveryEnvironment,
-        NPM_CONFIG_GLOBALCONFIG: npmConfiguration.globalConfig,
-        NPM_CONFIG_SCRIPT_SHELL: "/bin/sh",
-        NPM_CONFIG_USERCONFIG: npmConfiguration.userConfig,
-      }),
-      repoRoot,
+      buildEnvironment,
+      stage.workspace,
     );
-    if (!propagate(build, "Extension recovery bootstrap build")) return;
-    verifyScopedCheckpoint(repoRoot, source.path, source.bytes);
+    if (!propagate(build, "Extension recovery bootstrap build")) { record(build.timedOut ? "unknown" : "failed"); return; }
+    if (git(repoRoot, ["rev-parse", "HEAD"], "utf8").trim() !== context.head) throw new Error("Recovery source HEAD changed");
 
     const generatedDirectory = hardenGeneratedBootstrapDirectories(packageRoot, owner);
     normalizeTrustedRegularFileMode(
@@ -2891,31 +3006,33 @@ async function runAdmittedRecoveryBootstrapShim(argv, context, attestedSource) {
       expectedMode: 0o555,
       expectedOwner: owner,
     });
-    if (generated.path !== resolve(repoRoot, "packages/ingenium-extension/dist/scripts/recovery-bootstrap.js")) {
+    if (generated.path !== resolve(stage.workspace, "packages/ingenium-extension/dist/scripts/recovery-bootstrap.js")) {
       throw new Error("Generated recovery bootstrap path is invalid");
     }
-    const staged = privateStagedBootstrap(generated.bytes, owner);
-    try {
-      const generatedModule = await import(`${pathToFileURL(staged.path).href}?inspect=1`);
+      const generatedModule = await import(`${pathToFileURL(generated.path).href}?inspect=1`);
+      generatedModule.verifyRecoveryBuildStage({ ...recoveryEnvironment });
       const declaredRuntimeMs = generatedModule.RECOVERY_BOOTSTRAP_MAX_RUNTIME_MS;
       if (!Number.isSafeInteger(declaredRuntimeMs) || declaredRuntimeMs < 1
         || declaredRuntimeMs > MAX_TIMER_MS - GENERATED_TIMEOUT_GRACE_MS) {
         throw new Error("Generated recovery bootstrap timeout declaration is invalid");
       }
+      record("running");
       const generatedResult = await runFixed(
         runtime,
-        [staged.path],
+        [generated.path],
         declaredRuntimeMs + GENERATED_TIMEOUT_GRACE_MS,
         childEnvironment(RECOVERY_ENVIRONMENT, runtime, {
           ...recoveryEnvironment,
-          [GENERATED_BOOTSTRAP_SHA256]: staged.sha256,
+          HOME: stage.directory,
+          [GENERATED_BOOTSTRAP_SHA256]: generated.sha256,
         }),
-        repoRoot,
+        stage.workspace,
       );
       propagate(generatedResult, "Generated recovery bootstrap");
-    } finally {
-      staged.cleanup();
-    }
+      record(generatedResult.timedOut || generatedResult.signal ? "unknown" : generatedResult.status === 0 ? "complete" : "failed");
+  } catch (error) {
+    record("unknown");
+    throw error;
   } finally {
     npmConfiguration.cleanup();
   }

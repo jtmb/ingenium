@@ -1668,6 +1668,10 @@ describe("managed command wrappers", () => {
         closeSync(verified.descriptor);
       }
 
+      chmodSync(source, 0o4644);
+      expect(() => openVerifiedRecoveryBootstrap(source, root)).toThrow("not trusted");
+      chmodSync(source, 0o644);
+
       expect(() => openVerifiedRecoveryBootstrap(source, root, () => {
         renameSync(source, `${source}.opened`);
         writeFileSync(source, reviewed, { mode: 0o644 });
@@ -2184,7 +2188,7 @@ describe("managed command wrappers", () => {
           INGENIUM_WORKTREE: worktree,
           INGENIUM_RECOVERY_CANONICAL_WORKTREE: worktree,
         }),
-        { productionRestart },
+        { productionRestart, verifyStage: () => worktree },
       )).toBe(0);
       expect(calls.slice(0, -1).map(({ command, argv }) => [command, argv])).toEqual(RECOVERY_BOOTSTRAP_CHECKS);
       expect(calls.at(-1)).toMatchObject({
@@ -2246,6 +2250,7 @@ describe("managed command wrappers", () => {
         }),
         {
           productionRestart,
+          verifyStage: () => worktree,
           afterDirectoryOpen(path: string) {
             if (path !== distPath) return;
             renameSync(path, `${path}.opened`);
@@ -2284,7 +2289,7 @@ describe("managed command wrappers", () => {
       runner as any,
       undefined,
       recoveryBootstrapEnvironment(),
-      { productionRestart: productionRestartSource },
+      { productionRestart: productionRestartSource, verifyStage: () => repositoryRoot },
     )).toBe(7);
     expect(calls.map(({ command, argv }) => ({ command, argv })))
       .toEqual(RECOVERY_BOOTSTRAP_CHECKS.slice(0, 2).map(
@@ -2332,7 +2337,7 @@ describe("managed command wrappers", () => {
         runner as any,
         undefined,
         recoveryBootstrapEnvironment(),
-        { productionRestart: productionRestartSource },
+        { productionRestart: productionRestartSource, verifyStage: () => repositoryRoot },
       );
     } catch (error) {
       failure = error;
@@ -2637,9 +2642,9 @@ describe("managed command wrappers", () => {
 
       const shimSource = readFileSync(recoveryBootstrapShim, "utf8");
       const runSource = shimSource.slice(shimSource.indexOf("async function runAdmittedRecoveryBootstrapShim"));
-      expect(runSource.indexOf("hardenCanonicalRepositoryDirectories(")).toBeLessThan(
-        runSource.indexOf("verifyScopedCheckpoint("),
-      );
+      expect(runSource).not.toContain("hardenCanonicalRepositoryDirectories(");
+      expect(runSource).not.toContain("verifyScopedCheckpoint(");
+      expect(runSource.indexOf("createPrivateRecoveryStage(")).toBeLessThan(runSource.indexOf("await runFixed("));
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

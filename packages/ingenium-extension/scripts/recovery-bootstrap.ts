@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import { execFileSync, spawnSync, type SpawnSyncReturns } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -210,6 +210,74 @@ export function recoveryBootstrapCanonicalWorktree(source: NodeJS.ProcessEnv = p
   return canonical;
 }
 
+export function verifyRecoveryBuildStage(source: NodeJS.ProcessEnv = process.env): string {
+  const canonical = recoveryBootstrapCanonicalWorktree(source);
+  const directory = source.INGENIUM_RECOVERY_STAGE_DIRECTORY;
+  const digest = source.INGENIUM_RECOVERY_STAGE_SHA256;
+  const owner = process.getuid!();
+  const fail = (): never => { throw new Error("Recovery private stage provenance is invalid"); };
+  if (!directory || resolve(directory) !== directory || !digest || !/^[0-9a-f]{64}$/.test(digest)) return fail();
+  for (let path = directory; ; path = dirname(path)) {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || realpathSync(path) !== path || ![0, owner].includes(stat.uid)
+      || ((stat.mode & 0o022) !== 0 && !(stat.uid === 0 && (stat.mode & 0o1000)))) fail();
+    if (path === dirname(path)) break;
+  }
+  if ((lstatSync(directory).mode & 0o7777) !== 0o700 || lstatSync(directory).uid !== owner) fail();
+  const stable = (path: string, mode?: number, expectedOwner = owner) => {
+    if (realpathSync(path) !== path) fail();
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = fstatSync(fd);
+      if (!before.isFile() || before.nlink !== 1 || before.uid !== expectedOwner || (before.mode & 0o7022)
+        || (mode !== undefined && (before.mode & 0o7777) !== mode)) fail();
+      const bytes = readFileSync(fd);
+      for (const after of [fstatSync(fd), lstatSync(path)]) {
+        if (!after.isFile() || ["dev", "ino", "mode", "uid", "nlink", "size", "mtimeMs", "ctimeMs"].some(
+          (key) => before[key as keyof typeof before] !== after[key as keyof typeof after])) fail();
+      }
+      if (realpathSync(path) !== path) fail();
+      return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
+    } finally { closeSync(fd); }
+  };
+  const bytes = stable(resolve(directory, "stage.json"), 0o400);
+  if (bytes.sha256 !== digest) fail();
+  const manifest = JSON.parse(bytes.bytes.toString());
+  const exact = (value: unknown, keys: string[]): value is Record<string, any> => value !== null && typeof value === "object"
+    && !Array.isArray(value) && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+  const context = JSON.parse(source[ADMITTED_RECOVERY_CONTEXT] ?? "null");
+  if (!exact(manifest, ["schemaVersion", "repositoryRoot", "head", "archiveSha256", "node", "files"])
+    || manifest.schemaVersion !== 1 || manifest.repositoryRoot !== canonical || !/^[0-9a-f]{40}$/.test(manifest.head)
+    || context?.head !== manifest.head || context?.binding?.worktree !== canonical
+    || !exact(manifest.node, ["path", "sha256"]) || manifest.node.path !== realpathSync(process.execPath)
+    || !manifest.files || typeof manifest.files !== "object" || Array.isArray(manifest.files)
+    || stable(resolve(directory, "source.tar"), 0o400).sha256 !== manifest.archiveSha256) fail();
+  const nodeOwner = lstatSync(manifest.node.path).uid;
+  if (![0, owner].includes(nodeOwner) || stable(manifest.node.path, undefined, nodeOwner).sha256 !== manifest.node.sha256) fail();
+  const workspace = resolve(directory, "workspace");
+  if (workspace === canonical || canonical.startsWith(`${directory}/`)) fail();
+  for (const [relative, value] of Object.entries(manifest.files)) {
+    if (!exact(value, ["sha256", "mode"])) return fail();
+    if (!relative || relative.startsWith("/") || relative.includes("\\")
+      || relative.split("/").some((part) => !part || [".", "..", ".git", "node_modules"].includes(part))
+      || ![0o600, 0o700].includes(value.mode) || !/^[0-9a-f]{64}$/.test(value.sha256)) fail();
+    for (let path = dirname(resolve(workspace, relative)); ; path = dirname(path)) {
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || realpathSync(path) !== path || stat.uid !== owner || (stat.mode & 0o7777) !== 0o700) fail();
+      if (path === workspace) break;
+    }
+    if (stable(resolve(workspace, relative), value.mode).sha256 !== value.sha256
+      || stable(resolve(canonical, relative)).sha256 !== value.sha256) fail();
+  }
+  const git = (args: string[]) => execFileSync("/usr/bin/git", ["--no-optional-locks", "-C", canonical,
+    "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", ...args], {
+    encoding: "utf8", timeout: 10_000,
+    env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+  }).trim();
+  if (git(["rev-parse", "--show-toplevel"]) !== canonical || git(["rev-parse", "HEAD"]) !== manifest.head) fail();
+  return workspace;
+}
+
 export function hardenGeneratedBootstrapDirectories(
   root: string,
   afterOpen?: (path: string) => void,
@@ -321,11 +389,15 @@ export function runRecoveryBootstrap(
   runner: Runner = spawnSync,
   retainEvidence?: (evidence: RecoveryBootstrapEvidence) => void,
   source: NodeJS.ProcessEnv = process.env,
-  paths: { productionRestart?: string; afterDirectoryOpen?: (path: string) => void } = {},
+  paths: { productionRestart?: string; afterDirectoryOpen?: (path: string) => void; verifyStage?: typeof verifyRecoveryBuildStage } = {},
 ): number {
   if (argv.length !== 2) throw new Error("Recovery bootstrap accepts no arguments");
   verifyRecoveryBootstrapInvocation(argv[1]!, source[RECOVERY_BOOTSTRAP_SHA256]);
-  const root = recoveryBootstrapCanonicalWorktree(source);
+  const verifyStage = paths.verifyStage ?? verifyRecoveryBuildStage;
+  const root = verifyStage(source);
+  if (!paths.verifyStage && realpathSync(argv[1]!) !== resolve(root, "packages/ingenium-extension/dist/scripts/recovery-bootstrap.js")) {
+    throw new Error("Recovery bootstrap executable is outside the private stage");
+  }
   const productionRestart = paths.productionRestart
     ?? resolve(root, "packages/ingenium-extension/dist/scripts/production-restart.js");
   const npmConfiguration = privateNpmConfiguration();
@@ -338,10 +410,12 @@ export function runRecoveryBootstrap(
       timeout: RECOVERY_BOOTSTRAP_CHECK_TIMEOUT_MS,
     };
     for (const [index, [command, commandArgv]] of RECOVERY_BOOTSTRAP_CHECKS.entries()) {
+      if (verifyStage(source) !== root) throw new Error("Recovery private stage identity changed");
       const result = runner(command, commandArgv, options);
       const status = completedStatus(result, "check", index + 1);
       if (status !== 0) return status;
     }
+    if (verifyStage(source) !== root) throw new Error("Recovery private stage identity changed");
     hardenGeneratedBootstrapDirectories(root, paths.afterDirectoryOpen);
     const canonicalProductionRestart = normalizeGeneratedRecoveryExecutable(productionRestart);
     if (canonicalProductionRestart !== productionRestart) throw new Error("Production restart path is not canonical");

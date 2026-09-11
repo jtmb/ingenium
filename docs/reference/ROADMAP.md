@@ -2180,6 +2180,8 @@ Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): 
 
 Evidence RECOVERY-100 host-installer source (2026-09-11): No safe host installer existed before this change. The three changed files are `packages/ingenium-extension/scripts/install-host-build.mjs`, `packages/ingenium-extension/install-host-build.test.ts`, and `packages/ingenium-extension/package.json`. The `install:host-build` entry requires an exact expected HEAD and clean source, validates bootstrap and `dist` modes, hashes, and registry behavior, limits adoption to the canonical owner-controlled `~/.local/bin` only, and uses descriptor-pinned candidate/backup state, atomic rename, `fsync`, rollback, and protected provenance. It does not invoke the host command. Thirty-one focused tests and the extension typecheck pass. QA/security review, commit, live installation, and an independent verifier remain pending; this is source evidence only and not acceptance.
 
+Evidence RECOVERY-100 deployment and installer rejection (2026-09-11): Deployment of `b064d8854f05eb371a8edc571aa5fbd42948073b` used image `sha256:4e6bc545bcef7a8cfa74196aee5421546200268711729945d835e4345eb1324d` in container prefix `abc71396c08f`; services, routes, MCP, and scanner were healthy, with rollback target `ingenium-ingenium:rollback-67c40251-b064d885`. The installer was invoked once and rejected before lock or mutation with `HOST_INSTALL_SHARED_WORKTREE_TRUST_CONFLICT` because `/home/brajam/repos` was `0775` and canonical `dist` was `0575`/service-writable; the old relative symlink/inode and hashes were unchanged, with no manifest, backup, transaction, or command invocation. Next work is a private revision-pinned owner-only artifact; ACL weakening is not permitted. This is deployment/rejection evidence only, not an acceptance claim.
+
 #### UI-100 — Shared native Select primitive
 
 - **IN_SCOPE:** Create one accessible shared native `<select>` primitive for dashboard forms, with the repository's required hover/cursor styling, label/id association, disabled/loading/error states, keyboard behavior, and a testable API; inventory every current native-select consumer for the migration lane.
@@ -9968,3 +9970,49 @@ separately required parent replacement/restart or any parent/final gate.
   passed `1` with `31 skipped`. QA/security were not rerun. Security
   `FOLLOW_UP`s for distribution crash durability and compiler provenance remain
   nonblocking; no live install/deploy/recovery claim is added.
+- **Manual parent restart/interruption recovery (2026-09-11):** The user
+  manually restarted the parent. TodoWrite was interrupted and then successfully
+  reinitialized; no prior Todo replay is proven. The retained manifest records
+  full Git HEAD `b064d8854f05eb371a8edc571aa5fbd42948073b` and nine dirty paths:
+  eight tracked — `docs/reference/ROADMAP.md`,
+  `packages/ingenium-extension/install-host-build.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/scripts/build-distributions.mjs`,
+  `packages/ingenium-extension/scripts/install-host-build.mjs`,
+  `packages/ingenium-extension/scripts/managed-command-wrapper.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, and
+  `packages/ingenium-extension/scripts/recovery-bootstrap.ts` — plus untracked
+  `packages/ingenium-extension/recovery-private-stage.test.ts`. Nothing was
+  staged.
+- **Interruption/status boundary:** Interrupted child
+  `ses_f6d952a78ffewviE473j7B1Oo0` remains **UNKNOWN**; cancellation is not
+  completion. The current parent is responsive, but exact
+  session/incarnation/epoch/fence/claim/nonce/handoff/outbox/supervisor state
+  is **UNKNOWN**. The Recovery profile status path lacked `coordination-status`;
+  `Scout` is the authorized owner/nextWork for status retrieval. No edits,
+  replay, or restart were performed by this documentation update.
+- **Coordination-status recovery result (2026-09-11; read-only):** Recovery and
+  Scout independently lacked `ingenium_coordination_status`; Scout made zero
+  linked handoff reads. The current parent/session/claims/outbox state and child
+  `ses_f6d952a78ffewviE473j7B1Oo0` remain uncorroborated; no mutation occurred.
+  Stable internal failure: `COORDINATION_STATUS_TOOL_UNAVAILABLE`. Attempted
+  paths, in order: Recovery fixed preflight, then Scout status tool. New
+  evidence shows the nine dirty paths exactly match the cancelled source-only
+  assignment; no live mutation was authorized. Owner/nextWork:
+  `@ingenium-software-engineer-premium` (source-adoption writer) to inspect and
+  adopt the existing diff without replay while external recovery state stays
+  frozen. Deployment owner: `N/A`.
+- **Fresh Premium source-adoption boundary (2026-09-11; SOURCE ONLY):** The
+  interrupted child `ses_f6d952a78ffewviE473j7B1Oo0` remains **UNKNOWN**;
+  fresh Premium adopted every hunk in the eight tracked paths recorded above
+  plus new `packages/ingenium-extension/recovery-private-stage.test.ts`, with
+  no replay or reset. The source now covers owner-only immutable release data,
+  a regular sanitized launcher, a private manifest, and shared `dist` treated
+  only as data; committed shim stdin verification; and outer/generated
+  owner-only Git-archive staging. Shared ACLs were not mutated.
+- **Finalized source checks and boundary (2026-09-11):** Installer/stage
+  checks passed `56`; narrowed wrapper checks passed `61` with `52` skipped;
+  pre-admission checks passed `33`; and the strengthened-closure check passed
+  `1` with `38` skipped. Extension typecheck and `git diff --check` passed.
+  QA, security, commit, deploy, live install, and recovery remain pending;
+  no runtime acceptance or completion claim is added.
