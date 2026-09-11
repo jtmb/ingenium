@@ -60,6 +60,7 @@ export interface ChildMcpGatewayApi {
     unavailableCount: number;
   }>;
   recordDiscovery(project: string, server: string, report: ChildMcpDiscoveryReport): Promise<boolean>;
+  toolStates(project: string, toolNames: string[]): Promise<Map<string, Awaited<ReturnType<ChildMcpGatewayApi["toolEnabled"]>>>>;
   toolEnabled(project: string, toolName: string): Promise<{
     state: ToolState;
     attestation: ProjectStateAttestation | null;
@@ -149,6 +150,20 @@ export const childMcpGatewayApi: ChildMcpGatewayApi = {
     } catch {
       return { state: "unavailable", attestation: null, policy: null };
     }
+  },
+
+  async toolStates(project) {
+    const states = new Map<string, Awaited<ReturnType<ChildMcpGatewayApi["toolEnabled"]>>>();
+    const response = await api.settled.get("/mcp-tools", { project });
+    const attestation = getProjectStateAttestation(response.payload, project);
+    if (!response.ok || !attestation || !Array.isArray(response.data)) return states;
+    for (const tool of response.data) {
+      if (!isRecord(tool) || typeof tool.tool_name !== "string" || typeof tool.enabled !== "boolean") continue;
+      const policy = getToolAuthorizationPolicy(tool.authorization);
+      if (policy?.launcherBinding !== "required" || policy.target !== "project") continue;
+      states.set(tool.tool_name, { state: tool.enabled ? "enabled" : "disabled", attestation, policy });
+    }
+    return states;
   },
 };
 
@@ -428,8 +443,11 @@ export class ChildMcpGateway {
   private async syncTools(definition: ChildMcpRuntimeDefinitionResponse, discovered: ChildMcpTool[]): Promise<boolean> {
     let changed = false;
     const visible: ChildMcpTool[] = [];
+    // Discovery shares the launcher's read budget; invocation still checks fresh per-tool authority.
+    const states = await this.apiClient.toolStates(this.project!, discovered.map((tool) => canonicalToolName(definition.name, tool.name)));
     for (const tool of discovered) {
-      const response = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
+      const response = states.get(canonicalToolName(definition.name, tool.name));
+      if (!response) continue;
       if (this.projectStateAttestor.attest(this.project!, response.attestation)
         && response.state === "enabled" && response.policy?.launcherBinding === "required"
         && (!this.parentBinding || (response.attestation?.project_id === this.parentBinding.projectId

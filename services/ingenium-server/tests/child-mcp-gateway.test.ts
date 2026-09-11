@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   ChildMcpGateway,
+  childMcpGatewayApi,
   resolveChildMcpProjectIdentity,
   type ChildMcpDiscoveryReport,
   type ChildMcpGatewayApi,
@@ -14,6 +15,7 @@ import {
 } from "../lib/child-mcp-gateway.js";
 import type { ProjectStateAttestation } from "../lib/tool-state-gate.js";
 import { ChildMcpRuntimeManager } from "../lib/proxy.js";
+import { api as httpApi } from "../lib/client.js";
 import {
   ManagedPlaywrightRuntime,
   PLAYWRIGHT_CHILD_MCP_ARGS,
@@ -164,6 +166,9 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
       reports.push(report);
       return true;
     },
+    async toolStates(project, toolNames) {
+      return new Map(await Promise.all(toolNames.map(async (name) => [name, await api.toolEnabled(project, name)] as const)));
+    },
     async toolEnabled(_project, toolName) {
       checkedTools.push(toolName);
       return {
@@ -196,6 +201,55 @@ afterEach(async () => {
 });
 
 describe("ChildMcpGateway", () => {
+  it("reads one attested authorization batch and fails closed for foreign or incomplete state", async () => {
+    const fixtureApi = createApi([]);
+    const state = await fixtureApi.api.toolEnabled("child-gateway-project", "ingenium_fixture_echo");
+    const data = [
+      { tool_name: "ingenium_fixture_echo", enabled: true, authorization: state.policy },
+      { tool_name: "ingenium_fixture_disabled", enabled: false, authorization: state.policy },
+      { tool_name: "ingenium_fixture_missing_policy", enabled: true },
+    ];
+    const response = { ok: true, data, payload: { ...state.attestation, data } };
+    const get = vi.spyOn(httpApi.settled, "get").mockResolvedValue(response as never);
+    const states = await childMcpGatewayApi.toolStates("child-gateway-project", data.map((tool) => tool.tool_name));
+    expect(get).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledWith("/mcp-tools", { project: "child-gateway-project" });
+    expect(states.get("ingenium_fixture_echo")).toEqual(state);
+    expect(states.get("ingenium_fixture_disabled")?.state).toBe("disabled");
+    expect(states.has("ingenium_fixture_missing_policy")).toBe(false);
+    response.payload.project = "foreign-project";
+    expect(await childMcpGatewayApi.toolStates("child-gateway-project", [])).toEqual(new Map());
+    get.mockResolvedValue({ ok: false } as never);
+    expect(await childMcpGatewayApi.toolStates("child-gateway-project", [])).toEqual(new Map());
+  });
+
+  it("batches periodic 30-tool discovery without consuming launcher preflight capacity", async () => {
+    const { host, tools } = createHost();
+    const state = createApi([runtimeDefinition()]);
+    const manager = createManager();
+    const discovered = Array.from({ length: 30 }, (_, index) => ({
+      name: index === 0 ? "echo" : `tool_${index}`, description: "fixture", inputSchema: {},
+    }));
+    vi.spyOn(manager, "listTools").mockResolvedValue(discovered);
+    const original = state.api.toolEnabled;
+    const single = vi.spyOn(state.api, "toolEnabled");
+    const batch = vi.fn(async () => new Map(await Promise.all(discovered.map(async (tool) => {
+      const name = `ingenium_fixture_${tool.name}`;
+      return [name, await original("child-gateway-project", name)] as const;
+    }))));
+    Object.assign(state.api, { toolStates: batch });
+    const gateway = new ChildMcpGateway(host, "child-gateway-project", state.api, manager);
+    gateways.push(gateway);
+    for (let tick = 0; tick < 12; tick++) await gateway.refresh();
+    expect(batch).toHaveBeenCalledTimes(12);
+    expect(single).not.toHaveBeenCalled();
+    expect(tools.size).toBe(30);
+    state.setToolState("disabled");
+    await expect(tools.get("fixture_echo")!.handler({ project: "child-gateway-project", arguments: {} }))
+      .resolves.toMatchObject({ isError: true });
+    expect(single).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { executable: "npx" },
     { args: [...PLAYWRIGHT_CHILD_MCP_ARGS, "--no-sandbox"] },

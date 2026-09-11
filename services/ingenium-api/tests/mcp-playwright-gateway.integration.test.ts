@@ -160,6 +160,20 @@ function createGatewayApi(baseUrl: string): ChildMcpGatewayApi {
       const policy = getToolAuthorizationPolicy((body.data as { authorization?: unknown }).authorization);
       return { state: enabled ? "enabled" : "disabled", attestation, policy };
     },
+    async toolStates(project) {
+      const response = await jsonRequest(baseUrl, `/api/v1/mcp-tools${query(project)}`);
+      const body = await jsonBody(response);
+      const attestation = getProjectStateAttestation(body, project);
+      const states = new Map<string, Awaited<ReturnType<ChildMcpGatewayApi["toolEnabled"]>>>();
+      if (!response.ok || !attestation || !Array.isArray(body.data)) return states;
+      for (const tool of body.data) {
+        states.set(tool.tool_name, {
+          state: tool.enabled ? "enabled" : "disabled", attestation,
+          policy: getToolAuthorizationPolicy(tool.authorization),
+        });
+      }
+      return states;
+    },
   };
 }
 

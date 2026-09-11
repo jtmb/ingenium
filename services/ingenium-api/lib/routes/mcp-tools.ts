@@ -261,7 +261,9 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
     })).filter((category) => category.total_count > 0);
     res.json({ project, project_id: projectId, data: tools, total: tools.reduce((s, g) => s + g.total_count, 0), counts });
   } else {
-    const tools = mcpToolStates.listToolStatesWithDefaults(projectId).filter((tool) => authorized.has(tool.tool_name));
+    const tools = mcpToolStates.listToolStatesWithDefaults(projectId)
+      .filter((tool) => authorized.has(tool.tool_name))
+      .map((tool) => ({ ...tool, authorization: authorized.get(tool.tool_name)!.authorization }));
     res.json({ project, project_id: projectId, data: tools, total: tools.length, counts });
   }
   });

@@ -158,7 +158,13 @@ describe("MCP tool state API", () => {
 
     const listed = await fetch(`${baseUrl}/mcp-tools?project=mcp-tools-route-a`);
     expect(listed.status).toBe(200);
-    await expect(listed.json()).resolves.toMatchObject({ project: "mcp-tools-route-a", project_id: projectA.id });
+    await expect(listed.json()).resolves.toMatchObject({
+      project: "mcp-tools-route-a", project_id: projectA.id,
+      data: expect.arrayContaining([{
+        tool_name: toolName, enabled: true,
+        authorization: mcpToolStates.getAllTools(projectA.id).get(toolName)!.authorization,
+      }]),
+    });
 
     const disabled = await fetch(`${baseUrl}/mcp-tools/${toolName}?project=mcp-tools-route-a`, {
       method: "PUT",
