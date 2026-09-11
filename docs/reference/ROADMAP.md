@@ -9239,3 +9239,236 @@ notes only; all prior text and evidence remain historical. The documentation
 update itself is limited to this file and is verified by static readback only;
 it performs no source/test rerun, deployment, commit, Docs Workspace mutation,
 or delegation.
+
+## Linked Current Todos 47–56 — ten-request rollout opening (2026-09-10)
+
+This append-only block adds exactly ten linked, open rollout items. It preserves
+every earlier row, marker, evidence record, historical status, and numbering;
+these items are planning and acceptance boundaries, not implementation
+completion. The roadmap read/reconciliation is the first dependency for every
+item. Todo 53 must be complete before any browser test or visual gate, and Todo
+49 must not archive other `ingenium` Context conversations until the current
+redacted conversation has been imported and retrieved successfully. Documentation,
+MCP, visual, review, deployment, full-acceptance, and final-reconciliation gates
+remain open. Deployment is `N/A` for this roadmap-only append.
+
+### Linked Current Todo 47 — Chat Context control placement
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Place the requested Context control(s) on the intended Chat
+  surface, with an explicit relationship to the existing Context management
+  surface, project/workspace binding, and truthful loading, success, empty, and
+  failure states.
+- **OUT_OF_SCOPE:** Memory storage or archive implementation, provider changes,
+  unrelated Chat redesign, transcript export, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; the existing Context/memory contract and
+  authorized workspace/project resolution; Todo 53 before browser or visual
+  checks.
+- **Acceptance:** The control is present at the agreed `/chat` placement,
+  visibly identifies its scope, is keyboard/accessibility usable, preserves the
+  Context management boundary unless an explicit product decision changes it,
+  and has focused request/state evidence with no false success or disclosure.
+- **NextWork:** Implement and verify only the agreed placement and its direct
+  state contract; keep this item open until its applicable runtime and visual
+  gates are separately proven.
+
+### Linked Current Todo 48 — Bulk repository sync and command resources
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Bulk repository synchronization for the complete declared
+  repository resource set, including command resources, with explicit dry-run,
+  apply, manifest, project/worktree binding, and no-drift behavior.
+- **OUT_OF_SCOPE:** Unrelated Git workflow redesign, source feature changes,
+  credentials, destructive cleanup, Docs Workspace writes, and broad index
+  regeneration.
+- **Dependencies:** Roadmap first; the existing Git-authoritative
+  worktree-to-resource-sync path; Todo 52 consumes this sync boundary.
+- **Acceptance:** Dry-run validates and reports the complete resource set
+  without mutation; apply updates only the exact bound project/worktree; command
+  resources are included; a repeated apply reports no drift; manifests and
+  hashes are stable; and foreign, missing, malformed, or stale inputs fail
+  closed without deleting newer resources.
+- **NextWork:** Prove dry-run, apply, repeat/no-drift, command-resource, and
+  project-isolation cases before treating repository sync as available to later
+  items.
+
+### Linked Current Todo 49 — Redacted external Context import, retrieval, and archive gate
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Import the exact current external Context conversation through a
+  redacted, project-bound representation; keep per-project automatic upload
+  default-off; prove retrieval of that imported conversation; and archive all
+  other `ingenium` Context conversations only after that import-and-retrieval
+  proof.
+- **OUT_OF_SCOPE:** Raw transcript or secret retention, cross-project sharing,
+  silent auto-upload enablement, archive-before-proof, irreversible deletion,
+  and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; current external conversation import and
+  retrieval are hard prerequisites for the archive step. No other
+  `ingenium` Context conversation may be archived before both proofs are
+  recorded.
+- **Acceptance:** The imported record has exact redacted provenance and stable
+  project/session identity; per-project auto-upload is persisted as off until
+  explicit opt-in; a fresh authorized retrieval returns the expected redacted
+  record; an exact inventory and receipt prove that only the other `ingenium`
+  Context conversations were archived afterward; foreign-project records and
+  raw secrets/transcript content are not disclosed; and the archive remains
+  reversible or otherwise auditable under its authorized safety contract.
+- **NextWork:** Complete and retain the redacted import plus retrieval evidence
+  first, then perform the narrowly scoped archive reconciliation; do not replay
+  an uncertain import or archive mutation.
+
+### Linked Current Todo 50 — External-session observation and synthesis provenance
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Record external-session observations and synthesis with
+  project/session/source provenance, redacted lineage, stable dedupe keys, and
+  separation between user-behavior observations and operational/session data.
+- **OUT_OF_SCOPE:** Transcript stuffing, raw prompt/reasoning retention,
+  cross-project observation, inferred behavior from implementation notes, and
+  unrelated learning redesign.
+- **Dependencies:** Roadmap first; the existing self-learning observation and
+  synthesis pipeline; only authorized, redacted external-session events may be
+  consumed.
+- **Acceptance:** Each accepted observation and synthesis result identifies its
+  redacted source/session/project provenance and lineage; repeated delivery or
+  restart produces one effective observation/synthesis; unknown, hostile, or
+  operational-only data is not mislabeled as user behavior; foreign scope is
+  rejected; and the retained evidence contains no secret, prompt, or transcript
+  body.
+- **NextWork:** Prove one external-session observation-to-synthesis path and its
+  replay/dedupe behavior, retaining the first failure and provenance class.
+
+### Linked Current Todo 51 — External-session usage ingestion and `/usage` proof
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Ingest provider-reported usage from authorized external sessions
+  into the existing project-scoped usage ledger and prove the corresponding
+  `/usage` representation, freshness, provenance, and unknown-value behavior.
+- **OUT_OF_SCOPE:** Billing enforcement, inferred cost, provider credential
+  handling, fabricated counters, unrelated usage redesign, and Docs Workspace
+  mutation.
+- **Dependencies:** Roadmap first; the existing usage ledger and external
+  session attestation; Todo 50's provenance/dedupe boundary where the same
+  session event stream is consumed.
+- **Acceptance:** A bounded external-session fixture contributes only its
+  reported request/token/cache/cost fields; duplicate events do not double
+  count; `/usage` shows project-scoped totals with source and UTC freshness;
+  unknown/not-reported remains distinct from zero; no prompt, secret, or
+  credential is exposed; and the proof includes the API/ledger result and the
+  rendered `/usage` result.
+- **NextWork:** Run the smallest authorized ingestion and `/usage` proof after
+  provenance is available; keep this item open for deployment and visual gates.
+
+### Linked Current Todo 52 — Project-local plugin descriptions across repository sync
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Permit editing project-local plugin descriptions and preserve
+  those descriptions through repository synchronization, projection, reload,
+  and readback without changing global plugin authority.
+- **OUT_OF_SCOPE:** Global plugin redesign, unrelated agent/profile changes,
+  credential or prompt disclosure, broad repository cleanup, and Docs
+  Workspace mutation.
+- **Dependencies:** Roadmap first; Todo 48's bulk-sync dry-run/apply/no-drift
+  contract must be available before preservation is accepted.
+- **Acceptance:** An authorized project-local description edit persists with
+  the correct project identity; dry-run shows the expected change; apply and a
+  second sync retain the exact description without drift or truncation; another
+  project cannot read or overwrite it; and reload/readback proves sync did not
+  silently replace the editable local value with a global default.
+- **NextWork:** Add the smallest project-local edit/sync/readback proof after
+  Todo 48, preserving unrelated repository resources and current authority.
+
+### Linked Current Todo 53 — Persistent managed Playwright configuration for `ingenium`
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Persistently configure the existing managed Playwright child
+  MCP for project `ingenium`, with exact project/workspace binding, discovery,
+  least-privilege permissions, cleanup ownership, and restart retention.
+- **OUT_OF_SCOPE:** Ad-hoc or unmanaged browser processes, arbitrary browser
+  profiles, real credentials, broad Playwright upgrades, source changes outside
+  the managed preset, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first. This Todo is a hard prerequisite for every
+  browser test, changed-route visual gate, passive visual sweep, or browser
+  cleanup claim in this rollout; no such gate may run before it is proven.
+- **Acceptance:** The managed preset is persistently configured for exactly
+  `ingenium`, is rediscoverable after cleanup and a full parent/relevant service
+  restart, retains configuration while removing only run-owned browser state,
+  enforces declared tool permissions and isolation, leaves no process/port/
+  profile/credential residue, and records the exact configuration and
+  post-restart discovery proof without secrets.
+- **NextWork:** Complete configuration and persistence/restart proof first;
+  only then admit the browser and visual gates.
+
+### Linked Current Todo 54 — Protected dashboard and vault credentials
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Protect dashboard and vault credential handling, including
+  owner/mode/transport boundaries, redacted projections, and safe fixture
+  acceptance for the affected rollout surfaces.
+- **OUT_OF_SCOPE:** Credential rotation without authorization, passphrase
+  recovery, vault initialization/reset, secret-value display, provider changes,
+  and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; existing protected credential and vault
+  safety contracts; no real credential is required for the default proof.
+- **Acceptance:** Credential values are accepted only through protected
+  owner-controlled paths, never appear in responses, logs, prompts, screenshots,
+  manifests, or roadmap evidence, and are removed only through an authorized
+  identity-checked cleanup; vault state is preserved; no destructive vault reset
+  or unseal is performed; and denied/expired/foreign access fails closed with
+  content-free evidence.
+- **NextWork:** Verify the protected fixture and redaction boundary without
+  requesting or recording a secret; leave any destructive vault operation
+  outside this rollout open and untouched.
+
+### Linked Current Todo 55 — Next-steps template governance and update
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Govern and update the approved next-steps template so future
+  rollout records carry stable Todo identity, scope, acceptance, dependencies,
+  STOP/CANCELLED handling, verification, escalation, changed paths, evidence
+  class, owner, and executable `nextWork` without inventing follow-up work.
+- **OUT_OF_SCOPE:** Implementation, deployment, credentials, runtime/session
+  mutation, broad template/index regeneration, automatic task dispatch, and
+  Docs Workspace mutation.
+- **Dependencies:** Roadmap first; consume the settled boundaries from Todos
+  47–54 before finalizing wording, and remain open until the full acceptance
+  contract is reconciled.
+- **Acceptance:** The governed template contains every required contract field,
+  preserves stable IDs and prior evidence classes, distinguishes source,
+  deployed, model/session, visual, and review evidence, records blockers versus
+  follow-ups without auto-dispatch, and passes a readback against each of the
+  ten linked items with no false completion state.
+- **NextWork:** Apply the minimum authorized template/governance update after
+  the preceding boundaries are clear; do not create a separate plan or reopen
+  completed historical records.
+
+### Linked Current Todo 56 — Full acceptance and final reconciliation
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Final docs, MCP, visual, bounded review, exact deployment, and
+  final TodoWrite/roadmap/file reconciliation for Todos 47–55, with evidence
+  classes kept distinct and all required safety boundaries rechecked.
+- **OUT_OF_SCOPE:** New product scope, unrelated cleanup, secret collection,
+  destructive vault reset or Context archive before Todo 49 proof, broad docs
+  regeneration, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; Todos 47–55; Todo 53 before any browser or
+  visual gate; Todo 49's redacted import-and-retrieval proof before its archive
+  step. Documentation, MCP, visual, review, deployment, full acceptance, and
+  final reconciliation remain open until this item passes.
+- **Acceptance:** Directly affected canonical docs have verified links,
+  commands, policy wording, and scope; MCP initialize/tools-list/state proof is
+  current; changed UI receives `1440x900` and `390x844` evidence plus the
+  passive sweep; the declared QA/security/review reports are bounded and
+  consumed once; the current merged source is rebuilt, deployed, health-checked,
+  and provenance-matched; cleanup is identity-checked; and every Todo, marker,
+  evidence class, changed path, and `nextWork` is reconciled before any overall
+  `PASS`.
+- **NextWork:** Keep all acceptance and reconciliation gates open, then run the
+  declared final checks in dependency order; this roadmap append is not
+  implementation completion and records no final `PASS`.
+
+This ten-item opening changes no source, configuration, template, credential,
+runtime, deployment, Context state, or Docs Workspace page. No work-started or
+work-complete marker is added by this append; all ten linked Todos remain
+`OPEN`.
