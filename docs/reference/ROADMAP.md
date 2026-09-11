@@ -10101,3 +10101,32 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
 - **Acceptance:** The future T62 output is canonical, non-speculative, and
   actionable with no secret material; this roadmap amendment is accepted by
   concise append, readback, and scoped diff check only.
+
+## Append-only recovery deployment/install success and linked Todo 63 — 2026-09-11
+
+- **Exact deployment/install evidence:** Revision
+  `544c6c2a0033eb3d122a0d4cf7f6a8e6ffafeb35`, container prefix `1c4df53b3bc2`,
+  image `sha256:080f6886b9bce386bfc3a29a2c294b63ef03ae985e5b1f8732e88591c779df76`,
+  and rollback tag `ingenium-ingenium:rollback-6772154b-544c6c2a` were
+  deployed successfully. Runtime, routes, MCP `42`, binding, isolation,
+  entrypoint, ACL, and scanner checks passed.
+- **Installer evidence:** One installer invocation exited `0`; the host
+  launcher is regular, owner-only mode `0500`, and the immutable release path
+  is
+  `/home/brajam/.local/share/ingenium/host-build/releases/544c6c2a0033eb3d122a0d4cf7f6a8e6ffafeb35`.
+  Receipt
+  `/home/brajam/.local/state/ingenium-build-install-56af7221-b7e2-4b5e-99d6-71b698e05ff1.json`
+  has status `installed` and hash
+  `15aeef7013b597046ec6e00861116902d784bd8997e588c64ac4ad900de00b3d`.
+  The prior relative symlink was preserved as an exact backup. No
+  `recovery-prepare` or restart was performed.
+- **Todo 63 — plugin/OpenCode checker planning:** `COMPLETE` for planning only.
+  Premium drafted a nonintrusive offline/read-only plugin source-repository
+  checker and Docker OpenCode supported/latest checker, with check and update
+  paths separated. Proposed command names are `ingenium-check-plugins` and
+  `node scripts/check-opencode-release.mjs`; safe defaults are read-only,
+  offline, non-mutating, and credential-free. No implementation was authorized
+  or performed; implementation requires separate admission.
+- **Ordering preservation:** Todo 62 remains before Todo 60's final
+  documentation audit and Todo 57's redacted export, intended-evidence commit,
+  authorized push, and protected webhook. No secret value is recorded.
