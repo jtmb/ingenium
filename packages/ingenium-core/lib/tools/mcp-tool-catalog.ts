@@ -1259,7 +1259,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_plugin_update",
     category: "Plugins",
-    description: "Update a plugin's file path or source content.",
+    description: "Update a project-local plugin description alone, or executable file path/source alone. Description edits never change files or configuration.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: PLUGINS_ENDPOINTS,

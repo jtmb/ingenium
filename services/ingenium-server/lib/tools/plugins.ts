@@ -5,6 +5,19 @@
  */
 import { api } from "../client.js";
 import { textResult } from "./result.js";
+import { z } from "zod";
+
+const pluginUpdateFields = z.object({
+  description: z.string().max(2000).refine((value) => !value.includes("\0"), "Description must not contain NUL").optional(),
+  file_path: z.string().optional(),
+  source_content: z.string().optional(),
+}).strict();
+const isSeparateUpdate = (value: z.infer<typeof pluginUpdateFields>) => value.description !== undefined
+  ? value.file_path === undefined && value.source_content === undefined
+  : value.file_path !== undefined || value.source_content !== undefined;
+export const pluginUpdateInputSchema = pluginUpdateFields.extend({
+  project: z.string().min(1).max(256), name: z.string().min(1).max(256),
+});
 
 /** List all plugins available for a project. */
 export async function pluginList(project: string) {
@@ -36,9 +49,11 @@ export async function pluginDelete(project: string, name: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: true }) }] };
 }
 
-/** Update a plugin's file path or source content. */
-export async function pluginUpdate(project: string, name: string, updates: { file_path?: string; source_content?: string }) {
-  const res = await api.put(`/plugins/${encodeURIComponent(name)}`, updates, { project });
+/** Description edits are project-local metadata, never executable configuration. */
+export async function pluginUpdate(project: string, name: string, updates: z.infer<typeof pluginUpdateFields>) {
+  const fields = pluginUpdateFields.refine(isSeparateUpdate, "Provide description alone, or executable fields alone").parse(updates);
+  pluginUpdateInputSchema.parse({ ...fields, project, name });
+  const res = await api.put(`/plugins/${encodeURIComponent(name)}`, fields, { project });
   return textResult(res.data);
 }
 

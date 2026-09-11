@@ -5478,6 +5478,15 @@ function runMigrations(db: Database.Database): void {
     })();
     logger.info("db", "Applied migration 118_repository_command_resources.sql");
   }
+  if (!(db.prepare("PRAGMA table_info(plugins)").all() as Array<{ name: string }>).some((column) => column.name === "description")) {
+    db.transaction(() => {
+      db.exec(readFileSync(resolve(migrationsDir, "119_plugin_description.sql"), "utf-8"));
+      if (db.prepare("PRAGMA foreign_key_check(plugins)").all().length > 0) {
+        throw new Error("Migration 119 failed plugin foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 119_plugin_description.sql");
+  }
   enforceReservedBrokerInvariant(db);
 }
 

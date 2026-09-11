@@ -3,6 +3,38 @@ import { Plugin } from "../schema.js";
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, relative, isAbsolute, dirname } from "node:path";
 import { getPluginsBase, getConfigPath, isGlobal } from "./paths.js";
+import { z } from "zod";
+
+export const pluginDescriptionSchema = z.string().max(2000).refine((value) => !value.includes("\0"), "Description must not contain NUL");
+export const pluginUpdateSchema = z.union([
+  z.object({ description: pluginDescriptionSchema }).strict(),
+  z.object({ file_path: z.string().optional(), source_content: z.string().optional() }).strict()
+    .refine((value) => value.file_path !== undefined || value.source_content !== undefined, "An update is required"),
+]);
+
+export function defaultPluginDescription(name: string): string {
+  const descriptions: Record<string, string> = {
+    "auto-observer": "Extracts learning observations from user conversations.",
+    observer: "Imports fallback observations and triggers learning synthesis.",
+    "resource-sync": "Synchronizes repository resources into the project workspace.",
+    "session-coordinator": "Coordinates shared-worktree sessions, ownership, and recovery.",
+    ponytail: "Encourages minimal, practical implementations through Ponytail mode.",
+  };
+  return Object.hasOwn(descriptions, name) ? descriptions[name]! : "Project-local OpenCode plugin.";
+}
+
+export function updatePluginDescription(projectId: string, name: string, description: string): Plugin | undefined {
+  z.string().min(1).max(256).parse(projectId);
+  z.string().min(1).max(256).parse(name);
+  pluginDescriptionSchema.parse(description);
+  const plugin = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    return db.prepare("UPDATE plugins SET description = ?, updated_at = ? WHERE project_id = ? AND name = ? RETURNING *")
+      .get(description, new Date().toISOString(), projectId, name) as Plugin | undefined;
+  });
+  if (plugin) checkpointAfterWrite();
+  return plugin;
+}
 
 /**
  * Validate that a plugin file path is safe:

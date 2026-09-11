@@ -1781,10 +1781,11 @@ server.registerTool(
 server.registerTool(
   "plugin_update",
   {
-    description: "Update a plugin's file path or source content.",
-    inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), source_content: z.string().optional() }
+    description: "Update a project-local plugin description (up to 2000 characters) alone, or update executable file path/source alone. Description edits never change files or configuration.",
+    inputSchema: pluginTools.pluginUpdateInputSchema
   },
-  wrapHandler(C("plugin_update"), async ({ project, name, file_path, source_content }) => pluginTools.pluginUpdate(project, name, { file_path, source_content })),
+  wrapHandler(C("plugin_update"), async ({ project, name, description, file_path, source_content }) => pluginTools.pluginUpdate(project, name,
+    { description, file_path, source_content })),
 );
 
 server.registerTool(

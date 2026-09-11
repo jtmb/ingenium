@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import Database from "better-sqlite3";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getDb, projects, repositoryResources, repositorySync, resetDbForTest } from "../lib/index.js";
+import { getDb, plugins, projects, repositoryResources, repositorySync, resetDbForTest } from "../lib/index.js";
 
 let directory = "";
 let projectId = "";
@@ -95,6 +95,29 @@ afterEach(() => {
 });
 
 describe("repository resource sync", () => {
+  it("seeds descriptions only on insert and preserves local edits across source, enabled and order changes without drift", () => {
+    const entry = plugin("plugin:resource-sync", "resource-sync");
+    let generation = 0;
+    const sync = (resourcesManifest: ReturnType<typeof manifest>) => repositorySync.applyRepositorySync(projectId, {
+      docsManifest: { files: [] }, resourcesManifest, dryRun: false, expectedGeneration: generation++, worktreeId: `worktree-${"b".repeat(64)}`,
+    });
+    sync(manifest({ plugins: [entry] }));
+    expect(plugins.getPlugin(projectId, entry.name)?.description).toBe(plugins.defaultPluginDescription(entry.name));
+    for (const description of ["Local purpose <b>not markup</b>", ""]) {
+      const syncState = getDb().prepare("SELECT * FROM repository_sync_resources WHERE project_id = ?").all(projectId);
+      plugins.updatePluginDescription(projectId, entry.name, description);
+      expect(getDb().prepare("SELECT * FROM repository_sync_resources WHERE project_id = ?").all(projectId)).toEqual(syncState);
+      const { identity, sha256: _sha256, ...semantic } = entry;
+      const changed = { ...semantic, source: `export const updated = ${description.length};`, enabled: false, order: 4 };
+      const next = manifest({ plugins: [{ identity, sha256: hash(changed), ...changed }] });
+      sync(next);
+      expect(plugins.getPlugin(projectId, entry.name)).toMatchObject({ description, source_content: changed.source, enabled: 0 });
+      expect(JSON.parse((getDb().prepare("SELECT payload FROM repository_sync_resources WHERE project_id = ? AND resource_type = 'plugin'").get(projectId) as { payload: string }).payload)).toMatchObject({ order: 4, enabled: false, source: changed.source });
+      const before = getDb().prepare("SELECT * FROM plugins WHERE project_id = ?").all(projectId);
+      expect(sync(next).resources?.summary.plugin).toMatchObject({ unchanged: 1, updated: 0 });
+      expect(getDb().prepare("SELECT * FROM plugins WHERE project_id = ?").all(projectId)).toEqual(before);
+    }
+  });
   it("upgrades migration 060 without losing rows, keys, hash validation, index, or project cascade", () => {
     const db = new Database(":memory:");
     try {

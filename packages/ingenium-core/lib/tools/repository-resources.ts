@@ -7,6 +7,7 @@
  * changed only when a prior successful repository sync marked it as managed.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { defaultPluginDescription } from "./plugins.js";
 import { posix as path } from "node:path";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { isAgentCategory, isReservedAgentName, isSafeAgentName } from "./agents.js";
@@ -549,9 +550,9 @@ function syncPluginsInTransaction(projectId: string, entries: RepositoryPluginEn
       summary.created++;
       if (!dryRun) {
         const id = `plugin_${randomUUID()}`;
-        db.prepare(`INSERT INTO plugins (id, project_id, name, file_path, enabled, source_content, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(id, projectId, entry.name, entry.path, entry.enabled ? 1 : 0, entry.source, timestamp, timestamp);
+        db.prepare(`INSERT INTO plugins (id, project_id, name, file_path, enabled, source_content, description, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(id, projectId, entry.name, entry.path, entry.enabled ? 1 : 0, entry.source, defaultPluginDescription(entry.name), timestamp, timestamp);
         upsertState(db, projectId, "plugin", entry, id, entry);
       }
     } else {

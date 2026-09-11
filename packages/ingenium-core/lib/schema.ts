@@ -1224,6 +1224,7 @@ export interface Plugin {
   id: string;
   project_id: string;
   name: string;
+  description: string;
   file_path: string;
   enabled: boolean;
   source_content?: string;
