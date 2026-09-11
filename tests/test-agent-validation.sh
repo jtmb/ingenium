@@ -808,6 +808,7 @@ const orchestratorProfile = (byName.get("ingenium-orchestrator") ?? [])[0];
 const expectedRecoveryBash = {
   "*": "deny",
   "ingenium-build deployment production-restart": "allow",
+  "ingenium-build deployment recovery-prepare": "allow",
   "git status": "allow",
   "git diff -- docs/reference/ROADMAP.md": "allow",
   "git diff -- tests/artifacts/tui-recovery/*": "allow",

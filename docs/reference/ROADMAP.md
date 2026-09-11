@@ -9879,3 +9879,62 @@ separately required parent replacement/restart or any parent/final gate.
   `git diff --check` passed. This remains source-only: QA, security review,
   commit, deploy, live preflight, and restart are pending; no live acceptance
   or completion claim is made.
+- **Latest deployed evidence:** Revision
+  `e98208da556d67eefe96c45a74c325b18c5e211c`, image
+  `sha256:580ffcd0e2194312ad0aa09920c6daa48875811f344f504965291bdf040b18ec`,
+  container prefix `e4d91b40c2cd`, and rollback tag
+  `ingenium-ingenium:rollback-6afe6e47-e98208da`. Nine services/routes were
+  healthy and authenticated preflight passed.
+- **Packaged acceptance:** Packaged MCP `initialize`/`tools/list` returned 42
+  tools with the expected project binding; all 16 packaged recovery modules
+  matched source; ACL/protected-state/scanner checks passed 11.
+- **Review and boundary:** QA is **PASS**. Security has two **FOLLOW_UP**
+  findings: potentially stale role during agent switch and lease expiry during
+  attestation. Child discovery and parent activation/recovery remain unproven;
+  neither finding nor this evidence authorizes restart.
+- **Live preparation attempt (nonmutating; 2026-09-11):** Failure
+  `RECOVERY_PREPARATION_LIVE_PROBE_UNAVAILABLE`; the first denied probe was
+  `/proc/1259022/status`. The candidate PID/listener was not live-attested;
+  `tui-recovery/` was empty; the typed handoff and recovery owner were absent;
+  outbox key prefix/operation/count `11617` was ambiguous; and the
+  authorization-provenance directory was absent. No disposition was made and
+  the original record was untouched. Supported preparation actions were absent
+  from the callable registry. Owner and `nextWork` expose the deny-default
+  recovery command path.
+- **Recovery-prepare harness source boundary (`SOURCE ONLY`):** The root cause
+  was an exact Recovery grant that allowed only fixed `production-restart` and
+  exposed no preparation registry. The seven changed non-roadmap files add only
+  the literal `ingenium-build deployment recovery-prepare`; wildcard deny
+  remains in force, with no arbitrary arguments, paths, shell, `/proc`, or
+  systemd grants. Preparation is internal and passive, reserves the fence,
+  sets `authorizesRestart=false`, reconciles rollback/unknown outcomes, and
+  leaves `production-restart` unchanged.
+- **Changed files:** `.opencode/agents/execution/ingenium-recovery-engineer.md`,
+  `packages/ingenium-extension/agent-validation.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`,
+  `packages/ingenium-extension/scripts/managed-command-wrapper.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, and
+  `tests/test-agent-validation.sh`.
+- **Harness checks:** The combined result was `174/175` before the
+  adoption-test race correction; the focused post-correction regression was
+  `1/1`. Extension typecheck passed, the full agent-validation shell check
+  passed, and `git diff --check` passed. No `175/175` claim is made.
+- **Pending boundary:** QA, security review, commit, deploy, profile activation,
+  and live preparation remain pending. Deployment owner: `N/A`; no live
+  recovery/restart or completion claim is added.
+- **Final outbox disposition race remediation (`SOURCE ONLY`):** QA found a
+  **BLOCKING** race because final confirmation ignored `confirmed.disposition`
+  and `confirmed.ambiguity`. The same Premium writer changed only
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js` and
+  `packages/ingenium-extension/recovery-pre-admission.test.ts` for this fix.
+  The final gate now rejects a changed plan, invalid summaries, remaining
+  ambiguity, or accepted disposition drift, and rolls back owned preparation
+  artifacts while preserving the original record and authorization bytes.
+- **Named regression:**
+  `rejects final outbox drift and rolls back owned preparation` passed `2` with
+  `31 skipped`. QA and security were not rerun.
+- **Nonblocking follow-ups:** Security `FOLLOW_UP` mutation-lock and profile
+  wording items, plus prior stale-role, lease-expiry, and argv items, remain
+  nonblocking. No deployment, restart, or broader recovery acceptance is
+  claimed.

@@ -111,6 +111,8 @@ function parsedAttestedContext(value) {
 
 const MODULE_ATTESTATION = parsedAttestedContext(process.env[RECOVERY_ATTESTED_CONTEXT]);
 delete process.env[RECOVERY_ATTESTED_CONTEXT];
+const PREPARATION_REQUESTED = process.env.INGENIUM_RECOVERY_PREPARATION;
+delete process.env.INGENIUM_RECOVERY_PREPARATION;
 
 export const CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS = Object.freeze([
   "directory",
@@ -1403,6 +1405,422 @@ export function recoveryEnvironmentForBinding(binding, inherited = process.env) 
   return environment;
 }
 
+const PREPARATION_JOB = "ingenium-recovery-owner.service";
+const PREPARATION_OWNER_ARGUMENT = "--recovery-preparation-owner";
+const PREPARATION_LIFETIME_MS = 15 * 60 * 1_000;
+const PREPARATION_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
+
+function preparationDirectory(worktree) {
+  return resolve(worktree, ".opencode/protected-runtime-index/tui-recovery/preparation");
+}
+
+function privatePreparationDirectory(path) {
+  canonicalOwnedDirectory(path, "Recovery preparation directory");
+  if ((lstatSync(path).mode & 0o777) !== 0o700) throw new Error("Recovery preparation directory is not private");
+}
+
+function preparationSystemd(command, args, run = execFileSync) {
+  return run(`/usr/bin/${command}`, ["--user", ...args], {
+    encoding: "utf8", shell: false, timeout: 5_000, maxBuffer: 16 * 1024,
+    env: { PATH: "/usr/bin:/bin", XDG_RUNTIME_DIR: `/run/user/${ownerUid()}`,
+      DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${ownerUid()}/bus` },
+  });
+}
+
+export function inspectPreparationJob(run = execFileSync) {
+  let output;
+  let missingUnitExit = false;
+  try {
+    output = preparationSystemd("systemctl", ["show", PREPARATION_JOB, "--all",
+      "--property=LoadState,ActiveState,SubState,MainPID,InvocationID,Job"], run);
+  } catch (error) {
+    if (error.status !== 1 || typeof error.stdout !== "string" || Buffer.byteLength(error.stdout) > 16 * 1024) throw error;
+    output = error.stdout;
+    missingUnitExit = true;
+  }
+  const entries = output.trim().split("\n").map((line) => {
+    const index = line.indexOf("=");
+    return [line.slice(0, index), line.slice(index + 1)];
+  });
+  const value = Object.fromEntries(entries);
+  if (entries.length !== 6 || !hasExactKeys(value, ["LoadState", "ActiveState", "SubState", "MainPID", "InvocationID", "Job"])) {
+    throw new Error("Recovery preparation job probe is invalid");
+  }
+  if (missingUnitExit && !absentPreparationJob(value)) throw new Error("Recovery preparation job probe failed");
+  return value;
+}
+
+function absentPreparationJob(job) {
+  return job.LoadState === "not-found" && job.ActiveState === "inactive" && job.MainPID === "0"
+    && job.InvocationID === "" && job.Job === "";
+}
+
+function anchoredPreparationPath(path, action) {
+  const parent = dirname(path);
+  canonicalOwnedDirectory(parent, "Recovery preparation parent");
+  const descriptor = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  const identity = fstatSync(descriptor);
+  const verify = () => {
+    canonicalOwnedDirectory(parent, "Recovery preparation parent");
+    if (!directoryIdentityMatches(identity, lstatSync(parent))) throw new Error("Recovery preparation directory changed");
+  };
+  try {
+    verify();
+    const result = action(`/proc/self/fd/${descriptor}/${basename(path)}`);
+    fsyncSync(descriptor);
+    verify();
+    return result;
+  } finally { closeSync(descriptor); }
+}
+
+function writePreparationFile(path, bytes, retainOwnership, mode = 0o600) {
+  anchoredPreparationPath(path, (anchored) => {
+    const descriptor = openSync(anchored, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    let complete = false;
+    try { writeFileSync(descriptor, bytes); fchmodSync(descriptor, mode); fsyncSync(descriptor); complete = true; } finally {
+      try { retainOwnership?.(fstatSync(descriptor), complete); } finally { closeSync(descriptor); }
+    }
+  });
+}
+
+export function planPreparationDisposition(index, now = Date.now()) {
+  const state = summarizeCoordinationOutboxState(index);
+  if (state.outbox.status === "invalid" || state.disposition.status === "invalid") throw new Error("Recovery preparation outbox is invalid");
+  if (state.outbox.ambiguousCount === 0) return null;
+  if (state.outbox.ambiguousCount !== 1) throw new Error("Recovery preparation outbox is ambiguous");
+  privatePreparationDirectory(index);
+  const directory = resolve(index, "coordination-outbox");
+  const authorities = resolve(index, "coordination-outbox-authorizations");
+  privatePreparationDirectory(directory);
+  privatePreparationDirectory(authorities);
+  const key = PREPARATION_OVERFLOW_KEY;
+  const path = resolve(directory, `${key}.json`);
+  const bytes = readOnlyRegularFile(path, 16 * 1024, false, 0o600);
+  const record = JSON.parse(bytes);
+  if (!validOutboxSummaryRecord(record, key, `${key}.json`) || record.kind !== "overflow" || record.ambiguous !== true
+    || !/^0+$/.test(record.sessionHash) || record.mutation !== null) throw new Error("Recovery preparation record is not identityless");
+  const authorizationPath = resolve(authorities, `${key}.json`);
+  const authorizationBytes = readOnlyRegularFile(authorizationPath, 16 * 1024, false, 0o600);
+  const authorization = JSON.parse(authorizationBytes);
+  const issued = Date.parse(authorization.issuedAt);
+  const expires = Date.parse(authorization.expiresAt);
+  if (!hasExactKeys(authorization, ["schemaVersion", "authorizationId", "recordKey", "mode", "authority", "scope", "reason", "issuedAt", "expiresAt"])
+    || authorization.schemaVersion !== 1 || authorization.recordKey !== key
+    || authorization.authorizationId !== sha256(`explicit_user_authorization\0abandon_identityless_overflow\0${key}\0exact_key_same_record_family\0nonrecoverable_identityless_overflow`)
+    || authorization.mode !== "abandon_identityless_overflow" || authorization.authority !== "explicit_user_authorization"
+    || authorization.scope !== "exact_key_same_record_family" || authorization.reason !== "nonrecoverable_identityless_overflow"
+    || !isCanonicalRfc3339(authorization.issuedAt) || !isCanonicalRfc3339(authorization.expiresAt)
+    || issued > now || expires <= now || expires <= issued || expires - issued > 24 * 60 * 60 * 1_000) {
+    throw new Error("Recovery preparation authorization is unavailable");
+  }
+  const dispositions = inspectSummaryDirectory(resolve(index, "coordination-outbox-dispositions"), 16 * 1024, validDispositionSummaryRecord);
+  if (dispositions.entries.some(({ value }) => value.authorizationSha256 === sha256(authorizationBytes))) {
+    throw new Error("Recovery preparation authorization was already used");
+  }
+  const disposition = { schemaVersion: 2, recordKey: key, recordSha256: sha256(bytes), recordCount: record.count,
+    operationId: record.operationId, authorizationSha256: sha256(authorizationBytes), decision: "abandoned",
+    authority: authorization.authority, reason: authorization.reason, createdAt: new Date(now).toISOString() };
+  return { path, bytes, authorizationPath, authorizationBytes, disposition,
+    destination: resolve(index, "coordination-outbox-dispositions", `${key}.${disposition.recordSha256}.json`) };
+}
+
+function validatePreparationPlan(plan, now = Date.now()) {
+  if (!plan) return;
+  if (!plan.bytes.equals(readOnlyRegularFile(plan.path, 16 * 1024, false, 0o600))
+    || !plan.authorizationBytes.equals(readOnlyRegularFile(plan.authorizationPath, 16 * 1024, false, 0o600))
+    || Date.parse(JSON.parse(plan.authorizationBytes).expiresAt) <= now) {
+    throw new Error("Recovery preparation immutable record changed");
+  }
+}
+
+export async function collectPreparationInputs(sourceHandle, options = {}) {
+  const source = sourceHandle.revalidate();
+  const worktree = dirname(dirname(dirname(dirname(source.path))));
+  const environment = recoveryConfiguredEnvironment(worktree, options.environment ?? process.env);
+  const binding = await corroborateRecoveryBinding(worktree, environment, options.request ?? fetch);
+  const ancestry = (options.ancestry ?? inspectAncestry)(worktree);
+  if (ancestry.status !== "exact" || !ancestry.parent) throw new Error("Recovery preparation parent is ambiguous");
+  for (const [key, expected] of Object.entries({ INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
+    INGENIUM_WORKSPACE_ID: binding.workspaceId, INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
+    INGENIUM_WORKTREE: worktree, INGENIUM_API_URL: environment.INGENIUM_API_URL })) {
+    const inherited = ancestry.parent.environment?.[key];
+    if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
+  }
+  const gitSummary = (options.gitSummary ?? collectGitSummary)(worktree, source.path, source.bytes);
+  const capture = await captureLegacyRecoveryPreAdmission(ancestry.parent, binding, gitSummary, options.request ?? fetch, options.inspectParent);
+  if (!capture) throw new Error("Recovery preparation capture is unavailable");
+  const health = await collectApiHealth(environment, options.request ?? fetch);
+  if (health.status !== "healthy") throw new Error("Recovery preparation API health is unavailable");
+  const index = resolve(worktree, ".opencode/protected-runtime-index");
+  if (summarizeFreeze(resolve(index, "coordination-outbox-mutation.lock")).status !== "clear") {
+    throw new Error("Recovery preparation outbox is frozen");
+  }
+  const disposition = planPreparationDisposition(index);
+  sourceHandle.revalidate();
+  return { binding, capture, disposition, source, contract: prepareRecoveryOwnerContract(binding, source.head) };
+}
+
+function readPreparationRequest(worktree) {
+  const directory = preparationDirectory(worktree);
+  for (const path of [resolve(worktree, ".opencode/protected-runtime-index"), dirname(directory), directory]) privatePreparationDirectory(path);
+  const bytes = readOnlyRegularFile(resolve(directory, "request.json"), 64 * 1024, false, 0o600);
+  const value = JSON.parse(bytes);
+  if (!hasExactKeys(value, ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "issuedAt", "expiresAt"])
+    || value.schemaVersion !== 1 || value.kind !== "recovery-preparation" || value.authorizesRestart !== false
+    || canonicalJson(value.contract) !== canonicalJson(prepareRecoveryOwnerContract(value.contract?.binding, value.contract?.sourceHead))
+    || value.contract.binding.worktree !== worktree || !HASH.test(value.sourceSha256 ?? "") || !OPAQUE_TOKEN.test(value.nonce ?? "")
+    || !HASH.test(value.handoffSha256 ?? "") || !safeRecoveryIdentity(value.parent)
+    || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+    || !Number.isSafeInteger(value.issuedAt) || !Number.isSafeInteger(value.expiresAt)
+    || value.expiresAt - value.issuedAt !== PREPARATION_LIFETIME_MS) throw new Error("Recovery preparation request is invalid");
+  const handoff = readOnlyRegularFile(resolve(directory, "handoff.json"), 64 * 1024, false, 0o600);
+  if (sha256(handoff) !== value.handoffSha256) throw new Error("Recovery preparation handoff changed");
+  return { value, bytes, directory };
+}
+
+export function inspectPreparedRecoveryOwner(request, options = {}) {
+  try {
+    const retained = readPreparationRequest(request.contract.binding.worktree);
+    if (canonicalJson(retained.value) !== canonicalJson(request)) return null;
+    const statusBytes = readOnlyRegularFile(resolve(retained.directory, "owner-status.json"), 16 * 1024, false, 0o600);
+    const status = JSON.parse(statusBytes);
+    const now = options.now ?? Date.now();
+    if (!hasExactKeys(status, ["schemaVersion", "requestSha256", "job", "invocationId", "owner", "fence", "fenceState", "lease", "health", "authorizesRestart"])
+      || status.schemaVersion !== 1 || status.requestSha256 !== sha256(retained.bytes) || status.job !== PREPARATION_JOB
+      || !/^[0-9a-f]{32}$/.test(status.invocationId ?? "") || !safeRecoveryIdentity(status.owner)
+      || status.owner.nonceSha256 !== sha256(request.nonce) || status.fence !== 1 || status.fenceState !== "reserved"
+      || status.authorizesRestart !== false || status.health !== "ready"
+      || !hasExactKeys(status.lease, ["issuedAt", "expiresAt"]) || !Number.isSafeInteger(status.lease.issuedAt)
+      || !Number.isSafeInteger(status.lease.expiresAt) || status.lease.issuedAt > now || status.lease.expiresAt <= now
+      || status.lease.expiresAt > request.expiresAt || status.lease.expiresAt - status.lease.issuedAt > request.contract.maximumLeaseMs
+      || now < request.issuedAt || now >= request.expiresAt
+      || recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) return null;
+    const job = inspectPreparationJob(options.run);
+    if (job.LoadState !== "loaded" || job.ActiveState !== "active" || job.SubState !== "running" || job.Job !== ""
+      || job.MainPID !== String(status.owner.pid) || job.InvocationID !== status.invocationId) return null;
+    const inspect = options.inspect ?? inspectAncestor;
+    const owner = inspect(status.owner.pid);
+    const script = resolve(retained.directory, "owner.mjs");
+    const canonicalSource = resolve(request.contract.binding.worktree, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+    const environment = (options.environment ?? processEnvironment)(status.owner.pid);
+    if (!owner || owner.startTimeTicks !== status.owner.startTimeTicks || owner.executableSha256 !== status.owner.executableSha256
+      || owner.cwd !== request.contract.binding.worktree || owner.commandName !== "node" || owner.argv.length !== 3
+      || owner.argv[1] !== script || owner.argv[2] !== PREPARATION_OWNER_ARGUMENT
+      || environment?.INVOCATION_ID !== status.invocationId
+      || readTrustedRegularFile(canonicalSource, "Recovery preparation source", { expectedMode: 0o644 }).sha256 !== request.sourceSha256
+      || readTrustedRegularFile(script, "Recovery preparation staged source", { expectedMode: 0o400 }).sha256 !== request.sourceSha256
+      || !statusBytes.equals(readOnlyRegularFile(resolve(retained.directory, "owner-status.json"), 16 * 1024, false, 0o600))
+      || canonicalJson(inspect(status.owner.pid)) !== canonicalJson(owner)) return null;
+    return { status: "attested", authorizesRestart: false, job: status.job, invocationId: status.invocationId,
+      owner: status.owner, fence: status.fence, fenceState: status.fenceState, lease: status.lease, health: status.health,
+      sourceHead: request.contract.sourceHead, sourceSha256: request.sourceSha256,
+      bindingSha256: sha256(canonicalJson(request.contract.binding)), handoffSha256: request.handoffSha256,
+      evidenceSha256: sha256(statusBytes) };
+  } catch { return null; }
+}
+
+export async function runPreparedRecoveryOwner(argv = process.argv, dependencies = {}) {
+  const invocationId = (dependencies.environment ?? process.env).INVOCATION_ID;
+  if (argv.length !== 3 || argv[2] !== PREPARATION_OWNER_ARGUMENT || !/^[0-9a-f]{32}$/.test(invocationId ?? "")) {
+    throw new Error("Recovery preparation owner invocation is invalid");
+  }
+  const path = dependencies.sourcePath ?? fileURLToPath(import.meta.url);
+  const worktree = resolve(dirname(path), "../../../..");
+  if (path !== resolve(preparationDirectory(worktree), "owner.mjs") || argv[1] !== path
+    || (dependencies.cwd ?? process.cwd()) !== worktree) throw new Error("Recovery preparation owner source is invalid");
+  const retained = readPreparationRequest(worktree);
+  const request = retained.value;
+  if (readTrustedRegularFile(path, "Recovery preparation staged source", { expectedMode: 0o400 }).sha256 !== request.sourceSha256) {
+    throw new Error("Recovery preparation staged source changed");
+  }
+  const source = (dependencies.openSource ?? openVerifiedRecoverySource)({ repositoryRoot: worktree,
+    sourcePath: resolve(worktree, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
+    head: request.contract.sourceHead, sourceSha256: request.sourceSha256 });
+  const inspect = dependencies.inspect ?? inspectAncestor;
+  const self = inspect(process.pid);
+  if (!self) { source.close(); throw new Error("Recovery preparation owner identity is unavailable"); }
+  const statusPath = resolve(retained.directory, "owner-status.json");
+  let previous;
+  try {
+    while (Date.now() < request.expiresAt) {
+      if (recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) break;
+      source.revalidate();
+      if (!retained.bytes.equals(readPreparationRequest(worktree).bytes)) throw new Error("Recovery preparation request changed");
+      const job = inspectPreparationJob(dependencies.run);
+      if (job.LoadState !== "loaded" || job.ActiveState !== "active" || job.MainPID !== String(self.pid)
+        || job.InvocationID !== invocationId) throw new Error("Recovery preparation owner job changed");
+      const parent = inspect(request.parent.pid);
+      if (!parent || parent.startTimeTicks !== request.parent.startTimeTicks || parent.executableSha256 !== request.parent.executableSha256) break;
+      const now = Date.now();
+      if (now < request.issuedAt) throw new Error("Recovery preparation clock changed");
+      const status = { schemaVersion: 1, requestSha256: sha256(retained.bytes), job: PREPARATION_JOB,
+        invocationId,
+        owner: { pid: self.pid, startTimeTicks: self.startTimeTicks, executableSha256: self.executableSha256, nonceSha256: sha256(request.nonce) },
+        fence: 1, fenceState: "reserved", lease: { issuedAt: now, expiresAt: Math.min(now + request.contract.maximumLeaseMs, request.expiresAt) },
+        health: "ready", authorizesRestart: false };
+      const bytes = Buffer.from(canonicalJson(status));
+      if (previous) {
+        if (!previous.equals(readOnlyRegularFile(statusPath, 16 * 1024, false, 0o600))) throw new Error("Recovery preparation status changed");
+        writePreparationFile(resolve(retained.directory, "owner-status.next"), bytes);
+        anchoredPreparationPath(statusPath, (anchored) => renameSync(resolve(dirname(anchored), "owner-status.next"), anchored));
+      } else writePreparationFile(statusPath, bytes);
+      previous = bytes;
+      await (dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 1_000))))();
+    }
+  } finally { source.close(); }
+}
+
+export async function runRecoveryPreparation(argv = process.argv, dependencies = {}) {
+  if (argv.length !== 2) throw new Error("Recovery preparation accepts no arguments");
+  const sourceHandle = (dependencies.openSource ?? openVerifiedRecoverySource)(dependencies.attestation ?? MODULE_ATTESTATION);
+  const undo = [];
+  let directory;
+  let request;
+  let startAttempted = false;
+  let startConfirmed = false;
+  let phase = "inspect";
+  const run = dependencies.run ?? execFileSync;
+  const wait = dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 100)));
+  const ownedFile = (path, bytes, requiresStoppedOwner = true, mode = 0o600) => {
+    writePreparationFile(path, bytes, (identity, complete) => {
+      undo.push({ requiresStoppedOwner, rollback: () => {
+        const current = lstatSync(path);
+        if (!current.isFile() || current.isSymbolicLink() || !sourceIdentityMatches(identity, current)
+          || complete && !bytes.equals(readOnlyRegularFile(path, RECOVERY_SOURCE_MAX_BYTES, false, mode))) {
+          throw new Error("Recovery preparation rollback file changed");
+        }
+        anchoredPreparationPath(path, (anchored) => {
+          if (!sourceIdentityMatches(identity, lstatSync(anchored))) throw new Error("Recovery preparation rollback file changed");
+          unlinkSync(anchored);
+        });
+      } });
+    }, mode);
+  };
+  const ownedDirectory = (path, exclusive = false, requiresStoppedOwner = true) => {
+    if (!exclusive && recoveryAdmissionExists(path)) { privatePreparationDirectory(path); return; }
+    anchoredPreparationPath(path, (anchored) => {
+      mkdirSync(anchored, { mode: 0o700 });
+      const identity = lstatSync(anchored);
+      undo.push({ requiresStoppedOwner, rollback: () => {
+        privatePreparationDirectory(path);
+        anchoredPreparationPath(path, (current) => {
+          if (!directoryIdentityMatches(identity, lstatSync(current))) throw new Error("Recovery preparation rollback directory changed");
+          rmdirSync(current);
+        });
+      } });
+    });
+  };
+  try {
+    const inputs = await (dependencies.collectInputs ?? collectPreparationInputs)(sourceHandle);
+    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner already exists");
+    phase = "prepare";
+    const worktree = inputs.binding.worktree;
+    canonicalOwnedDirectory(resolve(worktree, ".opencode"), "Recovery preparation project directory");
+    const index = resolve(worktree, ".opencode/protected-runtime-index");
+    directory = preparationDirectory(worktree);
+    if (recoveryAdmissionExists(directory)) throw new Error("Recovery preparation requires reconciliation of retained state");
+    for (const path of [index, dirname(directory)]) ownedDirectory(path);
+    ownedDirectory(directory, true);
+    const handoffBytes = Buffer.from(canonicalJson(inputs.capture.snapshot));
+    ownedFile(resolve(directory, "handoff.json"), handoffBytes);
+    const now = Date.now();
+    request = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
+      sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
+      parent: inputs.capture.snapshot.parent, issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
+    ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(request)));
+    const stagedSource = resolve(directory, "owner.mjs");
+    ownedFile(stagedSource, inputs.source.bytes, true, 0o400);
+    validatePreparationPlan(inputs.disposition);
+    if (inputs.disposition) {
+      ownedDirectory(dirname(inputs.disposition.destination), false, false);
+      ownedFile(inputs.disposition.destination, Buffer.from(canonicalJson(inputs.disposition.disposition)), false);
+      const dispositions = inspectSummaryDirectory(dirname(inputs.disposition.destination), 16 * 1024, validDispositionSummaryRecord);
+      if (dispositions.summary.status !== "validated" || dispositions.entries.filter(({ value }) =>
+        value.authorizationSha256 === inputs.disposition.disposition.authorizationSha256).length !== 1) {
+        throw new Error("Recovery preparation authorization changed during application");
+      }
+    }
+    const preparedCoordination = summarizeCoordinationOutboxState(index);
+    if (preparedCoordination.outbox.ambiguousCount !== 0) throw new Error("Recovery preparation disposition was not accepted");
+    sourceHandle.revalidate();
+    const runtimePath = realpathSync(process.execPath);
+    const runtimeOwner = lstatSync(runtimePath).uid;
+    if (runtimeOwner !== 0 && runtimeOwner !== ownerUid()) throw new Error("Recovery preparation runtime owner is invalid");
+    const runtime = readTrustedRegularFile(runtimePath, "Recovery preparation runtime", { expectedOwner: runtimeOwner, executable: true });
+    phase = "start";
+    startAttempted = true;
+    preparationSystemd("systemd-run", ["--unit", PREPARATION_JOB, "--collect", "--no-block",
+      "--property=Type=exec", "--property=Restart=no", "--property=UMask=0077",
+      `--property=WorkingDirectory=${worktree}`, "--property=StandardOutput=null", "--property=StandardError=null",
+      "--property=UnsetEnvironment=NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG_OUTPUT LD_PROFILE LD_PROFILE_OUTPUT GLIBC_TUNABLES OPENSSL_CONF OPENSSL_MODULES INGENIUM_RECOVERY_ATTESTED_CONTEXT INGENIUM_RECOVERY_PREPARATION",
+      "--", runtime.path, stagedSource, PREPARATION_OWNER_ARGUMENT], run);
+    startConfirmed = true;
+    phase = "attest";
+    let evidence;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
+      if (evidence) break;
+      await wait();
+    }
+    if (!evidence) throw new Error("Recovery preparation owner attestation failed");
+    phase = "confirm";
+    const confirmed = await (dependencies.collectInputs ?? collectPreparationInputs)(sourceHandle);
+    if (canonicalJson(confirmed.capture.snapshot) !== canonicalJson(inputs.capture.snapshot)
+      || canonicalJson(confirmed.binding) !== canonicalJson(inputs.binding)) throw new Error("Recovery preparation capture changed");
+    sourceHandle.revalidate();
+    evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
+    if (!evidence) throw new Error("Recovery preparation owner changed");
+    validatePreparationPlan(inputs.disposition);
+    const finalCoordination = summarizeCoordinationOutboxState(index);
+    if (confirmed.disposition && canonicalJson(confirmed.disposition) !== canonicalJson(inputs.disposition)
+      || finalCoordination.outbox.status === "invalid" || finalCoordination.disposition.status === "invalid"
+      || finalCoordination.outbox.ambiguousCount !== 0
+      || canonicalJson(finalCoordination.disposition) !== canonicalJson(preparedCoordination.disposition)) {
+      throw new Error("Recovery preparation final disposition changed");
+    }
+    return { schemaVersion: 1, action: "recovery-prepare", authorizesRestart: false, status: "prepared", owner: evidence,
+      disposition: inputs.disposition ? { recordSha256: inputs.disposition.disposition.recordSha256,
+        recordCount: inputs.disposition.disposition.recordCount, authorizationSha256: inputs.disposition.disposition.authorizationSha256 } : null };
+  } catch {
+    let reconciled = true;
+    if (startAttempted) {
+      // The manager may have accepted a timed-out start. A durable stop request also covers a late owner.
+      try {
+        ownedFile(resolve(directory, "rollback.json"), Buffer.from(canonicalJson({ nonceSha256: sha256(request.nonce), authorizesRestart: false })));
+        reconciled = false;
+        for (let attempt = 0; attempt < 50; attempt += 1) {
+          if (absentPreparationJob(inspectPreparationJob(run)) && startConfirmed) { reconciled = true; break; }
+          await wait();
+        }
+        if (reconciled) {
+          for (const name of ["owner-status.json", "owner-status.next"]) {
+            const path = resolve(directory, name);
+            if (!recoveryAdmissionExists(path)) continue;
+            const bytes = readOnlyRegularFile(path, 16 * 1024, false, 0o600);
+            const value = JSON.parse(bytes);
+            if (value.requestSha256 !== sha256(canonicalJson(request)) || value.owner?.nonceSha256 !== sha256(request.nonce)) {
+              throw new Error("Recovery preparation rollback status is foreign");
+            }
+            anchoredPreparationPath(path, (anchored) => {
+              if (!bytes.equals(readFileSync(anchored))) throw new Error("Recovery preparation rollback status changed");
+              unlinkSync(anchored);
+            });
+          }
+        }
+      } catch { reconciled = false; }
+    }
+    for (const entry of undo.reverse()) {
+      if (!reconciled && entry.requiresStoppedOwner) continue;
+      try { entry.rollback(); } catch { reconciled = false; }
+    }
+    const error = new Error(reconciled ? "Recovery preparation failed; owned preparation rolled back" : "Recovery preparation requires reconciliation; retained protected evidence");
+    error.code = reconciled ? "RECOVERY_PREPARATION_ROLLED_BACK" : "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED";
+    error.phase = phase;
+    error.authorizesRestart = false;
+    throw error;
+  } finally { sourceHandle.close(); }
+}
+
 function enrollmentClassification(parent, binding, recovery) {
   if (!parent || !binding) return "ambiguous";
   if (!recovery.enrollment) return parent.nonceSha256 === "0".repeat(64) ? "legacy_unenrolled" : "unenrolled";
@@ -2555,6 +2973,18 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : undefined;
-if (MODULE_ATTESTATION || invokedPath === import.meta.url) {
+if (MODULE_ATTESTATION && PREPARATION_REQUESTED !== undefined) {
+  if (PREPARATION_REQUESTED !== "1") throw new Error("Recovery preparation invocation is invalid");
+  try {
+    console.log(canonicalJson(await runRecoveryPreparation([process.execPath, MODULE_ATTESTATION.sourcePath])));
+  } catch (error) {
+    console.error(canonicalJson({ action: "recovery-prepare", authorizesRestart: false,
+      code: error.code === "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" ? error.code : "RECOVERY_PREPARATION_FAILED",
+      phase: ["inspect", "prepare", "start", "attest", "confirm"].includes(error.phase) ? error.phase : "source" }));
+    process.exitCode = 1;
+  }
+} else if (invokedPath === import.meta.url && process.argv[2] === PREPARATION_OWNER_ARGUMENT) {
+  await runPreparedRecoveryOwner();
+} else if (MODULE_ATTESTATION || invokedPath === import.meta.url) {
   await runRecoveryBootstrapShim(MODULE_ATTESTATION ? [process.execPath, MODULE_ATTESTATION.sourcePath] : process.argv);
 }

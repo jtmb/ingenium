@@ -36,7 +36,7 @@ const EXTENSION_TEST_FILES = new Set([
   "session-coordinator.test.ts",
   "session-id-tui.test.ts",
 ]);
-const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart"]);
+const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart", "recovery-prepare"]);
 const IMAGE_REVISION_OPERATIONS = new Set(["compose-build", "compose-up", "compose-restart"]);
 const REPOSITORY_INSPECTIONS = new Set(["status", "staged-paths", "recent-log", "head"]);
 const REPOSITORY_PATH_INSPECTIONS = new Set(["diff", "staged-diff"]);
@@ -252,7 +252,11 @@ export function decodeManagedRepositoryArgv(encoded: string): string[] {
 }
 
 export function decodeManagedBuildArgv(encoded: string): string[] {
-  return validateManagedBuildArgv(decodeManagedArgv(encoded));
+  const argv = validateManagedBuildArgv(decodeManagedArgv(encoded));
+  if (argv[0] === "deployment" && argv[1] === "recovery-prepare") {
+    throw new Error("Recovery preparation requires the exact literal command");
+  }
+  return argv;
 }
 
 export async function managedReplacementFirstRestart<Session>(
@@ -366,6 +370,8 @@ export function managedBuildExecution(argv: string[], moduleUrl: string | URL = 
       return { command: CURL, argv: ["--fail", "--show-error", "http://127.0.0.1:4097/api/v1/health"] };
     case "production-restart":
       return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl)] };
+    case "recovery-prepare":
+      return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl), "recovery-prepare"] };
     default:
       throw new Error("Build wrapper rejected the command");
   }
@@ -396,6 +402,7 @@ export function runManagedRecoveryBootstrap(
   dependencies: {
     runner?: typeof spawnSync;
     openBootstrap?: typeof openVerifiedRecoveryBootstrap;
+    preparation?: boolean;
   } = {},
 ): number {
   const worktree = managedRecoveryWorktree(moduleUrl);
@@ -412,6 +419,7 @@ export function runManagedRecoveryBootstrap(
       env: {
         ...managedRecoveryEnvironment(process.env, moduleUrl),
         [RECOVERY_ATTESTED_CONTEXT]: JSON.stringify(verified.context),
+        ...(dependencies.preparation ? { INGENIUM_RECOVERY_PREPARATION: "1" } : {}),
       },
     });
     if (result.error) throw result.error;
@@ -840,6 +848,13 @@ export function managedCommand(
     readImageRevision?: typeof managedImageRevision;
   } = {},
 ): number {
+  if (kind === "build" && argv[0] === "deployment" && argv[1] === "recovery-prepare") {
+    validateManagedBuildArgv(argv);
+    if (realpathSync(cwd) !== managedRecoveryWorktree()) throw new Error("Recovery preparation requires the canonical repository");
+    return runManagedRecoveryBootstrap(import.meta.url, {
+      runner: dependencies.runner, openBootstrap: dependencies.openRecoveryBootstrap, preparation: true,
+    });
+  }
   const productionRestart = kind === "build" && argv[0] === "deployment" && argv[1] === "production-restart";
   const requiresImageRevision = kind === "build" && argv[0] === "deployment" && IMAGE_REVISION_OPERATIONS.has(argv[1]!);
   let command: string;
@@ -914,7 +929,13 @@ export function runManagedCommandCli(
 ): void {
   const fixedProductionRestart = kind === "build" && argv.length === 4
     && argv[2] === "deployment" && argv[3] === "production-restart";
-  if (!fixedProductionRestart && argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
+  const fixedPreparation = kind === "build" && argv.length === 4
+    && argv[2] === "deployment" && argv[3] === "recovery-prepare";
+  if (!fixedProductionRestart && !fixedPreparation && argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
+  if (fixedPreparation) {
+    process.exitCode = (dependencies.runRecoveryBootstrap ?? runManagedRecoveryBootstrap)(import.meta.url, { preparation: true });
+    return;
+  }
   const commandArgv = fixedProductionRestart
     ? validateManagedBuildArgv(argv.slice(2))
     : kind === "repository"

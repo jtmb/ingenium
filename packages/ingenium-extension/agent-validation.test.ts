@@ -51,6 +51,13 @@ describe("profile-only MCP designations", () => {
     expect(validatePermissions()).toEqual([]);
   });
 
+  it.each(["ingenium-build deployment recovery-prepare *", "ingenium-build *", "node *", "bash *", "systemctl *", "docker *", "cat /proc/*"])(
+    "rejects widening the Recovery literal grant to %s", (command) => {
+      expect(validatePermissions(".opencode/agents/execution/ingenium-recovery-engineer.md", (text) =>
+        text.replace('    "ingenium-build deployment recovery-prepare": allow', `    "${command}": allow`))).not.toEqual([]);
+    },
+  );
+
   it.each([
     ["primary/ingenium-orchestrator.md", "ingenium_coordination_status"],
     ["primary/ingenium-orchestrator.md", "ingenium_memory_list"],
@@ -109,9 +116,9 @@ describe("AGENT-100 validator model matrix", () => {
 
   it("still rejects stale models and root permission authority", () => {
     const agent = structuredClone(config.agent);
-    agent["ingenium-orchestrator"] = { model: "openai/gpt-5.6-sol", variant: "xhigh", permission: { "*": "allow" } };
+    agent["ingenium-orchestrator"] = { model: "stale/unsupported-model", variant: "xhigh", permission: { "*": "allow" } };
     expect(validate(agent)).toEqual(expect.arrayContaining([
-      expect.stringContaining("ingenium-orchestrator model must be deepseek/deepseek-v4-flash"),
+      expect.stringContaining(`ingenium-orchestrator model must be ${config.agent["ingenium-orchestrator"].model}`),
       expect.stringContaining("mapping must contain only model/variant"),
     ]));
   });

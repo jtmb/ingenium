@@ -1170,7 +1170,9 @@ describe("managed command wrappers", () => {
       expect(reconcileManagedRecoveryReplacement(worktree, sha256("other-transaction"))).toBe("unknown");
       const adopted = await waitForRecoveryState(
         paths.state,
-        (state) => state.phase === "enrolled" && state.activeParent?.pid === successor!.pid,
+        (state) => state.phase === "enrolled" && state.activeParent?.pid === successor!.pid
+          && !existsSync(join(dirname(paths.state), "mutation.lock"))
+          && readManagedRecoveryEnrollment(worktree)?.parent.pid === successor!.pid,
       );
       expect(adopted.replacement).toBeNull();
       expect(readFileSync(paths.state, "utf8")).not.toContain("successor-session");
@@ -1608,6 +1610,37 @@ describe("managed command wrappers", () => {
     } finally {
       process.exitCode = priorExitCode;
     }
+  });
+
+  it("admits only literal recovery preparation and dispatches attested stdin without a shell or inherited mode", () => {
+    const runRecoveryBootstrap = vi.fn(() => 0);
+    const runCommand = vi.fn(() => 0);
+    const priorExitCode = process.exitCode;
+    try {
+      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-prepare"], { runRecoveryBootstrap, runCommand });
+      expect(runRecoveryBootstrap).toHaveBeenCalledWith(expect.any(String), { preparation: true });
+      for (const args of [
+        ["deployment", "recovery-prepare", "extra"], ["deployment", "recovery-prepare", "/tmp/payload"],
+        ["deployment", "recovery-prepare;id"], ["deployment", "recovery-prepare\n"],
+        ["deployment", "recovery-prepare", "--"], ["deployment", "--recovery-prepare"],
+        [Buffer.from(JSON.stringify(["deployment", "recovery-prepare"])).toString("base64url")],
+        ["node", recoveryBootstrapShim, "recovery-prepare"],
+      ]) expect(() => runManagedCommandCli("build", ["node", "build-command", ...args], { runRecoveryBootstrap, runCommand })).toThrow();
+      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["deployment", "recovery-prepare"])).toString("base64url"))).toThrow("exact literal");
+      const descriptor = openSync("/dev/null", constants.O_RDONLY);
+      const bytes = Buffer.from("reviewed preparation source");
+      const runner = vi.fn(() => ({ status: 0, signal: null }));
+      expect(runManagedRecoveryBootstrap(import.meta.url.replace("managed-command-wrapper.test.ts", "scripts/managed-command-wrapper.ts"), {
+        preparation: true, runner: runner as any,
+        openBootstrap: () => ({ descriptor, bytes, context: { schemaVersion: 1, kind: "source-bootstrap",
+          sourcePath: recoveryBootstrapShim, repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(bytes) } }),
+      })).toBe(0);
+      expect(runner).toHaveBeenCalledWith(process.execPath, ["--input-type=module"], expect.objectContaining({
+        input: bytes, shell: false, env: expect.objectContaining({ INGENIUM_RECOVERY_PREPARATION: "1" }),
+      }));
+    } finally { process.exitCode = priorExitCode; }
   });
 
   it("attests exact Git bytes from a retained no-follow descriptor and rejects a pathname swap", () => {

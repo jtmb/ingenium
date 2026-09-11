@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
@@ -213,5 +213,280 @@ describe("independent recovery owner contract", () => {
     json(path, status);
     run.mockReturnValue("MainPID=999\nActiveState=active\nSubState=running");
     expect(shim.inspectRecoveryOwnerStatus(contract, options).status).toBe("unavailable");
+  });
+});
+
+function preparationFixture() {
+  const f = legacyFixture();
+  const script = join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+  mkdirSync(join(root, "packages/ingenium-extension/scripts"), { recursive: true });
+  writeFileSync(script, "fixture", { mode: 0o644 });
+  const source = { head, path: script, bytes: Buffer.from("fixture"), sha256: hash("fixture") };
+  const sourceHandle = { source, revalidate: vi.fn(() => source), close: vi.fn() };
+  const directory = join(root, ".opencode/protected-runtime-index/tui-recovery/preparation");
+  const stagedSource = join(directory, "owner.mjs");
+  const absent = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nJob=\n";
+  const active = "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=101\nInvocationID=" + "a".repeat(32) + "\nJob=\n";
+  let started = false;
+  const owner = { pid: 101, startTimeTicks: 42, executableSha256: hash("exe"), cwd: root, commandName: "node",
+    argv: ["node", stagedSource, "--recovery-preparation-owner"] };
+  const run = vi.fn((command: string, args: string[], options: any) => {
+    expect(options.shell).toBe(false);
+    if (command === "/usr/bin/systemctl") {
+      expect(args).toEqual(["--user", "show", "ingenium-recovery-owner.service", "--all", "--property=LoadState,ActiveState,SubState,MainPID,InvocationID,Job"]);
+      return started && !existsSync(join(directory, "rollback.json")) ? active : absent;
+    }
+    expect(command).toBe("/usr/bin/systemd-run");
+    expect(args).toEqual(expect.arrayContaining(["--user", "--unit", "ingenium-recovery-owner.service", "--no-block", "--collect", "--property=Restart=no"]));
+    expect(args.slice(-2)).toEqual([stagedSource, "--recovery-preparation-owner"]);
+    const requestBytes = readFileSync(join(directory, "request.json"));
+    const request = JSON.parse(requestBytes.toString());
+    json(join(directory, "owner-status.json"), { schemaVersion: 1, requestSha256: hash(requestBytes), job: "ingenium-recovery-owner.service",
+      invocationId: "a".repeat(32), owner: { pid: owner.pid, startTimeTicks: owner.startTimeTicks,
+        executableSha256: owner.executableSha256, nonceSha256: hash(request.nonce) }, fence: 1, fenceState: "reserved",
+      lease: { issuedAt: Date.now(), expiresAt: Date.now() + 50_000 }, health: "ready", authorizesRestart: false });
+    started = true;
+    return "";
+  });
+  const ownerOptions = { run, inspect: () => owner, environment: () => ({ INVOCATION_ID: "a".repeat(32) }) };
+  const inspectOwner = vi.fn((request: any) => shim.inspectPreparedRecoveryOwner(request, ownerOptions));
+  const collectInputs = vi.fn(async () => ({ binding, capture: await f.capture(), source, disposition: null,
+    contract: shim.prepareRecoveryOwnerContract(binding, head) }));
+  const dependencies = { openSource: () => sourceHandle, collectInputs, run, inspectOwner, wait: async () => {} };
+  return { ...f, directory, source, sourceHandle, run, ownerOptions, inspectOwner, collectInputs, dependencies,
+    prepare: () => shim.runRecoveryPreparation(["node", script], dependencies) };
+}
+
+describe("fixed recovery preparation transaction", () => {
+  it("reconciles an absent unit exit only with complete unambiguous systemd properties", () => {
+    const stdout = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nJob=\n";
+    expect(shim.inspectPreparationJob(() => { throw Object.assign(new Error("not found"), { status: 1, stdout }); }))
+      .toMatchObject({ LoadState: "not-found", MainPID: "0", Job: "" });
+    for (const output of [stdout.replace("MainPID=0", "MainPID=101"), stdout.replace("Job=\n", ""), `${stdout}Job=123\n`]) {
+      expect(() => shim.inspectPreparationJob(() => { throw Object.assign(new Error("unavailable"), { status: 1, stdout: output }); })).toThrow();
+    }
+  });
+  it("starts only the fixed passive owner, independently attests it, and retains protected transcript-free evidence", async () => {
+    const f = preparationFixture();
+    const result = await f.prepare();
+    expect(result).toMatchObject({ action: "recovery-prepare", status: "prepared", authorizesRestart: false,
+      owner: { status: "attested", job: "ingenium-recovery-owner.service", fence: 1, fenceState: "reserved", authorizesRestart: false } });
+    expect(f.collectInputs).toHaveBeenCalledTimes(2);
+    expect(f.sourceHandle.close).toHaveBeenCalledOnce();
+    const retained = readFileSync(join(f.directory, "handoff.json"), "utf8");
+    for (const content of ["private transcript", "private reasoning", "private tool arguments", "p".repeat(43), "c".repeat(43)]) {
+      expect(retained + JSON.stringify(result)).not.toContain(content);
+    }
+    expect(readdirSync(join(root, ".opencode/protected-runtime-index/tui-recovery"))).toEqual(["preparation"]);
+    const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
+    expect(JSON.stringify(result)).not.toContain(request.nonce);
+    for (const changed of [{ ...request, sourceSha256: hash("foreign") }, { ...request, nonce: "x".repeat(43) }]) {
+      expect(shim.inspectPreparedRecoveryOwner(changed, f.ownerOptions)).toBeNull();
+    }
+    const statusPath = join(f.directory, "owner-status.json");
+    const status = JSON.parse(readFileSync(statusPath, "utf8"));
+    for (const change of [{ fenceState: "active" }, { authorizesRestart: true }, { invocationId: "b".repeat(32) },
+      { lease: { issuedAt: 1, expiresAt: 2 } }, { requestSha256: hash("foreign") }, { health: "unhealthy" }]) {
+      json(statusPath, { ...status, ...change });
+      expect(shim.inspectPreparedRecoveryOwner(request, f.ownerOptions)).toBeNull();
+    }
+  });
+
+  it.each(["capture", "attestation", "final capture", "final source"])("rolls back only its preparation after %s failure", async (failure) => {
+    const f = preparationFixture();
+    if (failure === "capture") f.collectInputs.mockRejectedValue(new Error("private failure"));
+    if (failure === "attestation") f.inspectOwner.mockReturnValue(null);
+    if (failure === "final capture") f.collectInputs.mockImplementationOnce(async () => ({ binding, capture: await f.capture(), source: f.source,
+      disposition: null, contract: shim.prepareRecoveryOwnerContract(binding, head) })).mockRejectedValue(new Error("private capture failure"));
+    if (failure === "final source") f.sourceHandle.revalidate.mockImplementationOnce(() => f.source).mockImplementation(() => { throw new Error("changed"); });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", authorizesRestart: false });
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+    expect(f.sourceHandle.close).toHaveBeenCalledOnce();
+  });
+
+  it("preserves uncertain systemd start evidence and a durable rollback request without repeating or signaling", async () => {
+    const f = preparationFixture();
+    const normal = f.run.getMockImplementation()!;
+    f.run.mockImplementation((command, args, options) => {
+      const result = normal(command, args, options);
+      if (command === "/usr/bin/systemd-run") throw new Error("uncertain manager transport");
+      return result;
+    });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED", phase: "start", authorizesRestart: false });
+    expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
+    expect(existsSync(join(f.directory, "request.json"))).toBe(true);
+    expect(f.run.mock.calls.filter(([command]) => command === "/usr/bin/systemd-run")).toHaveLength(1);
+    expect(new Set(f.run.mock.calls.map(([command]) => command))).toEqual(new Set(["/usr/bin/systemctl", "/usr/bin/systemd-run"]));
+  });
+
+  it("rejects retained preparation and existing jobs without adopting or deleting them", async () => {
+    const f = preparationFixture();
+    mkdirSync(f.directory, { recursive: true, mode: 0o700 });
+    json(join(f.directory, "foreign.json"), { preserve: true });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK" });
+    expect(readdirSync(f.directory)).toEqual(["foreign.json"]);
+    expect(f.run.mock.calls.every(([command]) => command === "/usr/bin/systemctl")).toBe(true);
+    await expect(shim.runRecoveryPreparation(["node", "script", "payload"], f.dependencies)).rejects.toThrow("no arguments");
+  });
+
+  it("runs the passive owner loop with a reserved fence and exits cooperatively on rollback without touching restart state", async () => {
+    const f = preparationFixture();
+    await f.prepare();
+    rmSync(join(f.directory, "owner-status.json"));
+    const owner = { pid: 101, startTimeTicks: 42, executableSha256: hash("exe") };
+    let ticks = 0;
+    const wait = vi.fn(async () => {
+      ticks += 1;
+      if (ticks === 2) json(join(f.directory, "rollback.json"), { authorizesRestart: false });
+    });
+    const stagedSource = join(f.directory, "owner.mjs");
+    await shim.runPreparedRecoveryOwner(["node", stagedSource, "--recovery-preparation-owner"], {
+      sourcePath: stagedSource, cwd: root, environment: { INVOCATION_ID: "a".repeat(32) },
+      openSource: () => f.sourceHandle, inspect: (pid: number) => pid === f.parent.pid ? f.parent : owner,
+      run: f.run, wait,
+    });
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(readFileSync(join(f.directory, "owner-status.json"), "utf8"))).toMatchObject({
+      owner: { pid: 101 }, health: "ready", fence: 1, fenceState: "reserved", authorizesRestart: false,
+    });
+    expect(readdirSync(join(root, ".opencode/protected-runtime-index/tui-recovery"))).toEqual(["preparation"]);
+    expect(existsSync(join(f.directory, "owner-status.next"))).toBe(false);
+  });
+
+  it("refuses a foreign owner job and retains changed rollback evidence rather than deleting it", async () => {
+    const f = preparationFixture();
+    const normal = f.run.getMockImplementation()!;
+    f.run.mockImplementation((command, args, options) => {
+      const result = normal(command, args, options);
+      if (command === "/usr/bin/systemd-run") {
+        json(join(f.directory, "owner-status.json"), { owner: { nonceSha256: hash("foreign") }, requestSha256: hash("foreign") });
+      }
+      return result;
+    });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED", phase: "attest" });
+    expect(JSON.parse(readFileSync(join(f.directory, "owner-status.json"), "utf8")).requestSha256).toBe(hash("foreign"));
+    expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
+    await expect(shim.runPreparedRecoveryOwner(["node", f.source.path, "--recovery-preparation-owner"], {
+      sourcePath: f.source.path, cwd: root, environment: {},
+    })).rejects.toThrow("invocation is invalid");
+  });
+
+  it("derives binding, source, active session and role from independent read-only probes before any mutation", async () => {
+    const f = preparationFixture();
+    const auth = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.startsWith("http://127.0.0.1:4098") ? f.request(url)
+      : url.endsWith("/health") ? new Response(JSON.stringify({ status: "ok" })) : auth(url, init);
+    const inputs = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
+      ancestry: () => ({ status: "exact", parent: f.parent }), gitSummary: () => ({ status: "validated", head, sourceMatchesHead: true, dirtyPaths: [] }),
+      inspectParent: f.inspect });
+    expect(inputs).toMatchObject({ binding, disposition: null, capture: { snapshot: { sessionId: "ses_exact", operational: { role: "ingenium-orchestrator" } } } });
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+    f.parent.environment.INGENIUM_PROJECT = "foreign";
+    await expect(shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
+      ancestry: () => ({ status: "exact", parent: f.parent }) })).rejects.toThrow("binding conflicts");
+  });
+});
+
+describe("preparation disposition authorization", () => {
+  it.each(["concurrent authorized overflow", "final disposition mismatch"])(
+    "rejects final outbox drift and rolls back owned preparation: %s", async (change) => {
+      const f = preparationFixture();
+      const index = join(root, ".opencode/protected-runtime-index");
+      for (const path of [index, ...["coordination-outbox", "coordination-outbox-authorizations", "coordination-outbox-dispositions"]
+        .map((name) => join(index, name))]) mkdirSync(path, { mode: 0o700 });
+      const key = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
+      const now = Date.now();
+      const original = Buffer.from(JSON.stringify({ version: 1, key, operationId: hash("concurrent operation"), kind: "overflow",
+        sessionHash: "0".repeat(64), createdAt: new Date(now).toISOString(), failure: "unavailable", revision: null,
+        cursor: null, digest: hash("digest"), ambiguous: true, count: 4, mutation: null }));
+      const recordPath = join(index, "coordination-outbox", `${key}.json`);
+      const authPath = join(index, "coordination-outbox-authorizations", `${key}.json`);
+      json(authPath, { schemaVersion: 1, authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256, recordKey: key,
+        mode: "abandon_identityless_overflow", authority: "explicit_user_authorization", scope: "exact_key_same_record_family",
+        reason: "nonrecoverable_identityless_overflow", issuedAt: new Date(now - 1_000).toISOString(), expiresAt: new Date(now + 60_000).toISOString() });
+      const originalAuth = readFileSync(authPath);
+      if (change === "concurrent authorized overflow") {
+        const collect = f.collectInputs.getMockImplementation()!;
+        f.collectInputs.mockImplementation(async () => {
+          const inputs = await collect();
+          if (f.collectInputs.mock.calls.length === 2) writeFileSync(recordPath, original, { mode: 0o600 });
+          return { ...inputs, disposition: shim.planPreparationDisposition(index) };
+        });
+      } else {
+        writeFileSync(recordPath, original, { mode: 0o600 });
+        const plan = shim.planPreparationDisposition(index);
+        json(plan.destination, plan.disposition);
+        const inspect = f.inspectOwner.getMockImplementation()!;
+        f.inspectOwner.mockImplementation((request) => {
+          const evidence = inspect(request);
+          if (f.inspectOwner.mock.calls.length === 2) {
+            json(plan.destination, { ...plan.disposition, createdAt: new Date(Date.parse(plan.disposition.createdAt) + 1).toISOString() });
+          }
+          return evidence;
+        });
+      }
+      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(0);
+      await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "confirm", authorizesRestart: false });
+      expect(existsSync(f.directory)).toBe(false);
+      expect(existsSync(join(index, "tui-recovery"))).toBe(false);
+      expect(readFileSync(recordPath)).toEqual(original);
+      expect(readFileSync(authPath)).toEqual(originalAuth);
+      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(change === "concurrent authorized overflow" ? 1 : 0);
+      expect(f.sourceHandle.close).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each(["success", "attestation", "uncertain start", "changed count", "changed operation"])(
+    "pins existing authorization and immutable original bytes through %s", async (outcome) => {
+    const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    for (const path of [index, join(index, "coordination-outbox"), join(index, "coordination-outbox-authorizations")]) mkdirSync(path, { mode: 0o700 });
+    const key = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
+    const record = { version: 1, key, operationId: hash("operation"), kind: "overflow", sessionHash: "0".repeat(64),
+      createdAt: new Date().toISOString(), failure: "unavailable", revision: null, cursor: null, digest: hash("digest"), ambiguous: true, count: 4, mutation: null };
+    const path = join(index, "coordination-outbox", `${key}.json`);
+    json(path, record);
+    const original = readFileSync(path);
+    expect(() => shim.planPreparationDisposition(index)).toThrow();
+    const authPath = join(index, "coordination-outbox-authorizations", `${key}.json`);
+    const authorization = { schemaVersion: 1, authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256, recordKey: key,
+      mode: "abandon_identityless_overflow", authority: "explicit_user_authorization", scope: "exact_key_same_record_family",
+      reason: "nonrecoverable_identityless_overflow", issuedAt: new Date(Date.now() - 1_000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    json(authPath, authorization);
+    const originalAuth = readFileSync(authPath);
+    const plan = shim.planPreparationDisposition(index);
+    expect(plan.disposition).toMatchObject({ schemaVersion: 2, recordSha256: hash(original), recordCount: 4, operationId: record.operationId,
+      authorizationSha256: hash(originalAuth) });
+    for (const change of [{ expiresAt: new Date(1).toISOString() }, { recordKey: hash("foreign") }, { scope: "arbitrary" }, { authorizationId: hash("foreign") }]) {
+      json(authPath, { ...authorization, ...change });
+      expect(() => shim.planPreparationDisposition(index)).toThrow();
+    }
+    writeFileSync(authPath, originalAuth);
+    f.collectInputs.mockImplementation(async () => ({ binding, capture: await f.capture(), source: f.source,
+      disposition: plan, contract: shim.prepareRecoveryOwnerContract(binding, head) }));
+    if (outcome === "attestation") f.inspectOwner.mockReturnValue(null);
+    if (outcome === "uncertain start") {
+      const normal = f.run.getMockImplementation()!;
+      f.run.mockImplementation((command, args, options) => {
+        const result = normal(command, args, options);
+        if (command === "/usr/bin/systemd-run") throw new Error("uncertain start");
+        return result;
+      });
+    }
+    if (outcome === "changed count") json(path, { ...record, count: 5 });
+    if (outcome === "changed operation") json(path, { ...record, operationId: hash("changed") });
+    const expectedOriginal = readFileSync(path);
+    if (outcome === "success") {
+      expect(await f.prepare()).toMatchObject({ status: "prepared", authorizesRestart: false,
+        disposition: { recordSha256: hash(original), recordCount: 4 } });
+      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(0);
+    } else {
+      await expect(f.prepare()).rejects.toMatchObject({ code: outcome === "uncertain start"
+        ? "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" : "RECOVERY_PREPARATION_ROLLED_BACK" });
+      expect(existsSync(plan.destination)).toBe(false);
+      expect(existsSync(f.directory)).toBe(outcome === "uncertain start");
+    }
+    expect(readFileSync(path)).toEqual(expectedOriginal);
+    expect(readFileSync(authPath)).toEqual(originalAuth);
   });
 });
