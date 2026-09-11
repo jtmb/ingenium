@@ -11,9 +11,11 @@ permission:
   edit:
     "*": allow
     "next-steps-plan/**": deny
+    "next-steps-plan/next-steps-template.md": allow
   write:
     "*": allow
     "next-steps-plan/**": deny
+    "next-steps-plan/next-steps-template.md": allow
   bash:
     "*": allow
     "next-steps-plan/**": deny
