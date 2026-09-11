@@ -65,6 +65,7 @@
   "files": ["dist/", "context-upload-codec.mjs", "context-upload-codec.d.mts", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/"],
   "scripts": {
     "build": "node scripts/build-distributions.mjs",
+    "install:host-build": "node scripts/install-host-build.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

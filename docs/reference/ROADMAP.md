@@ -2178,6 +2178,8 @@ Evidence RECOVERY-100 overflow disposition (2026-09-05): explicit user authoriza
 
 Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): the fixed wrapper now normalizes the tracked outer bootstrap to `0644` only after descriptor identity, owner, clean Git HEAD bytes, and non-executable Git-configuration checks; regenerated bootstrap and production-restart executables are descriptor-normalized to `0555`. Live parent identity is read from the kernel `/proc/<pid>/exe` handle with PID/start-tick, descriptor metadata, nonce, and expected executable-hash continuity, so a deleted pathname is not trusted. Legacy bootstrap no longer depends on newly loaded `SessionCoordinator` code: the external production-restart process invokes the incumbent's attested `/proc/<pid>/exe` with `export <session> --pure`, keeps the raw export in memory, verifies the exact running fixed command and project directory, and reduces actions, changed paths, checks/results, task hash, Todo state, status, and `nextWork` to the bounded redacted handoff. It then registers its own authenticated coordination session, claims only `.opencode/protected-runtime-index/tui-recovery/legacy-handoff.json`, writes and rereads that private artifact with content-free claim proof, verifies and completes the claim, and closes the capture session before detached owner enrollment. Any export, identity, binding, claim, artifact, or completion mismatch fails before owner startup or signal. Endpointless parents use `oldPort: null`, and the detached external owner must enroll that exact process/handoff before replacement preparation or retirement. Recovery temporary roots are owner-specific (`/tmp/opencode-<uid>`) to avoid a foreign-owned shared-root denial. Focused source evidence covers the external claim/capture sequence, a legacy coordinator with no enrollment hook, deleted-executable attestation, candidate admission failures, replacement ordering, and extension typecheck. No deployment, parent signal, runtime canary, or actual TUI/session replay occurred; both roadmap tasks remain open and no completion marker is added.
 
+Evidence RECOVERY-100 host-installer source (2026-09-11): No safe host installer existed before this change. The three changed files are `packages/ingenium-extension/scripts/install-host-build.mjs`, `packages/ingenium-extension/install-host-build.test.ts`, and `packages/ingenium-extension/package.json`. The `install:host-build` entry requires an exact expected HEAD and clean source, validates bootstrap and `dist` modes, hashes, and registry behavior, limits adoption to the canonical owner-controlled `~/.local/bin` only, and uses descriptor-pinned candidate/backup state, atomic rename, `fsync`, rollback, and protected provenance. It does not invoke the host command. Thirty-one focused tests and the extension typecheck pass. QA/security review, commit, live installation, and an independent verifier remain pending; this is source evidence only and not acceptance.
+
 #### UI-100 — Shared native Select primitive
 
 - **IN_SCOPE:** Create one accessible shared native `<select>` primitive for dashboard forms, with the repository's required hover/cursor styling, label/id association, disabled/loading/error states, keyboard behavior, and a testable API; inventory every current native-select consumer for the migration lane.
@@ -9938,3 +9940,31 @@ separately required parent replacement/restart or any parent/final gate.
   wording items, plus prior stale-role, lease-expiry, and argv items, remain
   nonblocking. No deployment, restart, or broader recovery acceptance is
   claimed.
+- **67c deployment boundary:** Commit `67c402511aef7f1c36e475d65d8826e1818a9608`,
+  image `sha256:4370d15b8d5023063c44094c08cedb223d5002f664e17bd346f0e254003f397c`,
+  container prefix `81f0a1dc8291`, and rollback
+  `ingenium-ingenium:rollback-e98208da-67c40251` were recorded with healthy
+  services, routes, MCP, binding, scanner, and trust checks. The packaged
+  registry recognizes the literal `recovery-prepare`, rejects eight malformed
+  forms, and recorded zero live executions. This is deployment/provenance
+  evidence only; no recovery acceptance claim is made.
+- **Finding (`BLOCKING`):** `HOST_RECOVERY_WRAPPER_STALE` — host path
+  `/home/brajam/.local/bin/ingenium-build`, hash prefix `3e557883`, has
+  `recovery-prepare` unregistered while `production-restart` is registered.
+  The denied repair made no backup or change; no live preparation or restart
+  occurred. Owner/nextWork: locate a supported atomic installer.
+- **Host-installer QA remediation (2026-09-11; source/test only):** QA found a
+  **BLOCKING** rollback defect: the existing host symlink to the canonical
+  distribution was captured after distribution replacement, so rollback
+  restored the new behavior. **Remediated** in
+  `packages/ingenium-extension/scripts/install-host-build.mjs`,
+  `packages/ingenium-extension/scripts/build-distributions.mjs`, and
+  `packages/ingenium-extension/install-host-build.test.ts`: the host entry is
+  captured pre-build with a same-directory inode backup; the distribution
+  transaction/lock remains held until host commit; rollback restores prior
+  distributions/import hashes/modes and the original host metadata, target,
+  and hash with `fsync`/readback. Named regression
+  `restores_prebuild_canonical_dist_behavior_after_host_adoption_failure`
+  passed `1` with `31 skipped`. QA/security were not rerun. Security
+  `FOLLOW_UP`s for distribution crash durability and compiler provenance remain
+  nonblocking; no live install/deploy/recovery claim is added.

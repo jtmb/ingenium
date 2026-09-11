@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmodSync, closeSync, cpSync, existsSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { chmodSync, closeSync, constants, cpSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertMcpTransportParity } from "./verify-mcp-transport-parity.mjs";
 
@@ -64,6 +64,7 @@ export function buildDistributions({
   compile = compileTypeScript,
   parity = assertMcpTransportParity,
   rename = renameSync,
+  retainTransaction = false,
 } = {}) {
   const root = realpathSync(repositoryRoot);
   const extension = join(root, "packages/ingenium-extension");
@@ -76,6 +77,56 @@ export function buildDistributions({
   const stages = [];
   let journal;
   let rollbackFailed = false;
+  let retained = false;
+  const directoryIdentity = (path) => {
+    if (!existsSync(path)) return null;
+    ownedDirectory(path);
+    const stat = lstatSync(path);
+    return `${stat.dev}:${stat.ino}`;
+  };
+  const move = (from, to) => {
+    if (!retainTransaction) return rename(from, to);
+    const expected = directoryIdentity(from);
+    if (!expected || existsSync(to)) throw new Error("Distribution move identity mismatch");
+    const parents = [];
+    try {
+      for (const path of [dirname(from), dirname(to)]) {
+        ownedDirectory(path);
+        const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+        parents.push(fd);
+        const stat = fstatSync(fd);
+        if (`${stat.dev}:${stat.ino}` !== directoryIdentity(path)) throw new Error("Distribution parent changed");
+      }
+      const source = `/proc/self/fd/${parents[0]}/${basename(from)}`;
+      const target = `/proc/self/fd/${parents[1]}/${basename(to)}`;
+      const moved = () => !existsSync(source) && existsSync(target)
+        && `${lstatSync(target).dev}:${lstatSync(target).ino}` === expected;
+      try { rename(source, target); } catch (error) { if (!moved()) throw error; }
+      if (!moved()) throw new Error("Distribution rename outcome is unknown");
+      for (const fd of parents) fsyncSync(fd);
+    } finally { for (const fd of parents) closeSync(fd); }
+  };
+  const restoreStages = () => {
+    const failures = [];
+    for (const stage of [...stages].reverse()) {
+      try {
+        if (retainTransaction && stage.candidateIdentity) {
+          stage.adopted = directoryIdentity(stage.active) === stage.candidateIdentity;
+          stage.movedPrevious = stage.hadPrevious && directoryIdentity(stage.previous) === stage.previousIdentity;
+        }
+        if (stage.adopted) move(stage.active, stage.candidate);
+        if (stage.movedPrevious) move(stage.previous, stage.active);
+        if (retainTransaction && stage.candidateIdentity
+          && (directoryIdentity(stage.active) !== stage.previousIdentity
+            || (stage.hadPrevious && JSON.stringify(manifest(stage.active)) !== JSON.stringify(stage.previousManifest)))) {
+          throw new Error("Prior distribution graph was not restored");
+        }
+        stage.adopted = false;
+        stage.movedPrevious = false;
+      } catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, "Distribution rollback incomplete");
+  };
   const save = (phase) => {
     if (!journal) return;
     const temporary = `${journal}.tmp`;
@@ -118,36 +169,43 @@ export function buildDistributions({
     for (const stage of stages) {
       stage.candidateManifest = manifest(stage.candidate);
       stage.previousManifest = stage.hadPrevious ? manifest(stage.active) : null;
+      if (retainTransaction) {
+        stage.candidateIdentity = directoryIdentity(stage.candidate);
+        stage.previousIdentity = directoryIdentity(stage.active);
+      }
     }
     save("validated");
     for (const stage of stages) {
       if (stage.hadPrevious) {
-        rename(stage.active, stage.previous);
+        move(stage.active, stage.previous);
         stage.movedPrevious = true;
         save("adopting");
       }
-      rename(stage.candidate, stage.active);
+      move(stage.candidate, stage.active);
       stage.adopted = true;
       save("adopting");
+    }
+    if (retainTransaction) {
+      save("awaiting_host_commit");
+      retained = true;
+      return { journal, stages,
+        commit() { save("adopted"); rmdirSync(lock); retained = false; },
+        release() { rmdirSync(lock); retained = false; },
+        rollback() {
+          try { restoreStages(); save("rolled_back"); }
+          catch (error) { rollbackFailed = true; save("rollback_failed"); throw error; }
+        },
+      };
     }
     save("adopted");
     return { journal, stages };
   } catch (error) {
-    for (const stage of [...stages].reverse()) {
-      try {
-        if (stage.adopted) rename(stage.active, stage.candidate);
-        if (stage.movedPrevious) rename(stage.previous, stage.active);
-        stage.adopted = false;
-        stage.movedPrevious = false;
-      } catch {
-        rollbackFailed = true;
-      }
-    }
+    try { restoreStages(); } catch { rollbackFailed = true; }
     save(rollbackFailed ? "rollback_failed" : "failed");
     throw error;
   } finally {
     // An interrupted adoption keeps its lock and journal for explicit recovery, never a blind rebuild.
-    if (!rollbackFailed) rmdirSync(lock);
+    if (!rollbackFailed && !retained) rmdirSync(lock);
   }
 }
 
