@@ -13,6 +13,7 @@ import {
   readProtectedOwnerSecret,
   resetCoordinationCredential,
   resetLearningCredential,
+  resetRepositorySyncCredential,
   runCoordinationResetCli,
 } from "./coordination-reset.js";
 
@@ -92,6 +93,8 @@ function response(data: unknown, status = 200, setCookie?: string): Response {
 }
 
 function requestFixture(options: {
+  kind?: "service" | "repository-sync";
+  audience?: "mcp" | "repository-sync";
   scopes?: readonly string[];
   loginStatus?: number;
   loginErrorEnvelope?: boolean;
@@ -104,6 +107,8 @@ function requestFixture(options: {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const collisions: string[] = [];
   const scopes = options.scopes ?? generalMcpScopes;
+  const kind = options.kind ?? "service";
+  const audience = options.audience ?? "mcp";
   let launcherWorktree = "";
   const request = vi.fn(async (input: string | URL | globalThis.Request, init?: RequestInit) => {
     const url = String(input);
@@ -135,8 +140,8 @@ function requestFixture(options: {
       id: "00000000-0000-4000-8000-000000000004",
       servicePrincipalId,
       revokedAt: null,
-      kind: "service",
-      audience: "mcp",
+      kind,
+      audience,
       projectId,
       workspaceId: "shared-memory-ingenium",
       launcherWorktree: options.launcherWorktree ?? launcherWorktree,
@@ -151,8 +156,8 @@ function requestFixture(options: {
       return response({
       id: "00000000-0000-4000-8000-000000000003",
       token: newToken,
-      kind: "service",
-      audience: "mcp",
+       kind,
+       audience,
       projectId,
       projectIds: [projectId],
       workspaceId: "shared-memory-ingenium",
@@ -161,7 +166,7 @@ function requestFixture(options: {
       }, 201);
     }
     if (url.endsWith("/auth/preflight")) return response({
-      audience: "mcp",
+      audience,
       projectId,
       projectIds: [projectId],
       workspaceId: "shared-memory-ingenium",
@@ -326,6 +331,125 @@ describe("protected coordination reset", () => {
       scopes,
     });
   });
+
+  it("discovers and runs repository-sync CLI issuance using the protected owner provider without secret output", async () => {
+    const { worktree, credential: generalCredential, keyFile, bundleDirectory } = providerFixture();
+    persistEncryptedOwnerSecret(worktree, { keyFile, bundleDirectory });
+    delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
+    const credential = join(worktree, ".opencode/.ingenium-repository-sync-credential");
+    writeFileSync(join(worktree, ".gitignore"), ".opencode/\n");
+    execFileSync("/usr/bin/git", ["-C", worktree, "init", "--quiet"]);
+    const scopes = ["projects:read", "repository:sync"];
+    const { request, calls } = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes, priorCredentials: [] });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.spyOn(process, "cwd").mockReturnValue(worktree);
+    vi.spyOn(globalThis, "fetch").mockImplementation(request);
+
+    await expect(runCoordinationResetCli(["--help"])).resolves.toBe(0);
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join(""))
+      .toContain("ingenium-coordination-reset reset|reset-learning|reset-repository-sync");
+    expect(calls).toEqual([]);
+    stdout.mockClear();
+    await expect(runCoordinationResetCli(["reset-repository-sync"])).resolves.toBe(0);
+
+    expect(stdout.mock.calls).toEqual([["coordination reset: completed\n"]]);
+    expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toBe("");
+    expect(readFileSync(credential, "utf8")).toBe(`${newToken}\n`);
+    const metadata = lstatSync(credential);
+    expect(metadata.isFile()).toBe(true);
+    expect(metadata.isSymbolicLink()).toBe(false);
+    expect(metadata.mode & 0o777).toBe(0o600);
+    expect(process.geteuid).toBeDefined();
+    expect(metadata.uid).toBe(process.geteuid!());
+    expect(metadata.nlink).toBe(1);
+    expect(readFileSync(generalCredential, "utf8")).toBe(`${oldToken}\n`);
+    expect(readdirSync(join(worktree, ".opencode")).sort()).toEqual([
+      ".ingenium-coordination-owner-provider.json", ".ingenium-mcp-credential", ".ingenium-repository-sync-credential",
+    ]);
+    const issue = calls.find(({ url, init }) => url.endsWith("/auth/mcp-credentials") && init?.method === "POST")!;
+    expect(issue.url).toBe("http://localhost:3000/api/v1/auth/mcp-credentials");
+    expect(JSON.parse(String(issue.init?.body))).toEqual({
+      kind: "repository-sync", audience: "repository-sync", name: "Ingenium repository sync", scopes,
+      organizationId, projectId, projectIds: [projectId], workspaceId: "shared-memory-ingenium",
+      launcherWorktree: worktree, expiresAt: expect.any(String),
+    });
+    const headers = new Headers(issue.init?.headers);
+    expect(headers.get("cookie")).toBe("__Host-ingenium_session=elevated");
+    expect(headers.get("x-csrf-token")).toBe("s".repeat(43));
+    expect(headers.get("origin")).toBe("http://localhost:3000");
+    expect(headers.get("x-ingenium-ui")).toBe("dashboard");
+    expect(headers.has("authorization")).toBe(false);
+    const preflight = calls.find(({ url }) => url.endsWith("/auth/preflight"))!;
+    expect(Object.fromEntries(new Headers(preflight.init?.headers))).toEqual({
+      authorization: `Bearer ${newToken}`, "x-ingenium-audience": "repository-sync",
+      "x-ingenium-workspace": "shared-memory-ingenium", "x-ingenium-launcher-worktree": worktree,
+    });
+  });
+
+  it.each(["kind", "audience", "scopes", "projectId", "projectIds", "workspaceId", "launcherWorktree"])(
+    "rejects repository-sync issuance with mismatched %s before installation", async (field) => {
+      const { worktree } = fixture();
+      const base = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes: ["projects:read", "repository:sync"] });
+      await expect(resetRepositorySyncCredential(worktree, {
+        sourceFingerprint: () => Buffer.from("same"),
+        request: async (input, init) => {
+          const result = await base.request(input, init);
+          if (String(input).endsWith("/auth/mcp-credentials") && init?.method === "POST") {
+            const body = await result.json();
+            body.data[field] = field === "scopes" ? ["projects:read", "repository:sync", "memory:write"]
+              : field === "projectIds" ? [projectId, "other"] : "other";
+            return response(body.data, 201);
+          }
+          return result;
+        },
+      })).rejects.toMatchObject({ failure: "credential_issue" });
+      expectNoCredentialQuarantine(worktree);
+    },
+  );
+
+  it.each(["symlink", "directory", "unsafe mode", "interrupted install", "preflight mismatch", "success"])(
+    "preserves isolated repository-sync rotation safety: %s", async (scenario) => {
+      const { worktree, credential: generalCredential } = fixture();
+      const credential = join(worktree, ".opencode/.ingenium-repository-sync-credential");
+      if (scenario === "symlink") symlinkSync(generalCredential, credential);
+      else if (scenario === "directory") mkdirSync(credential);
+      else writeFileSync(credential, `${oldToken}\n`, { mode: scenario === "unsafe mode" ? 0o640 : 0o600 });
+      const before = lstatSync(credential);
+      const scopes = ["projects:read", "repository:sync"];
+      const { request, calls } = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes, launcherWorktree: worktree });
+      const result = resetRepositorySyncCredential(worktree, {
+        sourceFingerprint: () => Buffer.from("same"),
+        request: async (input, init) => {
+          const result = await request(input, init);
+          if (scenario === "preflight mismatch" && String(input).endsWith("/auth/preflight")) {
+            const body = await result.json();
+            return response({ ...body.data, audience: "mcp" });
+          }
+          return result;
+        },
+        installDependencies: scenario === "interrupted install" ? { afterRename: () => { throw new Error(newToken); } } : {},
+      });
+      if (scenario === "success") {
+        await expect(result).resolves.toEqual({ status: "completed" });
+        expect(readFileSync(credential, "utf8")).toBe(`${newToken}\n`);
+        expect(lstatSync(credential).mode & 0o777).toBe(0o600);
+        expect(calls.filter(({ init }) => init?.method === "DELETE")).toHaveLength(1);
+      } else {
+        const error = await result.catch((error: unknown) => error);
+        if (scenario === "preflight mismatch") expect(error).toMatchObject({ failure: "binding" });
+        else expectContentFreeInstallFailure(error, [oldToken, newToken, credential]);
+        expect(lstatSync(credential).ino).toBe(before.ino);
+        expect(lstatSync(credential).mode).toBe(before.mode);
+        if (scenario !== "directory") expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+        expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+      }
+      expect(readFileSync(generalCredential, "utf8")).toBe(`${oldToken}\n`);
+      expect(readdirSync(join(worktree, ".opencode")).sort()).toEqual([
+        ".ingenium-mcp-credential", ".ingenium-repository-sync-credential",
+      ]);
+    },
+  );
 
   it("marks the MFA mutation without changing Dashboard reads or MCP preflight", async () => {
     const { worktree } = fixture(true, { mfaCredential: "123456" });
@@ -700,6 +824,8 @@ try {
   it("accepts only the fixed reset operation", () => {
     expect(parseCoordinationResetArgs(["reset"])).toBe("reset");
     expect(parseCoordinationResetArgs(["reset-learning"])).toBe("reset-learning");
+    expect(parseCoordinationResetArgs(["reset-repository-sync"])).toBe("reset-repository-sync");
+    expect(() => parseCoordinationResetArgs(["reset-repository-sync", "--scopes", "*"])).toThrow(CoordinationResetError);
     expect(parseCoordinationResetArgs(["store", "--key-file", "/key", "--bundle-directory", "/bundle"]))
       .toEqual({ keyFile: "/key", bundleDirectory: "/bundle" });
     for (const args of [[], ["reset", "extra"], ["--project", "other"], ["reset;curl"], ["RESET"], ["store", "/key", "/bundle"]]) {

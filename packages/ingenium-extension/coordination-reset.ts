@@ -27,6 +27,7 @@ const PROJECT = "ingenium";
 const WORKSPACE = "shared-memory-ingenium";
 const CREDENTIAL_REFERENCE = ".opencode/.ingenium-mcp-credential";
 const LEARNING_CREDENTIAL_REFERENCE = ".opencode/.ingenium-learning-credential";
+const REPOSITORY_SYNC_CREDENTIAL_REFERENCE = ".opencode/.ingenium-repository-sync-credential";
 const OWNER_PROVIDER_REFERENCE = ".opencode/.ingenium-coordination-owner-provider.json";
 const OWNER_EMAIL = "bootstrap-admin@localhost";
 const COORDINATION_SCOPES = [
@@ -123,7 +124,9 @@ interface CanonicalBinding {
 
 interface CredentialProfile {
   credentialFile: string;
-  name: "Ingenium coordination" | "Ingenium learning";
+  name: "Ingenium coordination" | "Ingenium learning" | "Ingenium repository sync";
+  kind: "service" | "repository-sync";
+  audience: "mcp" | "repository-sync";
   scopes: readonly string[];
 }
 
@@ -913,8 +916,8 @@ async function issueCredential(
       headers: sessionHeaders(session, true),
       body: JSON.stringify({
         ...(servicePrincipalId ? { servicePrincipalId } : {}),
-        kind: "service",
-        audience: "mcp",
+        kind: profile.kind,
+        audience: profile.audience,
         name: profile.name,
         scopes: profile.scopes,
         organizationId: identity.organizationId,
@@ -930,7 +933,7 @@ async function issueCredential(
   if (response.status !== 201) return fail(response.status === 403 || response.status === 404 ? "authorization" : "credential_issue");
   const credential = data(await json(response));
   if (typeof credential.id !== "string" || typeof credential.token !== "string" || !TOKEN.test(credential.token)
-    || credential.kind !== "service" || credential.audience !== "mcp" || credential.projectId !== identity.id
+    || credential.kind !== profile.kind || credential.audience !== profile.audience || credential.projectId !== identity.id
     || !Array.isArray(credential.projectIds) || credential.projectIds.length !== 1 || credential.projectIds[0] !== identity.id
     || credential.workspaceId !== WORKSPACE || credential.launcherWorktree !== binding.worktree
     || !exactScopes(credential.scopes, profile.scopes)) return fail("credential_issue");
@@ -958,7 +961,7 @@ function matchesBinding(
   binding: CanonicalBinding,
   profile: CredentialProfile,
 ): boolean {
-  return entry.revokedAt === null && entry.kind === "service" && entry.audience === "mcp"
+  return entry.revokedAt === null && entry.kind === profile.kind && entry.audience === profile.audience
     && entry.projectId === identity.id && entry.workspaceId === WORKSPACE
     && entry.launcherWorktree === binding.worktree && exactScopes(entry.scopes, profile.scopes);
 }
@@ -975,7 +978,7 @@ async function verifyCredential(
     response = await request(`${API_URL}/auth/preflight`, {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-ingenium-audience": "mcp",
+        "x-ingenium-audience": profile.audience,
         "x-ingenium-workspace": WORKSPACE,
         "x-ingenium-launcher-worktree": binding.worktree,
       },
@@ -983,7 +986,7 @@ async function verifyCredential(
     });
   } catch { return fail("unavailable"); }
   const result = response.status === 200 ? data(await json(response)) : {};
-  if (response.status !== 200 || result.audience !== "mcp" || result.projectId !== identity.id
+  if (response.status !== 200 || result.audience !== profile.audience || result.projectId !== identity.id
     || !Array.isArray(result.projectIds) || result.projectIds.length !== 1 || result.projectIds[0] !== identity.id
     || result.workspaceId !== WORKSPACE || result.launcherWorktree !== binding.worktree
     || !exactScopes(result.scopes, profile.scopes)) {
@@ -1053,18 +1056,33 @@ export async function resetLearningCredential(
   return resetCredential(worktree, "learning", dependencies);
 }
 
+export async function resetRepositorySyncCredential(
+  worktree = process.cwd(),
+  dependencies: CoordinationResetDependencies = {},
+): Promise<{ status: "completed" }> {
+  return resetCredential(worktree, "repository-sync", dependencies);
+}
+
 async function resetCredential(
   worktree: string,
-  purpose: "coordination" | "learning",
+  purpose: "coordination" | "learning" | "repository-sync",
   dependencies: CoordinationResetDependencies,
 ): Promise<{ status: "completed" }> {
   const binding = canonicalBinding(worktree);
   const profile: CredentialProfile = purpose === "coordination"
-    ? { credentialFile: binding.credentialFile, name: "Ingenium coordination", scopes: COORDINATION_SCOPES }
-    : {
+    ? { credentialFile: binding.credentialFile, name: "Ingenium coordination", scopes: COORDINATION_SCOPES, kind: "service", audience: "mcp" }
+    : purpose === "learning" ? {
       credentialFile: resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE),
       name: "Ingenium learning",
       scopes: LEARNING_SCOPES,
+      kind: "service",
+      audience: "mcp",
+    } : {
+      credentialFile: resolve(binding.worktree, REPOSITORY_SYNC_CREDENTIAL_REFERENCE),
+      name: "Ingenium repository sync",
+      scopes: ["projects:read", "repository:sync"],
+      kind: "repository-sync",
+      audience: "repository-sync",
     };
   if (!isContained(resolve(binding.worktree, ".opencode"), profile.credentialFile)) return fail("binding");
   secureFileLocation(binding.worktree, profile.credentialFile, "binding");
@@ -1081,7 +1099,7 @@ async function resetCredential(
     // Scope changes and credential revocation do not remove the uniquely named principal.
     // The issuance API validates that the reused principal is active in this organization.
     const servicePrincipalId = (prior.find((entry) => matchesBinding(entry, identity, binding, profile))
-      ?? prior.find((entry) => entry.kind === "service" && entry.audience === "mcp"
+      ?? prior.find((entry) => entry.kind === profile.kind && entry.audience === profile.audience
         && entry.name === profile.name && entry.organizationId === identity.organizationId))?.servicePrincipalId;
     const issued = await issueCredential(
       request, session, identity, binding, profile, (dependencies.now ?? Date.now)(), servicePrincipalId,
@@ -1106,9 +1124,10 @@ async function resetCredential(
   }
 }
 
-export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "reset-learning" | PersistOwnerSecretOptions {
+export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "reset-learning" | "reset-repository-sync" | PersistOwnerSecretOptions {
   if (args.length === 1 && args[0] === "reset") return "reset";
   if (args.length === 1 && args[0] === "reset-learning") return "reset-learning";
+  if (args.length === 1 && args[0] === "reset-repository-sync") return "reset-repository-sync";
   if (args.length === 5 && args[0] === "store" && args[1] === "--key-file" && args[3] === "--bundle-directory") {
     return { keyFile: args[2]!, bundleDirectory: args[4]! };
   }
@@ -1116,11 +1135,19 @@ export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "
 }
 
 export async function runCoordinationResetCli(args = process.argv.slice(2)): Promise<number> {
+  if (args.length === 1 && args[0] === "--help") {
+    process.stdout.write("Usage: ingenium-coordination-reset reset|reset-learning|reset-repository-sync\n"
+      + "       ingenium-coordination-reset store --key-file <path> --bundle-directory <path>\n"
+      + "reset-repository-sync: install the owner-issued repository-sync credential at "
+      + `${REPOSITORY_SYNC_CREDENTIAL_REFERENCE}\n`);
+    return 0;
+  }
   try {
     const operation = parseCoordinationResetArgs(args);
-    if (operation === "reset" || operation === "reset-learning") {
+    if (operation === "reset" || operation === "reset-learning" || operation === "reset-repository-sync") {
       if (operation === "reset") await resetCoordinationCredential();
-      else await resetLearningCredential();
+      else if (operation === "reset-learning") await resetLearningCredential();
+      else await resetRepositorySyncCredential();
       process.stdout.write("coordination reset: completed\n");
     } else {
       persistEncryptedOwnerSecret(process.cwd(), operation);
