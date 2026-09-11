@@ -918,11 +918,11 @@ for (const tool of ["ingenium_task_create", "ingenium_docs_create_page", "ingeni
 const catalogSource = readText(path.join(path.dirname(configPath), "packages/ingenium-core/lib/tools/mcp-tool-catalog.ts"), "MCP catalog");
 const catalog = [...(catalogSource ?? "").matchAll(/\bname: "([^"]+)",\s*category: "([^"]+)"/g)].map(([, name, category]) => ({ name, category }));
 const catalogNames = new Set(catalog.map(({ name }) => name));
-if (catalog.length !== 291 || catalogNames.size !== 291) errors.push("MCP designation audit requires 291 unique catalog entries");
+if (catalog.length !== 292 || catalogNames.size !== 292) errors.push("MCP designation audit requires 292 unique catalog entries");
 const categoryCounts = {};
 for (const { category } of catalog) categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-if (categoryCounts.Tasks !== 32 || categoryCounts.Memory !== 7 || Object.keys(categoryCounts).length !== 31) {
-  errors.push("MCP designation audit requires 32 Tasks, 7 Memory tools, and 31 categories");
+if (categoryCounts.Tasks !== 32 || categoryCounts.Memory !== 7 || Object.keys(categoryCounts).length !== 32) {
+  errors.push("MCP designation audit requires 32 Tasks, 7 Memory tools, and 32 categories");
 }
 console.log(`MCP catalog categories: ${JSON.stringify(categoryCounts)}`);
 const owners = new Map(catalog.map(({ name }) => [name, []]));
@@ -944,7 +944,7 @@ const internalOnlyCounts = {
   Personality: 5, Synthesis: 3, Extraction: 2, Tasks: 17, Plans: 1, Context: 22,
   Projects: 7, Plugins: 5, Providers: 4, Servers: 5, Agents: 6, Commands: 3,
   Config: 2, Email: 16, Jobs: 5, Pipeline: 1, Vault: 10, Backups: 14,
-  RAG: 7, Documentation: 8,
+  RAG: 7, Documentation: 8, Usage: 1,
 };
 for (const category of new Set([...Object.keys(unowned), ...Object.keys(internalOnlyCounts)])) {
   if ((unowned[category]?.length ?? 0) !== internalOnlyCounts[category]) errors.push(`${category} internal/operator-only designation changed; review exact tool ownership`);
@@ -1226,10 +1226,10 @@ const errors = [];
 const expected = {
   "ingenium-docs": ["openai/gpt-5.6-luna", "max"],
   "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-software-engineer-fast": ["openai/gpt-5.6-sol", "medium"],
+  "ingenium-software-engineer-fast": ["openai/gpt-5.6-sol", "high"],
   "ingenium-software-engineer-premium": ["openai/gpt-6-astra", "medium"],
   "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "high"],
-  "ingenium-orchestrator": ["deepseek/deepseek-v4-flash", "max"],
+  "ingenium-orchestrator": ["openai/gpt-5.6-sol", "medium"],
   "ingenium-explore": ["openai/gpt-5.6-sol", "medium"],
   "ingenium-scout": ["openai/gpt-5.6-luna", "max"],
   "ingenium-chat": ["openai/gpt-5.6-luna", "max"],

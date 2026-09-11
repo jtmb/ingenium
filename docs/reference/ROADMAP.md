@@ -9530,3 +9530,268 @@ work-complete marker is added by this append; all ten linked Todos remain
   `290` registration count as drift. The test was not edited under this
   documentation-only boundary; retain the failure as the same **FOLLOW_UP**
   count/parity drift rather than claiming an audit pass.
+
+## Linked Current Todo 57 — exact-session export, authorized branch push, and protected completion notification
+
+- **Status:** `OPEN`; this item is a finalization requirement only and makes no
+  completion claim now.
+- **Owner:** `@ingenium-orchestrator` for the later authorized finalization;
+  this roadmap append is owned by `@ingenium-docs`.
+- **Dependencies and exact order:** Todos 47–56 and all implementation,
+  deployment, documentation, review, visual, Context archive, credential, and
+  reconciliation gates must be complete before any step below. Then, in order:
+  1. Export this exact user chat/session through the redacted protected
+     exact-session export path.
+  2. Verify the export is complete and that secrets are redacted.
+  3. Inspect `git status`, `git diff`, and `git log`; freeze the intended
+     remaining-path manifest and preserve unrelated concurrent changes.
+  4. Commit only the intended remaining paths after that inspection; do not
+     stage or commit an unrelated concurrent path.
+  5. Push the current authorized feature branch without force or amend. Push
+     authorization is explicit in the current user request.
+  6. Only after the push succeeds, send exactly one completion notification to
+     the user-provided protected Discord webhook, retaining only a content-free
+     endpoint identity plus HTTP status and receipt metadata.
+- **IN_SCOPE:** The ordered final export, completeness/redaction verification,
+  exact-path commit, authorized non-force/non-amend feature-branch push, and
+  one protected-webhook completion notification described above.
+- **OUT_OF_SCOPE:** Performing export, commit, push, or webhook work in this
+  roadmap append; source/template/runtime changes; unrelated cleanup; a second
+  notification; raw transcript or secret retention; and Docs Workspace
+  mutation.
+- **Acceptance:** The exact export and its completeness/secret-redaction checks
+  pass; the inspected manifest contains only intended remaining paths; the
+  commit contains only those paths; the current authorized feature branch is
+  pushed without force or amend; and exactly one post-push notification is sent
+  and reconciled with only content-free endpoint identity, HTTP status, and
+  receipt metadata. The raw webhook URL/secret must never appear in the
+  roadmap, Git, logs, Context, screenshots, or output. Unknown export, push, or
+  webhook outcomes must be reconciled before any retry. No false completion is
+  permitted.
+- **STOP_CONDITION:** `PASS` only after every dependency, ordered action,
+  redaction/completeness check, exact-path commit, push, one-notification, and
+  final reconciliation gate passes. Explicit user `STOP` or `CANCELLED` is
+  terminal; unresolved unknown outcomes remain open.
+- **Escalation:** Only (1) unavailable required protected external
+  credential/access after its configured path was attempted, (2) an
+  unauthorized destructive or irreversible action, (3) a mutually exclusive
+  product decision, (4) genuine ambiguity, or (5) a bounded diagnosis that
+  cannot reproduce the root cause. A failed check or unreconciled unknown
+  outcome alone is not escalation.
+- **Deployment owner:** N/A.
+- **Rollback/safety:** Do not mutate anything during this append. Preserve the
+  exact export and first failure, unrelated concurrent paths, and the
+  no-force/no-amend boundary; use protected inputs only; never copy, print,
+  persist, or transmit the raw webhook URL/secret beyond the protected send
+  path; and never blindly retry an unknown export, push, or webhook result.
+- **Design admission:** `executor=Docs`; `action=ROADMAP append`;
+  `probe=current numbering`; `verifier=readback/diff`;
+  `failure=no overwrite/no secret`; `rollback=you for the exact appended
+  block`; `evidence=path/ID/checks`.
+- **Verification plan:** Read the complete tail and numbering; edit by append
+  only; read back the appended block; inspect the roadmap diff with
+  `git diff --check`; do not run a documentation audit. The later finalization
+  owner must separately retain content-free export, commit, push, and webhook
+  receipts in the protected evidence path.
+
+## Current Todo 48/55/57 evidence reconciliation — 2026-09-11
+
+- **Source gap:** The missing repository-sync credential recovery path was
+  established as a source gap. Commit `c6dbcd59` (`fix(auth): provision
+  repository sync credential`) adds `ingenium-coordination-reset
+  reset-repository-sync` with the isolated `repository-sync` audience and
+  exact two-scope grant. This is source evidence only; it is not deployment or
+  live-grant evidence.
+- **QA:** The one-time QA result is **PASS**: 53 QA tests passed. The result
+  remains bounded review evidence and does not prove a live sync.
+- **Security:** The one-time security result is **PASS**. Retain the
+  non-blocking atomic-replacement **FOLLOW_UP**; it does not block the current
+  source/documentation result and is not silently converted to a pass.
+- **Todo 48:** remains `OPEN`. Deployment, live credential grant, and the
+  bulk-sync dry-run/apply/repeated-apply no-drift evidence remain pending;
+  command-resource, manifest, binding, isolation, and no-drift acceptance are
+  not claimed here.
+- **Todo 55:** remains `OPEN`. Its source validation remains retained, while
+  the full-parent-restart activation and template gate remain pending; the
+  concurrent template and test diffs were not edited by this documentation
+  update.
+- **Todo 57:** remains `OPEN`. No exact-session export, commit, push, or
+  protected completion notification was performed. No raw webhook URL or
+  secret is present in this roadmap, the documentation change, or the output.
+- **Boundary:** This reconciliation and the directly affected OpenCode usage
+  section are repository documentation only. No deployment, live grant, bulk
+  sync, source/test/template change, Docs Workspace mutation, or final audit
+  was performed.
+
+### Todo 48 append-only live-grant and first-dry-run evidence — 2026-09-11
+
+- **Owner/provider permissions:** After ownership and non-symlink checks, the
+  owner-provider modes were repaired: `.opencode` `0770` → `0750`, and the
+  descriptor `0670` → `0600`.
+- **Deployed grant and credential:** The deployed reset grant succeeded once.
+  The repository-sync credential is exactly mode `0600` and authenticated.
+- **First dry-run:** It did not apply. The size checks stopped it before
+  mutation: `ROADMAP` was `805,779` characters / `806,581` bytes, exceeding
+  `524,288`, and total docs were `1,873,484` bytes, exceeding `1,536,000`.
+- **Agent scan:** `0`; modes `0674` were not the scanner-required `0644`.
+- **Generation and manifest:** Generation remains `18`. The retained local
+  manifest SHA-256 is
+  `24c48a1cad59deac2a3617daedf2f7e0d559247a8da803e0d6b8e518f556a042`.
+- **Replay and remaining work:** No apply and no unknown replay occurred.
+  Source and metadata remediations remain in progress; no applied or no-drift
+  claim is made. Todo 48 remains `OPEN`, and Todo 57 remains `OPEN`.
+- **Historical-marker reconciliation:** The earlier pending live-grant wording
+  is retained as historical evidence; this later marker records the one
+  successful deployed grant. Dry-run/apply/repeated-apply no-drift acceptance
+  remains `OPEN`.
+
+## Todo 48 successful projection reconciliation — 2026-09-11
+
+- **Running/source and authentication:** The running source is `ec23d755`, and
+  the repository-sync credential is authenticated. The host distribution was
+  rebuilt and adopted with
+  `services/ingenium-server/build/distribution-FTOBGd/adoption.json`.
+- **Projection sequence:** The initial dry-run succeeded at generation `18`.
+  Exactly one apply was acknowledged at generation `19`; no apply replay
+  occurred. The final dry-run succeeded at generation `19`.
+- **Final dry-run result:** `84` resources were unchanged, with zero creates,
+  updates, archives, deletes, conflicts, or errors. The reported counts were
+  `docs=55`, `skills=8`, `agents=11`, `plugins=5`, and `commands=5`.
+- **Restart state:** The apply reported `restartRequired=true`. The final
+  dry-run reported `restartRequired=false`, but that dry-run result did not
+  clear the apply's restart requirement or prove that a restart completed.
+- **Hash evidence and root cause:** Initial, apply, and final server hashes
+  were captured for their respective phases and are phase-dependent; no
+  stable-server-hash claim is made. The stable local hash is
+  `6af4179d5ae4c4af71e1d3254280b7e0e3cad7ccd3a2aa8a85fc232ea698af92`.
+  The root cause is in core: server-hash computation included phase/control
+  inputs rather than only the projected docs and resources. Core remediation is
+  active; hash fix, rebuilt deployment, and the required restart remain
+  pending.
+- **Source-backed preservation:** The apply receipt reports zero deleted
+  resources and only two previously managed project skills archived. An
+  independent before/after inventory of unmanaged resources was unavailable;
+  no broader unmanaged-resource preservation claim is made.
+- **Current status:** Todo 48 remains `OPEN` pending the core hash fix,
+  deployment, and restart. The earlier failed size-check dry-run remains
+  historical evidence, as does its no-apply/no-drift wording; this later marker
+  records the successful projection without closing the restart or stable-hash
+  gates.
+
+## Todo 48/52/ACL finalized pre-deployment evidence — 2026-09-11
+
+This append-only overlay supersedes earlier Todo 48/52 hash and projection
+notes for current pre-deployment interpretation only. It preserves every prior
+row and evidence record and does not claim final deployment, audit, or overall
+rollout completion.
+
+- **Canonical hash source:** The deployed canonical-hash source is recorded at
+  `0f446778`. This source-provenance fact does not claim that the later ACL
+  repair at `c3e5b747` is deployed.
+- **Todo 52 canary:** Dashboard plugin canary
+  `plugin_1c5e2004-e5d9-4cc3-8265-19df5a8c9cae` passed description-only
+  save/reload/full-sync persistence. The exact original description was
+  restored, and the resulting inventory hash is
+  `0697d7e7b6c23911a6234ec1cb6392a8b5ede16334be9284f68fc6a41ad533a4`.
+- **Todo 48 projection:** Exactly one apply advanced generation `28 → 29`.
+  The final full-sync result was zero drift, with the same server hash
+  `255d517aae6157c7b2d1c158be0ee6c607186999695a7761c98aae47e5d12692`.
+  The recurring pre-deployment inventory reported `agents=0`; the final
+  deployed projection must still prove `11` agents.
+- **ACL boundary:** The established root cause was the broad ACL mask in
+  `docker-entrypoint.sh`. The durable source repair is `c3e5b747`. Focused QA
+  is **PASS**. Security recorded a **BLOCKING** ordering finding; the targeted
+  regression is now closed, but the security reviewer was not rerun, so no
+  security PASS is claimed. The inode/rename concern remains **FOLLOW_UP**.
+- **Current Todo state:** Todo 48 remains `OPEN` pending deployment and the
+  final 11-agent projection. The existing roadmap's qualified subcheck status
+  pattern permits Todo 52's bounded canary to be marked **EVIDENCE COMPLETE**;
+  this is not full Todo 52, deployment, or overall-rollout completion.
+- **Boundary:** Deployment claims not returned here, source/tests/template and
+  other documentation are out of scope, and no final audit, completion action,
+  raw credential, or webhook value is recorded.
+- **Deployment owner:** N/A.
+- **Design admission:** `executor=Docs`; `action=ROADMAP append`;
+  `probe=current Todo 48/52/ACL sections`; `verifier=readback/diff`;
+  `failure=no overwrite/no completion`; `evidence=path/IDs/hashes/checks`.
+- **Verification:** Read/edit/readback and `git diff --check` only; no
+  deployment, source/test, template, audit, or follow-up action was performed.
+
+## Todo 48/GATE final deployed ACL evidence before pre-restart repository projection — 2026-09-11
+
+This append-only marker records the final deployed ACL evidence before the
+pre-restart repository projection. It does not claim that projection,
+parent restart, final audit, or overall rollout completion has occurred.
+
+- **Deployed identity:** Revision `cd42c12b70a142167e4f0e687436def6bc8bf071`;
+  image `sha256:7457543d7ecd3ee8d801dee1a3f003f696bc3e29706b7b719ea781970a8cecc2`;
+  container
+  `0874a4df31618048bb533f2c3d1d00956ccba3893f42c37384d0ded274c79d89`;
+  rollback image `ingenium-ingenium:rollback-0f446778-cd42c12b`.
+- **Deployment health:** The checked routes returned `200/401/200`, and all
+  nine services were healthy.
+- **Profile and directory ACLs:** All 12 profiles are mode `0644` with no
+  extended ACL. All six directories have no default ACL and provide service
+  traversal/write; service identities have read access and no profile write
+  access. The broker is unmapped.
+- **Protected paths:** `2,323` protected paths, including `299` directories
+  at modes `0600/0700`, were denied to all ten service identities.
+- **Repeatability:** The repeat normalizer check was metadata- and
+  content-idempotent. The local scanner reported exactly `11`.
+- **Playwright dependency:** The retained preset has `30` tools, but child
+  discovery and browser execution are not yet final.
+- **Causal closure:** The prior deployment blockers addressed by this ACL
+  repair and deployed health evidence are causally closed; no ACL or deployed
+  health blocker is carried forward from that boundary.
+- **Current dependency/state:** Todo 48 remains `OPEN`, pending the final
+  generation projection and parent restart. No projection, restart, final
+  audit, or completion claim is made here.
+- **Deployment owner:** `N/A`.
+- **Design admission:** `executor=Docs`; `action=exact roadmap append`;
+  `probe=current deployed ACL evidence`; `verifier=readback/diff`;
+  `failure=no secret/overwrite`; `evidence=content-free deployment IDs,
+  ACL counts, route/service checks, and dependency state`.
+- **Verification:** Read the current tail, append only, read back this block,
+  and run the roadmap diff check; no source, test, template, deployment,
+  projection, restart, final-audit, credential, or webhook action was
+  performed by this documentation update.
+
+## Todo 48 final pre-restart repository projection — 2026-09-11
+
+This append-only marker closes Todo 48's repository-projection evidence
+checklist only. It preserves the original row and does not close the
+separately required parent replacement/restart or any parent/final gate.
+
+- **Runtime and authentication:** The exact runtime was `cd42c12b`; repository-
+  sync authentication passed.
+- **Projection sequence:** The initial dry-run expected generation `50` and
+  returned generation `50`. Exactly one apply was acknowledged at `50 → 51`,
+  with no replay. The final dry-run returned generation `51`.
+- **Restart boundary:** The apply reported `restartRequired=false`; this does
+  not cancel the separately required parent replacement/restart.
+- **Hash evidence:** The initial, apply, and final server hashes were each
+  `35917ee7a3bc6fc7dfd5b56015809428211a67ed562fe9df4dc37ed0d8771b1b`. The
+  input identity was
+  `81c723820eaaf8e56d73acaefdd37362689375b569be208f0e8f7bcfe6ab8557`, and
+  the final local manifest hash was
+  `587ba7332e36e23d2936fd47c5d2b2068248cf807d4200f12e8fa209b6f3e375`.
+- **Final manifest:** `55` docs, `8` skills, `11` agents, `5` plugins, and
+  `5` commands (`84` total) were unchanged; creates, updates, archives,
+  deletes, renames, conflicts, and errors were all `0`.
+- **Safety and binding:** The broker was excluded, all `12` profiles were
+  safe, and the projection tracked diff was unchanged.
+- **Todo state:** Todo 48 evidence is **COMPLETE** for this pre-restart
+  projection only. Parent replacement/restart, Todos 49–51, the vault,
+  QA/audit, and Todo 57 export/push/webhook work remain `OPEN`; no overall or
+  final completion is claimed.
+- **Boundary:** This documentation append performed no restart, projection
+  mutation, final audit, credential action, export, push, or webhook action;
+  no secret or webhook value is recorded.
+- **Deployment owner:** `N/A`.
+- **Design admission:** `executor=Docs`; `action=exact roadmap append`;
+  `probe=current Todo 48 evidence checklist`; `verifier=readback/diff`;
+  `failure=no overwrite/no secret`; `evidence=content-free runtime,
+  generation, inventory, identity, and hash values`.
+- **Verification:** Current-section read, append-only edit, appended-block
+  readback, and the roadmap `git diff --check` are the only checks for this
+  documentation record.

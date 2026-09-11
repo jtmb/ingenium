@@ -1,46 +1,131 @@
- **🔴HARD RULES:**
- - Your job is to be the brain of the operation.
- - Map Out documentation and testing at every phase and agent orchestration.
- - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium if you require a better model with deeper reasoning and you use @ingenium-docs for documentations and finally @ingenium-qa.
- - When building a plan for the Orchestrator to execute you will build it with agent paralyzation in mind. 
- You are allowed to plan for spawning 6 subagents at once.
-- You will view screenshots yourself during plan phase.
- - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. 
- Example:
+# Next-Steps Orchestration Plan
 
- ```    
- "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works.
+Use this template to turn a request into a bounded handoff for the
+Orchestrator. Keep the plan reusable: name only the files, agents, checks, and
+decisions required by the request.
 
-## DIRECTIVE:
-One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
+## Plan-mode boundary
 
+- Plan is read-only. Do not edit, write, run Bash, mutate Docs Workspace, or
+  claim implementation evidence from Plan.
+- In Plan, delegate research only to `@ingenium-explore`, and only for
+  read-only repository exploration. No other research or implementation
+  delegation is permitted from Plan.
+- Record the user's explicit maximum concurrency as
+  `{{USER_REQUESTED_MAX_CONCURRENCY}}`. Do not invent a default or imply a
+  universal agent ceiling.
+- The Orchestrator dispatches one distinct subagent per dependency-ready Todo,
+  never more than the recorded user maximum. Give each writer an exclusive,
+  non-overlapping territory. Subagents do not delegate, spawn, reassign, or
+  request follow-up work.
 
-### THE REQUESTS:
+## Request and contract
 
-ROAD MAP, @docs/reference/roadmap.md Lets update a feature in the roadmap.
+**Request:** `{{REQUEST}}`
 
-Requested Fetaures:
+**IN_SCOPE**
 
-1. Opencode has been restarted. Please proceed. Remember... whatever changes you are making to opencode need to work on the TUI we are in as well. You are in plan mode now. Review NEXT STEPS 1-6 and formulate a concrete plan. Do not overenginner. Do not design something that will not work in the TUI. All opencode related tests must past in both the server and this tui session where the plugin is present.
+- `{{FILES, ROUTES, OR BEHAVIORS}}`
 
-2. I want playwright to be one of the ingenium managed mcp servers *add in* 
+**OUT_OF_SCOPE**
 
-3. Diagnose why the MCP server keeps breaking.
+- `{{EXCLUDED_FILES, SYSTEMS, AND FOLLOW-UP WORK}}`
 
-4. Ingenium scout is not to be used for anything except retrieving stuff from rag. And retrieving context. Update any agent files. Also the ponytail skill is not being loaded. Enfore the loading of this skill. (by all agents)
+**Acceptance criteria**
 
-5. Additionaly. @opencode.json should not contain permissions for agents Only model and varients. Permissions are saved in the agent template. These are golden rules add them to AGENTS.md as well.
+- `{{TESTABLE OUTCOME 1}}`
+- `{{TESTABLE OUTCOME 2}}`
 
-7. Additionaly Ensure the agents are always following the roadmap. and consolidating in a true autonomous loop. Enforce this through agent files and AGENTS.md
+**STOP_CONDITION**
 
-8. Prove that session memory works in Ingenium UI /chat /opencode and in external opencode harness (such as the one we are in)
+- `{{PASS CONDITION, EXPLICIT STOP/CANCEL CONDITION, OR PERMITTED ESCALATION}}`
 
+**Deployment owner:** `{{OWNER OR N/A}}`
 
+**Verification plan**
 
----
+- `{{TARGETED CHECK, EXECUTION COUNT, AND DEPLOYED CHECK IF APPLICABLE}}`
 
-### Documentation References
+**Escalation rule**
 
-| Resource | Path |
-|----------|------|
-| docs | [`docs`](docs)
+- Escalate only for the contract's permitted credential/access,
+  authorization, product-decision, ambiguity, or unreproduced-cause condition:
+  `{{PERMITTED CONDITIONS}}`
+- A failed check is evidence to classify and repair, not automatic escalation.
+
+**Changed files:** `{{EXACT PATHS}}`
+
+**Directly affected canonical documentation:** `{{EXACT DOC PATHS OR NONE}}`
+
+## Design admission
+
+Complete one row before each dependent mutation. If a required field is
+missing or unverified, reject and replan instead of guessing.
+
+| Executor | Exact action | Safe probe | Prerequisites | Verifier | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|---|
+| `{{AGENT}}` | `{{MUTATION}}` | `{{READ-ONLY PROBE}}` | `{{PREREQUISITES}}` | `{{CHECK}}` | `{{OWNER}}` | `{{EVIDENCE}}` |
+
+## Phased execution plan
+
+### Phase `{{ID}}` — `{{NAME}}`
+
+- **Goal:** `{{DELIVERABLE}}`
+- **Dependencies:** `{{TODO IDS OR NONE}}`
+- **Assigned subagent:** `{{ONE DISTINCT AGENT}}`
+- **Exclusive writer territory:** `{{NON-OVERLAPPING PATHS OR READ-ONLY}}`
+- **Docs:** `{{DIRECTLY AFFECTED DOCS OR N/A}}`
+- **Tests/checks:** `{{TARGETED CHECKS}}`
+- **Deployment/restart:** `{{OWNER, FULL PARENT RESTART BOUNDARY, OR N/A}}`
+- **Exit evidence:** `{{REQUIRED EVIDENCE AND ACCEPTANCE MAPPING}}`
+
+Map documentation and tests for every phase. When a profile, plugin, command,
+instruction, or OpenCode configuration changes, restart the full parent
+OpenCode process/session; restarting only a child MCP process is insufficient.
+For runtime-impacting work, the authorized deployment owner rebuilds the
+current merged source, restarts it, and checks actual routes.
+
+## Evidence and failure discipline
+
+Keep these evidence classes separate and label each as pass, fail, unknown, or
+not applicable:
+
+| Evidence class | What it proves | What it does not prove |
+|---|---|---|
+| Source | Focused tests, lint, typecheck, or build on the current checkout | A deployed service, visual route, or real model/session |
+| Deployed | Rebuilt current source, restart, and actual-route health check | Source correctness, visual behavior, or model/session proof |
+| Visual | Declared changed-route gate and required passive sweep for UI work | Source tests, deployment health, or model/session proof |
+| Model/session | Actual provider, model, and session/TUI evidence | Source, deployment, or visual acceptance |
+
+On failure, retain the first failure and its stable signature (code, tool
+family, session, failing path, attempted paths, new evidence, owner, and
+`nextWork`). Repair the named root cause, then rerun only the affected check.
+Never retry an unchanged action with no new evidence.
+
+Preserve stable roadmap and Todo IDs and their history. Append linked work
+instead of rewriting historical entries. Update TodoWrite after each
+implementation or evidence transition, then reconcile every Todo and roadmap
+marker against retained evidence before the terminal response. Preserve
+unknown and failed outcomes; do not convert them to success by omission.
+
+## Copy-paste Orchestrator handoff
+
+```text
+Orchestrator, execute the approved plan below.
+
+Maximum concurrency: {{USER_REQUESTED_MAX_CONCURRENCY}} (the user's explicit maximum; do not invent another limit).
+Start only dependency-ready Todos, dispatching one distinct subagent per Todo with exclusive writer territory.
+Subagents must not delegate, spawn, reassign, or request follow-up work.
+
+Honor IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, deployment owner,
+verification plan, and escalation rule exactly. Complete the design-admission probe
+before every dependent mutation. On failure, repair the named root cause and do not
+repeat an unchanged action. Keep source, deployed, visual, and model/session evidence
+separate. Map docs and tests per phase. Apply the full parent OpenCode restart boundary
+when profile, plugin, command, instruction, or configuration changes require it.
+
+Update TodoWrite and preserve stable roadmap IDs after every evidence transition.
+Before reporting completion, reconcile all Todo and roadmap markers against retained
+evidence and report changed files, checks with execution counts, unresolved findings,
+and any permitted escalation.
+```

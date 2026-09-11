@@ -257,6 +257,74 @@ use the exact `ingenium-coordination-reset reset` exception: the API must report
 5,000–300,000 ms. Runtime and repository-sync credentials remain restart-mode;
 the reset never applies to a changed binding or plugin/config identity.
 
+#### Repository-sync credential recovery
+
+From the canonical `ingenium` worktree, recover only the repository-sync
+credential with:
+
+```bash
+ingenium-coordination-reset reset-repository-sync
+```
+
+This command accepts no endpoint, project, workspace, worktree, or scope
+override. It issues a credential with `kind: "repository-sync"` and
+`audience: "repository-sync"`, with exactly these scopes:
+`projects:read` and `repository:sync`. The token is installed only at the
+ignored, owner-only regular file
+`.opencode/.ingenium-repository-sync-credential` with mode `0600`; the general
+`.opencode/.ingenium-mcp-credential` is not replaced.
+
+The command validates the fixed `ingenium` project, `shared-memory-ingenium`
+workspace, exact canonical worktree, and repository-sync binding. Provide
+exactly one protected owner-secret source when using an override:
+`INGENIUM_COORDINATION_OWNER_SECRET_FILE` must name an absolute owner-private
+mode-`0600` file, or `INGENIUM_COORDINATION_OWNER_SECRET_FD` must name an
+already-open owner-private regular-file descriptor; the two are mutually
+exclusive. With neither override, the command requires the ignored
+`.opencode/.ingenium-coordination-owner-provider.json` reference. Provision
+that reference with paths only, while the protected source is available:
+
+```bash
+ingenium-coordination-reset store --key-file /absolute/protected/key --bundle-directory /absolute/owner-only/directory
+```
+
+The provider reference contains no secret material. Its AES-256-GCM bundle and
+key stay outside the worktree in separate owner-only directories, with
+mode-`0600` regular files; the provider metadata is bound to
+`bootstrap-admin@localhost`, project `ingenium`, and workspace
+`shared-memory-ingenium`. Login, any required MFA, recent step-up, project
+authorization, path/ownership/mode checks, and binding checks must pass; unsafe,
+tampered, symlinked, or mismatched inputs fail closed. See [the protected
+provider contract](../security/api-authentication.md#extension-project-initialization-preflight).
+
+Do not place secret or token values in arguments, logs, or reports. Success is
+content-free (`coordination reset: completed`); failure reports only a bounded
+failure category (and, for installation failures, a stage), never a bearer,
+plaintext/ciphertext value, endpoint, or response body. The issued credential's
+exact audience, scopes, and project/workspace/worktree binding are checked at
+issuance, then it is installed by atomically replacing the repository-sync
+credential file and authenticated with the API preflight. If preflight or the
+later source-fingerprint check fails, the pending rotation rolls back, restoring
+the prior credential when one exists; only after those checks pass does the
+local replacement commit and matching prior repository-sync credentials get
+revoked.
+
+After recovery, rebuild the extension if its artifact or plugin/config source
+changed and perform a **full parent OpenCode restart** before repository sync.
+Repository-sync credentials remain restart-mode; restarting only the child MCP
+process is insufficient. Then use the no-drift sequence for the bound project:
+
+```bash
+ingenium-init-project --dry-run --project ingenium
+ingenium-init-project --apply --project ingenium
+ingenium-init-project --apply --project ingenium  # repeat; require no drift
+```
+
+Review the dry-run before applying. Dry-run does not mutate the project,
+remote state, or local sync baseline; apply advances the baseline only after
+API confirmation. Do not claim repository synchronization is complete unless
+the repeated apply reports no drift.
+
 ## Ponytail
 
 The supported Ponytail integration is an immutable upstream checkout pinned to
