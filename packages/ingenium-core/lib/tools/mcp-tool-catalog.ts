@@ -828,7 +828,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_extraction_run",
     category: "Extraction",
-    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
+    description: "Extract durable user behavior rules. Optional external input probes learning eligibility or ingests one redacted visible user message from an exact launcher-bound session; otherwise schedules the server scan.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: EXTRACTION_ENDPOINTS,

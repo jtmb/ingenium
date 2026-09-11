@@ -17,6 +17,36 @@ const docsManifest = {
 };
 const resourcesManifest = { version: 2, skills: [], agents: [], plugins: [] };
 describe("repository sync MCP tool adapter", () => {
+  it("forwards command resources and returns only bounded command counters", async () => {
+    const resources = { ...resourcesManifest, commands: [{ source: "Run checks" }] };
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: true, generation: 0, manifestHash: "a".repeat(64), docs: { summary: {} },
+      resources: { summary: { command: { created: 1, unchanged: 2, source: "must-not-return" } } },
+    } });
+    const result = await repositorySync("repository-project", docsManifest, resources, 0, true);
+    expect(mockPost).toHaveBeenCalledWith("/repository/sync", { docsManifest, resourcesManifest: resources, expectedGeneration: 0, dryRun: true }, { project: "repository-project" });
+    expect(JSON.parse(result.content[0]!.text).resources.summary.command).toMatchObject({ created: 1, unchanged: 2 });
+    expect(result.content[0]!.text).not.toContain("must-not-return");
+  });
+
+  it.each([
+    "not-an-array",
+    Array.from({ length: 513 }, () => ({ source: "Run" })),
+    [{ source: "x".repeat(REPOSITORY_MAX_RESOURCE_FILE_BYTES + 1) }],
+    Array.from({ length: 7 }, () => ({ source: "x".repeat(240 * 1024) })),
+  ])("rejects malformed or oversized command aggregates before forwarding", async (commands) => {
+    const result = await repositorySync("repository-project", docsManifest, { ...resourcesManifest, commands }, 0, true);
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ isError: true });
+  });
+
+  it("does not manufacture command readback when the API omits it", async () => {
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: false, generation: 1, manifestHash: "a".repeat(64), docs: { summary: {} }, resources: { summary: {} },
+    } });
+    expect(await repositorySync("repository-project", docsManifest, { ...resourcesManifest, commands: [] }, 0, false)).toMatchObject({ isError: true });
+  });
+
   beforeEach(() => {
     mockPost.mockReset();
   });

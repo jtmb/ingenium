@@ -79,7 +79,7 @@ function hashFile(filePath: string): string | null {
 // ── Repository-authoritative manifest v2 ────────────────────────────────────
 // These scanners are intentionally independent from the legacy bidirectional
 // resource scans below. Repository sync is a one-way, validated projection of
-// the local worktree; it never scans commands or either project/global config.
+// the local worktree; it never projects either project/global config.
 
 export const REPOSITORY_MAX_ITEMS = 512;
 export const REPOSITORY_MAX_DOC_ITEMS = 256;
@@ -184,12 +184,23 @@ export interface RepositoryPluginManifestEntry {
   options: Record<string, unknown>;
 }
 
+export interface RepositoryCommandManifestEntry {
+  identity: string;
+  path: string;
+  sha256: string;
+  name: string;
+  source: string;
+  fileType: "regular";
+  isSymlink: false;
+}
+
 export interface RepositoryManifestV2 {
   version: 2;
   docs: RepositoryDocManifestEntry[];
   skills: RepositorySkillManifestEntry[];
   agents: RepositoryAgentManifestEntry[];
   plugins: RepositoryPluginManifestEntry[];
+  commands: RepositoryCommandManifestEntry[];
 }
 
 function normalizeRepositoryText(value: string): string {
@@ -776,8 +787,21 @@ function repositorySerializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-function assertRepositoryResourceManifestBounds(manifest: Pick<RepositoryManifestV2, "skills" | "agents" | "plugins">): void {
-  const entries = [...manifest.skills, ...manifest.agents, ...manifest.plugins];
+function scanRepositoryCommands(worktree: string, baseline: RepositoryBaseline, resourceBudget: RepositoryResourceScanBudget): RepositoryCommandManifestEntry[] {
+  const directory = resolve(worktree, ".opencode", "commands");
+  return walkRepositoryFiles(worktree, directory, REPOSITORY_MAX_RESOURCE_BYTES,
+    (filePath) => dirname(filePath) === directory && filePath.endsWith(".md"), REPOSITORY_MAX_ITEMS, resourceBudget)
+    .map((file) => {
+      const name = basename(file.path, ".md");
+      if (!safeRepositoryName(name) || !file.content.trim() || file.content.includes("\u0000")) throw new RepositorySyncScanError();
+      if (file.content.startsWith("---\n") && !parseRepositoryFrontmatter(file.content).body.trim()) throw new RepositorySyncScanError();
+      const semantic = { path: file.path, name, source: file.content, fileType: "regular" as const, isSymlink: false as const };
+      return { identity: resourceIdentity("commands", file.path, hashContent(file.content), baseline), sha256: repositoryHash(semantic), ...semantic };
+    });
+}
+
+function assertRepositoryResourceManifestBounds(manifest: Pick<RepositoryManifestV2, "skills" | "agents" | "plugins" | "commands">): void {
+  const entries = [...manifest.skills, ...manifest.agents, ...manifest.plugins, ...manifest.commands];
   if (entries.length > REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
 
   let total = 0;
@@ -799,6 +823,7 @@ export function buildRepositoryManifestV2(worktree: string, manifest?: SyncManif
     skills: scanRepositorySkills(worktree, repository.skills, resourceBudget),
     agents: scanRepositoryAgents(worktree, repository.agents, resourceBudget),
     plugins: scanRepositoryPlugins(worktree, repository.plugins, resourceBudget),
+    commands: scanRepositoryCommands(worktree, repository.commands ?? {}, resourceBudget),
   };
   assertRepositoryResourceManifestBounds(projection);
   return projection;
@@ -829,12 +854,13 @@ export interface SyncManifest {
     plugins: ResourceHashes;
     commands: ResourceHashes;
     config: { hash?: string };
-    /** V2 repository-authoritative baseline. Commands and global config are excluded. */
+    /** V2 repository-authoritative baseline. Global config is excluded. */
     repository?: {
       docs: RepositoryBaseline;
       skills: RepositoryBaseline;
       agents: RepositoryBaseline;
       plugins: RepositoryBaseline;
+      commands?: RepositoryBaseline;
     };
   };
 }
@@ -3390,6 +3416,7 @@ export interface RepositorySyncResult {
   skills: SyncResult;
   agents: SyncResult;
   plugins: SyncResult;
+  commands: SyncResult;
   /** Applied agent or plugin changes require a fresh OpenCode load. */
   restartRequired: boolean;
 }
@@ -3447,7 +3474,7 @@ function pluginFingerprint(entry: RepositoryPluginManifestEntry): string {
 /**
  * Deterministic repository initialization/sync. `dryRun` resolves the project
  * identity and submits repository-owned resources only through the packaged MCP
- * transport. Commands and all config are intentionally excluded.
+ * transport. All config is intentionally excluded.
  */
 export async function repositorySync(
   worktree: string,
@@ -3522,6 +3549,7 @@ function failedRepositorySyncResult(project: string, dryRun: boolean, scope: Rep
     skills: emptyResult(),
     agents: emptyResult(),
     plugins: emptyResult(),
+    commands: emptyResult(),
     restartRequired: false,
   };
 }
@@ -3549,18 +3577,19 @@ async function repositorySyncAttempt(
   const skillsResult = emptyResult();
   const agentsResult = emptyResult();
   const pluginsResult = emptyResult();
+  const commandsResult = emptyResult();
   if (scope === "all") cleanupLegacySkillTombstones(worktree, {
     dryRun,
     fileSystem: options.cleanupFileSystem,
   });
   const projection = scope === "all"
     ? buildRepositoryManifestV2(worktree, manifest)
-    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
+    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [], commands: [] };
   const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
     project,
     docsManifest: { files: projection.docs },
     resourcesManifest: scope === "all"
-      ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
+      ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins, commands: projection.commands }
       : undefined,
     dryRun,
     expectedGeneration,
@@ -3583,6 +3612,9 @@ async function repositorySyncAttempt(
     Object.assign(skillsResult, resultFromRepositorySummary(payload.resources.summary.skill));
     Object.assign(agentsResult, resultFromRepositorySummary(payload.resources.summary.agent));
     Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
+    const hasCommandState = projection.commands.length > 0 || Object.keys(manifest.resources.repository?.commands ?? {}).length > 0;
+    if (hasCommandState && !repositoryIsRecord(payload.resources.summary.command)) throw new Error("Invalid MCP response");
+    Object.assign(commandsResult, resultFromRepositorySummary(payload.resources.summary.command));
   }
 
   // The baseline advances only after the owning API endpoint confirmed the
@@ -3595,6 +3627,7 @@ async function repositorySyncAttempt(
       repository.skills = baselineFromEntries(projection.skills, skillFingerprint);
       repository.agents = baselineFromEntries(projection.agents, agentFingerprint);
       repository.plugins = baselineFromEntries(projection.plugins, pluginFingerprint);
+      repository.commands = baselineFromEntries(projection.commands, (entry) => hashContent(entry.source));
     }
     manifest.lastFullSync = new Date().toISOString();
     saveManifest(worktree, manifest, { expected: localGeneration, next: requiredGeneration });
@@ -3608,6 +3641,7 @@ async function repositorySyncAttempt(
     skills: skillsResult,
     agents: agentsResult,
     plugins: pluginsResult,
+    commands: commandsResult,
     restartRequired: !dryRun && scope === "all" && [agentsResult, pluginsResult]
       .some((result) => result.pushed + result.synced + result.removed > 0),
   };
@@ -3615,7 +3649,7 @@ async function repositorySyncAttempt(
 
 /**
  * Session hooks use the same repository-authoritative implementation as
- * `/init-project`. Legacy commands/config synchronization is deliberately not
+ * `/init-project`. Legacy bidirectional commands/config synchronization is deliberately not
  * invoked from this path.
  */
 export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
@@ -3625,7 +3659,7 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
     skills: result.skills,
     agents: result.agents,
     plugins: result.plugins,
-    commands: emptyResult(),
+    commands: result.commands,
     config: emptyResult(),
     restartRequired: result.restartRequired,
   };

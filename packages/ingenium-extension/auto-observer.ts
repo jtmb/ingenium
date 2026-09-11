@@ -1,28 +1,10 @@
-/**
- * Auto Observer Plugin — Thin MCP trigger for server-side extraction.
- *
- * This plugin is a lightweight trigger only. The actual extraction
- * (pattern detection, enrichment, observation creation) runs server-side
- * in the Ingenium API through the Ingenium MCP transport, triggered by both
- * this plugin (on session idle) and the API's scheduled maintenance cycle.
- *
- * No regex, no OpenCode DB access, no heavy init — just a thin MCP call.
- *
- * NOTE: Extraction runs server-side to avoid duplication and ensure consistency
- * across all OpenCode sessions. The client-side trigger is merely a convenience
- * to reduce latency vs. waiting for the scheduled maintenance cycle.
- */
 import { tool } from "@opencode-ai/plugin"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
 import { resolveExtensionBinding } from "./extension-binding.js"
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
 import { callMcpTool, mcpToolData } from "./mcp-client.js"
 import { classifyObserverFailure, type ObserverRequestFailure } from "./observer-core.js"
-
-// Throttle to once per 60s — extraction is expensive and the API's scheduled
-// maintenance cycle (every 15min) will catch anything this misses
-let lastFire = 0
-const THROTTLE_MS = 60000
+import { visibleContextExport } from "@ingenium/extension/context-upload-codec"
 
 type ExtractionRequestFailure = Extract<ObserverRequestFailure, "authentication" | "timeout" | "request_failed">
 
@@ -52,28 +34,49 @@ async function triggerExtraction(worktree: string): Promise<{
   }
 }
 
-/**
- * AutoObserverPlugin — triggers server-side extraction on session.idle events.
- * Throttled to 1/60s to avoid API load spikes.
- */
 export const AutoObserverPlugin = async (ctx: { worktree: string; client: any }) => {
+  const pending = new Map<string, Promise<void>>()
   const reportWarning = (reason: ExtractionRequestFailure) => {
     logPluginLifecycle(ctx.client, "auto-observer", "warn", `trigger_extraction: ${reason}`)
   }
 
+  const collect = async (sessionId: string) => {
+    const binding = resolveExtensionBinding(ctx.worktree, { purpose: "learning" })
+    if (binding.launcherWorktree !== ctx.worktree) throw new Error("EXTERNAL_OBSERVATION_BINDING_REJECTED")
+    const external = { worktree: binding.launcherWorktree, sessionId }
+    const invoke = async (input: Record<string, unknown>) => mcpToolData(await callMcpTool(
+      ctx.worktree, "extraction_run", { project: binding.project, external: input }, { timeoutMs: 60_000 },
+    )) as { enabled?: boolean }
+    if ((await invoke(external)).enabled !== true) return
+    const args = { path: { id: sessionId }, query: { directory: binding.launcherWorktree } }
+    const info = (await ctx.client.session.get(args))?.data
+    const messages = (await ctx.client.session.messages({ ...args, query: { ...args.query, limit: 100 } }))?.data
+    if (!Array.isArray(messages) || messages.length > 100) throw new Error("EXTERNAL_OBSERVATION_INVALID")
+    const users = messages.filter((message) => message?.info?.role === "user").slice(-20)
+    if (Buffer.byteLength(JSON.stringify(users)) > 1024 * 1024) {
+      throw new Error("EXTERNAL_OBSERVATION_INVALID")
+    }
+    // Bound each idle pass; replay is safe because the API persists per-message receipts.
+    const visible = visibleContextExport({ info, messages: users }, sessionId, binding.launcherWorktree)
+    for (const message of visible.messages) {
+      const text = message.parts[0]?.text
+      if (!text || text.length > 6000) continue
+      const result = await invoke({ ...external, message: { id: message.info.id, role: "user", text } })
+      if (result.enabled !== true) return
+    }
+  }
+
   return {
     event: async ({ event }: { event: any }) => {
-      if (event.type === "session.idle") {
-        const now = Date.now()
-        if (now - lastFire < THROTTLE_MS) return
-        lastFire = now
-        try {
-          const result = await triggerExtraction(ctx.worktree)
-          if (!result.triggered) reportWarning(result.failure ?? "request_failed")
-        } catch {
-          reportWarning("request_failed")
-        }
-      }
+      if (event.type !== "session.idle") return
+      const sessionId = event.properties?.sessionID
+      if (typeof sessionId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sessionId)) return
+      const existing = pending.get(sessionId)
+      if (existing) return existing
+      const promise = collect(sessionId).catch((error) => reportWarning(classifyExtractionFailure(error)))
+        .finally(() => pending.delete(sessionId))
+      pending.set(sessionId, promise)
+      await promise
     },
 
     tool: {

@@ -5465,6 +5465,19 @@ function runMigrations(db: Database.Database): void {
   }
 
   db.exec(readFileSync(resolve(migrationsDir, "117_mcp_credential_receipts.sql"), "utf-8"));
+  const repositoryResourceSchema = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_resources'",
+  ).get() as { sql: string };
+  if (!repositoryResourceSchema.sql.includes("'command'")) {
+    const migration = readFileSync(resolve(migrationsDir, "118_repository_command_resources.sql"), "utf-8");
+    db.transaction(() => {
+      db.exec(migration);
+      if (db.prepare("PRAGMA foreign_key_check(repository_sync_resources)").all().length > 0) {
+        throw new Error("Migration 118 failed repository resource foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 118_repository_command_resources.sql");
+  }
   enforceReservedBrokerInvariant(db);
 }
 

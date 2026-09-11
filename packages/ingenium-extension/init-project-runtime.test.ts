@@ -118,6 +118,7 @@ function repositoryResponse(resources = true) {
       skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
       agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
       plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+      command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
     } } } : {}),
   } };
 }
@@ -373,6 +374,8 @@ describe("ingenium-init-project production runtime contract", () => {
     const entrypoint = join(distribution, "scripts", "init-project.js");
     const command = createRuntimeSymlink(entrypoint);
     const worktree = createRuntimeWorktree();
+    mkdirSync(join(worktree, ".opencode/commands"), { recursive: true });
+    writeFileSync(join(worktree, ".opencode/commands/check.md"), "Run $ARGUMENTS\n");
     writeProtectedFallbackToken(worktree, "c".repeat(32));
     const requests: Array<{ url: string; method: string; body: string }> = [];
     const server = createServer((request, response) => {
@@ -404,6 +407,7 @@ describe("ingenium-init-project production runtime contract", () => {
             skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 8 },
             agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
             plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 5 },
+            command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 1 },
           } } } }));
           return;
         }
@@ -431,7 +435,7 @@ describe("ingenium-init-project production runtime contract", () => {
       );
 
       expect(result.code, result.stderr).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
+      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all", commands: { skipped: 1 } });
       expect(requests.map(({ url }) => url)).toContain("/api/v1/repository/sync?project=ingenium");
       expect(requests.some(({ url }) => url.startsWith("/api/v1/coordination/"))).toBe(false);
 
@@ -441,8 +445,10 @@ describe("ingenium-init-project production runtime contract", () => {
         skills: Array<{ path: string }>;
         agents: Array<{ path: string; name: string }>;
         plugins: Array<{ path: string; source: string }>;
+        commands: Array<{ path: string; source: string }>;
       } };
       expect(payload.resourcesManifest.skills).toHaveLength(8);
+      expect(payload.resourcesManifest.commands).toEqual([expect.objectContaining({ path: ".opencode/commands/check.md", source: "Run $ARGUMENTS\n" })]);
       expect(payload.resourcesManifest.skills.every((entry) => /\.opencode\/skills\/[^/]+\/SKILL\.md$/.test(entry.path))).toBe(true);
       expect(payload.resourcesManifest.agents).toHaveLength(11);
       expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/sync-diagnostics.md");
@@ -502,6 +508,7 @@ describe("ingenium-init-project production runtime contract", () => {
           skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
           agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 15 },
             plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
+            command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
         } } } }));
         return;
       }

@@ -11,6 +11,69 @@
 import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { Observation, ObservationSourceSchema } from "../schema.js";
 import { logEvent } from "./pipeline-events.js";
+import { createHash } from "node:crypto";
+import { redactContextText } from "@ingenium/extension/context-upload-codec";
+import { isAutomaticLearningEnabled } from "./settings.js";
+
+export interface ExternalObservationSource {
+  worktreeId: string;
+  sessionId: string;
+  messageId: string;
+  fingerprint: string;
+}
+
+export function requireExternalObservationSession(projectId: string, worktreeId: string, sessionId: string): void {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  if (!/^worktree-[a-f0-9]{64}$/.test(worktreeId)
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sessionId)
+    || redactContextText(sessionId) !== sessionId
+    || !db.prepare(`SELECT 1 FROM coordination_sessions s JOIN projects p ON p.id = s.project_id
+      WHERE s.project_id = ? AND s.worktree_id = ? AND s.session_id = ?
+      AND s.state = 'active' AND p.archived_at IS NULL LIMIT 1`).get(projectId, worktreeId, sessionId)) {
+    throw new Error("EXTERNAL_OBSERVATION_BINDING_REJECTED");
+  }
+}
+
+function externalReceiptKey(source: ExternalObservationSource): string {
+  return `external_observation_receipt_v1:${createHash("sha256")
+    .update(JSON.stringify([source.worktreeId, source.sessionId, source.messageId])).digest("hex")}`;
+}
+
+export function externalObservationReceipt(projectId: string, source: ExternalObservationSource): { observationId: number | null } | undefined {
+  const row = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT value FROM settings WHERE project_id = ? AND key = ?")
+    .get(projectId, externalReceiptKey(source)) as { value: string } | undefined;
+  if (!row) return undefined;
+  const receipt = JSON.parse(row.value);
+  if (receipt.fingerprint !== source.fingerprint) throw new Error("EXTERNAL_OBSERVATION_SOURCE_CONFLICT");
+  return { observationId: receipt.observationId };
+}
+
+/** The existing project/key uniqueness makes the content-free receipt and observation one atomic write. */
+export function storeExternalObservation(projectId: string, source: ExternalObservationSource,
+  rule?: { type: Observation["observation_type"]; content: string; importance?: number }) {
+  const result = execTransaction(() => {
+    requireExternalObservationSession(projectId, source.worktreeId, source.sessionId);
+    if (!isAutomaticLearningEnabled(projectId)) return { enabled: false, created: false, observationId: null };
+    const existing = externalObservationReceipt(projectId, source);
+    if (existing) return { enabled: true, created: false, ...existing };
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    let observationId: number | null = null;
+    if (rule) {
+      const timestamp = new Date().toISOString();
+      observationId = Number(db.prepare(`INSERT INTO observations
+        (project_id, organization_id, visibility, observation_type, content, importance, source, context, session_id, created_at, updated_at)
+        SELECT id, organization_id, 'organization', ?, ?, ?, 'auto-observer', ?, ?, ?, ? FROM projects WHERE id = ?`)
+        .run(rule.type, redactContextText(rule.content), rule.importance ?? 6,
+          JSON.stringify({ kind: "external-user-message-v1", ...source }), source.sessionId, timestamp, timestamp, projectId).lastInsertRowid);
+    }
+    // Receipts survive observation deletion and never expire: restart cannot relearn a deleted source message.
+    db.prepare("INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)")
+      .run(projectId, externalReceiptKey(source), JSON.stringify({ ...source, observationId }));
+    return { enabled: true, created: observationId !== null, observationId };
+  });
+  checkpointAfterWrite();
+  return result;
+}
 
 /**
  * Store a single observation and fire a pipeline event for observability.

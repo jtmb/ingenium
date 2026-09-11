@@ -139,7 +139,7 @@ export function assertRepositorySyncStructure(
 
   if (input.resourcesManifest !== null && typeof input.resourcesManifest === "object" && !Array.isArray(input.resourcesManifest)) {
     const resources = input.resourcesManifest as Record<string, unknown>;
-    const lists = [resources.skills, resources.agents, resources.plugins];
+    const lists = [resources.skills, resources.agents, resources.plugins, resources.commands];
     let entries = 0;
     for (const list of lists) {
       if (!Array.isArray(list)) continue;

@@ -49,7 +49,7 @@ import * as agentTools from "../lib/tools/agents.js";
 import * as observationTools from "../lib/tools/observations.js";
 import * as personalityTools from "../lib/tools/personality.js";
 import { synthesisRun, synthesisStatus, synthesisCrossProject } from "../lib/tools/synthesis.js";
-import { extractionRun } from "../lib/tools/extraction.js";
+import { extractionRun, externalExtractionSchema } from "../lib/tools/extraction.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
 import * as logTools from "../lib/tools/logs.js";
@@ -204,8 +204,9 @@ const repositoryResourcesManifestParam = z.object({
   skills: z.array(z.record(z.unknown())).max(512),
   agents: z.array(z.record(z.unknown())).max(512),
   plugins: z.array(z.record(z.unknown())).max(512),
+  commands: z.array(z.record(z.unknown())).max(512).optional(),
 }).strict().superRefine((manifest, context) => {
-  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length > 512) {
+  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length + (manifest.commands?.length ?? 0) > 512) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
   }
 });
@@ -779,10 +780,10 @@ server.registerTool(
 server.registerTool(
   "extraction_run",
   {
-    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
-    inputSchema: { project: projectParam },
+    description: "Extract durable user behavior rules. Optional external input probes learning eligibility or ingests one redacted visible user message from an exact launcher-bound session; otherwise schedules the server scan.",
+    inputSchema: { project: projectParam, external: externalExtractionSchema.optional() },
   },
-  wrapHandler(C("extraction_run"), async ({ project }) => extractionRun(project)),
+  wrapHandler(C("extraction_run"), async ({ project, external }) => extractionRun(project, external, launcherProject)),
 );
 
 const taskRevisionParam = z.number().int().nonnegative();

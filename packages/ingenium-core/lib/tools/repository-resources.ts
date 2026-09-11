@@ -1,5 +1,5 @@
 /**
- * Repository-authoritative skills, agents, and plugins synchronization.
+ * Repository-authoritative skills, agents, plugins, and commands synchronization.
  *
  * The API receives a fully validated semantic manifest from the extension. It
  * never reads a caller's filesystem. The repository is authoritative, while
@@ -18,7 +18,7 @@ export const MAX_REPOSITORY_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
 const REPOSITORY_PLUGIN_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const REPOSITORY_PLUGIN_ROOTS = [".opencode/plugins/", "packages/"] as const;
 
-type ResourceType = "skill" | "agent" | "plugin";
+type ResourceType = "skill" | "agent" | "plugin" | "command";
 
 interface BaseEntry {
   identity: string;
@@ -62,11 +62,19 @@ export interface RepositoryPluginEntry extends BaseEntry {
   options: Record<string, unknown>;
 }
 
+export interface RepositoryCommandEntry extends BaseEntry {
+  name: string;
+  source: string;
+  fileType: "regular";
+  isSymlink: false;
+}
+
 export interface RepositoryResourcesManifest {
   version: 2;
   skills: RepositorySkillEntry[];
   agents: RepositoryAgentEntry[];
   plugins: RepositoryPluginEntry[];
+  commands?: RepositoryCommandEntry[];
 }
 
 export interface RepositoryResourcesSyncSummary {
@@ -316,19 +324,43 @@ function validatePlugin(value: unknown, total: { bytes: number }): RepositoryPlu
   return entry;
 }
 
+function validateCommand(value: unknown, total: { bytes: number }): RepositoryCommandEntry {
+  if (!isRecord(value)
+    || !isSafeIdentity(value.identity) || !value.identity.startsWith("command:")
+    || !isSafeRelativePath(value.path)
+    || !isSafeSkillName(value.name)
+    || value.path !== `.opencode/commands/${value.name}.md`
+    || !isHash(value.sha256)
+    || !isBoundedText(value.source) || !value.source.trim() || value.source.includes("\u0000")
+    || value.fileType !== "regular" || value.isSymlink !== false) throw new RepositoryResourcesManifestError();
+  const entry: RepositoryCommandEntry = {
+    identity: value.identity, path: value.path, sha256: value.sha256, name: value.name,
+    source: normalizeText(value.source), fileType: "regular", isSymlink: false,
+  };
+  if (entry.source.startsWith("---\n") && !/^---\n[\s\S]*?\n---\n[\s\S]*\S/.test(entry.source)) {
+    throw new RepositoryResourcesManifestError();
+  }
+  const { sha256: _hash, identity: _identity, ...semantic } = entry;
+  if (entry.sha256 !== normalizedEntryHash(semantic)) throw new RepositoryResourcesManifestError();
+  assertEntrySize(entry, total);
+  return entry;
+}
+
 function validateManifest(value: unknown): RepositoryResourcesManifest {
-  const allowedKeys = ["version", "skills", "agents", "plugins"];
-  if (!isRecord(value) || Object.keys(value).length !== allowedKeys.length || !Object.keys(value).every((key) => allowedKeys.includes(key))
+  const allowedKeys = ["version", "skills", "agents", "plugins", "commands"];
+  if (!isRecord(value) || !Object.keys(value).every((key) => allowedKeys.includes(key))
     || value.version !== 2 || !Array.isArray(value.skills) || !Array.isArray(value.agents) || !Array.isArray(value.plugins)) {
     throw new RepositoryResourcesManifestError();
   }
-  const count = value.skills.length + value.agents.length + value.plugins.length;
+  if (value.commands !== undefined && !Array.isArray(value.commands)) throw new RepositoryResourcesManifestError();
+  const count = value.skills.length + value.agents.length + value.plugins.length + (value.commands?.length ?? 0);
   if (count > MAX_REPOSITORY_RESOURCE_ITEMS) throw new RepositoryResourcesManifestError();
   const total = { bytes: 0 };
   const skills = value.skills.map((entry) => validateSkill(entry, total));
   const agents = value.agents.map((entry) => validateAgent(entry, total));
   const plugins = value.plugins.map((entry) => validatePlugin(entry, total));
-  for (const entries of [skills, agents, plugins]) {
+  const commands = value.commands?.map((entry) => validateCommand(entry, total));
+  for (const entries of [skills, agents, plugins, commands ?? []]) {
     const identities = new Set<string>();
     const names = new Set<string>();
     for (const entry of entries) {
@@ -337,7 +369,7 @@ function validateManifest(value: unknown): RepositoryResourcesManifest {
       names.add(entry.name);
     }
   }
-  return { version: 2, skills, agents, plugins };
+  return { version: 2, skills, agents, plugins, commands };
 }
 
 export function validateRepositoryResourcesManifest(value: unknown): RepositoryResourcesManifest {
@@ -355,7 +387,7 @@ function resourceRows(projectId: string, type: ResourceType): ManagedResource[] 
 }
 
 function resourceExists(db: ReturnType<typeof getDb>, type: ResourceType, projectId: string, resourceId: string): boolean {
-  const table = type === "skill" ? "skills" : type === "agent" ? "agents" : "plugins";
+  const table = type === "skill" ? "skills" : type === "agent" ? "agents" : type === "command" ? "commands" : "plugins";
   return Boolean(db.prepare(`SELECT 1 FROM ${table} WHERE project_id = ? AND id = ?`).get(projectId, resourceId));
 }
 
@@ -547,6 +579,50 @@ function syncPluginsInTransaction(projectId: string, entries: RepositoryPluginEn
   return { summary, confirmed };
 }
 
+function syncCommandsInTransaction(projectId: string, entries: RepositoryCommandEntry[], dryRun: boolean): { summary: RepositoryResourcesSyncSummary; confirmed: RepositoryResourcesSyncResult["confirmed"] } {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const summary = emptySummary();
+  const confirmed: RepositoryResourcesSyncResult["confirmed"] = [];
+  const managed = new Map(resourceRows(projectId, "command").map((row) => [row.identity, row]));
+  const incoming = new Set(entries.map((entry) => entry.identity));
+  const timestamp = new Date().toISOString();
+  for (const entry of entries) {
+    const state = adoptManagedIdentity(db, projectId, "command", entry, managed, dryRun);
+    const current = state && resourceExists(db, "command", projectId, state.resource_id)
+      ? db.prepare("SELECT * FROM commands WHERE project_id = ? AND id = ?").get(projectId, state.resource_id) as { id: string; name: string; file_path: string; content: string | null } | undefined
+      : db.prepare("SELECT * FROM commands WHERE project_id = ? AND name = ?").get(projectId, entry.name) as { id: string; name: string; file_path: string; content: string | null } | undefined;
+    if (!current) {
+      summary.created++;
+      if (!dryRun) {
+        const id = randomUUID();
+        db.prepare("INSERT INTO commands (id, project_id, name, file_path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+          .run(id, projectId, entry.name, entry.path, entry.source, timestamp, timestamp);
+        upsertState(db, projectId, "command", entry, id, entry);
+      }
+    } else {
+      const changed = current.name !== entry.name || current.file_path !== entry.path || current.content !== entry.source;
+      if (!changed && state?.source_hash === entry.sha256 && state.source_path === entry.path) summary.unchanged++;
+      else if (current.name !== entry.name) summary.renamed++;
+      else summary.updated++;
+      if (!dryRun) {
+        if (changed) db.prepare("UPDATE commands SET name=?, file_path=?, content=?, updated_at=? WHERE project_id=? AND id=?")
+          .run(entry.name, entry.path, entry.source, timestamp, projectId, current.id);
+        upsertState(db, projectId, "command", entry, current.id, entry);
+      }
+    }
+    confirmed.push({ type: "command", identity: entry.identity, path: entry.path, sha256: entry.sha256 });
+  }
+  for (const [identity, state] of managed) {
+    if (incoming.has(identity)) continue;
+    summary.removed++;
+    if (!dryRun) {
+      db.prepare("DELETE FROM commands WHERE project_id = ? AND id = ?").run(projectId, state.resource_id);
+      db.prepare("DELETE FROM repository_sync_resources WHERE project_id = ? AND resource_type = 'command' AND identity = ?").run(projectId, identity);
+    }
+  }
+  return { summary, confirmed };
+}
+
 /** Preview or apply all non-document repository resources atomically. */
 export function syncRepositoryResources(projectId: string, input: unknown, dryRun = false): RepositoryResourcesSyncResult {
   if (dryRun) return syncRepositoryResourcesInTransaction(projectId, input, true);
@@ -557,12 +633,18 @@ export function syncRepositoryResources(projectId: string, input: unknown, dryRu
 
 export function syncRepositoryResourcesInTransaction(projectId: string, input: unknown, dryRun = false): RepositoryResourcesSyncResult {
   const manifest = validateManifest(input);
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  if (!db.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) throw new RepositoryResourcesManifestError();
   const skills = syncSkillsInTransaction(projectId, manifest.skills, dryRun);
   const agents = syncAgentsInTransaction(projectId, manifest.agents, dryRun);
   const plugins = syncPluginsInTransaction(projectId, manifest.plugins, dryRun);
+  // Older clients do not own command deletion; only an explicit list reconciles it.
+  const commands = manifest.commands === undefined
+    ? { summary: emptySummary(), confirmed: [] }
+    : syncCommandsInTransaction(projectId, manifest.commands, dryRun);
   return {
     dryRun,
-    summary: { skill: skills.summary, agent: agents.summary, plugin: plugins.summary },
-    confirmed: [...skills.confirmed, ...agents.confirmed, ...plugins.confirmed],
+    summary: { skill: skills.summary, agent: agents.summary, plugin: plugins.summary, command: commands.summary },
+    confirmed: [...skills.confirmed, ...agents.confirmed, ...plugins.confirmed, ...commands.confirmed],
   };
 }

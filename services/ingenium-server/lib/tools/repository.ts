@@ -71,9 +71,10 @@ function hasBoundedRepositoryManifests(docsManifest: unknown, resourcesManifest:
       || resourcesManifest.version !== 2
       || !Array.isArray(resourcesManifest.skills)
       || !Array.isArray(resourcesManifest.agents)
-      || !Array.isArray(resourcesManifest.plugins)) return false;
+      || !Array.isArray(resourcesManifest.plugins)
+      || (resourcesManifest.commands !== undefined && !Array.isArray(resourcesManifest.commands))) return false;
 
-    const entries = [...resourcesManifest.skills, ...resourcesManifest.agents, ...resourcesManifest.plugins];
+    const entries = [...resourcesManifest.skills, ...resourcesManifest.agents, ...resourcesManifest.plugins, ...(resourcesManifest.commands ?? [])];
     if (entries.length > REPOSITORY_MAX_RESOURCE_ITEMS) return false;
     let resourceBytes = 0;
     for (const entry of entries) {
@@ -146,11 +147,13 @@ export async function repositorySync(
     if (resourcesManifest !== undefined) {
       const resources = applied.data.resources;
       if (!isRecord(resources) || !isRecord(resources.summary)) return failure();
+      if (isRecord(resourcesManifest) && resourcesManifest.commands !== undefined && !isRecord(resources.summary.command)) return failure();
       output.resources = {
         summary: {
           skill: summary(resources.summary.skill, RESOURCE_SUMMARY_KEYS),
           agent: summary(resources.summary.agent, RESOURCE_SUMMARY_KEYS),
           plugin: summary(resources.summary.plugin, RESOURCE_SUMMARY_KEYS),
+          command: summary(resources.summary.command, RESOURCE_SUMMARY_KEYS),
         },
       };
     }

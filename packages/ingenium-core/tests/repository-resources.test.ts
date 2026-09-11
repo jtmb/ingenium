@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import Database from "better-sqlite3";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getDb, projects, repositoryResources, repositorySync, resetDbForTest } from "../lib/index.js";
@@ -94,6 +95,112 @@ afterEach(() => {
 });
 
 describe("repository resource sync", () => {
+  it("upgrades migration 060 without losing rows, keys, hash validation, index, or project cascade", () => {
+    const db = new Database(":memory:");
+    try {
+      db.pragma("foreign_keys = ON");
+      db.exec("CREATE TABLE projects (id TEXT PRIMARY KEY); INSERT INTO projects VALUES ('fixture')");
+      db.exec(readFileSync(new URL("../data/migrations/060_repository_resource_sync.sql", import.meta.url), "utf8"));
+      const insert = () => db.prepare("INSERT INTO repository_sync_resources VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+      for (const kind of ["skill", "agent", "plugin"]) {
+        insert().run("fixture", kind, kind, kind, kind, `path/${kind}`, "a".repeat(64), JSON.stringify({ kind }), "created", "updated");
+      }
+      const before = db.prepare("SELECT * FROM repository_sync_resources ORDER BY resource_type").all();
+      const migration = readFileSync(new URL("../data/migrations/118_repository_command_resources.sql", import.meta.url), "utf8");
+      db.transaction(() => db.exec(migration))();
+      expect(db.prepare("SELECT * FROM repository_sync_resources ORDER BY resource_type").all()).toEqual(before);
+      insert().run("fixture", "command", "command:id", "id", "run", ".opencode/commands/run.md", "b".repeat(64), "{}", "created", "updated");
+      for (const [project, kind, identity, id, hash] of [
+        ["fixture", "invalid", "other", "other", "a".repeat(64)],
+        ["missing", "command", "other", "other", "a".repeat(64)],
+        ["fixture", "command", "command:id", "other", "a".repeat(64)],
+        ["fixture", "command", "other", "id", "a".repeat(64)],
+        ["fixture", "command", "other", "other", "z".repeat(64)],
+        ["fixture", "command", "other", "other", "a".repeat(63)],
+      ]) expect(() => insert().run(project, kind, identity, id, "run", "path", hash, "{}", "created", "updated")).toThrow();
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+      expect(db.prepare("PRAGMA index_list(repository_sync_resources)").all()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "idx_repository_sync_resources_project_type_name" }),
+      ]));
+      db.prepare("DELETE FROM projects WHERE id = ?").run("fixture");
+      expect(db.prepare("SELECT * FROM repository_sync_resources").all()).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  it("syncs commands atomically with stable readback, no drift, scoped deletion, and legacy omission safety", () => {
+    const semantic = { path: ".opencode/commands/run.md", name: "run", source: "---\ndescription: Run checks\n---\nRun $ARGUMENTS\n", fileType: "regular", isSymlink: false };
+    const command = { identity: "command:run", sha256: hash(semantic), ...semantic };
+    const resourcesManifest = { ...manifest(), commands: [command] };
+    const worktreeId = `worktree-${"c".repeat(64)}`;
+    const input = { docsManifest: { files: [] }, resourcesManifest, worktreeId, expectedGeneration: 0, dryRun: true };
+    const db = getDb();
+    expect(repositorySync.applyRepositorySync(projectId, input).resources?.summary.command.created).toBe(1);
+    expect(db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId)).toEqual([]);
+    const applied = repositorySync.applyRepositorySync(projectId, { ...input, dryRun: false });
+    expect(applied.resources?.confirmed).toContainEqual({ type: "command", identity: command.identity, path: command.path, sha256: command.sha256 });
+    const persisted = db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId);
+    expect(persisted).toEqual([expect.objectContaining({ content: command.source, file_path: command.path })]);
+    expect(JSON.parse((db.prepare("SELECT payload FROM repository_sync_resources WHERE project_id = ? AND resource_type = 'command'").get(projectId) as { payload: string }).payload)).toEqual(command);
+    const previousResources = ["skills", "agents", "plugins"].map((table) => db.prepare(`SELECT * FROM ${table} WHERE project_id = ?`).all(projectId));
+    const repeated = repositorySync.applyRepositorySync(projectId, { ...input, dryRun: false, expectedGeneration: 1 });
+    expect(repeated.resources?.summary).toMatchObject({ command: { unchanged: 1 }, skill: { unchanged: 1 }, agent: { unchanged: 1 }, plugin: { unchanged: 1 } });
+    expect(db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId)).toEqual(persisted);
+    expect(["skills", "agents", "plugins"].map((table) => db.prepare(`SELECT * FROM ${table} WHERE project_id = ?`).all(projectId))).toEqual(previousResources);
+    expect(() => repositorySync.applyRepositorySync(projectId, { ...input, dryRun: false })).toThrow("MANIFEST_GENERATION_CONFLICT");
+    for (const malformed of [
+      { ...command, source: "tampered" }, { ...command, path: "../run.md" },
+      { ...command, isSymlink: true }, { ...command, name: "different" },
+    ]) expect(() => repositorySync.applyRepositorySync(projectId, { ...input, dryRun: false, expectedGeneration: 2, resourcesManifest: { ...resourcesManifest, commands: [malformed] } })).toThrow(repositoryResources.RepositoryResourcesManifestError);
+    expect(db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId)).toEqual(persisted);
+    expect(() => repositoryResources.syncRepositoryResources("missing-project", resourcesManifest)).toThrow();
+    const other = projects.createProject("other-command-project").id;
+    repositoryResources.syncRepositoryResources(other, resourcesManifest);
+    repositoryResources.syncRepositoryResources(projectId, manifest());
+    expect(db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId)).toEqual(persisted);
+    const renamedSemantic = { ...semantic, name: "renamed", path: ".opencode/commands/renamed.md" };
+    const renamed = { identity: command.identity, sha256: hash(renamedSemantic), ...renamedSemantic };
+    expect(repositoryResources.syncRepositoryResources(projectId, { ...manifest(), commands: [renamed] }).summary.command.renamed).toBe(1);
+    db.prepare("INSERT INTO commands (id, project_id, name, file_path, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("unmanaged-command", projectId, "unmanaged", ".opencode/commands/unmanaged.md", "Keep", "now", "now");
+    expect(repositoryResources.syncRepositoryResources(projectId, { ...manifest(), commands: [] }, true).summary.command.removed).toBe(1);
+    expect(repositoryResources.syncRepositoryResources(projectId, { ...manifest(), commands: [] }).summary.command.removed).toBe(1);
+    expect(db.prepare("SELECT name FROM commands WHERE project_id = ?").all(projectId)).toEqual([{ name: "unmanaged" }]);
+    expect(db.prepare("SELECT content FROM commands WHERE project_id = ?").all(other)).toEqual([{ content: command.source }]);
+  });
+
+  it("runs migration 118 on an existing database once and retains managed resource payloads across reopen", () => {
+    repositoryResources.syncRepositoryResources(projectId, manifest());
+    const db = getDb();
+    const before = db.prepare("SELECT * FROM repository_sync_resources ORDER BY resource_type").all();
+    const oldSchema = readFileSync(new URL("../data/migrations/060_repository_resource_sync.sql", import.meta.url), "utf8");
+    db.transaction(() => {
+      db.exec("CREATE TEMP TABLE saved_resources AS SELECT * FROM repository_sync_resources; DROP TABLE repository_sync_resources");
+      db.exec(oldSchema);
+      db.exec("INSERT INTO repository_sync_resources SELECT * FROM saved_resources; DROP TABLE saved_resources");
+    })();
+    resetDbForTest();
+    const upgraded = getDb();
+    expect(upgraded.prepare("SELECT * FROM repository_sync_resources ORDER BY resource_type").all()).toEqual(before);
+    expect((upgraded.prepare("SELECT sql FROM sqlite_master WHERE name = 'repository_sync_resources'").get() as { sql: string }).sql).toContain("'command'");
+    upgraded.exec("CREATE INDEX test_118_reopen_sentinel ON repository_sync_resources(identity)");
+    resetDbForTest();
+    expect(getDb().prepare("SELECT * FROM repository_sync_resources ORDER BY resource_type").all()).toEqual(before);
+    expect(getDb().prepare("SELECT name FROM sqlite_master WHERE name = 'test_118_reopen_sentinel'").get()).toEqual({ name: "test_118_reopen_sentinel" });
+  });
+
+  it("rolls back the entire bulk transaction when command storage fails", () => {
+    const db = getDb();
+    db.exec("CREATE TRIGGER reject_command BEFORE INSERT ON commands BEGIN SELECT RAISE(ABORT, 'command storage failure'); END");
+    const semantic = { name: "run", path: ".opencode/commands/run.md", source: "Run checks", fileType: "regular", isSymlink: false };
+    expect(() => repositorySync.applyRepositorySync(projectId, {
+      docsManifest: { files: [] }, resourcesManifest: { ...manifest(), commands: [{ identity: "command:run", sha256: hash(semantic), ...semantic }] },
+      dryRun: false, expectedGeneration: 0, worktreeId: `worktree-${"d".repeat(64)}`,
+    })).toThrow("command storage failure");
+    for (const table of ["skills", "agents", "plugins", "commands", "repository_sync_resources", "repository_sync_generations"]) {
+      expect(db.prepare(`SELECT * FROM ${table} WHERE project_id = ?`).all(projectId)).toEqual([]);
+    }
+  });
+
   it("applies generation CAS per authenticated worktree identity and reports the bounded current generation", () => {
     const worktreeId = `worktree-${"a".repeat(64)}`;
     const input = {

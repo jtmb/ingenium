@@ -181,6 +181,7 @@ beforeAll(async () => {
       projectIds: [projectId],
       audience: "repository-sync",
       ...binding,
+      workspaceId: req.get("x-test-workspace") ?? binding.workspaceId,
     };
     next();
   });
@@ -483,5 +484,42 @@ describe("repository resources sync API", () => {
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: { code: "NOT_FOUND", message: "Resource not found" } });
+  });
+
+  it("previews, applies, and reads back commands without drift and rejects stale or foreign submissions", async () => {
+    const command = entry("command:api", {
+      name: "check", path: ".opencode/commands/check.md", source: "Run $ARGUMENTS\n", fileType: "regular", isSymlink: false,
+    });
+    const content = "# Command sync fixture\n";
+    const body = {
+      docsManifest: { files: [{ path: "docs/commands.md", content, sha256: createHash("sha256").update(content).digest("hex"), fileType: "regular", isSymlink: false }] },
+      resourcesManifest: { ...manifest(), commands: [command] }, expectedGeneration: 0, dryRun: true,
+    };
+    const post = async (input: unknown, headers: Record<string, string> = {}) => {
+      const response = await fetch(`${baseUrl}${REPOSITORY_SYNC_PATH}?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-workspace": "command-workspace", ...headers }, body: JSON.stringify(input),
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    const db = getDb();
+    expect(await post(body)).toMatchObject({ status: 200, body: { data: { generation: 0, resources: { summary: { command: { created: 1 } } } } } });
+    expect(db.prepare("SELECT * FROM commands WHERE project_id = ?").all(projectId)).toEqual([]);
+    expect(await post({ ...body, dryRun: false })).toMatchObject({ status: 200, body: { data: { generation: 1, resources: { summary: { command: { created: 1 } }, confirmed: [
+      expect.anything(), expect.anything(), expect.anything(), { type: "command", identity: command.identity, path: command.path, sha256: command.sha256 },
+    ] } } } });
+    const snapshot = () => ["commands", "skills", "agents", "plugins", "docs_pages"].map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY id`).all());
+    const before = snapshot();
+    expect(await post({ ...body, dryRun: false, expectedGeneration: 1 })).toMatchObject({ status: 200, body: { data: {
+      generation: 2, docs: { summary: { unchanged: 1 } },
+      resources: { summary: { command: { unchanged: 1 }, skill: { unchanged: 1 }, agent: { unchanged: 1 }, plugin: { unchanged: 1 } } },
+    } } });
+    expect(snapshot()).toEqual(before);
+    expect(await post({ ...body, dryRun: false })).toMatchObject({ status: 409, body: { error: { code: "MANIFEST_GENERATION_CONFLICT", currentGeneration: 2 } } });
+    expect(await post({ ...body, expectedGeneration: 2, dryRun: false, resourcesManifest: { ...body.resourcesManifest, commands: [{ ...command, source: "tampered" }] } }))
+      .toMatchObject({ status: 422, body: { error: { code: "INVALID_REPOSITORY_SYNC" } } });
+    expect(await post({ ...body, expectedGeneration: 2, worktreeId: `worktree-${"f".repeat(64)}` })).toMatchObject({ status: 422 });
+    expect(await post({ ...body, dryRun: false }, { "x-test-wrong-project": "1" })).toMatchObject({ status: 404 });
+    expect(await post(body, { "x-test-workspace": "independent-worktree" })).toMatchObject({ status: 200, body: { data: { generation: 0 } } });
+    expect(snapshot()).toEqual(before);
   });
 });

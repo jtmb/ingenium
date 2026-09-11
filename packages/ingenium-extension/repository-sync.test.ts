@@ -151,6 +151,72 @@ afterEach(() => {
 });
 
 describe("repository-authoritative manifest v2", () => {
+  it("projects canonical commands with stable normalized hashes and retains identity across a rename", async () => {
+    fixture();
+    const before = buildRepositoryManifestV2(worktree, manifest());
+    const source = "---\ndescription: Run checks\n---\nRun $ARGUMENTS\n";
+    write(".opencode/commands/run.md", source.replaceAll("\n", "\r\n"));
+    write(".opencode/commands/nested/ignored.md", "Not canonical");
+    write(".opencode/commands/ignored.txt", "Not Markdown");
+    const projection = buildRepositoryManifestV2(worktree, manifest());
+    expect(projection.commands).toEqual([expect.objectContaining({ name: "run", source, path: ".opencode/commands/run.md", fileType: "regular", isSymlink: false })]);
+    expect({ ...projection, commands: [] }).toEqual(before);
+    write(".opencode/commands/run.md", source);
+    expect(buildRepositoryManifestV2(worktree, manifest())).toEqual(projection);
+    const call = successfulMcp();
+    mockCallMcpTool.mockImplementation(async (...args: Parameters<typeof call>) => {
+      const result = await call(...args);
+      const payload = JSON.parse(result.content[0]!.text);
+      payload.resources.summary.command = { created: 1 };
+      result.content[0]!.text = JSON.stringify(payload);
+      return result;
+    });
+    expect((await repositorySync(worktree, { dryRun: true })).commands.pushed).toBe(1);
+    expect(existsSync(join(worktree, ".opencode/.ingenium-sync-state.json"))).toBe(false);
+    expect((await repositorySync(worktree)).commands.pushed).toBe(1);
+    expect(call).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({ resourcesManifest: expect.objectContaining({ commands: projection.commands }) }));
+    const saved = loadManifest(worktree, "repository-fixture");
+    const original = projection.commands[0]!;
+    expect(saved.resources.repository?.commands?.[original.identity]?.hash).toBe(original.sha256);
+    renameSync(join(worktree, original.path), join(worktree, ".opencode/commands/renamed.md"));
+    const renamed = buildRepositoryManifestV2(worktree, saved).commands[0]!;
+    expect(renamed.identity).toBe(original.identity);
+    expect(renamed.sha256).not.toBe(original.sha256);
+  });
+
+  it.each(["", "---\ndescription: Missing closing delimiter", "---\ndescription: Empty prompt\n---\n", "bad\u0000content"])("rejects malformed command content before MCP: %j", async (source) => {
+    fixture();
+    write(".opencode/commands/run.md", source);
+    await expect(repositorySync(worktree, { dryRun: true })).rejects.toThrow(RepositorySyncScanError);
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects command symlinks and oversized content before submission", () => {
+    fixture();
+    write(".opencode/commands/run.md", "x".repeat(REPOSITORY_MAX_RESOURCE_BYTES + 1));
+    expect(() => buildRepositoryManifestV2(worktree)).toThrow(RepositorySyncScanError);
+    rmSync(join(worktree, ".opencode/commands/run.md"));
+    symlinkSync(join(worktree, "docs/index.md"), join(worktree, ".opencode/commands/run.md"));
+    expect(() => buildRepositoryManifestV2(worktree)).toThrow(RepositorySyncScanError);
+  });
+
+  it("does not advance a command baseline when readback is missing, including deletion", async () => {
+    fixture();
+    successfulMcp();
+    write(".opencode/commands/run.md", "Run checks\n");
+    expect((await repositorySync(worktree)).docs.errors).toBe(1);
+    expect(existsSync(join(worktree, ".opencode/.ingenium-sync-state.json"))).toBe(false);
+    const state = manifest();
+    state.generation = 0;
+    const command = buildRepositoryManifestV2(worktree, state).commands[0]!;
+    state.resources.repository!.commands = { [command.identity]: { identity: command.identity, path: command.path, hash: command.sha256, fingerprint: "previous" } };
+    saveManifest(worktree, state);
+    const before = readFileSync(join(worktree, ".opencode/.ingenium-sync-state.json"), "utf8");
+    rmSync(join(worktree, command.path));
+    expect((await repositorySync(worktree)).docs.errors).toBe(1);
+    expect(readFileSync(join(worktree, ".opencode/.ingenium-sync-state.json"), "utf8")).toBe(before);
+  });
+
   it.each(["created", "updated", "renamed", "archived", "removed"])("requires restart for agent-only %s applies, but not previews", async (change) => {
     fixture();
     const call = successfulMcp();
