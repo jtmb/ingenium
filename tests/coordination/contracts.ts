@@ -17,11 +17,31 @@ import {
   writeFileSync,
 } from "node:fs";
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { parse as parseYaml } from "yaml";
+import type { ResultManifest } from "../../packages/ingenium-extension/session-coordinator";
+import { isSafeRestartHandoffPath } from "../../packages/ingenium-extension/replacement-first-restart";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
-const FIXED_MODEL_SOURCE_AGENT = "ingenium-software-engineer-premium";
+export const HARNESS_ROLES = {
+  A: { agent: "ingenium-software-engineer-premium", category: "execution" },
+  B: { agent: "ingenium-explore", category: "research" },
+  C: { agent: "ingenium-explore", category: "research" },
+} as const;
+export type HarnessRole = keyof typeof HARNESS_ROLES;
+export interface HarnessAgent {
+  name: string;
+  model: string;
+  variant: string;
+  mode: "subagent";
+  hidden: false;
+  disable: false;
+  description: string;
+  permission: Record<string, unknown>;
+  prompt: string;
+}
 const SECRET_KEY = /(?:authorization|cookie|credential|password|passphrase|secret|token|api[_-]?key|auth(?:content)?)/i;
 const REDACTION_PATTERNS = [
   /Bearer\s+[A-Za-z0-9._~-]+/gi,
@@ -59,6 +79,7 @@ export interface HarnessOptions {
   providerId: string;
   modelId: string;
   variant: string;
+  agents: Record<HarnessRole, HarnessAgent>;
   expectedRevision: string;
   expectedOpenCodeVersion: string;
   expectedRuntimeOpenCodeVersion: string;
@@ -68,6 +89,7 @@ export interface HarnessOptions {
 }
 
 export interface OperationalMemoryEntry {
+  manifest?: ResultManifest;
   entryId: string;
   actorId: string;
   sourceRevision: number;
@@ -93,6 +115,32 @@ export interface OperationalMemoryEntry {
     referenceHash: string | null;
   };
   changedPathSegments: string[][];
+}
+
+export interface PersistentOperationalEntry {
+  version: 1;
+  type: "operational";
+  entryId: string;
+  actorId: string;
+  sourceRevision: number;
+  timestamp: string;
+  status: OperationalMemoryEntry["status"];
+  actions: Array<{ kind: OperationalMemoryEntry["actionKinds"][number]; result: "succeeded"; pathSegments: string[] | null; targetHash: string | null }>;
+  checks: Array<OperationalMemoryEntry["checkResults"][number] & { targetHash: string }>;
+  todos: OperationalMemoryEntry["todoCounts"] & { state: OperationalMemoryEntry["todoState"] };
+  currentTaskId: string | null;
+  contextRevision: number;
+  nextWork: OperationalMemoryEntry["nextWork"];
+  changedPaths: Array<{ pathSegments: string[]; operation: "write" | "edit"; additions: number; deletions: number; changeRevision: number }>;
+  manifest?: ResultManifest;
+}
+
+export interface TransformCapture {
+  schemaVersion: 1;
+  sessionIdSha256: string;
+  memory: string | null;
+  activity: string | null;
+  operationalEntries: PersistentOperationalEntry[];
 }
 
 export interface HarnessOwnershipManifest {
@@ -240,6 +288,33 @@ function readRootConfig(worktree: string): Record<string, unknown> {
   return parsed;
 }
 
+export function readHarnessAgents(worktree: string): Record<HarnessRole, HarnessAgent> {
+  const config = readRootConfig(worktree);
+  requireValue(isRecord(config.agent), "Root agent map is missing");
+  return Object.fromEntries(Object.entries(HARNESS_ROLES).map(([role, { agent, category }]) => {
+    const mapping = (config.agent as Record<string, unknown>)[agent];
+    requireValue(isRecord(mapping) && typeof mapping.model === "string" && /^[A-Za-z0-9._-]+\/[A-Za-z0-9._:/-]+$/.test(mapping.model)
+      && typeof mapping.variant === "string" && SAFE_NAME.test(mapping.variant), `${role} mapped model/variant is unavailable`);
+    const content = readFileSync(join(worktree, ".opencode", "agents", category, `${agent}.md`), "utf8");
+    const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(content);
+    requireValue(match, `${role} profile frontmatter is missing`);
+    const profile: unknown = parseYaml(match[1]!, { maxAliasCount: 0 });
+    requireValue(isRecord(profile) && profile.name === agent && profile.mode === "subagent"
+      && profile.disable === false && profile.hidden === false && typeof profile.description === "string"
+      && isRecord(profile.permission) && profile.permission["*"] === "deny" && profile.permission.read === "allow",
+    `${role} permitted mapped profile is unavailable`);
+    if (role === "A") requireValue(isRecord(profile.permission.edit) && profile.permission.edit["*"] === "allow"
+      && isRecord(profile.permission.bash) && profile.permission.bash["*"] === "allow" && profile.permission.todowrite === "allow",
+    "A profile does not permit ordinary mutation/check/todo tools");
+    else requireValue(profile.permission.edit === "deny" && profile.permission.write === "deny" && profile.permission.bash === "deny",
+      `${role} reader profile is not read-only`);
+    requireValue(mapping.permission === undefined && mapping.tools === undefined && mapping.prompt === undefined
+      && mapping.disable !== true && mapping.hidden !== true, `${role} root mapping overrides its permitted profile`);
+    return [role, { name: agent, model: mapping.model, variant: mapping.variant, mode: profile.mode,
+      hidden: false, disable: false, description: profile.description, permission: profile.permission, prompt: match[2]! }];
+  })) as Record<HarnessRole, HarnessAgent>;
+}
+
 function configuredMcpEnvironment(config: Record<string, unknown>): Record<string, unknown> {
   const mcp = isRecord(config.mcp) ? config.mcp : undefined;
   const ingenium = mcp && isRecord(mcp.ingenium) ? mcp.ingenium : undefined;
@@ -315,11 +390,8 @@ export function parseHarnessOptions(
     "openCodeAuthFile",
   ));
 
-  const agents = isRecord(config.agent) ? config.agent : undefined;
-  const mapping = agents && isRecord(agents[FIXED_MODEL_SOURCE_AGENT]) ? agents[FIXED_MODEL_SOURCE_AGENT] : undefined;
-  if (!mapping || typeof mapping.model !== "string" || !mapping.model.includes("/") || typeof mapping.variant !== "string") {
-    throw new Error("fixed harness model source must resolve to an exact configured model and variant");
-  }
+  const agents = readHarnessAgents(worktree);
+  const mapping = agents.A;
   const separator = mapping.model.indexOf("/");
   const providerId = mapping.model.slice(0, separator);
   const modelId = mapping.model.slice(separator + 1);
@@ -362,6 +434,7 @@ export function parseHarnessOptions(
     providerId,
     modelId,
     variant: mapping.variant,
+    agents,
     expectedRevision,
     expectedOpenCodeVersion,
     expectedRuntimeOpenCodeVersion: pluginVersion,
@@ -380,7 +453,7 @@ export function usage(): string {
   return [
     "Usage: npx tsx tests/coordination/run.ts --project NAME --project-id UUID --workspace ID --storage-mapping-hash SHA256 --runtime-id UUID --expected-revision SHA --operator-token-file PATH --opencode-auth-file PATH [options]",
     "All identity values are required CLI inputs or COORDINATION_HARNESS_* environment variables; operator and OpenCode auth inputs remain protected file locators.",
-    "This command performs a live model/runtime run and creates a managed Git commit. It is not a fixture self-test.",
+    "This command performs a live mapped-agent/runtime run, with writes confined to run-owned test artifacts and no Git commits. It is not a fixture self-test.",
   ].join("\n");
 }
 
@@ -454,12 +527,13 @@ export function decodeChangedPath(segments: unknown): string | undefined {
     decoded.push(value);
   }
   const path = decoded.join("/");
-  return !path.startsWith("/") && !path.includes("\\") ? path : undefined;
+  return isSafeRestartHandoffPath(path) ? path : undefined;
 }
 
 export function assertOperationalMemoryEntry(value: unknown): asserts value is OperationalMemoryEntry {
   const keys = ["entryId", "actorId", "sourceRevision", "publishedAt", "status", "actionKinds", "checkResults", "todoState",
-    "todoCounts", "currentTaskId", "contextRevision", "nextWork", "changedPathSegments"] as const;
+    "todoCounts", "currentTaskId", "contextRevision", "nextWork", "changedPathSegments",
+    ...(isRecord(value) && Object.hasOwn(value, "manifest") ? ["manifest"] : [])];
   requireValue(hasExactKeys(value, keys), "Operational memory shape is invalid");
   requireValue(typeof value.entryId === "string" && UUID.test(value.entryId), "Operational memory entry ID is invalid");
   requireValue(typeof value.actorId === "string" && /^actor-[0-9a-f]{64}$/.test(value.actorId), "Operational memory actor is invalid");
@@ -486,6 +560,66 @@ export function assertOperationalMemoryEntry(value: unknown): asserts value is O
   requireValue(hasExactKeys(value.nextWork, ["kind", "referenceHash"])
     && ["none", "continue_task", "review_changes", "run_checks", "address_failure"].includes(String(value.nextWork.kind))
     && (value.nextWork.referenceHash === null || (typeof value.nextWork.referenceHash === "string" && SHA256.test(value.nextWork.referenceHash))), "Operational memory next work is invalid");
+  if (value.manifest !== undefined) {
+    const m = value.manifest;
+    requireValue(hasExactKeys(m, ["baseCommit", "dirtyHashes", "dependencyResults", "exclusivePaths", "profileRevision", "toolRevision",
+      "ownerId", "fence", "unresolvedOperations", "todoWrite", "inputHash", "finalized"]), "Operational manifest shape is invalid");
+    requireValue(m.ownerId === value.actorId && integer(m.fence, 1) && typeof m.finalized === "boolean"
+      && (m.baseCommit === null || typeof m.baseCommit === "string" && /^[0-9a-f]{40,64}$/.test(m.baseCommit))
+      && [m.profileRevision, m.toolRevision, m.inputHash].every((hash) => hash === null || typeof hash === "string" && SHA256.test(hash)),
+    "Operational manifest identity is invalid");
+    requireValue(Array.isArray(m.dirtyHashes) && m.dirtyHashes.length <= 32 && m.dirtyHashes.every((entry) =>
+      hasExactKeys(entry, ["pathSegments", "sha256"]) && decodeChangedPath(entry.pathSegments) !== undefined
+      && (entry.sha256 === null || typeof entry.sha256 === "string" && SHA256.test(entry.sha256))), "Operational manifest paths are invalid");
+    requireValue(Array.isArray(m.exclusivePaths) && m.exclusivePaths.length <= 32 && m.exclusivePaths.every((path) => decodeChangedPath(path) !== undefined)
+      && Array.isArray(m.dependencyResults) && m.dependencyResults.length === 0
+      && Array.isArray(m.unresolvedOperations) && m.unresolvedOperations.length === 0, "Operational manifest has unresolved work");
+    requireValue(Array.isArray(m.todoWrite) && m.todoWrite.length <= 64 && m.todoWrite.every((todo) =>
+      hasExactKeys(todo, ["id", "content", "status", "priority"]) && typeof todo.id === "string" && todo.id.length > 0
+      && typeof todo.content === "string" && todo.content.length > 0 && todo.content.length <= 2048
+      && ["pending", "in_progress", "completed", "cancelled"].includes(String(todo.status))
+      && ["high", "medium", "low"].includes(String(todo.priority))), "Operational manifest todos are invalid");
+  }
+}
+
+export function projectPersistentEntry(value: unknown): OperationalMemoryEntry {
+  requireValue(isRecord(value), "Persistent operational entry is invalid");
+  const keys = ["version", "type", "entryId", "actorId", "sourceRevision", "timestamp", "status", "actions", "checks", "todos",
+    "currentTaskId", "contextRevision", "nextWork", "changedPaths", ...(Object.hasOwn(value, "manifest") ? ["manifest"] : [])];
+  requireValue(hasExactKeys(value, keys) && value.version === 1 && value.type === "operational"
+    && Array.isArray(value.actions) && value.actions.length <= 64 && Array.isArray(value.checks) && value.checks.length <= 32
+    && Array.isArray(value.changedPaths) && value.changedPaths.length <= 32
+    && hasExactKeys(value.todos, ["total", "pending", "inProgress", "completed", "cancelled", "state"]), "Persistent operational shape is invalid");
+  for (const action of value.actions) requireValue(hasExactKeys(action, ["kind", "result", "pathSegments", "targetHash"])
+    && action.result === "succeeded" && (action.pathSegments === null) !== (action.targetHash === null)
+    && (action.pathSegments === null || decodeChangedPath(action.pathSegments) !== undefined)
+    && (action.targetHash === null || typeof action.targetHash === "string" && SHA256.test(action.targetHash)), "Persistent action is invalid");
+  for (const check of value.checks) requireValue(hasExactKeys(check, ["kind", "result", "targetHash"])
+    && typeof check.targetHash === "string" && SHA256.test(check.targetHash), "Persistent check is invalid");
+  for (const path of value.changedPaths) requireValue(hasExactKeys(path, ["pathSegments", "operation", "additions", "deletions", "changeRevision"])
+    && ["write", "edit"].includes(String(path.operation)) && integer(path.additions) && integer(path.deletions)
+    && integer(path.changeRevision, 1), "Persistent changed path is invalid");
+  const entry = value as unknown as PersistentOperationalEntry;
+  const { state, ...todoCounts } = entry.todos;
+  const projected = { ...(entry.manifest ? { manifest: entry.manifest } : {}), entryId: entry.entryId, actorId: entry.actorId,
+    sourceRevision: entry.sourceRevision, publishedAt: entry.timestamp, status: entry.status, actionKinds: entry.actions.map((action) => action.kind),
+    checkResults: entry.checks.map(({ kind, result }) => ({ kind, result })), todoState: state, todoCounts,
+    currentTaskId: entry.currentTaskId, contextRevision: entry.contextRevision, nextWork: entry.nextWork,
+    changedPathSegments: entry.changedPaths.map((path) => path.pathSegments) };
+  assertOperationalMemoryEntry(projected);
+  return projected;
+}
+
+export function parseTransformCapture(value: unknown): TransformCapture {
+  requireValue(hasExactKeys(value, ["schemaVersion", "sessionIdSha256", "memory", "activity", "operationalEntries"])
+    && value.schemaVersion === 1 && typeof value.sessionIdSha256 === "string" && SHA256.test(value.sessionIdSha256)
+    && (value.activity === null || typeof value.activity === "string") && Array.isArray(value.operationalEntries), "Transform capture shape is invalid");
+  const entries = parseCoordinationMemoryBlock(value.memory);
+  requireValue(value.operationalEntries.length === entries.length, "Transform capture omitted persistent entries");
+  for (const [index, entry] of value.operationalEntries.entries()) {
+    requireValue(isDeepStrictEqual(projectPersistentEntry(entry), entries[index]), "Transform projection differs from persistent memory");
+  }
+  return value as unknown as TransformCapture;
 }
 
 export function parseCoordinationMemoryBlock(value: unknown): OperationalMemoryEntry[] {

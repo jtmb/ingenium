@@ -46,12 +46,12 @@ function TimePieChart({ spent, remaining, estimate }: { spent: number; remaining
   const r = 36;
   const circ = 2 * Math.PI * r;
   const offset = total > 0 ? circ * (1 - pct) : circ;
-  const fill = overEstimate ? "#ef4444" : remaining > 0 ? "#22c55e" : "#f59e0b";
+  const fill = overEstimate ? "var(--color-error-text)" : remaining > 0 ? "var(--color-success-text)" : "var(--color-warning-text)";
 
   return (
     <div className="flex items-center gap-3">
-      <svg width="44" height="44" viewBox="0 0 80 80" className="shrink-0">
-        <circle cx="40" cy="40" r={r} fill="none" stroke="#e5e7eb" strokeWidth="6" />
+      <svg width="44" height="44" viewBox="0 0 80 80" className="shrink-0" aria-hidden="true" focusable="false">
+        <circle cx="40" cy="40" r={r} fill="none" stroke="var(--color-border)" strokeWidth="6" />
         {total > 0 && (
           <circle
             cx="40" cy="40" r={r} fill="none" stroke={fill} strokeWidth="6"
@@ -59,14 +59,14 @@ function TimePieChart({ spent, remaining, estimate }: { spent: number; remaining
             strokeLinecap="round" transform="rotate(-90 40 40)"
           />
         )}
-        <text x="40" y="44" textAnchor="middle" fontSize="14" fill="#4b5563" fontFamily="sans-serif" fontWeight="600">
+        <text x="40" y="44" textAnchor="middle" fontSize="14" fill="var(--color-text-secondary)" fontFamily="sans-serif" fontWeight="600">
           {total > 0 ? Math.round(pct * 100) : "--"}
         </text>
       </svg>
-      <div className="text-xs text-gray-500">
+      <div className="text-xs text-[var(--color-text-secondary)]">
         <div>Spent: {spent}m</div>
         <div>Remaining: {remaining}m</div>
-        {estimate > 0 && <div className={overEstimate ? "text-red-600 font-semibold" : ""}>Est: {estimate}m</div>}
+        {estimate > 0 && <div className={overEstimate ? "text-[var(--color-error-text)] font-semibold" : ""}>Est: {estimate}m</div>}
       </div>
     </div>
   );

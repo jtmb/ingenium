@@ -10190,3 +10190,60 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   review, deployment, live acceptance, or Docs Workspace mutation was performed;
   no raw secret or endpoint is recorded. Acceptance for this append is tail
   readback plus the scoped roadmap diff check.
+
+## WAVE-2 finalized source evidence and T65 remediation boundary — 2026-09-11
+
+| Territory | Exact changed source | Focused result and source effect |
+|---|---|---|
+| W1 | `services/ingenium-dashboard/src/app/globals.css` | Theme/status contrast and reduced-motion coverage; `1` passed, `160` combinations, `12` selectors. |
+| W2 | `services/ingenium-dashboard/src/app/chat/components/ChatMessages.tsx` | Keyboard-operable Chat image expansion and accessibility coverage; `1` passed. |
+| W3 | `services/ingenium-dashboard/src/app/page.tsx`, `services/ingenium-dashboard/src/app/components/HealthStrip.tsx` | Per-service textual health coverage; `14` passed. |
+| W4 | `services/ingenium-dashboard/src/app/tasks/components/BoardView.tsx`, `services/ingenium-dashboard/src/app/tasks/components/TaskDetail.tsx` | Task-chart dark-contrast/equivalent coverage; `15` passed. |
+| W5 | `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` | Oversized-mail plain-text fallback coverage; `9` passed. |
+
+- **Focused tests:** W1 used the theme-contrast/reduced-motion test; W2 the
+  ChatMessages accessibility test; W3 `home-health`; W4 `tasks-visual`; and W5
+  `mail-media`. The external `opencode.json` was untouched by WAVE-2.
+- **T65 F1 source/test evidence:** Passive terminal-event collection is
+  implemented in the session coordinator, with focused event, dedupe, session,
+  and redaction tests passing; no test count is inferred here.
+- **T65 F2 source/test evidence:** Recovery zero/nonzero/unknown outcome
+  normalization is implemented, with its focused tests passing; no count is
+  inferred here.
+- **T65 F3 source/test evidence:** Export large-input, frozen-cutoff,
+  completeness, passphrase redaction, and URL redaction are implemented;
+  `11` export tests plus `8` codec/import tests passed.
+- **T65 F4:** The current-role A/B/C harness is active; review waits for its
+  dependent boundary. No actual export, live recovery, or deployment was
+  performed for this T65 evidence.
+- **T64 carry-forward:** The existing logo, icon, and wordmark remain retained;
+  T64 findings F08–F12 remain `FOLLOW_UP` only. No overall `PASS` is claimed.
+- **Boundary:** This append performed no documentation audit, Docs Workspace
+  mutation, or secret operation. Acceptance is readback plus the scoped roadmap
+  diff check.
+
+## T64/T65 finalized source QA and security evidence — 2026-09-11
+
+- **Source QA:** Dashboard typecheck `PASS`; lint `PASS` with `0` errors and
+  `326` warnings; `5` files / `40` tests. Extension typecheck `PASS`; `4` files
+  / `185` tests. Server context-upload tests: `306`; export tests: `11`;
+  coordination tests: `58`. QA reported no findings.
+- **Intake correction:** The initial QA/security intake prompts omitted the
+  embedded `STOP`/escalation rules, so no checks or review occurred under that
+  intake. The corrected intake was used and its reports were consumed.
+- **Security report:** Two `BLOCKING` findings were recorded: the session
+  coordinator ignored `metadata.code` and top-level exit fields, and recovery
+  omitted unknown operations. One bounded dedupe-cache reset/eviction item is
+  `FOLLOW_UP`; export, harness, and mail surfaces were otherwise acceptable.
+- **Causal remediation:** All supported top-level/metadata exits are reconciled;
+  contradictions remain `unknown`, and `24` focused coordinator tests passed.
+  Unknown recovery operations are preserved as bounded typed
+  `review_changes`/`nextWork`; `4` focused recovery regressions passed. QA and
+  security were not rerun.
+- **Remaining boundary:** T64 and T65 remain `OPEN` for commit, deployment,
+  live, visual, and session gates. The external `opencode.json` remains excluded
+  from these source territories and must not be claimed as ours. No overall
+  `PASS` or secret value is recorded.
+- **Acceptance:** This documentation append is accepted by readback and the
+  scoped roadmap diff check only; no documentation audit or Docs Workspace
+  mutation was performed.

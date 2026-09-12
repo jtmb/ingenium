@@ -12,6 +12,7 @@ import { CoordinationOutbox } from "./coordination-outbox.js";
 import { ContextAutoUploader } from "./context-upload.js";
 import { ExternalUsageCollector } from "./external-usage.js";
 import { readCurrentParentRecoveryCandidate } from "./tui-recovery.js";
+import { parseRedactedRestartHandoff } from "./replacement-first-restart.js";
 import {
   AUTONOMY_REMINDER_V1,
   decodeCoordinationPath,
@@ -531,6 +532,320 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(hooks["experimental.chat.system.transform"]).toBeTypeOf("function");
     }
     await coordinator.dispose();
+  });
+
+  describe("T65 F1 passive terminal tool observation", () => {
+    function toolEvent(sessionID: string, tool: string, state: Args = {}, identity: Args = {}) {
+      return { event: { type: "message.part.updated", properties: { part: {
+        type: "tool", id: "prt_terminal", sessionID, messageID: "msg_terminal", callID: "call_terminal", tool,
+        state: { status: "completed", input: {}, metadata: {}, output: "SENSITIVE_TOOL_OUTPUT",
+          title: "SENSITIVE_TOOL_TITLE", time: { start: 1, end: 2 }, ...state }, ...identity,
+      } } } } as any;
+    }
+
+    async function setup() {
+      const root = mkdtempSync(join(tmpdir(), "ingenium-terminal-events-"));
+      const fixture = coordinationFixture();
+      const messages = vi.fn();
+      const context = { ...processHarness("terminal-events", { session: { messages } }, root), directory: join(root, "nested") };
+      const coordinator = new SessionCoordinator(context, { callTool: fixture.callTool });
+      const sessionID = "ses_terminal";
+      await created(coordinator, sessionID);
+      const emit = (tool: string, state: Args = {}, identity: Args = {}) => coordinator.hooks().event!(toolEvent(sessionID, tool, state, identity));
+      return { root, fixture, context, coordinator, sessionID, emit, messages,
+        close: async () => { await coordinator.dispose(); rmSync(root, { recursive: true, force: true }); } };
+    }
+
+    it.each([
+      ["completed zero", "bash", "completed", { exit: 0 }, "passed", 0],
+      ["completed nonzero", "shell", "completed", { exit: 7 }, "failed", 7],
+      ["exitCode alias", "bash", "completed", { exitCode: 0 }, "passed", 0],
+      ["exit_code alias", "shell", "completed", { exit_code: 2 }, "failed", 2],
+      ["error without exit", "bash", "error", {}, "failed", null],
+      ["error with zero", "shell", "error", { exit: 0 }, "failed", null],
+      ["missing exit", "bash", "completed", {}, "unknown", null],
+      ["null exit", "shell", "completed", { exit: null }, "unknown", null],
+      ["string exit", "bash", "completed", { exit: "0" }, "unknown", null],
+      ["out-of-range exit", "shell", "completed", { exit: 256 }, "unknown", null],
+      ["negative exit", "bash", "completed", { exit: -1 }, "unknown", null],
+      ["conflicting exits", "shell", "completed", { exit: 0, exitCode: 1 }, "unknown", null],
+    ] as const)("classifies %s without trusting output or inventing success", async (_name, tool, status, metadata, result, exitCode) => {
+      const harness = await setup();
+      const { coordinator, fixture, emit, messages } = harness;
+      const journal = vi.spyOn(coordinator as any, "recoveryJournal");
+      try {
+        await emit(tool, { status, metadata, input: { command: "npm run test -- --run" },
+          output: "All tests passed. exitCode=0 SENSITIVE_TOOL_OUTPUT", error: "SENSITIVE_ERROR" });
+        expect(fixture.memories).toHaveLength(1);
+        const memory = fixture.memories[0]!;
+        expect(memory.status).toBe(result === "failed" ? "error" : "working");
+        expect(memory.actions).toEqual(result === "passed"
+          ? [{ kind: "execute", result: "succeeded", pathSegments: null, targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) }] : []);
+        expect(memory.checks).toEqual(result === "unknown" ? []
+          : [{ kind: "test", result, targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+        expect(memory.manifest.unresolvedOperations).toEqual(result === "unknown"
+          ? [{ operationId: expect.stringMatching(/^[0-9a-f]{64}$/), status: "unknown", firstFailure: "terminal_tool_outcome_unknown" }] : []);
+        expect(memory.nextWork.kind).toBe(result === "passed" ? "run_checks" : "address_failure");
+        expect(memory.changedPaths).toEqual([]);
+        const handoff = parseRedactedRestartHandoff(journal.mock.results.at(-1)!.value);
+        expect(handoff.checks).toEqual(result === "unknown" ? [] : [{ name: "test", result,
+          status: result === "passed" ? "completed" : "failed", exitCode, targetHash: expect.stringMatching(/^[0-9a-f]{64}$/) }]);
+        expect(handoff.nextWork).toEqual(memory.nextWork);
+        expect(coordinator.hooks()["tool.execute.before"]).toBeUndefined();
+        expect(coordinator.hooks()["tool.execute.after"]).toBeUndefined();
+        expect(fixture.calls.every(({ tool, args }) => ["coordination_update", "coordination_handoff"].includes(tool)
+          && ["register", "update", "memory"].includes(args.operation))).toBe(true);
+        expect(messages).not.toHaveBeenCalled();
+        expect(fixture.transcripts).toEqual([]);
+        for (const secret of ["SENSITIVE_", "npm run", "call_terminal", "msg_terminal", "ses_terminal"]) {
+          expect(JSON.stringify([memory, handoff])).not.toContain(secret);
+        }
+        const calls = fixture.calls.length;
+        await emit(tool, { input: { command: "npm run test -- --run" }, metadata: { exit: 0 } });
+        expect(fixture.calls).toHaveLength(calls);
+        expect(fixture.memories).toHaveLength(1);
+      } finally { await harness.close(); }
+    });
+
+    it.each([
+      { name: "metadata exit 0 + code 1", state: { metadata: { exit: 0, code: 1 } }, result: "unknown", exitCode: null },
+      { name: "top-level exitCode 1 + metadata exit 0", state: { exitCode: 1, metadata: { exit: 0 } }, result: "unknown", exitCode: null },
+      { name: "contradictory nonzero exits", state: { code: 2, metadata: { exit: 1 } }, result: "unknown", exitCode: null },
+      { name: "missing exit fields", state: {}, result: "unknown", exitCode: null },
+      ...["exit", "exitCode", "exit_code", "code"].flatMap((field) => [
+        { name: `metadata ${field} alone is zero`, state: { metadata: { [field]: 0 } }, result: "passed", exitCode: 0 },
+        { name: `top-level ${field} alone is nonzero`, state: { [field]: 7 }, result: "failed", exitCode: 7 },
+      ]),
+      ...[0, 9].map((code) => {
+        const fields = { exit: code, exitCode: code, exit_code: code, code };
+        return { name: `all eight fields agree on ${code}`, state: { ...fields, metadata: fields },
+          result: code === 0 ? "passed" : "failed", exitCode: code };
+      }),
+      ...[undefined, null, "0", false, -1, 256, 0.5, Number.NaN, Number.POSITIVE_INFINITY].map((invalid) => ({
+        name: `invalid field ${String(invalid)} alongside zero`, state: { code: invalid, metadata: { exit: 0 } }, result: "unknown", exitCode: null,
+      })),
+      { name: "invalid metadata code alongside zero", state: { exitCode: 0, metadata: { exit: 0, code: "0" } }, result: "unknown", exitCode: null },
+    ])("B1 shell exit normalization: $name", async ({ state, result, exitCode }) => {
+      const harness = await setup();
+      const { coordinator, fixture, emit, messages } = harness;
+      const journal = vi.spyOn(coordinator as any, "recoveryJournal");
+      try {
+        await emit("shell", { ...state, input: { command: "npm run test", ignored: "SENSITIVE_ARGUMENT" },
+          output: "SENSITIVE_OUTPUT", error: "SENSITIVE_ERROR" });
+        expect(fixture.memories).toHaveLength(1);
+        const memory = fixture.memories[0]!;
+        const handoff = parseRedactedRestartHandoff(journal.mock.results.at(-1)!.value);
+        expect(memory.actions.map((action: Args) => action.result)).toEqual(result === "passed" ? ["succeeded"] : []);
+        expect(handoff.actions.map((action) => action.result)).toEqual(result === "passed" ? ["succeeded"] : []);
+        expect(memory.checks).toEqual(result === "unknown" ? [] : [{ kind: "test", result, targetHash: expect.any(String) }]);
+        expect(handoff.checks).toEqual(result === "unknown" ? [] : [{ name: "test", result, exitCode,
+          status: result === "passed" ? "completed" : "failed", targetHash: expect.any(String) }]);
+        expect(memory.manifest.unresolvedOperations).toEqual(result === "unknown" ? [{
+          operationId: expect.any(String), status: "unknown", firstFailure: "terminal_tool_outcome_unknown",
+        }] : []);
+        expect(memory.nextWork.kind).toBe(result === "passed" ? "run_checks" : "address_failure");
+        expect(handoff.nextWork).toEqual(memory.nextWork);
+        expect(JSON.stringify([memory, handoff])).not.toContain("SENSITIVE_");
+        expect(messages).not.toHaveBeenCalled();
+        const calls = fixture.calls.length;
+        await emit("shell", { metadata: { exit: 0 }, input: { command: "npm run test" } });
+        expect(fixture.calls).toHaveLength(calls);
+        expect(fixture.memories).toHaveLength(1);
+      } finally { await harness.close(); }
+    });
+
+    it("deduplicates concurrent terminal delivery by exact session/message/call identity", async () => {
+      const harness = await setup();
+      const { coordinator, fixture, sessionID, emit, root } = harness;
+      try {
+        const state = { input: { filePath: join(root, "source.ts") } };
+        await Promise.all(Array.from({ length: 3 }, () => emit("write", state)));
+        expect(fixture.memories).toHaveLength(1);
+        await emit("write", state, { id: "prt_replayed", callID: "call_terminal" });
+        expect(fixture.memories).toHaveLength(1);
+        await Promise.all([
+          emit("write", state, { callID: "call_second" }),
+          emit("write", state, { messageID: "msg_second" }),
+        ]);
+        const actions = fixture.memories.at(-1)!.actions;
+        expect(actions).toHaveLength(3);
+        expect(new Set(actions.map((action: Args) => action.targetHash)).size).toBe(3);
+        await created(coordinator, "ses_terminal_other");
+        await coordinator.hooks().event!(toolEvent("ses_terminal_other", "write", { input: { filePath: join(root, "peer.ts") } }));
+        const peer = fixture.memories.at(-1)!;
+        expect(peer.actions).toHaveLength(1);
+        expect(actions.map((action: Args) => action.targetHash)).not.toContain(peer.actions[0].targetHash);
+        expect(peer.changedPaths.map((entry: Args) => decodeCoordinationPath(entry.pathSegments))).toEqual(["peer.ts"]);
+        expect((coordinator as any).sessions.get(sessionID).changedPaths.map((entry: Args) => entry.path)).toEqual(["source.ts"]);
+        expect(peer.actorId).not.toBe(fixture.memories[0]!.actorId);
+      } finally { await harness.close(); }
+    });
+
+    it("retains a fresh terminal observation while an earlier todo memory publication is in flight", async () => {
+      const harness = await setup();
+      const { coordinator, fixture, sessionID, emit } = harness;
+      const original = fixture.callTool.getMockImplementation()!;
+      let release!: () => void;
+      let started!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const publishing = new Promise<void>((resolve) => { started = resolve; });
+      let block = true;
+      fixture.callTool.mockImplementation(async (worktree, tool, args) => {
+        const result = await original(worktree, tool, args);
+        if (args.operation === "memory" && block) { block = false; started(); await gate; }
+        return result;
+      });
+      try {
+        const todo = coordinator.hooks().event!({ event: { type: "todo.updated", properties: { sessionID,
+          todos: [{ id: "T65-F1", content: "Observe terminal events", status: "in_progress", priority: "high" }],
+        } } } as any);
+        await publishing;
+        const observation = emit("read");
+        await vi.waitFor(() => expect((coordinator as any).sessions.get(sessionID).actions).toHaveLength(1));
+        release();
+        await Promise.all([todo, observation]);
+        expect(fixture.memories).toHaveLength(2);
+        expect(fixture.memories[0]!.actions).toEqual([]);
+        expect(fixture.memories[1]!.actions).toEqual([{ kind: "read", result: "succeeded", pathSegments: null, targetHash: expect.any(String) }]);
+        expect((coordinator as any).sessions.get(sessionID).memoryDirty).toBe(false);
+      } finally { release(); await harness.close(); }
+    });
+
+    it("ignores unknown sessions, incomplete identities, unsupported tools and nonterminal states", async () => {
+      const harness = await setup();
+      const { coordinator, fixture, sessionID, emit } = harness;
+      try {
+        const count = fixture.calls.length;
+        for (const status of ["pending", "running", "unknown", "cancelled"]) await emit("read", { status });
+        for (const identity of [{ id: undefined }, { messageID: undefined }, { callID: undefined }, { callID: "x".repeat(513) },
+          { messageID: "msg\nforeign" }, { sessionID: "ses_terminal_foreign" }, { sessionID: undefined }, { type: "text" }]) {
+          await emit("write", {}, identity);
+        }
+        await emit("unrecognized_tool", { input: { filePath: "invented.ts" } });
+        await emit("write", { input: null });
+        expect(fixture.calls).toHaveLength(count);
+        expect(fixture.memories).toEqual([]);
+        expect([...(coordinator as any).sessions.keys()]).toEqual([sessionID]);
+        await emit("read");
+        await emit("grep", { input: { pattern: "SENSITIVE_SEARCH" } }, { callID: "call_search" });
+        expect(fixture.memories.at(-1)!.actions.map((action: Args) => action.kind)).toEqual(["read", "search"]);
+        await coordinator.closeSession(sessionID);
+        const closed = fixture.calls.length;
+        await emit("write", {}, { callID: "call_after_close" });
+        expect(fixture.calls).toHaveLength(closed);
+      } finally { await harness.close(); }
+    });
+
+    it("extracts bounded native write/edit/patch paths including moves, but never failed or shell-inferred changes", async () => {
+      const harness = await setup();
+      const { fixture, emit, root, coordinator } = harness;
+      const journal = vi.spyOn(coordinator as any, "recoveryJournal");
+      try {
+        await emit("write", { input: { filePath: "fallback.ts", content: "SENSITIVE_CONTENT" } });
+        await emit("edit", { input: { filePath: "wrong.ts", oldString: "SENSITIVE_OLD", newString: "SENSITIVE_NEW" },
+          metadata: { filediff: { file: join(root, "edited.ts"), additions: 2, deletions: 1, patch: "SENSITIVE_DIFF" } } }, { callID: "edit" });
+        await emit("apply_patch", { input: { patchText: "SENSITIVE_PATCH" }, metadata: { files: [
+          { type: "add", filePath: join(root, "added.ts"), additions: 3, deletions: 0 },
+          { type: "update", filePath: join(root, "edited.ts"), additions: 4, deletions: 2 },
+          { type: "delete", filePath: join(root, "deleted.ts"), additions: 0, deletions: 7 },
+          { type: "move", filePath: join(root, "from.ts"), movePath: join(root, "to.ts"), additions: 1, deletions: 1 },
+        ] } }, { callID: "patch" });
+        await emit("apply_patch", { input: { patchText: "*** Begin Patch\n*** Add File: new.ts\n+SENSITIVE_LINE\n*** Update File: before.ts\n*** Move to: after.ts\n@@\n-old\n+new\n*** Delete File: removed.ts\n*** End Patch" } }, { callID: "patch_headers" });
+        const changed = fixture.memories.at(-1)!.changedPaths.map((entry: Args) => ({ ...entry, path: decodeCoordinationPath(entry.pathSegments) }));
+        expect(changed.map((entry: Args) => entry.path)).toEqual([
+          "nested/fallback.ts", "added.ts", "edited.ts", "deleted.ts", "from.ts", "to.ts",
+          "nested/new.ts", "nested/before.ts", "nested/after.ts", "nested/removed.ts",
+        ]);
+        expect(changed.find((entry: Args) => entry.path === "edited.ts")).toMatchObject({ operation: "edit", additions: 4, deletions: 2 });
+        expect(changed.find((entry: Args) => entry.path === "to.ts")).toMatchObject({ operation: "write" });
+        expect(changed.every((entry: Args) => Number.isSafeInteger(entry.changeRevision) && entry.changeRevision > 0)).toBe(true);
+        await emit("write", { status: "error", input: { filePath: "failed.ts" }, error: "SENSITIVE_ERROR" }, { callID: "failed_write" });
+        await emit("bash", { input: { command: "touch guessed.ts" }, metadata: { exit: 0, files: [{ type: "add", filePath: "guessed.ts" }] } }, { callID: "shell" });
+        expect(fixture.memories.at(-1)!.changedPaths).toEqual(fixture.memories.at(-3)!.changedPaths);
+        expect(fixture.memories.at(-2)!.checks).toContainEqual({ kind: "other", result: "failed", targetHash: expect.any(String) });
+        const handoff = parseRedactedRestartHandoff(journal.mock.results.at(-1)!.value);
+        expect(handoff.changedPaths.map((entry) => entry.path)).toEqual(changed.map((entry: Args) => entry.path));
+        expect(JSON.stringify([fixture.memories, handoff])).not.toContain("SENSITIVE_");
+      } finally { await harness.close(); }
+    });
+
+    it("replays typed memory to a replacement and publishes its fresh deduplicated actions", async () => {
+      const harness = await setup();
+      const { fixture, context, coordinator, sessionID, emit, root } = harness;
+      let replacement: SessionCoordinator | undefined;
+      try {
+        const state = { input: { filePath: join(root, "retained.ts"), content: "SENSITIVE_CONTENT" } };
+        await emit("write", state);
+        await coordinator.dispose();
+        replacement = new SessionCoordinator(context, { callTool: fixture.callTool, now: () => Date.now() + 1000 });
+        await created(replacement, sessionID);
+        const output = { system: [] as string[] };
+        await replacement.hooks()["experimental.chat.system.transform"]!({ sessionID, model: {} as any }, output);
+        expect(coordinationPayload(output.system, "COORDINATION_MEMORY_V2").memoryEntries).toEqual([
+          expect.objectContaining({ actionKinds: ["write"], changedPathSegments: [encodeCoordinationPath("retained.ts")],
+            nextWork: { kind: "review_changes", referenceHash: fixture.memories[0]!.actions[0].targetHash } }),
+        ]);
+        await replacement.hooks().event!(toolEvent(sessionID, "write", state, { callID: "call_fresh" }));
+        expect(fixture.memories).toHaveLength(2);
+        expect(fixture.memories[1]!.actions[0].targetHash).not.toBe(fixture.memories[0]!.actions[0].targetHash);
+        const calls = fixture.calls.length;
+        await replacement.hooks().event!(toolEvent(sessionID, "write", state, { callID: "call_fresh" }));
+        expect(fixture.calls).toHaveLength(calls);
+        expect(fixture.memories).toHaveLength(2);
+        expect(output.system.join("\n")).not.toContain("SENSITIVE_");
+      } finally { await replacement?.dispose(); await harness.close(); }
+    });
+
+    it("bounds and redacts metadata without reading tool content, output, diagnostics or secret paths", async () => {
+      const harness = await setup();
+      const { fixture, coordinator, root, sessionID, emit } = harness;
+      try {
+        const unsafePaths = ["../escape.ts", `${root}-foreign/escape.ts`, ".env", "src/secrets.ts", ".git/config",
+          ".opencode/protected-runtime-index/state.json", `src/ghp_${"a".repeat(40)}.ts`, "src/Bearer SENSITIVE_VALUE.ts",
+          `src/${"a".repeat(256)}.ts`];
+        const files = [...unsafePaths.map((filePath) => ({ type: "update", filePath })),
+          ...Array.from({ length: 40 }, (_, index) => ({ type: "add", filePath: join(root, `safe-${index}.ts`),
+            additions: Number.MAX_SAFE_INTEGER, deletions: -1 }))];
+        const event = toolEvent(sessionID, "apply_patch", { input: { patchText: "SENSITIVE_PATCH" }, metadata: { files } });
+        const unread = () => { throw new Error("raw tool content was accessed"); };
+        Object.defineProperty(event.event.properties.part.state, "output", { get: unread });
+        Object.defineProperty(event.event.properties.part.state, "title", { get: unread });
+        Object.defineProperty(event.event.properties.part.state.metadata, "diagnostics", { get: unread });
+        Object.defineProperty(files[unsafePaths.length]!, "patch", { get: unread });
+        await coordinator.hooks().event!(event);
+        const paths = fixture.memories[0]!.changedPaths.map((entry: Args) => decodeCoordinationPath(entry.pathSegments));
+        expect(paths).toHaveLength(32 - unsafePaths.length);
+        expect(paths.every((path: string) => path.startsWith("safe-"))).toBe(true);
+        expect(fixture.memories[0]!.changedPaths.every((entry: Args) => entry.additions === 1_000_000 && entry.deletions === 0)).toBe(true);
+        await emit("apply_patch", { input: { patchText: `*** Add File: invented.ts\n+${"x".repeat(1024 * 1024)}` } }, { callID: "oversize_patch" });
+        expect(fixture.memories.at(-1)!.changedPaths).toEqual(fixture.memories[0]!.changedPaths);
+        for (let index = 0; index < 66; index++) {
+          await emit("write", { input: { filePath: join(root, `recent-${index}.ts`), content: "SENSITIVE_CONTENT" } }, { callID: `write_${index}` });
+        }
+        for (let index = 0; index < 34; index++) {
+          await emit("shell", { input: { command: "npm run typecheck" }, metadata: { exit: 0 } }, { callID: `check_${index}` });
+          await emit("shell", { input: { command: "npm run lint" } }, { callID: `unknown_${index}` });
+        }
+        await emit("bash", { input: { command: "npm test || true" }, metadata: { exit: 0 } }, { callID: "compound" });
+        const memory = fixture.memories.at(-1)!;
+        expect(memory.actions).toHaveLength(64);
+        expect(memory.checks).toHaveLength(32);
+        expect(memory.checks.at(-1)).toMatchObject({ kind: "other", result: "passed" });
+        expect(memory.changedPaths).toHaveLength(32);
+        expect(memory.manifest.dirtyHashes).toHaveLength(32);
+        expect(memory.manifest.dirtyHashes.map((entry: Args) => decodeCoordinationPath(entry.pathSegments)).sort())
+          .toEqual(memory.changedPaths.map((entry: Args) => decodeCoordinationPath(entry.pathSegments)).sort());
+        expect(memory.manifest.unresolvedOperations).toHaveLength(32);
+        expect(memory.manifest.finalized).toBe(false);
+        expect(JSON.stringify(memory)).not.toContain("SENSITIVE_");
+        for (const path of memory.changedPaths) expect(unsafePaths).not.toContain(decodeCoordinationPath(path.pathSegments));
+        const local = (coordinator as any).sessions.get(sessionID);
+        local.observedToolCalls = new Set(Array.from({ length: 1024 }, (_, index) => durableSessionReference(`old-${index}`)));
+        await emit("read", {}, { callID: "bounded_dedup" });
+        expect(local.observedToolCalls.size).toBe(1024);
+        expect(local.observedToolCalls.has(durableSessionReference("old-0"))).toBe(false);
+      } finally { await harness.close(); }
+    }, 15_000);
   });
 
   it("runtime_data_without_checkout preserves operational records across reopen without creating a checkout", () => {

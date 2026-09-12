@@ -1,20 +1,34 @@
 const marker = "[REDACTED]";
+const tokenPattern = /\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-|xapp-|glpat-|npm_)[A-Za-z0-9_-]+\b|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b|\bAKIA[A-Z0-9]{16}\b/g;
+const urlTokenPattern = new RegExp(tokenPattern.source);
+const sensitiveUrlKey = /token|key|secret|sig|credential|auth|code|pass(?:word|[ _-]?phrase)/i;
+
+function redactUrl(value) {
+  try {
+    const url = new URL(value);
+    const material = decodeURIComponent(`${url.pathname}${url.search}${url.hash}`);
+    // Nested encodings and opaque URL capabilities are unsafe even without a secret-labelled key.
+    if (url.username || url.password || /%[0-9a-f]{2}/i.test(material)
+      || /webhooks?|hooks|services/i.test(material)
+      || urlTokenPattern.test(material) || /[A-Za-z0-9_+=-]{32,}/.test(material)
+      || /(?:[/?&#])[^/?&#=]{0,80}(?:token|secret|credential|pass(?:word|[ _-]?phrase)|api[_-]?key|authorization)[^/?&#=]{0,80}[=/:]/i.test(material)
+      || [...url.searchParams.keys(), ...new URLSearchParams(url.hash.slice(1)).keys()].some((key) => sensitiveUrlKey.test(key))) return marker;
+  } catch { return marker; }
+  return value;
+}
 
 export function redactContextText(text) {
   return text
     .replace(/-----BEGIN [^-\r\n]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]*PRIVATE KEY-----|$)/g, marker)
-    .replace(/\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s<>"'`]+/gi, (value) => {
-      try {
-        const url = new URL(value);
-        if (url.username || url.password || /webhooks?|hooks|services/i.test(url.pathname)
-          || [...url.searchParams.keys()].some((key) => /token|key|secret|sig|credential|auth|code/i.test(key))) return marker;
-      } catch { return marker; }
-      return value;
-    })
+    .replace(/\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s<>"'`]+/gi, redactUrl)
     .replace(/\b(?:Bearer|Basic)\s+[^\s,"'`<>]+/gi, marker)
-    .replace(/\b[\w-]{0,80}(?:token|secret|password|credential|webhook|api[_-]?key|authorization)[\w-]{0,80}\b["']?\s*[:=]\s*[^\r\n]*/gi, (value) => `${value.slice(0, value.search(/[:=]/) + 1)} ${marker}`)
-    .replace(/\b(?:sk-|gh[pousr]_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]+\b/g, marker)
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, marker);
+    // Preserve text after explicitly quoted values; an unquoted phrase has no safe word boundary.
+    .replace(/(\b[\w-]{0,80}(?:token|secret|pass(?:word|[ _-]?phrase)|credential|webhook|api[ _-]?key|authorization)[\w-]{0,80}\b["'`*_]{0,2}\s*(?:[:=]|\bis\b)[*_]{0,2})\s*("(?:\\(?:[\s\S]|$)|[^"\\])*(?:"|$)|'(?:\\(?:[\s\S]|$)|[^'\\])*(?:'|$)|```[\s\S]*?(?:```|$)|`[^`]*(?:`|$)|[^\r\n]*)/gi,
+      (_, label, value) => {
+        const quote = value.startsWith("```") ? "```" : /^["'`]/.test(value) ? value[0] : "";
+        return `${label} ${quote}${marker}${quote}`;
+      })
+    .replace(tokenPattern, marker);
 }
 
 function record(value) {

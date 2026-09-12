@@ -19,12 +19,16 @@ import {
   managedCommandPayload,
   parseCoordinationMemoryBlock,
   parseHarnessOptions,
+  parseTransformCapture,
+  projectPersistentEntry,
+  readHarnessAgents,
   readProtectedValue,
   redactEvidence,
   sha256,
   validateProtectedLocator,
   type HarnessOwnershipManifest,
   type OperationalMemoryEntry,
+  type PersistentOperationalEntry,
 } from "./contracts";
 import { CoordinationFaultProxy, faultDisposition, type FaultProxyEvent } from "./fault-proxy";
 import { allowlistedBaseEnvironment, allowlistedCanaryActionEnvironment, prepareExternalHome, runCanaryAction, startHostOpenCode, stopHostOpenCode, waitForOpenCode } from "./process-lifecycle";
@@ -45,6 +49,10 @@ import {
   CROSS_READ_PROMPT,
   DispatchTurnValidationError,
   assertDispatchTurn,
+  assertFreshOperationalMemory,
+  assertMemoryDerivedRead,
+  assertOpenCodeInspection,
+  assertRestartReplay,
   buildExternalConfig,
   cleanupRuntimeProvider,
   crossReadPromptContainsExpected,
@@ -53,12 +61,17 @@ import {
   finishCoordinationCleanup,
   inspectReady,
   parseCrossReadResponse,
+  mappedPromptBody,
+  MAPPED_CHECK_COMMAND,
+  projectTurn,
   prepareRuntimeProvider,
   dispatchFailureDiagnostic,
   runtimeProviderConnected,
   runtimeProviderCredential,
   HarnessRuntimeReadinessError,
   runCoordinationHarness,
+  terminalOutcome,
+  validateCrossReadResults,
   writeHarnessFailureEvidence,
   type ProjectedTurn,
 } from "./harness";
@@ -376,7 +389,10 @@ if (process.argv[2] === "--version") {
   chmodSync(openCode, 0o700);
   writeFileSync(join(root, "package.json"), JSON.stringify({ devDependencies: { "@opencode-ai/plugin": "1.18.9" } }));
   writeFileSync(join(root, "opencode.json"), JSON.stringify({
-    agent: { "ingenium-software-engineer-premium": { model: "openai/gpt-5.6-sol", variant: "high" } },
+    agent: {
+      "ingenium-software-engineer-premium": { model: "openai/gpt-5.6-sol", variant: "high" },
+      "ingenium-explore": { model: "openai/gpt-5.6-sol", variant: "medium" },
+    },
     mcp: {
       ingenium: {
         type: "local",
@@ -390,6 +406,11 @@ if (process.argv[2] === "--version") {
       },
     },
   }));
+  for (const [category, name] of [["execution", "ingenium-software-engineer-premium"], ["research", "ingenium-explore"]]) {
+    const profile = join(".opencode", "agents", category!, `${name}.md`);
+    mkdirSync(dirname(join(root, profile)), { recursive: true });
+    writeFileSync(join(root, profile), readFileSync(join(process.cwd(), profile)));
+  }
   return { root, operator, auth, openCode };
 }
 
@@ -641,7 +662,7 @@ test("uses the launched OpenCode binary version for readiness", async () => {
   assert.equal(options.expectedOpenCodeVersion, "1.18.25");
 });
 
-test("attests internal C against the deployed runtime OpenCode pin", async () => {
+test("T65 F4 attests permitted internal C against the deployed runtime OpenCode pin", async () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
 
@@ -649,7 +670,8 @@ test("attests internal C against the deployed runtime OpenCode pin", async () =>
     label: "C",
     inspect: async () => ({
       health: { healthy: true, version: "1.18.9" },
-      agents: [{ name: "ingenium-llm-broker", mode: "subagent" }],
+      agents: [{ name: options.agents.C.name, mode: "subagent", model: { providerID: "openai", modelID: "gpt-5.6-sol" }, variant: "medium",
+        permission: [{ permission: "*", pattern: "*", action: "deny" }, { permission: "read", pattern: "*", action: "allow" }] }],
       providers: { providers: [{ id: "openai", connected: true }] },
       mcp: { ingenium: { status: "connected" } },
     }),
@@ -1631,9 +1653,9 @@ test("validates typed operational memory and rejects duplicates or malformed pat
   assert.throws(() => parseCoordinationMemoryBlock(block.replace('"schemaVersion":2', '"schemaVersion":2,"unexpected":true')), /payload/);
 });
 
-test("cross-read input omits peer values while the exact reduced model response reports them", () => {
+test("T65 F4 cross-read input omits peer values while the exact reduced model response reports them", () => {
   const entry = {
-    ...memoryEntry("tests/coordination/private-cross-read-nonce.txt"),
+    ...memoryEntry("tests/coordination/cross-read-nonce.txt"),
     entryId: "98765432-1234-4234-9234-123456789abc",
     actorId: `actor-${"c".repeat(64)}`,
     sourceRevision: 29,
@@ -1766,7 +1788,7 @@ test("pins nested canary API trust to the validated parent URL", () => {
   assert.equal(environment.RANDOM_VALUE, undefined);
 });
 
-test("prepares isolated homes without copying credential-bearing files", () => {
+test("T65 F4 prepares isolated homes without synthetic canary plugins or credential-bearing files", () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
   const root = tempRoot("ingenium-coordination-home-");
@@ -1774,54 +1796,159 @@ test("prepares isolated homes without copying credential-bearing files", () => {
   const files = readdirSync(prepared.home, { recursive: true }).map(String);
   assert.equal(files.some((path) => /credential|repository-secret|coordination-secret/i.test(path)), false);
   assert.equal(readFileSync(prepared.configFile, "utf8"), "{}\n");
-  assert.equal(existsSync(prepared.pluginFile), true);
-  assert.equal(existsSync(prepared.planFile), true);
-  const plugin = readFileSync(prepared.pluginFile, "utf8");
-  assert.match(plugin, /runCanaryAction/);
-  assert.match(plugin, /allowlistedCanaryActionEnvironment\(process\.env\)/);
-  assert.match(plugin, /CanaryDispatcher/);
-  assert.match(plugin, /\[CANARY_TOOL\]: tool/);
-  assert.doesNotMatch(plugin, /coordination-secret|repository-secret|provider-secret/);
+  assert.equal(existsSync(prepared.pluginFile), false);
+  assert.equal(existsSync(prepared.planFile), false);
   assert.equal(statSync(prepared.home).mode & 0o777, 0o700);
-  assert.equal(statSync(prepared.pluginFile).mode & 0o777, 0o600);
 });
 
-test("generates one fixed default-deny model profile without serializing credential locators", () => {
+test("T65 F4 preserves mapped profiles without granting synthetic tools or changing external config", () => {
   const fixture = fixtureRepository();
   const options = parseHarnessOptions(validArguments(fixture), {});
   const legacyCoordination = join(fixture.root, ".credentials", ".ingenium-mcp-credential");
   const legacyRepository = join(fixture.root, ".credentials", ".ingenium-repository-sync-credential");
+  const original = readFileSync(join(fixture.root, "opencode.json"), "utf8");
+  const path = "tests/artifacts/test-runs/11111111-1111-4111-8111-111111111111/shared-a.txt";
   const serialized = buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", {
     projectId: options.projectId,
     workspaceId: options.workspaceId,
     storageMappingHash: options.storageMappingHash,
-  });
+  }, "A", [path]);
   assert.equal(serialized.includes(legacyCoordination), false);
   assert.equal(serialized.includes(legacyRepository), false);
   const config = JSON.parse(serialized);
-  assert.deepEqual(Object.keys(config.agent), ["coordination-harness-canary"]);
-  assert.deepEqual(config.tools, { "*": false, coordination_canary: true });
+  assert.deepEqual(Object.keys(config.agent), [options.agents.A.name]);
+  assert.equal(config.tools, undefined);
   assert.deepEqual(config.permission, { "*": "deny" });
-  assert.deepEqual(config.agent["coordination-harness-canary"].tools, { "*": false, coordination_canary: true });
-  assert.deepEqual(config.agent["coordination-harness-canary"].permission, { "*": "deny" });
-  assert.equal(config.agent["coordination-harness-canary"].maxSteps, 2);
-  assert.deepEqual(config.plugin, [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
-    "file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}",
-  ]);
+  assert.equal(config.agent[options.agents.A.name].prompt, options.agents.A.prompt);
+  assert.deepEqual(config.agent[options.agents.A.name].permission.bash, { "*": "deny", [MAPPED_CHECK_COMMAND]: "allow" });
+  assert.deepEqual(config.agent[options.agents.A.name].permission.edit, { "*": "deny", [path]: "allow", [join(fixture.root, path)]: "allow" });
+  assert.deepEqual(config.plugin, ["file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"]);
   assert.equal(config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE, "{env:INGENIUM_MCP_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE, "{env:INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_TRUSTED_API_URL, "http://127.0.0.1:45000/api/v1");
-  const transformOnly = JSON.parse(buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", {
+  const reader = JSON.parse(buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", {
     projectId: options.projectId,
     workspaceId: options.workspaceId,
     storageMappingHash: options.storageMappingHash,
   }, "B"));
-  assert.deepEqual(transformOnly.tools, { "*": false });
-  assert.deepEqual(transformOnly.agent["coordination-harness-canary"].tools, { "*": false });
-  assert.deepEqual(transformOnly.plugin, [
+  assert.deepEqual(reader.agent[options.agents.B.name].permission, options.agents.B.permission);
+  assert.equal(reader.tools, undefined);
+  assert.deepEqual(reader.plugin, [
     "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
   ]);
+  for (const label of ["A", "B", "C"] as const) {
+    const prompt = mappedPromptBody(label, "bounded task", options);
+    assert.equal(prompt.agent, options.agents[label].name);
+    assert.equal(prompt.tools, undefined);
+    assert.equal(prompt.system, undefined);
+    assert.notEqual(prompt.agent, "ingenium-llm-broker");
+  }
+  assert.equal(readFileSync(join(fixture.root, "opencode.json"), "utf8"), original);
+  assert.throws(() => buildExternalConfig(options, "http://127.0.0.1:45000/api/v1", options, "A", ["opencode.json"]), /run evidence/);
+  const root = JSON.parse(original);
+  delete root.agent[options.agents.B.name];
+  root.agent["ingenium-llm-broker"] = { model: "openai/gpt-5.6-sol", variant: "medium" };
+  writeFileSync(join(fixture.root, "opencode.json"), JSON.stringify(root));
+  assert.throws(() => readHarnessAgents(fixture.root), /mapped model\/variant is unavailable/);
+});
+
+test("T65 F4 requires fresh identity-linked terminal events, persistent memory, Read, and parent restart replay", () => {
+  const worktree = "/canonical/worktree";
+  const path = "tests/artifacts/test-runs/11111111-1111-4111-8111-111111111111/shared-a.txt";
+  const marker = "fresh-run-marker";
+  const started = Date.now() - 1_000;
+  const sessionA = "ses_a";
+  const actor = `actor-${sha256(`session-${sha256(sessionA)}\0${1}`)}`;
+  const messages = (sessionID: string, messageID: string, agent: string, parts: unknown[], text = "done") => [{
+    info: { id: messageID, sessionID, role: "assistant", agent, providerID: "openai", modelID: "gpt-5.6-sol", finish: "stop",
+      time: { created: started + 1, completed: started + 100 } },
+    parts: [...parts, { type: "text", text }],
+  }];
+  const part = (sessionID: string, messageID: string, tool: string, input: unknown, metadata: unknown = {}) => ({
+    id: `part_${messageID}_${tool}`, sessionID, messageID, callID: `call_${messageID}_${tool}`, type: "tool", tool,
+    state: { status: "completed", input, metadata, output: marker, time: { start: started + 2, end: started + 90 } },
+  });
+  const nativeMessages = messages(sessionA, "msg_a", "ingenium-software-engineer-premium", [
+    part(sessionA, "msg_a", "apply_patch", { patchText: `*** Begin Patch\n*** Add File: ${path}\n+${marker}\n*** End Patch` }),
+    part(sessionA, "msg_a", "bash", { command: MAPPED_CHECK_COMMAND }, { exit: 0 }),
+  ]);
+  const turn = projectTurn("A", "native-write-check", sessionA, nativeMessages, started, marker, worktree, "write/check", [], []);
+  const encoded = path.split("/").map((segment) => Buffer.from(segment).toString("base64url"));
+  const entry: PersistentOperationalEntry = {
+    version: 1, type: "operational", entryId: "11111111-1111-4111-8111-111111111111", actorId: actor,
+    sourceRevision: 12, timestamp: new Date(started + 110).toISOString(), status: "working", contextRevision: 12,
+    actions: turn.tools.map((tool) => ({ kind: tool.name === "bash" ? "execute" : "edit", result: "succeeded", pathSegments: null, targetHash: tool.sourceReference })),
+    checks: [{ kind: "typecheck", result: "passed", targetHash: turn.tools[1]!.sourceReference }],
+    changedPaths: [{ pathSegments: encoded, operation: "write", additions: 1, deletions: 0, changeRevision: 11 }],
+    todos: { state: "in_progress", total: 1, pending: 0, inProgress: 1, completed: 0, cancelled: 0 },
+    currentTaskId: null, nextWork: { kind: "continue_task", referenceHash: null },
+    manifest: { baseCommit: "a".repeat(40), dirtyHashes: [{ pathSegments: encoded, sha256: sha256(`${marker}\n`) }],
+      dependencyResults: [], exclusivePaths: [], profileRevision: null, toolRevision: null, ownerId: actor, fence: 1,
+      unresolvedOperations: [], todoWrite: [{ id: "T65-F4", content: "Verify peer read and restart replay", status: "in_progress", priority: "high" }],
+      inputHash: null, finalized: false },
+  };
+  assert.doesNotThrow(() => assertFreshOperationalMemory(entry, turn, path, marker, actor));
+  assert.throws(() => assertFreshOperationalMemory(entry, turn, path, marker, `actor-${"b".repeat(64)}`), /another actor/);
+  assert.throws(() => assertFreshOperationalMemory(entry, turn, path, marker, actor, 12), /stale/);
+  assert.throws(() => assertFreshOperationalMemory({ ...entry, actions: [] }, turn, path, marker, actor), /terminal action/);
+  assert.throws(() => assertFreshOperationalMemory({ ...entry, checks: [{ ...entry.checks[0]!, targetHash: "c".repeat(64) }] }, turn, path, marker, actor), /check result/);
+  assert.throws(() => assertFreshOperationalMemory({ ...entry, changedPaths: [] }, turn, path, marker, actor), /changed-path/);
+  assert.throws(() => assertFreshOperationalMemory(entry, { ...turn, tools: turn.tools.map((tool) => ({ ...tool, name: "coordination_canary" })) }, path, marker, actor), /terminal action/);
+  assert.throws(() => assertFreshOperationalMemory(entry, { ...turn, tools: turn.tools.map((tool) => tool.name === "bash" ? { ...tool, exitCode: null, outcome: "unknown" } : tool) }, path, marker, actor), /terminal action/);
+  assert.throws(() => assertFreshOperationalMemory({ ...entry, manifest: { ...entry.manifest!, unresolvedOperations: [{ operationId: "unknown-call", status: "unknown", firstFailure: "terminal_tool_outcome_unknown" }] } }, turn, path, marker, actor), /unresolved/);
+
+  const projected = projectPersistentEntry(entry);
+  const block = `${COORDINATION_MEMORY_PREFIX}untrusted metadata\n${JSON.stringify({ schemaVersion: 2, pathEncoding: "base64url-utf8-segments", memoryEntries: [projected] })}`;
+  const capture = { schemaVersion: 1, sessionIdSha256: sha256("ses_b"), memory: block, activity: null, operationalEntries: [entry] };
+  assert.deepEqual(parseTransformCapture(capture), capture);
+  assert.throws(() => parseTransformCapture({ ...capture, operationalEntries: [] }), /persistent entries/);
+  assert.throws(() => parseTransformCapture({ ...capture, sessionIdSha256: undefined }), /shape/);
+  assert.throws(() => parseTransformCapture({ ...capture, operationalEntries: [{ ...entry, sourceRevision: 99 }] }), /differs/);
+  const makeRead = (label: "B" | "C", messageID: string, filePath = join(worktree, path)) => {
+    const sessionID = label === "B" ? "ses_b" : "ses_c";
+    const readMessages = messages(sessionID, messageID, "ingenium-explore", [part(sessionID, messageID, "read", { filePath })], JSON.stringify(projected));
+    return projectTurn(label, "peer-read", sessionID, readMessages, started, marker, worktree, CROSS_READ_PROMPT,
+      label === "B" ? [entry.entryId] : [], label === "B" ? [{ captureIndex: 1, captureSha256: sha256(JSON.stringify(capture)), entryIds: [entry.entryId] }] : [],
+      label === "B" ? [entry] : []);
+  };
+  const b = { turn: makeRead("B", "msg_b"), entry: projected };
+  const c = { turn: makeRead("C", "msg_c"), entry: projected };
+  assert.doesNotThrow(() => validateCrossReadResults([b, c], [projected], path));
+  assert.throws(() => validateCrossReadResults([c], [projected], path), /capture linkage/);
+  assert.throws(() => assertMemoryDerivedRead({ ...b.turn, tools: [] }, projected, path), /ordinary Read/);
+  assert.throws(() => assertMemoryDerivedRead(makeRead("B", "msg_foreign", `/foreign/worktree/${path}`), projected, path), /ordinary Read/);
+  assert.throws(() => assertMemoryDerivedRead({ ...b.turn, tools: b.turn.tools.map((tool) => ({ ...tool, markerObserved: false })) }, projected, path), /Read output/);
+  const replay = { turn: makeRead("B", "msg_replay"), entry: projected };
+  assert.doesNotThrow(() => assertRestartReplay(b, replay, 123, 456, path));
+  assert.throws(() => assertRestartReplay(b, replay, 123, 123, path), /not replaced/);
+  assert.throws(() => assertRestartReplay(b, b, 123, 456, path), /identity-linked/);
+  assert.throws(() => assertRestartReplay(b, { ...replay, turn: { ...replay.turn, operationalEntries: [] } }, 123, 456, path), /persistent/);
+  const foreign = structuredClone(nativeMessages);
+  (foreign[0]!.parts[0] as Record<string, unknown>).sessionID = "ses_foreign";
+  assert.throws(() => projectTurn("A", "foreign", sessionA, foreign, started, marker, worktree, "", [], []), /foreign/);
+  assert.throws(() => projectTurn("A", "stale", sessionA, nativeMessages, started + 500, marker, worktree, "", [], []), /stale/);
+});
+
+test("T65 F4 rejects incomplete and contradictory shell exits and invalid role surfaces", () => {
+  for (const alias of ["exit", "exitCode", "exit_code", "code"]) {
+    assert.deepEqual(terminalOutcome("bash", { status: "completed", metadata: { [alias]: 0 } }), { outcome: "passed", exitCode: 0 });
+    assert.deepEqual(terminalOutcome("shell", { status: "completed", [alias]: 7 }), { outcome: "failed", exitCode: 7 });
+  }
+  for (const state of [
+    { status: "completed" }, { status: "running", metadata: { exit: 0 } }, { status: "completed", metadata: { exit: "0" } },
+    { status: "error", metadata: { exit: 0 } }, { status: "completed", exitCode: 1, metadata: { exit: 0 } },
+    { status: "completed", metadata: { exit: 256 } }, { status: "completed", metadata: { exit: null } },
+  ]) assert.deepEqual(terminalOutcome("bash", state), { outcome: "unknown", exitCode: null });
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  const inspection = { health: { healthy: true, version: options.expectedRuntimeOpenCodeVersion },
+    agents: [{ name: options.agents.C.name, mode: "subagent", model: { providerID: "openai", modelID: "gpt-5.6-sol" }, variant: "medium",
+      permission: [{ permission: "*", pattern: "*", action: "deny" }, { permission: "read", pattern: "*", action: "allow" }] }],
+    providers: { providers: [{ id: "openai", connected: true }] }, mcp: { ingenium: { status: "connected" } } };
+  assert.doesNotThrow(() => assertOpenCodeInspection("C", inspection, options));
+  assert.throws(() => assertOpenCodeInspection("C", { ...inspection, agents: [{ ...inspection.agents[0], name: "ingenium-llm-broker" }] }, options), /mapped agent/);
+  assert.throws(() => assertOpenCodeInspection("C", { ...inspection, agents: [{ ...inspection.agents[0], permission: [] }] }, options), /tool boundary/);
+  assert.throws(() => assertOpenCodeInspection("C", { ...inspection, agents: [{ ...inspection.agents[0], permission: [...inspection.agents[0]!.permission, { permission: "bash", pattern: "*", action: "allow" }] }] }, options), /mutation boundary/);
 });
 
 test("rejects every nonallowlisted canary request before side effects and accepts the exact operation", async () => {
@@ -1946,6 +2073,7 @@ test("continues replacement-first and retains the last safe phase without retiri
     lastCompletedPhase: "replacement_started",
     replacementLocated: true,
     oldParentRetired: false,
+    handoff: undefined,
   });
 
   const retirementFailureEvidence: ReplacementContinuationEvidence[] = [];

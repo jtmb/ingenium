@@ -266,12 +266,17 @@ afterEach(() => {
 describe("context file upload", () => {
   it("redacts before fingerprints and rejects mismatched exported session identity", () => {
     const prepare = (value: string) => prepareContextUploadSnapshot(project, session, writeUpload("redacted.json", JSON.stringify({
-      info: {}, messages: [{ info: { id: "m1", role: "user" }, parts: [{ type: "text", text: `api_key=${value}` }] }],
+      info: {}, messages: [{ info: { id: "m1", role: "user" }, parts: [{ type: "text", text:
+        `api_key=${value}\nPassphrase: "two words ${value}"; keep useful text\nhttps://example.test/#access_token=${value}\nhttps://example.test/download/${value}` }] }],
     })));
-    const first = prepare(randomUUID());
-    const second = prepare(randomUUID());
+    const values = [randomUUID(), randomUUID()];
+    const first = prepare(values[0]!);
+    const second = prepare(values[1]!);
     expect(first.sourceFileHash).toBe(second.sourceFileHash);
     expect(first.snapshotHash).toBe(second.snapshotHash);
+    expect(Buffer.from(first.bytes).toString()).not.toContain(values[0]);
+    expect(Buffer.from(second.bytes).toString()).not.toContain(values[1]);
+    expect(Buffer.from(first.bytes).toString()).toContain("keep useful text");
     const { snapshotHash, ...unsigned } = snapshotBody(first.bytes);
     expect(snapshotHash).toBe(calculateContextConversationSnapshotHash(unsigned));
     const mismatch = fixturePath("mismatch.json");

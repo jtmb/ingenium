@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
 import { stableRestartTodos } from "./replacement-first-restart.js";
-import { inspectProductionRestartBinding } from "./scripts/production-restart.js";
+import { inspectProductionRestartBinding, redactedHandoffFromExport } from "./scripts/production-restart.js";
 
 const shim = await import(/* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href);
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -103,10 +103,106 @@ function legacyFixture() {
   const request = vi.fn(async (url: string) => new Response(JSON.stringify(payloads[new URL(url).pathname]), { status: 200 }));
   const inspect = vi.fn(() => ({ ...parent, commandName: "opencode", ports: [4098], nonce: undefined }));
   return { parent, source, todos, payloads, request, inspect,
-    capture: () => shim.captureLegacyRecoveryPreAdmission(parent, binding, source, request, inspect) };
+    capture: () => shim.captureLegacyRecoveryPreAdmission(parent, binding, source, request, inspect),
+    project: () => redactedHandoffFromExport({ info: payloads["/session/ses_exact"], messages: [...payloads["/session/ses_exact/message"], { parts: [
+      { type: "tool", tool: "bash", state: { status: "running", input: { command: "ingenium-build deployment production-restart" } } },
+    ] }] }, "ses_exact", root)!,
+  };
 }
 
 describe("legacy pre-admission capture", () => {
+  it.each([
+    ["zero", { metadata: { exit: 0 } }, 0],
+    ["nonzero", { metadata: { exitCode: 1 } }, 1],
+    ["top-level exit", { exit_code: 0, metadata: {} }, 0],
+    ["agreeing aliases", { code: 2, metadata: { exit: 2, exitCode: 2, exit_code: 2, code: 2 } }, 2],
+    ["error with nonzero exit", { status: "error", metadata: { exit_code: 1 } }, 1],
+    ["running", { status: "running", metadata: { exitCode: 0 } }, null],
+  ] as const)("T65 F2 keeps %s shell outcomes identical to the strict handoff projection", async (_label, state, exitCode) => {
+    for (const tool of ["bash", "shell"]) {
+      const f = legacyFixture();
+      const messages = f.payloads["/session/ses_exact/message"];
+      messages[0].parts.push({ type: "tool", tool, state: { status: "completed", input: { command: "npm run test" }, ...state } });
+      const result = await f.capture();
+      const projected = f.project();
+      expect(projected.checks).toEqual(exitCode === null ? [] : [expect.objectContaining({ exitCode,
+        status: exitCode === 0 ? "completed" : "failed", result: exitCode === 0 ? "passed" : "failed" })]);
+      expect(result.snapshot.operational.checks).toEqual(projected.checks);
+      expect(result.snapshot.operational.actionsSha256).toBe(hash(shim.canonicalJson(projected.actions)));
+      expect(result.summary.actionCount).toBe(exitCode === 0 ? 2 : 1);
+      expect(result.summary.checkCount).toBe(exitCode === null ? 0 : 1);
+      const nextWork = exitCode !== null && exitCode !== 0
+        ? { kind: "address_failure", referenceHash: projected.checks[0]!.targetHash }
+        : { kind: "continue_task", referenceHash: hash("task") };
+      expect(projected.nextWork).toEqual(nextWork);
+      expect(result.snapshot.operational.nextWork).toEqual(nextWork);
+      expect(result.summary.nextWork).toEqual(nextWork);
+    }
+  });
+
+  it("B2 preserves unknown and contradictory pre-admission outcomes", async () => {
+    const input = { command: "npm run test -- private-command-canary" };
+    const output = "private-output-canary";
+    for (const tool of ["bash", "shell"]) for (const open of [false, true]) {
+      for (const state of [{}, { metadata: { exitCode: "0" } }, { metadata: { exit: null } },
+        { metadata: { exit: 256 } }, { exitCode: 0, metadata: [] }, { metadata: { exit: 0, exitCode: 1 } },
+        { metadata: { exitCode: 1, code: 2 } }, { exitCode: 0, metadata: { exit: 1 } },
+        { metadata: { exitCode: 0, code: null } }, { status: "error", metadata: { exitCode: 0 } }, { status: "error" }]) {
+        const f = legacyFixture();
+        if (!open) f.todos.splice(0);
+        f.payloads["/session/ses_exact/message"][0].parts.push({ type: "tool", tool,
+          state: { status: "completed", input, output, ...state } });
+        const result = await f.capture();
+        const projected = f.project();
+        const referenceHash = hash(JSON.stringify({ kind: "unresolved_operation", result: "unknown",
+          sourceTargetHash: hash(`${tool}\0${JSON.stringify(input)}`), previousHash: null }));
+        expect(projected.nextWork).toEqual({ kind: "review_changes", referenceHash });
+        expect(result.snapshot.operational.nextWork).toEqual(projected.nextWork);
+        expect(result.summary.nextWork).toEqual(projected.nextWork);
+        expect(result.snapshot.operational.checks).toEqual([]);
+        expect(projected.checks).toEqual([]);
+        expect(result.summary.actionCount).toBe(1);
+        expect(result.snapshot.operational.actionsSha256).toBe(hash(shim.canonicalJson(projected.actions)));
+        expect(projected.replay.todos).toEqual(stableRestartTodos(f.todos));
+        const serialized = JSON.stringify({ result, projected });
+        expect(serialized).not.toContain(input.command);
+        expect(serialized).not.toContain(output);
+      }
+    }
+  });
+
+  it("B2 retains bounded unknown pre-admission references", async () => {
+    const f = legacyFixture();
+    const parts = f.payloads["/session/ses_exact/message"][0].parts;
+    parts.push(
+      { type: "tool", tool: "read", state: { status: "completed", input: { filePath: "src/kept.ts" } } },
+      { type: "tool", tool: "read", state: { status: "error", input: { filePath: "src/missing.ts" } } },
+      ...[0, 1].map((exit) => ({ type: "tool", tool: "shell", state: { status: "completed",
+        input: { command: "pwd" }, metadata: { exit } } })),
+    );
+    const unknown = Array.from({ length: 128 }, (_, index) => ({ type: "tool", tool: index % 2 ? "bash" : "shell",
+      state: { status: "completed", input: { command: `private-command-${index}` }, output: `private-output-${index}`,
+        metadata: index % 2 ? { exit: 0, exitCode: 1 } : {} } }));
+    parts.push(...unknown);
+    const result = await f.capture();
+    const projected = f.project();
+    expect(result.snapshot.operational.checks).toEqual([]);
+    expect(result.summary.actionCount).toBe(3);
+    const referenceHash = unknown.reduce<string | null>((previousHash, part) => hash(JSON.stringify({ kind: "unresolved_operation", result: "unknown",
+      sourceTargetHash: hash(`${part.tool}\0${JSON.stringify(part.state.input)}`), previousHash })), null);
+    expect(projected.nextWork).toEqual({ kind: "review_changes", referenceHash });
+    expect(result.summary.nextWork).toEqual(projected.nextWork);
+    expect(result.snapshot.operational.nextWork).toEqual(projected.nextWork);
+    expect(JSON.stringify(projected.nextWork).length).toBeLessThan(128);
+    const serialized = JSON.stringify({ result, projected });
+    expect(serialized).not.toContain("private-command-");
+    expect(serialized).not.toContain("private-output-");
+    unknown[0]!.state.input.command = "changed-first-unresolved-command";
+    const changed = await f.capture();
+    expect(changed.summary.nextWork).toEqual(f.project().nextWork);
+    expect(changed.summary.nextWork.referenceHash).not.toBe(referenceHash);
+  });
+
   it("corroborates one old process/session/active role and emits only typed operational references", async () => {
     const fixture = legacyFixture();
     const result = await fixture.capture();

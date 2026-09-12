@@ -1113,10 +1113,20 @@ function liveCheckName(command) {
   return undefined;
 }
 
-function liveExitCode(state) {
-  const metadata = isRecord(state.metadata) ? state.metadata : state;
-  const value = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
-  return Number.isSafeInteger(value) && value >= 0 && value <= 255 ? value : null;
+function liveToolOutcome(tool, state) {
+  const unknown = { result: "unknown", exitCode: null };
+  if (!["completed", "error"].includes(state.status)) return unknown;
+  if (!["bash", "shell"].includes(tool)) {
+    return { result: state.status === "completed" ? "passed" : "failed", exitCode: null };
+  }
+  if (state.metadata !== undefined && !isRecord(state.metadata)) return unknown;
+  const sources = isRecord(state.metadata) ? [state, state.metadata] : [state];
+  const codes = sources.flatMap((source) => ["exit", "exitCode", "exit_code", "code"]
+    .filter((key) => Object.hasOwn(source, key)).map((key) => source[key]));
+  const exitCode = codes[0];
+  if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode) || exitCode < 0 || exitCode > 255
+    || codes.some((code) => code !== exitCode) || (state.status === "error" && exitCode === 0)) return unknown;
+  return { result: exitCode === 0 ? "passed" : "failed", exitCode };
 }
 
 function liveInputChanges(tool, input, worktree) {
@@ -1188,6 +1198,8 @@ async function readLiveRecoverySummary(parent, worktree, request) {
     const actions = [];
     const changedPaths = new Map();
     const checks = [];
+    // The strict handoff has no unknown check variant; a hash chain retains every unresolved target in bounded space.
+    let unresolvedOperationsHash = null;
     for (const message of messages) {
       if (!isRecord(message) || !Array.isArray(message.parts)) continue;
       for (const part of message.parts) {
@@ -1196,12 +1208,17 @@ async function readLiveRecoverySummary(parent, worktree, request) {
         const tool = String(part.tool).toLowerCase().replace(/[.-]/g, "_");
         if (["bash", "shell"].includes(tool)
           && part.state.input.command === "ingenium-build deployment production-restart") continue;
+        const { result, exitCode } = liveToolOutcome(tool, part.state);
+        if (result === "unknown") {
+          unresolvedOperationsHash = sha256(JSON.stringify({ kind: "unresolved_operation", result,
+            sourceTargetHash: sha256(`${tool}\0${JSON.stringify(part.state.input)}`), previousHash: unresolvedOperationsHash }));
+        }
         const changes = liveInputChanges(tool, part.state.input, worktree);
         const path = changes.length === 1 ? changes[0].path : undefined;
         const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
           : tool === "write" || tool === "file_write" ? "write"
             : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
-        if (part.state.status === "completed") {
+        if (result === "passed") {
           actions.push({
             kind,
             result: "succeeded",
@@ -1219,10 +1236,8 @@ async function readLiveRecoverySummary(parent, worktree, request) {
           });
         }
         const name = ["bash", "shell"].includes(tool) ? liveCheckName(part.state.input.command) : undefined;
-        if (name) {
-          const result = part.state.status === "completed" ? "passed" : "failed";
+        if (name && result !== "unknown") {
           const checkStatus = result === "passed" ? "completed" : "failed";
-          const exitCode = liveExitCode(part.state);
           checks.push({
             name,
             status: checkStatus,
@@ -1256,11 +1271,12 @@ async function readLiveRecoverySummary(parent, worktree, request) {
     const populated = Object.values(todoCounts).filter((count) => count > 0).length;
     const todoState = populated === 0 ? "none" : populated > 1 ? "mixed" : todoCounts.pending ? "pending"
       : todoCounts.inProgress ? "in_progress" : todoCounts.completed ? "complete" : "cancelled";
-    const nextWork = failedCheck ? { kind: "address_failure", referenceHash: failedCheck.targetHash }
-      : open ? { kind: "continue_task", referenceHash: taskHash }
-        : latestCheck ? { kind: "run_checks", referenceHash: latestCheck.targetHash }
-          : latestAction ? { kind: "review_changes", referenceHash: latestAction.targetHash ?? sha256(latestAction.path) }
-            : { kind: "none", referenceHash: null };
+    const nextWork = unresolvedOperationsHash ? { kind: "review_changes", referenceHash: unresolvedOperationsHash }
+      : failedCheck ? { kind: "address_failure", referenceHash: failedCheck.targetHash }
+        : open ? { kind: "continue_task", referenceHash: taskHash }
+          : latestCheck ? { kind: "run_checks", referenceHash: latestCheck.targetHash }
+            : latestAction ? { kind: "review_changes", referenceHash: latestAction.targetHash ?? sha256(latestAction.path) }
+              : { kind: "none", referenceHash: null };
     const handoff = {
       status,
       taskHash,

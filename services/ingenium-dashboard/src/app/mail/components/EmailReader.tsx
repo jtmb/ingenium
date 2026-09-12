@@ -213,7 +213,10 @@ export default function EmailReader({
   const fromAddress = email.from?.[0];
   const toList = email.to?.map((t: any) => t.address).join(", ") || "";
   const ccList = email.cc?.map((c: any) => c.address).join(", ") || "";
-  const bodyOverflowClass = email.body?.html ? "overflow-hidden" : "overflow-y-auto";
+  // Avoid building iframe documents for oversized inline media.
+  const htmlTooLarge = email.body?.html?.length > 2_000_000;
+  const showHtml = email.body?.html && !htmlTooLarge;
+  const bodyOverflowClass = showHtml ? "overflow-hidden" : "overflow-y-auto";
 
   const renderSummarize = (
     <div className="px-4 py-2 border-b border-[var(--color-border)]">
@@ -263,7 +266,13 @@ export default function EmailReader({
 
   const renderEmailBody = (
     <>
-        {email.body?.html ? (
+      {htmlTooLarge && (
+        <p className="mb-3 text-sm text-[var(--color-text-muted)] italic">
+          This email is too large to preview ({(email.body.html.length / 1_048_576).toFixed(1)} MB).
+          {email.body?.text ? " Showing plain text." : " No plain text version is available."}
+        </p>
+      )}
+      {showHtml ? (
         (() => {
           const html = email.body.html;
           let srcDoc: string;
@@ -277,26 +286,12 @@ export default function EmailReader({
            * and `color-scheme:light` to prevent dark-mode email HTML from inverting colors.
            */
           if (/<html[\s>]/i.test(html) || /<body[\s>]/i.test(html)) {
-            srcDoc = html.replace(/<head[^>]*>/i, '$&<base target="_blank">');
+            srcDoc = html.replace(/<head[^>]*>/i, '$&<base target="_blank"><style>body{color-scheme:light}img{max-width:100%;height:auto}</style>');
             if (!/<head/i.test(html)) {
               srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head>' + html.replace(/^<html[^>]*>/i, '').replace(/<\/html>\s*$/i, '');
             }
           } else {
             srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head><body>' + html + '</body></html>';
-          }
-
-          /** PERF: Size guard — email bodies > 2MB skip HTML rendering to avoid
-           *  freezing the browser on massive inline base64 images. Falls back to
-           *  plain text if available. */
-          if (html.length > 2_000_000) {
-            return (
-              <p className="text-sm text-[var(--color-text-muted)] italic">
-                This email is too large to preview ({(html.length / 1_048_576).toFixed(1)} MB).
-                {email.body?.text && (
-                  <> <button onClick={() => {}} className="underline text-blue-500">View plain text</button></>
-                )}
-              </p>
-            );
           }
 
           return (
@@ -313,7 +308,7 @@ export default function EmailReader({
         <pre className="text-sm text-[var(--color-text-primary)] whitespace-pre-wrap font-sans">
           {email.body.text}
         </pre>
-      ) : (
+      ) : !htmlTooLarge && (
         <p className="text-[var(--color-text-muted)] text-sm italic">No content</p>
       )}
     </>

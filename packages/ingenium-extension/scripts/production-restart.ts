@@ -1171,10 +1171,23 @@ function restartCheckName(command: unknown): RedactedRestartHandoff["checks"][nu
   return undefined;
 }
 
-function restartExitCode(state: Record<string, unknown>): number | null {
-  const metadata = isRecord(state.metadata) ? state.metadata : state;
-  const value = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
-  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 255 ? value as number : null;
+function restartToolOutcome(tool: string, state: Record<string, unknown>): {
+  result: "passed" | "failed" | "unknown";
+  exitCode: number | null;
+} {
+  const unknown = { result: "unknown" as const, exitCode: null };
+  if (!["completed", "error"].includes(state.status as string)) return unknown;
+  if (!["bash", "shell"].includes(tool)) {
+    return { result: state.status === "completed" ? "passed" : "failed", exitCode: null };
+  }
+  if (state.metadata !== undefined && !isRecord(state.metadata)) return unknown;
+  const sources = isRecord(state.metadata) ? [state, state.metadata] : [state];
+  const codes = sources.flatMap((source) => ["exit", "exitCode", "exit_code", "code"]
+    .filter((key) => Object.hasOwn(source, key)).map((key) => source[key]));
+  const exitCode = codes[0];
+  if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode) || exitCode < 0 || exitCode > 255
+    || codes.some((code) => code !== exitCode) || (state.status === "error" && exitCode === 0)) return unknown;
+  return { result: exitCode === 0 ? "passed" : "failed", exitCode };
 }
 
 function restartInputPath(input: Record<string, unknown>, worktree: string): string | undefined {
@@ -1239,17 +1252,24 @@ function redactedHandoffFromSession(
   const actions: RedactedRestartHandoff["actions"] = [];
   const changed = new Map<string, RedactedRestartHandoff["changedPaths"][number]>();
   const checks: RedactedRestartHandoff["checks"] = [];
+  // The strict handoff has no unknown check variant; a hash chain retains every unresolved target in bounded space.
+  let unresolvedOperationsHash: string | null = null;
   for (const message of list) {
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
     for (const part of message.parts) {
       if (!isRecord(part) || part.type !== "tool" || typeof part.tool !== "string" || !isRecord(part.state)
         || !["completed", "error"].includes(part.state.status as string) || !isRecord(part.state.input)) continue;
       const tool = part.tool.toLowerCase().replace(/[.-]/g, "_");
+      const { result, exitCode } = restartToolOutcome(tool, part.state);
+      if (result === "unknown") {
+        unresolvedOperationsHash = hash(JSON.stringify({ kind: "unresolved_operation", result,
+          sourceTargetHash: hash(`${tool}\0${JSON.stringify(part.state.input)}`), previousHash: unresolvedOperationsHash }));
+      }
       const changes = restartInputChanges(tool, part.state.input, worktree);
       const path = changes.length === 1 ? changes[0]!.path : undefined;
       const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
         : tool === "write" || tool === "file_write" ? "write" : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
-      if (part.state.status === "completed") {
+      if (result === "passed") {
         actions.push({
           kind,
           result: "succeeded",
@@ -1266,11 +1286,9 @@ function redactedHandoffFromSession(
           changeRevision: changed.size + 1,
         });
       }
-      const name = tool === "bash" ? restartCheckName(part.state.input.command) : undefined;
-      if (name) {
-        const result = part.state.status === "completed" ? "passed" as const : "failed" as const;
+      const name = ["bash", "shell"].includes(tool) ? restartCheckName(part.state.input.command) : undefined;
+      if (name && result !== "unknown") {
         const checkStatus = result === "passed" ? "completed" as const : "failed" as const;
-        const exitCode = restartExitCode(part.state);
         checks.push({
           name,
           status: checkStatus,
@@ -1292,11 +1310,12 @@ function redactedHandoffFromSession(
   const failed = [...boundedChecks].reverse().find((check) => check.result === "failed");
   const latestCheck = boundedChecks.at(-1);
   const latestAction = boundedActions.at(-1);
-  const nextWork = failed ? { kind: "address_failure" as const, referenceHash: failed.targetHash }
-    : open ? { kind: "continue_task" as const, referenceHash: taskHash }
-      : latestCheck ? { kind: "run_checks" as const, referenceHash: latestCheck.targetHash }
-        : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
-          : { kind: "none" as const, referenceHash: null };
+  const nextWork = unresolvedOperationsHash ? { kind: "review_changes" as const, referenceHash: unresolvedOperationsHash }
+    : failed ? { kind: "address_failure" as const, referenceHash: failed.targetHash }
+      : open ? { kind: "continue_task" as const, referenceHash: taskHash }
+        : latestCheck ? { kind: "run_checks" as const, referenceHash: latestCheck.targetHash }
+          : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
+            : { kind: "none" as const, referenceHash: null };
   return parseRedactedRestartHandoff({
     replay: { sessionIdSha256: hash(sessionId), todos },
     status: operationalStatus,

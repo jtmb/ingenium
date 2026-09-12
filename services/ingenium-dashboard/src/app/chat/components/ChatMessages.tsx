@@ -153,12 +153,10 @@ function ReasoningBlock({ content, isStreaming }: { content: string; isStreaming
   );
 }
 
-/**
- * FileImagePart — renders an image file part as an <img> with click-to-expand.
- */
 function FileImagePart({ file }: { file: FilePart }) {
   const [expanded, setExpanded] = useState(false);
   const src = file.dataUrl ?? file.url ?? "";
+  const alt = file.filename ?? "attached image";
 
   if (!src) {
     return (
@@ -170,23 +168,19 @@ function FileImagePart({ file }: { file: FilePart }) {
 
   return (
     <div className="my-2" data-testid="chat-file-image">
-      {expanded ? (
-        <div className="relative">
-          <img
-            src={src}
-            alt={file.filename ?? "attached image"}
-            className="max-w-full"
-            onClick={() => setExpanded(false)}
-          />
-        </div>
-      ) : (
+      <button
+        type="button"
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${alt}`}
+        aria-expanded={expanded}
+        className="block max-w-full cursor-pointer border-0 bg-transparent p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+        onClick={() => setExpanded((value) => !value)}
+      >
         <img
           src={src}
-          alt={file.filename ?? "attached image"}
-          className="max-h-48 cursor-pointer hover:opacity-90 transition-opacity"
-          onClick={() => setExpanded(true)}
+          alt={alt}
+          className={expanded ? "max-w-full" : "max-h-48 hover:opacity-90 transition-opacity"}
         />
-      )}
+      </button>
       {file.filename && (
         <p className="text-[10px] text-[var(--color-text-muted)] mt-1">
           {file.filename}
@@ -476,7 +470,7 @@ export default function ChatMessages({
                   <path strokeLinecap="round" d="M14 3a11 11 0 0111 11" />
                 </svg>
               </div>
-              <p className="text-sm text-[var(--color-text-muted)]">
+              <p role="status" className="text-sm text-[var(--color-text-muted)]">
                 Loading conversation...
               </p>
             </div>
@@ -498,7 +492,7 @@ export default function ChatMessages({
                   <path strokeLinecap="round" d="M14 9v5M14 19.5v.5" />
                 </svg>
               </div>
-              <p className="text-sm text-[var(--color-error-text)]">
+              <p role="alert" className="text-sm text-[var(--color-error-text)]">
                 {error}
               </p>
               {onRetry && (

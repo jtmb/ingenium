@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, writeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { Hooks, PluginInput } from "@opencode-ai/plugin";
+import { redactContextText } from "@ingenium/extension/context-upload-codec";
 import { ContextAutoUploader } from "./context-upload.js";
 import { ExternalUsageCollector } from "./external-usage.js";
 import {
@@ -51,6 +52,8 @@ const SNAPSHOT_VERSION = 1;
 const MAX_CHANGED_PATHS = 32;
 const MAX_PATH_SEGMENT_BYTES = 255;
 const MAX_DIFF_COUNT = 1_000_000;
+const MAX_OBSERVED_TOOL_CALLS = 1024;
+const MAX_OBSERVED_PATCH_BYTES = 1024 * 1024;
 const TRACE_ROOT = "/tmp/opencode/";
 const MAX_TRANSCRIPT_MESSAGES = 16;
 const MAX_TRANSCRIPT_BYTES = 1_572_864;
@@ -314,6 +317,7 @@ interface SessionState extends SessionMutation {
   contextRevision: number | null;
   actions: OperationalAction[];
   checks: OperationalCheck[];
+  observedToolCalls: Set<string>;
   memoryDirty: boolean;
   replayMemory: OperationalEntry[];
   manifest: ResultManifest;
@@ -323,7 +327,7 @@ interface SessionState extends SessionMutation {
 }
 
 type RecoverableOperationalState = Pick<SessionState,
-  "status" | "todos" | "changedPaths" | "currentTaskId" | "actions" | "checks" | "memoryDirty" | "manifest" | "allocation">;
+  "status" | "todos" | "changedPaths" | "currentTaskId" | "actions" | "checks" | "observedToolCalls" | "memoryDirty" | "manifest" | "allocation">;
 
 interface OperationalMemoryBatch {
   conversationId: string;
@@ -363,7 +367,7 @@ export interface SessionCoordinatorDependencies {
   outbox?: CoordinationOutbox;
 }
 
-type CoordinatorContext = { worktree: string; client: unknown; serverUrl?: URL };
+type CoordinatorContext = { worktree: string; directory?: string; client: unknown; serverUrl?: URL };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -527,6 +531,99 @@ function targetHash(tool: string, args: unknown): string {
 
 function publishedChecks(checks: OperationalCheck[]): Array<Omit<OperationalCheck, "exitCode">> {
   return checks.map(({ exitCode: _exitCode, ...check }) => check);
+}
+
+function observedToolPath(value: unknown, worktree: string, directory = worktree): string | undefined {
+  if (typeof value !== "string" || value.length > 4096) return undefined;
+  if (isAbsolute(value) ? resolve(value) !== value : !isSafeRestartHandoffPath(value)) return undefined;
+  const path = relative(resolve(worktree), resolve(directory, value));
+  return isSafeRestartHandoffPath(path) && redactContextText(path) === path ? path : undefined;
+}
+
+function observedToolChanges(tool: string, input: Record<string, unknown>, metadata: Record<string, unknown>, ctx: CoordinatorContext) {
+  const changes = new Map<string, Omit<ChangedPathSnapshot, "changeRevision">>();
+  const add = (value: unknown, operation: "write" | "edit", counts: Record<string, unknown> = {}, directory = ctx.worktree) => {
+    const path = observedToolPath(value, ctx.worktree, directory);
+    if (path && (changes.has(path) || changes.size < MAX_CHANGED_PATHS)) {
+      changes.set(path, { path, operation, additions: boundedCount(counts.additions) ?? 0, deletions: boundedCount(counts.deletions) ?? 0 });
+    }
+  };
+  if (tool === "write" || tool === "edit") {
+    const diff = isRecord(metadata.filediff) ? metadata.filediff : {};
+    const path = tool === "write" ? metadata.filepath : diff.file;
+    if (path !== undefined) add(path, tool, diff);
+    else add(input.filePath, tool, {}, ctx.directory ?? ctx.worktree);
+  } else if (tool === "apply_patch") {
+    if (Array.isArray(metadata.files)) {
+      for (const file of metadata.files.slice(0, MAX_CHANGED_PATHS)) {
+        if (!isRecord(file) || !["add", "update", "delete", "move"].includes(file.type as string)) continue;
+        add(file.filePath, file.type === "add" ? "write" : "edit", file.type === "move" ? {} : file);
+        if (file.type === "move") add(file.movePath, "write", file);
+      }
+    } else {
+      const patch = input.patchText;
+      if (typeof patch === "string" && patch.length <= MAX_OBSERVED_PATCH_BYTES
+        && Buffer.byteLength(patch, "utf8") <= MAX_OBSERVED_PATCH_BYTES) {
+        for (const match of patch.matchAll(/^\*\*\* (?:(Add|Update|Delete) File|Move to): ([^\r\n]+)\r?$/gm)) {
+          add(match[2], match[1] === "Add" || match[1] === undefined ? "write" : "edit", {}, ctx.directory ?? ctx.worktree);
+          if (changes.size === MAX_CHANGED_PATHS) break;
+        }
+      }
+    }
+  }
+  return [...changes.values()];
+}
+
+function observedCheckKind(command: unknown): OperationalCheck["kind"] {
+  // Compound shell exits describe the whole command, not an individual check.
+  if (typeof command !== "string" || command.length > 8192 || /[;&|\r\n`$<>]/.test(command)) return "other";
+  const name = command.trim().match(/^(?:(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?|(?:npx|bunx)\s+)?([a-z][a-z0-9-]*)(?:\s|:|$)/)?.[1];
+  if (name && ["test", "vitest", "jest", "pytest", "playwright"].includes(name)) return "test";
+  if (name === "typecheck" || name === "tsc") return "typecheck";
+  if (name === "lint" || name === "eslint") return "lint";
+  if (name === "format" || name === "prettier") return "format";
+  if (name === "build" || name === "compile") return "build";
+  if (name && ["audit", "security", "snyk"].includes(name)) return "security";
+  return "other";
+}
+
+function terminalToolObservation(part: unknown, ctx: CoordinatorContext) {
+  const id = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/.test(value);
+  if (!isRecord(part) || part.type !== "tool" || !id(part.id) || !id(part.sessionID) || !id(part.messageID) || !id(part.callID)
+    || !isRecord(part.state) || !isRecord(part.state.input) || !["completed", "error"].includes(part.state.status as string)) return undefined;
+  const tool = part.tool;
+  const shell = tool === "bash" || tool === "shell";
+  const kind: OperationalAction["kind"] | undefined = tool === "read" ? "read"
+    : tool === "glob" || tool === "grep" ? "search"
+      : tool === "write" ? "write" : tool === "edit" || tool === "apply_patch" ? "edit" : shell ? "execute" : undefined;
+  if (!kind) return undefined;
+  const input = part.state.input;
+  const metadata = isRecord(part.state.metadata) ? part.state.metadata : {};
+  const exits = [metadata, part.state].flatMap((source) => ["exit", "exitCode", "exit_code", "code"]
+    .filter((key) => Object.hasOwn(source, key)).map((key) => source[key]));
+  const exitCode = exits.length > 0 && exits.every((value) => Number.isSafeInteger(value)
+    && (value as number) >= 0 && (value as number) <= 255 && value === exits[0]) ? exits[0] as number : null;
+  const result = part.state.status === "error" ? "failed"
+    : shell ? exitCode === null ? "unknown" : exitCode === 0 ? "passed" : "failed" : "passed";
+  const reference = targetHash("terminal-tool", [part.sessionID, part.messageID, part.callID]);
+  return {
+    sessionId: part.sessionID,
+    reference,
+    result,
+    action: result === "passed" ? { kind, result: "succeeded" as const, pathSegments: null, targetHash: reference } : undefined,
+    check: result !== "unknown" && (shell || result === "failed") ? {
+      kind: shell ? observedCheckKind(input.command) : "other" as const,
+      result: result as OperationalCheck["result"], targetHash: reference,
+      exitCode: result === "failed" && exitCode === 0 ? null : exitCode,
+    } : undefined,
+    changes: result === "passed" ? observedToolChanges(tool as string, input, metadata, ctx) : [],
+  };
+}
+
+function rememberToolCall(state: SessionState, reference: string): void {
+  state.observedToolCalls.add(reference);
+  // ponytail: bounded recent-call dedup; a durable event cursor is needed for older replay.
+  if (state.observedToolCalls.size > MAX_OBSERVED_TOOL_CALLS) state.observedToolCalls.delete(state.observedToolCalls.values().next().value!);
 }
 
 function eventStatus(value: unknown): SessionState["status"] | undefined {
@@ -998,6 +1095,7 @@ export class SessionCoordinator {
       contextRevision: null,
       actions: recovered?.actions ?? [],
       checks: recovered?.checks ?? [],
+      observedToolCalls: recovered?.observedToolCalls ?? new Set(),
       memoryDirty: recovered?.memoryDirty ?? false,
       replayMemory: [],
       manifest: recovered?.manifest ?? {
@@ -1085,6 +1183,7 @@ export class SessionCoordinator {
       currentTaskId: state.currentTaskId,
       actions: state.actions.map((entry) => ({ ...entry, pathSegments: entry.pathSegments ? [...entry.pathSegments] : null })),
       checks: state.checks.map((entry) => ({ ...entry })),
+      observedToolCalls: new Set(state.observedToolCalls),
       memoryDirty: state.memoryDirty,
       manifest: structuredClone(state.manifest),
       allocation: state.allocation ? structuredClone(state.allocation) : undefined,
@@ -1282,7 +1381,7 @@ export class SessionCoordinator {
       await this.closeBridge();
       this.registering.clear();
       this.closingSessions.clear();
-      this.transformQueues.clear();
+      this.observationQueues.clear();
     });
     return this.disposal;
   }
@@ -1535,7 +1634,8 @@ export class SessionCoordinator {
             state.snapshotRevision = snapshotRevision;
           } else if (record.kind === "memory") {
             if (!state.memoryDirty) return true;
-            const changedPaths = state.changedPaths.map(({ path, ...entry }) => ({ pathSegments: encodeCoordinationPath(path), ...entry }));
+            const observedPaths = state.changedPaths;
+            const changedPaths = observedPaths.map(({ path, ...entry }) => ({ pathSegments: encodeCoordinationPath(path), ...entry }));
             if (changedPaths.some((entry) => !entry.pathSegments)) return false;
             const total = state.todos.pending + state.todos.inProgress + state.todos.completed + state.todos.cancelled;
             result = await this.invoke("coordination_handoff", {
@@ -1550,7 +1650,7 @@ export class SessionCoordinator {
                 nextWork: this.nextWork(state),
               },
             });
-            state.memoryDirty = false;
+            state.memoryDirty = state.changedPaths !== observedPaths;
           } else if (record.kind === "ack" && record.cursor !== null) {
             result = await this.invoke("coordination_handoff", {
               ...this.lease(state), operation: "ack", through_sequence: record.cursor,
@@ -2183,18 +2283,50 @@ export class SessionCoordinator {
     return targetId;
   }
 
-  private readonly transformQueues = new Map<string, Promise<void>>();
+  private readonly observationQueues = new Map<string, Promise<void>>();
 
-  private async serializedTransform(sessionId: string, action: () => Promise<void>): Promise<void> {
+  private async serializedObservation(sessionId: string, action: () => Promise<void>): Promise<void> {
     if (this.disposed) return;
-    const predecessor = this.transformQueues.get(sessionId) ?? Promise.resolve();
+    const predecessor = this.observationQueues.get(sessionId) ?? Promise.resolve();
     const current = predecessor.catch(() => undefined).then(() => this.disposed ? undefined : action());
-    this.transformQueues.set(sessionId, current);
+    this.observationQueues.set(sessionId, current);
     try {
       await current;
     } finally {
-      if (this.transformQueues.get(sessionId) === current) this.transformQueues.delete(sessionId);
+      if (this.observationQueues.get(sessionId) === current) this.observationQueues.delete(sessionId);
     }
+  }
+
+  private async observeTerminalTool(part: unknown): Promise<void> {
+    if (!isRecord(part) || typeof part.sessionID !== "string") return;
+    const local = this.sessions.get(part.sessionID);
+    if (!local || local.state !== "active" || this.closingSessions.has(part.sessionID)) return;
+    const observation = terminalToolObservation(part, this.ctx);
+    if (!observation) return;
+    const { sessionId, reference, result, action, check, changes } = observation;
+    await this.serializedObservation(sessionId, async () => {
+      await this.registering.get(sessionId)?.catch(() => undefined);
+      if (this.disposed || this.sessions.get(sessionId) !== local || local.state !== "active" || this.closingSessions.has(sessionId)
+        || local.observedToolCalls.has(reference)) return;
+      rememberToolCall(local, reference);
+      await this.publishSnapshot(sessionId, (state) => {
+        state.status = "working";
+        if (action) state.actions = [...state.actions, action].slice(-64);
+        if (check) state.checks = [...state.checks, check].slice(-32);
+        const changed = changes.map((entry) => ({ ...entry, changeRevision: (state.snapshotRevision ?? 0) + 1 }));
+        state.changedPaths = [...state.changedPaths.filter((entry) => !changed.some((change) => change.path === entry.path)), ...changed]
+          .slice(-MAX_CHANGED_PATHS);
+        if (result === "unknown") {
+          state.manifest.unresolvedOperations = [...state.manifest.unresolvedOperations, {
+            operationId: reference, status: "unknown" as const, firstFailure: "terminal_tool_outcome_unknown",
+          }].slice(-32);
+        }
+        state.manifest.finalized = false;
+        state.reviewAdmission = undefined;
+        state.memoryDirty = true;
+      });
+      await this.publishMemory(sessionId, result === "failed" ? "error" : "working");
+    });
   }
 
   private async unseenPeerSnapshots(sessionId: string): Promise<PeerSnapshot[]> {
@@ -2257,10 +2389,11 @@ export class SessionCoordinator {
     } else {
       let baseCommit: string | null = null;
       try { baseCommit = git(this.ctx.worktree, ["rev-parse", "HEAD"]).toString("utf8").trim(); } catch { /* An unborn worktree has no base commit. */ }
-      const paths = new Set([...manifest.dirtyHashes.map((entry) => decodeCoordinationPath(entry.pathSegments)!),
-        ...state.changedPaths.map((entry) => entry.path)]);
+      const currentPaths = new Set(state.changedPaths.map((entry) => entry.path));
+      const paths = [...manifest.dirtyHashes.map((entry) => decodeCoordinationPath(entry.pathSegments)!)
+        .filter((path) => !currentPaths.has(path)), ...currentPaths].slice(-MAX_CHANGED_PATHS);
       manifest = { ...manifest, baseCommit, ownerId: state.actorId, fence: state.fence,
-        dirtyHashes: [...paths].sort().map((path) => ({ pathSegments: encodeCoordinationPath(path)!, sha256: fileBaselineSha256(this.ctx.worktree, path) })) };
+        dirtyHashes: paths.sort().map((path) => ({ pathSegments: encodeCoordinationPath(path)!, sha256: fileBaselineSha256(this.ctx.worktree, path) })) };
     }
     const unresolved = this.outbox?.unresolved().filter((entry) => entry.sessionHash === state.sessionId.slice("session-".length)) ?? [];
     for (const entry of unresolved) {
@@ -2278,6 +2411,8 @@ export class SessionCoordinator {
   private nextWork(state: SessionState): OperationalEntry["nextWork"] {
     const failed = [...state.checks].reverse().find((check) => check.result === "failed");
     if (failed) return { kind: "address_failure", referenceHash: failed.targetHash };
+    const unknown = [...state.manifest.unresolvedOperations].reverse().find((operation) => operation.firstFailure === "terminal_tool_outcome_unknown");
+    if (unknown) return { kind: "address_failure", referenceHash: unknown.operationId };
     if (state.todos.pending > 0 || state.todos.inProgress > 0) {
       return { kind: "continue_task", referenceHash: state.currentTaskId?.slice(5) ?? null };
     }
@@ -2373,7 +2508,8 @@ export class SessionCoordinator {
         if (!state.memoryDirty) return false;
         state.recoveryStatus = status;
         persistManagedRecoveryJournal(this.ctx.worktree, this.recoveryJournal(state, status));
-        const changedPaths = state.changedPaths.map(({ path, ...entry }) => {
+        const observedPaths = state.changedPaths;
+        const changedPaths = observedPaths.map(({ path, ...entry }) => {
           const pathSegments = encodeCoordinationPath(path);
           if (!pathSegments) throw new Error("invalid coordination path");
           return { pathSegments, ...entry };
@@ -2401,7 +2537,8 @@ export class SessionCoordinator {
         state.memoryConversationId = result.memory.conversationId;
         state.memoryRevision = result.memory.revision as number;
         state.contextRevision = result.memory.revision as number;
-        state.memoryDirty = false;
+        // Terminal observations replace this array even when no file changed.
+        state.memoryDirty = state.changedPaths !== observedPaths;
         return true;
       });
     } catch (error) {
@@ -2420,6 +2557,10 @@ export class SessionCoordinator {
       },
       event: async ({ event }) => {
         if (this.disposed) return;
+        if (event.type === "message.part.updated") {
+          await this.observeTerminalTool(event.properties?.part);
+          return;
+        }
         const sessionId = eventSessionId(event);
         if (!sessionId) return;
         if (event.type === "session.created" || event.type === "session.idle") {
@@ -2527,7 +2668,7 @@ export class SessionCoordinator {
       "experimental.chat.system.transform": async ({ sessionID, model }, output) => {
         appendAutonomyReminder(output.system);
         if (this.disposed || !sessionID) return;
-        await this.serializedTransform(sessionID, async () => {
+        await this.serializedObservation(sessionID, async () => {
           trace({
             event: "hook_entry",
             operation: "experimental.chat.system.transform",

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Create one complete OpenCode export that is safe for context_upload_file.
- * Raw stdout stays in bounded memory; only redacted visible text reaches disk.
+ * Raw CLI/stdin input stays in bounded memory; only redacted visible text reaches disk.
+ * Final mode additionally verifies the caller's explicit frozen snapshot boundary.
  */
 import { spawn } from "node:child_process";
-import { visibleContextExport } from "../packages/ingenium-extension/context-upload-codec.mjs";
+import { completedAssistant, visibleContextExport } from "../packages/ingenium-extension/context-upload-codec.mjs";
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -25,6 +25,8 @@ import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { performance } from "node:perf_hooks";
 
 const MAX_EXPORT_BYTES = 64 * 1024 * 1024;
+// Diagnostic parts can exceed the importer limit before visible-text filtering.
+const MAX_SOURCE_BYTES = 128 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const MIN_TIMEOUT_MS = 50;
 const MAX_TIMEOUT_MS = 5 * 60_000;
@@ -50,7 +52,7 @@ function fail(code) {
 
 function usage() {
   process.stderr.write(
-    "Usage: export-context-upload.mjs --session <safe-session-id> --worktree <canonical-absolute-worktree> --output <safe-output.json> [--timeout-ms <50-300000>]\n",
+    "Usage: export-context-upload.mjs --session <safe-session-id> --worktree <canonical-absolute-worktree> --output <safe-output.json> [--input -] [--timeout-ms <50-300000>] [--mode final --project-id <OpenCode-project-id> --cutoff-ms <frozen-epoch-ms> --cutoff-message <last-source-message-id> --expected-messages <source-count>]\n",
   );
 }
 
@@ -69,7 +71,8 @@ function parseArguments(argv) {
     index += 1;
   }
 
-  const allowed = new Set(["--session", "--worktree", "--output", "--timeout-ms"]);
+  const finalFlags = ["--project-id", "--cutoff-ms", "--cutoff-message", "--expected-messages"];
+  const allowed = new Set(["--session", "--worktree", "--output", "--timeout-ms", "--input", "--mode", ...finalFlags]);
   if ([...options.keys()].some((flag) => !allowed.has(flag))) fail("INVALID_ARGUMENTS");
 
   const session = options.get("--session");
@@ -83,7 +86,21 @@ function parseArguments(argv) {
     fail("INVALID_ARGUMENTS");
   }
 
-  return { session, worktree, output, timeoutMs };
+  const input = options.get("--input");
+  const mode = options.get("--mode") ?? "incremental";
+  if ((input !== undefined && input !== "-") || !["incremental", "final"].includes(mode)) fail("INVALID_ARGUMENTS");
+  let frozen;
+  if (mode === "final") {
+    if (finalFlags.some((flag) => !options.has(flag))) fail("INVALID_ARGUMENTS");
+    const cutoffMs = Number(options.get("--cutoff-ms"));
+    const expectedMessages = Number(options.get("--expected-messages"));
+    if (!Number.isSafeInteger(cutoffMs) || cutoffMs <= 0 || cutoffMs > Date.now()
+      || !Number.isSafeInteger(expectedMessages) || expectedMessages <= 0) fail("INVALID_ARGUMENTS");
+    frozen = { projectId: safeSession(options.get("--project-id")), cutoffMs,
+      cutoffMessage: safeSession(options.get("--cutoff-message")), expectedMessages };
+  } else if (finalFlags.some((flag) => options.has(flag))) fail("INVALID_ARGUMENTS");
+
+  return { session, worktree, output, timeoutMs, input, frozen };
 }
 
 function currentUid() {
@@ -262,11 +279,11 @@ function terminateProcessGroup(child, signal) {
   }
 }
 
-function runExport(worktree, session, timeoutMs) {
-  return new Promise((resolve) => {
+function runExport(worktree, session, timeoutMs, input) {
+  return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn("opencode", ["export", session, "--pure"], {
+      if (input !== "-") child = spawn("opencode", ["export", session, "--pure"], {
         cwd: worktree,
         // POSIX descendants share a group so timeout cleanup reaches helpers;
         // Windows falls back to terminating the direct child.
@@ -277,43 +294,100 @@ function runExport(worktree, session, timeoutMs) {
         windowsHide: true,
       });
     } catch {
-      resolve({ code: null, signal: null, spawned: false, timedOut: false });
+      reject(new ExportError("EXPORT_FAILED"));
       return;
     }
 
+    const stream = child?.stdout ?? process.stdin;
     let settled = false;
-    let timedOut = false;
-    let oversized = false;
+    let failure;
+    let eof = false;
     let size = 0;
     const chunks = [];
-    child.stdout.on("data", (chunk) => {
-      size += chunk.length;
-      if (size > MAX_EXPORT_BYTES) {
-        oversized = true;
-        chunks.length = 0;
-        terminateProcessGroup(child, "SIGKILL");
-      } else if (!oversized) chunks.push(chunk);
-    });
     let forceKillTimer;
-    const settle = (result) => {
+    const settle = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
-      resolve(result);
+      if (failure) reject(new ExportError(failure));
+      else resolve(Buffer.concat(chunks, size));
+      chunks.length = 0;
+    };
+    const abort = (code, graceMs = 0) => {
+      if (settled || failure) return;
+      failure = code;
+      chunks.length = 0;
+      if (child) terminateProcessGroup(child, graceMs ? "SIGTERM" : "SIGKILL");
+      const finish = () => {
+        if (child) terminateProcessGroup(child, "SIGKILL");
+        stream.destroy();
+        settle();
+      };
+      if (graceMs) forceKillTimer = setTimeout(finish, graceMs);
+      else finish();
     };
     const timeout = setTimeout(() => {
-      timedOut = true;
-      // Stop the group first, then force-kill after a short grace period so a
-      // stuck exporter or descendant cannot keep writing after the timeout.
-      terminateProcessGroup(child, "SIGTERM");
-      forceKillTimer = setTimeout(() => terminateProcessGroup(child, "SIGKILL"), PROCESS_GROUP_KILL_GRACE_MS);
+      abort("EXPORT_TIMEOUT", PROCESS_GROUP_KILL_GRACE_MS);
     }, timeoutMs);
 
-    child.once("error", () => settle({ code: null, signal: null, spawned: false, timedOut }));
-    child.once("close", (code, signal) => settle({ code, signal, spawned: true, timedOut,
-      oversized, bytes: oversized ? undefined : Buffer.concat(chunks) }));
+    stream.on("data", (chunk) => {
+      if (settled || failure) return;
+      size += chunk.length;
+      if (size > MAX_SOURCE_BYTES) abort("EXPORT_TOO_LARGE");
+      else chunks.push(chunk);
+    });
+    stream.once("error", () => abort("EXPORT_FAILED"));
+    stream.once("end", () => {
+      eof = true;
+      if (!child && !failure) settle();
+    });
+    stream.once("close", () => { if (!eof) abort("EXPORT_INCOMPLETE"); });
+    child?.once("error", () => abort("EXPORT_FAILED"));
+    child?.once("close", (code, signal) => {
+      if (failure) return;
+      if (code !== 0 || signal !== null) abort("EXPORT_FAILED");
+      else if (!eof) abort("EXPORT_INCOMPLETE");
+      else settle();
+    });
   });
+}
+
+function validateFrozenExport(value, session, worktree, frozen) {
+  const info = value?.info;
+  if (info?.id !== session || info.directory !== worktree || info.projectID !== frozen.projectId) {
+    fail("FINAL_EXPORT_BINDING_MISMATCH");
+  }
+  const beforeCutoff = (time) => Number.isSafeInteger(time) && time >= 0 && time <= frozen.cutoffMs;
+  if (!beforeCutoff(info.time?.created) || !beforeCutoff(info.time?.updated)
+    || info.time.updated < info.time.created || !Array.isArray(value.messages)
+    || value.messages.length !== frozen.expectedMessages
+    || value.messages.at(-1)?.info?.id !== frozen.cutoffMessage) fail("FINAL_EXPORT_CUTOFF_MISMATCH");
+
+  const ids = new Set();
+  for (const message of value.messages) {
+    const info = message?.info;
+    if (!info || info.sessionID !== session || typeof info.id !== "string"
+      || !SESSION_PATTERN.test(info.id) || info.id.length > 128 || ids.has(info.id)) {
+      fail("FINAL_EXPORT_BINDING_MISMATCH");
+    }
+    ids.add(info.id);
+    if (!["user", "assistant"].includes(info.role) || !beforeCutoff(info.time?.created)
+      || !Array.isArray(message.parts)) fail("FINAL_EXPORT_INCOMPLETE");
+    if (info.role === "assistant" && (!completedAssistant(info) || !beforeCutoff(info.time.completed)
+      || info.time.completed < info.time.created)) fail("FINAL_EXPORT_INCOMPLETE");
+    for (const part of message.parts) {
+      if (!part || typeof part !== "object" || Array.isArray(part) || typeof part.type !== "string"
+        || (part.sessionID !== undefined && part.sessionID !== session)
+        || (part.messageID !== undefined && part.messageID !== info.id)) fail("FINAL_EXPORT_INCOMPLETE");
+      if (part.type === "text" && (typeof part.text !== "string" || (part.time !== undefined
+        && (!beforeCutoff(part.time?.start) || !beforeCutoff(part.time?.end)
+          || part.time.end < part.time.start)))) fail("FINAL_EXPORT_INCOMPLETE");
+      if (part.type === "tool" && (!["completed", "error"].includes(part.state?.status)
+        || !beforeCutoff(part.state.time?.start) || !beforeCutoff(part.state.time?.end)
+        || part.state.time.end < part.state.time.start)) fail("FINAL_EXPORT_INCOMPLETE");
+    }
+  }
 }
 
 function validateCompleteExport(owned) {
@@ -381,22 +455,42 @@ async function main() {
     const outputPath = join(prepareUploadDirectory(worktree), outputBasename);
     owned = createOwnedOutputFile(outputPath);
 
-    const result = await runExport(worktree, session, arguments_.timeoutMs);
-    if (result.oversized) fail("EXPORT_TOO_LARGE");
-    if (!result.spawned || result.timedOut || result.code !== 0 || result.signal !== null) fail("EXPORT_FAILED");
+    let source = await runExport(worktree, session, arguments_.timeoutMs, arguments_.input);
+    const sourceBytes = source.byteLength;
+    let parsed;
+    try {
+      parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(source));
+    } catch { fail("INVALID_EXPORT"); }
+    source = undefined;
+    if (arguments_.frozen) validateFrozenExport(parsed, session, worktree, arguments_.frozen);
     let visible;
     try {
-      visible = visibleContextExport(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.bytes)), session, worktree);
+      visible = visibleContextExport(parsed, session, worktree);
     } catch { fail("INVALID_EXPORT"); }
-    writeFileSync(owned.descriptor, JSON.stringify(visible));
+    let final;
+    if (arguments_.frozen) {
+      const last = visible.messages.at(-1)?.info;
+      if (last?.id !== arguments_.frozen.cutoffMessage || last.role !== "assistant") fail("FINAL_EXPORT_INCOMPLETE");
+      delete visible.info.contextUploadAutomatic;
+      final = { projectId: arguments_.frozen.projectId, session, worktree,
+        cutoffMs: arguments_.frozen.cutoffMs, cutoffMessage: arguments_.frozen.cutoffMessage,
+        sourceBytes, sourceMessageCount: parsed.messages.length, visibleMessageCount: visible.messages.length,
+        excludedMessageCount: parsed.messages.length - visible.messages.length, complete: true };
+    }
+    parsed = undefined;
+    const output = JSON.stringify(visible);
+    if (Buffer.byteLength(output) > MAX_EXPORT_BYTES) fail("EXPORT_TOO_LARGE");
+    writeFileSync(owned.descriptor, output);
     closeOwnedDescriptor(owned);
 
     const verified = validateCompleteExport(owned);
+    if (verified.sha256 !== createHash("sha256").update(output).digest("hex")) fail("INVALID_EXPORT");
     process.stdout.write(`${JSON.stringify({
       path: owned.path,
       sha256: verified.sha256,
       bytes: verified.bytes,
       elapsedMs: Math.round(performance.now() - startedAt),
+      ...(final ? { final } : {}),
     })}\n`);
   } catch (error) {
     if (owned !== undefined) {

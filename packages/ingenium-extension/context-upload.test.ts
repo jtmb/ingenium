@@ -25,6 +25,51 @@ describe("Context upload boundary", () => {
     expect(JSON.stringify(exported)).not.toContain("excluded");
   });
 
+  it("redacts passphrase labels, including escaped and unfinished quotes, without losing useful surrounding text", () => {
+    const value = randomUUID();
+    const labels = ["passphrase", "Pass Phrase", "pass_phrase", "pass-phrase", "SSH_KEY_PASSPHRASE", "keyPassphrase", "**Passphrase**", "API key"];
+    const text = labels.map((label) => `${label}: ${JSON.stringify(`two words "${value}"`)}; keep useful text`).join("\n");
+    const redacted = redactContextText(text);
+    expect(redacted).not.toContain(value);
+    expect(redacted.match(/keep useful text/g)).toHaveLength(labels.length);
+    expect(redactContextText(redacted)).toBe(redacted);
+    expect(redactContextText(`passphrase is \`${value}\`; keep this`)).toBe("passphrase is `[REDACTED]`; keep this");
+    expect(redactContextText(`"passphrase":"${value}","status":"healthy"`)).toBe('"passphrase": "[REDACTED]","status":"healthy"');
+    expect(redactContextText(`passphrase: "${value}\n${value}\\`)).toBe('passphrase: "[REDACTED]"');
+    expect(redactContextText(`**Passphrase:** "${value}"; keep this`)).toBe('**Passphrase:** "[REDACTED]"; keep this');
+    expect(redactContextText(`passphrase:\n\`\`\`\n${value}\n\`\`\`\nkeep this`)).toBe("passphrase: ```[REDACTED]```\nkeep this");
+    expect(redactContextText(`passphrase: two words ${value}\nkeep this`)).toBe("passphrase: [REDACTED]\nkeep this");
+    expect(redactContextText(`passphrase: [REDACTED]${value}`)).toBe("passphrase: [REDACTED]");
+  });
+
+  it("redacts fragment, encoded, nested and opaque URL capabilities and tokens but preserves ordinary links and prose", () => {
+    const value = randomUUID().replaceAll("-", "");
+    const shortValue = value.slice(0, 12);
+    const jwt = `eyJ${value}.${value}.${value}`;
+    const urls = [
+      `https://example.test/#access_token=${shortValue}`,
+      `https://example.test/?passphrase=${shortValue}`,
+      `https://example.test/?%70assphrase=${shortValue}`,
+      `https://example.test/%2570assphrase/${shortValue}`,
+      `https://example.test/passphrase/${shortValue}`,
+      `https://example.test/my-webhook/${shortValue}`,
+      `https://example.test/?redirect=${encodeURIComponent(`https://other.test/?token=${shortValue}`)}`,
+      `https://example.test/download/${value}`,
+      `https://example.test/?q=${value}`,
+      `https://example.test/#${jwt}`,
+      `https://user:${value}@example.test/path`,
+    ];
+    for (const url of urls) {
+      const redacted = redactContextText(`before ${url} after`);
+      expect(redacted).toBe("before [REDACTED] after");
+      expect(redactContextText(redacted)).toBe(redacted);
+    }
+    const tokens = ["sk-", "ghp_", "github_pat_", "xoxb-", "glpat-", "npm_"].map((prefix) => `${prefix}${value}`);
+    expect(redactContextText([...tokens, jwt].join("\n"))).toBe(Array(tokens.length + 1).fill("[REDACTED]").join("\n"));
+    const useful = `Keep https://example.test/docs?view=compact#install and the public build id ${value}.`;
+    expect(redactContextText(useful)).toBe(useful);
+  });
+
   it("binds the session/worktree and stops before an unfinished assistant, including finish-only messages", () => {
     const input = { info: { id: "ses_exact", directory: "/work" }, messages: [message("m1"), message("m2", "assistant", false), message("m3")] };
     Object.assign(input.messages[1]!.info, { finish: "stop" });

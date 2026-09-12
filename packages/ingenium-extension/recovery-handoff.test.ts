@@ -22,7 +22,108 @@ const binding = (root: string) => ({ project: "ingenium", projectId: "00000000-0
   workspaceId: "workspace-ingenium", storageMappingHash: hash("mapping"), launcherWorktree: root });
 const toolResult = (data: unknown) => ({ content: [{ type: "text", text: JSON.stringify(data) }] });
 
+describe.each(["bash", "shell"])("T65 F2 %s recovery outcomes", (tool) => {
+  it.each([
+    ["zero exit", { metadata: { exit: 0 } }, 0],
+    ["nonzero exit", { metadata: { exit: 1 } }, 1],
+    ["zero exitCode", { metadata: { exitCode: 0 } }, 0],
+    ["nonzero exitCode", { metadata: { exitCode: 2 } }, 2],
+    ["zero exit_code", { metadata: { exit_code: 0 } }, 0],
+    ["nonzero exit_code", { metadata: { exit_code: 127 } }, 127],
+    ["zero code", { metadata: { code: 0 } }, 0],
+    ["nonzero code", { metadata: { code: 255 } }, 255],
+    ["top-level exit", { exitCode: 0, metadata: {} }, 0],
+    ["agreeing aliases", { code: 1, metadata: { exit: 1, exitCode: 1, exit_code: 1, code: 1 } }, 1],
+    ["error with nonzero exit", { status: "error", metadata: { exit: 1 } }, 1],
+    ["running with zero exit", { status: "running", metadata: { exit: 0 } }, null],
+    ["pending with zero exit", { status: "pending", metadata: { exit: 0 } }, null],
+  ] as const)("normalizes %s without inventing successful actions or checks", (_label, state, exitCode) => {
+    const root = temporary();
+    const input = { command: "npm run test" };
+    const projected = redactedHandoffFromExport({ info: { id: "original", directory: root }, messages: [{ parts: [
+      { type: "tool", tool, state: { status: "completed", input, ...state } },
+      { type: "tool", tool: "bash", state: { status: "running", input: { command: "ingenium-build deployment production-restart" } } },
+    ] }] }, "original", root);
+    const sourceTargetHash = hash(`${tool}\0${JSON.stringify(input)}`);
+    const check = { name: "test", status: exitCode === 0 ? "completed" : "failed",
+      result: exitCode === 0 ? "passed" : "failed", exitCode };
+    const targetHash = hash(JSON.stringify({ ...check, sourceTargetHash }));
+    expect(projected?.checks).toEqual(exitCode === null ? [] : [{ ...check, targetHash }]);
+    expect(projected?.actions).toEqual(exitCode === 0
+      ? [{ kind: "execute", result: "succeeded", path: null, targetHash: sourceTargetHash }] : []);
+    expect(projected?.nextWork).toEqual(exitCode === null ? { kind: "none", referenceHash: null }
+      : { kind: exitCode === 0 ? "run_checks" : "address_failure", referenceHash: targetHash });
+    expect(parseRedactedRestartHandoff(projected)).toEqual(projected);
+  });
+});
+
 describe("typed recovery replay", () => {
+  it("B2 preserves unknown and contradictory recovery outcomes", () => {
+    const root = temporary();
+    const input = { command: "npm run test -- private-command-canary" };
+    const output = "private-output-canary";
+    for (const tool of ["bash", "shell"]) {
+      for (const state of [{}, { metadata: {} }, { metadata: { exit: null } }, { metadata: { exit: "0" } },
+        { metadata: { exit: 0.5 } }, { metadata: { exit: -1 } }, { metadata: { exit: 256 } },
+        { exitCode: 0, metadata: [] }, { metadata: { exit: 0, exitCode: 1 } },
+        { metadata: { exitCode: 1, exit_code: 2 } }, { exitCode: 1, metadata: { exitCode: 0 } },
+        { metadata: { exitCode: 0, code: null } }, { status: "error", metadata: { exit: 0 } }, { status: "error" }]) {
+        const projected = redactedHandoffFromExport({ info: { id: "original", directory: root }, messages: [{ parts: [
+          { type: "tool", tool, state: { status: "completed", input, output, ...state } },
+          { type: "tool", tool: "bash", state: { status: "running", input: { command: "ingenium-build deployment production-restart" } } },
+        ] }] }, "original", root)!;
+        const referenceHash = hash(JSON.stringify({ kind: "unresolved_operation", result: "unknown",
+          sourceTargetHash: hash(`${tool}\0${JSON.stringify(input)}`), previousHash: null }));
+        expect(projected.nextWork).toEqual({ kind: "review_changes", referenceHash });
+        expect(projected.actions).toEqual([]);
+        expect(projected.checks).toEqual([]);
+        expect(projected.replay.todos).toEqual([]);
+        const serialized = JSON.stringify(projected);
+        expect(serialized).not.toContain(input.command);
+        expect(serialized).not.toContain(output);
+        expect(parseRedactedRestartHandoff(JSON.parse(serialized))).toEqual(projected);
+        expect(restartHandoffMemoryEntry(projected, { actorId: `actor-${hash("owner")}`, fence: 1 }).nextWork)
+          .toEqual(projected.nextWork);
+        expect(() => parseRedactedRestartHandoff({ ...projected, checks: [{ name: "test", status: "unknown",
+          result: "unknown", exitCode: null, targetHash: referenceHash }] })).toThrow("handoff.checks is invalid");
+      }
+    }
+  });
+
+  it("keeps check status/result/exit validation strict", () => {
+    const original = handoff();
+    const check = { name: "test", status: "completed", result: "passed", exitCode: 0, targetHash: hash("test") };
+    for (const change of [{ exitCode: 1 }, { status: "failed" }, { result: "failed" },
+      { status: "failed", result: "failed" }, { status: "unknown", result: "unknown", exitCode: null }]) {
+      expect(() => parseRedactedRestartHandoff({ ...original, checks: [{ ...check, ...change }] })).toThrow("handoff.checks is invalid");
+    }
+  });
+
+  it("B2 keeps unknown work actionable alongside known check results", () => {
+    const root = temporary();
+    const exported = { info: { id: "original", directory: root, currentTaskId: "task" }, messages: [{ parts: [
+      { type: "tool", tool: "todowrite", state: { status: "completed", input: { todos: handoff().replay.todos } } },
+      { type: "tool", tool: "bash", state: { status: "completed", input: { command: "npm run typecheck" } } },
+      { type: "tool", tool: "bash", state: { status: "completed", input: { command: "npm run test" }, metadata: { exit: 1 } } },
+      { type: "tool", tool: "shell", state: { status: "completed", input: { command: "npm run lint" }, metadata: { exit: 2 } } },
+      { type: "tool", tool: "bash", state: { status: "completed", input: { command: "npm run build" }, metadata: { exit: 0 } } },
+      { type: "tool", tool: "bash", state: { status: "running", input: { command: "ingenium-build deployment production-restart" } } },
+    ] }] };
+    const projected = redactedHandoffFromExport(exported, "original", root)!;
+    expect(projected?.checks.map(({ name, result }) => ({ name, result }))).toEqual([
+      { name: "test", result: "failed" }, { name: "lint", result: "failed" }, { name: "build", result: "passed" },
+    ]);
+    const referenceHash = hash(JSON.stringify({ kind: "unresolved_operation", result: "unknown",
+      sourceTargetHash: hash(`bash\0${JSON.stringify({ command: "npm run typecheck" })}`), previousHash: null }));
+    expect(projected.nextWork).toEqual({ kind: "review_changes", referenceHash });
+    expect(projected?.replay.todos).toEqual(handoff().replay.todos);
+    exported.messages[0]!.parts.splice(1, 1);
+    const knownOnly = redactedHandoffFromExport(exported, "original", root)!;
+    expect(knownOnly.checks).toEqual(projected.checks);
+    expect(knownOnly.actions).toEqual(projected.actions);
+    expect(knownOnly.nextWork).toEqual({ kind: "address_failure", referenceHash: knownOnly.checks[1]!.targetHash });
+  });
+
   it("reuses lifecycle Todo IDs from completed original-session history and ignores uncertain Todo writes", () => {
     const todos = handoff().replay.todos;
     const inputWithoutId = todos.map(({ id: _id, ...todo }) => todo);
