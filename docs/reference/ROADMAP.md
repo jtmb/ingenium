@@ -10341,3 +10341,22 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   remain pending.
 - **Safety/acceptance:** No secret is recorded. Acceptance for this append is
   readback plus the scoped roadmap diff check.
+
+## DEPLOY-1 exact 16a deployment-attempt and test-fix boundary — 2026-09-12
+
+- **Deployment attempt:** Full revision
+  `16a618bfb15ddd2ae9965ee5aec2ac3a5014c179` had one build failure before
+  recreate, install, or preflight. TypeScript reported `TS2339` because the
+  `process.getuid` spy's `mockReturnValue` was inferred as `never` in
+  `recovery-pre-admission.test.ts`. The c132 container, image, host receipt,
+  and launcher remained healthy and exact. Rollback tag:
+  `ingenium-ingenium:rollback-c132ee46-16a618bf`.
+- **Mutation boundary:** Installer invocation count was zero, and no recovery
+  mutation occurred.
+- **Causal test-only fix:** Use the existing `vi.mocked` pattern; ownership-
+  negative behavior is unchanged. One execution of
+  `npm run typecheck --workspace=@ingenium/extension` passed.
+- **Pending gates:** A new commit, deploy/install, and fresh read-only preflight
+  remain pending.
+- **Safety/acceptance:** No secret is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.

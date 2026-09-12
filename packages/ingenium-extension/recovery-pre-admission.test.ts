@@ -180,7 +180,10 @@ describe("recovery preflight repository-data trust", () => {
       symlinkSync(target, f.file);
     }
     if (failure === "hardlink") linkSync(f.file, join(root, ".opencode/hardlink"));
-    if (failure === "foreign owner") vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
+    if (failure === "foreign owner") {
+      vi.spyOn(process, "getuid");
+      vi.mocked(process.getuid!).mockReturnValue(process.getuid!() + 1);
+    }
     if (failure === "executable Git blob") {
       f.git("update-index", "--chmod=+x", "opencode.json");
       f.git("commit", "--quiet", "-m", "executable config");
