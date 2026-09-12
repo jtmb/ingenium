@@ -1228,7 +1228,7 @@ const expected = {
   "ingenium-docs": ["openai/gpt-5.6-luna", "max"],
   "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
   "ingenium-software-engineer-fast": ["openai/gpt-5.6-sol", "high"],
-  "ingenium-software-engineer-premium": ["openai/gpt-6-astra", "medium"],
+  "ingenium-software-engineer-premium": ["openai/gpt-6-astra", "max"],
   "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "high"],
   "ingenium-orchestrator": ["openai/gpt-5.6-sol", "medium"],
   "ingenium-explore": ["openai/gpt-5.6-sol", "medium"],

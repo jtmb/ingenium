@@ -10247,3 +10247,45 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
 - **Acceptance:** This documentation append is accepted by readback and the
   scoped roadmap diff check only; no documentation audit or Docs Workspace
   mutation was performed.
+
+## CONFIG-1/2 append-only configuration authority reconciliation — 2026-09-11
+
+- **CONFIG-1 — external config boundary:** The externally-origin-unknown
+  `opencode.json` Premium variant change `medium` → `max` is preserved. A
+  read-only audit verified that `openai/gpt-6-astra` supports `max`: Plan uses
+  it and the validator permits it. Adopt this as a separate quality-aligned
+  configuration boundary under the user's Astra/deep-quality direction, with
+  no permission, scope, or tool widening.
+- **CONFIG-2 — companion authority references:** The required companion paths
+  are `tests/test-agent-validation.sh` for the exact expectation,
+  `.opencode/models.md`, `docs/configure/agents.md`, and `AGENTS.md` for roster
+  truth. The Premium profile remains unchanged because the root map owns the
+  runtime variant.
+
+| Boundary | Authorized writer and exact action | Smallest probe / prerequisite | Verifier and fail behavior | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|
+| CONFIG-1 | Premium; reconcile the exact `opencode.json` variant and `tests/test-agent-validation.sh` expectation only. | Read-only exact diff/authority probe; exclusive paths and the existing working parent are preserved. | `bash tests/test-agent-validation.sh`; failure is non-mutating and keeps the current parent. | Premium | Source validation, then later full-parent replacement, effective mapping/profile/grants, and model/session proof. |
+| CONFIG-2 | Docs; reconcile `.opencode/models.md`, `docs/configure/agents.md`, and `AGENTS.md` canonical references without changing the Premium profile. | Exact authority/reference diff; CONFIG-1's exclusive path and existing parent remain prerequisites. | The same validator plus canonical-reference readback; failure is non-mutating and keeps the current parent. | Premium | Source/reference validation, later full-parent replacement, effective mapping/profile/grants, and model/session proof. |
+
+- **Restart/secret boundary:** No child-only restart is permitted; no secret value
+  is recorded. This append performs no config implementation or source mutation.
+- **Acceptance:** Readback plus the scoped roadmap diff check only.
+
+## CONFIG-2 finalized source/config evidence — 2026-09-11
+
+- **Implementation paths:** `opencode.json`,
+  `tests/test-agent-validation.sh`, `.opencode/models.md`,
+  `docs/configure/agents.md`, and `AGENTS.md`.
+- **Roster result:** `ingenium-software-engineer-premium` retains model
+  `openai/gpt-6-astra` and changes only variant `medium` → `max`; role,
+  permissions, and every other agent entry remain unchanged.
+- **Verification evidence:** One QA scoped-diff review `PASS`; one execution of
+  `bash tests/test-agent-validation.sh` `PASS`; and one read-only documentation
+  audit `PASS` with no findings.
+- **Activation boundary:** This is source/config validation only. Activation
+  remains pending the exact committed deployment/host install and a
+  replacement-first full parent restart, followed by effective
+  mapping/profile/grant and model/session proof. The current parent is preserved
+  until those gates pass.
+- **Safety/acceptance:** No secret value is recorded. This append is accepted by
+  readback and the scoped roadmap diff check only.

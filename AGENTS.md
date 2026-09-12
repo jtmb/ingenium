@@ -52,7 +52,7 @@ The authoritative agent list is the `agent` map in root [`opencode.json`](openco
 | `ingenium-orchestrator` | Primary coordination; never edits; TodoWrite; scoped Git/GitHub Bash; `openai/gpt-5.6-sol / medium` | primary / visible | No |
 | `ingenium-chat` | Read-only chat primary; `openai/gpt-5.6-luna / max` | primary / hidden | No |
 | `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-5.6-sol / high` | subagent / visible | Yes |
-| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-astra / medium` | subagent / visible | Yes |
+| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-astra / max` | subagent / visible | Yes |
 | `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-5.6-luna / max` | subagent / visible | Yes |
 | `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-5.6-sol / high` | subagent / visible | Yes, scoped |
 | `ingenium-explore` | Read-only search and codebase exploration; `openai/gpt-5.6-sol / medium` | subagent / visible | No |

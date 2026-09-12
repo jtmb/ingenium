@@ -22,7 +22,7 @@ named Ingenium agents. Root `opencode.json` remains authoritative; the hidden
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
 | `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
 | `ingenium-software-engineer-fast` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
-| `ingenium-software-engineer-premium` | `openai/gpt-6-astra` | `medium` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-software-engineer-premium` | `openai/gpt-6-astra` | `max` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
 | `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
 | `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/primary/ingenium-orchestrator.md` |
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
