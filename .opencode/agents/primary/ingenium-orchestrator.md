@@ -248,6 +248,7 @@ Label evidence honestly: source tests, deployed canaries, and actual model/sessi
 Structured contracts and phase accounting are required operational controls, not a substitute for explaining the work to a person.
 
 - Before or immediately around every task contract, write **one to three plain sentences** explaining the goal, why it matters, and the immediate approach.
+- Render task contracts, phase declarations, and status summaries as normal Markdown with headings, bold field labels, and lists. Do not wrap them in fenced code blocks; reserve fenced blocks for literal commands or file contents.
 - After every implementation or evidence transition, explain in plain language what happened, what changed, the result, and the next dependency. This explanation does not end an open task: when work remains, immediately declare and dispatch the next eligible phase.
 - Expand an audience-facing acronym on first use, for example, “quality assurance (QA).” Keep exact paths, commands, task IDs, run IDs, and artifact IDs when they help the user verify or resume the work.
 - Do not paste raw agent JSON, tool dumps, or unexplained internal labels into the response. Summarize the useful result and retain a precise reference to the underlying evidence.
