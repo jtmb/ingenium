@@ -10441,3 +10441,47 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
 - **RECOVERY-49 — nextWork:** After this roadmap commit, deploy/install the
   final revision and run `ingenium-build deployment recovery-prepare` through
   the installed source, then perform replacement activation.
+
+## RECOVERY-48..58 and T53 evidence checkpoint — 2026-09-12
+
+- **Deployment chain — `DEPLOYED/HOST` and `DEPLOYED/MCP` evidence:**
+  `bc356d5d` deploy/install/scanner `PASS`; `d71d2764` deploy/install `PASS`;
+  `d13667c7` deploy/install `PASS`; `fde4d358` built/recreated healthy, but its
+  MCP canary failed with `FDE_MCP_CONNECTION_CLOSED` and installation was
+  deferred; `0aa682c7` deploy/install `PASS` with a fresh MCP acceptance of
+  `42` unique tools. The fresh `0aa682c7` acceptance used container
+  `891f4d68ef32fe7fe7b149b970a71f460015142e5e038a0a8bdb4c3a0ee927c2`, image
+  `sha256:75fce783428c43df5d8c0f962501a154a7df4d5f7cd378fcf18f09633ce93d74`,
+  and receipt
+  `/home/brajam/.local/state/ingenium-build-install-05db5887-c2db-4874-9227-882ac45a06c3.json`.
+- **Recovery preparation — `SOURCE/TEST` and failure evidence:** Direct
+  `recovery-prepare` returned `RECOVERY_PREPARATION_FAILED` at phase `inspect`.
+  Root cause 1 was empty launcher defaults forwarded as bindings, fixed at
+  `d13667c7`; a retry returned the same public signature. Root cause 2 was
+  captured as `Recovery preparation parent is ambiguous` from foreign-user
+  `/proc/<pid>/exe` `EACCES`, fixed at `fde4d358`; its ancestry walker uses
+  stable UID/PID/start-time linkage and has `10` focused tests.
+- **MCP flake — deployed diagnostic evidence:** The `fde4d358` closure did not
+  reproduce on one diagnostic pass, which listed `42` tools. The cause was not
+  established. The `0aa682c7` canary is the fresh acceptance, not a retry.
+- **Control-plane verdict — recovery gate:** The current TUI parent cannot
+  qualify for legacy capture: it has no loopback listener and no
+  `OPENCODE_SERVER_PASSWORD`, and neither can be retrofitted into a running
+  process. The container `4101` proxy cannot substitute. The managed launcher
+  `ingenium-opencode` reserved a port but lacked password provisioning; this
+  was fixed at `0aa682c7` with `13` focused tests and one security review
+  `PASS`, with no `BLOCKING`/`FOLLOW_UP` findings.
+- **T53 — visual gate `PASS` at `d71d2764`:** Changed-route evidence and the
+  `24`-route sweep are retained under
+  `tests/artifacts/visual-qa/t53-d71-20260912-1410/`. There were no `BLOCKING`
+  findings. Retained `INFORMATIONAL` notes cover masked sweep bodies and
+  superseded harness attempts.
+- **Evidence boundary:** `SOURCE/TEST`, deployed canary, and still-absent
+  model/session recovery proof remain distinct. The failed canary, deferred
+  installation, unestablished MCP cause, and non-mutations are not converted
+  into acceptance; no replacement activation or actual model/session recovery
+  proof is claimed.
+- **nextWork:** The user must relaunch OpenCode through the documented managed
+  `ingenium-opencode` launcher in `docs/usage/opencode.md` so a capture-eligible
+  parent exists; then run `recovery-prepare` and replacement activation; then
+  perform T49–T51 acceptance.
