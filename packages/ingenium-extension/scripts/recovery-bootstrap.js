@@ -682,24 +682,46 @@ export function stableRecoveryAncestryMembers(ancestry, parent) {
   return parentIndex < 0 ? [] : ancestry.slice(parentIndex);
 }
 
-function inspectAncestry(worktree) {
+export function inspectAncestry(worktree, options = {}) {
   const ancestry = [];
   const candidates = [];
-  let pid = process.ppid;
+  const ambiguous = { status: "ambiguous", members: [], parent: null };
+  const owner = ownerUid();
+  const processOwner = options.processOwner ?? ((pid) => lstatSync(`/proc/${pid}`).uid);
+  const processStat = options.processStat ?? parseProcessStat;
+  const inspect = options.inspect ?? inspectAncestor;
+  const environmentFor = options.environment ?? processEnvironment;
+  const listeningPortsFor = options.listeningPorts ?? processListeningPorts;
+  let pid = options.parentPid ?? process.ppid;
   for (let depth = 0; depth < 32 && pid > 1; depth += 1) {
-    const inspected = inspectAncestor(pid);
-    if (!inspected) return { status: "ambiguous", members: [], parent: null };
+    try {
+      const uid = processOwner(pid);
+      if (uid !== owner) {
+        // Foreign supervisors contribute lineage, never recoverable parent authority.
+        const before = processStat(pid);
+        const after = processStat(pid);
+        if (!before || !after || before.parentPid === pid || before.parentPid !== after.parentPid
+          || before.startTimeTicks !== after.startTimeTicks || processOwner(pid) !== uid) return ambiguous;
+        pid = before.parentPid;
+        continue;
+      }
+    } catch { return ambiguous; }
+    const inspected = inspect(pid);
+    if (!inspected) return ambiguous;
+    try {
+      if (processOwner(pid) !== owner) return ambiguous;
+    } catch { return ambiguous; }
     const { argv, ...member } = inspected;
     ancestry.push(member);
     const sessionId = commandLineSession(argv);
     const sessionArgument = argv.some((arg) => arg === "-s" || arg === "--session" || arg.startsWith("--session="));
     if (inspected.commandName === "opencode" && inspected.cwd === worktree && (sessionId || !sessionArgument)) {
-      const environment = processEnvironment(pid);
+      const environment = environmentFor(pid);
       const dataHomeCandidate = environment?.XDG_DATA_HOME
         ?? (environment?.HOME ? resolve(environment.HOME, ".local/share") : undefined);
       let dataHome;
       try { dataHome = dataHomeCandidate && realpathSync(dataHomeCandidate); } catch {}
-      const ports = processListeningPorts(pid);
+      const ports = listeningPortsFor(pid);
       const nonce = environment?.INGENIUM_RESTART_NONCE;
       if (environment && dataHome && ports.length <= 1 && (!nonce || /^[A-Za-z0-9_-]{43,128}$/.test(nonce))) {
         candidates.push({

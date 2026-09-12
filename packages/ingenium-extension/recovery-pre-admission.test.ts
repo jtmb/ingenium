@@ -108,6 +108,56 @@ describe("recovery configured authority", () => {
   });
 });
 
+describe("recovery ancestry ownership", () => {
+  function fixture() {
+    const uid = process.getuid!();
+    const parent = { pid: 10, parentPid: 20, startTimeTicks: 100, executableSha256: hash("parent"),
+      cwd: root, commandName: "opencode", cmdlineSha256: hash("argv"), argv: ["opencode"] };
+    const inspect = vi.fn((pid: number) => pid === 10 ? parent
+      : pid === 30 ? { ...parent, pid: 30, parentPid: 1 } : undefined);
+    const processOwner = vi.fn((pid: number) => pid === 20 ? uid + 1 : uid);
+    const processStat = vi.fn((_pid: number): { parentPid: number; startTimeTicks: number } | undefined =>
+      ({ parentPid: 1, startTimeTicks: 200 }));
+    return { uid, inspect, processOwner, processStat, options: {
+      parentPid: 10, inspect, processOwner, processStat,
+      environment: () => ({ XDG_DATA_HOME: root }), listeningPorts: () => [4098],
+    } };
+  }
+
+  it("follows stable foreign supervisor links without opening their executable or adopting them", () => {
+    const f = fixture();
+    const result = shim.inspectAncestry(root, f.options);
+    expect(result).toMatchObject({ status: "exact", parent: { pid: 10, port: 4098 } });
+    expect(result.members.map((member: { pid: number }) => member.pid)).toEqual([10]);
+    expect(f.inspect.mock.calls).toEqual([[10]]);
+    expect(f.processStat.mock.calls).toEqual([[20], [20]]);
+    expect(shim.inspectAncestry(root, { ...f.options, parentPid: 20 })).toMatchObject({ status: "ambiguous", parent: null });
+  });
+
+  it.each(["second owned parent", "unreadable owned ancestor", "missing foreign link", "changed foreign link",
+    "changed foreign process", "changed foreign owner", "changed owned process owner", "unreadable process owner",
+    "cyclic foreign link"])("rejects %s", (failure) => {
+    const f = fixture();
+    if (failure === "second owned parent") f.processStat.mockReturnValue({ parentPid: 30, startTimeTicks: 200 });
+    if (failure === "unreadable owned ancestor") f.processOwner.mockReturnValue(f.uid);
+    if (failure === "missing foreign link") f.processStat.mockReturnValue(undefined);
+    if (failure === "changed foreign link") f.processStat.mockReturnValueOnce({ parentPid: 2, startTimeTicks: 200 });
+    if (failure === "changed foreign process") f.processStat.mockReturnValueOnce({ parentPid: 1, startTimeTicks: 199 });
+    if (failure === "changed foreign owner") {
+      let reads = 0;
+      f.processOwner.mockImplementation((pid) => pid === 20 && ++reads === 1 ? f.uid + 1 : f.uid);
+    }
+    if (failure === "changed owned process owner") {
+      f.processOwner.mockReturnValueOnce(f.uid).mockReturnValue(f.uid + 1);
+    }
+    if (failure === "unreadable process owner") {
+      f.processOwner.mockReturnValueOnce(f.uid).mockImplementation(() => { throw new Error("process disappeared"); });
+    }
+    if (failure === "cyclic foreign link") f.processStat.mockReturnValue({ parentPid: 20, startTimeTicks: 200 });
+    expect(shim.inspectAncestry(root, f.options)).toMatchObject({ status: "ambiguous", parent: null });
+  });
+});
+
 describe("recovery preflight repository-data trust", () => {
   const acl = Buffer.alloc(4 + 5 * 8);
   acl.writeUInt32LE(2);
