@@ -10130,3 +10130,63 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
 - **Ordering preservation:** Todo 62 remains before Todo 60's final
   documentation audit and Todo 57's redacted export, intended-evidence commit,
   authorized push, and protected webhook. No secret value is recorded.
+
+## RECOVERY-44/45 append-only cancellation and reconciliation — 2026-09-11
+
+- **RECOVERY-44 — cancelled-child signature:** The cancelled child signature is
+  preserved as the first cancelled/unknown outcome; no replay, reset, discard,
+  or replacement identity is inferred.
+- **RECOVERY-45 — reconciliation:** Full revision
+  `f10acc87dd0e6534b1323a3b9f9bb9091401621c` deployment completed and was
+  healthy on container prefix `0705bd9eba6d`, image
+  `sha256:c90d9aa0bc894257bb3f4338c6eee6cd69e3c9b4fa62e96bd6aab09fc092fd87`.
+  The host installer did not reach the lock/mutation boundary. The verified
+  `544c` launcher, release, installed receipt, and original symlink backup
+  remain exact; preserve all of them, with final-source install later. The
+  externally-origin-unknown unstaged `opencode.json` change from Premium variant
+  `medium` to `max` must be preserved and reconciled, not reset or staged as
+  ours.
+
+## Linked Current Todo 64 — final visual/product audit boundary — 2026-09-11
+
+- **Status:** `OPEN`; the accepted scope has seven `BLOCKING` items: theme/status
+  contrast; keyboard-operable Chat image expansion; per-service textual health;
+  initial loading/error announcements; task-chart dark contrast or equivalent;
+  a working oversized-mail plain-text fallback; and the final GIF/instructions.
+- **Adequate existing surface:** Logo, icon, wordmark, and navigation imagery
+  are adequate and are not blockers.
+- **Territories and evidence:** W1–W5 are exclusive source territories, each
+  retaining its named focused test; W9 is the dependent GIF territory. Premium
+  owns deployment. After implementation is final, retain exactly one combined
+  QA report, one changed-route visual gate, and one passive full-site sweep after
+  final deployment.
+- **Findings:** F08–F12 remain `FOLLOW_UP` only; they are not new blockers.
+
+## Linked Current Todo 65 — final MCP/recovery/acceptance audit boundary — 2026-09-11
+
+- **Status:** `OPEN`; no general MCP expansion is justified. Blocking candidates
+  are F1 passive terminal-tool operational-memory event collection in the
+  `session-coordinator` files; F2 shell exit/result normalization across recovery
+  projections; F3 final-export large-input, completeness, and passphrase
+  redaction; and F4 current-role A/B/C acceptance harness, which depends on F1
+  and F2.
+- **Writer/order boundary:** F1–F3 are independent exclusive Premium writer
+  territories; F4 waits for F1 and F2. Predeclare changed security surfaces:
+  F1 privacy/identity/replay; F2 handoff integrity; F3 redaction/path/bounds;
+  F4 runtime selection/protected-process containment. The finalized T65
+  boundary receives exactly one QA report and at most one security report.
+- **FOLLOW_UP:** F5's fixed read-only recovery-status command and skill guidance
+  remain `FOLLOW_UP` only; Todo 62 handles skill guidance after the repaired
+  paths are complete.
+
+| Boundary | Authorized Premium writer and exact action | Safe probe / prerequisites | Preserved verifier and fail-closed behavior | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|
+| F1 | Exclusive Premium; add passive terminal-tool operational-memory event collection in `session-coordinator` files. | Synthetic event fixture with redaction, identity, and replay readback; admit the F1 privacy/identity/replay surface first. | Existing coordinator/operational-memory tests plus a focused F1 regression; reject unknown, foreign, unredacted, or replay-ambiguous events without mutation. | Premium | Source, deployed/runtime, and session evidence; visual only if a route changes. |
+| F2 | Exclusive Premium; normalize shell exit/result handling across recovery projections. | Synthetic exit/result matrix with no process mutation; preserve the recovery projection contract first. | Existing recovery/handoff verifiers plus a focused F2 regression; incomplete or ambiguous exit/result state cannot appear successful or replayable. | Premium | Source, deployed/runtime, and session evidence. |
+| F3 | Exclusive Premium; enforce final-export large-input, completeness, and passphrase-redaction handling. | Bounded synthetic large-input/redaction fixture with no real secret; admit the F3 redaction/path/bounds surface first. | Existing export size/completeness/redaction verifiers plus a focused F3 regression; overflow, truncation, or uncertain redaction fails closed. | Premium | Source, deployed/export, and session evidence; no visual claim. |
+| F4 | Dependent Premium; add the current-role A/B/C acceptance harness after F1/F2. | Synthetic three-role fixture with protected-process containment; F1/F2 and the F4 runtime-selection surface must pass first. | Existing A/B/C harness and containment verifiers; role, binding, replay, or process ambiguity fails closed. | Premium | Source, deployed/runtime, visual where applicable, and session evidence. |
+
+- **Current documentation boundary:** No T64/T65 implementation, QA, security
+  review, deployment, live acceptance, or Docs Workspace mutation was performed;
+  no raw secret or endpoint is recorded. Acceptance for this append is tail
+  readback plus the scoped roadmap diff check.
