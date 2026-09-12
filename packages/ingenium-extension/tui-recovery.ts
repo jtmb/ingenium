@@ -1445,6 +1445,14 @@ async function spawnManagedTui(
   argv: string[],
 ): Promise<ChildProcess> {
   if (argv.some((value) => value === "--port" || value.startsWith("--port="))) throw new Error("ingenium-opencode owns the recovery port");
+  let password = process.env.OPENCODE_SERVER_PASSWORD;
+  if (!password || !/^[A-Za-z0-9_-]{43,128}$/.test(password)) {
+    try {
+      password = randomBytes(32).toString("base64url");
+    } catch {
+      throw new Error("TUI recovery server authentication is unavailable");
+    }
+  }
   const reservation = await reservePort();
   const nonce = randomBytes(32).toString("base64url");
   await closeServer(reservation.server);
@@ -1454,6 +1462,7 @@ async function spawnManagedTui(
     stdio: "inherit",
     env: {
       ...process.env,
+      OPENCODE_SERVER_PASSWORD: password,
       PWD: worktree,
       INGENIUM_WORKTREE: worktree,
       INGENIUM_RESTART_NONCE: nonce,
