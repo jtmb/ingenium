@@ -10360,3 +10360,45 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   remain pending.
 - **Safety/acceptance:** No secret is recorded. Acceptance for this append is
   readback plus the scoped roadmap diff check.
+
+## RECOVERY-47 exact b491 deployment and policy-recovery checkpoint — 2026-09-12
+
+- **DEPLOYED/HOST PASS:** Exact source `b491a05fbf40475462d8e9468ca4d60e00e8be9a`
+  ran in container `c2d3e7fe406eb09b4b1421bd2348c8788c9b330890621b055743f4280d2c17df`
+  on image
+  `sha256:d028ff20be610dda72da8821351b65d90a16261289f0c58314dace1b70d12124`.
+  The host-install receipt
+  `/home/brajam/.local/state/ingenium-build-install-f8fd8716-f62a-4d1b-a50a-015cba870d66.json`
+  returned `PASS`/`installed`; no receipt payload or secret is copied into this
+  content-free checkpoint.
+- **SOURCE/PREFLIGHT:** Repository Git identity acceptance allowed the tracked
+  mode-`0674` input after the exact clean-HEAD/Git-blob, owner, no-follow,
+  inode/nlink, stable-readback, and byte-identity checks. The preflight digest
+  was retained for that exact read. Missing recovery gates remained the current
+  parent identity, fresh enrollment/nonce, durable handoff, independent
+  supervisor authority/current-source/health, epoch/fence/claim split-brain
+  fencing, and accepted task/TodoWrite state. The outbox contained `193`
+  records with one unresolved ambiguity; no recovery or session proof follows
+  from this preflight.
+- **SAFE FAILURE, NO MUTATION:** A preparation attempt was safely rejected
+  because the loaded Recovery policy permitted only
+  `ingenium-build deployment production-restart`; no preparation, restart,
+  parent signal, or state mutation occurred. Stable content-free failure label:
+  `RECOVERY_PREPARE_POLICY_DENIED`.
+- **EXTERNAL-SUPERVISOR PROBE:** A fresh read-only probe proved the source
+  contradiction: the Recovery profile granted `recovery-prepare`, while its
+  loaded prompt still described a restart-only command boundary. Stable
+  content-free failure signature: `RECOVERY_PROFILE_EXECUTOR_CONFLICT`.
+- **SOURCE/STATIC PASS:** The minimal fix updated
+  `.opencode/agents/execution/ingenium-recovery-engineer.md` and added the
+  matching guard in `tests/test-agent-validation.sh`. Writer validation passed
+  once. The initial QA dispatch executed zero checks because the orchestrator
+  contract omitted the required intake; it was not a QA report. The corrected
+  single QA report was `PASS`.
+- **COMMIT/BOUNDARY:** The scoped source fix is commit
+  `c06bf886f8fcacfd05d0cf0bfd0b50789760bba4`; this is source validation only.
+  Deployed b491/host evidence remains separate, and actual model/session
+  recovery proof is still absent. `nextWork` is to deploy/install the exact
+  current c06 source while preserving b491/c132 rollback, then perform a fresh
+  external-supervisor read-only authority/identity probe and preparation without
+  signaling the old parent first.
