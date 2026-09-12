@@ -10289,3 +10289,55 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   until those gates pass.
 - **Safety/acceptance:** No secret value is recorded. This append is accepted by
   readback and the scoped roadmap diff check only.
+
+## DEPLOY-1 exact c132 deployment/install and recovery-preflight boundary — 2026-09-11
+
+- **Deployment/install identity:** Full revision
+  `c132ee462cecc84bdcb2cbef83e62ac4fb3f730f`, container prefix
+  `f440ac26a6c1`, image
+  `sha256:031b1f54bd3fed5faa13c2e763ef04bd014c3ef4c1629b3652bd7da307220900`,
+  and rollback tag `ingenium-ingenium:rollback-f10acc87-c132ee46`. Routes,
+  nine services, MCP `42`, binding, isolation, ACL, and scanner checks passed.
+  Installed receipt:
+  `/home/brajam/.local/state/ingenium-build-install-331c96e5-a883-4fc6-ad00-c457b070d113.json`.
+  The launcher and release are exact `c132`, and the worktree was clean.
+- **Mandatory read-only recovery preflight:** `REJECT_AND_REPLAN`. Source,
+  deployment, and API were independently healthy, but tracked clean
+  `opencode.json` mode `0674` was rejected as writable. No enrollment, nonce,
+  current-parent record, supervisor, handoff, fence, or replay existed; state
+  was stale from September 3. The outbox held `193` records with one unresolved
+  ambiguity and a distinct historical disposition. No preparation, restart, or
+  signal occurred.
+- **Failure signature:** `RECOVERY_PREFLIGHT_FILE_UNAVAILABLE`; first path
+  `opencode.json`; no retry, and the state remains unchanged.
+- **Fix admission:** Premium owns only the preflight repository-data reader and
+  tests. Preserve the shared ACL and require exact clean HEAD/Git-blob identity,
+  owner/no-follow/inode/nlink checks, stable byte readback, and rejection of
+  dirty input, blob mismatch, symlink, or race. Preserve the existing
+  deployed/host verifier. The gate requires one focused test, one QA report,
+  one security report, commit/deploy/install, and then a fresh read-only
+  preflight.
+- **Rollback/evidence boundary:** Premium owns rollback/adoption. Keep
+  `SOURCE/TEST`, `DEPLOYED/HOST`, and `RECOVERY/RUNTIME/SESSION` evidence
+  distinct; no secret or transcript is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.
+
+## DEPLOY-1 repository-data trust source and hidden-drift remediation — 2026-09-11
+
+- **Repository-data trust source:** The admitted source is
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, verified by
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`. The initial
+  focused result was `31` passed and `41` skipped.
+- **QA/security evidence:** One QA report was `PASS`. One security report was
+  `BLOCKING`: hidden tracked sibling drift could be masked by
+  `assume-unchanged` or `skip-worktree`, because status alone can report a
+  clean worktree.
+- **Causal remediation:** Read repository-wide
+  `git ls-files -v -f -z` state before and after the repository-data read; accept
+  only normal `H` entries and never mutate the flags. The focused remediation
+  result was `5` passed and `72` skipped. QA and security were not rerun.
+- **Trust boundary:** The shared ACL is preserved, and strict private/executable
+  trust is unchanged. Commit, deploy/install, and a fresh read-only preflight
+  remain pending.
+- **Safety/acceptance:** No secret is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.

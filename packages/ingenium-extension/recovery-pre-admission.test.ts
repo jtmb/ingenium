@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
@@ -80,6 +81,217 @@ describe("recovery configured authority", () => {
     container.Config.Labels["com.docker.compose.project.working_dir"] = "/foreign";
     expect(shim.inspectRecoveryDeployment(root, head, run).status).toBe("unavailable");
     expect(shim.inspectRecoveryDeployment(root, head, () => "abc\ndef").status).toBe("unavailable");
+  });
+});
+
+describe("recovery preflight repository-data trust", () => {
+  const acl = Buffer.alloc(4 + 5 * 8);
+  acl.writeUInt32LE(2);
+  // The named service user and rwx mask reproduce Linux's 0674 mode without making the Git blob executable.
+  for (const [index, [tag, permissions, uid]] of [
+    [1, 6, 0xffffffff], [2, 7, process.getuid!() + 10000], [4, 4, 0xffffffff],
+    [16, 7, 0xffffffff], [32, 4, 0xffffffff],
+  ].entries()) {
+    acl.writeUInt16LE(tag!, 4 + index * 8);
+    acl.writeUInt16LE(permissions!, 6 + index * 8);
+    acl.writeUInt32LE(uid!, 8 + index * 8);
+  }
+  const sharedAcl = (path: string) => execFileSync("/usr/bin/python3", ["-c",
+    "import os, sys\nos.setxattr(sys.argv[1], 'system.posix_acl_access', sys.stdin.buffer.read())", path], { input: acl });
+  const readAcl = (path: string) => execFileSync("/usr/bin/python3", ["-c",
+    "import os, sys\nsys.stdout.buffer.write(os.getxattr(sys.argv[1], 'system.posix_acl_access'))", path]);
+
+  function fixture() {
+    const git = (...args: string[]) => execFileSync("/usr/bin/git", ["-C", root,
+      "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+      "-c", "user.name=Recovery Test", "-c", "user.email=recovery@invalid", ...args], {
+      encoding: "utf8", env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    });
+    writeFileSync(join(root, ".gitignore"), ".opencode/\n");
+    git("init", "--quiet");
+    git("add", "--", ".gitignore", "opencode.json");
+    git("commit", "--quiet", "-m", "fixture");
+    const file = join(root, "opencode.json");
+    const bytes = readFileSync(file);
+    sharedAcl(file);
+    expect(lstatSync(file).mode & 0o7777).toBe(0o674);
+    expect(readAcl(file)).toEqual(acl);
+    expect(git("status", "--porcelain=v1")).toBe("");
+    return { file, bytes, git, head: git("rev-parse", "HEAD").trim() };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("accepts service-user ACL mode 0674 at exact clean Git identity through both config callers without mutation", async () => {
+    const f = fixture();
+    const before = lstatSync(f.file);
+    const index = readFileSync(join(root, ".git/index"));
+    expect(() => shim.readTrustedRegularFile(f.file, "config")).toThrow("writable");
+    expect(shim.readRecoveryRepositoryData(root, f.head)).toEqual(f.bytes);
+    expect(shim.recoveryConfiguredEnvironment(root, {}, f.head)).toEqual(environment);
+    expect(() => shim.recoveryConfiguredEnvironment(root, {}, head)).toThrow("Git drift");
+    const legacy = legacyFixture();
+    legacy.source.head = f.head;
+    expect(await legacy.capture()).toMatchObject({ snapshot: { sourceHead: f.head, binding } });
+    legacy.source.head = head;
+    expect(await legacy.capture()).toBeNull();
+    expect(lstatSync(f.file)).toMatchObject({ dev: before.dev, ino: before.ino, uid: before.uid, nlink: before.nlink,
+      mode: before.mode, size: before.size, mtimeMs: before.mtimeMs, ctimeMs: before.ctimeMs });
+    expect(readAcl(f.file)).toEqual(acl);
+    expect(readFileSync(join(root, ".git/index"))).toEqual(index);
+  });
+
+  it.each([
+    "missing expected HEAD", "foreign expected HEAD", "dirty config", "dirty tracked sibling", "untracked sibling",
+    "staged-only drift", "skip-worktree blob mismatch", "assume-unchanged blob mismatch", "untracked ignored config",
+    "symlink", "hardlink", "foreign owner", "executable Git blob", "owner executable", "other executable", "special mode",
+    "aliased worktree", "external untracked input", "empty file", "oversized file",
+  ])("rejects %s rather than admitting shared data", (failure) => {
+    const f = fixture();
+    let expectedHead: string | undefined = f.head;
+    let worktree = root;
+    const changed = f.bytes.toString().replace("ingenium", "foreignx");
+    if (failure === "missing expected HEAD") expectedHead = undefined;
+    if (failure === "foreign expected HEAD") expectedHead = head;
+    if (failure === "dirty config") writeFileSync(f.file, changed);
+    if (failure === "dirty tracked sibling") writeFileSync(join(root, ".gitignore"), ".opencode/\nchanged\n");
+    if (failure === "untracked sibling") writeFileSync(join(root, "untracked.json"), "{}");
+    if (failure === "staged-only drift") {
+      writeFileSync(f.file, changed);
+      f.git("add", "--", "opencode.json");
+      writeFileSync(f.file, f.bytes);
+    }
+    if (failure === "skip-worktree blob mismatch" || failure === "assume-unchanged blob mismatch") {
+      f.git("update-index", failure.startsWith("skip") ? "--skip-worktree" : "--assume-unchanged", "opencode.json");
+      writeFileSync(f.file, changed);
+      expect(f.git("status", "--porcelain=v1")).toBe("");
+    }
+    if (failure === "untracked ignored config") {
+      f.git("rm", "--cached", "--", "opencode.json");
+      writeFileSync(join(root, ".gitignore"), ".opencode/\nopencode.json\n");
+      f.git("add", "--", ".gitignore");
+      f.git("commit", "--quiet", "-m", "untrack config");
+      expectedHead = f.git("rev-parse", "HEAD").trim();
+      expect(f.git("status", "--porcelain=v1")).toBe("");
+    }
+    if (failure === "symlink") {
+      const target = join(root, ".opencode/config.json");
+      renameSync(f.file, target);
+      symlinkSync(target, f.file);
+    }
+    if (failure === "hardlink") linkSync(f.file, join(root, ".opencode/hardlink"));
+    if (failure === "foreign owner") vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1);
+    if (failure === "executable Git blob") {
+      f.git("update-index", "--chmod=+x", "opencode.json");
+      f.git("commit", "--quiet", "-m", "executable config");
+      f.git("config", "core.filemode", "false");
+      expectedHead = f.git("rev-parse", "HEAD").trim();
+      expect(f.git("status", "--porcelain=v1")).toBe("");
+    }
+    const modes: Record<string, number> = { "owner executable": 0o774, "other executable": 0o675, "special mode": 0o4674 };
+    if (modes[failure] !== undefined) {
+      chmodSync(f.file, modes[failure]!);
+      f.git("config", "core.filemode", "false");
+    }
+    if (failure === "aliased worktree") {
+      worktree = join(root, ".opencode/alias");
+      symlinkSync(root, worktree);
+    }
+    if (failure === "external untracked input") {
+      worktree = join(root, ".opencode/external");
+      mkdirSync(worktree);
+      writeFileSync(join(worktree, "opencode.json"), f.bytes);
+      sharedAcl(join(worktree, "opencode.json"));
+    }
+    if (failure === "empty file") writeFileSync(f.file, "");
+    if (failure === "oversized file") writeFileSync(f.file, Buffer.alloc(1024 * 1024 + 1));
+    expect(() => shim.readRecoveryRepositoryData(worktree, expectedHead)).toThrow("Recovery preflight");
+  });
+
+  describe("tracked-index flag verification", () => {
+    it("accepts clean repository data without hidden index flags", () => {
+      const f = fixture();
+      expect(f.git("ls-files", "-v", "-f", "-z")).toBe("H .gitignore\0H opencode.json\0");
+      const index = readFileSync(join(root, ".git/index"));
+      const afterOpen = vi.fn();
+      expect(shim.readRecoveryRepositoryData(root, f.head, afterOpen)).toEqual(f.bytes);
+      expect(afterOpen).toHaveBeenCalledOnce();
+      expect(readFileSync(join(root, ".git/index"))).toEqual(index);
+    });
+
+    it.each([
+      ["--assume-unchanged", "before"], ["--skip-worktree", "before"],
+      ["--assume-unchanged", "during"], ["--skip-worktree", "during"],
+    ])("rejects a hidden modified sibling with %s %s the read", (flag, timing) => {
+      const f = fixture();
+      let markedIndex: Buffer;
+      const concealSibling = () => {
+        f.git("update-index", flag, ".gitignore");
+        writeFileSync(join(root, ".gitignore"), ".opencode/\nhidden-modification\n");
+        expect(f.git("status", "--porcelain=v1")).toBe("");
+        expect(readFileSync(f.file)).toEqual(f.bytes);
+        markedIndex = readFileSync(join(root, ".git/index"));
+      };
+      if (timing === "before") concealSibling();
+      const afterOpen = vi.fn(() => { if (timing === "during") concealSibling(); });
+      expect(() => shim.readRecoveryRepositoryData(root, f.head, afterOpen)).toThrow("Git drift");
+      expect(afterOpen).toHaveBeenCalledTimes(timing === "during" ? 1 : 0);
+      expect(f.git("ls-files", "-v", "-z", "--", ".gitignore"))
+        .toBe(`${flag === "--skip-worktree" ? "S" : "h"} .gitignore\0`);
+      expect(readFileSync(join(root, ".git/index"))).toEqual(markedIndex!);
+    });
+  });
+
+  it.each(["stable-byte rewrite", "pathname replacement", "symlink swap", "hardlink added", "mode change", "blob change",
+    "HEAD change", "index change", "worktree change"])("rejects %s during the descriptor read", (race) => {
+    const f = fixture();
+    const afterOpen = vi.fn(() => {
+      if (race === "stable-byte rewrite") {
+        writeFileSync(f.file, f.bytes);
+        utimesSync(f.file, new Date(1000), new Date(1000));
+      }
+      if (race === "pathname replacement" || race === "symlink swap") {
+        const target = join(root, ".opencode/opened");
+        renameSync(f.file, target);
+        if (race === "symlink swap") symlinkSync(target, f.file);
+        else writeFileSync(f.file, f.bytes, { mode: 0o644 });
+      }
+      if (race === "hardlink added") linkSync(f.file, join(root, ".opencode/hardlink"));
+      if (race === "mode change") chmodSync(f.file, 0o644);
+      if (race === "blob change") writeFileSync(f.file, f.bytes.toString().replace("ingenium", "foreignx"));
+      if (race === "HEAD change") {
+        writeFileSync(join(root, "new.json"), "{}");
+        f.git("add", "--", "new.json");
+        f.git("commit", "--quiet", "-m", "new HEAD");
+      }
+      if (race === "index change") {
+        writeFileSync(join(root, ".gitignore"), ".opencode/\nchanged\n");
+        f.git("add", "--", ".gitignore");
+      }
+      if (race === "worktree change") writeFileSync(join(root, "untracked.json"), "{}");
+    });
+    expect(() => shim.readRecoveryRepositoryData(root, f.head, afterOpen)).toThrow("Recovery preflight");
+    expect(afterOpen).toHaveBeenCalledOnce();
+  });
+
+  it("keeps private recovery, credential, launcher and release readers strict", async () => {
+    const f = fixture();
+    expect(shim.readRecoveryRepositoryData(root, f.head)).toEqual(f.bytes);
+    for (const options of [{ executable: true }, { expectedMode: 0o400 }, { expectedMode: 0o555 }, { expectedMode: 0o600 }, { expectedMode: 0o644 }]) {
+      expect(() => shim.readTrustedRegularFile(f.file, "strict artifact", { ...options, allowWritableData: true })).toThrow("writable");
+    }
+    const artifact = join(root, ".opencode/admission.json");
+    json(artifact, {});
+    sharedAcl(artifact);
+    const preflight = { admissible: true, git: { head: f.head }, source: { sha256: hash("source") }, binding,
+      parent: { pid: 100, startTimeTicks: 10, executableSha256: hash("exe"), nonceSha256: hash("nonce"), sessionId: "ses_exact" } };
+    expect(() => shim.readRecoveryAdmission(artifact, preflight, hash(shim.canonicalJson(preflight))))
+      .toThrow("Recovery preflight file is unavailable");
+    sharedAcl(join(root, ".opencode/.ingenium-mcp-credential"));
+    const request = authorityRequest();
+    await expect(shim.corroborateRecoveryBinding(root, environment, request)).rejects.toThrow("Recovery admission authentication is unavailable");
+    expect(request).not.toHaveBeenCalled();
+    expect(readAcl(f.file)).toEqual(acl);
   });
 });
 

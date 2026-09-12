@@ -483,31 +483,62 @@ export function openVerifiedRecoverySource(context = MODULE_ATTESTATION, options
   }
 }
 
-function readOnlyRegularFile(path, maximumBytes, allowEmpty = false, expectedMode) {
+function recoveryRepositoryBlob(worktree, head) {
+  const inspect = (args, encoding = "utf8") => git(worktree, ["--no-replace-objects", ...args], encoding);
+  if (!GIT_OID.test(head ?? "") || realpathSync(worktree) !== worktree
+    || gitConfiguration(worktree).some(isExecutableGitConfiguration)
+    || inspect(["rev-parse", "--show-toplevel"]).trim() !== worktree
+    || inspect(["rev-parse", "--verify", "HEAD"]).trim() !== head) {
+    throw new Error("Recovery preflight repository data has Git drift");
+  }
+  const entry = inspect(["ls-tree", "-z", head, "--", "opencode.json"]);
+  const blob = entry.split(" ")[2]?.split("\t")[0];
+  if (!GIT_OID.test(blob ?? "") || entry !== `100644 blob ${blob}\topencode.json\0`
+    || inspect(["ls-files", "--stage", "-z", "--", "opencode.json"]) !== `100644 ${blob} 0\topencode.json\0`) {
+    throw new Error("Recovery preflight repository data is not tracked at expected HEAD");
+  }
+  const bytes = inspect(["cat-file", "blob", blob], "buffer");
+  if (inspect(["ls-files", "-v", "-f", "-z"]).split("\0").some((entry) => entry && !entry.startsWith("H "))
+    || inspect(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]) !== ""
+    || inspect(["rev-parse", "--verify", "HEAD"]).trim() !== head) {
+    throw new Error("Recovery preflight repository data has Git drift");
+  }
+  return bytes;
+}
+
+function readOnlyRegularFile(path, maximumBytes, allowEmpty = false, expectedMode, repository) {
   const requested = resolve(path);
   const owner = ownerUid();
   let descriptor;
   try {
     const before = lstatSync(requested);
+    const sharedData = (before.mode & 0o022) !== 0 && expectedMode === undefined && repository?.head !== undefined
+      && requested === resolve(repository.worktree, "opencode.json");
+    // An ACL mask may set group execute (0674) on Git data; executable/private inputs never get this exception.
+    const forbiddenMode = sharedData ? 0o7101 : 0o022;
     if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== owner
-      || (before.mode & 0o022) !== 0 || (!allowEmpty && before.size < 1) || before.size > maximumBytes
+      || (before.mode & forbiddenMode) !== 0 || (!allowEmpty && before.size < 1) || before.size > maximumBytes
       || (expectedMode !== undefined && (before.mode & 0o777) !== expectedMode)
       || realpathSync(requested) !== requested) throw new Error("Recovery preflight file is unavailable");
+    const reviewed = sharedData ? recoveryRepositoryBlob(repository.worktree, repository.head) : null;
     descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
     const opened = fstatSync(descriptor);
-    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & 0o022) !== 0
+    if (!opened.isFile() || opened.nlink !== 1 || opened.uid !== owner || (opened.mode & forbiddenMode) !== 0
       || (expectedMode !== undefined && (opened.mode & 0o777) !== expectedMode)
-      || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+      || !sourceIdentityMatches(before, opened) || opened.mode !== before.mode) {
       throw new Error("Recovery preflight file is unavailable");
     }
+    repository?.afterOpen?.(requested);
     const bytes = readBoundedDescriptor(descriptor, maximumBytes, allowEmpty);
+    if (sharedData && (!bytes.equals(reviewed) || !bytes.equals(recoveryRepositoryBlob(repository.worktree, repository.head)))) {
+      throw new Error("Recovery preflight repository data changed from expected Git blob");
+    }
     const after = fstatSync(descriptor);
     const current = lstatSync(requested);
-    if (bytes.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
-      || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
+    if (bytes.length !== opened.size || !sourceIdentityMatches(opened, after) || after.mode !== opened.mode
       || !current.isFile() || current.isSymbolicLink() || current.nlink !== 1
-      || current.dev !== opened.dev || current.ino !== opened.ino || current.size !== opened.size
-      || current.uid !== owner || (current.mode & 0o022) !== 0
+      || !sourceIdentityMatches(opened, current) || current.mode !== opened.mode
+      || current.uid !== owner || (current.mode & forbiddenMode) !== 0
       || (expectedMode !== undefined && (current.mode & 0o777) !== expectedMode)
       || realpathSync(requested) !== requested) {
       throw new Error("Recovery preflight file changed during inspection");
@@ -516,6 +547,10 @@ function readOnlyRegularFile(path, maximumBytes, allowEmpty = false, expectedMod
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
+}
+
+export function readRecoveryRepositoryData(worktree, head = MODULE_ATTESTATION?.head, afterOpen) {
+  return readOnlyRegularFile(resolve(worktree, "opencode.json"), 1024 * 1024, false, undefined, { worktree, head, afterOpen });
 }
 
 function optionalReadOnlyRegularFile(path, maximumBytes, allowEmpty = false) {
@@ -1337,7 +1372,7 @@ export async function captureLegacyRecoveryPreAdmission(parent, binding, source,
     const sessionId = matches[0].id;
     const live = await readLiveRecoverySummary({ ...parent, sessionId }, binding.worktree, request);
     if (!live?.operational || !sameProcess()) return null;
-    const config = JSON.parse(readOnlyRegularFile(resolve(binding.worktree, "opencode.json"), 1024 * 1024));
+    const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
     if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
       || config.agent[live.operational.role]?.disable === true) return null;
     const confirmed = await get("/session/status");
@@ -1350,8 +1385,8 @@ export async function captureLegacyRecoveryPreAdmission(parent, binding, source,
   } catch { return null; }
 }
 
-export function recoveryConfiguredEnvironment(worktree, inherited = {}) {
-  const config = JSON.parse(readOnlyRegularFile(resolve(worktree, "opencode.json"), 1024 * 1024));
+export function recoveryConfiguredEnvironment(worktree, inherited = {}, head = MODULE_ATTESTATION?.head) {
+  const config = JSON.parse(readRecoveryRepositoryData(worktree, head));
   const candidates = Object.entries(config.mcp ?? {}).filter(([name, entry]) => name === "ingenium"
     || entry?.environment?.INGENIUM_MCP_AUDIENCE !== undefined
     || entry?.command?.some?.((part) => typeof part === "string" && part.endsWith("/packages/ingenium-extension/dist/scripts/mcp-server.js")));
@@ -1961,7 +1996,7 @@ export async function collectRecoveryPreflight(options = {}) {
   let configuredEnvironment;
   let binding = null;
   if (worktree) try {
-    configuredEnvironment = recoveryConfiguredEnvironment(worktree, environment);
+    configuredEnvironment = recoveryConfiguredEnvironment(worktree, environment, source?.head);
     const parentEnvironment = parentInternal?.environment ?? {};
     for (const key of ["INGENIUM_PROJECT", "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID", "INGENIUM_WORKTREE", "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_API_URL"]) {
       if (parentEnvironment[key] !== undefined && configuredEnvironment[key] !== undefined
