@@ -477,7 +477,8 @@ export function managedRecoveryEnvironment(
   moduleUrl: string | URL = import.meta.url,
 ): NodeJS.ProcessEnv {
   return {
-    ...Object.fromEntries(RECOVERY_ENVIRONMENT.flatMap((name) => source[name] === undefined ? [] : [[name, source[name]!]])),
+    ...Object.fromEntries(RECOVERY_ENVIRONMENT.flatMap((name) =>
+      source[name] === undefined || source[name] === "" ? [] : [[name, source[name]!]])),
     INGENIUM_WORKTREE: managedRecoveryWorktree(moduleUrl),
     PATH: `${RUNTIME_BIN}:/usr/local/bin:/usr/bin:/bin`,
   };

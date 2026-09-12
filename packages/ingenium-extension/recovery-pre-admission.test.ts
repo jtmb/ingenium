@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
 import { stableRestartTodos } from "./replacement-first-restart.js";
 import { inspectProductionRestartBinding, redactedHandoffFromExport } from "./scripts/production-restart.js";
+import { managedRecoveryEnvironment } from "./scripts/managed-command-wrapper.js";
 
 const shim = await import(/* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href);
 const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
@@ -42,6 +44,28 @@ function authorityRequest(change: Record<string, unknown> = {}) {
 }
 
 describe("recovery configured authority", () => {
+  it("omits empty launcher defaults without accepting nonempty binding conflicts", async () => {
+    const scripts = join(root, "packages/ingenium-extension/scripts");
+    mkdirSync(scripts, { recursive: true });
+    const wrapper = join(scripts, "managed-command-wrapper.ts");
+    writeFileSync(wrapper, "");
+    const moduleUrl = pathToFileURL(wrapper);
+    const inherited = Object.fromEntries([...Object.keys(environment), "INGENIUM_PROJECT_ID",
+      "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_MCP_CREDENTIAL_PURPOSE"].map((key) => [key, ""]));
+    const forwarded = managedRecoveryEnvironment(inherited, moduleUrl);
+    expect(forwarded).toEqual({ INGENIUM_WORKTREE: root, PATH: expect.any(String) });
+    const configured = shim.recoveryConfiguredEnvironment(root, forwarded);
+    expect(configured).toMatchObject(environment);
+    const request = authorityRequest();
+    expect(await shim.corroborateRecoveryBinding(root, configured, request)).toEqual(binding);
+    expect(request).toHaveBeenCalledTimes(2);
+    for (const project of ["foreign", " "]) {
+      const conflicting = managedRecoveryEnvironment({ ...inherited, INGENIUM_PROJECT: project }, moduleUrl);
+      expect(conflicting.INGENIUM_PROJECT).toBe(project);
+      expect(() => shim.recoveryConfiguredEnvironment(root, conflicting)).toThrow("Recovery binding conflicts with configured binding");
+    }
+  });
+
   it("resolves the existing MCP binding without inherited UUID/storage and corroborates both independently", async () => {
     const configured = shim.recoveryConfiguredEnvironment(root, {});
     const request = authorityRequest();
