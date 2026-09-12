@@ -10402,3 +10402,42 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   current c06 source while preserving b491/c132 rollback, then perform a fresh
   external-supervisor read-only authority/identity probe and preparation without
   signaling the old parent first.
+
+## T61/T66/T67 and RECOVERY-48/49 append-only checkpoint — 2026-09-12
+
+- **T61/T67 — source validation:** The gitignore audit found the tracked
+  repository-root `:memory:` SQLite database (`1,626,112` bytes, introduced by
+  commit `99d39f0d`) and its untracked `:memory:-shm`/`:memory:-wal` sidecars.
+  Added `:memory:` and `:memory:-*`; `git rm --cached` untracked the database
+  while retaining the working file on disk. The read-only dependency check found
+  no path-like consumers, only SQLite in-memory DSN usages. Existing ignore
+  coverage was otherwise adequate: zero non-ignored untracked artifacts. Commit
+  `418f657b`.
+- **FOLLOW_UP — build context:** `.dockerignore` lacks the entry, so
+  `Dockerfile`'s `COPY . .` still includes the database in the build context;
+  this is non-blocking.
+- **FOLLOW_UP — history:** The database remains in branch history since
+  `99d39f0d`; assess before any push under T57. History rewrite is not
+  authorized.
+- **T66 — source validation:** One-line orchestrator output guidance was
+  committed at `bc356d5d`; contracts and status render as plain Markdown. The
+  validator passed, and the guidance is effective on the next orchestrator
+  restart.
+- **RECOVERY-48 — deployed canary:** `bc356d5d` deploy/install/scanner passed
+  with container `34199ba4ffea92321951998f1dab13a4ed798776d9996fbf908491f619bf36dd`,
+  image `sha256:710a27da1668d625e647552c009b17464e89b6a254cf4e4434a2e290772441aa`,
+  and receipt
+  `/home/brajam/.local/state/ingenium-build-install-4eee0581-e0bb-4c11-9891-9c8e53a8df52.json`.
+- **RECOVERY-48 — recovery preflight:** One recovery preflight was executed
+  once, with digest
+  `01bac2dd3b52978c33aaae5ddc041097a367f87a6c0f1e36a2a290dad13c83d3`, and
+  rejected. Remaining gates were unavailable parent identity/session/incarnation;
+  ambiguous nonce/enrollment; missing typed handoff; unavailable supervisor
+  ownership (expected `systemd-user` `ingenium-recovery-owner.service`);
+  unavailable fence/claim; an outbox with `193` records and one unresolved
+  ambiguity; one disposition record; freeze clear; and an empty Git footprint.
+  Zero mutations occurred. This distinguishes source validation and deployed
+  canary evidence from still-absent actual model/session recovery proof.
+- **RECOVERY-49 — nextWork:** After this roadmap commit, deploy/install the
+  final revision and run `ingenium-build deployment recovery-prepare` through
+  the installed source, then perform replacement activation.
