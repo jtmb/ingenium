@@ -2036,6 +2036,9 @@ check_policy_pattern "$QA_PROFILE" "QA profile" \
 
 RECOVERY_PROFILE="$AGENTS_DIR/execution/ingenium-recovery-engineer.md"
 check_normalized_policy_pattern "$RECOVERY_PROFILE" 'recovery profile' \
+  'The only executable recovery operations are the literal `ingenium-build deployment recovery-prepare` and `ingenium-build deployment production-restart` commands.' \
+  'the exact recovery-prepare and production-restart command boundary (RECOVERY_PROFILE_EXECUTOR_CONFLICT)'
+check_normalized_policy_pattern "$RECOVERY_PROFILE" 'recovery profile' \
   'Git inspection is limited to `git status`, exact recovery-evidence or roadmap diffs, `git log --oneline -10`, and read-only object/tree inspection via `git blame`, `git ls-files`, `git ls-tree`, and `git rev-parse`.' \
   'the curated read-only Git command boundary'
 for recovery_phrase in 'read-only preflight' 'nonce' 'Durable accepted handoff' \
