@@ -10485,3 +10485,42 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   `ingenium-opencode` launcher in `docs/usage/opencode.md` so a capture-eligible
   parent exists; then run `recovery-prepare` and replacement activation; then
   perform T49–T51 acceptance.
+
+## Current user-authorized multi-session checkpoint — 2026-09-13
+
+- **Parent recovery boundary:** The user explicitly cancelled parent
+  recovery/relaunch. Committed recovery fixes remain, but parent
+  restart/replacement is not active scope.
+- **COORD run:** `1025dfa5-c629-45ca-a476-e9d17cacb744` ended at
+  `phase=readiness` with `failureCode=harness_failure`; cleanup is now
+  `complete/resolved`. Owned PIDs and ports are gone, the provider is
+  disconnected, credentials are revoked/removed, exact sessions/claims/run-
+  outbox records are zero, and remote deletes/signals are zero. Evidence is
+  under
+  `tests/artifacts/coordination/1025dfa5-c629-45ca-a476-e9d17cacb744/`.
+- **Committed source boundaries (SOURCE/TEST only):** `131e0018` internal-C
+  metadata handling (QA `PASS`); `640dbd48` external usage canonical session
+  ID (QA/security `PASS`); `4be8e085` scoped Context service handoff
+  (QA/security found a source-key bypass, remediated with the minimum
+  regression, and no reviewer rerun); and `b839e480` auto-observer canonical
+  session ID (QA/security `PASS`). T49/T50/T51 source tests are source evidence
+  only; these fixes are not deployed and live acceptance is not passed.
+- **T54 credential boundary:** The configured protected passphrase path was
+  attempted and unavailable; canary attempt count is `0`. Redacted evidence:
+  `tests/artifacts/manual/t54-protected-vault-canary-20260913T040105Z.json`.
+  Classification: `BLOCKED_EXTERNAL_CREDENTIAL`.
+- **Configuration boundary:** The sole tracked dirty path is the unrelated,
+  uncommitted `opencode.json` remapping of six agents. Clean-tree
+  coordination/host-deployment admission rejects it, and deployment would
+  consume it. Ownership and acceptance are not inferred. The mutually
+  exclusive next decision is to adopt it (validate/commit/deploy as its own
+  scope) or preserve/remove it from this worktree through its owner; neither
+  action is authorized by the current coordination task.
+- **Runtime/evidence boundary:** Current HEAD is `b839e480`; deployed runtime
+  remains `8560029d`. No runtime or model-session acceptance is claimed.
+  `COORD-1` is an artifact-local label semantically mapped to T65 F4, not a
+  new canonical roadmap ID; do not create `META-3` or other new canonical IDs.
+- **NextWork:** After configuration resolution, the clean-tree deployment
+  owner must rebuild, restart, and health-check the current committed source;
+  then run parallel live COORD/T49/T50/T51 acceptance. Remaining final gates
+  stay waiting. Deployment owner for this documentation task: `N/A`.
