@@ -464,6 +464,42 @@ export function transitionRuntime(input: {
   return result;
 }
 
+export function renewLocalRuntimeLifetime(input: {
+  id: string; expectedRevision: number; idleExpiresAt: Date; absoluteExpiresAt: Date;
+}): RuntimeInstance {
+  const now = new Date();
+  if (!Number.isFinite(input.absoluteExpiresAt.getTime()) || !Number.isFinite(input.idleExpiresAt.getTime())
+    || input.idleExpiresAt <= now || input.absoluteExpiresAt < input.idleExpiresAt) {
+    throw new Error("Invalid local runtime lifetime");
+  }
+  const timestamp = now.toISOString();
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const current = db.prepare(`SELECT runtime.* FROM runtime_instances runtime
+      JOIN authorized_workspaces workspace ON workspace.id = runtime.workspace_id
+        AND workspace.organization_id = runtime.organization_id AND workspace.project_id = runtime.project_id
+        AND workspace.owner_user_id = runtime.owner_user_id AND workspace.security_epoch = runtime.security_epoch
+        AND workspace.status = 'authorized'
+      WHERE runtime.id = ?`).get(input.id) as RuntimeRow | undefined;
+    if (!current) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (current.revision !== input.expectedRevision) throw new RuntimeConflictError("REVISION_CONFLICT");
+    if (current.backend_container_id !== null || !["READY", "IDLE"].includes(current.state)
+      || (current.absolute_expires_at !== null && current.absolute_expires_at > timestamp)) {
+      throw new RuntimeConflictError("STATE_CONFLICT");
+    }
+    const changed = db.prepare(`UPDATE runtime_instances
+      SET idle_expires_at = ?, absolute_expires_at = ?, revision = revision + 1, updated_at = ?
+      WHERE id = ? AND revision = ?`)
+      .run(input.idleExpiresAt.toISOString(), input.absoluteExpiresAt.toISOString(), timestamp, current.id, current.revision);
+    if (changed.changes !== 1) throw new RuntimeConflictError("REVISION_CONFLICT");
+    const updated = db.prepare("SELECT * FROM runtime_instances WHERE id = ?").get(current.id) as RuntimeRow;
+    appendEvent(updated, "state_changed", "system", "compatibility-lifetime-renewal", current.state);
+    return runtimeDto(updated);
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
 export function claimRuntimeLease(input: {
   id: string; expectedRevision: number; ownerToken: string; ttlMs: number; actorId: string; now?: Date;
 }): RuntimeInstance {

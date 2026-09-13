@@ -36,6 +36,10 @@ beforeEach(async () => {
   vi.stubEnv("INGENIUM_CORE_DB_PATH", join(directory, "data"));
   vi.stubEnv("INGENIUM_API_TOKEN", installationToken);
   vi.stubEnv("INGENIUM_API_TOKEN_FILE", "");
+  vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+  vi.stubEnv("INGENIUM_RUNTIME_MANAGER_URL", "");
+  vi.stubEnv("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", "");
+  vi.stubEnv("INGENIUM_RUNTIME_IDLE_LEASE_MS", "");
   const keyPath = join(directory, "key");
   writeFileSync(keyPath, Buffer.alloc(32, 7).toString("base64url"), { mode: 0o600 });
   vi.stubEnv("INGENIUM_AUTH_ENCRYPTION_KEY_FILE", keyPath);
@@ -57,12 +61,97 @@ beforeEach(async () => {
 afterEach(async () => {
   if (server) await closeHttpServer(server);
   resetDbForTest();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   rmSync(directory, { recursive: true, force: true });
 });
 
 describe("compatibility MCP bootstrap", () => {
+  it.each([
+    { name: "default window", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: null },
+    { name: "configured window", absoluteMs: 120_000, idleMs: 600_000, remainingCapabilityMs: null },
+    { name: "capability expiry cap", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: 30_000 },
+  ])("renews an expired compatibility lifetime within its $name", async ({ name, absoluteMs, idleMs, remainingCapabilityMs }) => {
+    if (name === "configured window") {
+      vi.stubEnv("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", String(absoluteMs));
+      vi.stubEnv("INGENIUM_RUNTIME_IDLE_LEASE_MS", String(idleMs));
+    }
+    expect((await issue()).status).toBe(201);
+    const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const first = (await (await local()).json()).data;
+    const now = remainingCapabilityMs === null
+      ? Date.parse(first.runtime.absoluteExpiresAt) + 1
+      : Date.parse(first.credential.expiresAt) - remainingCapabilityMs;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const lease = () => fetch(`${baseUrl}/api/v1/auth/coordination-lease`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" },
+      body: JSON.stringify({ runtimeId: first.runtime.id }),
+    });
+    expect((await lease()).status).toBe(404);
+    const response = await local();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    const absoluteExpiry = Math.min(now + absoluteMs, Date.parse(first.credential.expiresAt));
+    expect(renewed.runtime).toMatchObject({
+      id: first.runtime.id, state: "READY", backendContainerId: null, revision: first.runtime.revision + 1,
+      securityEpoch: first.runtime.securityEpoch,
+      absoluteExpiresAt: new Date(absoluteExpiry).toISOString(),
+      idleExpiresAt: new Date(Math.min(now + idleMs, absoluteExpiry)).toISOString(),
+    });
+    expect(renewed.credential.token).toBe(first.credential.token);
+    expect(renewed.credential.expiresAt).toBe(first.credential.expiresAt);
+    const issued = await lease();
+    expect(issued.status).toBe(201);
+    expect(Date.parse((await issued.json()).data.expiresAt)).toBe(Math.min(now + 15 * 60_000, absoluteExpiry));
+    expect((await (await local()).json()).data.runtime).toEqual(renewed.runtime);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM runtime_capability_bindings WHERE runtime_id = ?",
+    ).get(first.runtime.id)).toEqual({ count: 1 });
+  });
+
+  it.each(["capability", "workspace", "epoch", "backend", "state", "principal"])(
+    "does not renew an expired compatibility lifetime with invalid %s", async (invalid) => {
+      expect((await issue()).status).toBe(201);
+      const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+        method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+      });
+      const first = (await (await local()).json()).data;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse(first.runtime.absoluteExpiresAt) + 1);
+      const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+      if (invalid === "capability") mcpCredentials.revokeMcpCredential(first.credential.id, ownerId);
+      if (invalid === "workspace") db.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(first.runtime.workspaceId);
+      if (invalid === "epoch") db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1 WHERE id = ?").run(first.runtime.workspaceId);
+      if (invalid === "backend") runtimes.transitionRuntime({ id: first.runtime.id, expectedRevision: first.runtime.revision,
+        toState: "IDLE", actorType: "system", actorId: "test", backendContainerId: "a".repeat(64) });
+      if (invalid === "state") runtimes.transitionRuntime({ id: first.runtime.id, expectedRevision: first.runtime.revision,
+        toState: "STOPPING", actorType: "system", actorId: "test" });
+      if (invalid === "principal") db.prepare("UPDATE service_principals SET status = 'revoked' WHERE id = ?").run(first.credential.servicePrincipalId);
+      const before = runtimes.getRuntimeInstance(first.runtime.id);
+      expect((await local()).status).toBe(503);
+      expect(runtimes.getRuntimeInstance(first.runtime.id)).toEqual(before);
+    },
+  );
+
+  it("keeps local lifetime renewal revision-checked and rejects invalid bounds", async () => {
+    expect((await issue()).status).toBe(201);
+    const response = await fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const { runtime } = (await response.json()).data;
+    const input = { id: runtime.id, expectedRevision: runtime.revision,
+      absoluteExpiresAt: new Date(Date.now() + 120_000), idleExpiresAt: new Date(Date.now() + 60_000) };
+    expect(() => runtimes.renewLocalRuntimeLifetime(input)).toThrow("STATE_CONFLICT");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, expectedRevision: runtime.revision - 1 })).toThrow("REVISION_CONFLICT");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, idleExpiresAt: new Date(0) })).toThrow("Invalid local runtime lifetime");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, absoluteExpiresAt: new Date(NaN) })).toThrow("Invalid local runtime lifetime");
+    expect(runtimes.getRuntimeInstance(runtime.id)).toEqual(runtime);
+  });
+
   it("recovers an existing failed local runtime without weakening capability binding", async () => {
     expect((await issue()).status).toBe(201);
     const runtime = runtimes.createRuntimeInstance("shared-memory-ingenium", {

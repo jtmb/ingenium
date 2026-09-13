@@ -52,6 +52,19 @@ export function provisionLocalRuntime(workspaceId: string) {
     if (bound?.mcp_credential_id !== credential.id) runtimes.bindRuntimeCapability(runtime.id, credential.id);
     stage = "resolution";
     if (!mcpCredentials.resolveMcpCredential(credential.token, "runtime")) throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const now = Date.now();
+    if (runtime.absoluteExpiresAt === null || Date.parse(runtime.absoluteExpiresAt) <= now) {
+      stage = "lifetime";
+      const absoluteLeaseMs = runtimeNumberSetting("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", 28_800_000, 60_000);
+      const idleLeaseMs = runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000);
+      // Receipt replay must never extend the existing capability's lifetime.
+      const expiresAt = Math.min(now + absoluteLeaseMs, Date.parse(credential.expiresAt));
+      runtime = runtimes.renewLocalRuntimeLifetime({
+        id: runtime.id, expectedRevision: runtime.revision,
+        absoluteExpiresAt: new Date(expiresAt),
+        idleExpiresAt: new Date(Math.min(now + idleLeaseMs, expiresAt)),
+      });
+    }
     return { runtime, credential };
   } catch (error) {
     throw new LocalRuntimeProvisionError(stage, error instanceof runtimes.RuntimeConflictError ? error.code

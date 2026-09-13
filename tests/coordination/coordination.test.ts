@@ -56,6 +56,7 @@ import {
   buildExternalConfig,
   cleanupRuntimeProvider,
   crossReadPromptContainsExpected,
+  ensureHarnessRuntimeReady,
   establishHarnessAccess,
   finalizeCoordinationTestRun,
   finishCoordinationCleanup,
@@ -65,6 +66,7 @@ import {
   MAPPED_CHECK_COMMAND,
   projectTurn,
   prepareRuntimeProvider,
+  preflightHarnessIdentity,
   dispatchFailureDiagnostic,
   runtimeProviderConnected,
   runtimeProviderCredential,
@@ -533,6 +535,12 @@ function runtimeStartPayload(options: ReturnType<typeof parseHarnessOptions>): u
   } };
 }
 
+function compatibilityRuntime(options: ReturnType<typeof parseHarnessOptions>) {
+  return { id: options.runtimeId, projectId: options.projectId, workspaceId: options.workspaceId,
+    state: "READY", revision: 7, backendContainerId: null,
+    absoluteExpiresAt: new Date(Date.now() + 600_000).toISOString() };
+}
+
 async function leaseTestContext(prefix: string) {
   const context = createTestRunContext({
     repoRoot: process.cwd(),
@@ -602,6 +610,156 @@ async function startSentinelProcess(port: number, runNonce: string): Promise<{ c
     },
   };
 }
+
+test("COORD-1 readiness mode requires explicit compatibility selection", () => {
+  const fixture = fixtureRepository();
+  const args = validArguments(fixture);
+  assert.equal(parseHarnessOptions(args, {}).deploymentMode, "control-plane");
+  assert.equal(parseHarnessOptions(args, { COORDINATION_HARNESS_DEPLOYMENT_MODE: "compatibility" }).deploymentMode, "compatibility");
+  assert.equal(parseHarnessOptions([...args, "--deployment-mode", "control-plane"], {
+    COORDINATION_HARNESS_DEPLOYMENT_MODE: "compatibility",
+  }).deploymentMode, "control-plane");
+  assert.equal(parseHarnessOptions([...args, "--deployment-mode", "compatibility"], {}).deploymentMode, "compatibility");
+  assert.throws(() => parseHarnessOptions([...args, "--deployment-mode", "user-runtime"], {}), /deploymentMode/);
+});
+
+for (const deploymentMode of ["compatibility", "control-plane"] as const) {
+  test(`COORD-1 readiness validates the exact ${deploymentMode} binding and health`, async () => {
+    const fixture = fixtureRepository();
+    const options = parseHarnessOptions([...validArguments(fixture), "--deployment-mode", deploymentMode], {});
+    const calls: string[] = [];
+    const request: typeof fetch = async (input, init) => {
+      const path = new URL(String(input)).pathname;
+      calls.push(`${init?.method} ${path}`);
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer operator-secret");
+      assert.equal(init?.method, "GET");
+      if (path === "/api/v1/runtimes/workspaces") return Response.json(runtimeWorkspacePayload(options));
+      if (deploymentMode === "control-plane" && path === `/api/v1/runtimes/${options.runtimeId}`) {
+        return Response.json(runtimeStatusPayload(options, "READY"));
+      }
+      if (deploymentMode === "compatibility" && path === "/api/v1/runtimes") return Response.json({ data: [compatibilityRuntime(options)] });
+      if (deploymentMode === "compatibility" && path === "/api/v1/opencode/health") {
+        return Response.json({ data: { healthy: true, version: options.expectedRuntimeOpenCodeVersion } });
+      }
+      throw new Error(`Unexpected readiness request ${path}`);
+    };
+    const runtime = await ensureHarnessRuntimeReady(options, "operator-secret", new AbortController().signal, request, 100);
+    assert.deepEqual(runtime, deploymentMode === "compatibility"
+      ? { id: options.runtimeId, state: "READY", imageRevision: null, openCodeVersion: options.expectedRuntimeOpenCodeVersion, registryRevision: 7 }
+      : { id: options.runtimeId, state: "READY", imageRevision: options.expectedRevision });
+    assert.deepEqual(calls, ["GET /api/v1/runtimes/workspaces", ...(deploymentMode === "compatibility"
+      ? ["GET /api/v1/runtimes", "GET /api/v1/opencode/health"] : [`GET /api/v1/runtimes/${options.runtimeId}`])]);
+  });
+}
+
+test("COORD-1 readiness fails closed on compatibility binding, expiry and health failures", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions([...validArguments(fixture), "--deployment-mode", "compatibility"], {});
+  const scenarios: Array<{ name: string; code: string; workspace?: Record<string, unknown>;
+    runtime?: Record<string, unknown>; health?: Record<string, unknown>; count?: number; status?: number }> = [
+    { name: "worktree", code: "RUNTIME_BINDING_MISMATCH", workspace: { storagePath: "/foreign/worktree" } },
+    { name: "project", code: "RUNTIME_BINDING_MISMATCH", runtime: { projectId: "foreign-project" } },
+    { name: "workspace", code: "RUNTIME_BINDING_MISMATCH", runtime: { workspaceId: "foreign-workspace" } },
+    { name: "managed backend", code: "RUNTIME_BINDING_MISMATCH", runtime: { backendContainerId: "a".repeat(64) } },
+    { name: "missing runtime", code: "RUNTIME_BINDING_MISMATCH", count: 0 },
+    { name: "duplicate runtime", code: "RUNTIME_BINDING_MISMATCH", count: 2 },
+    { name: "stopped", code: "RUNTIME_STATUS_INVALID", runtime: { state: "STOPPED" } },
+    { name: "revision", code: "RUNTIME_STATUS_INVALID", runtime: { revision: 0 } },
+    { name: "expiry", code: "RUNTIME_EXPIRED", runtime: { absoluteExpiresAt: new Date(0).toISOString() } },
+    { name: "invalid health", code: "RUNTIME_STATUS_INVALID", health: { healthy: "true" } },
+    { name: "version", code: "RUNTIME_VERSION_MISMATCH", health: { version: "0.0.0" } },
+    { name: "unhealthy", code: "RUNTIME_READINESS_TIMEOUT", health: { healthy: false } },
+    { name: "unavailable", code: "RUNTIME_STATUS_UNAVAILABLE", status: 503 },
+  ];
+  for (const scenario of scenarios) {
+    const request: typeof fetch = async (input, init) => {
+      assert.equal(init?.method, "GET");
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/v1/runtimes/workspaces") return Response.json({ data: [{
+        id: options.workspaceId, projectId: options.projectId, storagePath: options.worktree,
+        storageMappingHash: options.storageMappingHash, status: "authorized", ...scenario.workspace,
+      }] });
+      if (path === "/api/v1/runtimes") return Response.json({ data: Array.from({ length: scenario.count ?? 1 },
+        () => ({ ...compatibilityRuntime(options), ...scenario.runtime })) });
+      assert.equal(path, "/api/v1/opencode/health");
+      return Response.json({ data: { healthy: true, version: options.expectedRuntimeOpenCodeVersion, ...scenario.health } },
+        { status: scenario.status ?? 200 });
+    };
+    await assert.rejects(ensureHarnessRuntimeReady(options, "operator-secret", new AbortController().signal, request, 25),
+      (error: unknown) => error instanceof HarnessRuntimeReadinessError && error.code === scenario.code, scenario.name);
+  }
+});
+
+test("COORD-1 readiness never falls back from isolated inspection or accepts a foreign image revision", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions(validArguments(fixture), {});
+  for (const failure of ["unavailable", "revision"] as const) {
+    const request: typeof fetch = async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/v1/runtimes/workspaces") return Response.json(runtimeWorkspacePayload(options));
+      assert.equal(path, `/api/v1/runtimes/${options.runtimeId}`);
+      return failure === "unavailable" ? Response.json({}, { status: 503 })
+        : Response.json(runtimeStatusPayload({ ...options, expectedRevision: "c".repeat(40) }, "READY"));
+    };
+    await assert.rejects(ensureHarnessRuntimeReady(options, "operator-secret", new AbortController().signal, request, 100),
+      (error: unknown) => error instanceof HarnessRuntimeReadinessError
+        && error.code === (failure === "unavailable" ? "RUNTIME_STATUS_UNAVAILABLE" : "RUNTIME_BINDING_MISMATCH"));
+  }
+});
+
+test("COORD-1 compatibility access keeps run-owned leases and revalidates protected identity without manager attestation", async () => {
+  const fixture = fixtureRepository();
+  const options = parseHarnessOptions([...validArguments(fixture), "--deployment-mode", "compatibility"], {});
+  const context = await leaseTestContext("ingenium-coordination-compatibility-access-");
+  let issued = 0;
+  let revoked = 0;
+  const lease = new RunCredentialLease(context, options, {
+    async issue() { issued += 1; return issuedCredentialPair(options); },
+    async revoke() { revoked += 1; },
+    async verifyRevoked() {},
+  });
+  const calls: string[] = [];
+  let foreignBinding = false;
+  const request: typeof fetch = async (input, init) => {
+    const url = new URL(String(input));
+    calls.push(`${url.pathname}${url.search}`);
+    if (url.pathname === "/api/v1/auth/preflight") {
+      assert.equal(url.search, "");
+      assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${issuedCredentialPair(options).coordination!.token}`);
+      return Response.json({ data: { authenticated: true, scopes: ["projects:read", "coordination:read"],
+        organizationId: "88888888-8888-4888-8888-888888888888", projectId: options.projectId, projectIds: [options.projectId],
+        audience: "mcp", workspaceId: options.workspaceId, launcherWorktree: options.worktree,
+        storageMappingHash: foreignBinding ? "c".repeat(64) : options.storageMappingHash,
+        restartRequiredOnCredentialChange: false, credentialChangeMode: "live-mcp-reload" } });
+    }
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer operator-secret");
+    if (url.pathname === "/api/v1/runtimes/workspaces") return Response.json(runtimeWorkspacePayload(options));
+    if (url.pathname === "/api/v1/runtimes") return Response.json({ data: [compatibilityRuntime(options)] });
+    assert.equal(url.pathname, "/api/v1/opencode/health");
+    return Response.json({ data: { healthy: true, version: options.expectedRuntimeOpenCodeVersion } });
+  };
+  const signal = new AbortController().signal;
+  try {
+    const access = await establishHarnessAccess(options, context, lease, signal, { request });
+    assert.equal(issued, 1);
+    assert.equal(access.runtime.imageRevision, null);
+    assert.equal(access.runtime.openCodeVersion, options.expectedRuntimeOpenCodeVersion);
+    assert.equal(access.binding.storageMappingHash, options.storageMappingHash);
+    assert.equal(lease.snapshot().credentials.length, 2);
+    const after = await preflightHarnessIdentity(options, lease.coordinationLocator!, signal, request);
+    assert.deepEqual(after.runtime, access.runtime);
+    assert.equal(calls.filter((path) => path === "/api/v1/opencode/health").length, 3);
+    foreignBinding = true;
+    await assert.rejects(preflightHarnessIdentity(options, lease.coordinationLocator!, signal, request), {
+      message: "Explicit project/workspace/storage identity does not match the credential binding",
+    });
+    assert.equal(calls.at(-1), "/api/v1/auth/preflight");
+  } finally {
+    await lease.revokeAndRemove(signal);
+    await finalizeCoordinationTestRun(context);
+  }
+  assert.equal(revoked, 2);
+});
 
 test("parses exact CLI/config bindings without accepting secret values", () => {
   const fixture = fixtureRepository();

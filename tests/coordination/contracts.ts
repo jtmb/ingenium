@@ -73,6 +73,7 @@ export interface HarnessOptions {
   workspaceId: string;
   storageMappingHash: string;
   apiUrl: string;
+  deploymentMode: "compatibility" | "control-plane";
   operatorToken: ProtectedLocator;
   openCodeBinary: string;
   openCodeAuth: ProtectedLocator;
@@ -341,7 +342,7 @@ function parseArgs(argv: readonly string[]): Map<string, string> {
   const allowed = new Set([
     "worktree", "project", "project-id", "workspace", "storage-mapping-hash", "api-url",
     "operator-token-file", "opencode-binary", "opencode-auth-file",
-    "expected-revision", "runtime-id", "timeout-ms", "check",
+    "expected-revision", "runtime-id", "timeout-ms", "check", "deployment-mode",
   ]);
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
@@ -420,6 +421,10 @@ export function parseHarnessOptions(
   if (!["build", "lint", "test", "typecheck"].includes(check)) throw new Error("check must be build, lint, test, or typecheck");
   const runtimeId = configuredValue(args.get("runtime-id"), environment, "COORDINATION_HARNESS_RUNTIME_ID", undefined, "runtimeId");
   if (!UUID.test(runtimeId)) throw new Error("runtimeId must be a UUID");
+  const deploymentMode = args.get("deployment-mode") ?? environment.COORDINATION_HARNESS_DEPLOYMENT_MODE ?? "control-plane";
+  if (deploymentMode !== "compatibility" && deploymentMode !== "control-plane") {
+    throw new Error("deploymentMode must be compatibility or control-plane");
+  }
 
   return {
     worktree,
@@ -428,6 +433,7 @@ export function parseHarnessOptions(
     workspaceId,
     storageMappingHash,
     apiUrl: apiUrl(configuredApi),
+    deploymentMode,
     operatorToken: validateProtectedLocator(operatorFile, "operatorTokenFile"),
     openCodeBinary,
     openCodeAuth: validateProtectedLocator(authFile, "openCodeAuthFile"),
@@ -453,6 +459,7 @@ export function usage(): string {
   return [
     "Usage: npx tsx tests/coordination/run.ts --project NAME --project-id UUID --workspace ID --storage-mapping-hash SHA256 --runtime-id UUID --expected-revision SHA --operator-token-file PATH --opencode-auth-file PATH [options]",
     "All identity values are required CLI inputs or COORDINATION_HARNESS_* environment variables; operator and OpenCode auth inputs remain protected file locators.",
+    "--deployment-mode compatibility (or COORDINATION_HARNESS_DEPLOYMENT_MODE) opts into shared-service readiness; the default is control-plane.",
     "This command performs a live mapped-agent/runtime run, with writes confined to run-owned test artifacts and no Git commits. It is not a fixture self-test.",
   ].join("\n");
 }

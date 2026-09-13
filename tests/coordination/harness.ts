@@ -76,8 +76,10 @@ interface StorageBinding {
 
 interface RuntimeBinding {
   id: string;
-  imageRevision: string;
+  imageRevision: string | null;
   state: "READY" | "IDLE";
+  openCodeVersion?: string;
+  registryRevision?: number;
 }
 
 const HARNESS_RUNTIME_STATES = new Set([
@@ -86,12 +88,14 @@ const HARNESS_RUNTIME_STATES = new Set([
 type HarnessRuntimeState = "ABSENT" | "PROVISIONING" | "STARTING" | "READY" | "IDLE" | "STOPPING" | "STOPPED" | "FAILED" | "REVOKED";
 type HarnessRuntimeReadinessCode =
   | "RUNTIME_BINDING_MISMATCH"
+  | "RUNTIME_EXPIRED"
   | "RUNTIME_READINESS_TIMEOUT"
   | "RUNTIME_REVOKED"
   | "RUNTIME_START_INVALID"
   | "RUNTIME_START_UNAVAILABLE"
   | "RUNTIME_STATUS_INVALID"
   | "RUNTIME_STATUS_UNAVAILABLE"
+  | "RUNTIME_VERSION_MISMATCH"
   | "RUNTIME_WORKSPACE_INVALID"
   | "RUNTIME_WORKSPACE_UNAVAILABLE";
 
@@ -670,6 +674,33 @@ export async function ensureHarnessRuntimeReady(
   timeoutMs = Math.min(options.timeoutMs, 90_000),
 ): Promise<RuntimeBinding> {
   await assertHarnessWorkspaceBinding(options, operatorToken, signal, request);
+  if (options.deploymentMode === "compatibility") {
+    return waitFor("shared OpenCode readiness", timeoutMs, signal, async (readSignal) => {
+      const inventory = await runtimeApiValue(options, operatorToken, "/runtimes", "GET", undefined, 200,
+        "RUNTIME_STATUS_UNAVAILABLE", "RUNTIME_STATUS_INVALID", readSignal, request);
+      if (!Array.isArray(inventory)) throw new HarnessRuntimeReadinessError("RUNTIME_STATUS_INVALID");
+      const matches = inventory.map((value) => runtimeRecord(value, "RUNTIME_STATUS_INVALID"))
+        .filter((runtime) => runtime.id === options.runtimeId);
+      if (matches.length !== 1) throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+      const runtime = matches[0]!;
+      if (runtime.projectId !== options.projectId || runtime.workspaceId !== options.workspaceId
+        || runtime.backendContainerId !== null) throw new HarnessRuntimeReadinessError("RUNTIME_BINDING_MISMATCH");
+      if ((runtime.state !== "READY" && runtime.state !== "IDLE")
+        || !Number.isSafeInteger(runtime.revision) || (runtime.revision as number) < 1) {
+        throw new HarnessRuntimeReadinessError("RUNTIME_STATUS_INVALID");
+      }
+      if (typeof runtime.absoluteExpiresAt !== "string" || !Number.isFinite(Date.parse(runtime.absoluteExpiresAt))
+        || Date.parse(runtime.absoluteExpiresAt) <= Date.now()) throw new HarnessRuntimeReadinessError("RUNTIME_EXPIRED");
+      const health = runtimeRecord(await runtimeApiValue(options, operatorToken, "/opencode/health", "GET", undefined, 200,
+        "RUNTIME_STATUS_UNAVAILABLE", "RUNTIME_STATUS_INVALID", readSignal, request), "RUNTIME_STATUS_INVALID");
+      if (typeof health.healthy !== "boolean") throw new HarnessRuntimeReadinessError("RUNTIME_STATUS_INVALID");
+      if (health.version !== options.expectedRuntimeOpenCodeVersion) throw new HarnessRuntimeReadinessError("RUNTIME_VERSION_MISMATCH");
+      if (!health.healthy) return undefined;
+      // Compatibility exposes the OpenCode version, not an attested image SHA.
+      return { id: options.runtimeId, state: runtime.state, imageRevision: null,
+        openCodeVersion: health.version, registryRevision: runtime.revision as number };
+    }, () => new HarnessRuntimeReadinessError("RUNTIME_READINESS_TIMEOUT"), INTERNAL_READINESS_POLL_INTERVAL_MS);
+  }
   let startAttempted = false;
   return waitFor("exact harness runtime readiness", timeoutMs, signal, async (readSignal) => {
     const value = await runtimeApiValue(options, operatorToken, `/runtimes/${encodeURIComponent(options.runtimeId)}`, "GET", undefined, 200,
@@ -691,6 +722,7 @@ export async function preflightHarnessIdentity(
   signal: AbortSignal,
   request: typeof fetch = fetch,
 ): Promise<HarnessIdentity> {
+  const compatibility = options.deploymentMode === "compatibility";
   const boundedRequest: typeof fetch = (input, init = {}) => request(input, {
     ...init,
     signal: init.signal ? AbortSignal.any([signal, init.signal]) : signal,
@@ -703,10 +735,10 @@ export async function preflightHarnessIdentity(
       launcherWorktree: options.worktree,
       credentialFile: coordinationCredential.path,
     },
-    runtimeId: options.runtimeId,
+    runtimeId: compatibility ? undefined : options.runtimeId,
     timeoutMs: 15_000,
   });
-  required(result.authenticated && result.binding && result.runtime, "Protected preflight identity assertion failed");
+  required(result.authenticated && result.binding && (compatibility || result.runtime), "Protected preflight identity assertion failed");
   required(result.binding.audience === "mcp"
     && result.binding.scopes.includes("projects:read")
     && result.binding.scopes.includes("coordination:read")
@@ -715,7 +747,10 @@ export async function preflightHarnessIdentity(
     && result.binding.launcherWorktree === options.worktree
     && result.binding.storageMappingHash === options.storageMappingHash,
   "Explicit project/workspace/storage identity does not match the credential binding");
-  required(result.runtime.id === options.runtimeId && result.runtime.imageRevision === options.expectedRevision,
+  const runtime = compatibility
+    ? await ensureHarnessRuntimeReady(options, readProtectedValue(options.operatorToken), signal, request)
+    : result.runtime!;
+  required(compatibility || runtime.id === options.runtimeId && runtime.imageRevision === options.expectedRevision,
     "Explicit runtime UUID or image revision does not match the protected preflight assertion");
   return {
     binding: {
@@ -723,7 +758,7 @@ export async function preflightHarnessIdentity(
       workspaceId: result.binding.workspaceId,
       storageMappingHash: result.binding.storageMappingHash,
     },
-    runtime: result.runtime,
+    runtime,
   };
 }
 
@@ -1647,6 +1682,7 @@ export async function runCoordinationHarness(
       schema: HARNESS_ARTIFACT_SCHEMA,
       checkedAt: new Date().toISOString(),
       gitRevision: originalRevision,
+      deploymentMode: options.deploymentMode,
       project: options.project,
       workspaceId: binding.workspaceId,
       projectId: binding.projectId,
