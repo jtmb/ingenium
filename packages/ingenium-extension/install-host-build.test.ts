@@ -30,12 +30,13 @@ function fixture() {
   const state = join(home, ".local/state");
   for (const path of [join(extension, "scripts"), bin, state]) mkdirSync(path, { recursive: true, mode: 0o700 });
   const source = join(extension, "scripts/recovery-bootstrap.js");
+  const packageSource = join(extension, "package.json");
   const buildSource = join(extension, "scripts/build-command.ts");
   const opencodeSource = join(extension, "scripts/opencode.ts");
   writeFileSync(source, 'throw new Error("outer bootstrap must not execute");\n', { mode: 0o644 });
   writeFileSync(buildSource, readFileSync(new URL("./scripts/build-command.ts", import.meta.url)), { mode: 0o644 });
   writeFileSync(opencodeSource, readFileSync(new URL("./scripts/opencode.ts", import.meta.url)), { mode: 0o644 });
-  writeFileSync(join(extension, "package.json"), readFileSync(new URL("./package.json", import.meta.url)), { mode: 0o644 });
+  writeFileSync(packageSource, readFileSync(new URL("./package.json", import.meta.url)), { mode: 0o644 });
   writeFileSync(join(root, ".gitignore"), "**/dist/\n");
   const git = (args: string[]) => execFileSync("/usr/bin/git", ["-C", root, ...args], {
     env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8",
@@ -43,6 +44,7 @@ function fixture() {
   git(["init", "--quiet"]);
   git(["add", "."]);
   git(["-c", "user.name=Installer Test", "-c", "user.email=installer@example.invalid", "commit", "--quiet", "-m", "fixture"]);
+  for (const path of [packageSource, buildSource, opencodeSource]) chmodSync(path, 0o674);
   const head = git(["rev-parse", "HEAD"]);
   const target = join(bin, "ingenium-build");
   const opencodeTarget = join(bin, "ingenium-opencode");
@@ -65,7 +67,7 @@ function fixture() {
   const release = join(home, ".local/share/ingenium/host-build/releases", head);
   const options = { repositoryRoot: root, home, build };
   const manifest = () => JSON.parse(readFileSync(join(state, readdirSync(state).find((name) => name.endsWith(".json"))!), "utf8"));
-  return { root, home, extension, bin, state, source, buildSource, opencodeSource, head, target, opencodeTarget,
+  return { root, home, extension, bin, state, source, packageSource, buildSource, opencodeSource, head, target, opencodeTarget,
     originalHash, opencodeOriginalHash, build, git, options, manifest, material, release };
 }
 
@@ -170,11 +172,12 @@ describe("private host build installer", () => {
     }
     expect(Object.keys(result.launchers).sort()).toEqual(["ingenium-build", "ingenium-opencode"]);
     expect(result.head).toBe(f.head);
+    expect(result.packageSource).toEqual({ path: f.packageSource, sha256: hash(f.packageSource), mode: 0o674 });
     for (const [name, target, source] of [
       ["ingenium-build", f.target, f.buildSource],
       ["ingenium-opencode", f.opencodeTarget, f.opencodeSource],
     ] as const) {
-      expect(result.launchers[name].source).toMatchObject({ path: source, sha256: hash(source), mode: 0o644 });
+      expect(result.launchers[name].source).toMatchObject({ path: source, sha256: hash(source), mode: 0o674 });
       expect(result.launchers[name].artifact).toMatchObject({
         path: join(f.release, result.launchers[name].packageBin.slice(2)), mode: 0o400,
       });
@@ -211,6 +214,30 @@ describe("private host build installer", () => {
     expect(Object.keys(f.material).map((name) => lstatSync(join(f.release, name)).ino)).toEqual(before);
     f.material["dist/scripts/build-command.js"] = Buffer.from("changed\n");
     await expect(installHostBuild(f.head, f.options)).rejects.toThrow("immutable release");
+  }, 10_000);
+
+  it.each([
+    ["tampered", "Launcher source changed"],
+    ["private-stage mismatch", "Private build closure is incomplete"],
+    ["symlink", "Unsafe regular file"],
+    ["hardlink", "Unsafe regular file"],
+  ] as const)("rejects a %s launcher input after its exact HEAD-pinned read", async (failure, message) => {
+    const f = fixture();
+    const build = vi.fn(() => {
+      if (failure === "tampered") writeFileSync(f.opencodeSource, "tampered launcher\n");
+      if (failure === "private-stage mismatch") f.material["package.json"] = Buffer.from("{}\n");
+      if (failure === "symlink") {
+        const moved = join(f.home, "opencode-source");
+        renameSync(f.opencodeSource, moved);
+        symlinkSync(moved, f.opencodeSource);
+      }
+      if (failure === "hardlink") linkSync(f.opencodeSource, join(f.home, "opencode-source"));
+      return f.material;
+    });
+    await expect(installHostBuild(f.head, { ...f.options, build })).rejects.toThrow(message);
+    expect(build).toHaveBeenCalledOnce();
+    expect(hash(f.target)).toBe(f.originalHash);
+    expect(hash(f.opencodeTarget)).toBe(f.opencodeOriginalHash);
   });
 
   it.each([[], ["--expected-head", "A".repeat(40)], ["--expected-head", "a".repeat(39)],

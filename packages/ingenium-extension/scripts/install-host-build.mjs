@@ -54,9 +54,11 @@ function checkDirectory(directory) {
     || realpathSync(directory.path) !== directory.path) throw new Error("Directory identity changed");
 }
 
-function readRegular(path, owner, mode, links = 1) {
+function readRegular(path, owner, mode, links = 1, allowSharedAclMode = false) {
   const before = lstatSync(path);
-  if (!before.isFile() || before.uid !== owner || before.nlink !== links || (before.mode & 0o7022) !== 0
+  const permissions = before.mode & 0o7777;
+  if (!before.isFile() || before.uid !== owner || before.nlink !== links
+    || (allowSharedAclMode ? ![0o644, 0o674].includes(permissions) : (before.mode & 0o7022) !== 0)
     || (mode !== undefined && (before.mode & 0o7777) !== mode)) throw new Error("Unsafe regular file");
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -293,19 +295,32 @@ export async function installHostBuild(expectedHead, {
     };
     const verifiedSource = source();
     const sourceSha256 = verifiedSource.sha256;
-    const packageSource = readRegular(`${extensionDirectory.anchored}/package.json`, owner, 0o644);
-    if (!packageSource.bytes.equals(git(root.path, ["show", `${expectedHead}:${extensionRelative}/package.json`]))) {
-      throw new Error("Package source mismatch");
-    }
-    const entries = packageLauncherEntries(packageSource.bytes);
+    const trackedInputs = [];
+    const trackedInput = (directory, relative, repositoryRelative, label) => {
+      const bytes = git(root.path, ["show", `${expectedHead}:${repositoryRelative}`]);
+      checkDirectory(directory);
+      const value = readRegular(`${directory.anchored}/${relative}`, owner, undefined, 1, true);
+      if (!value.bytes.equals(bytes)) throw new Error(`${label} source mismatch`);
+      const input = { directory, relative, label, bytes, fileIdentity: identity(value),
+        manifest: { path: join(directory.path, relative), sha256: sha256(bytes), mode: value.mode & 0o7777 } };
+      trackedInputs.push(input);
+      return input;
+    };
+    const revalidateTrackedInputs = () => {
+      for (const input of trackedInputs) {
+        checkDirectory(input.directory);
+        const value = readRegular(`${input.directory.anchored}/${input.relative}`, owner, undefined, 1, true);
+        if (!same(identity(value), input.fileIdentity) || !value.bytes.equals(input.bytes)) {
+          throw new Error(`${input.label} source changed`);
+        }
+      }
+    };
+    const packageInput = trackedInput(extensionDirectory, "package.json", `${extensionRelative}/package.json`, "Package");
+    const entries = packageLauncherEntries(packageInput.bytes);
     const wrapperSources = {};
     for (const name of launcherNames) {
       const relative = entries[name].slice("dist/".length, -3) + ".ts";
-      const value = readRegular(`${extensionDirectory.anchored}/${relative}`, owner, 0o644);
-      if (!value.bytes.equals(git(root.path, ["show", `${expectedHead}:${extensionRelative}/${relative}`]))) {
-        throw new Error("Launcher source mismatch");
-      }
-      wrapperSources[name] = { path: join(root.path, extensionRelative, relative), sha256: value.sha256, mode: value.mode & 0o7777 };
+      wrapperSources[name] = trackedInput(extensionDirectory, relative, `${extensionRelative}/${relative}`, "Launcher").manifest;
     }
     let parent = openDirectory(join(home, ".local"), descriptors, owner);
     for (const name of ["share", "ingenium", "host-build", "releases"]) {
@@ -328,7 +343,7 @@ export async function installHostBuild(expectedHead, {
     manifestPath = `${state.anchored}/ingenium-build-install-${id}.json`;
     manifest = { schemaVersion: 2, head: expectedHead, repositoryRoot: root.path, owner,
       target: join(bin.path, "ingenium-build"), canonicalTarget, source: { path: join(root.path, sourceRelative), sha256: sourceSha256 },
-      artifacts: {}, releasePath, prior: buildLauncher.prior,
+      packageSource: packageInput.manifest, artifacts: {}, releasePath, prior: buildLauncher.prior,
       backup: buildLauncher.prior ? join(bin.path, `.ingenium-build-${id}.previous`) : null,
       candidate: join(bin.path, `.ingenium-build-${id}.candidate`),
       launchers: Object.fromEntries(launchers.map((launcher) => [launcher.name, {
@@ -342,9 +357,10 @@ export async function installHostBuild(expectedHead, {
     save("building");
     const result = build ? await build(root.path) : await buildPrivateClosure(root.path, expectedHead,
       dirname(parent.path), verifiedSource.bytes);
-    const closure = privateClosure(packageSource.bytes);
+    revalidateTrackedInputs();
+    const closure = privateClosure(packageInput.bytes);
     if (!same(Object.keys(result).sort(), [...closure].sort()) || Object.values(result).some((bytes) => !Buffer.isBuffer(bytes) || !bytes.length)
-      || !result["package.json"].equals(packageSource.bytes)) {
+      || !result["package.json"].equals(packageInput.bytes)) {
       throw new Error("Private build closure is incomplete");
     }
     const nodePath = realpathSync(process.execPath);
@@ -376,6 +392,7 @@ export async function installHostBuild(expectedHead, {
     const release = openDirectory(releasePath, descriptors, owner);
     const verifyArtifacts = () => {
       checkDirectory(root); checkDirectory(release);
+      revalidateTrackedInputs();
       verifyHead(root.path, expectedHead);
       if (source().sha256 !== sourceSha256) throw new Error("Bootstrap source changed");
       for (const [name, bytes] of Object.entries(material)) {
