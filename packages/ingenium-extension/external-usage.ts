@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { completedAssistant, redactContextText } from "@ingenium/extension/context-upload-codec";
 
 type Invoke = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -31,7 +32,8 @@ export function externalUsageEvent(info: unknown, sessionId: string, worktree: s
     || message.cost < 0 || message.cost > Number.MAX_SAFE_INTEGER)) return;
   // Copy the allowlist, never the SDK envelope, parts, errors, or provider configuration.
   return {
-    worktree, sessionId, messageId: message.id, role: "assistant", completedAt: new Date(completed).toISOString(),
+    worktree, sessionId: `session-${createHash("sha256").update(sessionId, "utf8").digest("hex")}`,
+    messageId: message.id, role: "assistant", completedAt: new Date(completed).toISOString(),
     providerId: message.providerID, modelId: message.modelID, agentId: message.agent,
     totalTokens: tokens?.total, inputTokens: tokens?.input, outputTokens: tokens?.output,
     reasoningTokens: tokens?.reasoning, cacheReadTokens: cache?.read, cacheWriteTokens: cache?.write,

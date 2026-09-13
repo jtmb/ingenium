@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { ExternalUsageCollector, externalUsageEvent } from "./external-usage.js";
 
 const worktree = "/home/brajam/repos/ingenium";
@@ -10,7 +11,8 @@ describe("external completed assistant usage", () => {
   it("copies reported metadata only and preserves absent versus zero without inferred totals or cost", () => {
     const event = externalUsageEvent({ ...message, text: "secret-canary", reasoning: "private", parts: [{ text: "private" }] }, "ses-usage", worktree)!;
     expect(event).toMatchObject({ inputTokens: 4, outputTokens: 0, reasoningTokens: 2, cacheReadTokens: 0,
-      completedAt: "2027-01-15T08:00:00.000Z", providerId: "openai", modelId: "model", agentId: "engineer" });
+      completedAt: "2027-01-15T08:00:00.000Z", providerId: "openai", modelId: "model", agentId: "engineer",
+      sessionId: `session-${createHash("sha256").update("ses-usage", "utf8").digest("hex")}` });
     expect(event.costAmount).toBeUndefined();
     expect(event.totalTokens).toBeUndefined();
     expect(event.cacheWriteTokens).toBeUndefined();
