@@ -1227,14 +1227,14 @@ const errors = [];
 const expected = {
   "ingenium-docs": ["openai/gpt-5.6-luna", "max"],
   "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-software-engineer-fast": ["openai/gpt-5.6-sol", "high"],
-  "ingenium-software-engineer-premium": ["openai/gpt-6-astra", "max"],
-  "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "high"],
-  "ingenium-orchestrator": ["openai/gpt-5.6-sol", "medium"],
-  "ingenium-explore": ["openai/gpt-5.6-sol", "medium"],
+  "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "xhigh"],
+  "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "xhigh"],
+  "ingenium-orchestrator": ["openai/gpt-5.6-sol", "xhigh"],
+  "ingenium-explore": ["openai/gpt-5.6-luna", "max"],
   "ingenium-scout": ["openai/gpt-5.6-luna", "max"],
   "ingenium-chat": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-security-auditor": ["openai/gpt-6-astra", "high"],
+  "ingenium-security-auditor": ["openai/gpt-6-astra", "max"],
 };
 
 const repositoryMappedNames = Object.keys(expected);

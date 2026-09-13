@@ -18,16 +18,16 @@ named Ingenium agents. Root `opencode.json` remains authoritative; the hidden
 | Agent | Model | Variant | Canonical profile |
 |---|---|---|---|
 | `plan` (built-in) | `openai/gpt-6-astra` | `max` | Built-in Plan mode (root mapping) |
-| `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
+| `ingenium-explore` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-explore.md` |
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
 | `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
-| `ingenium-software-engineer-fast` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
-| `ingenium-software-engineer-premium` | `openai/gpt-6-astra` | `max` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
-| `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
-| `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
+| `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
+| `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/primary/ingenium-orchestrator.md` |
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
 | `ingenium-chat` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
-| `ingenium-security-auditor` | `openai/gpt-6-astra` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |
+| `ingenium-security-auditor` | `openai/gpt-6-astra` | `max` | `.opencode/agents/security/ingenium-security-auditor.md` |
 
 The canonical `ingenium-chat` profile is
 `.opencode/agents/chat/ingenium-chat.md`; runtime bootstrap may project ordinary
