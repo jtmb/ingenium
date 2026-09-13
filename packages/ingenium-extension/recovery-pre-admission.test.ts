@@ -770,6 +770,31 @@ describe("fixed recovery preparation transaction", () => {
     await expect(shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
       ancestry: () => ({ status: "exact", parent: f.parent }) })).rejects.toThrow("binding conflicts");
   });
+
+  it("reports the exact inspect path when the current parent has no recovery control plane", async () => {
+    const f = preparationFixture();
+    const auth = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" })) : auth(url, init);
+    const parent = { ...f.parent, port: null };
+    const inspectFailure = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
+      ancestry: () => ({ status: "exact", parent }), gitSummary: () => ({ status: "validated", head,
+        sourceMatchesHead: true, dirtyPaths: [] }) }).then(() => null, (error: unknown) => error);
+    expect(inspectFailure).toMatchObject({ code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
+      failurePath: "inspect.parent_control_plane" });
+
+    f.collectInputs.mockRejectedValue(inspectFailure);
+    const preparationFailure = await f.prepare().then(() => null, (error: unknown) => error);
+    expect(preparationFailure).toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "inspect",
+      authorizesRestart: false, failure: { code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
+        path: "inspect.parent_control_plane" } });
+    expect(shim.recoveryPreparationFailureOutput(preparationFailure)).toEqual({ action: "recovery-prepare",
+      authorizesRestart: false, code: "RECOVERY_PREPARATION_FAILED", phase: "inspect",
+      failure: { code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE", path: "inspect.parent_control_plane" } });
+    expect(JSON.stringify(shim.recoveryPreparationFailureOutput(Object.assign(new Error("private failure"), { phase: "inspect" }))))
+      .not.toContain("private failure");
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+  });
 });
 
 describe("preparation disposition authorization", () => {

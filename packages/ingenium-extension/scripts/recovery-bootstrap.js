@@ -1484,6 +1484,28 @@ const PREPARATION_JOB = "ingenium-recovery-owner.service";
 const PREPARATION_OWNER_ARGUMENT = "--recovery-preparation-owner";
 const PREPARATION_LIFETIME_MS = 15 * 60 * 1_000;
 const PREPARATION_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
+const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = Object.freeze({
+  code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
+  path: "inspect.parent_control_plane",
+});
+
+function recoveryPreparationFailureDetail(error, phase) {
+  return error?.code === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code
+    && error.failurePath === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path
+    ? PREPARATION_PARENT_CONTROL_PLANE_FAILURE
+    : { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
+}
+
+export function recoveryPreparationFailureOutput(error) {
+  const phase = ["inspect", "prepare", "start", "attest", "confirm"].includes(error?.phase) ? error.phase : "source";
+  const failure = error?.failure?.code === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code
+    && error.failure.path === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path
+    ? PREPARATION_PARENT_CONTROL_PLANE_FAILURE
+    : { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
+  return { action: "recovery-prepare", authorizesRestart: false,
+    code: error?.code === "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" ? error.code : "RECOVERY_PREPARATION_FAILED",
+    phase, failure };
+}
 
 function preparationDirectory(worktree) {
   return resolve(worktree, ".opencode/protected-runtime-index/tui-recovery/preparation");
@@ -1622,6 +1644,13 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
   }
   const gitSummary = (options.gitSummary ?? collectGitSummary)(worktree, source.path, source.bytes);
+  if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
+    && ancestry.parent.port === null) {
+    const error = new Error("Recovery preparation parent control plane is unavailable");
+    error.code = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code;
+    error.failurePath = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path;
+    throw error;
+  }
   const capture = await captureLegacyRecoveryPreAdmission(ancestry.parent, binding, gitSummary, options.request ?? fetch, options.inspectParent);
   if (!capture) throw new Error("Recovery preparation capture is unavailable");
   const health = await collectApiHealth(environment, options.request ?? fetch);
@@ -1856,7 +1885,7 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     return { schemaVersion: 1, action: "recovery-prepare", authorizesRestart: false, status: "prepared", owner: evidence,
       disposition: inputs.disposition ? { recordSha256: inputs.disposition.disposition.recordSha256,
         recordCount: inputs.disposition.disposition.recordCount, authorizationSha256: inputs.disposition.disposition.authorizationSha256 } : null };
-  } catch {
+  } catch (cause) {
     let reconciled = true;
     if (startAttempted) {
       // The manager may have accepted a timed-out start. A durable stop request also covers a late owner.
@@ -1892,6 +1921,7 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     error.code = reconciled ? "RECOVERY_PREPARATION_ROLLED_BACK" : "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED";
     error.phase = phase;
     error.authorizesRestart = false;
+    error.failure = recoveryPreparationFailureDetail(cause, phase);
     throw error;
   } finally { sourceHandle.close(); }
 }
@@ -3170,9 +3200,7 @@ if (MODULE_ATTESTATION && PREPARATION_REQUESTED !== undefined) {
   try {
     console.log(canonicalJson(await runRecoveryPreparation([process.execPath, MODULE_ATTESTATION.sourcePath])));
   } catch (error) {
-    console.error(canonicalJson({ action: "recovery-prepare", authorizesRestart: false,
-      code: error.code === "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" ? error.code : "RECOVERY_PREPARATION_FAILED",
-      phase: ["inspect", "prepare", "start", "attest", "confirm"].includes(error.phase) ? error.phase : "source" }));
+    console.error(canonicalJson(recoveryPreparationFailureOutput(error)));
     process.exitCode = 1;
   }
 } else if (invokedPath === import.meta.url && process.argv[2] === PREPARATION_OWNER_ARGUMENT) {
