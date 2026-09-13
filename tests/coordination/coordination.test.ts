@@ -5,6 +5,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { createTestRunContext, readTestRunManifest, readTestRunTelemetry, recordTestRunTelemetryFailure, updateTestRunManifest, type TestRunProcess } from "../test-run-context";
 import { inspectProcessIdentity, terminateChildProcessHandle } from "../test-server-lifecycle";
@@ -1974,13 +1975,14 @@ test("T65 F4 preserves mapped profiles without granting synthetic tools or chang
   assert.equal(serialized.includes(legacyCoordination), false);
   assert.equal(serialized.includes(legacyRepository), false);
   const config = JSON.parse(serialized);
+  const expectedPlugin = pathToFileURL(join(options.worktree, "packages/ingenium-extension/plugins/session-coordinator.ts")).href;
   assert.deepEqual(Object.keys(config.agent), [options.agents.A.name]);
   assert.equal(config.tools, undefined);
   assert.deepEqual(config.permission, { "*": "deny" });
   assert.equal(config.agent[options.agents.A.name].prompt, options.agents.A.prompt);
   assert.deepEqual(config.agent[options.agents.A.name].permission.bash, { "*": "deny", [MAPPED_CHECK_COMMAND]: "allow" });
   assert.deepEqual(config.agent[options.agents.A.name].permission.edit, { "*": "deny", [path]: "allow", [join(fixture.root, path)]: "allow" });
-  assert.deepEqual(config.plugin, ["file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"]);
+  assert.deepEqual(config.plugin, [expectedPlugin]);
   assert.equal(config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE, "{env:INGENIUM_MCP_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE, "{env:INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE}");
   assert.equal(config.mcp.ingenium.environment.INGENIUM_TRUSTED_API_URL, "http://127.0.0.1:45000/api/v1");
@@ -1991,9 +1993,28 @@ test("T65 F4 preserves mapped profiles without granting synthetic tools or chang
   }, "B"));
   assert.deepEqual(reader.agent[options.agents.B.name].permission, options.agents.B.permission);
   assert.equal(reader.tools, undefined);
-  assert.deepEqual(reader.plugin, [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
-  ]);
+  assert.deepEqual(reader.plugin, [expectedPlugin]);
+  const inspection = {
+    health: { healthy: true, version: options.expectedOpenCodeVersion },
+    agents: [{ name: options.agents.B.name, mode: "subagent", model: mappedPromptBody("B", "", options).model,
+      variant: options.agents.B.variant,
+      permission: [{ permission: "*", pattern: "*", action: "deny" }, { permission: "read", pattern: "*", action: "allow" }] }],
+    config: reader,
+    providers: { connected: [options.providerId] },
+    mcp: { ingenium: { status: "connected" } },
+  };
+  assert.doesNotThrow(() => assertOpenCodeInspection("B", inspection, options));
+  for (const invalid of [
+    { ...reader, tools: {} },
+    { ...reader, agent: { [options.agents.B.name]: { ...reader.agent[options.agents.B.name], tools: {} } } },
+    { ...reader, plugin: [] },
+    { ...reader, plugin: [expectedPlugin, expectedPlugin] },
+    { ...reader, plugin: [expectedPlugin, "file:///unexpected-plugin.ts"] },
+    { ...reader, plugin: ["file:///foreign/worktree/packages/ingenium-extension/plugins/session-coordinator.ts"] },
+    { ...reader, plugin: ["file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"] },
+  ]) {
+    assert.throws(() => assertOpenCodeInspection("B", { ...inspection, config: invalid }, options), /B synthetic tool override detected/);
+  }
   for (const label of ["A", "B", "C"] as const) {
     const prompt = mappedPromptBody(label, "bounded task", options);
     assert.equal(prompt.agent, options.agents[label].name);

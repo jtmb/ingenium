@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { CoordinationOutbox } from "../../packages/ingenium-extension/coordination-outbox";
 import { isSafeRestartHandoffPath } from "../../packages/ingenium-extension/replacement-first-restart";
 import { preflightApiAuthentication } from "../../packages/ingenium-extension/api-auth";
@@ -63,7 +64,8 @@ const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 250;
 const INTERNAL_READINESS_POLL_INTERVAL_MS = 5_000;
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const SESSION_COORDINATOR_PLUGIN = "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts";
+const sessionCoordinatorPlugin = (worktree: string): string =>
+  pathToFileURL(join(worktree, "packages/ingenium-extension/plugins/session-coordinator.ts")).href;
 export const MAPPED_CHECK_COMMAND = "npm run typecheck --workspace=@ingenium/extension";
 
 type JsonRecord = Record<string, unknown>;
@@ -838,7 +840,7 @@ export function buildExternalConfig(
   config.default_agent = name;
   config.permission = { "*": "deny" };
   delete config.tools;
-  config.plugin = [SESSION_COORDINATOR_PLUGIN];
+  config.plugin = [sessionCoordinatorPlugin(options.worktree)];
   config.agent = { [name]: { ...agent, permission } };
   return `${JSON.stringify(config, null, 2)}\n`;
 }
@@ -1036,7 +1038,7 @@ export function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonReco
     required(configured.model === mapping.model && configured.variant === mapping.variant && configured.prompt === mapping.prompt,
       `${label} exact profile mapping changed`);
     required(configured.tools === undefined && config.tools === undefined
-      && isDeepStrictEqual(config.plugin, [SESSION_COORDINATOR_PLUGIN]), `${label} synthetic tool override detected`);
+      && isDeepStrictEqual(config.plugin, [sessionCoordinatorPlugin(options.worktree)]), `${label} synthetic tool override detected`);
   }
   const providers = record(value.providers, `${label} provider catalog is invalid`);
   const providerConnected = label === "C"
