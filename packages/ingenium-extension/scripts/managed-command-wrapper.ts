@@ -119,7 +119,7 @@ export function verifyPrivateBuildRelease(release: string, home = userInfo().hom
   }
   const manifest = JSON.parse(stable(resolve(release, "release.json"), 0o400).bytes.toString());
   const files = ["package.json", "context-upload-codec.mjs", "dist/replacement-first-restart.js",
-    "dist/scripts/build-command.js", "dist/scripts/managed-command-wrapper.js"];
+    "dist/scripts/build-command.js", "dist/scripts/managed-command-wrapper.js", "dist/scripts/opencode.js"];
   if (!exact(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files"])
     || manifest.schemaVersion !== 1 || manifest.owner !== owner || manifest.head !== basename(release)
     || typeof manifest.repositoryRoot !== "string" || resolve(manifest.repositoryRoot) !== manifest.repositoryRoot

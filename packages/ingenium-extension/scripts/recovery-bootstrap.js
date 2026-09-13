@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import {
   closeSync,
@@ -1096,60 +1096,10 @@ export function inspectRecoveryOwnerStatus(contract, options = {}) {
   const unavailable = { status: "unavailable", authorizesRestart: false };
   try {
     if (canonicalJson(contract) !== canonicalJson(prepareRecoveryOwnerContract(contract.binding, contract.sourceHead))) return unavailable;
-    const directory = resolve(contract.binding.worktree, ".opencode/protected-runtime-index/tui-recovery");
-    for (const path of [dirname(directory), directory]) {
-      const stat = lstatSync(path);
-      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== ownerUid()
-        || (stat.mode & 0o777) !== 0o700 || realpathSync(path) !== path) return unavailable;
-    }
-    const bytes = readOnlyRegularFile(resolve(directory, "owner-status.json"), 16 * 1024, false, 0o600);
-    const value = JSON.parse(bytes);
-    const now = options.now ?? Date.now();
-    if (!hasExactKeys(value, ["schemaVersion", "job", "invocationId", "binding", "sourceHead", "scriptSha256", "owner", "fence", "lease", "health"])
-      || value.schemaVersion !== 1 || value.job !== contract.job || !/^[0-9a-f]{32}$/.test(value.invocationId ?? "")
-      || canonicalJson(value.binding) !== canonicalJson(contract.binding) || value.sourceHead !== contract.sourceHead
-      || !HASH.test(value.scriptSha256 ?? "") || !hasExactKeys(value.owner, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
-      || !safeRecoveryIdentity(value.owner) || value.owner.nonceSha256 === "0".repeat(64)
-      || !Number.isSafeInteger(value.fence) || value.fence < 1 || value.health !== "ready"
-      || !hasExactKeys(value.lease, ["issuedAt", "expiresAt"]) || !Number.isSafeInteger(value.lease.issuedAt)
-      || !Number.isSafeInteger(value.lease.expiresAt) || value.lease.issuedAt > now || value.lease.expiresAt <= now
-      || value.lease.expiresAt - value.lease.issuedAt > contract.maximumLeaseMs) return unavailable;
-    const stateBytes = readOnlyRegularFile(resolve(directory, "state.json"), 64 * 1024, false, 0o600);
-    const state = JSON.parse(stateBytes);
-    if (!hasExactKeys(state, ["schemaVersion", "owner", "fence", "generation", "phase", "activeParent", "replacement", "updatedAt"])
-      || state.schemaVersion !== 1 || !Number.isSafeInteger(state.generation) || state.generation < 1
-      || !["owner_ready", "enrolled"].includes(state.phase) || state.replacement !== null
-      || (state.phase === "owner_ready" ? state.activeParent !== null : !safeEnrolledParent(state.activeParent))
-      || !isCanonicalRfc3339(state.updatedAt) || state.fence !== value.fence
-      || canonicalJson(state.owner) !== canonicalJson(value.owner)) return unavailable;
-    const run = options.run ?? execFileSync;
-    const unit = run("/usr/bin/systemctl", ["--user", "show", contract.job,
-      "--property=MainPID,InvocationID,ActiveState,SubState"], { encoding: "utf8", timeout: 5_000, maxBuffer: 16 * 1024,
-      env: { PATH: "/usr/bin:/bin", XDG_RUNTIME_DIR: `/run/user/${ownerUid()}`,
-        DBUS_SESSION_BUS_ADDRESS: `unix:path=/run/user/${ownerUid()}/bus` } });
-    const properties = Object.fromEntries(unit.trim().split("\n").map((line) => {
-      const index = line.indexOf("=");
-      return [line.slice(0, index), line.slice(index + 1)];
-    }));
-    if (properties.MainPID !== String(value.owner.pid) || properties.InvocationID !== value.invocationId
-      || properties.ActiveState !== "active" || properties.SubState !== "running") return unavailable;
-    const inspect = options.inspect ?? inspectAncestor;
-    const environment = (options.environment ?? processEnvironment)(value.owner.pid);
-    const owner = inspect(value.owner.pid);
-    const script = resolve(contract.binding.worktree, "packages/ingenium-extension/dist/scripts/recovery-owner.js");
-    if (!owner || owner.startTimeTicks !== value.owner.startTimeTicks || owner.executableSha256 !== value.owner.executableSha256
-      || owner.cwd !== contract.binding.worktree || owner.commandName !== "node" || owner.argv.length !== 3 || owner.argv[1] !== script
-      || !OPAQUE_TOKEN.test(environment?.INGENIUM_RECOVERY_OWNER_NONCE ?? "")
-      || sha256(environment.INGENIUM_RECOVERY_OWNER_NONCE) !== value.owner.nonceSha256
-      || environment.INGENIUM_RECOVERY_OWNER_SOURCE_HEAD !== contract.sourceHead
-      || environment.INGENIUM_RECOVERY_OWNER_SCRIPT_SHA256 !== value.scriptSha256
-      || readTrustedRegularFile(script, "Recovery owner executable").sha256 !== value.scriptSha256) return unavailable;
-    if (!bytes.equals(readOnlyRegularFile(resolve(directory, "owner-status.json"), 16 * 1024, false, 0o600))
-      || !stateBytes.equals(readOnlyRegularFile(resolve(directory, "state.json"), 64 * 1024, false, 0o600))
-      || canonicalJson(inspect(value.owner.pid)) !== canonicalJson(owner)) return unavailable;
-    return { status: "attested", authorizesRestart: false, job: value.job, invocationId: value.invocationId,
-      owner: value.owner, fence: value.fence, lease: value.lease, health: value.health,
-      binding: value.binding, sourceHead: value.sourceHead, evidenceSha256: sha256(bytes) };
+    const retained = readPreparationRequest(contract.binding.worktree);
+    if (canonicalJson(retained.value.contract) !== canonicalJson(contract)) return unavailable;
+    const evidence = inspectPreparedRecoveryOwner(retained.value, options);
+    return evidence ? { ...evidence, binding: contract.binding } : unavailable;
   } catch { return unavailable; }
 }
 
@@ -1407,6 +1357,35 @@ export async function captureLegacyRecoveryPreAdmission(parent, binding, source,
   } catch { return null; }
 }
 
+export async function captureCurrentRecoveryPreAdmission(parent, binding, source, request = fetch,
+  inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) })) {
+  try { prepareRecoveryOwnerContract(binding, source?.head); } catch { return null; }
+  if (!parent || !binding || !source || source.status !== "validated" || source.dirtyPaths.length !== 0
+    || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree
+    || !safeRecoveryIdentity(parent) || parent.port === null || parent.nonceSha256 === "0".repeat(64)) return null;
+  const sameProcess = () => {
+    const actual = inspect(parent.pid);
+    return actual && actual.commandName === "opencode" && actual.pid === parent.pid
+      && actual.startTimeTicks === parent.startTimeTicks && actual.executableSha256 === parent.executableSha256
+      && actual.cwd === binding.worktree && actual.cmdlineSha256 === parent.cmdlineSha256
+      && OPAQUE_TOKEN.test(actual.nonce ?? "") && sha256(actual.nonce) === parent.nonceSha256
+      && actual.ports?.length === 1 && actual.ports[0] === parent.port;
+  };
+  if (!sameProcess()) return null;
+  const discovered = currentParentEvidence(binding.worktree, parent, binding, source.head);
+  if (!discovered.record) return null;
+  const session = discovered.record.sessions[0];
+  const live = await readLiveRecoverySummary({ ...parent, sessionId: session.sessionId }, binding.worktree, request);
+  if (!live?.operational || !sameProcess()
+    || currentParentEvidence(binding.worktree, parent, binding, source.head, Date.now(), live.handoff).record === null
+    || live.operational.role !== session.role) return null;
+  const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
+  const snapshot = { schemaVersion: 1, kind: "current-pre-admission", parent: identity,
+    nonceProvenance: "process_environment", sessionId: session.sessionId, binding, sourceHead: source.head,
+    operational: { role: session.role, ...session.handoff } };
+  return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
+}
+
 export function recoveryConfiguredEnvironment(worktree, inherited = {}, head = MODULE_ATTESTATION?.head) {
   const config = JSON.parse(readRecoveryRepositoryData(worktree, head));
   const candidates = Object.entries(config.mcp ?? {}).filter(([name, entry]) => name === "ingenium"
@@ -1651,7 +1630,11 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     error.failurePath = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path;
     throw error;
   }
-  const capture = await captureLegacyRecoveryPreAdmission(ancestry.parent, binding, gitSummary, options.request ?? fetch, options.inspectParent);
+  const capture = ancestry.parent.nonceSha256 === "0".repeat(64)
+    ? await (options.captureLegacy ?? captureLegacyRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
+      options.request ?? fetch, options.inspectParent)
+    : await (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
+      options.request ?? fetch, options.inspectParent);
   if (!capture) throw new Error("Recovery preparation capture is unavailable");
   const health = await collectApiHealth(environment, options.request ?? fetch);
   if (health.status !== "healthy") throw new Error("Recovery preparation API health is unavailable");
@@ -1939,8 +1922,8 @@ function enrollmentClassification(parent, binding, recovery) {
 }
 
 // The stdin-attested bootstrap cannot import generated extension code before admission.
-export function readCurrentParentSummary(worktree, parent, binding, head, now = Date.now(), handoff) {
-  const empty = (status) => ({ status, role: null, project: null, enrollmentSha256: null });
+function currentParentEvidence(worktree, parent, binding, head, now = Date.now(), handoff) {
+  const empty = (status) => ({ summary: { status, role: null, project: null, enrollmentSha256: null }, record: null });
   const directory = resolve(worktree, ".opencode/protected-runtime-index/tui-recovery");
   try {
     for (const path of [resolve(worktree, ".opencode"), dirname(directory), directory]) {
@@ -1999,7 +1982,7 @@ export function readCurrentParentSummary(worktree, parent, binding, head, now = 
       if (record.expiresAt <= now || !record.sessions.length) continue;
       if (!record.sourceClean || record.sourceHead !== head
         || Object.keys(record.parent).some((key) => record.parent[key] !== parent[key])
-        || record.sessions[0].sessionId !== parent.sessionId
+        || parent.sessionId !== null && record.sessions[0].sessionId !== parent.sessionId
         || parent.port !== null && Number(url.port) !== parent.port) return empty("invalid");
       if (handoff) {
         const current = record.sessions[0].handoff;
@@ -2016,10 +1999,15 @@ export function readCurrentParentSummary(worktree, parent, binding, head, now = 
       || names.some((name, index) => !records[index].equals(readOnlyRegularFile(resolve(directory, name), 64 * 1024, false, 0o600)))) return empty("invalid");
     if (candidates.length !== 1) return empty("invalid");
     const record = candidates[0];
-    return { status: "validated", role: record.sessions[0].role, project: record.binding.project, enrollmentSha256: record.enrollmentSha256 };
+    return { summary: { status: "validated", role: record.sessions[0].role, project: record.binding.project,
+      enrollmentSha256: record.enrollmentSha256 }, record };
   } catch (error) {
     return empty(error?.code === "ENOENT" ? "missing" : "invalid");
   }
+}
+
+export function readCurrentParentSummary(worktree, parent, binding, head, now = Date.now(), handoff) {
+  return currentParentEvidence(worktree, parent, binding, head, now, handoff).summary;
 }
 
 export async function collectRecoveryPreflight(options = {}) {
@@ -2058,6 +2046,15 @@ export async function collectRecoveryPreflight(options = {}) {
     if (parentEnvironment.INGENIUM_PROJECT_ID !== undefined && parentEnvironment.INGENIUM_PROJECT_ID !== binding.projectId
       || parentEnvironment.INGENIUM_STORAGE_MAPPING_HASH !== undefined && parentEnvironment.INGENIUM_STORAGE_MAPPING_HASH !== binding.storageMappingHash) binding = null;
   } catch {}
+  const gitSummary = worktree && source
+    ? collectGitSummary(worktree, source.path, source.bytes)
+    : { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
+  const currentParentDiscovery = worktree ? currentParentEvidence(worktree, parent, binding,
+    gitSummary.dirtyPaths.length === 0 ? gitSummary.head : null) : { record: null };
+  if (currentParentDiscovery.record && parentInternal && parent) {
+    parentInternal.sessionId = currentParentDiscovery.record.sessions[0].sessionId;
+    parent.sessionId = parentInternal.sessionId;
+  }
   let recovery = worktree ? readRecoverySummary(worktree) : {
     summary: { status: "invalid", state: null, handoff: null }, enrollment: null,
   };
@@ -2068,13 +2065,16 @@ export async function collectRecoveryPreflight(options = {}) {
       enrollment: recovery.enrollment,
     };
   }
-  const gitSummary = worktree && source
-    ? collectGitSummary(worktree, source.path, source.bytes)
-    : { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
   const protectedIndex = worktree ? resolve(worktree, ".opencode/protected-runtime-index") : null;
-  const currentParent = worktree ? readCurrentParentSummary(worktree, parent, binding,
+  const confirmedCurrentParent = worktree ? currentParentEvidence(worktree, parent, binding,
     gitSummary.dirtyPaths.length === 0 ? gitSummary.head : null, Date.now(), recovery.summary.handoff)
-    : { status: "invalid", role: null, project: null, enrollmentSha256: null };
+    : { summary: { status: "invalid", role: null, project: null, enrollmentSha256: null }, record: null };
+  const currentSession = confirmedCurrentParent.record?.sessions[0];
+  const currentParent = { ...confirmedCurrentParent.summary, session: currentSession ? {
+    incarnation: currentSession.incarnation,
+    revision: currentSession.revision,
+    fence: currentSession.fence,
+  } : null };
   const preAdmissionCapture = currentParent.status === "missing"
     ? await captureLegacyRecoveryPreAdmission(parentInternal, binding, gitSummary, options.request ?? fetch) : null;
   if (preAdmissionCapture) {
@@ -2277,6 +2277,162 @@ function readRecoveryApiToken(worktree, environment) {
     throw new Error("Recovery admission authentication is unavailable");
   }
   return token;
+}
+
+export async function mintRecoveryAdmissionArtifact(preflight, preflightDigest, path, options = {}) {
+  const expected = expectedRecoveryAdmission(preflight, preflightDigest);
+  const session = preflight.currentParent?.session;
+  if (!hasExactKeys(session, ["incarnation", "revision", "fence"])
+    || !Number.isSafeInteger(session.incarnation) || session.incarnation < 1 || session.incarnation >= Number.MAX_SAFE_INTEGER
+    || !Number.isSafeInteger(session.revision) || session.revision < 0
+    || !Number.isSafeInteger(session.fence) || session.fence < 1) {
+    throw new Error("Recovery admission session evidence is unavailable");
+  }
+  const environment = options.environment ?? recoveryEnvironmentForBinding(expected.binding);
+  const parentEnvironment = (options.parentEnvironment ?? processEnvironment)(expected.parent.pid);
+  const parentNonce = parentEnvironment?.INGENIUM_RESTART_NONCE;
+  const parentExecutable = options.parentExecutable ?? `/proc/${expected.parent.pid}/exe`;
+  let executableSha256;
+  try { executableSha256 = sha256(readFileSync(realpathSync(parentExecutable))); } catch {}
+  if (!OPAQUE_TOKEN.test(parentNonce ?? "") || sha256(parentNonce) !== expected.parent.nonceSha256
+    || executableSha256 !== expected.parent.executableSha256) {
+    throw new Error("Recovery admission parent secret evidence is unavailable");
+  }
+  let base;
+  try { base = new URL(environment.INGENIUM_API_URL); } catch {}
+  if (!base || base.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(base.hostname)
+    || base.username || base.password || base.search || base.hash
+    || environment.INGENIUM_PROJECT !== expected.binding.project
+    || environment.INGENIUM_PROJECT_ID !== expected.binding.projectId
+    || environment.INGENIUM_WORKSPACE_ID !== expected.binding.workspaceId
+    || environment.INGENIUM_STORAGE_MAPPING_HASH !== expected.binding.storageMappingHash
+    || environment.INGENIUM_WORKTREE !== expected.binding.worktree || environment.INGENIUM_MCP_AUDIENCE !== "mcp") {
+    throw new Error("Recovery admission binding changed");
+  }
+  const credential = readRecoveryApiToken(expected.binding.worktree, environment);
+  const request = options.request ?? fetch;
+  const worktreeId = `worktree-${sha256(`${expected.binding.workspaceId}\0${expected.binding.storageMappingHash}`)}`;
+  const incarnation = session.incarnation + 1;
+  const ownershipToken = randomBytes(32).toString("base64url");
+  const headers = { Authorization: `Bearer ${credential}`, "Content-Type": "application/json",
+    "X-Ingenium-Audience": "mcp", "X-Ingenium-Workspace": expected.binding.workspaceId,
+    "X-Ingenium-Launcher-Worktree": expected.binding.worktree };
+  const endpoint = (suffix) => {
+    const target = new URL(`${base.href.replace(/\/$/, "")}/coordination/${suffix}`);
+    target.searchParams.set("project", expected.binding.project);
+    return target;
+  };
+  const post = async (suffix, body) => {
+    const response = await request(endpoint(suffix), { method: "POST", redirect: "error",
+      signal: AbortSignal.timeout(5_000), headers, body: canonicalJson(body) });
+    let payload;
+    try { payload = await response.json(); } catch {}
+    return { response, data: payload?.data };
+  };
+  let lease;
+  let registrationAttempted = false;
+  let artifactIdentity;
+  let artifactBytes;
+  let directoryCreated = false;
+  const requested = resolve(path);
+  const directory = dirname(requested);
+  const removeArtifact = () => {
+    if (!artifactIdentity || !recoveryAdmissionExists(requested)) return;
+    const current = lstatSync(requested);
+    if (!current.isFile() || current.isSymbolicLink() || !sourceIdentityMatches(artifactIdentity, current)
+      || !artifactBytes.equals(readOnlyRegularFile(requested, RECOVERY_ADMISSION_MAX_BYTES, false, 0o600))) {
+      throw new Error("Recovery admission rollback artifact changed");
+    }
+    unlinkSync(requested);
+  };
+  const inspectLease = async () => {
+    const target = endpoint("snapshot");
+    target.searchParams.set("worktree_id", worktreeId);
+    target.searchParams.set("session_id", expected.parent.sessionId);
+    target.searchParams.set("incarnation", String(incarnation));
+    const response = await request(target, { method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
+      headers: { ...headers, "X-Ingenium-Coordination-Ownership": ownershipToken } });
+    if (response.status === 404) return null;
+    let payload;
+    try { payload = await response.json(); } catch {}
+    const current = payload?.data?.session;
+    if (response.status !== 200 || !Number.isSafeInteger(current?.revision) || current.revision < 0
+      || !Number.isSafeInteger(current?.fence) || current.fence < 1 || !["active", "closed"].includes(current.state)) {
+      throw new Error("Recovery admission session rollback inspection failed");
+    }
+    return current;
+  };
+  const closeLease = async () => {
+    if (!registrationAttempted) return;
+    const current = await inspectLease();
+    if (!current || current.state === "closed") {
+      lease = undefined;
+      registrationAttempted = false;
+      return;
+    }
+    const closed = await post("close", { worktree_id: worktreeId, session_id: expected.parent.sessionId,
+      incarnation, expected_revision: current.revision, fence: current.fence, ownership_token: ownershipToken,
+      idempotency_key: randomUUID() });
+    if (closed.response.status !== 200 || closed.data?.session?.state !== "closed"
+      || closed.data.session.revision !== current.revision + 1 || closed.data.session.fence !== current.fence) {
+      throw new Error("Recovery admission session rollback failed");
+    }
+    lease = undefined;
+    registrationAttempted = false;
+  };
+  const rollback = async () => {
+    let remoteFailure;
+    try { await closeLease(); } catch (error) { remoteFailure = error; }
+    if (remoteFailure) throw new AggregateError([remoteFailure], "Recovery admission rollback requires reconciliation");
+    let localFailure;
+    try { removeArtifact(); } catch (error) { localFailure = error; }
+    if (directoryCreated) {
+      try { rmdirSync(directory); } catch (error) { localFailure ??= error; }
+    }
+    if (localFailure) throw new AggregateError([localFailure],
+      "Recovery admission rollback requires reconciliation");
+  };
+  try {
+    registrationAttempted = true;
+    const registered = await post("register", { worktree_id: worktreeId, session_id: expected.parent.sessionId,
+      incarnation, ownership_token: ownershipToken, ttl_ms: RECOVERY_ADMISSION_LIFETIME_MS,
+      idempotency_key: randomUUID() });
+    lease = registered.data?.session;
+    if (registered.response.status !== 201 || !Number.isSafeInteger(lease?.revision) || lease.revision !== 0
+      || !Number.isSafeInteger(lease?.fence) || lease.fence < 1 || lease.state !== "active") {
+      throw new Error("Recovery admission session registration failed");
+    }
+    const minted = await post("recovery-admissions/mint", { worktree_id: worktreeId,
+      session_id: expected.parent.sessionId, incarnation, expected_revision: lease.revision, fence: lease.fence,
+      ownership_token: ownershipToken, preflight_digest: expected.preflightDigest, head: expected.head,
+      parent_pid: expected.parent.pid, parent_start: String(expected.parent.startTimeTicks),
+      parent_executable: parentExecutable, parent_nonce: parentNonce, ttl_ms: RECOVERY_ADMISSION_LIFETIME_MS,
+      idempotency_key: randomUUID() });
+    const mintedLease = minted.data?.session;
+    const record = { incarnation, admission: minted.data?.admission, consumeToken: minted.data?.consumeToken };
+    if (minted.response.status !== 201 || !Number.isSafeInteger(mintedLease?.revision) || mintedLease.revision !== 1
+      || mintedLease?.fence !== lease.fence || mintedLease.state !== "active"
+      || record.admission?.revision !== mintedLease.revision || record.admission?.fence !== mintedLease.fence) {
+      throw new Error("Recovery admission mint failed");
+    }
+    lease = mintedLease;
+    try {
+      mkdirSync(directory, { mode: 0o700 });
+      directoryCreated = true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    privatePreparationDirectory(directory);
+    artifactBytes = Buffer.from(canonicalJson(record));
+    writePreparationFile(requested, artifactBytes, (identity) => { artifactIdentity = identity; });
+    readRecoveryAdmission(requested, preflight, preflightDigest, options.now ?? Date.now());
+    return Object.freeze({ status: "created", pathSha256: sha256(requested), admissionSha256: sha256(artifactBytes), rollback });
+  } catch (error) {
+    try { await rollback(); } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "Recovery admission creation requires reconciliation");
+    }
+    throw new Error("Recovery admission creation failed");
+  }
 }
 
 export async function consumeRecoveryAdmission(admission, context, options = {}) {
@@ -3157,38 +3313,48 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
     const admissionPath = dependencies.admissionPath
       ?? (preflight.binding?.worktree ? recoveryAdmissionPath(preflight.binding.worktree) : undefined);
     const exists = dependencies.admissionExists ?? recoveryAdmissionExists;
+    let minted;
+    if (admissionPath && !exists(admissionPath) && preflight.admissible && preflight.currentParent?.session) {
+      minted = await (dependencies.mintAdmissionArtifact ?? mintRecoveryAdmissionArtifact)(preflight, digest, admissionPath);
+    }
     if (!admissionPath || !exists(admissionPath)) {
       (dependencies.writeOutput ?? ((value) => process.stdout.write(value)))(`${output}\n`);
       return;
     }
-    let admission = (dependencies.readAdmission ?? readRecoveryAdmission)(
-      admissionPath,
-      preflight,
-      digest,
-      (dependencies.now ?? Date.now)(),
-    );
-    const current = await collect({
-      environment: process.env,
-      sourcePath: sourceHandle.source.path,
-      verifiedSource: sourceHandle.revalidate(),
-    });
-    assertUnchangedRecoveryPreflight(current, digest);
-    const expectedContext = expectedAdmittedRecoveryContext(current, digest);
-    sourceHandle.revalidate();
-    const context = validatedAdmittedRecoveryContext(
-      await (dependencies.consumeAdmission ?? ((record, expected) => consumeRecoveryAdmission(record, expected, {
-        environment: recoveryEnvironmentForBinding(expected.binding),
-      })))(admission, expectedContext),
-      expectedContext,
-      admission.admission,
-    );
     try {
-      (dependencies.discardAdmission ?? unlinkSync)(admissionPath);
-    } finally {
-      admission = undefined;
+      let admission = (dependencies.readAdmission ?? readRecoveryAdmission)(
+        admissionPath,
+        preflight,
+        digest,
+        (dependencies.now ?? Date.now)(),
+      );
+      const current = await collect({
+        environment: process.env,
+        sourcePath: sourceHandle.source.path,
+        verifiedSource: sourceHandle.revalidate(),
+      });
+      assertUnchangedRecoveryPreflight(current, digest);
+      const expectedContext = expectedAdmittedRecoveryContext(current, digest);
+      sourceHandle.revalidate();
+      const context = validatedAdmittedRecoveryContext(
+        await (dependencies.consumeAdmission ?? ((record, expected) => consumeRecoveryAdmission(record, expected, {
+          environment: recoveryEnvironmentForBinding(expected.binding),
+        })))(admission, expectedContext),
+        expectedContext,
+        admission.admission,
+      );
+      (dependencies.postConsumeCheck ?? recheckHeadAndParent)(context, sourceHandle);
+      try {
+        (dependencies.discardAdmission ?? unlinkSync)(admissionPath);
+      } finally {
+        admission = undefined;
+      }
+      minted = undefined;
+      await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv, context, sourceHandle.source);
+    } catch (error) {
+      if (minted) await minted.rollback();
+      throw error;
     }
-    (dependencies.postConsumeCheck ?? recheckHeadAndParent)(context, sourceHandle);
-    await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv, context, sourceHandle.source);
   } finally {
     sourceHandle.close();
   }

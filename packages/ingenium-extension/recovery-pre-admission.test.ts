@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
-import { stableRestartTodos } from "./replacement-first-restart.js";
+import { runReplacementFirstRestart, stableRestartTodos } from "./replacement-first-restart.js";
 import { inspectProductionRestartBinding, redactedHandoffFromExport } from "./scripts/production-restart.js";
 import { managedRecoveryEnvironment } from "./scripts/managed-command-wrapper.js";
 
@@ -566,38 +566,20 @@ describe("immutable schema-v2 outbox disposition", () => {
 });
 
 describe("independent recovery owner contract", () => {
-  it("requires an exact job, process, lease, fence, binding and source; preparation is not authorization", () => {
+  it("reads the exact prepared-owner path and schema used by the writer; preparation is not authorization", async () => {
+    const f = preparationFixture();
     const contract = shim.prepareRecoveryOwnerContract(binding, head);
-    const run = vi.fn();
-    expect(contract).toMatchObject({ authorizesRestart: false, nonceTarget: "successor_or_supervisor_only" });
-    expect(shim.inspectRecoveryOwnerStatus(contract, { run }).status).toBe("unavailable");
-    expect(run).not.toHaveBeenCalled();
-    const directory = join(root, ".opencode/protected-runtime-index/tui-recovery");
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const script = join(root, "packages/ingenium-extension/dist/scripts/recovery-owner.js");
-    mkdirSync(join(root, "packages/ingenium-extension/dist/scripts"), { recursive: true });
-    writeFileSync(script, "fixture", { mode: 0o555 });
-    const owner = { pid: 101, startTimeTicks: 42, executableSha256: hash("exe"), nonceSha256: hash("n".repeat(43)) };
-    const status = { schemaVersion: 1, job: contract.job, invocationId: "a".repeat(32), binding, sourceHead: head,
-      scriptSha256: hash("fixture"), owner, fence: 3, lease: { issuedAt: 1000, expiresAt: 2000 }, health: "ready" };
-    json(join(directory, "state.json"), { schemaVersion: 1, owner, fence: 3, generation: 1, phase: "owner_ready",
-      activeParent: null, replacement: null, updatedAt: "2026-09-11T00:00:00Z" });
-    const path = join(directory, "owner-status.json");
-    json(path, status);
-    run.mockReturnValue(`MainPID=101\nInvocationID=${status.invocationId}\nActiveState=active\nSubState=running\n`);
-    const options = { now: 1500, run, inspect: () => ({ ...owner, cwd: root, commandName: "node", argv: ["node", script, "payload"] }),
-      environment: () => ({ INGENIUM_RECOVERY_OWNER_NONCE: "n".repeat(43), INGENIUM_RECOVERY_OWNER_SOURCE_HEAD: head,
-        INGENIUM_RECOVERY_OWNER_SCRIPT_SHA256: status.scriptSha256 }) };
-    expect(shim.inspectRecoveryOwnerStatus(contract, options)).toMatchObject({ status: "attested", fence: 3, authorizesRestart: false });
-    for (const change of [{ fence: 4 }, { binding: { ...binding, project: "foreign" } }, { sourceHead: "b".repeat(40) },
-      { lease: { issuedAt: 1, expiresAt: 1000 } }, { health: "unhealthy" }, { job: "docker.service" },
-      { owner: { ...owner, nonceSha256: "0".repeat(64) } }]) {
-      json(path, { ...status, ...change });
-      expect(shim.inspectRecoveryOwnerStatus(contract, options).status).toBe("unavailable");
-    }
-    json(path, status);
-    run.mockReturnValue("MainPID=999\nActiveState=active\nSubState=running");
-    expect(shim.inspectRecoveryOwnerStatus(contract, options).status).toBe("unavailable");
+    expect(shim.inspectRecoveryOwnerStatus(contract, f.ownerOptions).status).toBe("unavailable");
+
+    await f.prepare();
+
+    expect(shim.inspectRecoveryOwnerStatus(contract, f.ownerOptions)).toMatchObject({ status: "attested", fence: 1,
+      fenceState: "reserved", authorizesRestart: false, binding });
+    expect(existsSync(join(f.directory, "owner-status.json"))).toBe(true);
+    expect(existsSync(join(root, ".opencode/protected-runtime-index/tui-recovery/owner-status.json"))).toBe(false);
+    const status = JSON.parse(readFileSync(join(f.directory, "owner-status.json"), "utf8"));
+    json(join(f.directory, "owner-status.json"), { ...status, health: "unhealthy" });
+    expect(shim.inspectRecoveryOwnerStatus(contract, f.ownerOptions).status).toBe("unavailable");
   });
 });
 
@@ -771,6 +753,30 @@ describe("fixed recovery preparation transaction", () => {
       ancestry: () => ({ status: "exact", parent: f.parent }) })).rejects.toThrow("binding conflicts");
   });
 
+  it("routes a fresh-nonce managed parent through current evidence and never legacy capture", async () => {
+    const f = preparationFixture();
+    const nonce = "n".repeat(43);
+    f.parent.nonceSha256 = hash(nonce);
+    f.parent.environment.INGENIUM_RESTART_NONCE = nonce;
+    const capture = { snapshot: { parent: Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"]
+      .map((key) => [key, f.parent[key]])) }, summary: { status: "working" } };
+    const captureCurrent = vi.fn(async () => capture);
+    const captureLegacy = vi.fn();
+    const auth = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" })) : auth(url, init);
+
+    const inputs = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
+      ancestry: () => ({ status: "exact", parent: f.parent }),
+      gitSummary: () => ({ status: "validated", head, sourceMatchesHead: true, dirtyPaths: [] }),
+      captureCurrent, captureLegacy });
+
+    expect(inputs.capture).toBe(capture);
+    expect(captureCurrent).toHaveBeenCalledOnce();
+    expect(captureLegacy).not.toHaveBeenCalled();
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+  });
+
   it("reports the exact inspect path when the current parent has no recovery control plane", async () => {
     const f = preparationFixture();
     const auth = authorityRequest();
@@ -794,6 +800,263 @@ describe("fixed recovery preparation transaction", () => {
     expect(JSON.stringify(shim.recoveryPreparationFailureOutput(Object.assign(new Error("private failure"), { phase: "inspect" }))))
       .not.toContain("private failure");
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+  });
+});
+
+function recoveryAdmissionFixture() {
+  const nonce = "n".repeat(43);
+  const executable = realpathSync(process.execPath);
+  const parent = { pid: process.pid, startTimeTicks: 42, executableSha256: hash(readFileSync(executable)),
+    nonceSha256: hash(nonce), sessionId: "ses_exact" };
+  const preflight = { admissible: true, git: { head }, source: { sha256: hash("source") }, parent, binding,
+    currentParent: { status: "validated", session: { incarnation: 2, revision: 4, fence: 3 } } };
+  const digest = hash(shim.canonicalJson(preflight));
+  const worktreeId = `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`;
+  const now = Date.now();
+  const admission = {
+    schema: "ingenium.recovery-admission", version: 1, action: "production-restart", preflightDigest: digest, head,
+    parent: { pid: parent.pid, start: String(parent.startTimeTicks), executable, nonce, session: parent.sessionId },
+    project: binding.project, projectId: binding.projectId, worktreeId, workspace: binding.workspaceId,
+    storage: binding.storageMappingHash, worktree: root, issuedAt: new Date(now - 1_000).toISOString(),
+    expiresAt: new Date(now + 60_000).toISOString(), revision: 1, fence: 7,
+  };
+  const calls: Array<{ path: string; body: any }> = [];
+  const request = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(input.toString()).pathname;
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    calls.push({ path, body });
+    expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${"c".repeat(43)}`);
+    if (path.endsWith("/register")) return new Response(JSON.stringify({ data: {
+      session: { revision: 0, fence: 7, state: "active" }, memory: {},
+    } }), { status: 201 });
+    if (path.endsWith("/mint")) return new Response(JSON.stringify({ data: {
+      session: { revision: 1, fence: 7, state: "active" }, admission, consumeToken: "t".repeat(43),
+    } }), { status: 201 });
+    if (path.endsWith("/snapshot")) return new Response(JSON.stringify({ data: {
+      session: { revision: 1, fence: 7, state: "active" },
+    } }), { status: 200 });
+    if (path.endsWith("/close")) return new Response(JSON.stringify({ data: {
+      session: { revision: 2, fence: 7, state: "closed" },
+    } }), { status: 200 });
+    throw new Error("unexpected request");
+  });
+  return { nonce, executable, parent, preflight, digest, now, admission, calls, request,
+    path: join(root, "production-restart-admission.json"),
+    options: { environment: { ...environment, INGENIUM_PROJECT_ID: binding.projectId,
+      INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash }, parentEnvironment: () => ({ INGENIUM_RESTART_NONCE: nonce }),
+    parentExecutable: executable, request, now } };
+}
+
+describe("secret-safe recovery admission bridge", () => {
+  it("registers a fenced recovery incarnation, mints, and creates the owner-private production artifact", async () => {
+    const f = recoveryAdmissionFixture();
+    const created = await shim.mintRecoveryAdmissionArtifact(f.preflight, f.digest, f.path, f.options);
+
+    expect(created).toMatchObject({ status: "created", pathSha256: hash(f.path), admissionSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(lstatSync(f.path).mode & 0o777).toBe(0o600);
+    expect(shim.readRecoveryAdmission(f.path, f.preflight, f.digest, f.now)).toMatchObject({ incarnation: 3, admission: f.admission });
+    const register = f.calls[0]!.body;
+    const mint = f.calls[1]!.body;
+    expect(f.calls.map(({ path }) => path)).toEqual(["/api/v1/coordination/register", "/api/v1/coordination/recovery-admissions/mint"]);
+    expect(register).toMatchObject({ session_id: "ses_exact", incarnation: 3, ttl_ms: 900_000 });
+    expect(mint).toMatchObject({ session_id: "ses_exact", incarnation: 3, expected_revision: 0, fence: 7,
+      preflight_digest: f.digest, parent_nonce: f.nonce });
+    const surfaced = JSON.stringify(created);
+    for (const secret of [f.nonce, "c".repeat(43), register.ownership_token]) expect(surfaced).not.toContain(secret);
+    expect(readFileSync(f.path, "utf8")).not.toContain(register.ownership_token);
+
+    await created.rollback();
+    expect(existsSync(f.path)).toBe(false);
+    expect(f.calls.at(-1)).toMatchObject({ path: "/api/v1/coordination/close",
+      body: { session_id: "ses_exact", incarnation: 3, expected_revision: 1, fence: 7, ownership_token: register.ownership_token } });
+  });
+
+  it("closes its registered incarnation and leaves no artifact when minting fails", async () => {
+    const f = recoveryAdmissionFixture();
+    f.request.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input.toString()).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      f.calls.push({ path, body });
+      if (path.endsWith("/register")) return new Response(JSON.stringify({ data: {
+        session: { revision: 0, fence: 7, state: "active" }, memory: {},
+      } }), { status: 201 });
+      if (path.endsWith("/mint")) return new Response(JSON.stringify({ error: { code: "RECOVERY_ADMISSION_CONFLICT" } }), { status: 409 });
+      if (path.endsWith("/snapshot")) return new Response(JSON.stringify({ data: {
+        session: { revision: 0, fence: 7, state: "active" },
+      } }), { status: 200 });
+      return new Response(JSON.stringify({ data: { session: { revision: 1, fence: 7, state: "closed" } } }), { status: 200 });
+    });
+
+    await expect(shim.mintRecoveryAdmissionArtifact(f.preflight, f.digest, f.path, f.options))
+      .rejects.toThrow("Recovery admission creation failed");
+    expect(f.calls.map(({ path }) => path)).toEqual(["/api/v1/coordination/register",
+      "/api/v1/coordination/recovery-admissions/mint", "/api/v1/coordination/snapshot", "/api/v1/coordination/close"]);
+    expect(existsSync(f.path)).toBe(false);
+  });
+
+  it("reconciles and closes the exact owned incarnation after an uncertain mint response", async () => {
+    const f = recoveryAdmissionFixture();
+    let revision = 0;
+    f.request.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input.toString()).pathname;
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      f.calls.push({ path, body });
+      if (path.endsWith("/register")) return new Response(JSON.stringify({ data: {
+        session: { revision, fence: 7, state: "active" }, memory: {},
+      } }), { status: 201 });
+      if (path.endsWith("/mint")) { revision = 1; throw new Error("uncertain transport"); }
+      if (path.endsWith("/snapshot")) return new Response(JSON.stringify({ data: {
+        session: { revision, fence: 7, state: "active" },
+      } }), { status: 200 });
+      expect(body).toMatchObject({ expected_revision: 1, fence: 7 });
+      return new Response(JSON.stringify({ data: { session: { revision: 2, fence: 7, state: "closed" } } }), { status: 200 });
+    });
+
+    await expect(shim.mintRecoveryAdmissionArtifact(f.preflight, f.digest, f.path, f.options))
+      .rejects.toThrow("Recovery admission creation failed");
+    expect(f.calls.map(({ path }) => path)).toEqual(["/api/v1/coordination/register",
+      "/api/v1/coordination/recovery-admissions/mint", "/api/v1/coordination/snapshot", "/api/v1/coordination/close"]);
+    expect(existsSync(f.path)).toBe(false);
+  });
+
+  it("retains the admission artifact when remote rollback cannot be reconciled", async () => {
+    const f = recoveryAdmissionFixture();
+    const created = await shim.mintRecoveryAdmissionArtifact(f.preflight, f.digest, f.path, f.options);
+    f.request.mockRejectedValue(new Error("unavailable"));
+
+    await expect(created.rollback()).rejects.toThrow("Recovery admission rollback requires reconciliation");
+    expect(existsSync(f.path)).toBe(true);
+    expect(shim.readRecoveryAdmission(f.path, f.preflight, f.digest, f.now)).toMatchObject({ admission: f.admission });
+  });
+
+  it("retains automatic rollback ownership through consume and post-consumption validation", async () => {
+    for (const phase of ["consume", "post-consumption", "execution"] as const) {
+      const f = recoveryAdmissionFixture();
+      const events: string[] = [];
+      const sourceHandle = { source: { path: f.executable }, revalidate: vi.fn(() => ({ path: f.executable })), close: vi.fn() };
+      const consumeAdmission = vi.fn(async (record: any, expected: any) => {
+        events.push("consume");
+        if (phase === "consume") throw new Error("consume failed");
+        return Object.freeze({ ...expected, receipt: Object.freeze({ id: "22222222-2222-4222-8222-222222222222",
+          schema: "ingenium.recovery-admission-receipt", version: 1, action: "production-restart",
+          admissionDigest: hash(shim.canonicalJson(record.admission)), consumedAt: new Date(f.now).toISOString() }) });
+      });
+      const postConsumeCheck = vi.fn(() => {
+        events.push("post-consumption");
+        expect(existsSync(f.path)).toBe(true);
+        if (phase === "post-consumption") throw new Error("post-consumption failed");
+      });
+      const executeAdmitted = vi.fn(async () => {
+        events.push("execution");
+        expect(existsSync(f.path)).toBe(false);
+        throw new Error("execution failed");
+      });
+
+      await expect(shim.runRecoveryBootstrapShim(["node", f.executable], { openSource: () => sourceHandle,
+        collectPreflight: vi.fn(async () => f.preflight), admissionPath: f.path,
+        mintAdmissionArtifact: (preflight: any, digest: string, path: string) => shim.mintRecoveryAdmissionArtifact(preflight, digest, path, f.options),
+        consumeAdmission, postConsumeCheck, executeAdmitted, now: () => f.now }))
+        .rejects.toThrow(`${phase} failed`);
+
+      expect(events).toEqual(phase === "consume" ? ["consume"]
+        : phase === "post-consumption" ? ["consume", "post-consumption"]
+          : ["consume", "post-consumption", "execution"]);
+      expect(f.calls.map(({ path }) => path)).toEqual(phase === "execution"
+        ? ["/api/v1/coordination/register", "/api/v1/coordination/recovery-admissions/mint"]
+        : ["/api/v1/coordination/register", "/api/v1/coordination/recovery-admissions/mint",
+          "/api/v1/coordination/snapshot", "/api/v1/coordination/close"]);
+      expect(existsSync(f.path)).toBe(false);
+      expect(sourceHandle.close).toHaveBeenCalledOnce();
+    }
+  });
+
+  it("carries one bounded prepared-parent fixture through replay acknowledgement, replacement adoption, and fencing", async () => {
+    const preparation = preparationFixture();
+    const f = recoveryAdmissionFixture();
+    const parentIdentity = { pid: f.parent.pid, startTimeTicks: f.parent.startTimeTicks,
+      executableSha256: f.parent.executableSha256, nonceSha256: f.parent.nonceSha256 };
+    preparation.collectInputs.mockResolvedValue({ binding, source: preparation.source, disposition: null,
+      contract: shim.prepareRecoveryOwnerContract(binding, head), capture: { snapshot: { parent: parentIdentity } } });
+    await preparation.prepare();
+    expect(shim.inspectRecoveryOwnerStatus(shim.prepareRecoveryOwnerContract(binding, head), preparation.ownerOptions))
+      .toMatchObject({ status: "attested", fence: 1, fenceState: "reserved", authorizesRestart: false });
+
+    const oldDataHome = join(root, "old-data");
+    mkdirSync(oldDataHome, { mode: 0o700 });
+    const replacement = { pid: process.pid + 1, startTimeTicks: 84, executableSha256: f.parent.executableSha256,
+      nonceSha256: hash("successor nonce") };
+    const handoff = { replay: { sessionIdSha256: hash("ses_exact"), todos: [
+      { id: "TODO-44", content: "Continue the admitted recovery", status: "in_progress", priority: "high" },
+    ] }, status: "working", taskHash: hash("recovery task"), actions: [], changedPaths: [], checks: [],
+    todos: { total: 1, pending: 0, inProgress: 1, completed: 0, cancelled: 0, state: "in_progress" },
+    nextWork: { kind: "continue_task", referenceHash: hash("recovery task") } } as const;
+    const request = { schemaVersion: 1, worktree: root,
+      binding: { projectId: binding.projectId, workspaceId: binding.workspaceId, launcherWorktree: root,
+        storageMappingHash: binding.storageMappingHash, audience: "mcp" },
+      oldProcess: parentIdentity, oldPort: 4098, oldDataHome,
+      replacement: { port: 4099, dataHome: join(root, "replacement-data"), expectedIdentity: {
+        executableSha256: replacement.executableSha256, nonceSha256: replacement.nonceSha256 } }, handoff,
+      timeouts: Object.fromEntries(["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "memoryAckMs",
+        "terminalIdleMs", "retirementMs"].map((key) => [key, 1_000])) } as any;
+    const phases: string[] = [];
+    const signals: string[] = [];
+    let fence = 7;
+    let activeOwner = "old";
+    let replacementResult: Awaited<ReturnType<typeof runReplacementFirstRestart>> | undefined;
+    const executeAdmitted = vi.fn(async () => {
+      replacementResult = await runReplacementFirstRestart(request, {
+        revalidateBinding: async () => true,
+        revalidateProcessIdentity: async () => true,
+        persistHandoff: async (received) => { expect(received.replay.todos).toEqual(handoff.replay.todos); phases.push("handoff"); },
+        launchReplacement: async ({ bindProvisionalIdentity }) => { bindProvisionalIdentity(replacement); phases.push("launched"); return replacement; },
+        verifyReplacementHealth: async () => { expect(signals).toEqual([]); phases.push("healthy"); },
+        createReplacementSession: async (_identity, _port, transactionSha256) => ({ status: "created", transactionSha256,
+          session: { id: "successor" } }),
+        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
+          expect(signals).toEqual([]); phases.push("memory"); return { status: "acknowledged", handoffSha256, transactionSha256 };
+        },
+        awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
+          expect(signals).toEqual([]); phases.push("idle");
+          return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
+        },
+        prepareRecoveryOwner: async (_identity, _session, _handoffSha256, transactionSha256) => {
+          expect(signals).toEqual([]); activeOwner = "replacement"; phases.push("adopted");
+          return { status: "ready", transactionSha256, replacementIdentitySha256: hash(JSON.stringify(replacement)) };
+        },
+        quiesceOldProcess: async () => {
+          expect(signals).toEqual([]);
+          expect(phases.filter((phase) => ["healthy", "memory", "idle", "adopted"].includes(phase)))
+            .toEqual(["healthy", "memory", "idle", "adopted"]);
+          signals.push("quiesced");
+        },
+        resumeOldProcess: async () => { throw new Error("old process must not resume after commit"); },
+        prepareRetirement: async () => ({ rollback: async () => { throw new Error("committed retirement must not roll back"); } }),
+        commitRetirement: async () => { expect(activeOwner).toBe("replacement"); expect(fence).toBe(7); fence += 1; phases.push("fenced"); },
+        retireOldProcess: async () => { expect(fence).toBe(8); signals.push("retired"); },
+        stopReplacement: async () => { throw new Error("healthy adopted replacement must not stop"); },
+        persistEvidence: async ({ phase }) => { phases.push(phase); },
+      });
+    });
+    const consumeAdmission = vi.fn(async (record: any, expected: any) => Object.freeze({ ...expected,
+      receipt: Object.freeze({ id: "22222222-2222-4222-8222-222222222222", schema: "ingenium.recovery-admission-receipt",
+        version: 1, action: "production-restart", admissionDigest: hash(shim.canonicalJson(record.admission)),
+        consumedAt: new Date(f.now).toISOString() }) }));
+    const sourceHandle = { source: preparation.source, revalidate: vi.fn(() => preparation.source), close: vi.fn() };
+
+    await shim.runRecoveryBootstrapShim(["node", preparation.source.path], { openSource: () => sourceHandle,
+      collectPreflight: vi.fn(async () => f.preflight), admissionPath: f.path,
+      mintAdmissionArtifact: (preflight: any, digest: string, path: string) => shim.mintRecoveryAdmissionArtifact(preflight, digest, path, f.options),
+      consumeAdmission, postConsumeCheck: vi.fn(), executeAdmitted, now: () => f.now });
+
+    expect(executeAdmitted).toHaveBeenCalledOnce();
+    expect(replacementResult).toMatchObject({ handoffSha256: hash(JSON.stringify(handoff)) });
+    expect(replacementResult).not.toHaveProperty("recoveryState");
+    expect(signals).toEqual(["quiesced", "retired"]);
+    expect(activeOwner).toBe("replacement");
+    expect(fence).toBe(8);
+    expect(phases).toEqual(expect.arrayContaining(["memory", "idle", "adopted", "fenced", "old_parent_retired"]));
+    expect(existsSync(f.path)).toBe(false);
+    expect(sourceHandle.close).toHaveBeenCalledOnce();
   });
 });
 

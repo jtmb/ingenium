@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-const { readCurrentParentSummary, collectRecoveryPreflight } = await import(
+const { captureCurrentRecoveryPreAdmission, readCurrentParentSummary, collectRecoveryPreflight } = await import(
   /* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href
 );
 import {
@@ -98,6 +98,41 @@ describe("current parent recovery discovery", () => {
        console.log(JSON.stringify(readCurrentParentRecoveryCandidate(${JSON.stringify(binding)})));`],
     { cwd: process.cwd(), encoding: "utf8" });
     expect(JSON.parse(output)).toEqual(record);
+  });
+
+  it("captures a fresh-nonce managed parent from canonical current-parent evidence", async () => {
+    publishCurrentParentRecovery(input);
+    const record = readCurrentParentRecoveryCandidate(binding);
+    const parent = { ...record.parent, cwd: root, cmdlineSha256: digest("argv"), sessionId: null, port: 4098,
+      dataHome: join(root, "data-home"), environment: { INGENIUM_RESTART_NONCE: input.nonce,
+        OPENCODE_SERVER_PASSWORD: "p".repeat(43) } };
+    const todos = [{ id: "TODO-STABLE-1", content: "private replay content", status: "in_progress", priority: "high" }];
+    const payloads: Record<string, unknown> = {
+      "/global/health": { healthy: true, version: "1.0.0" },
+      "/session/ses_exact": { id: "ses_exact", directory: root, currentTaskId: "task" },
+      "/session/ses_exact/message": [{ info: { role: "assistant", agent: "ingenium-orchestrator" }, parts: [
+        { type: "text", text: "private transcript" },
+        { type: "tool", tool: "todowrite", state: { status: "completed", input: { todos } } },
+        { type: "tool", tool: "shell", state: { status: "completed", input: { command: "npm test" }, metadata: { exitCode: 0 } } },
+      ] }],
+      "/session/status": { ses_exact: { type: "busy" } },
+    };
+    const request = async (url: string) => new Response(JSON.stringify(payloads[new URL(url).pathname]), { status: 200 });
+    const inspectParent = () => ({ ...parent, commandName: "opencode", nonce: input.nonce, ports: [4098] });
+    const source = { status: "validated", head: input.source.head, sourceMatchesHead: true, dirtyPaths: [] };
+    const exactBinding = { project: binding.project, projectId: binding.projectId, workspaceId: binding.workspaceId,
+      storageMappingHash: binding.storageMappingHash, worktree: root };
+
+    const capture = await captureCurrentRecoveryPreAdmission(parent, exactBinding, source, request, inspectParent);
+
+    expect(capture).toMatchObject({ snapshot: { kind: "current-pre-admission", nonceProvenance: "process_environment",
+      parent: record.parent, sessionId: "ses_exact", sourceHead: input.source.head,
+      operational: { role: "ingenium-orchestrator", todos: [{ idSha256: digest("TODO-STABLE-1"), status: "in_progress" }] } } });
+    expect(parent.sessionId).toBeNull();
+    const serialized = JSON.stringify(capture);
+    for (const forbidden of [input.nonce, "p".repeat(43), "private transcript", "private replay content"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
   it.each([

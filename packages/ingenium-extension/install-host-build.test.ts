@@ -30,7 +30,12 @@ function fixture() {
   const state = join(home, ".local/state");
   for (const path of [join(extension, "scripts"), bin, state]) mkdirSync(path, { recursive: true, mode: 0o700 });
   const source = join(extension, "scripts/recovery-bootstrap.js");
+  const buildSource = join(extension, "scripts/build-command.ts");
+  const opencodeSource = join(extension, "scripts/opencode.ts");
   writeFileSync(source, 'throw new Error("outer bootstrap must not execute");\n', { mode: 0o644 });
+  writeFileSync(buildSource, readFileSync(new URL("./scripts/build-command.ts", import.meta.url)), { mode: 0o644 });
+  writeFileSync(opencodeSource, readFileSync(new URL("./scripts/opencode.ts", import.meta.url)), { mode: 0o644 });
+  writeFileSync(join(extension, "package.json"), readFileSync(new URL("./package.json", import.meta.url)), { mode: 0o644 });
   writeFileSync(join(root, ".gitignore"), "**/dist/\n");
   const git = (args: string[]) => execFileSync("/usr/bin/git", ["-C", root, ...args], {
     env: { PATH: "/usr/bin:/bin", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, encoding: "utf8",
@@ -40,8 +45,11 @@ function fixture() {
   git(["-c", "user.name=Installer Test", "-c", "user.email=installer@example.invalid", "commit", "--quiet", "-m", "fixture"]);
   const head = git(["rev-parse", "HEAD"]);
   const target = join(bin, "ingenium-build");
+  const opencodeTarget = join(bin, "ingenium-opencode");
   writeFileSync(target, "original command; never execute\n", { mode: 0o755 });
+  writeFileSync(opencodeTarget, "original opencode command; never execute\n", { mode: 0o700 });
   const originalHash = hash(target);
+  const opencodeOriginalHash = hash(opencodeTarget);
   const transpile = (path: string) => Buffer.from(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
   }).outputText);
@@ -51,12 +59,14 @@ function fixture() {
     "dist/replacement-first-restart.js": transpile("./replacement-first-restart.ts"),
     "dist/scripts/managed-command-wrapper.js": transpile("./scripts/managed-command-wrapper.ts"),
     "dist/scripts/build-command.js": Buffer.from("console.log(JSON.stringify({argv:process.argv.slice(2),env:process.env,cwd:process.cwd()}));\n"),
+    "dist/scripts/opencode.js": Buffer.from('throw new Error("fixture launcher must not execute");\n'),
   };
   const build = vi.fn(() => material);
   const release = join(home, ".local/share/ingenium/host-build/releases", head);
   const options = { repositoryRoot: root, home, build };
   const manifest = () => JSON.parse(readFileSync(join(state, readdirSync(state).find((name) => name.endsWith(".json"))!), "utf8"));
-  return { root, home, extension, bin, state, source, head, target, originalHash, build, git, options, manifest, material, release };
+  return { root, home, extension, bin, state, source, buildSource, opencodeSource, head, target, opencodeTarget,
+    originalHash, opencodeOriginalHash, build, git, options, manifest, material, release };
 }
 
 describe("private host build installer", () => {
@@ -85,18 +95,24 @@ describe("private host build installer", () => {
       mkdirSync(compiler, { recursive: true, mode: 0o700 });
       cpSync(new URL("../../node_modules/typescript/lib/typescript.js", import.meta.url), join(compiler, "typescript.js"));
     });
-    const result = await buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies);
+    const bundle = vi.fn((_workspace: string, source: string) => Buffer.from(ts.transpileModule(readFileSync(source, "utf8"), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+    }).outputText));
+    const result = await buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies, bundle);
     expect(Object.keys(result).sort()).toEqual(Object.keys(f.material).sort());
     expect(result["dist/scripts/build-command.js"].toString()).toContain('runManagedCommandCli("build")');
+    expect(result["dist/scripts/opencode.js"].toString()).toContain("runManagedTui");
     for (const path of metadata) expect(lstatSync(path).mode & 0o7777).toBe(0o674);
     expect(prepareDependencies).toHaveBeenCalledOnce();
+    expect(bundle).toHaveBeenCalledOnce();
     expect(existsSync(join(f.extension, "dist"))).toBe(false);
 
     writeFileSync(join(f.root, ".git/info/attributes"), ".dockerignore export-subst\n");
     expect(f.git(["status", "--porcelain=v1"])).toBe("");
-    await expect(buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies))
+    await expect(buildPrivateClosure(f.root, head, f.state, readFileSync(f.source), prepareDependencies, bundle))
       .rejects.toThrow("Git archive/source hash mismatch");
     expect(prepareDependencies).toHaveBeenCalledOnce();
+    expect(bundle).toHaveBeenCalledOnce();
   });
 
   it("builds the real ESM closure from archived source with distinct private npm configuration", async () => {
@@ -109,6 +125,9 @@ describe("private host build installer", () => {
     f.git(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "private build sources"]);
     const head = f.git(["rev-parse", "HEAD"]);
     let configuration: string[] = [];
+    const bundle = vi.fn((_workspace: string, source: string) => Buffer.from(ts.transpileModule(readFileSync(source, "utf8"), {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+    }).outputText));
     const result = await buildPrivateClosure(f.root, head, f.state, readFileSync(f.source),
       (node: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => {
         expect(options.cwd.startsWith(`${f.state}/git-stage-`)).toBe(true);
@@ -126,9 +145,11 @@ describe("private host build installer", () => {
         const compiler = join(options.cwd, "node_modules/typescript/lib");
         mkdirSync(compiler, { recursive: true, mode: 0o700 });
         cpSync(new URL("../../node_modules/typescript/lib/typescript.js", import.meta.url), join(compiler, "typescript.js"));
-      });
+      }, bundle);
     expect(Object.keys(result).sort()).toEqual(Object.keys(f.material).sort());
     expect(result["dist/scripts/build-command.js"].toString()).toContain('runManagedCommandCli("build")');
+    expect(result["dist/scripts/opencode.js"].toString()).toContain("runManagedTui");
+    expect(bundle).toHaveBeenCalledOnce();
     expect(configuration.every((path) => !existsSync(path))).toBe(true);
     expect(existsSync(join(f.extension, "dist"))).toBe(false);
   });
@@ -141,13 +162,31 @@ describe("private host build installer", () => {
     writeFileSync(join(shared, "build-command.js"), "throw Error('shared execution');\n");
     chmodSync(dirname(shared), 0o575);
     const result = await installHostBuild(f.head, f.options);
-    expect(lstatSync(f.target).isFile()).toBe(true);
-    expect(lstatSync(f.target).nlink).toBe(1);
-    expect(lstatSync(f.target).mode & 0o7777).toBe(0o500);
+    for (const target of [f.target, f.opencodeTarget]) {
+      expect(lstatSync(target).isFile()).toBe(true);
+      expect(lstatSync(target).uid).toBe(process.getuid!());
+      expect(lstatSync(target).nlink).toBe(1);
+      expect(lstatSync(target).mode & 0o7777).toBe(0o500);
+    }
+    expect(Object.keys(result.launchers).sort()).toEqual(["ingenium-build", "ingenium-opencode"]);
+    expect(result.head).toBe(f.head);
+    for (const [name, target, source] of [
+      ["ingenium-build", f.target, f.buildSource],
+      ["ingenium-opencode", f.opencodeTarget, f.opencodeSource],
+    ] as const) {
+      expect(result.launchers[name].source).toMatchObject({ path: source, sha256: hash(source), mode: 0o644 });
+      expect(result.launchers[name].artifact).toMatchObject({
+        path: join(f.release, result.launchers[name].packageBin.slice(2)), mode: 0o400,
+      });
+      expect(hash(result.launchers[name].artifact.path)).toBe(result.launchers[name].artifact.sha256);
+      expect(result.launchers[name].launcher).toEqual({ sha256: hash(target), mode: 0o500 });
+      expect(result.launchers[name].installed.sha256).toBe(hash(target));
+    }
     const launcher = readFileSync(f.target, "utf8");
     expect(launcher).toContain("/usr/bin/stat");
     expect(launcher.indexOf("/usr/bin/stat")).toBeLessThan(launcher.indexOf("node_hash="));
     expect(hash(result.backup)).toBe(f.originalHash);
+    expect(hash(result.launchers["ingenium-opencode"].backup)).toBe(f.opencodeOriginalHash);
     expect(lstatSync(result.manifest).mode & 0o7777).toBe(0o600);
     expect(readdirSync(f.release).sort()).toEqual(["context-upload-codec.mjs", "dist", "package.json", "release.json"]);
     for (const artifact of Object.values(result.artifacts) as Array<{ path: string; sha256: string }>) {
@@ -251,8 +290,30 @@ describe("private host build installer", () => {
     if (kind === "absent") expect(existsSync(f.target)).toBe(false);
     else expect(hash(f.target)).toBe(f.originalHash);
     if (kind === "symlink") expect(readlinkSync(f.target)).toBe(join(f.home, "old"));
+    expect(hash(f.opencodeTarget)).toBe(f.opencodeOriginalHash);
     expect(f.manifest().status).toBe("rolled_back");
     expect(existsSync(join(f.state, "ingenium-build-install.lock"))).toBe(false);
+  });
+
+  it("restores or removes both launchers after a post-adoption failure", async () => {
+    for (const prior of ["present", "absent"] as const) {
+      const f = fixture();
+      if (prior === "absent") {
+        unlinkSync(f.target);
+        unlinkSync(f.opencodeTarget);
+      }
+      await expect(installHostBuild(f.head, { ...f.options, afterAdoption: () => {
+        expect(lstatSync(f.target).mode & 0o7777).toBe(0o500);
+        expect(lstatSync(f.opencodeTarget).mode & 0o7777).toBe(0o500);
+        throw new Error("injected paired-launcher failure");
+      } })).rejects.toThrow("injected paired-launcher failure");
+      for (const [target, original] of [[f.target, f.originalHash], [f.opencodeTarget, f.opencodeOriginalHash]] as const) {
+        if (prior === "present") expect(hash(target)).toBe(original);
+        else expect(existsSync(target)).toBe(false);
+      }
+      expect(f.manifest().status).toBe("rolled_back");
+      expect(existsSync(join(f.state, "ingenium-build-install.lock"))).toBe(false);
+    }
   });
 
   it("retains the lock, backup and alien target for unknown adoption rather than replaying rollback", async () => {
@@ -286,6 +347,7 @@ describe("private host build installer", () => {
       },
     })).rejects.toThrow();
     expect(hash(f.target)).toBe(f.originalHash);
+    expect(hash(f.opencodeTarget)).toBe(f.opencodeOriginalHash);
     expect(lstatSync(f.target).nlink).toBe(1);
     expect(lstatSync(f.target).mode & 0o7777).toBe(0o755);
     if (failure === "replaced-lock") expect(readFileSync(lock, "utf8")).toBe("another installer");

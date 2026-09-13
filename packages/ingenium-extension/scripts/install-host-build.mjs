@@ -8,6 +8,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const extensionRelative = "packages/ingenium-extension";
 const sourceRelative = `${extensionRelative}/scripts/recovery-bootstrap.js`;
+const launcherNames = ["ingenium-build", "ingenium-opencode"];
+const releaseClosure = ["package.json", "context-upload-codec.mjs", "dist/replacement-first-restart.js",
+  "dist/scripts/build-command.js", "dist/scripts/managed-command-wrapper.js"];
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const identity = (stat) => ({ dev: stat.dev, ino: stat.ino, uid: stat.uid, mode: stat.mode, nlink: stat.isDirectory?.() ? undefined : stat.nlink });
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -102,8 +105,21 @@ export function verifyRecoveryRegistry(wrapper) {
   if (!rejected) throw new Error("Registry accepts encoded recovery-prepare");
 }
 
-const closure = ["package.json", "context-upload-codec.mjs", "dist/replacement-first-restart.js",
-  "dist/scripts/build-command.js", "dist/scripts/managed-command-wrapper.js"];
+function packageLauncherEntries(bytes) {
+  const bin = JSON.parse(bytes).bin;
+  const entries = {};
+  for (const name of launcherNames) {
+    const entry = bin?.[name];
+    if (typeof entry !== "string" || !entry.startsWith("./dist/scripts/") || !entry.endsWith(".js")
+      || entry.slice("./dist/scripts/".length, -3).includes("/")) throw new Error("Package launcher declaration is invalid");
+    entries[name] = entry.slice(2);
+  }
+  return entries;
+}
+
+function privateClosure(packageBytes) {
+  return [...new Set([...releaseClosure, ...Object.values(packageLauncherEntries(packageBytes))])];
+}
 
 function runtimeAncestry(runtime, root) {
   const entries = [];
@@ -117,7 +133,18 @@ function runtimeAncestry(runtime, root) {
   }
 }
 
-export async function buildPrivateClosure(root, head, parent, sourceBytes, runNpm = execFileSync) {
+async function bundlePrivateLauncher(workspace, source) {
+  const esbuild = await import(pathToFileURL(join(workspace, "node_modules/esbuild/lib/main.js")).href);
+  const result = await esbuild.build({ entryPoints: [source], bundle: true, platform: "node", format: "esm",
+    target: "node18", write: false, logLevel: "silent" });
+  if (result.outputFiles?.length !== 1 || !result.outputFiles[0].contents.length) {
+    throw new Error("Private launcher bundle is incomplete");
+  }
+  return Buffer.from(result.outputFiles[0].contents);
+}
+
+export async function buildPrivateClosure(root, head, parent, sourceBytes, runNpm = execFileSync,
+  bundle = bundlePrivateLauncher) {
   const shim = await import(`data:text/javascript;base64,${sourceBytes.toString("base64")}`);
   const stage = shim.createPrivateRecoveryStage(root, head, parent);
   const node = realpathSync(process.execPath);
@@ -137,8 +164,10 @@ export async function buildPrivateClosure(root, head, parent, sourceBytes, runNp
   } finally { configuration.cleanup(); }
   const ts = (await import(pathToFileURL(join(stage.workspace, "node_modules/typescript/lib/typescript.js")).href)).default;
   const packageRoot = join(stage.workspace, extensionRelative);
+  const packageBytes = readFileSync(join(packageRoot, "package.json"));
+  const entries = packageLauncherEntries(packageBytes);
   const output = {};
-  for (const relative of closure) {
+  for (const relative of releaseClosure) {
     if (!relative.startsWith("dist/")) output[relative] = readFileSync(join(packageRoot, relative));
     else {
       const source = relative.slice(5).replace(/\.js$/, ".ts");
@@ -147,10 +176,13 @@ export async function buildPrivateClosure(root, head, parent, sourceBytes, runNp
       }).outputText);
     }
   }
+  const opencodeEntry = entries["ingenium-opencode"];
+  const opencodeSource = opencodeEntry.slice("dist/".length, -3) + ".ts";
+  output[opencodeEntry] = await bundle(stage.workspace, join(packageRoot, opencodeSource));
   return output;
 }
 
-function launcherBytes(node, nodeSha256, release, root, home, verifier) {
+function launcherBytes(node, nodeSha256, release, root, home, entry, verifier, isolatedEnvironment) {
   const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
   const runtimeChecks = runtimeAncestry(node, root).map(({ path, identity }) =>
     `[ "$(/usr/bin/stat -c '%d:%i:%u:%f' -- ${quote(path)})" = ${quote(identity)} ] || exit 1`);
@@ -161,13 +193,16 @@ import { basename,dirname,resolve } from 'node:path';
 import { userInfo } from 'node:os';
 const verify = ${verifier};
 verify(${JSON.stringify(release)}, ${JSON.stringify(home)});
-process.argv = [process.execPath, ${JSON.stringify(join(release, "dist/scripts/build-command.js"))}, ...process.argv.slice(1)];
-await import(${JSON.stringify(pathToFileURL(join(release, "dist/scripts/build-command.js")).href)});`;
+process.argv = [process.execPath, ${JSON.stringify(entry)}, ...process.argv.slice(1)];
+await import(${JSON.stringify(pathToFileURL(entry).href)});`;
   const names = ["CI", "FORCE_COLOR", "NO_COLOR", "TERM", "INGENIUM_API_URL", "INGENIUM_MCP_AUDIENCE",
     "INGENIUM_MCP_CREDENTIAL_FILE", "INGENIUM_MCP_CREDENTIAL_PURPOSE", "INGENIUM_PROJECT", "INGENIUM_PROJECT_ID",
     "INGENIUM_RECOVERY_OWNER_NONCE", "INGENIUM_RECOVERY_OWNER_PID", "INGENIUM_RECOVERY_OWNER_START_TICKS",
     "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_WORKSPACE_ID"];
-  return Buffer.from(`#!/bin/sh\nset -eu\nunset ENV BASH_ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH NODE_OPTIONS NODE_PATH\n${runtimeChecks.join("\n")}\ncd ${quote(root)}\nnode_hash=$(/usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/sha256sum -- ${quote(node)})\n[ "$node_hash" = ${quote(`${nodeSha256}  ${node}`)} ] || exit 1\nexec /usr/bin/env -i HOME=${quote(home)} PATH=${quote(`${dirname(node)}:/usr/bin:/bin`)} ${names.map((name) => `"${name}=\${${name}-}"`).join(" ")} ${quote(node)} --input-type=module --eval ${quote(code)} -- "$@"\n`);
+  const environment = isolatedEnvironment
+    ? `-i HOME=${quote(home)} PATH=${quote(`${dirname(node)}:/usr/bin:/bin`)} ${names.map((name) => `"${name}=\${${name}-}"`).join(" ")}`
+    : `HOME=${quote(home)} PATH=${quote(`${dirname(node)}:/usr/bin:/bin`)}`;
+  return Buffer.from(`#!/bin/sh\nset -eu\nunset ENV BASH_ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH NODE_OPTIONS NODE_PATH\n${runtimeChecks.join("\n")}\ncd ${quote(root)}\nnode_hash=$(/usr/bin/env -i PATH=/usr/bin:/bin /usr/bin/sha256sum -- ${quote(node)})\n[ "$node_hash" = ${quote(`${nodeSha256}  ${node}`)} ] || exit 1\nexec /usr/bin/env ${environment} ${quote(node)} --input-type=module --eval ${quote(code)} -- "$@"\n`);
 }
 
 export async function installHostBuild(expectedHead, {
@@ -186,14 +221,10 @@ export async function installHostBuild(expectedHead, {
   let bin;
   let manifest;
   let manifestPath;
-  let backup;
-  let candidate;
-  let candidateStat;
-  let prior;
-  let target;
-  let adoptionAttempted = false;
+  let launchers = [];
+  const adoptionAttempted = new Set();
   let rollbackFailed = false;
-  let backupAttempted = false;
+  const backupAttempted = new Set();
   const inspectTarget = (path) => {
     const stat = present(path);
     if (!stat) return null;
@@ -212,9 +243,11 @@ export async function installHostBuild(expectedHead, {
     return { ...identity(stat), sha256: file.sha256 };
   };
   const releaseLock = () => {
-    if (candidate && present(candidate) && same(identity(lstatSync(candidate)), candidateStat)) {
-      unlinkSync(candidate); fsyncSync(bin.fd);
+    for (const launcher of launchers) {
+      if (launcher.candidate && present(launcher.candidate)
+        && same(identity(lstatSync(launcher.candidate)), launcher.candidateStat)) unlinkSync(launcher.candidate);
     }
+    if (launchers.length) fsyncSync(bin.fd);
     if (lock !== undefined) {
       const path = `${state.anchored}/ingenium-build-install.lock`;
       const current = present(path);
@@ -248,9 +281,9 @@ export async function installHostBuild(expectedHead, {
     const lockPath = `${state.anchored}/ingenium-build-install.lock`;
     lock = openSync(lockPath, "wx", 0o600);
     fsyncSync(lock); fsyncSync(state.fd);
-    target = `${bin.anchored}/ingenium-build`;
-    prior = inspectTarget(target);
+    const priorByName = Object.fromEntries(launcherNames.map((name) => [name, inspectTarget(`${bin.anchored}/${name}`)]));
     verifyHead(root.path, expectedHead);
+    const extensionDirectory = openDirectory(join(root.path, extensionRelative), descriptors, owner, true);
     const sourceDirectory = openDirectory(join(root.path, extensionRelative, "scripts"), descriptors, owner, true);
     const source = () => {
       checkDirectory(sourceDirectory);
@@ -260,6 +293,20 @@ export async function installHostBuild(expectedHead, {
     };
     const verifiedSource = source();
     const sourceSha256 = verifiedSource.sha256;
+    const packageSource = readRegular(`${extensionDirectory.anchored}/package.json`, owner, 0o644);
+    if (!packageSource.bytes.equals(git(root.path, ["show", `${expectedHead}:${extensionRelative}/package.json`]))) {
+      throw new Error("Package source mismatch");
+    }
+    const entries = packageLauncherEntries(packageSource.bytes);
+    const wrapperSources = {};
+    for (const name of launcherNames) {
+      const relative = entries[name].slice("dist/".length, -3) + ".ts";
+      const value = readRegular(`${extensionDirectory.anchored}/${relative}`, owner, 0o644);
+      if (!value.bytes.equals(git(root.path, ["show", `${expectedHead}:${extensionRelative}/${relative}`]))) {
+        throw new Error("Launcher source mismatch");
+      }
+      wrapperSources[name] = { path: join(root.path, extensionRelative, relative), sha256: value.sha256, mode: value.mode & 0o7777 };
+    }
     let parent = openDirectory(join(home, ".local"), descriptors, owner);
     for (const name of ["share", "ingenium", "host-build", "releases"]) {
       const child = join(parent.path, name);
@@ -268,21 +315,36 @@ export async function installHostBuild(expectedHead, {
       if (name !== "share" && (fstatSync(parent.fd).mode & 0o7777) !== 0o700) throw new Error("Private release parent mode is invalid");
     }
     const releasePath = join(parent.path, expectedHead);
-    const canonicalTarget = join(releasePath, "dist/scripts/build-command.js");
     const id = randomUUID();
-    backup = `${bin.anchored}/.ingenium-build-${id}.previous`;
-    candidate = `${bin.anchored}/.ingenium-build-${id}.candidate`;
+    launchers = launcherNames.map((name) => ({
+      name,
+      target: `${bin.anchored}/${name}`,
+      prior: priorByName[name],
+      backup: `${bin.anchored}/.${name}-${id}.previous`,
+      candidate: `${bin.anchored}/.${name}-${id}.candidate`,
+    }));
+    const buildLauncher = launchers[0];
+    const canonicalTarget = join(releasePath, entries["ingenium-build"]);
     manifestPath = `${state.anchored}/ingenium-build-install-${id}.json`;
-    manifest = { schemaVersion: 1, head: expectedHead, repositoryRoot: root.path, owner,
+    manifest = { schemaVersion: 2, head: expectedHead, repositoryRoot: root.path, owner,
       target: join(bin.path, "ingenium-build"), canonicalTarget, source: { path: join(root.path, sourceRelative), sha256: sourceSha256 },
-      artifacts: {}, releasePath, prior, backup: prior ? join(bin.path, `.ingenium-build-${id}.previous`) : null,
-      candidate: join(bin.path, `.ingenium-build-${id}.candidate`), timestamp: new Date().toISOString() };
+      artifacts: {}, releasePath, prior: buildLauncher.prior,
+      backup: buildLauncher.prior ? join(bin.path, `.ingenium-build-${id}.previous`) : null,
+      candidate: join(bin.path, `.ingenium-build-${id}.candidate`),
+      launchers: Object.fromEntries(launchers.map((launcher) => [launcher.name, {
+        target: join(bin.path, launcher.name), packageBin: `./${entries[launcher.name]}`,
+        source: wrapperSources[launcher.name], prior: launcher.prior,
+        backup: launcher.prior ? join(bin.path, `.${launcher.name}-${id}.previous`) : null,
+        candidate: join(bin.path, `.${launcher.name}-${id}.candidate`),
+      }])), timestamp: new Date().toISOString() };
     save("preparing");
-    manifest.backupMetadata = prior;
+    manifest.backupMetadata = buildLauncher.prior;
     save("building");
     const result = build ? await build(root.path) : await buildPrivateClosure(root.path, expectedHead,
       dirname(parent.path), verifiedSource.bytes);
-    if (!same(Object.keys(result).sort(), [...closure].sort()) || Object.values(result).some((bytes) => !Buffer.isBuffer(bytes) || !bytes.length)) {
+    const closure = privateClosure(packageSource.bytes);
+    if (!same(Object.keys(result).sort(), [...closure].sort()) || Object.values(result).some((bytes) => !Buffer.isBuffer(bytes) || !bytes.length)
+      || !result["package.json"].equals(packageSource.bytes)) {
       throw new Error("Private build closure is incomplete");
     }
     const nodePath = realpathSync(process.execPath);
@@ -325,7 +387,8 @@ export async function installHostBuild(expectedHead, {
     verifyArtifacts();
     // Validate directories before importing any private bytes, including for an existing revision.
     for (const [relative, expected] of [["", ["context-upload-codec.mjs", "dist", "package.json", "release.json"]],
-      ["dist", ["replacement-first-restart.js", "scripts"]], ["dist/scripts", ["build-command.js", "managed-command-wrapper.js"]]]) {
+      ["dist", ["replacement-first-restart.js", "scripts"]],
+      ["dist/scripts", ["build-command.js", "managed-command-wrapper.js", "opencode.js"]]]) {
       const dir = openDirectory(join(releasePath, relative), descriptors, owner);
       if ((fstatSync(dir.fd).mode & 0o7777) !== 0o700 || !same(readdirSync(dir.anchored).sort(), expected.sort())) throw new Error("Invalid release directory");
     }
@@ -336,33 +399,55 @@ export async function installHostBuild(expectedHead, {
     const start = wrapperSource.indexOf("export function verifyPrivateBuildRelease(");
     const end = wrapperSource.indexOf("\nexport function managedWrapperPackageRoot(", start);
     if (start < 0 || end <= start) throw new Error("Private release verifier export is missing");
-    const launcher = launcherBytes(nodePath, node.sha256, releasePath, root.path, home, wrapperSource.slice(start + "export ".length, end).trim());
-    const candidateFd = openSync(candidate, "wx", 0o500);
-    try { fchmodSync(candidateFd, 0o500); writeFileSync(candidateFd, launcher); fsyncSync(candidateFd); }
-    finally { closeSync(candidateFd); }
-    candidateStat = identity(lstatSync(candidate));
+    const verifier = wrapperSource.slice(start + "export ".length, end).trim();
+    for (const launcher of launchers) {
+      launcher.bytes = launcherBytes(nodePath, node.sha256, releasePath, root.path, home,
+        join(releasePath, entries[launcher.name]), verifier, launcher.name === "ingenium-build");
+      const candidateFd = openSync(launcher.candidate, "wx", 0o500);
+      try { fchmodSync(candidateFd, 0o500); writeFileSync(candidateFd, launcher.bytes); fsyncSync(candidateFd); }
+      finally { closeSync(candidateFd); }
+      launcher.candidateStat = identity(lstatSync(launcher.candidate));
+      manifest.launchers[launcher.name].artifact = {
+        path: join(releasePath, entries[launcher.name]), sha256: sha256(result[entries[launcher.name]]), mode: 0o400,
+      };
+      manifest.launchers[launcher.name].launcher = { sha256: sha256(launcher.bytes), mode: 0o500 };
+      manifest.launchers[launcher.name].candidateIdentity = launcher.candidateStat;
+    }
     fsyncSync(bin.fd);
-    if (!same(inspectTarget(target), prior) || readRegular(candidate, owner, 0o500).sha256 !== sha256(launcher)) throw new Error("Target changed before adoption");
-    manifest.candidateIdentity = candidateStat;
+    if (launchers.some((launcher) => !same(inspectTarget(launcher.target), launcher.prior)
+      || readRegular(launcher.candidate, owner, 0o500).sha256 !== sha256(launcher.bytes))) {
+      throw new Error("Target changed before adoption");
+    }
+    manifest.candidateIdentity = buildLauncher.candidateStat;
     save("prepared");
     checkDirectory(bin); verifyArtifacts();
-    if (!same(inspectTarget(target), prior) || present(backup)) throw new Error("Prior target changed before backup");
-    if (prior) {
-      backupAttempted = true;
-      renameSync(target, backup);
-      fsyncSync(bin.fd);
-      if (present(target) || !same(inspectTarget(backup), prior)) throw new Error("Prior backup changed");
+    if (launchers.some((launcher) => !same(inspectTarget(launcher.target), launcher.prior) || present(launcher.backup))) {
+      throw new Error("Prior target changed before backup");
     }
-    adoptionAttempted = true;
-    rename(candidate, target);
-    fsyncSync(bin.fd);
+    for (const launcher of launchers) {
+      if (!launcher.prior) continue;
+      backupAttempted.add(launcher.name);
+      renameSync(launcher.target, launcher.backup);
+      fsyncSync(bin.fd);
+      if (present(launcher.target) || !same(inspectTarget(launcher.backup), launcher.prior)) throw new Error("Prior backup changed");
+    }
+    for (const launcher of launchers) {
+      adoptionAttempted.add(launcher.name);
+      rename(launcher.candidate, launcher.target);
+      fsyncSync(bin.fd);
+    }
     afterAdoption();
     checkDirectory(bin); verifyArtifacts();
     wrapper.verifyPrivateBuildRelease(releasePath, home);
-    const installed = inspectTarget(target);
-    if (!same(identity(lstatSync(target)), candidateStat) || installed.sha256 !== sha256(launcher)
-      || (installed.mode & 0o7777) !== 0o500) throw new Error("Post-adoption verification failed");
-    manifest.installed = installed;
+    for (const launcher of launchers) {
+      const installed = inspectTarget(launcher.target);
+      if (!same(identity(lstatSync(launcher.target)), launcher.candidateStat)
+        || installed.sha256 !== sha256(launcher.bytes) || (installed.mode & 0o7777) !== 0o500) {
+        throw new Error("Post-adoption verification failed");
+      }
+      manifest.launchers[launcher.name].installed = installed;
+    }
+    manifest.installed = manifest.launchers["ingenium-build"].installed;
     save("installed");
     checkDirectory(bin); checkDirectory(state);
     releaseLock();
@@ -370,28 +455,41 @@ export async function installHostBuild(expectedHead, {
   } catch (error) {
     try {
       // A rename can complete and still report failure: inspect the pinned directory, never replay it.
-      if (backupAttempted || adoptionAttempted) {
-        const current = inspectTarget(target);
-        if (prior) {
-          if (same(inspectTarget(backup), prior)) {
-            if (current && !same(identity(current), candidateStat)) throw new Error("Unknown adoption outcome; retained backup and lock");
-            try { renameSync(backup, target); } catch (failure) {
-              if (present(backup) || !same(inspectTarget(target), prior)) throw failure;
+      if (backupAttempted.size || adoptionAttempted.size) {
+        for (const launcher of launchers) {
+          const current = inspectTarget(launcher.target);
+          if (launcher.prior) {
+            const backedUp = same(inspectTarget(launcher.backup), launcher.prior);
+            if (backedUp && current && !same(identity(current), launcher.candidateStat)) {
+              throw new Error("Unknown adoption outcome; retained backup and lock");
             }
-          } else if (present(backup) || !same(current, prior)) {
-            throw new Error("Backup changed before rollback");
+            if (!backedUp && (present(launcher.backup) || !same(current, launcher.prior))) {
+              throw new Error("Backup changed before rollback");
+            }
+          } else if (current && !same(identity(current), launcher.candidateStat)) {
+            throw new Error("Unknown adoption outcome; retained backup and lock");
           }
-        } else if (current && same(identity(current), candidateStat)) {
-          unlinkSync(target);
-        } else if (current) {
-          throw new Error("Unknown adoption outcome; retained backup and lock");
+        }
+        for (const launcher of [...launchers].reverse()) {
+          const current = inspectTarget(launcher.target);
+          if (launcher.prior && same(inspectTarget(launcher.backup), launcher.prior)) {
+            try { renameSync(launcher.backup, launcher.target); } catch (failure) {
+              if (present(launcher.backup) || !same(inspectTarget(launcher.target), launcher.prior)) throw failure;
+            }
+          } else if (!launcher.prior && current && same(identity(current), launcher.candidateStat)) {
+            unlinkSync(launcher.target);
+          }
         }
         fsyncSync(bin.fd);
-        if (!same(inspectTarget(target), prior)) throw new Error("Rollback readback failed");
+        if (launchers.some((launcher) => !same(inspectTarget(launcher.target), launcher.prior))) {
+          throw new Error("Rollback readback failed");
+        }
         checkDirectory(bin);
       }
-      if (manifest && !same(inspectTarget(target), prior)) throw new Error("Pre-build host entry was not restored");
-      if (manifest) save(adoptionAttempted ? "rolled_back" : "failed");
+      if (manifest && launchers.some((launcher) => !same(inspectTarget(launcher.target), launcher.prior))) {
+        throw new Error("Pre-build host entry was not restored");
+      }
+      if (manifest) save(adoptionAttempted.size ? "rolled_back" : "failed");
     } catch (rollbackError) {
       rollbackFailed = true;
       try { if (manifest) save("rollback_failed"); } catch {}
