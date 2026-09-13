@@ -6,19 +6,20 @@ import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { getDb, logger, resetDbForTest } from "ingenium-core";
+import { getDb, identity, logger, mcpCredentials, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
 import {
   CONTEXT_SNAPSHOT_TIMING_MAX_MS,
   ContextSnapshotImportTimingSchema,
   ContextSnapshotIngestTimingSchema,
 } from "ingenium-core/lib/schema";
-import { appendContextMessage, createContextConversation } from "ingenium-core/lib/tools/context-conversations";
+import { appendContextMessage, createContextConversation, getContextConversation } from "ingenium-core/lib/tools/context-conversations";
 import { calculateContextConversationSnapshotHash } from "ingenium-core/lib/tools/context-snapshot-import";
-import { projects } from "ingenium-core";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { getSetting, setSetting } from "ingenium-core/lib/tools/settings";
 import { settingsRouter } from "../lib/routes/settings.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
+import { contextRouter } from "../lib/routes/context.js";
 import {
   CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE,
   CONTEXT_SNAPSHOT_INGEST_PATH,
@@ -37,6 +38,8 @@ let origin = "";
 let originalDbPath: string | undefined;
 let originalToken: string | undefined;
 let originalTokenFile: string | undefined;
+let serviceOwnerId = "";
+let serviceCredential: ReturnType<typeof mcpCredentials.createMcpCredential>;
 
 type Entry = {
   role: "user" | "assistant";
@@ -76,6 +79,16 @@ function snapshot(entries: Entry[], overrides: Record<string, unknown> = {}) {
 
 function ingestUrl(project = primaryProjectName): string {
   return `${origin}${CONTEXT_SNAPSHOT_INGEST_PATH}?project=${encodeURIComponent(project)}`;
+}
+
+function serviceHeaders(headers: Record<string, string> = {}): Record<string, string> {
+  return {
+    Authorization: `Bearer ${serviceCredential.token}`,
+    "x-ingenium-audience": "mcp",
+    "x-ingenium-workspace": serviceCredential.workspaceId,
+    "x-ingenium-launcher-worktree": serviceCredential.launcherWorktree,
+    ...headers,
+  };
 }
 
 async function postSnapshot(
@@ -160,14 +173,38 @@ beforeEach(async () => {
   process.env.INGENIUM_API_TOKEN = API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
   resetDbForTest();
-  projects.createProject(primaryProjectName);
-  projects.createProject(secondaryProjectName);
+  const primaryProject = projects.createProject(primaryProjectName);
+  projects.createProject(secondaryProjectName, false, primaryProject.organization_id);
+  const owner = identity.createUser("context-snapshot-service@example.test", "Context Snapshot Service Owner");
+  serviceOwnerId = owner.id;
+  organizations.addOrganizationMember(primaryProject.organization_id, owner.id, "admin");
+  runtimes.authorizeWorkspace({
+    id: "context-snapshot-service-workspace",
+    organizationId: primaryProject.organization_id,
+    projectId: primaryProject.id,
+    ownerUserId: owner.id,
+    storagePath: directory,
+  });
+  serviceCredential = mcpCredentials.createMcpCredential({
+    kind: "service",
+    audience: "mcp",
+    name: "Context snapshot service",
+    scopes: ["projects:read"],
+    organizationId: primaryProject.organization_id,
+    projectId: primaryProject.id,
+    workspaceId: "context-snapshot-service-workspace",
+    launcherWorktree: directory,
+    expiresAt: new Date(Date.now() + 3_600_000),
+    createdByUserId: owner.id,
+  });
 
   const app = express();
   // Proves the octet-stream route bypasses the global JSON parser.
   app.use(express.json({ limit: "2mb" }));
   app.use(authMiddleware);
+  app.use(authorizationMiddleware);
   app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
+  app.use("/api/v1/context", contextRouter);
   app.use("/api/v1/settings", settingsRouter);
   app.use(errorHandler);
   server = createServer(app);
@@ -191,6 +228,158 @@ afterEach(async () => {
 });
 
 describe("protected context snapshot ingest API", () => {
+  it("rejects source-key-only service imports targeting private or newly reserved conversations", async () => {
+    const project = projects.getProject(primaryProjectName)!;
+    const privateConversation = createContextConversation(project.id, {
+      title: "Mapped private conversation",
+      organizationId: project.organization_id,
+      ownerUserId: serviceOwnerId,
+      visibility: "private",
+    });
+    const privateSourceKey = "mapped-private-source";
+    expect((await postSnapshot(snapshot(makeEntries(1), {
+      sourceKey: privateSourceKey,
+      existingConversationId: privateConversation.id,
+    }), { authorization: `Bearer ${API_TOKEN}` })).status).toBe(200);
+
+    const privateResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(2), { sourceKey: privateSourceKey })),
+    });
+    expect(privateResponse.status).toBe(404);
+    expect(await privateResponse.json()).toEqual({
+      error: { code: "SNAPSHOT_TARGET_NOT_FOUND", message: "Snapshot target was not found." },
+    });
+    expect(getContextConversation(project.id, privateConversation.id)?.revision).toBe(1);
+
+    const reservedConversation = createContextConversation(project.id, {
+      title: "Mapped reserved coordination conversation",
+      organizationId: project.organization_id,
+      metadata: { kind: "coordination_operational_memory" },
+      visibility: "project",
+    });
+    const reservedSourceKey = "mapped-reserved-source";
+    expect((await postSnapshot(snapshot(makeEntries(1), {
+      sourceKey: reservedSourceKey,
+      existingConversationId: reservedConversation.id,
+    }), { authorization: `Bearer ${API_TOKEN}` })).status).toBe(200);
+
+    const reservedResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(2), { sourceKey: reservedSourceKey })),
+    });
+    expect(reservedResponse.status).toBe(404);
+    expect(await reservedResponse.json()).toEqual({
+      error: { code: "SNAPSHOT_TARGET_NOT_FOUND", message: "Snapshot target was not found." },
+    });
+    expect(getContextConversation(project.id, reservedConversation.id)?.revision).toBe(1);
+  });
+
+  it("confines an MCP service credential to project-bound import, retrieve, and archive operations", async () => {
+    const importedResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(1))),
+    });
+    expect(importedResponse.status).toBe(201);
+    const imported = (await importedResponse.json() as { data: { id: string; revision: number; conversation: { latest_message_id: string } } }).data;
+
+    const retrieveResponse = await fetch(
+      `${origin}/api/v1/context/conversations/${imported.id}/messages/${imported.conversation.latest_message_id}?project=${primaryProjectName}`,
+      { headers: serviceHeaders() },
+    );
+    expect(retrieveResponse.status).toBe(200);
+    expect((await retrieveResponse.json()).data.content).toBe("private snapshot message 0");
+
+    const primaryProject = projects.getProject(primaryProjectName)!;
+    const privateConversation = createContextConversation(primaryProject.id, {
+      title: "Browser-owned private conversation",
+      organizationId: primaryProject.organization_id,
+      ownerUserId: serviceOwnerId,
+      visibility: "private",
+    });
+    const privateMessage = appendContextMessage(primaryProject.id, privateConversation.id, {
+      role: "user",
+      content: "private browser message",
+      expectedRevision: 0,
+    }).message;
+    const privateRetrieveResponse = await fetch(
+      `${origin}/api/v1/context/conversations/${privateConversation.id}/messages/${privateMessage.id}?project=${primaryProjectName}`,
+      { headers: serviceHeaders() },
+    );
+    expect(privateRetrieveResponse.status).toBe(404);
+    const privateImportResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(1), {
+        sourceKey: "private-conversation-source",
+        existingConversationId: privateConversation.id,
+      })),
+    });
+    expect(privateImportResponse.status).toBe(404);
+    const coordinationConversation = createContextConversation(primaryProject.id, {
+      title: "Reserved coordination memory",
+      metadata: { kind: "coordination_operational_memory" },
+      visibility: "project",
+    });
+    const coordinationImportResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(1), {
+        sourceKey: "coordination-conversation-source",
+        existingConversationId: coordinationConversation.id,
+      })),
+    });
+    expect(coordinationImportResponse.status).toBe(404);
+
+    const authorizeResponse = await fetch(
+      `${origin}/api/v1/context/conversations/${imported.id}/maintenance/authorize?project=${primaryProjectName}`,
+      {
+        method: "POST",
+        headers: serviceHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ operation: "archive_conversation", expectedRevision: imported.revision }),
+      },
+    );
+    expect(authorizeResponse.status).toBe(201);
+    const confirmationToken = (await authorizeResponse.json()).data.confirmationToken;
+    const archiveResponse = await fetch(
+      `${origin}/api/v1/context/conversations/${imported.id}/archive?project=${primaryProjectName}`,
+      {
+        method: "POST",
+        headers: serviceHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ expectedRevision: imported.revision, confirmationToken }),
+      },
+    );
+    expect(archiveResponse.status).toBe(200);
+    expect((await archiveResponse.json()).data.archived).toBe(true);
+
+    const foreignResponse = await fetch(ingestUrl(secondaryProjectName), {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE }),
+      body: JSON.stringify(snapshot(makeEntries(1), { sourceKey: "foreign-project-source" })),
+    });
+    expect(foreignResponse.status).toBe(404);
+
+    const outsideContractResponse = await fetch(`${origin}/api/v1/context/conversations?project=${primaryProjectName}`, {
+      method: "POST",
+      headers: serviceHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ title: "Service-created conversation" }),
+    });
+    expect(outsideContractResponse.status).toBe(404);
+
+    const dashboardMarkedResponse = await fetch(ingestUrl(), {
+      method: "POST",
+      headers: serviceHeaders({
+        "Content-Type": CONTEXT_SNAPSHOT_INGEST_CONTENT_TYPE,
+        "x-ingenium-ui": "dashboard",
+      }),
+      body: JSON.stringify(snapshot(makeEntries(1), { sourceKey: "dashboard-marked-source" })),
+    });
+    expect(dashboardMarkedResponse.status).toBe(404);
+  });
+
   it("enforces opt-in for each batch, persists sync status and rejects invalid settings", async () => {
     const project = projects.getProject(primaryProjectName)!;
     const source = { sourceKey: "context-upload-file:ses_exact", sourceSessionId: "ses_exact", automatic: true };

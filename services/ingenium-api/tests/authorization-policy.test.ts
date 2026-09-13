@@ -189,6 +189,72 @@ describe("AUTH-102 canonical API policy", () => {
     expect(next).toHaveBeenCalledOnce();
   });
 
+  it("confines an attested MCP service principal to the exact project-bound Context handoff", () => {
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    const organizationId = "22222222-2222-4222-8222-222222222222";
+    vi.spyOn(projects, "getProject").mockImplementation((name) => ({
+      id: name === "context-project" ? projectId : "33333333-3333-4333-8333-333333333333",
+      name,
+      organization_id: organizationId,
+      archived_at: null,
+    } as ReturnType<typeof projects.getProject>));
+    vi.spyOn(authorization, "requireProjectPermission").mockImplementation((_principal, targetProjectId, resource, permission) => ({
+      allowed: targetProjectId === projectId && resource === "projects" && permission === "read",
+      visible: targetProjectId === projectId,
+      projectId: targetProjectId,
+      organizationId,
+    }));
+    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
+    const principal = {
+      type: "service",
+      id: "service-id",
+      tokenId: "credential-id",
+      scopes: ["projects:read"],
+      organizationId,
+      projectId,
+      projectIds: [projectId],
+      audience: "mcp",
+      workspaceId: "workspace-id",
+      launcherWorktree: "/workspace",
+      storageMappingHash: "a".repeat(64),
+    } as const;
+    const request = (method: string, path: string, project = "context-project") => ({
+      method,
+      path,
+      query: { project },
+      params: {},
+      principal,
+      attestedCoordinationIdentity: {
+        credentialId: principal.tokenId,
+        workspaceId: principal.workspaceId,
+        storageMappingHash: principal.storageMappingHash,
+      },
+    } as unknown as Request);
+
+    for (const [method, path] of [
+      ["POST", "/api/v1/context/conversations/import"],
+      ["GET", "/api/v1/context/conversations/conversation-id/messages/message-id"],
+      ["POST", "/api/v1/context/conversations/conversation-id/maintenance/authorize"],
+      ["POST", "/api/v1/context/conversations/conversation-id/archive"],
+    ]) {
+      const next = vi.fn();
+      authorizationMiddleware(request(method!, path!), {} as Response, next);
+      expect(next).toHaveBeenCalledOnce();
+    }
+
+    for (const denied of [
+      request("POST", "/api/v1/context/conversations"),
+      request("GET", "/api/v1/emails/accounts"),
+      request("GET", "/api/v1/context/conversations/conversation-id/messages/message-id", "foreign-project"),
+      { ...request("POST", "/api/v1/context/conversations/import"), attestedCoordinationIdentity: undefined },
+    ]) {
+      expect(() => authorizationMiddleware(denied as Request, {} as Response, vi.fn())).toThrowError(expect.objectContaining({
+        code: "NOT_FOUND",
+        statusCode: 404,
+      }));
+    }
+  });
+
   it("allows only exact attested service credential self-revocation", () => {
     const credentialId = "11111111-1111-4111-8111-111111111111";
     const principal = {

@@ -114,6 +114,12 @@ function contextOwnerScope(req: Request): string | null | undefined {
   return principal.type === "browser-user" || principal.type === "user-token" ? principal.id : null;
 }
 
+function requireAuthorizedContextProject(req: Request, res: Response): string | null {
+  return req.principal?.type === "service" && req.authorizationPolicy?.resource === "context" && req.authorizedProjectId
+    ? req.authorizedProjectId
+    : requireProject(req, res);
+}
+
 function isCoordinationMemory(metadata: unknown): boolean {
   let value = metadata;
   if (typeof value === "string") {
@@ -518,7 +524,7 @@ contextRouter.post("/chat-sessions/link", (req, res) => {
 });
 
 contextRouter.param("conversationId", (req, res, next, conversationId) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireAuthorizedContextProject(req, res);
   if (!projectId) return;
   const conversation = contextConversations.getContextConversation(projectId, conversationId);
   if (!conversation) {
@@ -529,7 +535,10 @@ contextRouter.param("conversationId", (req, res, next, conversationId) => {
     res.status(404).json({ error: { code: "CONVERSATION_NOT_FOUND", message: "Context conversation not found" } });
     return;
   }
-  if (!requireContentAccess(req, res, {
+  const authorizedServiceProjectConversation = req.principal?.type === "service"
+    && req.authorizedProjectId === projectId && conversation.visibility === "project"
+    && conversation.owner_user_id === null;
+  if (!authorizedServiceProjectConversation && !requireContentAccess(req, res, {
     resourceType: "context_conversation",
     resourceId: conversation.id,
     organizationId: conversation.organization_id,
@@ -592,7 +601,7 @@ contextRouter.get("/conversations/:conversationId", (req, res) => {
 // Authorization issues a short-lived, one-time confirmation capability. The
 // raw token is returned only here and is never written to audit history.
 contextRouter.post("/conversations/:conversationId/maintenance/authorize", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireAuthorizedContextProject(req, res);
   if (!projectId) return;
   try {
     const authorization = contextConversations.authorizeContextMaintenanceAction(
@@ -622,7 +631,7 @@ contextRouter.get("/conversations/:conversationId/maintenance/audit", (req, res)
 });
 
 contextRouter.post("/conversations/:conversationId/archive", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireAuthorizedContextProject(req, res);
   if (!projectId) return;
   try {
     res.json({ data: contextConversations.archiveContextConversation(projectId, req.params.conversationId!, req.body ?? {}) });
@@ -692,7 +701,7 @@ contextRouter.post("/conversations/:conversationId/messages/batch", (req, res) =
 
 // Retrieval is intentionally separate from list/search because it exposes content.
 contextRouter.get("/conversations/:conversationId/messages/:messageId", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireAuthorizedContextProject(req, res);
   if (!projectId) return;
   const message = contextConversations.getContextMessage(projectId, req.params.conversationId!, req.params.messageId!);
   if (!message) {
