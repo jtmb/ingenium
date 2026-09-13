@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
 import { resolveExtensionBinding } from "./extension-binding.js"
@@ -43,7 +44,10 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
   const collect = async (sessionId: string) => {
     const binding = resolveExtensionBinding(ctx.worktree, { purpose: "learning" })
     if (binding.launcherWorktree !== ctx.worktree) throw new Error("EXTERNAL_OBSERVATION_BINDING_REJECTED")
-    const external = { worktree: binding.launcherWorktree, sessionId }
+    const external = {
+      worktree: binding.launcherWorktree,
+      sessionId: `session-${createHash("sha256").update(sessionId, "utf8").digest("hex")}`,
+    }
     const invoke = async (input: Record<string, unknown>) => mcpToolData(await callMcpTool(
       ctx.worktree, "extraction_run", { project: binding.project, external: input }, { timeoutMs: 60_000 },
     )) as { enabled?: boolean }

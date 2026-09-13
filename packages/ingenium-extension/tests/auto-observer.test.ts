@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockAssertExtensionToolEnabled = vi.hoisted(() => vi.fn());
@@ -118,11 +119,21 @@ describe("AutoObserverPlugin lifecycle output", () => {
       const plugin = await AutoObserverPlugin({ worktree: "/worktree", client });
       await Promise.all([plugin.event(event), plugin.event(event)]);
     }
+    const coordinationSessionId = `session-${createHash("sha256").update("ses-external", "utf8").digest("hex")}`;
+    const probes = mockCallMcpTool.mock.calls.filter((call) => !call[2].external.message);
     const sent = mockCallMcpTool.mock.calls.filter((call) => call[2].external.message);
+    expect(probes).toHaveLength(2);
+    expect(probes[0][2]).toEqual({ project: "extension-project", external: {
+      worktree: "/worktree", sessionId: coordinationSessionId,
+    } });
     expect(sent).toHaveLength(2);
-    expect(sent[0][2]).toEqual({ project: "extension-project", external: { worktree: "/worktree", sessionId: "ses-external",
+    expect(sent[0][2]).toEqual({ project: "extension-project", external: { worktree: "/worktree", sessionId: coordinationSessionId,
       message: { id: "msg-user", role: "user", text: "I prefer concise answers. [REDACTED]" } } });
     expect(sent[1][2]).toEqual(sent[0][2]);
+    expect(client.session.get).toHaveBeenCalledWith({ path: { id: "ses-external" }, query: { directory: "/worktree" } });
+    expect(client.session.messages).toHaveBeenCalledWith({
+      path: { id: "ses-external" }, query: { directory: "/worktree", limit: 100 },
+    });
     expect(JSON.stringify(mockCallMcpTool.mock.calls)).not.toMatch(/secret-canary|hidden-canary|tool-canary|assistant-canary|metadata-canary/);
   });
 
