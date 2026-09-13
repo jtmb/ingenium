@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -1309,24 +1309,85 @@ async function readLiveRecoverySummary(parent, worktree, request) {
   }
 }
 
+async function readDurableLegacyRecoverySummary(parent, worktree, execute = spawnSync) {
+  if (!SAFE_SESSION.test(parent?.sessionId ?? "") || !safeRecoveryIdentity(parent)
+    || parent.nonceSha256 !== "0".repeat(64) || parent.port !== null
+    || typeof parent.dataHome !== "string" || resolve(parent.dataHome) !== parent.dataHome) return undefined;
+  const home = parent.environment?.HOME;
+  if (typeof home !== "string" || !isAbsolute(home) || resolve(home) !== home) return undefined;
+  let stdout;
+  let stderr;
+  try {
+    const result = execute(`/proc/${parent.pid}/exe`, ["export", parent.sessionId, "--pure"], {
+      cwd: worktree,
+      encoding: null,
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
+    });
+    stdout = Buffer.isBuffer(result.stdout) ? result.stdout : undefined;
+    stderr = Buffer.isBuffer(result.stderr) ? result.stderr : undefined;
+    if (result.error || result.signal || result.status !== 0 || !stdout || stdout.length < 1 || stdout.length > 1024 * 1024) {
+      return undefined;
+    }
+    const text = stdout.toString("utf8");
+    if (!Buffer.from(text).equals(stdout)) return undefined;
+    const exported = JSON.parse(text);
+    if (!hasExactKeys(exported, ["info", "messages"]) || !isRecord(exported.info) || !Array.isArray(exported.messages)
+      || exported.info.id !== parent.sessionId || exported.info.directory !== worktree) return undefined;
+    const payloads = {
+      "/global/health": { healthy: true, version: "durable-export" },
+      [`/session/${parent.sessionId}`]: exported.info,
+      [`/session/${parent.sessionId}/message`]: exported.messages,
+      "/session/status": { [parent.sessionId]: { type: "working" } },
+    };
+    return await readLiveRecoverySummary({ ...parent, port: 1024,
+      environment: { OPENCODE_SERVER_PASSWORD: "x".repeat(43) } }, worktree, async (url) => {
+      const value = payloads[new URL(url).pathname];
+      return new Response(JSON.stringify(value), { status: value === undefined ? 404 : 200 });
+    });
+  } catch {
+    return undefined;
+  } finally {
+    stdout?.fill(0);
+    stderr?.fill(0);
+  }
+}
+
 export async function captureLegacyRecoveryPreAdmission(parent, binding, source, request = fetch,
-  inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) })) {
+  inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) }),
+  exportSession = spawnSync) {
   try { prepareRecoveryOwnerContract(binding, source?.head); } catch { return null; }
   if (!parent || !binding || !source || source.status !== "validated" || source.dirtyPaths.length !== 0
     || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree
-    || !safeRecoveryIdentity(parent) || parent.port === null || parent.nonceSha256 !== "0".repeat(64)) return null;
+    || !safeRecoveryIdentity(parent) || parent.nonceSha256 !== "0".repeat(64)
+    || parent.port === null && !SAFE_SESSION.test(parent.sessionId ?? "")) return null;
   const sameProcess = () => {
     const actual = inspect(parent.pid);
     return actual && actual.commandName === "opencode" && actual.pid === parent.pid
       && actual.startTimeTicks === parent.startTimeTicks && actual.executableSha256 === parent.executableSha256
       && actual.cwd === binding.worktree && actual.cmdlineSha256 === parent.cmdlineSha256
-      && actual.nonce === undefined && actual.ports?.length === 1 && actual.ports[0] === parent.port;
+      && actual.nonce === undefined && (parent.port === null
+        ? actual.ports?.length === 0 : actual.ports?.length === 1 && actual.ports[0] === parent.port);
   };
   if (!sameProcess()) return null;
-  const password = parent.environment?.OPENCODE_SERVER_PASSWORD;
-  const username = parent.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
-  if (!OPAQUE_TOKEN.test(password ?? "") || !/^[A-Za-z0-9._-]{1,64}$/.test(username)) return null;
   try {
+    if (parent.port === null) {
+      const live = await readDurableLegacyRecoverySummary(parent, binding.worktree, exportSession);
+      if (!live?.operational || !sameProcess()) return null;
+      const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
+      if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
+        || config.agent[live.operational.role]?.disable === true) return null;
+      const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
+      const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
+        nonceProvenance: "absent_process_environment", sessionId: parent.sessionId, binding, sourceHead: source.head,
+        operational: live.operational };
+      return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
+    }
+    const password = parent.environment?.OPENCODE_SERVER_PASSWORD;
+    const username = parent.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
+    if (!OPAQUE_TOKEN.test(password ?? "") || !/^[A-Za-z0-9._-]{1,64}$/.test(username)) return null;
     const headers = { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
     const get = async (path) => {
       const response = await request(`http://127.0.0.1:${parent.port}${path}`, {
@@ -1467,6 +1528,59 @@ const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = Object.freeze({
   code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
   path: "inspect.parent_control_plane",
 });
+
+function inspectInstalledManagedLauncher(parent, binding, source, environment) {
+  const home = parent.environment?.HOME;
+  if (typeof home !== "string" || !isAbsolute(home) || resolve(home) !== home || realpathSync(home) !== home) {
+    throw new Error("Recovery preparation managed launcher home is unavailable");
+  }
+  const launcherPath = resolve(home, ".local/bin/ingenium-opencode");
+  const launcher = readTrustedRegularFile(launcherPath, "Installed managed OpenCode launcher", {
+    executable: true, expectedMode: 0o500,
+  });
+  const release = resolve(home, ".local/share/ingenium/host-build/releases", source.head);
+  const entry = resolve(release, "dist/scripts/opencode.js");
+  const manifestBytes = readOnlyRegularFile(resolve(release, "release.json"), 64 * 1024, false, 0o400);
+  const manifest = JSON.parse(manifestBytes);
+  const artifact = readOnlyRegularFile(entry, 16 * 1024 * 1024, false, 0o400);
+  if (!hasExactKeys(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files"])
+    || manifest.schemaVersion !== 1 || manifest.head !== source.head || manifest.repositoryRoot !== binding.worktree
+    || manifest.sourceSha256 !== source.sha256 || manifest.owner !== ownerUid()
+    || manifest.files?.["dist/scripts/opencode.js"]?.sha256 !== sha256(artifact)
+    || !launcher.bytes.includes(Buffer.from(release)) || !launcher.bytes.includes(Buffer.from(entry))) {
+    throw new Error("Recovery preparation managed launcher source is unavailable");
+  }
+  const executablePath = realpathSync(`/proc/${parent.pid}/exe`);
+  const executableOwner = lstatSync(executablePath).uid;
+  const executable = readTrustedRegularFile(executablePath, "Recovery preparation OpenCode executable", {
+    expectedOwner: executableOwner, executable: true,
+  });
+  if (basename(executable.path) !== "opencode" || executable.sha256 !== parent.executableSha256) {
+    throw new Error("Recovery preparation OpenCode executable changed");
+  }
+  return {
+    schemaVersion: 1,
+    kind: "legacy-managed-parent",
+    sessionId: parent.sessionId,
+    dataHome: parent.dataHome,
+    launcher: { path: launcher.path, sha256: launcher.sha256, releaseSha256: sha256(manifestBytes), artifactSha256: sha256(artifact) },
+    executable: { path: executable.path, sha256: executable.sha256 },
+    environment: {
+      HOME: home,
+      XDG_DATA_HOME: parent.dataHome,
+      INGENIUM_API_URL: environment.INGENIUM_API_URL,
+      INGENIUM_PROJECT: binding.project,
+      INGENIUM_PROJECT_ID: binding.projectId,
+      INGENIUM_WORKSPACE_ID: binding.workspaceId,
+      INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
+      INGENIUM_WORKTREE: binding.worktree,
+      INGENIUM_MCP_AUDIENCE: "mcp",
+      INGENIUM_MCP_CREDENTIAL_FILE: resolve(binding.worktree, environment.INGENIUM_MCP_CREDENTIAL_FILE),
+      INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
+      INGENIUM_OPENCODE_EXECUTABLE: executable.path,
+    },
+  };
+}
 
 function recoveryPreparationFailureDetail(error, phase) {
   return error?.code === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code
@@ -1623,7 +1737,19 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
   }
   const gitSummary = (options.gitSummary ?? collectGitSummary)(worktree, source.path, source.bytes);
+  let launch = null;
   if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
+    && ancestry.parent.port === null && ancestry.parent.nonceSha256 === "0".repeat(64)
+    && SAFE_SESSION.test(ancestry.parent.sessionId ?? "")) {
+    const deployment = (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
+      options.inspectDeploymentCommand);
+    if (deployment.status !== "attested" || deployment.revision !== gitSummary.head) {
+      throw new Error("Recovery preparation deployed source is unavailable");
+    }
+    launch = (options.inspectLauncher ?? inspectInstalledManagedLauncher)(ancestry.parent, binding, {
+      ...source, ...gitSummary, sha256: source.sha256,
+    }, environment);
+  } else if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
     && ancestry.parent.port === null) {
     const error = new Error("Recovery preparation parent control plane is unavailable");
     error.code = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code;
@@ -1632,7 +1758,7 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   }
   const capture = ancestry.parent.nonceSha256 === "0".repeat(64)
     ? await (options.captureLegacy ?? captureLegacyRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
-      options.request ?? fetch, options.inspectParent)
+      options.request ?? fetch, options.inspectParent, options.exportSession)
     : await (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
       options.request ?? fetch, options.inspectParent);
   if (!capture) throw new Error("Recovery preparation capture is unavailable");
@@ -1644,7 +1770,31 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   }
   const disposition = planPreparationDisposition(index);
   sourceHandle.revalidate();
-  return { binding, capture, disposition, source, contract: prepareRecoveryOwnerContract(binding, source.head) };
+  return { binding, capture, disposition, source, launch, contract: prepareRecoveryOwnerContract(binding, source.head) };
+}
+
+function validPreparationLaunch(value, request) {
+  return hasExactKeys(value, ["schemaVersion", "kind", "sessionId", "dataHome", "launcher", "executable", "environment"])
+    && value.schemaVersion === 1 && value.kind === "legacy-managed-parent" && SAFE_SESSION.test(value.sessionId ?? "")
+    && typeof value.dataHome === "string" && resolve(value.dataHome) === value.dataHome
+    && hasExactKeys(value.launcher, ["path", "sha256", "releaseSha256", "artifactSha256"])
+    && isAbsolute(value.launcher.path) && HASH.test(value.launcher.sha256 ?? "")
+    && HASH.test(value.launcher.releaseSha256 ?? "") && HASH.test(value.launcher.artifactSha256 ?? "")
+    && hasExactKeys(value.executable, ["path", "sha256"]) && isAbsolute(value.executable.path)
+    && value.executable.sha256 === request.parent.executableSha256
+    && hasExactKeys(value.environment, ["HOME", "XDG_DATA_HOME", "INGENIUM_API_URL", "INGENIUM_PROJECT",
+      "INGENIUM_PROJECT_ID", "INGENIUM_WORKSPACE_ID", "INGENIUM_STORAGE_MAPPING_HASH", "INGENIUM_WORKTREE",
+      "INGENIUM_MCP_AUDIENCE", "INGENIUM_MCP_CREDENTIAL_FILE", "INGENIUM_MCP_CREDENTIAL_PURPOSE", "INGENIUM_OPENCODE_EXECUTABLE"])
+    && isAbsolute(value.environment.HOME) && value.environment.XDG_DATA_HOME === value.dataHome
+    && value.environment.INGENIUM_PROJECT === request.contract.binding.project
+    && value.environment.INGENIUM_PROJECT_ID === request.contract.binding.projectId
+    && value.environment.INGENIUM_WORKSPACE_ID === request.contract.binding.workspaceId
+    && value.environment.INGENIUM_STORAGE_MAPPING_HASH === request.contract.binding.storageMappingHash
+    && value.environment.INGENIUM_WORKTREE === request.contract.binding.worktree
+    && value.environment.INGENIUM_MCP_AUDIENCE === "mcp"
+    && isAbsolute(value.environment.INGENIUM_MCP_CREDENTIAL_FILE)
+    && value.environment.INGENIUM_MCP_CREDENTIAL_PURPOSE === "general"
+    && value.environment.INGENIUM_OPENCODE_EXECUTABLE === value.executable.path;
 }
 
 function readPreparationRequest(worktree) {
@@ -1652,17 +1802,239 @@ function readPreparationRequest(worktree) {
   for (const path of [resolve(worktree, ".opencode/protected-runtime-index"), dirname(directory), directory]) privatePreparationDirectory(path);
   const bytes = readOnlyRegularFile(resolve(directory, "request.json"), 64 * 1024, false, 0o600);
   const value = JSON.parse(bytes);
-  if (!hasExactKeys(value, ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "issuedAt", "expiresAt"])
+  const keys = ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "issuedAt", "expiresAt"];
+  if (!(hasExactKeys(value, keys) || hasExactKeys(value, [...keys, "launch"]))
     || value.schemaVersion !== 1 || value.kind !== "recovery-preparation" || value.authorizesRestart !== false
     || canonicalJson(value.contract) !== canonicalJson(prepareRecoveryOwnerContract(value.contract?.binding, value.contract?.sourceHead))
     || value.contract.binding.worktree !== worktree || !HASH.test(value.sourceSha256 ?? "") || !OPAQUE_TOKEN.test(value.nonce ?? "")
     || !HASH.test(value.handoffSha256 ?? "") || !safeRecoveryIdentity(value.parent)
     || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
     || !Number.isSafeInteger(value.issuedAt) || !Number.isSafeInteger(value.expiresAt)
-    || value.expiresAt - value.issuedAt !== PREPARATION_LIFETIME_MS) throw new Error("Recovery preparation request is invalid");
+    || value.expiresAt - value.issuedAt !== PREPARATION_LIFETIME_MS
+    || value.launch !== undefined && (value.parent.nonceSha256 !== "0".repeat(64)
+      || !validPreparationLaunch(value.launch, value))) throw new Error("Recovery preparation request is invalid");
   const handoff = readOnlyRegularFile(resolve(directory, "handoff.json"), 64 * 1024, false, 0o600);
   if (sha256(handoff) !== value.handoffSha256) throw new Error("Recovery preparation handoff changed");
+  if (value.launch !== undefined) {
+    const captured = JSON.parse(handoff);
+    if (!hasExactKeys(captured, ["schemaVersion", "kind", "parent", "nonceProvenance", "sessionId", "binding", "sourceHead", "operational"])
+      || captured.schemaVersion !== 1 || captured.kind !== "legacy-pre-admission"
+      || captured.sessionId !== value.launch.sessionId || captured.sourceHead !== value.contract.sourceHead
+      || canonicalJson(captured.parent) !== canonicalJson(value.parent)
+      || canonicalJson(captured.binding) !== canonicalJson(value.contract.binding)) {
+      throw new Error("Recovery preparation handoff changed");
+    }
+  }
   return { value, bytes, directory };
+}
+
+function directProcessChildren(pid) {
+  try {
+    const value = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
+    if (!value) return [];
+    const children = value.split(/\s+/).map(Number);
+    return children.every((child) => Number.isSafeInteger(child) && child > 1) ? children : [];
+  } catch { return []; }
+}
+
+function removeManagedParentAuthentication(record) {
+  let current;
+  try { current = lstatSync(record.path); } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw new Error("Managed recovery parent authentication rollback failed");
+  }
+  if (!current.isFile() || current.isSymbolicLink() || (current.mode & 0o777) !== 0o600
+    || !sourceIdentityMatches(record.identity, current)
+    || record.sha256 && sha256(readOnlyRegularFile(record.path, 1024, false, 0o600)) !== record.sha256) {
+    throw new Error("Managed recovery parent authentication changed");
+  }
+  anchoredPreparationPath(record.path, (anchored) => {
+    if (!sourceIdentityMatches(record.identity, lstatSync(anchored))) {
+      throw new Error("Managed recovery parent authentication changed");
+    }
+    unlinkSync(anchored);
+  });
+}
+
+function persistManagedParentAuthentication(dataHome, authentication) {
+  let directory;
+  try { directory = realpathSync(resolve(dataHome)); } catch {
+    throw new Error("Managed recovery parent authentication is unavailable");
+  }
+  if (directory !== dataHome) throw new Error("Managed recovery parent authentication is unavailable");
+  canonicalOwnedDirectory(directory, "Managed recovery parent data home");
+  const path = resolve(directory, ".ingenium-recovery-server-auth.json");
+  const bytes = Buffer.from(`${JSON.stringify({ username: "opencode", password: authentication })}\n`);
+  const record = { path, identity: null, sha256: sha256(bytes) };
+  try {
+    writePreparationFile(path, bytes, (identity) => { record.identity = identity; });
+    if (!record.identity || !bytes.equals(readOnlyRegularFile(path, 1024, false, 0o600))
+      || !sourceIdentityMatches(record.identity, lstatSync(path))) {
+      throw new Error("Managed recovery parent authentication is unavailable");
+    }
+    return record;
+  } catch {
+    if (record.identity) {
+      try { removeManagedParentAuthentication({ ...record, sha256: null }); } catch {}
+    }
+    throw new Error("Managed recovery parent authentication is unavailable");
+  } finally { bytes.fill(0); }
+}
+
+function inspectManagedParent(request, launch, child, authentication, dependencies, expected) {
+  const inspect = dependencies.inspect ?? inspectAncestor;
+  const environment = dependencies.environment ?? processEnvironment;
+  const children = dependencies.children ?? directProcessChildren;
+  const listeningPorts = dependencies.listeningPorts ?? processListeningPorts;
+  const inspectOnce = () => {
+    if (!Number.isSafeInteger(child.pid) || child.pid < 2) return null;
+    const launcher = inspect(child.pid);
+    const descendantPids = children(child.pid);
+    if (!launcher || launcher.pid !== child.pid || launcher.commandName !== "node"
+      || launcher.cwd !== request.contract.binding.worktree || descendantPids.length !== 1) return null;
+    const replacement = inspect(descendantPids[0]);
+    const launcherEnvironment = environment(child.pid);
+    const replacementEnvironment = environment(descendantPids[0]);
+    const port = Number(replacementEnvironment?.INGENIUM_OPENCODE_PORT);
+    const nonce = replacementEnvironment?.INGENIUM_RESTART_NONCE;
+    const ports = listeningPorts(descendantPids[0]);
+    if (launcherEnvironment?.INGENIUM_RECOVERY_PREPARATION_NONCE !== request.nonce
+      || replacement?.pid !== descendantPids[0] || replacement.commandName !== "opencode"
+      || replacement.parentPid !== child.pid || replacement.cwd !== request.contract.binding.worktree
+      || replacement.executableSha256 !== launch.executable.sha256 || !OPAQUE_TOKEN.test(nonce ?? "")
+      || !Number.isSafeInteger(port) || port < 1024 || port > 65535
+      || replacementEnvironment?.OPENCODE_SERVER_PASSWORD !== authentication
+      || replacementEnvironment?.INGENIUM_RECOVERY_PREPARATION_NONCE !== request.nonce
+      || replacementEnvironment?.INGENIUM_RECOVERY_OWNER_PID !== String(child.pid)
+      || replacementEnvironment?.INGENIUM_RECOVERY_OWNER_START_TICKS !== String(launcher.startTimeTicks)
+      || ports.length !== 1 || ports[0] !== port) return null;
+    return {
+      launcher: { pid: launcher.pid, startTimeTicks: launcher.startTimeTicks,
+        executableSha256: launcher.executableSha256, nonceSha256: sha256(request.nonce) },
+      replacement: { pid: replacement.pid, startTimeTicks: replacement.startTimeTicks,
+        executableSha256: replacement.executableSha256, nonceSha256: sha256(nonce), port, dataHome: launch.dataHome },
+    };
+  };
+  const before = inspectOnce();
+  const after = before && inspectOnce();
+  if (!before || !after || canonicalJson(before) !== canonicalJson(after)
+    || expected && canonicalJson(after) !== canonicalJson(expected)) return null;
+  return after;
+}
+
+async function managedParentHealth(managed, authentication, request = fetch) {
+  const response = await request(`http://127.0.0.1:${managed.replacement.port}/global/health`, {
+    method: "GET",
+    headers: { authorization: `Basic ${Buffer.from(`opencode:${authentication}`).toString("base64")}` },
+    redirect: "error",
+    signal: AbortSignal.timeout(5_000),
+  });
+  const payload = response.status === 200 ? responseValue(await response.json()) : null;
+  if (payload?.healthy !== true) throw new Error("Managed recovery parent health is unavailable");
+  return { status: "healthy", checkedAt: Date.now(), versionSha256: sha256(String(payload.version ?? "unknown")) };
+}
+
+export async function startPreparedManagedParent(request, dependencies = {}) {
+  const launch = request.launch;
+  if (!validPreparationLaunch(launch, request)) throw new Error("Managed recovery parent request is invalid");
+  if (readTrustedRegularFile(launch.launcher.path, "Installed managed OpenCode launcher", {
+    executable: true, expectedMode: 0o500,
+  }).sha256 !== launch.launcher.sha256
+    || readTrustedRegularFile(launch.executable.path, "Recovery preparation OpenCode executable", {
+      expectedOwner: lstatSync(launch.executable.path).uid, executable: true,
+    }).sha256 !== launch.executable.sha256) throw new Error("Managed recovery parent launcher changed");
+  const authentication = randomBytes(32).toString("base64url");
+  const authenticationRecord = persistManagedParentAuthentication(launch.dataHome, authentication);
+  let authenticationRetained = true;
+  const removeAuthentication = () => {
+    if (!authenticationRetained) return;
+    removeManagedParentAuthentication(authenticationRecord);
+    authenticationRetained = false;
+  };
+  let child;
+  try {
+    child = (dependencies.spawn ?? spawn)(launch.launcher.path, ["serve"], {
+      cwd: request.contract.binding.worktree,
+      shell: false,
+      stdio: "ignore",
+      env: { ...launch.environment, PATH: "/usr/local/bin:/usr/bin:/bin", TERM: "dumb", NO_COLOR: "1",
+        OPENCODE_SERVER_PASSWORD: authentication, INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce },
+    });
+  } catch {
+    removeAuthentication();
+    throw new Error("Managed recovery parent did not start");
+  }
+  let spawnError;
+  child.once?.("error", (error) => { spawnError = error; });
+  const wait = dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 100)));
+  let managed;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (spawnError) break;
+    managed = inspectManagedParent(request, launch, child, authentication, dependencies);
+    if (managed) {
+      try {
+        const evidence = (identity, health) => ({
+          schemaVersion: 1,
+          ...identity,
+          health,
+          handoff: { sessionId: launch.sessionId, sha256: request.handoffSha256, status: "captured" },
+          ownership: { job: PREPARATION_JOB, ownerNonceSha256: sha256(request.nonce), status: "external" },
+          rollback: { status: "armed", scope: "exact-owned-replacement" },
+          adoption: { status: "pending", requires: "replacement-first-restart" },
+          fencing: { current: 1, successorMinimum: 2, staleCalls: "reject" },
+        });
+        const initial = evidence(managed, await managedParentHealth(managed, authentication, dependencies.request ?? fetch));
+        return {
+          child,
+          evidence: initial,
+          removeAuthentication,
+          refresh: async () => {
+            const current = inspectManagedParent(request, launch, child, authentication, dependencies, managed);
+            if (!current) throw new Error("Managed recovery parent identity changed");
+            return evidence(current, await managedParentHealth(current, authentication, dependencies.request ?? fetch));
+          },
+        };
+      } catch { /* Continue until the reserved server is ready. */ }
+    }
+    await wait();
+  }
+  if (managed) stopPreparedManagedParent({ evidence: managed, removeAuthentication },
+    dependencies.inspect ?? inspectAncestor, dependencies.kill ?? process.kill);
+  else try { child.kill?.("SIGTERM"); } catch { /* An already-exited launcher needs no rollback signal. */ }
+  removeAuthentication();
+  throw new Error("Managed recovery parent did not become healthy");
+}
+
+function stopPreparedManagedParent(control, inspect = inspectAncestor, kill = process.kill) {
+  try {
+    for (const identity of [control?.evidence?.replacement, control?.evidence?.launcher]) {
+      if (!identity) continue;
+      const actual = inspect(identity.pid);
+      if (actual && actual.startTimeTicks === identity.startTimeTicks && actual.executableSha256 === identity.executableSha256) {
+        try { kill(identity.pid, "SIGTERM"); } catch { /* An already-exited owned process needs no rollback signal. */ }
+      }
+    }
+  } finally { control?.removeAuthentication?.(); }
+}
+
+function validManagedPreparationStatus(managed, request, now) {
+  return hasExactKeys(managed, ["schemaVersion", "launcher", "replacement", "health", "handoff", "ownership", "rollback", "adoption", "fencing"])
+    && managed.schemaVersion === 1
+    && hasExactKeys(managed.launcher, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+    && safeRecoveryIdentity(managed.launcher) && managed.launcher.nonceSha256 === sha256(request.nonce)
+    && hasExactKeys(managed.replacement, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])
+    && safeRecoveryIdentity(managed.replacement) && managed.replacement.executableSha256 === request.launch.executable.sha256
+    && Number.isSafeInteger(managed.replacement.port) && managed.replacement.port >= 1024 && managed.replacement.port <= 65535
+    && managed.replacement.dataHome === request.launch.dataHome
+    && hasExactKeys(managed.health, ["status", "checkedAt", "versionSha256"])
+    && managed.health.status === "healthy" && Number.isSafeInteger(managed.health.checkedAt)
+    && managed.health.checkedAt >= request.issuedAt && managed.health.checkedAt <= now && now - managed.health.checkedAt <= 5_000
+    && HASH.test(managed.health.versionSha256 ?? "")
+    && canonicalJson(managed.handoff) === canonicalJson({ sessionId: request.launch.sessionId, sha256: request.handoffSha256, status: "captured" })
+    && canonicalJson(managed.ownership) === canonicalJson({ job: PREPARATION_JOB, ownerNonceSha256: sha256(request.nonce), status: "external" })
+    && canonicalJson(managed.rollback) === canonicalJson({ status: "armed", scope: "exact-owned-replacement" })
+    && canonicalJson(managed.adoption) === canonicalJson({ status: "pending", requires: "replacement-first-restart" })
+    && canonicalJson(managed.fencing) === canonicalJson({ current: 1, successorMinimum: 2, staleCalls: "reject" });
 }
 
 export function inspectPreparedRecoveryOwner(request, options = {}) {
@@ -1672,7 +2044,8 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
     const statusBytes = readOnlyRegularFile(resolve(retained.directory, "owner-status.json"), 16 * 1024, false, 0o600);
     const status = JSON.parse(statusBytes);
     const now = options.now ?? Date.now();
-    if (!hasExactKeys(status, ["schemaVersion", "requestSha256", "job", "invocationId", "owner", "fence", "fenceState", "lease", "health", "authorizesRestart"])
+    const statusKeys = ["schemaVersion", "requestSha256", "job", "invocationId", "owner", "fence", "fenceState", "lease", "health", "authorizesRestart"];
+    if (!(hasExactKeys(status, statusKeys) || request.launch !== undefined && hasExactKeys(status, [...statusKeys, "managed"]))
       || status.schemaVersion !== 1 || status.requestSha256 !== sha256(retained.bytes) || status.job !== PREPARATION_JOB
       || !/^[0-9a-f]{32}$/.test(status.invocationId ?? "") || !safeRecoveryIdentity(status.owner)
       || status.owner.nonceSha256 !== sha256(request.nonce) || status.fence !== 1 || status.fenceState !== "reserved"
@@ -1681,6 +2054,7 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
       || !Number.isSafeInteger(status.lease.expiresAt) || status.lease.issuedAt > now || status.lease.expiresAt <= now
       || status.lease.expiresAt > request.expiresAt || status.lease.expiresAt - status.lease.issuedAt > request.contract.maximumLeaseMs
       || now < request.issuedAt || now >= request.expiresAt
+      || request.launch !== undefined && !validManagedPreparationStatus(status.managed, request, now)
       || recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) return null;
     const job = inspectPreparationJob(options.run);
     if (job.LoadState !== "loaded" || job.ActiveState !== "active" || job.SubState !== "running" || job.Job !== ""
@@ -1698,8 +2072,25 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
       || readTrustedRegularFile(script, "Recovery preparation staged source", { expectedMode: 0o400 }).sha256 !== request.sourceSha256
       || !statusBytes.equals(readOnlyRegularFile(resolve(retained.directory, "owner-status.json"), 16 * 1024, false, 0o600))
       || canonicalJson(inspect(status.owner.pid)) !== canonicalJson(owner)) return null;
+    if (request.launch !== undefined) {
+      const launcher = inspect(status.managed.launcher.pid);
+      const replacement = inspect(status.managed.replacement.pid);
+      const launcherEnvironment = (options.environment ?? processEnvironment)(status.managed.launcher.pid);
+      const replacementEnvironment = (options.environment ?? processEnvironment)(status.managed.replacement.pid);
+      if (!launcher || launcher.startTimeTicks !== status.managed.launcher.startTimeTicks
+        || launcher.executableSha256 !== status.managed.launcher.executableSha256
+        || launcher.cwd !== request.contract.binding.worktree
+        || launcherEnvironment?.INGENIUM_RECOVERY_PREPARATION_NONCE !== request.nonce
+        || !replacement || replacement.parentPid !== launcher.pid || replacement.commandName !== "opencode"
+        || replacement.startTimeTicks !== status.managed.replacement.startTimeTicks
+        || replacement.executableSha256 !== status.managed.replacement.executableSha256
+        || replacement.cwd !== request.contract.binding.worktree
+        || sha256(replacementEnvironment?.INGENIUM_RESTART_NONCE ?? "") !== status.managed.replacement.nonceSha256
+        || Number(replacementEnvironment?.INGENIUM_OPENCODE_PORT) !== status.managed.replacement.port) return null;
+    }
     return { status: "attested", authorizesRestart: false, job: status.job, invocationId: status.invocationId,
       owner: status.owner, fence: status.fence, fenceState: status.fenceState, lease: status.lease, health: status.health,
+      ...(status.managed ? { managed: status.managed } : {}),
       sourceHead: request.contract.sourceHead, sourceSha256: request.sourceSha256,
       bindingSha256: sha256(canonicalJson(request.contract.binding)), handoffSha256: request.handoffSha256,
       evidenceSha256: sha256(statusBytes) };
@@ -1728,7 +2119,9 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
   if (!self) { source.close(); throw new Error("Recovery preparation owner identity is unavailable"); }
   const statusPath = resolve(retained.directory, "owner-status.json");
   let previous;
+  let managedControl;
   try {
+    if (request.launch) managedControl = await (dependencies.startManagedParent ?? startPreparedManagedParent)(request, dependencies);
     while (Date.now() < request.expiresAt) {
       if (recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) break;
       source.revalidate();
@@ -1740,11 +2133,12 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
       if (!parent || parent.startTimeTicks !== request.parent.startTimeTicks || parent.executableSha256 !== request.parent.executableSha256) break;
       const now = Date.now();
       if (now < request.issuedAt) throw new Error("Recovery preparation clock changed");
+      if (managedControl) managedControl.evidence = await managedControl.refresh();
       const status = { schemaVersion: 1, requestSha256: sha256(retained.bytes), job: PREPARATION_JOB,
         invocationId,
         owner: { pid: self.pid, startTimeTicks: self.startTimeTicks, executableSha256: self.executableSha256, nonceSha256: sha256(request.nonce) },
         fence: 1, fenceState: "reserved", lease: { issuedAt: now, expiresAt: Math.min(now + request.contract.maximumLeaseMs, request.expiresAt) },
-        health: "ready", authorizesRestart: false };
+        health: "ready", authorizesRestart: false, ...(managedControl ? { managed: managedControl.evidence } : {}) };
       const bytes = Buffer.from(canonicalJson(status));
       if (previous) {
         if (!previous.equals(readOnlyRegularFile(statusPath, 16 * 1024, false, 0o600))) throw new Error("Recovery preparation status changed");
@@ -1754,7 +2148,11 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
       previous = bytes;
       await (dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 1_000))))();
     }
-  } finally { source.close(); }
+  } finally {
+    if (managedControl) (dependencies.stopManagedParent ?? stopPreparedManagedParent)(managedControl,
+      dependencies.inspect ?? inspectAncestor, dependencies.kill ?? process.kill);
+    source.close();
+  }
 }
 
 export async function runRecoveryPreparation(argv = process.argv, dependencies = {}) {
@@ -1813,7 +2211,8 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     const now = Date.now();
     request = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
       sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
-      parent: inputs.capture.snapshot.parent, issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
+      parent: inputs.capture.snapshot.parent, ...(inputs.launch ? { launch: inputs.launch } : {}),
+      issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
     ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(request)));
     const stagedSource = resolve(directory, "owner.mjs");
     ownedFile(stagedSource, inputs.source.bytes, true, 0o400);
@@ -1853,7 +2252,10 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     phase = "confirm";
     const confirmed = await (dependencies.collectInputs ?? collectPreparationInputs)(sourceHandle);
     if (canonicalJson(confirmed.capture.snapshot) !== canonicalJson(inputs.capture.snapshot)
-      || canonicalJson(confirmed.binding) !== canonicalJson(inputs.binding)) throw new Error("Recovery preparation capture changed");
+      || canonicalJson(confirmed.binding) !== canonicalJson(inputs.binding)
+      || canonicalJson(confirmed.launch ?? null) !== canonicalJson(inputs.launch ?? null)) {
+      throw new Error("Recovery preparation capture changed");
+    }
     sourceHandle.revalidate();
     evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
     if (!evidence) throw new Error("Recovery preparation owner changed");

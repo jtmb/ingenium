@@ -400,6 +400,24 @@ function legacyFixture() {
 }
 
 describe("legacy pre-admission capture", () => {
+  it("captures an exact active session from the legacy parent's durable export when no control-plane port exists", async () => {
+    const f = legacyFixture();
+    Object.assign(f.parent, { port: null, sessionId: "ses_exact", dataHome: join(root, ".local/share/opencode"),
+      environment: { HOME: root } });
+    f.inspect.mockReturnValue({ ...f.parent, commandName: "opencode", ports: [], nonce: undefined });
+    const exported = { info: f.payloads["/session/ses_exact"], messages: f.payloads["/session/ses_exact/message"] };
+    const execute = vi.fn(() => ({ status: 0, signal: null, stdout: Buffer.from(JSON.stringify(exported)), stderr: Buffer.alloc(0) }));
+
+    const result = await shim.captureLegacyRecoveryPreAdmission(f.parent, binding, f.source, f.request, f.inspect, execute);
+
+    expect(result).toMatchObject({ snapshot: { sessionId: "ses_exact", nonceProvenance: "absent_process_environment",
+      operational: { role: "ingenium-orchestrator" } } });
+    expect(execute).toHaveBeenCalledWith("/proc/100/exe", ["export", "ses_exact", "--pure"], expect.objectContaining({
+      cwd: root, env: { HOME: root, XDG_DATA_HOME: join(root, ".local/share/opencode"), PATH: "/usr/local/bin:/usr/bin:/bin" },
+    }));
+    expect(f.request).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["zero", { metadata: { exit: 0 } }, 0],
     ["nonzero", { metadata: { exitCode: 1 } }, 1],
@@ -617,14 +635,172 @@ function preparationFixture() {
   });
   const ownerOptions = { run, inspect: () => owner, environment: () => ({ INVOCATION_ID: "a".repeat(32) }) };
   const inspectOwner = vi.fn((request: any) => shim.inspectPreparedRecoveryOwner(request, ownerOptions));
-  const collectInputs = vi.fn(async () => ({ binding, capture: await f.capture(), source, disposition: null,
+  const collectInputs: any = vi.fn(async () => ({ binding, capture: await f.capture(), source, disposition: null,
     contract: shim.prepareRecoveryOwnerContract(binding, head) }));
   const dependencies = { openSource: () => sourceHandle, collectInputs, run, inspectOwner, wait: async () => {} };
   return { ...f, directory, source, sourceHandle, run, ownerOptions, inspectOwner, collectInputs, dependencies,
     prepare: () => shim.runRecoveryPreparation(["node", script], dependencies) };
 }
 
+function managedPreparationLaunch() {
+  const launcher = join(root, "ingenium-opencode");
+  writeFileSync(launcher, "fixture launcher", { mode: 0o500 });
+  const executable = realpathSync(process.execPath);
+  const dataHome = join(root, ".local/share/opencode");
+  mkdirSync(dataHome, { recursive: true, mode: 0o700 });
+  return {
+    schemaVersion: 1, kind: "legacy-managed-parent", sessionId: "ses_exact", dataHome,
+    launcher: { path: launcher, sha256: hash(readFileSync(launcher)), releaseSha256: hash("release"), artifactSha256: hash("artifact") },
+    executable: { path: executable, sha256: hash(readFileSync(executable)) },
+    environment: { HOME: root, XDG_DATA_HOME: join(root, ".local/share/opencode"),
+      INGENIUM_API_URL: environment.INGENIUM_API_URL, INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
+      INGENIUM_WORKSPACE_ID: binding.workspaceId, INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
+      INGENIUM_WORKTREE: root, INGENIUM_MCP_AUDIENCE: "mcp", INGENIUM_MCP_CREDENTIAL_FILE: join(root, ".opencode/.ingenium-mcp-credential"),
+      INGENIUM_MCP_CREDENTIAL_PURPOSE: "general", INGENIUM_OPENCODE_EXECUTABLE: executable },
+  };
+}
+
 describe("fixed recovery preparation transaction", () => {
+  it("persists the exact private recovery authentication before authenticated managed-parent health", async () => {
+    const launch = managedPreparationLaunch();
+    const request = { contract: shim.prepareRecoveryOwnerContract(binding, head), launch, nonce: "n".repeat(43),
+      parent: { pid: 100, startTimeTicks: 10, executableSha256: launch.executable.sha256, nonceSha256: "0".repeat(64) },
+      handoffSha256: hash("handoff"), issuedAt: Date.now() };
+    let spawned: any;
+    const child = { pid: 202, once: vi.fn(), kill: vi.fn() };
+    const spawn = vi.fn((_path: string, _args: string[], options: any) => { spawned = options; return child; });
+    const replacementNonce = "r".repeat(43);
+    const inspect = (pid: number) => pid === 202
+      ? { pid, parentPid: 101, startTimeTicks: 22, executableSha256: hash("node"), cwd: root, commandName: "node", argv: ["node"] }
+      : { pid, parentPid: 202, startTimeTicks: 23, executableSha256: launch.executable.sha256, cwd: root, commandName: "opencode", argv: ["opencode"] };
+    const processEnvironment = (pid: number) => pid === 202
+      ? { INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce }
+      : pid === 203 ? {
+      INGENIUM_OPENCODE_PORT: "4099", INGENIUM_RESTART_NONCE: replacementNonce,
+      OPENCODE_SERVER_PASSWORD: spawned.env.OPENCODE_SERVER_PASSWORD,
+      INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce,
+      INGENIUM_RECOVERY_OWNER_PID: "202", INGENIUM_RECOVERY_OWNER_START_TICKS: "22",
+    } : {};
+    const health = vi.fn(async (_url: string, init: RequestInit) => {
+      const expected = `Basic ${Buffer.from(`opencode:${spawned.env.OPENCODE_SERVER_PASSWORD}`).toString("base64")}`;
+      expect(new Headers(init.headers).get("authorization") === expected).toBe(true);
+      return new Response(JSON.stringify({ healthy: true, version: "1.0.0" }));
+    });
+
+    const control = await shim.startPreparedManagedParent(request, { spawn, inspect, environment: processEnvironment,
+      children: () => [203], listeningPorts: () => [4099], request: health, wait: async () => {} });
+    control.evidence = await control.refresh();
+
+    expect(spawn).toHaveBeenCalledWith(launch.launcher.path, ["serve"], expect.objectContaining({ cwd: root, shell: false, stdio: "ignore" }));
+    expect(control.evidence).toMatchObject({
+      replacement: { pid: 203, port: 4099, dataHome: launch.dataHome }, health: { status: "healthy" },
+      handoff: { sessionId: "ses_exact", sha256: request.handoffSha256, status: "captured" },
+      rollback: { status: "armed", scope: "exact-owned-replacement" },
+      adoption: { status: "pending", requires: "replacement-first-restart" },
+      fencing: { current: 1, successorMinimum: 2, staleCalls: "reject" },
+    });
+    const authenticationPath = join(launch.dataHome, ".ingenium-recovery-server-auth.json");
+    const authentication = JSON.parse(readFileSync(authenticationPath, "utf8"));
+    const authenticationStat = lstatSync(authenticationPath);
+    expect(Object.keys(authentication).sort()).toEqual(["password", "username"]);
+    expect(authentication.username).toBe("opencode");
+    expect(authentication.password === spawned.env.OPENCODE_SERVER_PASSWORD).toBe(true);
+    expect(authenticationStat.mode & 0o777).toBe(0o600);
+    expect(authenticationStat.uid).toBe(process.getuid!());
+    expect(authenticationStat.nlink).toBe(1);
+    expect(authenticationStat.isSymbolicLink()).toBe(false);
+    expect(health).toHaveBeenCalledTimes(2);
+    expect(child.kill).not.toHaveBeenCalled();
+  });
+
+  it("sends no authenticated health request when listener ownership is absent or changes", async () => {
+    const launch = managedPreparationLaunch();
+    const request = { contract: shim.prepareRecoveryOwnerContract(binding, head), launch, nonce: "n".repeat(43),
+      parent: { pid: 100, startTimeTicks: 10, executableSha256: launch.executable.sha256, nonceSha256: "0".repeat(64) },
+      handoffSha256: hash("handoff"), issuedAt: Date.now() };
+    let spawned: any;
+    let ownsListener = false;
+    const child = { pid: 202, once: vi.fn(), kill: vi.fn() };
+    const spawn = vi.fn((_path: string, _args: string[], options: any) => { spawned = options; return child; });
+    const inspect = (pid: number) => pid === 202
+      ? { pid, parentPid: 101, startTimeTicks: 22, executableSha256: hash("node"), cwd: root, commandName: "node", argv: ["node"] }
+      : { pid, parentPid: 202, startTimeTicks: 23, executableSha256: launch.executable.sha256, cwd: root, commandName: "opencode", argv: ["opencode"] };
+    const processEnvironment = (pid: number) => pid === 202
+      ? { INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce }
+      : { INGENIUM_OPENCODE_PORT: "4099", INGENIUM_RESTART_NONCE: "r".repeat(43),
+        OPENCODE_SERVER_PASSWORD: spawned.env.OPENCODE_SERVER_PASSWORD,
+        INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce,
+        INGENIUM_RECOVERY_OWNER_PID: "202", INGENIUM_RECOVERY_OWNER_START_TICKS: "22" };
+    const health = vi.fn(async () => new Response(JSON.stringify({ healthy: true, version: "1.0.0" })));
+    const dependencies = { spawn, inspect, environment: processEnvironment, children: () => [203],
+      listeningPorts: () => ownsListener ? [4099] : [], request: health, wait: async () => {} };
+
+    await expect(shim.startPreparedManagedParent(request, dependencies)).rejects.toThrow("did not become healthy");
+    expect(health).not.toHaveBeenCalled();
+    expect(existsSync(join(launch.dataHome, ".ingenium-recovery-server-auth.json"))).toBe(false);
+
+    ownsListener = true;
+    const control = await shim.startPreparedManagedParent(request, dependencies);
+    expect(health).toHaveBeenCalledOnce();
+    ownsListener = false;
+    await expect(control.refresh()).rejects.toThrow("identity changed");
+    expect(health).toHaveBeenCalledOnce();
+  });
+
+  it("prepares a legacy-unenrolled managed replacement in one authorized transaction without signaling the old parent", async () => {
+    const f = preparationFixture();
+    const launch = managedPreparationLaunch();
+    launch.executable.sha256 = f.parent.executableSha256;
+    const captured = await f.capture();
+    f.collectInputs.mockResolvedValue({ binding, capture: captured, source: f.source, disposition: null, launch,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
+    const normalRun = f.run.getMockImplementation()!;
+    const replacementNonce = "r".repeat(43);
+    f.run.mockImplementation((command, args, options) => {
+      const result = normalRun(command, args, options);
+      if (command === "/usr/bin/systemd-run") {
+        const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
+        const statusPath = join(f.directory, "owner-status.json");
+        const status = JSON.parse(readFileSync(statusPath, "utf8"));
+        json(statusPath, { ...status, managed: {
+          schemaVersion: 1,
+          launcher: { pid: 202, startTimeTicks: 22, executableSha256: hash("node"), nonceSha256: hash(request.nonce) },
+          replacement: { pid: 203, startTimeTicks: 23, executableSha256: launch.executable.sha256,
+            nonceSha256: hash(replacementNonce), port: 4099, dataHome: launch.dataHome },
+          health: { status: "healthy", checkedAt: Date.now(), versionSha256: hash("1.0.0") },
+          handoff: { sessionId: launch.sessionId, sha256: request.handoffSha256, status: "captured" },
+          ownership: { job: "ingenium-recovery-owner.service", ownerNonceSha256: hash(request.nonce), status: "external" },
+          rollback: { status: "armed", scope: "exact-owned-replacement" },
+          adoption: { status: "pending", requires: "replacement-first-restart" },
+          fencing: { current: 1, successorMinimum: 2, staleCalls: "reject" },
+        } });
+      }
+      return result;
+    });
+    const owner = { pid: 101, parentPid: 1, startTimeTicks: 42, executableSha256: hash("exe"), cwd: root,
+      commandName: "node", argv: ["node", join(f.directory, "owner.mjs"), "--recovery-preparation-owner"] };
+    const ownerOptions = f.ownerOptions as any;
+    ownerOptions.inspect = (pid: number) => pid === 101 ? owner : pid === 202
+      ? { pid, parentPid: 101, startTimeTicks: 22, executableSha256: hash("node"), cwd: root, commandName: "node", argv: ["node"] }
+      : { pid, parentPid: 202, startTimeTicks: 23, executableSha256: launch.executable.sha256, cwd: root,
+        commandName: "opencode", argv: ["opencode", "serve"] };
+    ownerOptions.environment = (pid: number) => {
+      const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
+      return pid === 101 ? { INVOCATION_ID: "a".repeat(32) }
+        : pid === 202 ? { INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce }
+          : { INGENIUM_RESTART_NONCE: replacementNonce, INGENIUM_OPENCODE_PORT: "4099" };
+    };
+
+    const result = await f.prepare();
+
+    expect(result).toMatchObject({ status: "prepared", authorizesRestart: false, owner: { managed: {
+      replacement: { pid: 203, port: 4099 }, health: { status: "healthy" },
+      rollback: { status: "armed" }, adoption: { status: "pending" }, fencing: { staleCalls: "reject" },
+    } } });
+    expect(f.run.mock.calls.filter(([command]) => command === "/usr/bin/systemd-run")).toHaveLength(1);
+    expect(new Set(f.run.mock.calls.map(([command]) => command))).toEqual(new Set(["/usr/bin/systemctl", "/usr/bin/systemd-run"]));
+  });
+
   it("reconciles an absent unit exit only with complete unambiguous systemd properties", () => {
     const stdout = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nJob=\n";
     expect(shim.inspectPreparationJob(() => { throw Object.assign(new Error("not found"), { status: 1, stdout }); }))
@@ -720,6 +896,49 @@ describe("fixed recovery preparation transaction", () => {
     expect(existsSync(join(f.directory, "owner-status.next"))).toBe(false);
   });
 
+  it("keeps the managed replacement under the external owner and stops only that owned replacement on rollback", async () => {
+    const f = preparationFixture();
+    const launch = managedPreparationLaunch();
+    launch.executable.sha256 = f.parent.executableSha256;
+    f.collectInputs.mockResolvedValue({ binding, capture: await f.capture(), source: f.source, disposition: null, launch,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
+    f.inspectOwner.mockReturnValue({ status: "attested", authorizesRestart: false });
+    await f.prepare();
+    rmSync(join(f.directory, "owner-status.json"));
+    const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
+    const owner = { pid: 101, startTimeTicks: 42, executableSha256: hash("exe") };
+    const managed = {
+      schemaVersion: 1,
+      launcher: { pid: 202, startTimeTicks: 22, executableSha256: hash("node"), nonceSha256: hash(request.nonce) },
+      replacement: { pid: 203, startTimeTicks: 23, executableSha256: launch.executable.sha256,
+        nonceSha256: hash("r".repeat(43)), port: 4099, dataHome: launch.dataHome },
+      health: { status: "healthy", checkedAt: Date.now(), versionSha256: hash("1.0.0") },
+      handoff: { sessionId: launch.sessionId, sha256: request.handoffSha256, status: "captured" },
+      ownership: { job: "ingenium-recovery-owner.service", ownerNonceSha256: hash(request.nonce), status: "external" },
+      rollback: { status: "armed", scope: "exact-owned-replacement" },
+      adoption: { status: "pending", requires: "replacement-first-restart" },
+      fencing: { current: 1, successorMinimum: 2, staleCalls: "reject" },
+    };
+    const control = { refresh: vi.fn(async () => ({ ...managed, health: { ...managed.health, checkedAt: Date.now() } })) };
+    const stopManagedParent = vi.fn();
+    let ticks = 0;
+    const wait = vi.fn(async () => { if (++ticks === 2) json(join(f.directory, "rollback.json"), { authorizesRestart: false }); });
+    const stagedSource = join(f.directory, "owner.mjs");
+
+    await shim.runPreparedRecoveryOwner(["node", stagedSource, "--recovery-preparation-owner"], {
+      sourcePath: stagedSource, cwd: root, environment: { INVOCATION_ID: "a".repeat(32) },
+      openSource: () => f.sourceHandle, inspect: (pid: number) => pid === f.parent.pid ? f.parent : owner,
+      run: f.run, wait, startManagedParent: vi.fn(async () => control), stopManagedParent,
+    });
+
+    expect(control.refresh).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(readFileSync(join(f.directory, "owner-status.json"), "utf8"))).toMatchObject({
+      managed: { replacement: { pid: 203 }, health: { status: "healthy" }, rollback: { status: "armed" } },
+    });
+    expect(stopManagedParent).toHaveBeenCalledOnce();
+    expect(stopManagedParent.mock.calls[0]![0]).toMatchObject({ evidence: { replacement: { pid: 203 }, launcher: { pid: 202 } } });
+  });
+
   it("refuses a foreign owner job and retains changed rollback evidence rather than deleting it", async () => {
     const f = preparationFixture();
     const normal = f.run.getMockImplementation()!;
@@ -777,12 +996,39 @@ describe("fixed recovery preparation transaction", () => {
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
   });
 
-  it("reports the exact inspect path when the current parent has no recovery control plane", async () => {
+  it("routes a legacy-unenrolled parent without a control-plane port to the attested external launcher", async () => {
+    const f = preparationFixture();
+    const parent = { ...f.parent, port: null, sessionId: "ses_exact", dataHome: join(root, ".local/share/opencode"),
+      environment: { HOME: root } };
+    const launch = managedPreparationLaunch();
+    launch.executable.sha256 = parent.executableSha256;
+    const capture = { snapshot: { parent: Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"]
+      .map((key) => [key, parent[key]])) }, summary: { status: "working" } };
+    const captureLegacy = vi.fn(async () => capture);
+    const inspectLauncher = vi.fn(() => launch);
+    const inspectDeployment = vi.fn(() => ({ status: "attested", revision: head }));
+    const auth = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" })) : auth(url, init);
+
+    const inputs = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
+      ancestry: () => ({ status: "exact", parent }), gitSummary: () => ({ status: "validated", head,
+        sourceMatchesHead: true, dirtyPaths: [] }), captureLegacy, inspectLauncher, inspectDeployment });
+
+    expect(inputs).toMatchObject({ capture, launch: { kind: "legacy-managed-parent", sessionId: "ses_exact" } });
+    expect(inspectDeployment).toHaveBeenCalledOnce();
+    expect(inspectLauncher).toHaveBeenCalledOnce();
+    expect(captureLegacy).toHaveBeenCalledOnce();
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+  });
+
+  it("reports the exact inspect path when a fresh-nonce parent has no recovery control plane", async () => {
     const f = preparationFixture();
     const auth = authorityRequest();
     const request = async (url: string, init: RequestInit) => url.endsWith("/health")
       ? new Response(JSON.stringify({ status: "ok" })) : auth(url, init);
-    const parent = { ...f.parent, port: null };
+    const nonce = "n".repeat(43);
+    const parent = { ...f.parent, port: null, nonceSha256: hash(nonce), environment: { ...f.parent.environment, INGENIUM_RESTART_NONCE: nonce } };
     const inspectFailure = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
       ancestry: () => ({ status: "exact", parent }), gitSummary: () => ({ status: "validated", head,
         sourceMatchesHead: true, dirtyPaths: [] }) }).then(() => null, (error: unknown) => error);
