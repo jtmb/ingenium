@@ -65,6 +65,7 @@ import {
   parseCrossReadResponse,
   mappedPromptBody,
   MAPPED_CHECK_COMMAND,
+  projectOpenCodeInspection,
   projectTurn,
   prepareRuntimeProvider,
   preflightHarnessIdentity,
@@ -821,15 +822,19 @@ test("uses the launched OpenCode binary version for readiness", async () => {
   assert.equal(options.expectedOpenCodeVersion, "1.18.25");
 });
 
-test("T65 F4 attests permitted internal C against the deployed runtime OpenCode pin", async () => {
+test("T65 F4 derives internal C model metadata from the mapped config when the runtime omits it", async () => {
   const fixture = fixtureRepository();
+  const configPath = join(fixture.root, "opencode.json");
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  config.agent["ingenium-explore"] = { model: "openai/gpt-5.6-luna", variant: "max" };
+  writeFileSync(configPath, JSON.stringify(config));
   const options = parseHarnessOptions(validArguments(fixture), {});
 
   const inspection = await inspectReady({
     label: "C",
     inspect: async () => ({
       health: { healthy: true, version: "1.18.9" },
-      agents: [{ name: options.agents.C.name, mode: "subagent", model: { providerID: "openai", modelID: "gpt-5.6-sol" }, variant: "medium",
+      agents: [{ name: options.agents.C.name, mode: "subagent",
         permission: [{ permission: "*", pattern: "*", action: "deny" }, { permission: "read", pattern: "*", action: "allow" }] }],
       providers: { providers: [{ id: "openai", connected: true }] },
       mcp: { ingenium: { status: "connected" } },
@@ -837,6 +842,19 @@ test("T65 F4 attests permitted internal C against the deployed runtime OpenCode 
   } as never, options, new AbortController().signal, 100);
 
   assert.equal((inspection.health as { version: string }).version, options.expectedRuntimeOpenCodeVersion);
+  assert.deepEqual(mappedPromptBody("C", "", options), {
+    agent: "ingenium-explore",
+    model: { providerID: "openai", modelID: "gpt-5.6-luna" },
+    variant: "max",
+    parts: [{ type: "text", text: "" }],
+  });
+  assert.deepEqual(projectOpenCodeInspection("C", inspection, options).agent, {
+    name: "ingenium-explore",
+    mode: "subagent",
+    providerId: "openai",
+    modelId: "gpt-5.6-luna",
+    variant: "max",
+  });
 });
 
 test("selects only the requested protected provider credential for internal C", () => {

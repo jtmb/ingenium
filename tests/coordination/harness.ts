@@ -1021,7 +1021,9 @@ export function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonReco
   const agent = value.agents.find((entry) => (entry as JsonRecord).name === agentName) as JsonRecord | undefined;
   const model = agent?.model && typeof agent.model === "object" ? agent.model as JsonRecord : {};
   required(agent?.mode === mapping.mode && agent.hidden !== true && agent.disable !== true, `${label} permitted mapped agent is unavailable`);
-  required(`${model.providerID}/${model.modelID}` === mapping.model && agent.variant === mapping.variant,
+  const exactModelMetadata = `${model.providerID}/${model.modelID}` === mapping.model && agent.variant === mapping.variant;
+  const runtimeOmitsModelMetadata = label === "C" && agent.model === undefined && agent.variant === undefined;
+  required(exactModelMetadata || runtimeOmitsModelMetadata,
     `${label} configured agent mapping does not match the requested model`);
   required(Array.isArray(agent.permission), `${label} mapped tool surface is missing`);
   const rules = agent.permission as JsonRecord[];
@@ -1050,18 +1052,23 @@ export function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonReco
   required(expectedMcp.status === "connected", `${label} Ingenium MCP is disconnected`);
 }
 
-function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, options: HarnessOptions): JsonRecord {
+export function projectOpenCodeInspection(label: "A" | "B" | "C", value: JsonRecord, options: HarnessOptions): JsonRecord {
   const agents = value.agents as JsonRecord[];
-  const agentName = options.agents[label].name;
+  const mapping = options.agents[label];
+  const agentName = mapping.name;
   const agent = agents.find((entry) => entry.name === agentName)!;
-  const model = agent.model && typeof agent.model === "object" ? agent.model as JsonRecord : {};
+  const runtimeOmitsModelMetadata = label === "C" && agent.model === undefined && agent.variant === undefined;
+  const model = runtimeOmitsModelMetadata
+    ? mappedPromptBody(label, "", options).model as JsonRecord
+    : agent.model && typeof agent.model === "object" ? agent.model as JsonRecord : {};
   const providers = value.providers as JsonRecord;
   const mcp = value.mcp as JsonRecord;
   const mcpEntry = mcp.ingenium as JsonRecord;
   return {
     label,
     version: (value.health as JsonRecord).version,
-    agent: { name: agent.name, mode: agent.mode, providerId: model.providerID ?? null, modelId: model.modelID ?? null, variant: agent.variant ?? null },
+    agent: { name: agent.name, mode: agent.mode, providerId: model.providerID ?? null, modelId: model.modelID ?? null,
+      variant: runtimeOmitsModelMetadata ? mapping.variant : agent.variant ?? null },
     toolSurface: agent.permission,
     profileSha256: sha256(JSON.stringify(options.agents[label])),
     providerConnected: label === "C"
