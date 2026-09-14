@@ -588,7 +588,11 @@ function legacyQueryRow(parent: { pid: number; startTimeTicks: number }, todos =
     todoPartId: "prt_todo",
     todoCompletedAt: 1_800_000_000_000,
     todoInput: JSON.stringify({ todos }),
-    assistantMessageId: "msg_assistant",
+    todoAssistantMessageId: "msg_0a010feaf001ybavkgP3zX2igj",
+    todoAssistantSessionId: "ses_exact",
+    todoAssistantRole: "assistant",
+    assistantMessageId: "msg_0a012b71b001XbTeSPwt1svKqz",
+    assistantSessionId: "ses_exact",
     assistantRole: "assistant",
     assistantAgent: "ingenium-orchestrator",
     assistantProviderId: "openai",
@@ -604,7 +608,7 @@ function markedLegacyCapture(capture: any, parent: any) {
 }
 
 describe("legacy pre-admission capture", () => {
-  it("captures a 97,775,138-byte legacy session through bounded metadata queries without export", async () => {
+  it("captures a large legacy session with distinct Todo-owner and current assistants through bounded metadata queries", async () => {
     const f = legacyFixture();
     Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
       environment: { HOME: root } });
@@ -658,7 +662,8 @@ describe("legacy pre-admission capture", () => {
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toMatch(/^SELECT /);
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|PRAGMA)\b/);
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("LIMIT 2");
-    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("p.message_id = a.id");
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("todoAssistant.id = p.message_id");
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toContain("p.message_id = a.id");
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("assistantModelId");
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toMatch(/\$\.(?:text|reasoning)|\$\.state\.(?:output|error)/);
     expect(raw.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
@@ -687,7 +692,8 @@ describe("legacy pre-admission capture", () => {
   it.each(["wrong pid", "wrong start", "wrong source", "wrong project ID", "wrong workspace", "wrong worktree", "wrong storage",
     "unsafe path", "missing marker", "session mismatch", "known parent mismatch", "duplicate marker", "unexpected marker field",
     "unexpected Todo field", "zero matches", "child", "foreign directory", "multiple matches", "candidate overflow",
-    "Todo part metadata", "Todo completion metadata", "assistant message metadata", "assistant role", "assistant agent",
+    "Todo part metadata", "Todo completion metadata", "Todo owner message metadata", "Todo owner session",
+    "Todo owner role", "assistant message metadata", "assistant session", "assistant role", "assistant agent",
     "assistant provider", "assistant model", "assistant status", "unexpected row field"])(
     "rejects strict marker discovery for %s", (failure) => {
       const f = legacyFixture();
@@ -714,7 +720,11 @@ describe("legacy pre-admission capture", () => {
       });
       if (failure === "Todo part metadata") row.todoPartId = "";
       if (failure === "Todo completion metadata") row.todoCompletedAt = "now";
+      if (failure === "Todo owner message metadata") row.todoAssistantMessageId = "";
+      if (failure === "Todo owner session") row.todoAssistantSessionId = "ses_other";
+      if (failure === "Todo owner role") row.todoAssistantRole = "user";
       if (failure === "assistant message metadata") row.assistantMessageId = "";
+      if (failure === "assistant session") row.assistantSessionId = "ses_other";
       if (failure === "assistant role") row.assistantRole = "user";
       if (failure === "assistant agent") row.assistantAgent = "foreign agent";
       if (failure === "assistant provider") row.assistantProviderId = "private provider";
@@ -736,7 +746,7 @@ describe("legacy pre-admission capture", () => {
     },
   );
 
-  it.each(["session", "marker", "assistant model"])("rejects changed %s metadata between bounded queries", async (change) => {
+  it.each(["session", "marker", "Todo owner", "assistant model"])("rejects changed %s metadata between bounded queries", async (change) => {
     const f = legacyFixture();
     Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
       environment: { HOME: root } });
@@ -746,6 +756,7 @@ describe("legacy pre-admission capture", () => {
     const changed = structuredClone(initial);
     if (change === "session") changed.sessionId = "ses_other";
     if (change === "marker") changed.todoInput = JSON.stringify({ todos: strictLegacyTodos(f.parent, { nextWork: "changed" }) });
+    if (change === "Todo owner") changed.todoAssistantMessageId = "msg_changed_todo_owner";
     if (change === "assistant model") changed.assistantModelId = "gpt-5.6-luna";
     let calls = 0;
     const buffers: Buffer[] = [];

@@ -105,7 +105,11 @@ export const LEGACY_RECOVERY_SESSION_QUERY = `SELECT s.id AS sessionId,
        p.id AS todoPartId,
        json_extract(p.data, '$.state.time.end') AS todoCompletedAt,
        json_extract(p.data, '$.state.input') AS todoInput,
+       todoAssistant.id AS todoAssistantMessageId,
+       todoAssistant.session_id AS todoAssistantSessionId,
+       json_extract(todoAssistant.data, '$.role') AS todoAssistantRole,
        a.id AS assistantMessageId,
+       a.session_id AS assistantSessionId,
        json_extract(a.data, '$.role') AS assistantRole,
        json_extract(a.data, '$.agent') AS assistantAgent,
        json_extract(a.data, '$.providerID') AS assistantProviderId,
@@ -128,6 +132,10 @@ JOIN part AS p ON p.id = (
   ORDER BY json_extract(candidate.data, '$.state.time.end') DESC, candidate.id DESC
   LIMIT 1
 )
+AND p.session_id = s.id
+JOIN message AS todoAssistant ON todoAssistant.id = p.message_id
+  AND todoAssistant.session_id = s.id
+  AND json_extract(todoAssistant.data, '$.role') = 'assistant'
 JOIN message AS a ON a.id = (
   SELECT candidate.id
   FROM message AS candidate
@@ -136,8 +144,8 @@ JOIN message AS a ON a.id = (
   ORDER BY candidate.time_created DESC, candidate.id DESC
   LIMIT 1
 )
+AND a.session_id = s.id
 WHERE s.parent_id IS NULL
-  AND p.message_id = a.id
   AND length(CAST(json_extract(p.data, '$.state.input') AS BLOB)) <= 49152
   AND instr(json_extract(p.data, '$.state.input'), '[RECOVERY_BIND:') > 0
   AND instr(json_extract(p.data, '$.state.input'), '[RECOVERY_HANDOFF]') > 0
@@ -1537,11 +1545,14 @@ export function discoverLegacyRecoverySession(parent, binding, source, execute =
     const matches = [];
     for (const row of rows) {
       if (!hasExactKeys(row, ["sessionId", "directory", "parentId", "todoPartId", "todoCompletedAt", "todoInput",
-        "assistantMessageId", "assistantRole", "assistantAgent", "assistantProviderId", "assistantModelId", "assistantStatus"])
+        "todoAssistantMessageId", "todoAssistantSessionId", "todoAssistantRole", "assistantMessageId",
+        "assistantSessionId", "assistantRole", "assistantAgent", "assistantProviderId", "assistantModelId", "assistantStatus"])
         || !SAFE_SESSION.test(row.sessionId ?? "") || typeof row.directory !== "string" || row.parentId !== null
         || !SAFE_ID.test(row.todoPartId ?? "") || !Number.isSafeInteger(row.todoCompletedAt) || row.todoCompletedAt < 1
         || typeof row.todoInput !== "string" || Buffer.byteLength(row.todoInput, "utf8") > LEGACY_TODO_INPUT_MAX_BYTES
-        || !SAFE_ID.test(row.assistantMessageId ?? "") || row.assistantRole !== "assistant"
+        || !SAFE_ID.test(row.todoAssistantMessageId ?? "") || row.todoAssistantSessionId !== row.sessionId
+        || row.todoAssistantRole !== "assistant" || !SAFE_ID.test(row.assistantMessageId ?? "")
+        || row.assistantSessionId !== row.sessionId || row.assistantRole !== "assistant"
         || !SAFE_ID.test(row.assistantAgent ?? "") || !SAFE_MODEL_METADATA.test(row.assistantProviderId ?? "")
         || !SAFE_MODEL_METADATA.test(row.assistantModelId ?? "") || row.assistantStatus !== "working"
         || seen.has(row.sessionId)) return null;
@@ -4041,7 +4052,7 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
     }
     if (!admissionPath || !exists(admissionPath)) {
       (dependencies.writeOutput ?? ((value) => process.stdout.write(value)))(`${output}\n`);
-      return;
+      return preflight.admissible ? 0 : 1;
     }
     try {
       let admission = (dependencies.readAdmission ?? readRecoveryAdmission)(
@@ -4073,6 +4084,7 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
       }
       minted = undefined;
       await (dependencies.executeAdmitted ?? runAdmittedRecoveryBootstrapShim)(argv, context, sourceHandle.source);
+      return process.exitCode ?? 0;
     } catch (error) {
       if (minted) await minted.rollback();
       throw error;
@@ -4104,5 +4116,5 @@ if (PREFLIGHT_REQUESTED !== undefined) {
 } else if (invokedPath === import.meta.url && process.argv[2] === PREPARATION_OWNER_ARGUMENT) {
   await runPreparedRecoveryOwner();
 } else if (MODULE_ATTESTATION || invokedPath === import.meta.url) {
-  await runRecoveryBootstrapShim(MODULE_ATTESTATION ? [process.execPath, MODULE_ATTESTATION.sourcePath] : process.argv);
+  process.exitCode = await runRecoveryBootstrapShim(MODULE_ATTESTATION ? [process.execPath, MODULE_ATTESTATION.sourcePath] : process.argv);
 }

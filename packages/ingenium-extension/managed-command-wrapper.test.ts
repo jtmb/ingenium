@@ -1688,6 +1688,22 @@ describe("managed command wrappers", () => {
       }));
       expect(runner.mock.calls[0]![2].env).not.toHaveProperty("INGENIUM_RECOVERY_PREPARATION");
 
+      const rejectedDescriptor = openSync("/dev/null", constants.O_RDONLY);
+      runner.mockReturnValueOnce({ status: 1, signal: null });
+      expect(runManagedRecoveryBootstrap(import.meta.url.replace("managed-command-wrapper.test.ts", "scripts/managed-command-wrapper.ts"), {
+        preflight: true,
+        runner: runner as any,
+        openBootstrap: () => ({ descriptor: rejectedDescriptor, bytes, context: { schemaVersion: 1, kind: "source-bootstrap",
+          sourcePath: recoveryBootstrapShim, repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(bytes) } }),
+      })).toBe(1);
+
+      runRecoveryBootstrap.mockReturnValueOnce(1);
+      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
+        runRecoveryBootstrap,
+        runCommand,
+      });
+      expect(process.exitCode).toBe(1);
+
       const forged = JSON.stringify({ schemaVersion: 1, kind: "source-bootstrap", sourcePath: recoveryBootstrapShim,
         repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(readFileSync(recoveryBootstrapShim)) });
       expect(() => execFileSync(process.execPath, [recoveryBootstrapShim], { env: {
@@ -1757,7 +1773,7 @@ describe("managed command wrappers", () => {
 
     expect(writeOutput).toHaveBeenCalledOnce();
     expect(writeOutput).toHaveBeenCalledWith(`${canonicalTestJson({ digest, preflight })}\n`);
-    expect(result).toBeUndefined();
+    expect(result).toBe(0);
     expect(JSON.parse(writeOutput.mock.calls[0]![0])).toEqual({ digest, preflight });
     expect(writeOutput.mock.calls[0]![0]).not.toContain("restart-nonce");
     expect(writeOutput.mock.calls[0]![0]).not.toContain("password");
@@ -1765,6 +1781,7 @@ describe("managed command wrappers", () => {
     expect(executeAdmitted).not.toHaveBeenCalled();
 
     const source = readFileSync(recoveryBootstrapShim, "utf8");
+    expect(source).toContain("process.exitCode = await runRecoveryBootstrapShim(");
     const collector = source.slice(
       source.indexOf("export async function collectRecoveryPreflight"),
       source.indexOf("export function recoveryAdmissionPath"),
@@ -1794,7 +1811,7 @@ describe("managed command wrappers", () => {
     const writeOutput = vi.fn();
     const executeAdmitted = vi.fn();
 
-    await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+    const status = await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
       openSource: vi.fn(() => fakeRecoverySourceHandle(preflight)),
       collectPreflight: vi.fn(async () => preflight),
       admissionExists: vi.fn(() => false),
@@ -1803,6 +1820,8 @@ describe("managed command wrappers", () => {
     });
 
     const emitted = JSON.parse(writeOutput.mock.calls[0]![0]);
+    expect(status).toBe(1);
+    expect(Buffer.byteLength(writeOutput.mock.calls[0]![0])).toBeLessThan(16 * 1024);
     expect(emitted.preflight).toMatchObject({
       admissible: false,
       source: {
@@ -1836,7 +1855,7 @@ describe("managed command wrappers", () => {
       const writeOutput = vi.fn();
       const executeAdmitted = vi.fn();
 
-      await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+      const status = await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
         openSource: vi.fn(() => fakeRecoverySourceHandle(preflight)),
         collectPreflight: vi.fn(async () => preflight),
         executeAdmitted,
@@ -1851,6 +1870,7 @@ describe("managed command wrappers", () => {
           expectedMode: "0644",
         },
       });
+      expect(status).toBe(1);
       expect(writeOutput).toHaveBeenCalledOnce();
       expect(executeAdmitted).not.toHaveBeenCalled();
       expect(lstatSync(source).mode & 0o777).toBe(0o674);
@@ -2057,7 +2077,7 @@ describe("managed command wrappers", () => {
       expect(context).toBe(postConsumeCheck.mock.calls[0]![0]);
     });
 
-    await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
+    expect(await shim.runRecoveryBootstrapShim(["node", recoveryBootstrapShim], {
       openSource: vi.fn(() => sourceHandle),
       collectPreflight: vi.fn(async () => preflight),
       admissionPath: "/unread/local/artifact",
@@ -2067,7 +2087,7 @@ describe("managed command wrappers", () => {
       discardAdmission,
       postConsumeCheck,
       executeAdmitted,
-    });
+    })).toBe(0);
 
     expect(calls).toEqual(["consume", "post-consume", "discard", "execute"]);
     expect(discardAdmission).toHaveBeenCalledWith("/unread/local/artifact");
