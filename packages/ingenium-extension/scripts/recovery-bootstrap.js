@@ -80,13 +80,14 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_SESSION = /^[A-Za-z0-9_-]{1,256}$/;
 const SAFE_OPERATIONAL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SAFE_MODEL_METADATA = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
 const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43,128}$/;
 const API_TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const RECOVERY_SOURCE_MAX_BYTES = 256 * 1024;
 const RECOVERY_ADMISSION_MAX_BYTES = 16 * 1024;
 const RECOVERY_ADMISSION_LIFETIME_MS = 15 * 60 * 1_000;
-const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 1024 * 1024;
+const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 256 * 1024;
 const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
 const SERVER_ADMISSION_KEYS = [
   "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
@@ -101,7 +102,20 @@ export const RECOVERY_ADMISSION_RELATIVE_PATH = "tests/artifacts/tui-recovery/pr
 export const LEGACY_RECOVERY_SESSION_QUERY = `SELECT s.id AS sessionId,
        s.directory AS directory,
        s.parent_id AS parentId,
-       json_extract(p.data, '$.state.input') AS todoInput
+       p.id AS todoPartId,
+       json_extract(p.data, '$.state.time.end') AS todoCompletedAt,
+       json_extract(p.data, '$.state.input') AS todoInput,
+       a.id AS assistantMessageId,
+       json_extract(a.data, '$.role') AS assistantRole,
+       json_extract(a.data, '$.agent') AS assistantAgent,
+       json_extract(a.data, '$.providerID') AS assistantProviderId,
+       json_extract(a.data, '$.modelID') AS assistantModelId,
+       CASE
+         WHEN json_type(a.data, '$.error') IS NOT NULL THEN 'invalid'
+         WHEN json_type(a.data, '$.time.completed') IS NULL THEN 'working'
+         WHEN json_type(a.data, '$.time.completed') = 'integer' THEN 'idle'
+         ELSE 'invalid'
+       END AS assistantStatus
 FROM session AS s
 JOIN part AS p ON p.id = (
   SELECT candidate.id
@@ -114,9 +128,21 @@ JOIN part AS p ON p.id = (
   ORDER BY json_extract(candidate.data, '$.state.time.end') DESC, candidate.id DESC
   LIMIT 1
 )
+JOIN message AS a ON a.id = (
+  SELECT candidate.id
+  FROM message AS candidate
+  WHERE candidate.session_id = s.id
+    AND json_extract(candidate.data, '$.role') = 'assistant'
+  ORDER BY candidate.time_created DESC, candidate.id DESC
+  LIMIT 1
+)
 WHERE s.parent_id IS NULL
-ORDER BY s.id
-LIMIT 129`;
+  AND p.message_id = a.id
+  AND length(CAST(json_extract(p.data, '$.state.input') AS BLOB)) <= 49152
+  AND instr(json_extract(p.data, '$.state.input'), '[RECOVERY_BIND:') > 0
+  AND instr(json_extract(p.data, '$.state.input'), '[RECOVERY_HANDOFF]') > 0
+ORDER BY json_extract(p.data, '$.state.time.end') DESC, s.id DESC
+LIMIT 2`;
 
 function parsedAttestedContext(value) {
   if (value === undefined) return null;
@@ -1443,6 +1469,43 @@ function validLegacyRecoveryTodoHandoff(value, sessionId) {
     && Object.values(value.declaredOperational).every((digest) => typeof digest === "string" && HASH.test(digest));
 }
 
+function legacyRecoveryProjection(captured, assistant) {
+  const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
+  for (const todo of captured.todos) {
+    if (todo.status === "in_progress") counts.inProgress += 1;
+    else counts[todo.status] += 1;
+  }
+  const open = counts.pending > 0 || counts.inProgress > 0;
+  const populated = Object.values(counts).filter((count) => count > 0).length;
+  const todoState = populated > 1 ? "mixed" : counts.pending ? "pending"
+    : counts.inProgress ? "in_progress" : counts.completed ? "complete" : "cancelled";
+  const nextWork = {
+    kind: open ? "continue_task" : "review_changes",
+    referenceHash: captured.declaredOperational.nextWorkSha256,
+  };
+  const operational = Object.freeze({
+    role: assistant.agent,
+    model: Object.freeze({ providerId: assistant.providerId, modelId: assistant.modelId }),
+    status: assistant.status,
+    taskHash: captured.declaredOperational.taskSha256,
+    actionsSha256: captured.declaredOperational.actionsSha256,
+    changedPathsSha256: captured.declaredOperational.changedPathsSha256,
+    checksSha256: captured.declaredOperational.checksSha256,
+    todos: captured.todos,
+    nextWork: Object.freeze(nextWork),
+  });
+  const handoff = {
+    status: operational.status,
+    taskHash: operational.taskHash,
+    actionsSha256: operational.actionsSha256,
+    changedPathsSha256: operational.changedPathsSha256,
+    checksSha256: operational.checksSha256,
+    todos: { total: captured.todos.length, ...counts, state: todoState },
+    nextWork,
+  };
+  return Object.freeze({ operational, handoff: Object.freeze({ ...handoff, sha256: sha256(canonicalJson(handoff)) }) });
+}
+
 export function discoverLegacyRecoverySession(parent, binding, source, execute = spawnSync) {
   let stdout;
   let stderr;
@@ -1469,70 +1532,39 @@ export function discoverLegacyRecoverySession(parent, binding, source, execute =
     const text = stdout.toString("utf8");
     if (!Buffer.from(text).equals(stdout)) return null;
     const rows = JSON.parse(text);
-    if (!Array.isArray(rows) || rows.length > 128) return null;
+    if (!Array.isArray(rows) || rows.length > 2) return null;
     const seen = new Set();
     const matches = [];
     for (const row of rows) {
-      if (!hasExactKeys(row, ["sessionId", "directory", "parentId", "todoInput"])
+      if (!hasExactKeys(row, ["sessionId", "directory", "parentId", "todoPartId", "todoCompletedAt", "todoInput",
+        "assistantMessageId", "assistantRole", "assistantAgent", "assistantProviderId", "assistantModelId", "assistantStatus"])
         || !SAFE_SESSION.test(row.sessionId ?? "") || typeof row.directory !== "string" || row.parentId !== null
+        || !SAFE_ID.test(row.todoPartId ?? "") || !Number.isSafeInteger(row.todoCompletedAt) || row.todoCompletedAt < 1
         || typeof row.todoInput !== "string" || Buffer.byteLength(row.todoInput, "utf8") > LEGACY_TODO_INPUT_MAX_BYTES
+        || !SAFE_ID.test(row.assistantMessageId ?? "") || row.assistantRole !== "assistant"
+        || !SAFE_ID.test(row.assistantAgent ?? "") || !SAFE_MODEL_METADATA.test(row.assistantProviderId ?? "")
+        || !SAFE_MODEL_METADATA.test(row.assistantModelId ?? "") || row.assistantStatus !== "working"
         || seen.has(row.sessionId)) return null;
       seen.add(row.sessionId);
       if (row.directory !== binding.worktree) continue;
       const input = JSON.parse(row.todoInput);
       const captured = parseLegacyRecoveryTodoInput(input, parent, binding, source.head, row.sessionId);
-      if (captured) matches.push(Object.freeze({ sessionId: row.sessionId, ...captured }));
+      if (captured) matches.push(Object.freeze({
+        sessionId: row.sessionId,
+        ...captured,
+        ...legacyRecoveryProjection(captured, {
+          agent: row.assistantAgent,
+          providerId: row.assistantProviderId,
+          modelId: row.assistantModelId,
+          status: row.assistantStatus,
+        }),
+        querySha256: sha256(canonicalJson(row)),
+      }));
     }
     if (matches.length !== 1 || parent.sessionId !== null && parent.sessionId !== matches[0].sessionId) return null;
     return matches[0];
   } catch {
     return null;
-  } finally {
-    stdout?.fill(0);
-    stderr?.fill(0);
-  }
-}
-
-async function readDurableLegacyRecoverySummary(parent, worktree, execute = spawnSync) {
-  if (!SAFE_SESSION.test(parent?.sessionId ?? "") || !safeRecoveryIdentity(parent)
-    || parent.nonceSha256 !== "0".repeat(64) || parent.port !== null
-    || typeof parent.dataHome !== "string" || resolve(parent.dataHome) !== parent.dataHome) return undefined;
-  const home = parent.environment?.HOME;
-  if (typeof home !== "string" || !isAbsolute(home) || resolve(home) !== home) return undefined;
-  let stdout;
-  let stderr;
-  try {
-    const result = execute(`/proc/${parent.pid}/exe`, ["export", parent.sessionId, "--pure"], {
-      cwd: worktree,
-      encoding: null,
-      timeout: 10_000,
-      maxBuffer: 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
-    });
-    stdout = Buffer.isBuffer(result.stdout) ? result.stdout : undefined;
-    stderr = Buffer.isBuffer(result.stderr) ? result.stderr : undefined;
-    if (result.error || result.signal || result.status !== 0 || !stdout || stdout.length < 1 || stdout.length > 1024 * 1024) {
-      return undefined;
-    }
-    const text = stdout.toString("utf8");
-    if (!Buffer.from(text).equals(stdout)) return undefined;
-    const exported = JSON.parse(text);
-    if (!hasExactKeys(exported, ["info", "messages"]) || !isRecord(exported.info) || !Array.isArray(exported.messages)
-      || exported.info.id !== parent.sessionId || exported.info.directory !== worktree) return undefined;
-    const payloads = {
-      "/global/health": { healthy: true, version: "durable-export" },
-      [`/session/${parent.sessionId}`]: exported.info,
-      [`/session/${parent.sessionId}/message`]: exported.messages,
-      "/session/status": { [parent.sessionId]: { type: "working" } },
-    };
-    return await readLiveRecoverySummary({ ...parent, port: 1024,
-      environment: { OPENCODE_SERVER_PASSWORD: "x".repeat(43) } }, worktree, async (url) => {
-      const value = payloads[new URL(url).pathname];
-      return new Response(JSON.stringify(value), { status: value === undefined ? 404 : 200 });
-    });
-  } catch {
-    return undefined;
   } finally {
     stdout?.fill(0);
     stderr?.fill(0);
@@ -1560,21 +1592,17 @@ export async function captureLegacyRecoveryPreAdmission(parent, binding, source,
     if (parent.port === null) {
       const discovered = discoverLegacyRecoverySession(parent, binding, source, executeParent);
       if (!discovered || !sameProcess()) return null;
-      const identifiedParent = { ...parent, sessionId: discovered.sessionId };
-      const live = await readDurableLegacyRecoverySummary(identifiedParent, binding.worktree, executeParent);
-      if (!live?.operational || !sameProcess()) return null;
-      if (canonicalJson(live.operational.todos) !== canonicalJson(discovered.todos)) return null;
       const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
-      if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
-        || config.agent[live.operational.role]?.disable === true) return null;
+      if (!isRecord(config.agent) || !Object.hasOwn(config.agent, discovered.operational.role)
+        || config.agent[discovered.operational.role]?.disable === true) return null;
       const confirmed = discoverLegacyRecoverySession(parent, binding, source, executeParent);
       if (!confirmed || canonicalJson(confirmed) !== canonicalJson(discovered) || !sameProcess()) return null;
       const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
       const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
         nonceProvenance: "absent_process_environment", sessionId: discovered.sessionId, binding, sourceHead: source.head,
         marker: discovered.marker, todos: discovered.todos, declaredOperational: discovered.declaredOperational,
-        operational: live.operational };
-      return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
+        operational: discovered.operational };
+      return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: discovered.handoff };
     }
     const password = parent.environment?.OPENCODE_SERVER_PASSWORD;
     const username = parent.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";

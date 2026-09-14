@@ -580,13 +580,31 @@ function strictLegacyTodos(parent: { pid: number; startTimeTicks: number }, over
   ];
 }
 
+function legacyQueryRow(parent: { pid: number; startTimeTicks: number }, todos = strictLegacyTodos(parent), overrides = {}) {
+  return {
+    sessionId: "ses_exact",
+    directory: root,
+    parentId: null,
+    todoPartId: "prt_todo",
+    todoCompletedAt: 1_800_000_000_000,
+    todoInput: JSON.stringify({ todos }),
+    assistantMessageId: "msg_assistant",
+    assistantRole: "assistant",
+    assistantAgent: "ingenium-orchestrator",
+    assistantProviderId: "openai",
+    assistantModelId: "gpt-5.6-sol",
+    assistantStatus: "working",
+    ...overrides,
+  };
+}
+
 function markedLegacyCapture(capture: any, parent: any) {
   const parsed = shim.parseLegacyRecoveryTodoInput({ todos: strictLegacyTodos(parent) }, parent, binding, head, "ses_exact");
   return { ...capture, snapshot: { ...capture.snapshot, ...parsed } };
 }
 
 describe("legacy pre-admission capture", () => {
-  it("captures an exact active session from the legacy parent's durable export when no control-plane port exists", async () => {
+  it("captures a 97,775,138-byte legacy session through bounded metadata queries without export", async () => {
     const f = legacyFixture();
     Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
       environment: { HOME: root } });
@@ -595,14 +613,19 @@ describe("legacy pre-admission capture", () => {
     f.payloads["/session/ses_exact/message"][0].parts.push({ type: "tool", tool: "bash", state: {
       status: "completed", input: { command: "private export command" }, output: "private export output", metadata: { exit: 0 },
     } });
-    const exported = { info: f.payloads["/session/ses_exact"], messages: f.payloads["/session/ses_exact/message"] };
+    const sessionHistoryBytes = 97_775_138;
+    const row = legacyQueryRow(f.parent, f.todos);
     const raw: Buffer[] = [];
+    const queryOutputBytes: number[] = [];
+    let exportInvocations = 0;
     const execute = vi.fn((_command: string, args: string[], _options?: any) => {
-      const value = args[0] === "db"
-        ? [{ sessionId: "ses_exact", directory: root, parentId: null, todoInput: JSON.stringify({ todos: f.todos }) }]
-        : exported;
-      const stdout = Buffer.from(JSON.stringify(value));
+      if (args[0] === "export") {
+        exportInvocations += 1;
+        return { status: 1, signal: null, error: new Error(`session export exceeded buffer at ${sessionHistoryBytes} bytes`) };
+      }
+      const stdout = Buffer.from(JSON.stringify([row]));
       const stderr = Buffer.alloc(1);
+      queryOutputBytes.push(stdout.length);
       raw.push(stdout, stderr);
       return { status: 0, signal: null, stdout, stderr };
     });
@@ -615,18 +638,33 @@ describe("legacy pre-admission capture", () => {
       todos: f.todos.map((todo) => ({ idSha256: hash(`todo-${hash(`todo\0${JSON.stringify(todo.content)}`)}`), status: todo.status })),
       declaredOperational: { actionsSha256: hash("root-a"),
         checksSha256: hash(shim.canonicalJson(["typecheck", "test"])) },
-      operational: { role: "ingenium-orchestrator" } } });
-    expect(execute).toHaveBeenCalledWith("/proc/100/exe", ["export", "ses_exact", "--pure"], expect.objectContaining({
+      operational: { role: "ingenium-orchestrator", model: { providerId: "openai", modelId: "gpt-5.6-sol" },
+        status: "working", taskHash: hash("legacy-admission"), actionsSha256: hash("root-a"),
+        checksSha256: hash(shim.canonicalJson(["typecheck", "test"])),
+        nextWork: { kind: "continue_task", referenceHash: hash("verify") } } } });
+    expect(execute).toHaveBeenCalledWith("/proc/100/exe", ["db", shim.LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"], expect.objectContaining({
       cwd: root, env: { HOME: root, XDG_DATA_HOME: join(root, ".local/share/opencode"), PATH: "/usr/local/bin:/usr/bin:/bin" },
     }));
-    expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(["db", "export", "db"]);
-    expect(execute.mock.calls[0]![0]).toBe("/proc/100/exe");
-    expect(execute.mock.calls[0]![1]).toEqual(["db", shim.LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"]);
-    expect(execute.mock.calls[0]![2]).toMatchObject({ encoding: null, maxBuffer: 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"] });
+    expect(sessionHistoryBytes).toBeGreaterThan(97_000_000);
+    expect(exportInvocations).toBe(0);
+    expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(["db", "db"]);
+    expect(execute.mock.calls.every(([command, args, options]) => command === "/proc/100/exe"
+      && args[0] === "db" && args[1] === shim.LEGACY_RECOVERY_SESSION_QUERY && args[2] === "--format"
+      && args[3] === "json" && options.encoding === null && options.timeout === 10_000
+      && options.maxBuffer === 256 * 1024 && JSON.stringify(options.stdio) === JSON.stringify(["ignore", "pipe", "pipe"]))).toBe(true);
+    expect(queryOutputBytes).toHaveLength(2);
+    expect(queryOutputBytes.every((bytes) => bytes < 256 * 1024)).toBe(true);
+    expect(f.inspect).toHaveBeenCalledTimes(3);
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toMatch(/^SELECT /);
     expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|PRAGMA)\b/);
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("LIMIT 2");
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("p.message_id = a.id");
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toContain("assistantModelId");
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toMatch(/\$\.(?:text|reasoning)|\$\.state\.(?:output|error)/);
     expect(raw.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+    expect(Object.keys(result.snapshot.operational).sort()).toEqual([
+      "actionsSha256", "changedPathsSha256", "checksSha256", "model", "nextWork", "role", "status", "taskHash", "todos",
+    ]);
     expect(JSON.stringify(result)).not.toContain("private transcript");
     expect(JSON.stringify(result)).not.toContain("private reasoning");
     expect(JSON.stringify(result)).not.toContain("private export command");
@@ -649,7 +687,8 @@ describe("legacy pre-admission capture", () => {
   it.each(["wrong pid", "wrong start", "wrong source", "wrong project ID", "wrong workspace", "wrong worktree", "wrong storage",
     "unsafe path", "missing marker", "session mismatch", "known parent mismatch", "duplicate marker", "unexpected marker field",
     "unexpected Todo field", "zero matches", "child", "foreign directory", "multiple matches", "candidate overflow",
-    "unexpected row field"])(
+    "Todo part metadata", "Todo completion metadata", "assistant message metadata", "assistant role", "assistant agent",
+    "assistant provider", "assistant model", "assistant status", "unexpected row field"])(
     "rejects strict marker discovery for %s", (failure) => {
       const f = legacyFixture();
       Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
@@ -669,8 +708,18 @@ describe("legacy pre-admission capture", () => {
       if (failure === "duplicate marker") todos.push({ ...todos[0] });
       if (failure === "unexpected marker field") todos[0].content += " extra=value";
       if (failure === "unexpected Todo field") todos[2] = { ...todos[2], secret: "private" };
-      const row: any = { sessionId: "ses_exact", directory: failure === "foreign directory" ? "/foreign" : root,
-        parentId: failure === "child" ? "ses_parent" : null, todoInput: JSON.stringify({ todos }) };
+      const row: any = legacyQueryRow(f.parent, todos, {
+        directory: failure === "foreign directory" ? "/foreign" : root,
+        parentId: failure === "child" ? "ses_parent" : null,
+      });
+      if (failure === "Todo part metadata") row.todoPartId = "";
+      if (failure === "Todo completion metadata") row.todoCompletedAt = "now";
+      if (failure === "assistant message metadata") row.assistantMessageId = "";
+      if (failure === "assistant role") row.assistantRole = "user";
+      if (failure === "assistant agent") row.assistantAgent = "foreign agent";
+      if (failure === "assistant provider") row.assistantProviderId = "private provider";
+      if (failure === "assistant model") row.assistantModelId = "private model";
+      if (failure === "assistant status") row.assistantStatus = "idle";
       if (failure === "known parent mismatch") f.parent.sessionId = "ses_other";
       if (failure === "unexpected row field") row.message = "private";
       const rows = failure === "zero matches" ? [] : failure === "multiple matches"
@@ -686,6 +735,33 @@ describe("legacy pre-admission capture", () => {
       expect(stderr.every((byte) => byte === 0)).toBe(true);
     },
   );
+
+  it.each(["session", "marker", "assistant model"])("rejects changed %s metadata between bounded queries", async (change) => {
+    const f = legacyFixture();
+    Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
+      environment: { HOME: root } });
+    f.inspect.mockReturnValue({ ...f.parent, commandName: "opencode", ports: [], nonce: undefined });
+    f.todos.splice(0, f.todos.length, ...strictLegacyTodos(f.parent));
+    const initial = legacyQueryRow(f.parent, f.todos);
+    const changed = structuredClone(initial);
+    if (change === "session") changed.sessionId = "ses_other";
+    if (change === "marker") changed.todoInput = JSON.stringify({ todos: strictLegacyTodos(f.parent, { nextWork: "changed" }) });
+    if (change === "assistant model") changed.assistantModelId = "gpt-5.6-luna";
+    let calls = 0;
+    const buffers: Buffer[] = [];
+    const execute = vi.fn((_command: string, _args: string[]) => {
+      const stdout = Buffer.from(JSON.stringify([calls++ === 0 ? initial : changed]));
+      const stderr = Buffer.from("private diagnostic");
+      buffers.push(stdout, stderr);
+      return { status: 0, signal: null, stdout, stderr };
+    });
+
+    expect(await shim.captureLegacyRecoveryPreAdmission(f.parent, binding, f.source, f.request, f.inspect, execute)).toBeNull();
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls.every(([, args]) => args[0] === "db")).toBe(true);
+    expect(buffers.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+    expect(f.request).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["zero", { metadata: { exit: 0 } }, 0],
