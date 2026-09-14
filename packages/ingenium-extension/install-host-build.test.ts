@@ -413,12 +413,17 @@ describe("private host build installer", () => {
     expect(f.manifest().status).toBe("installed");
   });
 
-  it.each(["hash", "file-mode", "directory-mode", "extra-file", "manifest-key", "manifest-link", "node", "worktree", "head"])("rejects malformed private %s before entry execution", async (failure) => {
+  it.each(["hash", "launcher-hash", "file-mode", "directory-mode", "extra-file", "manifest-key", "manifest-link", "node", "worktree", "head"])("rejects malformed private %s before entry execution", async (failure) => {
     const f = fixture();
     await installHostBuild(f.head, f.options);
     const file = join(f.release, "dist/scripts/build-command.js");
     const manifestPath = join(f.release, "release.json");
     if (failure === "hash") { chmodSync(file, 0o600); writeFileSync(file, "process.exit(99);\n"); chmodSync(file, 0o400); }
+    if (failure === "launcher-hash") {
+      chmodSync(f.target, 0o700);
+      writeFileSync(f.target, Buffer.concat([readFileSync(f.target), Buffer.from("\nexit 99\n")]));
+      chmodSync(f.target, 0o500);
+    }
     if (failure === "file-mode") chmodSync(file, 0o600);
     if (failure === "directory-mode") chmodSync(join(f.release, "dist"), 0o755);
     if (failure === "extra-file") writeFileSync(join(f.release, "extra"), "unexpected");

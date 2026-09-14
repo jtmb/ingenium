@@ -194,6 +194,31 @@ describe("recovery preflight repository-data trust", () => {
     return { file, bytes, git, head: git("rev-parse", "HEAD").trim() };
   }
 
+  function installedBuildFixture(source: { head: string; sha256: string }) {
+    const home = join(root, ".opencode/home");
+    const release = join(home, ".local/share/ingenium/host-build/releases", source.head);
+    const bin = join(home, ".local/bin");
+    const artifacts = {
+      "dist/scripts/build-command.js": Buffer.from("build artifact\n"),
+      "dist/scripts/opencode.js": Buffer.from("opencode artifact\n"),
+    };
+    const launcherEntries = [["ingenium-build", "dist/scripts/build-command.js"],
+      ["ingenium-opencode", "dist/scripts/opencode.js"]] as const;
+    const launcherBytes: Record<string, Buffer> = Object.fromEntries(launcherEntries.map(([name, path]) =>
+      [name, Buffer.from(`#!/bin/sh\n# ${release}\n# ${join(release, path)}\n`)]));
+    for (const path of [release, join(release, "dist/scripts"), bin]) mkdirSync(path, { recursive: true, mode: 0o700 });
+    for (const [path, bytes] of Object.entries(artifacts)) writeFileSync(join(release, path), bytes, { mode: 0o400 });
+    const manifestPath = join(release, "release.json");
+    writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 1, head: source.head, repositoryRoot: root,
+      owner: process.getuid!(), node: {}, sourceSha256: source.sha256,
+      files: Object.fromEntries(Object.entries(artifacts).map(([path, bytes]) => [path, { sha256: hash(bytes), mode: 0o400 }])),
+      launchers: Object.fromEntries(launcherEntries.map(([name, entry]) =>
+        [name, { sha256: hash(launcherBytes[name]!), mode: 0o500, entry }])) }),
+    { mode: 0o400 });
+    for (const [name, bytes] of Object.entries(launcherBytes)) writeFileSync(join(bin, name), bytes, { mode: 0o500 });
+    return { home, release, artifacts, manifestPath, bin };
+  }
+
   afterEach(() => vi.restoreAllMocks());
 
   it("accepts service-user ACL mode 0674 at exact clean Git identity through both config callers without mutation", async () => {
@@ -213,6 +238,133 @@ describe("recovery preflight repository-data trust", () => {
       mode: before.mode, size: before.size, mtimeMs: before.mtimeMs, ctimeMs: before.ctimeMs });
     expect(readAcl(f.file)).toEqual(acl);
     expect(readFileSync(join(root, ".git/index"))).toEqual(index);
+  });
+
+  it("runs exact attested preflight with bounded content-free output and byte-identical protected state", async () => {
+    const f = fixture();
+    const source = { head: f.head, path: join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
+      bytes: Buffer.from("attested source"), sha256: hash("attested source") };
+    const installedFixture = installedBuildFixture(source);
+    const installed = shim.inspectInstalledRecoveryBuild(root, source, { HOME: installedFixture.home });
+    const parent = { pid: 100, startTimeTicks: 10, executableSha256: hash("exe"), nonceSha256: "0".repeat(64),
+      cwd: root, cmdlineSha256: hash("argv"), port: 4098, sessionId: null, environment: {} };
+    const capture = { snapshot: { kind: "legacy-pre-admission", sessionId: "ses_exact", parent,
+      marker: { sessionIdSha256: hash("ses_exact"), bindingSha256: hash("binding"), handoffSha256: hash("handoff") },
+      todos: [{ idSha256: hash("private todo"), status: "in_progress" }], operational: { status: "working" } },
+    summary: { status: "working" } };
+    const sourceHandle = { source, revalidate: vi.fn(() => source), close: vi.fn() };
+    const authority = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" })) : authority(url, init);
+    const gitSummary = vi.fn(() => ({ status: "validated", head: f.head, clean: true, dirtyPaths: [],
+      indexFlagsNormal: true, sourceMatchesHead: true }));
+    const forbidden = Object.fromEntries(["mintAdmissionArtifact", "runRecoveryPreparation", "systemd", "spawn", "signal",
+      "write", "rename", "unlink"].map((name) => [name, vi.fn()]));
+    const before = {
+      config: readFileSync(f.file),
+      credential: readFileSync(join(root, ".opencode/.ingenium-mcp-credential")),
+      index: readFileSync(join(root, ".git/index")),
+      acl: readAcl(f.file),
+      stat: lstatSync(f.file),
+    };
+
+    const result = await shim.runRecoveryPreflight(["node", source.path], {
+      openSource: () => sourceHandle,
+      ...forbidden,
+      inputOptions: {
+        request,
+        gitSummary,
+        inspectInstalledBuild: () => installed,
+        inspectDeployment: () => ({ status: "attested", provider: "docker-local", revision: f.head }),
+        ancestry: () => ({ status: "exact", parent }),
+        captureLegacy: async () => capture,
+      },
+    });
+
+    expect(result).toMatchObject({ action: "recovery-preflight", status: "admitted", admissible: true, mutationFree: true,
+      authorizesRestart: false, session: { kind: "legacy-pre-admission", status: "working",
+        sessionIdSha256: hash("ses_exact"), markerSha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      binding, source: { head: f.head, clean: true, blobMatches: true, indexFlagsNormal: true },
+      deployment: { status: "attested", revision: f.head }, launcher: { status: "attested" },
+      quarantine: null, admission: { decision: "admit", nextOperation: "recovery-prepare" } });
+    const serialized = JSON.stringify(result);
+    for (const content of ["private todo", "private transcript", "private reasoning", "credential", "p".repeat(43), "c".repeat(43)]) {
+      expect(serialized.toLowerCase()).not.toContain(content.toLowerCase());
+    }
+    expect(Buffer.byteLength(serialized)).toBeLessThan(4096);
+    expect(Object.values(forbidden).every((operation: any) => operation.mock.calls.length === 0)).toBe(true);
+    expect(sourceHandle.revalidate).toHaveBeenCalledTimes(4);
+    expect(sourceHandle.close).toHaveBeenCalledOnce();
+    expect(readFileSync(f.file)).toEqual(before.config);
+    expect(readFileSync(join(root, ".opencode/.ingenium-mcp-credential"))).toEqual(before.credential);
+    expect(readFileSync(join(root, ".git/index"))).toEqual(before.index);
+    expect(readAcl(f.file)).toEqual(before.acl);
+    expect(lstatSync(f.file)).toMatchObject({ dev: before.stat.dev, ino: before.stat.ino, mode: before.stat.mode,
+      size: before.stat.size, mtimeMs: before.stat.mtimeMs, ctimeMs: before.stat.ctimeMs });
+    expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+    const bootstrapSource = readFileSync(new URL("./scripts/recovery-bootstrap.js", import.meta.url), "utf8");
+    const preflightSource = bootstrapSource.slice(bootstrapSource.indexOf("export async function runRecoveryPreflight"),
+      bootstrapSource.indexOf("function validPreparationLaunch"));
+    const collectorSource = bootstrapSource.slice(bootstrapSource.indexOf("export async function collectPreparationInputs"),
+      bootstrapSource.indexOf("export function recoveryPreflightFailureOutput"));
+    for (const forbiddenCall of ["mintRecoveryAdmissionArtifact(", "runRecoveryPreparation(", "preparationSystemd(",
+      "spawn(", "process.kill(", "writeFileSync(", "renameSync(", "unlinkSync("]) {
+      expect(preflightSource, forbiddenCall).not.toContain(forbiddenCall);
+      expect(collectorSource, forbiddenCall).not.toContain(forbiddenCall);
+    }
+  });
+
+  it.each(["dirty", "source tamper", "deployment mismatch", "hidden index flag"])(
+    "rejects %s before configured ACL access",
+    async (failure) => {
+      const source = { head, path: join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
+        bytes: Buffer.from("source"), sha256: hash("source") };
+      const order: string[] = [];
+      const changed = { ...source, sha256: hash("changed") };
+      const sourceHandle = { source, revalidate: vi.fn(() => {
+        order.push("source");
+        return failure === "source tamper" && order.filter((entry) => entry === "source").length === 2 ? changed : source;
+      }), close: vi.fn() };
+      const configuredEnvironment = vi.fn(() => { order.push("config"); return environment; });
+      const summary = () => ({ status: "validated", head, clean: failure !== "dirty", dirtyPaths: failure === "dirty" ? ["changed.ts"] : [],
+        indexFlagsNormal: failure !== "hidden index flag", sourceMatchesHead: true });
+      const gitSummary = vi.fn(() => { order.push("git"); return summary(); });
+      const inspectInstalledBuild = vi.fn(() => { order.push("installed"); return { status: "attested" }; });
+      const inspectDeployment = vi.fn(() => {
+        order.push("deployment");
+        return failure === "deployment mismatch" ? { status: "unavailable", revision: null }
+          : { status: "attested", revision: head };
+      });
+
+      await expect(shim.collectPreparationInputs(sourceHandle, { preflight: true, configuredEnvironment,
+        gitSummary, inspectInstalledBuild, inspectDeployment })).rejects.toThrow("Recovery preflight");
+      expect(configuredEnvironment).not.toHaveBeenCalled();
+      expect(order).not.toContain("config");
+      expect(sourceHandle.close).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects changed release artifacts and launchers from the installed preflight chain", () => {
+    const source = { head, sha256: hash("source") };
+    const installed = installedBuildFixture(source);
+    expect(shim.inspectInstalledRecoveryBuild(root, source, { HOME: installed.home })).toMatchObject({
+      status: "attested", release: { sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+      launchers: { "ingenium-build": { sha256: expect.stringMatching(/^[0-9a-f]{64}$/) },
+        "ingenium-opencode": { artifactSha256: hash(installed.artifacts["dist/scripts/opencode.js"]) } },
+    });
+    const artifact = join(installed.release, "dist/scripts/build-command.js");
+    chmodSync(artifact, 0o600);
+    writeFileSync(artifact, "changed artifact\n");
+    chmodSync(artifact, 0o400);
+    expect(() => shim.inspectInstalledRecoveryBuild(root, source, { HOME: installed.home })).toThrow("launcher source");
+    chmodSync(artifact, 0o600);
+    writeFileSync(artifact, installed.artifacts["dist/scripts/build-command.js"]);
+    chmodSync(artifact, 0o400);
+    const launcher = join(installed.bin, "ingenium-build");
+    chmodSync(launcher, 0o700);
+    writeFileSync(launcher, "foreign launcher\n");
+    chmodSync(launcher, 0o500);
+    expect(() => shim.inspectInstalledRecoveryBuild(root, source, { HOME: installed.home })).toThrow("launcher source");
   });
 
   it.each([

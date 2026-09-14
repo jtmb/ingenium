@@ -93,18 +93,20 @@ function verifyHead(root, expectedHead) {
 }
 
 export function verifyRecoveryRegistry(wrapper) {
-  const literal = ["deployment", "recovery-prepare"];
-  if (!same(wrapper.validateManagedBuildArgv([...literal]), literal) || !wrapper.isManagedDeploymentArgv(literal)) {
-    throw new Error("Registry lacks literal recovery-prepare");
-  }
-  for (const argv of [[...literal, "extra"], ["deployment", "recovery-prepare;id"], ["deployment", "--recovery-prepare"]]) {
+  for (const operation of ["recovery-preflight", "recovery-prepare"]) {
+    const literal = ["deployment", operation];
+    if (!same(wrapper.validateManagedBuildArgv([...literal]), literal) || !wrapper.isManagedDeploymentArgv(literal)) {
+      throw new Error(`Registry lacks literal ${operation}`);
+    }
+    for (const argv of [[...literal, "extra"], ["deployment", `${operation};id`], ["deployment", `--${operation}`]]) {
+      let rejected = false;
+      try { wrapper.validateManagedBuildArgv(argv); } catch { rejected = true; }
+      if (!rejected) throw new Error(`Registry accepts nonliteral ${operation}`);
+    }
     let rejected = false;
-    try { wrapper.validateManagedBuildArgv(argv); } catch { rejected = true; }
-    if (!rejected) throw new Error("Registry accepts nonliteral recovery-prepare");
+    try { wrapper.decodeManagedBuildArgv(Buffer.from(JSON.stringify(literal)).toString("base64url")); } catch { rejected = true; }
+    if (!rejected) throw new Error(`Registry accepts encoded ${operation}`);
   }
-  let rejected = false;
-  try { wrapper.decodeManagedBuildArgv(Buffer.from(JSON.stringify(literal)).toString("base64url")); } catch { rejected = true; }
-  if (!rejected) throw new Error("Registry accepts encoded recovery-prepare");
 }
 
 function packageLauncherEntries(bytes) {
@@ -367,9 +369,20 @@ export async function installHostBuild(expectedHead, {
     const nodeOwner = lstatSync(nodePath).uid;
     if (![0, owner].includes(nodeOwner)) throw new Error("Untrusted Node runtime");
     const node = readRegular(nodePath, nodeOwner);
+    const wrapperSource = result["dist/scripts/managed-command-wrapper.js"].toString();
+    const start = wrapperSource.indexOf("export function verifyPrivateBuildRelease(");
+    const end = wrapperSource.indexOf("\nexport function managedWrapperPackageRoot(", start);
+    if (start < 0 || end <= start) throw new Error("Private release verifier export is missing");
+    const verifier = wrapperSource.slice(start + "export ".length, end).trim();
+    for (const launcher of launchers) {
+      launcher.bytes = launcherBytes(nodePath, node.sha256, releasePath, root.path, home,
+        join(releasePath, entries[launcher.name]), verifier, launcher.name === "ingenium-build");
+    }
     const releaseManifest = { schemaVersion: 1, head: expectedHead, repositoryRoot: root.path, owner,
       node: { path: nodePath, sha256: node.sha256, ...identity(lstatSync(nodePath)) }, sourceSha256,
-      files: Object.fromEntries(closure.map((name) => [name, { sha256: sha256(result[name]), mode: 0o400 }])) };
+      files: Object.fromEntries(closure.map((name) => [name, { sha256: sha256(result[name]), mode: 0o400 }])),
+      launchers: Object.fromEntries(launchers.map((launcher) => [launcher.name,
+        { sha256: sha256(launcher.bytes), mode: 0o500, entry: entries[launcher.name] }])) };
     const releaseBytes = Buffer.from(JSON.stringify(releaseManifest) + "\n");
     const material = { ...result, "release.json": releaseBytes };
     if (!present(releasePath)) {
@@ -411,15 +424,8 @@ export async function installHostBuild(expectedHead, {
     }
     const wrapper = await import(pathToFileURL(join(releasePath, "dist/scripts/managed-command-wrapper.js")).href + `?install=${randomUUID()}`);
     verifyRecoveryRegistry(wrapper);
-    wrapper.verifyPrivateBuildRelease(releasePath, home);
-    const wrapperSource = result["dist/scripts/managed-command-wrapper.js"].toString();
-    const start = wrapperSource.indexOf("export function verifyPrivateBuildRelease(");
-    const end = wrapperSource.indexOf("\nexport function managedWrapperPackageRoot(", start);
-    if (start < 0 || end <= start) throw new Error("Private release verifier export is missing");
-    const verifier = wrapperSource.slice(start + "export ".length, end).trim();
+    wrapper.verifyPrivateBuildRelease(releasePath, home, false);
     for (const launcher of launchers) {
-      launcher.bytes = launcherBytes(nodePath, node.sha256, releasePath, root.path, home,
-        join(releasePath, entries[launcher.name]), verifier, launcher.name === "ingenium-build");
       const candidateFd = openSync(launcher.candidate, "wx", 0o500);
       try { fchmodSync(candidateFd, 0o500); writeFileSync(candidateFd, launcher.bytes); fsyncSync(candidateFd); }
       finally { closeSync(candidateFd); }

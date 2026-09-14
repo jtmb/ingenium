@@ -1519,6 +1519,8 @@ describe("managed command wrappers", () => {
         command: process.execPath,
         argv: [recoveryBootstrapShim],
       });
+    expect(managedBuildExecution(["deployment", "recovery-preflight"]))
+      .toEqual({ command: process.execPath, argv: [recoveryBootstrapShim, "recovery-preflight"] });
     expect(managedBuildExecution(["run", "typecheck"]))
       .toEqual({ command: `${dirname(process.execPath)}/npm`, argv: ["run", "typecheck"] });
     expect(managedBuildExecution(["agent-validation"]))
@@ -1641,6 +1643,58 @@ describe("managed command wrappers", () => {
       expect(runner).toHaveBeenCalledWith(process.execPath, ["--input-type=module"], expect.objectContaining({
         input: bytes, shell: false, env: expect.objectContaining({ INGENIUM_RECOVERY_PREPARATION: "1" }),
       }));
+    } finally { process.exitCode = priorExitCode; }
+  });
+
+  it("admits only literal recovery preflight through attested stdin and rejects a standalone environment", () => {
+    const runRecoveryBootstrap = vi.fn(() => 0);
+    const runCommand = vi.fn(() => 0);
+    const priorExitCode = process.exitCode;
+    try {
+      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
+        runRecoveryBootstrap,
+        runCommand,
+      });
+      expect(runRecoveryBootstrap).toHaveBeenCalledWith(expect.any(String), { preflight: true });
+      for (const args of [
+        ["deployment", "recovery-preflight", "extra"], ["deployment", "recovery-preflight", "/tmp/payload"],
+        ["deployment", "recovery-preflight;id"], ["deployment", "recovery-preflight\n"],
+        ["deployment", "recovery-preflight", "--"], ["deployment", "--recovery-preflight"],
+        [Buffer.from(JSON.stringify(["deployment", "recovery-preflight"])).toString("base64url")],
+        ["node", recoveryBootstrapShim, "recovery-preflight"],
+      ]) expect(() => runManagedCommandCli("build", ["node", "build-command", ...args], {
+        runRecoveryBootstrap,
+        runCommand,
+      })).toThrow();
+      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["deployment", "recovery-preflight"])).toString("base64url")))
+        .toThrow("exact literal");
+
+      const descriptor = openSync("/dev/null", constants.O_RDONLY);
+      const bytes = Buffer.from("reviewed preflight source");
+      const runner = vi.fn((_command: string, _argv: readonly string[], _options: { env: NodeJS.ProcessEnv }) =>
+        ({ status: 0, signal: null }));
+      expect(runManagedRecoveryBootstrap(import.meta.url.replace("managed-command-wrapper.test.ts", "scripts/managed-command-wrapper.ts"), {
+        preflight: true,
+        runner: runner as any,
+        openBootstrap: () => ({ descriptor, bytes, context: { schemaVersion: 1, kind: "source-bootstrap",
+          sourcePath: recoveryBootstrapShim, repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(bytes) } }),
+      })).toBe(0);
+      expect(runner).toHaveBeenCalledWith(process.execPath, ["--input-type=module"], expect.objectContaining({
+        input: bytes,
+        shell: false,
+        env: expect.objectContaining({ INGENIUM_RECOVERY_PREFLIGHT: "1", INGENIUM_RECOVERY_ATTESTED_CONTEXT: expect.any(String) }),
+      }));
+      expect(runner.mock.calls[0]![2].env).not.toHaveProperty("INGENIUM_RECOVERY_PREPARATION");
+
+      const forged = JSON.stringify({ schemaVersion: 1, kind: "source-bootstrap", sourcePath: recoveryBootstrapShim,
+        repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(readFileSync(recoveryBootstrapShim)) });
+      expect(() => execFileSync(process.execPath, [recoveryBootstrapShim], { env: {
+        PATH: process.env.PATH,
+        INGENIUM_RECOVERY_PREFLIGHT: "1",
+        INGENIUM_RECOVERY_ATTESTED_CONTEXT: forged,
+      } })).toThrow();
     } finally { process.exitCode = priorExitCode; }
   });
 

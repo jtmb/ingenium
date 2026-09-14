@@ -37,7 +37,7 @@ const EXTENSION_TEST_FILES = new Set([
   "session-coordinator.test.ts",
   "session-id-tui.test.ts",
 ]);
-const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart", "recovery-prepare"]);
+const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart", "recovery-preflight", "recovery-prepare"]);
 const IMAGE_REVISION_OPERATIONS = new Set(["compose-build", "compose-up", "compose-restart"]);
 const REPOSITORY_INSPECTIONS = new Set(["status", "staged-paths", "recent-log", "head"]);
 const REPOSITORY_PATH_INSPECTIONS = new Set(["diff", "staged-diff"]);
@@ -51,6 +51,7 @@ const DOCKER = "/usr/bin/docker";
 const CURL = "/usr/bin/curl";
 const MANAGED_COMMAND_NONCE = "INGENIUM_MANAGED_COMMAND_NONCE";
 const RECOVERY_ATTESTED_CONTEXT = "INGENIUM_RECOVERY_ATTESTED_CONTEXT";
+const RECOVERY_PREFLIGHT = "INGENIUM_RECOVERY_PREFLIGHT";
 const RECOVERY_BOOTSTRAP_MAX_BYTES = 256 * 1024;
 const RECOVERY_ENVIRONMENT = [
   "CI",
@@ -86,8 +87,12 @@ const COMMIT_CONFIGURATION = [
 const EXECUTABLE_GIT_CONFIGURATION = /^(?:core\.(?:askPass|editor|fsmonitor|gitproxy|hooksPath|pager|sshCommand)|credential\..*helper|diff(?:\.external|\..*\.(?:command|textconv))|filter\..*\.(?:clean|process|smudge)|gpg(?:\..*)?\.program|interactive\.diffFilter|merge\..*\.driver|sequence\.editor)$/i;
 
 // Kept self-contained so the installer can put the same pre-import verifier in the launcher.
-export function verifyPrivateBuildRelease(release: string, home = userInfo().homedir) {
+export function verifyPrivateBuildRelease(release: string, home = userInfo().homedir, verifyLaunchers = true) {
   const owner = process.getuid!();
+  const launcherEntries = {
+    "ingenium-build": "dist/scripts/build-command.js",
+    "ingenium-opencode": "dist/scripts/opencode.js",
+  } as const;
   const exact = (value: unknown, keys: string[]): value is Record<string, any> =>
     value !== null && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
@@ -120,11 +125,12 @@ export function verifyPrivateBuildRelease(release: string, home = userInfo().hom
   const manifest = JSON.parse(stable(resolve(release, "release.json"), 0o400).bytes.toString());
   const files = ["package.json", "context-upload-codec.mjs", "dist/replacement-first-restart.js",
     "dist/scripts/build-command.js", "dist/scripts/managed-command-wrapper.js", "dist/scripts/opencode.js"];
-  if (!exact(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files"])
+  if (!exact(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files", "launchers"])
     || manifest.schemaVersion !== 1 || manifest.owner !== owner || manifest.head !== basename(release)
     || typeof manifest.repositoryRoot !== "string" || resolve(manifest.repositoryRoot) !== manifest.repositoryRoot
     || realpathSync(manifest.repositoryRoot) !== manifest.repositoryRoot
     || !/^[0-9a-f]{64}$/.test(manifest.sourceSha256) || !exact(manifest.files, files)
+    || !exact(manifest.launchers, Object.keys(launcherEntries))
     || !exact(manifest.node, ["path", "sha256", "dev", "ino", "uid", "mode", "nlink"])) fail();
   const nodePath = realpathSync(process.execPath);
   if (manifest.node.path !== nodePath || ![0, owner].includes(manifest.node.uid)) fail();
@@ -154,6 +160,12 @@ export function verifyPrivateBuildRelease(release: string, home = userInfo().hom
     const expected = manifest.files[file];
     if (!exact(expected, ["sha256", "mode"]) || expected.mode !== 0o400 || !/^[0-9a-f]{64}$/.test(expected.sha256)
       || stable(resolve(release, file), 0o400).sha256 !== expected.sha256) fail();
+  }
+  for (const [name, entry] of Object.entries(launcherEntries)) {
+    const expected = manifest.launchers[name];
+    if (!exact(expected, ["sha256", "mode", "entry"]) || expected.mode !== 0o500 || expected.entry !== entry
+      || !/^[0-9a-f]{64}$/.test(expected.sha256)
+      || (verifyLaunchers && stable(resolve(home, ".local/bin", name), 0o500).sha256 !== expected.sha256)) fail();
   }
   if (JSON.parse(stable(resolve(release, "package.json"), 0o400).bytes.toString()).type !== "module") fail();
   const git = (args: string[]) => execFileSync("/usr/bin/git", ["--no-optional-locks", "-C", manifest.repositoryRoot,
@@ -339,8 +351,8 @@ export function decodeManagedRepositoryArgv(encoded: string): string[] {
 
 export function decodeManagedBuildArgv(encoded: string): string[] {
   const argv = validateManagedBuildArgv(decodeManagedArgv(encoded));
-  if (argv[0] === "deployment" && argv[1] === "recovery-prepare") {
-    throw new Error("Recovery preparation requires the exact literal command");
+  if (argv[0] === "deployment" && ["recovery-preflight", "recovery-prepare"].includes(argv[1]!)) {
+    throw new Error("Recovery operations require the exact literal command");
   }
   return argv;
 }
@@ -458,6 +470,8 @@ export function managedBuildExecution(argv: string[], moduleUrl: string | URL = 
       return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl)] };
     case "recovery-prepare":
       return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl), "recovery-prepare"] };
+    case "recovery-preflight":
+      return { command: process.execPath, argv: [managedRecoveryBootstrapPath(moduleUrl), "recovery-preflight"] };
     default:
       throw new Error("Build wrapper rejected the command");
   }
@@ -489,9 +503,11 @@ export function runManagedRecoveryBootstrap(
   dependencies: {
     runner?: typeof spawnSync;
     openBootstrap?: typeof openVerifiedRecoveryBootstrap;
+    preflight?: boolean;
     preparation?: boolean;
   } = {},
 ): number {
+  if (dependencies.preflight && dependencies.preparation) throw new Error("Managed recovery mode is ambiguous");
   const worktree = managedRecoveryWorktree(moduleUrl);
   const verified = (dependencies.openBootstrap ?? openVerifiedRecoveryBootstrap)(
     managedRecoveryBootstrapPath(moduleUrl),
@@ -513,6 +529,7 @@ export function runManagedRecoveryBootstrap(
       env: {
         ...managedRecoveryEnvironment(process.env, moduleUrl),
         [RECOVERY_ATTESTED_CONTEXT]: JSON.stringify(verified.context),
+        ...(dependencies.preflight ? { [RECOVERY_PREFLIGHT]: "1" } : {}),
         ...(dependencies.preparation ? { INGENIUM_RECOVERY_PREPARATION: "1" } : {}),
       },
     });
@@ -942,11 +959,14 @@ export function managedCommand(
     readImageRevision?: typeof managedImageRevision;
   } = {},
 ): number {
-  if (kind === "build" && argv[0] === "deployment" && argv[1] === "recovery-prepare") {
+  if (kind === "build" && argv[0] === "deployment"
+    && ["recovery-preflight", "recovery-prepare"].includes(argv[1]!)) {
     validateManagedBuildArgv(argv);
-    if (realpathSync(cwd) !== managedRecoveryWorktree()) throw new Error("Recovery preparation requires the canonical repository");
+    if (realpathSync(cwd) !== managedRecoveryWorktree()) throw new Error("Recovery operation requires the canonical repository");
     return runManagedRecoveryBootstrap(import.meta.url, {
-      runner: dependencies.runner, openBootstrap: dependencies.openRecoveryBootstrap, preparation: true,
+      runner: dependencies.runner,
+      openBootstrap: dependencies.openRecoveryBootstrap,
+      ...(argv[1] === "recovery-preflight" ? { preflight: true } : { preparation: true }),
     });
   }
   const productionRestart = kind === "build" && argv[0] === "deployment" && argv[1] === "production-restart";
@@ -1029,7 +1049,15 @@ export function runManagedCommandCli(
     && argv[2] === "deployment" && argv[3] === "production-restart";
   const fixedPreparation = kind === "build" && argv.length === 4
     && argv[2] === "deployment" && argv[3] === "recovery-prepare";
-  if (!fixedProductionRestart && !fixedPreparation && argv.length !== 3) throw new Error("Managed wrapper requires one encoded argv payload");
+  const fixedPreflight = kind === "build" && argv.length === 4
+    && argv[2] === "deployment" && argv[3] === "recovery-preflight";
+  if (!fixedProductionRestart && !fixedPreparation && !fixedPreflight && argv.length !== 3) {
+    throw new Error("Managed wrapper requires one encoded argv payload");
+  }
+  if (fixedPreflight) {
+    process.exitCode = (dependencies.runRecoveryBootstrap ?? runManagedRecoveryBootstrap)(import.meta.url, { preflight: true });
+    return;
+  }
   if (fixedPreparation) {
     process.exitCode = (dependencies.runRecoveryBootstrap ?? runManagedRecoveryBootstrap)(import.meta.url, { preparation: true });
     return;

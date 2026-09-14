@@ -32,6 +32,7 @@ const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
 const RECOVERY_ATTESTED_CONTEXT = "INGENIUM_RECOVERY_ATTESTED_CONTEXT";
+const RECOVERY_PREFLIGHT = "INGENIUM_RECOVERY_PREFLIGHT";
 const ADMITTED_RECOVERY_CONTEXT = "INGENIUM_ADMITTED_RECOVERY_CONTEXT";
 const GIT = "/usr/bin/git";
 export const CANONICAL_DIRECTORY_AUDIT_PATH = `/tmp/opencode-${ownerUid()}/recovery-bootstrap-directory-audit.jsonl`;
@@ -136,6 +137,8 @@ const MODULE_ATTESTATION = parsedAttestedContext(process.env[RECOVERY_ATTESTED_C
 delete process.env[RECOVERY_ATTESTED_CONTEXT];
 const PREPARATION_REQUESTED = process.env.INGENIUM_RECOVERY_PREPARATION;
 delete process.env.INGENIUM_RECOVERY_PREPARATION;
+const PREFLIGHT_REQUESTED = process.env[RECOVERY_PREFLIGHT];
+delete process.env[RECOVERY_PREFLIGHT];
 
 export const CANONICAL_OWNED_DIRECTORY_FAILURE_REASONS = Object.freeze([
   "directory",
@@ -1064,16 +1067,20 @@ function collectGitSummary(root, sourcePath, sourceBytes) {
     const relativeSource = "packages/ingenium-extension/scripts/recovery-bootstrap.js";
     const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]);
     const dirtyPaths = status.toString("utf8").split("\0").filter(Boolean).map((entry) => entry.slice(3)).sort();
+    const indexFlagsNormal = git(root, ["ls-files", "-v", "-f", "-z"], "utf8")
+      .split("\0").every((entry) => !entry || entry.startsWith("H "));
     const sourceMatchesHead = resolve(root, relativeSource) === sourcePath
       && Buffer.from(git(root, ["show", `${head}:${relativeSource}`])).equals(sourceBytes);
     return {
-      status: topLevel === root && GIT_OID.test(head) && sourceMatchesHead ? "validated" : "invalid",
+      status: topLevel === root && GIT_OID.test(head) && sourceMatchesHead && indexFlagsNormal ? "validated" : "invalid",
       head: GIT_OID.test(head) ? head : null,
+      clean: dirtyPaths.length === 0,
       dirtyPaths,
+      indexFlagsNormal,
       sourceMatchesHead,
     };
   } catch {
-    return { status: "invalid", head: null, dirtyPaths: [], sourceMatchesHead: false };
+    return { status: "invalid", head: null, clean: false, dirtyPaths: [], indexFlagsNormal: false, sourceMatchesHead: false };
   }
 }
 
@@ -1714,27 +1721,45 @@ const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = Object.freeze({
   path: "inspect.parent_control_plane",
 });
 
-function inspectInstalledManagedLauncher(parent, binding, source, environment) {
-  const home = parent.environment?.HOME;
+export function inspectInstalledRecoveryBuild(worktree, source, inherited = process.env) {
+  const home = inherited.HOME;
   if (typeof home !== "string" || !isAbsolute(home) || resolve(home) !== home || realpathSync(home) !== home) {
-    throw new Error("Recovery preparation managed launcher home is unavailable");
+    throw new Error("Recovery preflight managed launcher home is unavailable");
   }
-  const launcherPath = resolve(home, ".local/bin/ingenium-opencode");
-  const launcher = readTrustedRegularFile(launcherPath, "Installed managed OpenCode launcher", {
-    executable: true, expectedMode: 0o500,
-  });
   const release = resolve(home, ".local/share/ingenium/host-build/releases", source.head);
-  const entry = resolve(release, "dist/scripts/opencode.js");
   const manifestBytes = readOnlyRegularFile(resolve(release, "release.json"), 64 * 1024, false, 0o400);
   const manifest = JSON.parse(manifestBytes);
-  const artifact = readOnlyRegularFile(entry, 16 * 1024 * 1024, false, 0o400);
-  if (!hasExactKeys(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files"])
-    || manifest.schemaVersion !== 1 || manifest.head !== source.head || manifest.repositoryRoot !== binding.worktree
-    || manifest.sourceSha256 !== source.sha256 || manifest.owner !== ownerUid()
-    || manifest.files?.["dist/scripts/opencode.js"]?.sha256 !== sha256(artifact)
-    || !launcher.bytes.includes(Buffer.from(release)) || !launcher.bytes.includes(Buffer.from(entry))) {
-    throw new Error("Recovery preparation managed launcher source is unavailable");
+  if (!hasExactKeys(manifest, ["schemaVersion", "head", "repositoryRoot", "owner", "node", "sourceSha256", "files", "launchers"])
+    || manifest.schemaVersion !== 1 || manifest.head !== source.head || manifest.repositoryRoot !== worktree
+    || manifest.sourceSha256 !== source.sha256 || manifest.owner !== ownerUid()) {
+    throw new Error("Recovery preflight installed release is unavailable");
   }
+  const launchers = {};
+  for (const [name, relativePath] of [["ingenium-build", "dist/scripts/build-command.js"],
+    ["ingenium-opencode", "dist/scripts/opencode.js"]]) {
+    const entry = resolve(release, relativePath);
+    const artifact = readOnlyRegularFile(entry, 16 * 1024 * 1024, false, 0o400);
+    const expected = manifest.files?.[relativePath];
+    const expectedLauncher = manifest.launchers?.[name];
+    const launcher = readTrustedRegularFile(resolve(home, ".local/bin", name), `Installed managed ${name} launcher`, {
+      executable: true, expectedMode: 0o500,
+    });
+    if (!hasExactKeys(expected, ["sha256", "mode"]) || expected.mode !== 0o400
+      || !hasExactKeys(expectedLauncher, ["sha256", "mode", "entry"]) || expectedLauncher.mode !== 0o500
+      || expectedLauncher.entry !== relativePath || expectedLauncher.sha256 !== launcher.sha256
+      || expected.sha256 !== sha256(artifact) || !launcher.bytes.includes(Buffer.from(release))
+      || !launcher.bytes.includes(Buffer.from(entry))) {
+      throw new Error("Recovery preflight installed launcher source is unavailable");
+    }
+    launchers[name] = { path: launcher.path, sha256: launcher.sha256, artifactSha256: expected.sha256 };
+  }
+  return { status: "attested", release: { path: release, sha256: sha256(manifestBytes) }, launchers };
+}
+
+function inspectInstalledManagedLauncher(parent, binding, source, environment) {
+  const home = parent.environment?.HOME;
+  const installed = inspectInstalledRecoveryBuild(binding.worktree, source, { HOME: home });
+  const launcher = installed.launchers["ingenium-opencode"];
   const executablePath = realpathSync(`/proc/${parent.pid}/exe`);
   const executableOwner = lstatSync(executablePath).uid;
   const executable = readTrustedRegularFile(executablePath, "Recovery preparation OpenCode executable", {
@@ -1748,7 +1773,8 @@ function inspectInstalledManagedLauncher(parent, binding, source, environment) {
     kind: "legacy-managed-parent",
     sessionId: parent.sessionId,
     dataHome: parent.dataHome,
-    launcher: { path: launcher.path, sha256: launcher.sha256, releaseSha256: sha256(manifestBytes), artifactSha256: sha256(artifact) },
+    launcher: { path: launcher.path, sha256: launcher.sha256, releaseSha256: installed.release.sha256,
+      artifactSha256: launcher.artifactSha256 },
     executable: { path: executable.path, sha256: executable.sha256 },
     environment: {
       HOME: home,
@@ -1898,8 +1924,40 @@ function preparationQuarantineMatches(outbox, plan) {
 export async function collectPreparationInputs(sourceHandle, options = {}) {
   const source = sourceHandle.revalidate();
   const worktree = dirname(dirname(dirname(dirname(source.path))));
-  const environment = recoveryConfiguredEnvironment(worktree, options.environment ?? process.env);
-  const binding = await corroborateRecoveryBinding(worktree, environment, options.request ?? fetch);
+  const collectGit = options.gitSummary ?? collectGitSummary;
+  let gitSummary = collectGit(worktree, source.path, source.bytes);
+  let installedBuild = null;
+  let deployment = null;
+  if (options.preflight === true) {
+    if (gitSummary.status !== "validated" || gitSummary.head !== source.head || gitSummary.clean !== true
+      || gitSummary.dirtyPaths.length !== 0 || gitSummary.indexFlagsNormal !== true || !gitSummary.sourceMatchesHead) {
+      throw new Error("Recovery preflight repository source is unavailable");
+    }
+    installedBuild = (options.inspectInstalledBuild ?? inspectInstalledRecoveryBuild)(worktree, source,
+      options.environment ?? process.env);
+    deployment = (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, source.head,
+      options.inspectDeploymentCommand);
+    if (deployment.status !== "attested" || deployment.revision !== source.head) {
+      throw new Error("Recovery preflight deployed source is unavailable");
+    }
+    const confirmedSource = sourceHandle.revalidate();
+    const confirmedGit = collectGit(worktree, confirmedSource.path, confirmedSource.bytes);
+    if (confirmedSource.head !== source.head || confirmedSource.sha256 !== source.sha256
+      || canonicalJson(confirmedGit) !== canonicalJson(gitSummary)) {
+      throw new Error("Recovery preflight source changed before configuration");
+    }
+    gitSummary = confirmedGit;
+  }
+  const environment = (options.configuredEnvironment ?? recoveryConfiguredEnvironment)(
+    worktree,
+    options.environment ?? process.env,
+    source.head,
+  );
+  const binding = await (options.corroborateBinding ?? corroborateRecoveryBinding)(
+    worktree,
+    environment,
+    options.request ?? fetch,
+  );
   const ancestry = (options.ancestry ?? inspectAncestry)(worktree);
   if (ancestry.status !== "exact" || !ancestry.parent) throw new Error("Recovery preparation parent is ambiguous");
   for (const [key, expected] of Object.entries({ INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
@@ -1908,12 +1966,11 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     const inherited = ancestry.parent.environment?.[key];
     if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
   }
-  const gitSummary = (options.gitSummary ?? collectGitSummary)(worktree, source.path, source.bytes);
   let launch = null;
   let legacyDeploymentAttested = false;
   if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
     && ancestry.parent.port === null && ancestry.parent.nonceSha256 === "0".repeat(64)) {
-    const deployment = (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
+    deployment ??= (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
       options.inspectDeploymentCommand);
     if (deployment.status !== "attested" || deployment.revision !== gitSummary.head) {
       throw new Error("Recovery preparation deployed source is unavailable");
@@ -1946,7 +2003,63 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   }
   const quarantine = planPreparationQuarantine(index);
   sourceHandle.revalidate();
-  return { binding, capture, quarantine, source, launch, contract: prepareRecoveryOwnerContract(binding, source.head) };
+  return { binding, capture, quarantine, source, git: gitSummary, deployment, installedBuild, launch,
+    contract: prepareRecoveryOwnerContract(binding, source.head) };
+}
+
+export function recoveryPreflightFailureOutput() {
+  return { schemaVersion: 1, action: "recovery-preflight", status: "rejected", admissible: false,
+    mutationFree: true, authorizesRestart: false, session: null, binding: null, source: null, deployment: null,
+    launcher: null, quarantine: null, admission: { decision: "reject", nextOperation: null } };
+}
+
+export async function runRecoveryPreflight(argv = process.argv, dependencies = {}) {
+  if (argv.length !== 2) throw new Error("Recovery preflight accepts no arguments");
+  const sourceHandle = (dependencies.openSource ?? openVerifiedRecoverySource)(dependencies.attestation ?? MODULE_ATTESTATION);
+  try {
+    const inputs = await (dependencies.collectInputs ?? collectPreparationInputs)(sourceHandle, {
+      ...(dependencies.inputOptions ?? {}),
+      environment: dependencies.environment ?? process.env,
+      preflight: true,
+    });
+    const source = sourceHandle.revalidate();
+    const snapshot = inputs.capture.snapshot;
+    const installed = inputs.installedBuild;
+    if (!installed || installed.status !== "attested" || inputs.deployment?.status !== "attested"
+      || inputs.deployment.revision !== source.head) throw new Error("Recovery preflight attestation is incomplete");
+    const output = {
+      schemaVersion: 1,
+      action: "recovery-preflight",
+      status: "admitted",
+      admissible: true,
+      mutationFree: true,
+      authorizesRestart: false,
+      session: {
+        kind: snapshot.kind,
+        status: inputs.capture.summary?.status ?? snapshot.operational?.status ?? "validated",
+        sessionIdSha256: sha256(snapshot.sessionId),
+        markerSha256: sha256(canonicalJson(snapshot)),
+      },
+      binding: inputs.binding,
+      source: { status: "attested", head: source.head, sha256: source.sha256,
+        clean: inputs.git.clean, blobMatches: inputs.git.sourceMatchesHead, indexFlagsNormal: inputs.git.indexFlagsNormal },
+      deployment: { status: inputs.deployment.status, provider: inputs.deployment.provider, revision: inputs.deployment.revision },
+      launcher: {
+        status: installed.status,
+        releaseSha256: installed.release.sha256,
+        buildSha256: installed.launchers["ingenium-build"].sha256,
+        opencodeSha256: installed.launchers["ingenium-opencode"].sha256,
+      },
+      quarantine: inputs.quarantine?.quarantine ?? null,
+      admission: { decision: "admit", nextOperation: "recovery-prepare" },
+    };
+    if (Buffer.byteLength(canonicalJson(output)) > RECOVERY_ADMISSION_MAX_BYTES) {
+      throw new Error("Recovery preflight output exceeds its bound");
+    }
+    return output;
+  } finally {
+    sourceHandle.close();
+  }
 }
 
 function validPreparationLaunch(value, request) {
@@ -3942,7 +4055,17 @@ export async function runRecoveryBootstrapShim(argv = process.argv, dependencies
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(realpathSync(process.argv[1])).href : undefined;
-if (MODULE_ATTESTATION && PREPARATION_REQUESTED !== undefined) {
+if (PREFLIGHT_REQUESTED !== undefined) {
+  if (!MODULE_ATTESTATION || invokedPath !== undefined || PREFLIGHT_REQUESTED !== "1" || PREPARATION_REQUESTED !== undefined) {
+    throw new Error("Recovery preflight invocation is invalid");
+  }
+  try {
+    console.log(canonicalJson(await runRecoveryPreflight([process.execPath, MODULE_ATTESTATION.sourcePath])));
+  } catch {
+    console.error(canonicalJson(recoveryPreflightFailureOutput()));
+    process.exitCode = 1;
+  }
+} else if (MODULE_ATTESTATION && PREPARATION_REQUESTED !== undefined) {
   if (PREPARATION_REQUESTED !== "1") throw new Error("Recovery preparation invocation is invalid");
   try {
     console.log(canonicalJson(await runRecoveryPreparation([process.execPath, MODULE_ATTESTATION.sourcePath])));
