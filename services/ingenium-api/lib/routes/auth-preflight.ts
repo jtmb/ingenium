@@ -341,7 +341,7 @@ authPreflightRouter.post("/bootstrap-mcp-credential", (req, res, next) => {
       organizationId: project.organization_id, projectId: project.id,
       workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000), createdByUserId: owner.id,
-    }, "compatibility-opencode-v1");
+    }, "compatibility-opencode-v1", { replaceRevokedReceipt: true });
     res.status(201).location(`/api/v1/auth/mcp-credentials/${credential.id}`).json({ data: credential });
   } catch {
     throw new AppError("Compatibility credential provisioning is unavailable", "MCP_BOOTSTRAP_UNAVAILABLE", 503);

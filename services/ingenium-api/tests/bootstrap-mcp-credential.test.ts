@@ -123,6 +123,9 @@ describe("compatibility MCP bootstrap", () => {
       vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(Date.parse(first.runtime.absoluteExpiresAt) + 1);
       const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+      const receiptBefore = invalid === "capability" ? db.prepare(
+        "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE credential_id = ?",
+      ).get(first.credential.id) : undefined;
       if (invalid === "capability") mcpCredentials.revokeMcpCredential(first.credential.id, ownerId);
       if (invalid === "workspace") db.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(first.runtime.workspaceId);
       if (invalid === "epoch") db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1 WHERE id = ?").run(first.runtime.workspaceId);
@@ -134,6 +137,12 @@ describe("compatibility MCP bootstrap", () => {
       const before = runtimes.getRuntimeInstance(first.runtime.id);
       expect((await local()).status).toBe(503);
       expect(runtimes.getRuntimeInstance(first.runtime.id)).toEqual(before);
+      if (invalid === "capability") {
+        expect(db.prepare(
+          "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE credential_id = ?",
+        ).get(first.credential.id)).toEqual(receiptBefore);
+        expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+      }
     },
   );
 
@@ -280,15 +289,31 @@ describe("compatibility MCP bootstrap", () => {
     expect(emitted).not.toContain(marker);
   });
 
-  it("fails closed with a safe error when a receipt credential is revoked", async () => {
-    const { data } = await (await issue()).json();
-    mcpCredentials.revokeMcpCredential(data.id, ownerId);
+  it("replaces a revoked receipt credential without extending expiry and replays the replacement", async () => {
+    const { data: original } = await (await issue()).json();
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    mcpCredentials.revokeMcpCredential(original.id, ownerId);
+
     const response = await issue();
-    expect(response.status).toBe(503);
-    const text = await response.text();
-    expect(text).toContain("MCP_BOOTSTRAP_UNAVAILABLE");
-    expect(text).not.toContain(data.token);
-    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(1);
+    expect(response.status).toBe(201);
+    const { data: replacement } = await response.json();
+    expect(replacement.id).not.toBe(original.id);
+    expect(replacement.token).not.toBe(original.token);
+    expect(replacement.expiresAt).toBe(original.expiresAt);
+    expect(database.prepare("SELECT credential_id FROM mcp_credential_receipts WHERE idempotency_key = ?")
+      .get("compatibility-opencode-v1")).toEqual({ credential_id: replacement.id });
+    expect(database.prepare("SELECT revoked_at FROM mcp_credentials WHERE id = ?").get(original.id))
+      .toMatchObject({ revoked_at: expect.any(String) });
+    expect(mcpCredentials.resolveMcpCredential(original.token, "mcp")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(replacement.token, "mcp")?.id).toBe(replacement.id);
+
+    resetDbForTest();
+    const retry = await issue();
+    expect(retry.status).toBe(201);
+    expect((await retry.json()).data).toMatchObject({
+      id: replacement.id, token: replacement.token, expiresAt: replacement.expiresAt,
+    });
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
   });
 
   it("rate limits bootstrap issuance without creating extra credentials", async () => {

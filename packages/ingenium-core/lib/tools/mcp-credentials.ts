@@ -46,6 +46,10 @@ export interface CreateMcpCredentialInput {
   createdByUserId: string;
 }
 
+export interface CreateMcpCredentialOptions {
+  replaceRevokedReceipt?: boolean;
+}
+
 export interface ServiceCredentialIdentity {
   credentialId: string;
   authenticatedCredentialId: string;
@@ -176,7 +180,26 @@ function newCredentialToken(): { id: string; tokenPrefix: string; token: string 
   return { id, tokenPrefix, token: `${tokenPrefix}_${randomBytes(32).toString("base64url")}` };
 }
 
-export function createMcpCredential(input: CreateMcpCredentialInput, idempotencyKey?: string): McpCredential & { token: string } {
+function matchesCredentialBinding(
+  row: CredentialRow,
+  input: CreateMcpCredentialInput,
+  scopes: string[],
+  grants: string[],
+): boolean {
+  return row.kind === input.kind && row.audience === input.audience && row.name === normalizeText(input.name, 128, "credential name")
+    && row.scopes_json === JSON.stringify(scopes) && row.organization_id === input.organizationId
+    && row.project_id === input.projectId && row.project_grants_json === JSON.stringify(grants)
+    && row.workspace_id === normalizeText(input.workspaceId, 256, "workspace binding")
+    && row.launcher_worktree === normalizeWorktree(input.launcherWorktree)
+    && row.created_by_user_id === input.createdByUserId
+    && (!input.servicePrincipalId || row.service_principal_id === input.servicePrincipalId);
+}
+
+export function createMcpCredential(
+  input: CreateMcpCredentialInput,
+  idempotencyKey?: string,
+  options: CreateMcpCredentialOptions = {},
+): McpCredential & { token: string } {
   const { scopes, grants } = validateInput(input);
   const { id, tokenPrefix, token } = newCredentialToken();
   // The first issuance owns expiry; retries must not extend credential lifetime.
@@ -193,16 +216,32 @@ export function createMcpCredential(input: CreateMcpCredentialInput, idempotency
       if (receipt) {
         const row = db.prepare(`${SELECT_CREDENTIAL}
           JOIN service_principals principal ON principal.id = mcp_credentials.service_principal_id
-          WHERE mcp_credentials.id = ? AND mcp_credentials.revoked_at IS NULL AND mcp_credentials.expires_at > ?
+          WHERE mcp_credentials.id = ? AND mcp_credentials.expires_at > ?
+            AND principal.organization_id = mcp_credentials.organization_id
             AND principal.status = 'active' AND principal.security_epoch = mcp_credentials.security_epoch
             AND authorized_workspaces.status = 'authorized'
+            AND authorized_workspaces.organization_id = mcp_credentials.organization_id
+            AND authorized_workspaces.project_id = mcp_credentials.project_id
+            AND authorized_workspaces.owner_user_id = mcp_credentials.created_by_user_id
+            AND authorized_workspaces.storage_path = mcp_credentials.launcher_worktree
             AND authorized_workspaces.security_epoch = mcp_credentials.security_epoch`)
           .get(receipt.credential_id, new Date().toISOString()) as CredentialRow | undefined;
-        if (receipt.request_hash !== requestHash || !row
-          || (input.servicePrincipalId && input.servicePrincipalId !== row.service_principal_id)) {
+        if (receipt.request_hash !== requestHash || !row || !matchesCredentialBinding(row, input, scopes, grants)) {
           throw new Error("Credential replay is unavailable");
         }
-        return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
+        if (!row.revoked_at) return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
+        if (!options.replaceRevokedReceipt) throw new Error("Credential replay is unavailable");
+        const credential = insertMcpCredential(db, {
+          ...input,
+          servicePrincipalId: row.service_principal_id,
+          expiresAt: new Date(row.expires_at),
+        }, scopes, grants, id, tokenPrefix, token);
+        if (db.prepare(`UPDATE mcp_credential_receipts SET credential_id = ?, encrypted_token = ?
+          WHERE idempotency_key = ? AND request_hash = ? AND credential_id = ?`)
+          .run(id, encryptedToken!, idempotencyKey, requestHash, row.id).changes !== 1) {
+          throw new Error("Credential replay is unavailable");
+        }
+        return { credential, encryptedToken: undefined };
       }
     }
     const servicePrincipalId = input.servicePrincipalId ?? insertServicePrincipal(db, input);
