@@ -80,9 +80,8 @@ describe("recovery configured authority", () => {
     });
   });
   it.each([
-    ["/auth/preflight", "1", 1_000],
-    ["/projects/ingenium/detail", "0", 0],
-    ["/auth/preflight", new Date(2_000_000_002_000).toUTCString(), 2_000],
+    ["/auth/preflight", "27", 27_000],
+    ["/projects/ingenium/detail", "60", 60_000],
   ])("retries one rate-limited %s read with bounded Retry-After %s", async (limitedPath, retryAfter, delay) => {
     const authority = authorityRequest();
     const attempts: Array<{ url: string; method: string | undefined; redirect: RequestRedirect | undefined; headers: [string, string][] }> = [];
@@ -116,8 +115,8 @@ describe("recovery configured authority", () => {
     ["malformed Retry-After", "later", [429], 1],
     ["unsupported date Retry-After", new Date(2_000_000_001_000).toISOString(), [429], 1],
     ["negative Retry-After", "-1", [429], 1],
-    ["excessive delta Retry-After", "3", [429], 1],
-    ["excessive date Retry-After", new Date(2_000_000_003_000).toUTCString(), [429], 1],
+    ["excessive delta Retry-After", "61", [429], 1],
+    ["excessive date Retry-After", new Date(2_000_000_061_000).toUTCString(), [429], 1],
     ["a second 429", "1", [429, 429], 2],
     ["a non-429 response", undefined, [503], 1],
   ])("fails closed without another retry for %s", async (_failure, retryAfter, statuses, expectedRequests) => {

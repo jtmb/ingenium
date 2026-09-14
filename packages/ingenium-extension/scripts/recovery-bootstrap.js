@@ -28,8 +28,8 @@ const BUILD_TIMEOUT_MS = 300_000;
 const CLEANUP_GRACE_MS = 5_000;
 const GENERATED_TIMEOUT_GRACE_MS = 30_000;
 const MAX_TIMER_MS = 2_147_483_647;
-// This source shim runs before extension build output exists, so it mirrors the authenticated preflight's strict cap.
-const PREFLIGHT_RETRY_DELAY_CAP_MS = 2_000;
+// This source shim runs before extension build output exists, so it matches the API's 60-second fixed-window maximum.
+const PREFLIGHT_RETRY_DELAY_CAP_MS = 60_000;
 const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
