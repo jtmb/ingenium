@@ -28,6 +28,8 @@ const BUILD_TIMEOUT_MS = 300_000;
 const CLEANUP_GRACE_MS = 5_000;
 const GENERATED_TIMEOUT_GRACE_MS = 30_000;
 const MAX_TIMER_MS = 2_147_483_647;
+// This source shim runs before extension build output exists, so it mirrors the authenticated preflight's strict cap.
+const PREFLIGHT_RETRY_DELAY_CAP_MS = 2_000;
 const CHILD_NONCE = "INGENIUM_RECOVERY_SHIM_CHILD_NONCE";
 const CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 const GENERATED_BOOTSTRAP_SHA256 = "INGENIUM_RECOVERY_GENERATED_BOOTSTRAP_SHA256";
@@ -1712,14 +1714,31 @@ export function recoveryConfiguredEnvironment(worktree, inherited = {}, head = M
   return environment;
 }
 
-export async function corroborateRecoveryBinding(worktree, environment, request = fetch) {
+export async function corroborateRecoveryBinding(worktree, environment, request = fetch, options = {}) {
   const token = readRecoveryApiToken(worktree, environment);
   const get = async (path) => {
-    const response = await request(`${environment.INGENIUM_API_URL}${path}`, {
+    const url = `${environment.INGENIUM_API_URL}${path}`;
+    const init = Object.freeze({
       method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
-      headers: { Authorization: `Bearer ${token}`, "X-Ingenium-Audience": "mcp",
-        "X-Ingenium-Workspace": environment.INGENIUM_WORKSPACE_ID, "X-Ingenium-Launcher-Worktree": worktree },
+      headers: Object.freeze({ Authorization: `Bearer ${token}`, "X-Ingenium-Audience": "mcp",
+        "X-Ingenium-Workspace": environment.INGENIUM_WORKSPACE_ID, "X-Ingenium-Launcher-Worktree": worktree }),
     });
+    const probe = () => request(url, init);
+    let response = await probe();
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After")?.trim();
+      const seconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : NaN;
+      const retryAt = retryAfter ? Date.parse(retryAfter) : NaN;
+      const delay = Number.isFinite(seconds) ? seconds * 1_000
+        : Number.isFinite(retryAt) && new Date(retryAt).toUTCString() === retryAfter
+          ? retryAt - (options.now ?? Date.now)() : NaN;
+      await response.body?.cancel();
+      if (!Number.isFinite(delay) || delay < 0 || delay > PREFLIGHT_RETRY_DELAY_CAP_MS) {
+        throw new Error("Recovery binding authority is unavailable");
+      }
+      await (options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))))(delay);
+      response = await probe();
+    }
     if (response.status !== 200) throw new Error("Recovery binding authority is unavailable");
     return responseValue(await response.json());
   };

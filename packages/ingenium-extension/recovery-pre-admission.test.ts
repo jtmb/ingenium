@@ -79,6 +79,62 @@ describe("recovery configured authority", () => {
       projectId, workspaceId: binding.workspaceId, storageMappingHash: binding.storageMappingHash, launcherWorktree: root,
     });
   });
+  it.each([
+    ["/auth/preflight", "1", 1_000],
+    ["/projects/ingenium/detail", "0", 0],
+    ["/auth/preflight", new Date(2_000_000_002_000).toUTCString(), 2_000],
+  ])("retries one rate-limited %s read with bounded Retry-After %s", async (limitedPath, retryAfter, delay) => {
+    const authority = authorityRequest();
+    const attempts: Array<{ url: string; method: string | undefined; redirect: RequestRedirect | undefined; headers: [string, string][] }> = [];
+    let limited = false;
+    const request = vi.fn(async (url: string, init: RequestInit) => {
+      attempts.push({ url, method: init.method, redirect: init.redirect, headers: [...new Headers(init.headers)].sort() });
+      if (!limited && url.endsWith(limitedPath)) {
+        limited = true;
+        return new Response(null, { status: 429, headers: { "Retry-After": retryAfter } });
+      }
+      return authority(url, init);
+    });
+    const sleep = vi.fn(async () => {
+      writeFileSync(join(root, ".opencode/.ingenium-mcp-credential"), "d".repeat(43), { mode: 0o600 });
+    });
+
+    await expect(shim.corroborateRecoveryBinding(root, environment, request, {
+      now: () => 2_000_000_000_000,
+      sleep,
+    })).resolves.toEqual(binding);
+
+    const retried = attempts.filter((attempt) => attempt.url.endsWith(limitedPath));
+    expect(retried).toHaveLength(2);
+    expect(retried[1]).toEqual(retried[0]);
+    expect(retried[0]?.headers).toContainEqual(["authorization", `Bearer ${"c".repeat(43)}`]);
+    expect(sleep.mock.calls).toEqual([[delay]]);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+  it.each([
+    ["missing Retry-After", undefined, [429], 1],
+    ["malformed Retry-After", "later", [429], 1],
+    ["unsupported date Retry-After", new Date(2_000_000_001_000).toISOString(), [429], 1],
+    ["negative Retry-After", "-1", [429], 1],
+    ["excessive delta Retry-After", "3", [429], 1],
+    ["excessive date Retry-After", new Date(2_000_000_003_000).toUTCString(), [429], 1],
+    ["a second 429", "1", [429, 429], 2],
+    ["a non-429 response", undefined, [503], 1],
+  ])("fails closed without another retry for %s", async (_failure, retryAfter, statuses, expectedRequests) => {
+    let attempt = 0;
+    const request = vi.fn(async () => new Response(null, {
+      status: statuses[Math.min(attempt++, statuses.length - 1)],
+      headers: attempt === 1 && retryAfter !== undefined ? { "Retry-After": retryAfter } : undefined,
+    }));
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(shim.corroborateRecoveryBinding(root, environment, request, {
+      now: () => 2_000_000_000_000,
+      sleep,
+    })).rejects.toThrow("Recovery binding authority is unavailable");
+    expect(request).toHaveBeenCalledTimes(expectedRequests);
+    expect(sleep.mock.calls).toEqual(expectedRequests === 2 ? [[1_000]] : []);
+  });
   it("rejects conflicting configuration, foreign authority, and changed source binding", async () => {
     expect(() => shim.recoveryConfiguredEnvironment(root, { INGENIUM_PROJECT: "foreign" })).toThrow();
     expect(() => shim.recoveryEnvironmentForBinding({ ...binding, workspaceId: "foreign" }, {})).toThrow();
