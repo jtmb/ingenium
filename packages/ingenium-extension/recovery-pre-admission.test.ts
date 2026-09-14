@@ -361,6 +361,7 @@ describe("recovery preflight repository-data trust", () => {
     json(artifact, {});
     sharedAcl(artifact);
     const preflight = { admissible: true, git: { head: f.head }, source: { sha256: hash("source") }, binding,
+      outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: null, quarantine: null },
       parent: { pid: 100, startTimeTicks: 10, executableSha256: hash("exe"), nonceSha256: hash("nonce"), sessionId: "ses_exact" } };
     expect(() => shim.readRecoveryAdmission(artifact, preflight, hash(shim.canonicalJson(preflight))))
       .toThrow("Recovery preflight file is unavailable");
@@ -399,24 +400,140 @@ function legacyFixture() {
   };
 }
 
+function strictLegacyTodos(parent: { pid: number; startTimeTicks: number }, overrides: Record<string, string> = {}) {
+  const values = {
+    session: "ses_exact",
+    pid: String(parent.pid),
+    startTicks: String(parent.startTimeTicks),
+    head,
+    project: binding.project,
+    projectId,
+    workspace: binding.workspaceId,
+    worktree: root,
+    storageHash: binding.storageMappingHash,
+    actions: "root-a",
+    changedPaths: "packages/ingenium-extension/scripts/recovery-bootstrap.js",
+    checks: "typecheck,test",
+    task: "legacy-admission",
+    status: "in_progress",
+    nextWork: "verify",
+    ...overrides,
+  };
+  return [
+    { content: `[RECOVERY_BIND:${values.session}] pid=${values.pid} startTicks=${values.startTicks} head=${values.head} project=${values.project} projectId=${values.projectId} workspace=${values.workspace} worktree=${values.worktree} storageHash=${values.storageHash}`,
+      status: "in_progress", priority: "high" },
+    { content: `[RECOVERY_HANDOFF] actions=${values.actions}; changedPaths=${values.changedPaths}; checks=${values.checks}; task=${values.task}; status=${values.status}; nextWork=${values.nextWork}`,
+      status: "pending", priority: "high" },
+    { content: "Complete the bounded recovery implementation", status: "pending", priority: "medium" },
+  ];
+}
+
+function markedLegacyCapture(capture: any, parent: any) {
+  const parsed = shim.parseLegacyRecoveryTodoInput({ todos: strictLegacyTodos(parent) }, parent, binding, head, "ses_exact");
+  return { ...capture, snapshot: { ...capture.snapshot, ...parsed } };
+}
+
 describe("legacy pre-admission capture", () => {
   it("captures an exact active session from the legacy parent's durable export when no control-plane port exists", async () => {
     const f = legacyFixture();
-    Object.assign(f.parent, { port: null, sessionId: "ses_exact", dataHome: join(root, ".local/share/opencode"),
+    Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
       environment: { HOME: root } });
     f.inspect.mockReturnValue({ ...f.parent, commandName: "opencode", ports: [], nonce: undefined });
+    f.todos.splice(0, f.todos.length, ...strictLegacyTodos(f.parent));
+    f.payloads["/session/ses_exact/message"][0].parts.push({ type: "tool", tool: "bash", state: {
+      status: "completed", input: { command: "private export command" }, output: "private export output", metadata: { exit: 0 },
+    } });
     const exported = { info: f.payloads["/session/ses_exact"], messages: f.payloads["/session/ses_exact/message"] };
-    const execute = vi.fn(() => ({ status: 0, signal: null, stdout: Buffer.from(JSON.stringify(exported)), stderr: Buffer.alloc(0) }));
+    const raw: Buffer[] = [];
+    const execute = vi.fn((_command: string, args: string[], _options?: any) => {
+      const value = args[0] === "db"
+        ? [{ sessionId: "ses_exact", directory: root, parentId: null, todoInput: JSON.stringify({ todos: f.todos }) }]
+        : exported;
+      const stdout = Buffer.from(JSON.stringify(value));
+      const stderr = Buffer.alloc(1);
+      raw.push(stdout, stderr);
+      return { status: 0, signal: null, stdout, stderr };
+    });
 
     const result = await shim.captureLegacyRecoveryPreAdmission(f.parent, binding, f.source, f.request, f.inspect, execute);
 
     expect(result).toMatchObject({ snapshot: { sessionId: "ses_exact", nonceProvenance: "absent_process_environment",
+      marker: { sessionIdSha256: hash("ses_exact"), bindingSha256: hash(f.todos[0]!.content),
+        handoffSha256: hash(f.todos[1]!.content) },
+      todos: f.todos.map((todo) => ({ idSha256: hash(`todo-${hash(`todo\0${JSON.stringify(todo.content)}`)}`), status: todo.status })),
+      declaredOperational: { actionsSha256: hash("root-a"),
+        checksSha256: hash(shim.canonicalJson(["typecheck", "test"])) },
       operational: { role: "ingenium-orchestrator" } } });
     expect(execute).toHaveBeenCalledWith("/proc/100/exe", ["export", "ses_exact", "--pure"], expect.objectContaining({
       cwd: root, env: { HOME: root, XDG_DATA_HOME: join(root, ".local/share/opencode"), PATH: "/usr/local/bin:/usr/bin:/bin" },
     }));
+    expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(["db", "export", "db"]);
+    expect(execute.mock.calls[0]![0]).toBe("/proc/100/exe");
+    expect(execute.mock.calls[0]![1]).toEqual(["db", shim.LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"]);
+    expect(execute.mock.calls[0]![2]).toMatchObject({ encoding: null, maxBuffer: 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"] });
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).toMatch(/^SELECT /);
+    expect(shim.LEGACY_RECOVERY_SESSION_QUERY).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|REPLACE|DROP|ALTER|PRAGMA)\b/);
+    expect(raw.every((bytes) => bytes.every((byte) => byte === 0))).toBe(true);
+    expect(JSON.stringify(result)).not.toContain("private transcript");
+    expect(JSON.stringify(result)).not.toContain("private reasoning");
+    expect(JSON.stringify(result)).not.toContain("private export command");
+    expect(JSON.stringify(result)).not.toContain("private export output");
+    expect(JSON.stringify(result)).not.toContain("Complete the bounded recovery implementation");
+    expect(JSON.stringify(result)).not.toContain("root-a");
+    expect(JSON.stringify(result)).not.toContain("legacy-admission");
     expect(f.request).not.toHaveBeenCalled();
   });
+
+  it("accepts the exact marker project and rejects a wrong project", () => {
+    const f = legacyFixture();
+    const input = { todos: strictLegacyTodos(f.parent) };
+
+    expect(shim.parseLegacyRecoveryTodoInput(input, f.parent, binding, head, "ses_exact")).not.toBeNull();
+    expect(() => shim.parseLegacyRecoveryTodoInput(input, f.parent, { ...binding, project: "foreign" }, head, "ses_exact"))
+      .toThrow("Recovery legacy binding marker does not match");
+  });
+
+  it.each(["wrong pid", "wrong start", "wrong source", "wrong project ID", "wrong workspace", "wrong worktree", "wrong storage",
+    "unsafe path", "missing marker", "session mismatch", "known parent mismatch", "duplicate marker", "unexpected marker field",
+    "unexpected Todo field", "zero matches", "child", "foreign directory", "multiple matches", "candidate overflow",
+    "unexpected row field"])(
+    "rejects strict marker discovery for %s", (failure) => {
+      const f = legacyFixture();
+      Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
+        environment: { HOME: root } });
+      const overrides: Record<string, string> = {};
+      if (failure === "wrong pid") overrides.pid = "101";
+      if (failure === "wrong start") overrides.startTicks = "11";
+      if (failure === "wrong source") overrides.head = "b".repeat(40);
+      if (failure === "wrong project ID") overrides.projectId = "33333333-3333-4333-8333-333333333333";
+      if (failure === "wrong workspace") overrides.workspace = "foreign";
+      if (failure === "wrong worktree") overrides.worktree = "/foreign";
+      if (failure === "wrong storage") overrides.storageHash = hash("foreign");
+      if (failure === "unsafe path") overrides.changedPaths = "../private.txt";
+      if (failure === "session mismatch") overrides.session = "ses_other";
+      const todos: any[] = strictLegacyTodos(f.parent, overrides);
+      if (failure === "missing marker") todos.splice(0, 2);
+      if (failure === "duplicate marker") todos.push({ ...todos[0] });
+      if (failure === "unexpected marker field") todos[0].content += " extra=value";
+      if (failure === "unexpected Todo field") todos[2] = { ...todos[2], secret: "private" };
+      const row: any = { sessionId: "ses_exact", directory: failure === "foreign directory" ? "/foreign" : root,
+        parentId: failure === "child" ? "ses_parent" : null, todoInput: JSON.stringify({ todos }) };
+      if (failure === "known parent mismatch") f.parent.sessionId = "ses_other";
+      if (failure === "unexpected row field") row.message = "private";
+      const rows = failure === "zero matches" ? [] : failure === "multiple matches"
+        ? [row, { ...row, sessionId: "ses_other",
+          todoInput: JSON.stringify({ todos: strictLegacyTodos(f.parent, { session: "ses_other" }) }) }]
+        : failure === "candidate overflow" ? Array.from({ length: 129 }, (_, index) => ({ ...row, sessionId: `ses_${index}` })) : [row];
+      const stdout = Buffer.from(JSON.stringify(rows));
+      const stderr = Buffer.from("private diagnostic");
+      const execute = vi.fn(() => ({ status: 0, signal: null, stdout, stderr }));
+
+      expect(shim.discoverLegacyRecoverySession(f.parent, binding, f.source, execute)).toBeNull();
+      expect(stdout.every((byte) => byte === 0)).toBe(true);
+      expect(stderr.every((byte) => byte === 0)).toBe(true);
+    },
+  );
 
   it.each([
     ["zero", { metadata: { exit: 0 } }, 0],
@@ -635,7 +752,7 @@ function preparationFixture() {
   });
   const ownerOptions = { run, inspect: () => owner, environment: () => ({ INVOCATION_ID: "a".repeat(32) }) };
   const inspectOwner = vi.fn((request: any) => shim.inspectPreparedRecoveryOwner(request, ownerOptions));
-  const collectInputs: any = vi.fn(async () => ({ binding, capture: await f.capture(), source, disposition: null,
+  const collectInputs: any = vi.fn(async () => ({ binding, capture: await f.capture(), source, quarantine: null,
     contract: shim.prepareRecoveryOwnerContract(binding, head) }));
   const dependencies = { openSource: () => sourceHandle, collectInputs, run, inspectOwner, wait: async () => {} };
   return { ...f, directory, source, sourceHandle, run, ownerOptions, inspectOwner, collectInputs, dependencies,
@@ -751,8 +868,8 @@ describe("fixed recovery preparation transaction", () => {
     const f = preparationFixture();
     const launch = managedPreparationLaunch();
     launch.executable.sha256 = f.parent.executableSha256;
-    const captured = await f.capture();
-    f.collectInputs.mockResolvedValue({ binding, capture: captured, source: f.source, disposition: null, launch,
+    const captured = markedLegacyCapture(await f.capture(), f.parent);
+    f.collectInputs.mockResolvedValue({ binding, capture: captured, source: f.source, quarantine: null, launch,
       contract: shim.prepareRecoveryOwnerContract(binding, head) });
     const normalRun = f.run.getMockImplementation()!;
     const replacementNonce = "r".repeat(43);
@@ -840,7 +957,7 @@ describe("fixed recovery preparation transaction", () => {
     if (failure === "capture") f.collectInputs.mockRejectedValue(new Error("private failure"));
     if (failure === "attestation") f.inspectOwner.mockReturnValue(null);
     if (failure === "final capture") f.collectInputs.mockImplementationOnce(async () => ({ binding, capture: await f.capture(), source: f.source,
-      disposition: null, contract: shim.prepareRecoveryOwnerContract(binding, head) })).mockRejectedValue(new Error("private capture failure"));
+      quarantine: null, contract: shim.prepareRecoveryOwnerContract(binding, head) })).mockRejectedValue(new Error("private capture failure"));
     if (failure === "final source") f.sourceHandle.revalidate.mockImplementationOnce(() => f.source).mockImplementation(() => { throw new Error("changed"); });
     await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", authorizesRestart: false });
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
@@ -900,7 +1017,7 @@ describe("fixed recovery preparation transaction", () => {
     const f = preparationFixture();
     const launch = managedPreparationLaunch();
     launch.executable.sha256 = f.parent.executableSha256;
-    f.collectInputs.mockResolvedValue({ binding, capture: await f.capture(), source: f.source, disposition: null, launch,
+    f.collectInputs.mockResolvedValue({ binding, capture: markedLegacyCapture(await f.capture(), f.parent), source: f.source, quarantine: null, launch,
       contract: shim.prepareRecoveryOwnerContract(binding, head) });
     f.inspectOwner.mockReturnValue({ status: "attested", authorizesRestart: false });
     await f.prepare();
@@ -965,7 +1082,7 @@ describe("fixed recovery preparation transaction", () => {
     const inputs = await shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
       ancestry: () => ({ status: "exact", parent: f.parent }), gitSummary: () => ({ status: "validated", head, sourceMatchesHead: true, dirtyPaths: [] }),
       inspectParent: f.inspect });
-    expect(inputs).toMatchObject({ binding, disposition: null, capture: { snapshot: { sessionId: "ses_exact", operational: { role: "ingenium-orchestrator" } } } });
+    expect(inputs).toMatchObject({ binding, quarantine: null, capture: { snapshot: { sessionId: "ses_exact", operational: { role: "ingenium-orchestrator" } } } });
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
     f.parent.environment.INGENIUM_PROJECT = "foreign";
     await expect(shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
@@ -1049,12 +1166,14 @@ describe("fixed recovery preparation transaction", () => {
   });
 });
 
-function recoveryAdmissionFixture() {
+function recoveryAdmissionFixture(outboxQuarantine: any = null) {
   const nonce = "n".repeat(43);
   const executable = realpathSync(process.execPath);
   const parent = { pid: process.pid, startTimeTicks: 42, executableSha256: hash(readFileSync(executable)),
     nonceSha256: hash(nonce), sessionId: "ses_exact" };
   const preflight = { admissible: true, git: { head }, source: { sha256: hash("source") }, parent, binding,
+    outbox: { status: "validated", count: outboxQuarantine ? 1 : 0, ambiguousCount: outboxQuarantine ? 1 : 0,
+      sha256: outboxQuarantine?.recordSha256 ?? null, quarantine: outboxQuarantine },
     currentParent: { status: "validated", session: { incarnation: 2, revision: 4, fence: 3 } } };
   const digest = hash(shim.canonicalJson(preflight));
   const worktreeId = `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`;
@@ -1115,6 +1234,31 @@ describe("secret-safe recovery admission bridge", () => {
     expect(existsSync(f.path)).toBe(false);
     expect(f.calls.at(-1)).toMatchObject({ path: "/api/v1/coordination/close",
       body: { session_id: "ses_exact", incarnation: 3, expected_revision: 1, fence: 7, ownership_token: register.ownership_token } });
+  });
+
+  it("carries the exact overflow quarantine from preflight into the admitted restart context", async () => {
+    const quarantine = Object.freeze({ schemaVersion: 1, status: "fenced", recordKey: COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
+      recordSha256: hash("overflow record"), recordCount: 11_617 });
+    const f = recoveryAdmissionFixture(quarantine);
+    const sourceHandle = { source: { path: f.executable }, revalidate: vi.fn(() => ({ path: f.executable })), close: vi.fn() };
+    const executeAdmitted = vi.fn(async (_argv: string[], context: any) => {
+      expect(context.outboxQuarantine).toEqual(quarantine);
+      expect(Object.isFrozen(context.outboxQuarantine)).toBe(true);
+    });
+    const consumeAdmission = vi.fn(async (record: any, expected: any) => Object.freeze({ ...expected,
+      receipt: Object.freeze({ id: "22222222-2222-4222-8222-222222222222", schema: "ingenium.recovery-admission-receipt",
+        version: 1, action: "production-restart", admissionDigest: hash(shim.canonicalJson(record.admission)),
+        consumedAt: new Date(f.now).toISOString() }) }));
+
+    await shim.runRecoveryBootstrapShim(["node", f.executable], { openSource: () => sourceHandle,
+      collectPreflight: vi.fn(async () => f.preflight), admissionPath: f.path,
+      mintAdmissionArtifact: (preflight: any, digest: string, path: string) => shim.mintRecoveryAdmissionArtifact(preflight, digest, path, f.options),
+      consumeAdmission, postConsumeCheck: vi.fn(), executeAdmitted, now: () => f.now });
+
+    expect(consumeAdmission.mock.calls[0]![1].outboxQuarantine).toEqual(quarantine);
+    expect(executeAdmitted).toHaveBeenCalledOnce();
+    expect(existsSync(f.path)).toBe(false);
+    expect(sourceHandle.close).toHaveBeenCalledOnce();
   });
 
   it("closes its registered incarnation and leaves no artifact when minting fails", async () => {
@@ -1221,7 +1365,7 @@ describe("secret-safe recovery admission bridge", () => {
     const f = recoveryAdmissionFixture();
     const parentIdentity = { pid: f.parent.pid, startTimeTicks: f.parent.startTimeTicks,
       executableSha256: f.parent.executableSha256, nonceSha256: f.parent.nonceSha256 };
-    preparation.collectInputs.mockResolvedValue({ binding, source: preparation.source, disposition: null,
+    preparation.collectInputs.mockResolvedValue({ binding, source: preparation.source, quarantine: null,
       contract: shim.prepareRecoveryOwnerContract(binding, head), capture: { snapshot: { parent: parentIdentity } } });
     await preparation.prepare();
     expect(shim.inspectRecoveryOwnerStatus(shim.prepareRecoveryOwnerContract(binding, head), preparation.ownerOptions))
@@ -1306,106 +1450,69 @@ describe("secret-safe recovery admission bridge", () => {
   });
 });
 
-describe("preparation disposition authorization", () => {
-  it.each(["concurrent authorized overflow", "final disposition mismatch"])(
-    "rejects final outbox drift and rolls back owned preparation: %s", async (change) => {
-      const f = preparationFixture();
-      const index = join(root, ".opencode/protected-runtime-index");
-      for (const path of [index, ...["coordination-outbox", "coordination-outbox-authorizations", "coordination-outbox-dispositions"]
-        .map((name) => join(index, name))]) mkdirSync(path, { mode: 0o700 });
-      const key = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
-      const now = Date.now();
-      const original = Buffer.from(JSON.stringify({ version: 1, key, operationId: hash("concurrent operation"), kind: "overflow",
-        sessionHash: "0".repeat(64), createdAt: new Date(now).toISOString(), failure: "unavailable", revision: null,
-        cursor: null, digest: hash("digest"), ambiguous: true, count: 4, mutation: null }));
-      const recordPath = join(index, "coordination-outbox", `${key}.json`);
-      const authPath = join(index, "coordination-outbox-authorizations", `${key}.json`);
-      json(authPath, { schemaVersion: 1, authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256, recordKey: key,
-        mode: "abandon_identityless_overflow", authority: "explicit_user_authorization", scope: "exact_key_same_record_family",
-        reason: "nonrecoverable_identityless_overflow", issuedAt: new Date(now - 1_000).toISOString(), expiresAt: new Date(now + 60_000).toISOString() });
-      const originalAuth = readFileSync(authPath);
-      if (change === "concurrent authorized overflow") {
-        const collect = f.collectInputs.getMockImplementation()!;
-        f.collectInputs.mockImplementation(async () => {
-          const inputs = await collect();
-          if (f.collectInputs.mock.calls.length === 2) writeFileSync(recordPath, original, { mode: 0o600 });
-          return { ...inputs, disposition: shim.planPreparationDisposition(index) };
-        });
-      } else {
-        writeFileSync(recordPath, original, { mode: 0o600 });
-        const plan = shim.planPreparationDisposition(index);
-        json(plan.destination, plan.disposition);
-        const inspect = f.inspectOwner.getMockImplementation()!;
-        f.inspectOwner.mockImplementation((request) => {
-          const evidence = inspect(request);
-          if (f.inspectOwner.mock.calls.length === 2) {
-            json(plan.destination, { ...plan.disposition, createdAt: new Date(Date.parse(plan.disposition.createdAt) + 1).toISOString() });
-          }
-          return evidence;
-        });
-      }
-      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(0);
-      await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "confirm", authorizesRestart: false });
-      expect(existsSync(f.directory)).toBe(false);
-      expect(existsSync(join(index, "tui-recovery"))).toBe(false);
-      expect(readFileSync(recordPath)).toEqual(original);
-      expect(readFileSync(authPath)).toEqual(originalAuth);
-      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(change === "concurrent authorized overflow" ? 1 : 0);
-      expect(f.sourceHandle.close).toHaveBeenCalledOnce();
-    },
-  );
-
-  it.each(["success", "attestation", "uncertain start", "changed count", "changed operation"])(
-    "pins existing authorization and immutable original bytes through %s", async (outcome) => {
-    const f = preparationFixture();
+describe("preparation overflow quarantine", () => {
+  function fixture() {
+    const preparation = preparationFixture();
     const index = join(root, ".opencode/protected-runtime-index");
-    for (const path of [index, join(index, "coordination-outbox"), join(index, "coordination-outbox-authorizations")]) mkdirSync(path, { mode: 0o700 });
+    mkdirSync(index, { mode: 0o700 });
+    mkdirSync(join(index, "coordination-outbox"), { mode: 0o700 });
     const key = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
     const record = { version: 1, key, operationId: hash("operation"), kind: "overflow", sessionHash: "0".repeat(64),
-      createdAt: new Date().toISOString(), failure: "unavailable", revision: null, cursor: null, digest: hash("digest"), ambiguous: true, count: 4, mutation: null };
+      createdAt: new Date().toISOString(), failure: "unavailable", revision: null, cursor: null, digest: hash("digest"),
+      ambiguous: true, count: 11_617, mutation: null };
     const path = join(index, "coordination-outbox", `${key}.json`);
     json(path, record);
     const original = readFileSync(path);
-    expect(() => shim.planPreparationDisposition(index)).toThrow();
-    const authPath = join(index, "coordination-outbox-authorizations", `${key}.json`);
-    const authorization = { schemaVersion: 1, authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256, recordKey: key,
-      mode: "abandon_identityless_overflow", authority: "explicit_user_authorization", scope: "exact_key_same_record_family",
-      reason: "nonrecoverable_identityless_overflow", issuedAt: new Date(Date.now() - 1_000).toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() };
-    json(authPath, authorization);
-    const originalAuth = readFileSync(authPath);
-    const plan = shim.planPreparationDisposition(index);
-    expect(plan.disposition).toMatchObject({ schemaVersion: 2, recordSha256: hash(original), recordCount: 4, operationId: record.operationId,
-      authorizationSha256: hash(originalAuth) });
-    for (const change of [{ expiresAt: new Date(1).toISOString() }, { recordKey: hash("foreign") }, { scope: "arbitrary" }, { authorizationId: hash("foreign") }]) {
-      json(authPath, { ...authorization, ...change });
-      expect(() => shim.planPreparationDisposition(index)).toThrow();
-    }
-    writeFileSync(authPath, originalAuth);
-    f.collectInputs.mockImplementation(async () => ({ binding, capture: await f.capture(), source: f.source,
-      disposition: plan, contract: shim.prepareRecoveryOwnerContract(binding, head) }));
-    if (outcome === "attestation") f.inspectOwner.mockReturnValue(null);
-    if (outcome === "uncertain start") {
-      const normal = f.run.getMockImplementation()!;
-      f.run.mockImplementation((command, args, options) => {
-        const result = normal(command, args, options);
-        if (command === "/usr/bin/systemd-run") throw new Error("uncertain start");
-        return result;
+    const quarantine = shim.planPreparationQuarantine(index);
+    preparation.collectInputs.mockImplementation(async () => ({ binding, capture: await preparation.capture(),
+      source: preparation.source, quarantine, contract: shim.prepareRecoveryOwnerContract(binding, head) }));
+    return { preparation, index, key, record, path, original, quarantine };
+  }
+
+  it("carries exact key, hash, and count without disposition, authorization, replay, or byte changes", async () => {
+    const f = fixture();
+
+    expect(await f.preparation.prepare()).toMatchObject({ status: "prepared", authorizesRestart: false,
+      quarantine: { schemaVersion: 1, status: "fenced", recordKey: f.key,
+        recordSha256: hash(f.original), recordCount: 11_617 } });
+    expect(readFileSync(f.path)).toEqual(f.original);
+    expect(shim.summarizeCoordinationOutboxState(f.index).outbox).toMatchObject({ ambiguousCount: 1,
+      quarantine: { recordKey: f.key, recordSha256: hash(f.original), recordCount: 11_617 } });
+    expect(existsSync(join(f.index, "coordination-outbox-authorizations"))).toBe(false);
+    expect(existsSync(join(f.index, "coordination-outbox-dispositions"))).toBe(false);
+  });
+
+  it.each(["exact", "changed"])('accepts exact retained evidence and rejects changed ambiguousCount: %s', async (state) => {
+    const f = fixture();
+    if (state === "changed") {
+      const collect = f.preparation.collectInputs.getMockImplementation()!;
+      f.preparation.collectInputs.mockImplementation(async () => {
+        const inputs = await collect();
+        return { ...inputs, quarantine: { ...inputs.quarantine, ambiguousCount: 0 } };
       });
     }
-    if (outcome === "changed count") json(path, { ...record, count: 5 });
-    if (outcome === "changed operation") json(path, { ...record, operationId: hash("changed") });
-    const expectedOriginal = readFileSync(path);
-    if (outcome === "success") {
-      expect(await f.prepare()).toMatchObject({ status: "prepared", authorizesRestart: false,
-        disposition: { recordSha256: hash(original), recordCount: 4 } });
-      expect(shim.summarizeCoordinationOutboxState(index).outbox.ambiguousCount).toBe(0);
-    } else {
-      await expect(f.prepare()).rejects.toMatchObject({ code: outcome === "uncertain start"
-        ? "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" : "RECOVERY_PREPARATION_ROLLED_BACK" });
-      expect(existsSync(plan.destination)).toBe(false);
-      expect(existsSync(f.directory)).toBe(outcome === "uncertain start");
-    }
-    expect(readFileSync(path)).toEqual(expectedOriginal);
-    expect(readFileSync(authPath)).toEqual(originalAuth);
+
+    const result = f.preparation.prepare();
+    if (state === "exact") await expect(result).resolves.toMatchObject({ status: "prepared" });
+    else await expect(result).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "prepare" });
+  });
+
+  it.each(["count", "hash", "key"])("rejects %s drift and rolls back only owned preparation", async (drift) => {
+    const f = fixture();
+    const inspect = f.preparation.inspectOwner.getMockImplementation()!;
+    f.preparation.inspectOwner.mockImplementation((request) => {
+      const evidence = inspect(request);
+      if (f.preparation.inspectOwner.mock.calls.length === 2) {
+        if (drift === "count") json(f.path, { ...f.record, count: f.record.count + 1 });
+        else if (drift === "hash") json(f.path, { ...f.record, digest: hash("changed") });
+        else renameSync(f.path, join(f.index, "coordination-outbox", `${hash("foreign")}.json`));
+      }
+      return evidence;
+    });
+
+    await expect(f.preparation.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK",
+      phase: "confirm", authorizesRestart: false });
+    expect(existsSync(f.preparation.directory)).toBe(false);
+    expect(existsSync(join(f.index, "coordination-outbox-dispositions"))).toBe(false);
   });
 });

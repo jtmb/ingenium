@@ -23,6 +23,7 @@ export const COORDINATION_OUTBOX_MAX_RECORD_BYTES = 16 * 1024;
 export const COORDINATION_OUTBOX_MAX_RECORDS = 128;
 export const COORDINATION_OUTBOX_MAX_BYTES = 2 * 1024 * 1024;
 export const COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
+export const COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT = 11_617;
 export const COORDINATION_OUTBOX_LEGACY_DISPOSITION_KEY = "196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3b29b355f6258b1e2";
 export const COORDINATION_OUTBOX_LEGACY_DISPOSITION_OPERATION_ID = "e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc";
 export const COORDINATION_OUTBOX_LEGACY_DISPOSITION_RECORD_SHA256 = "b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c";
@@ -94,6 +95,14 @@ export interface CoordinationOutboxRecord {
   ambiguous: boolean;
   count: number;
   mutation: CoordinationOutboxMutationEvidence | null;
+}
+
+export interface CoordinationOutboxQuarantine {
+  readonly schemaVersion: 1;
+  readonly status: "fenced";
+  readonly recordKey: string;
+  readonly recordSha256: string;
+  readonly recordCount: number;
 }
 
 export interface LegacyCoordinationOutboxDisposition {
@@ -653,6 +662,38 @@ export class CoordinationOutbox {
       .map(({ record }) => record);
   }
 
+  fencedOverflowQuarantine(): CoordinationOutboxQuarantine | null {
+    const ambiguous = this.snapshots().filter(({ record, sha256 }) =>
+      this.readDisposition(record, sha256) === undefined && (record.ambiguous || record.kind === "overflow"));
+    if (ambiguous.length === 0) return null;
+    const { record, sha256 } = ambiguous[0]!;
+    if (ambiguous.length !== 1 || !sha256 || record.key !== COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY
+      || record.kind !== "overflow" || !record.ambiguous || !/^0+$/.test(record.sessionHash)
+      || record.mutation !== null || record.count !== COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT) {
+      throw new Error("Coordination outbox quarantine is ambiguous");
+    }
+    return Object.freeze({
+      schemaVersion: 1,
+      status: "fenced",
+      recordKey: record.key,
+      recordSha256: sha256,
+      recordCount: record.count,
+    });
+  }
+
+  assertFencedOverflowQuarantine(expected: CoordinationOutboxQuarantine | null): void {
+    const current = this.fencedOverflowQuarantine();
+    if (expected !== null && (Object.keys(expected).length !== 5
+      || expected.schemaVersion !== 1 || expected.status !== "fenced"
+      || expected.recordKey !== COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY || !HASH.test(expected.recordSha256)
+      || expected.recordCount !== COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT)
+      || current?.recordKey !== expected?.recordKey || current?.recordSha256 !== expected?.recordSha256
+      || current?.recordCount !== expected?.recordCount || current?.status !== expected?.status
+      || current?.schemaVersion !== expected?.schemaVersion) {
+      throw new Error("Coordination outbox quarantine changed");
+    }
+  }
+
   private writeNewPrivateFile(path: string, serialized: string): void {
     const parentPath = dirname(path);
     const directory = this.openPrivateDirectory(parentPath);
@@ -1002,7 +1043,7 @@ export class CoordinationOutbox {
   async replay(deliver: (record: CoordinationOutboxRecord) => Promise<boolean>): Promise<void> {
     const unresolved = this.snapshots().filter(({ record, sha256 }) => this.readDisposition(record, sha256) === undefined);
     for (const { record, sha256 } of unresolved) {
-      if (record.key === FILESYSTEM_SENTINEL_KEY) continue;
+      if (record.kind === "overflow") continue;
       if (!(await deliver(record).catch(() => false))) continue;
       this.withMutationBoundary(() => {
         const current = this.readRecordSnapshot(this.path(record.key));

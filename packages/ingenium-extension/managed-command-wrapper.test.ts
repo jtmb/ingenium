@@ -369,7 +369,7 @@ function twoPassRecoveryPreflight(worktree: string): Record<string, unknown> {
         sha256: sha256("handoff"),
       },
     },
-    outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: sha256("") },
+    outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: sha256(""), quarantine: null },
     disposition: { status: "missing", count: 0, ambiguousCount: 0, sha256: null },
     freeze: { status: "clear", sha256: null },
     deployed: {
@@ -434,6 +434,7 @@ function expectedAdmittedRecoveryContext(preflight: Record<string, any>, digest:
       sessionId: preflight.parent.sessionId,
     }),
     binding: Object.freeze({ ...preflight.binding }),
+    outboxQuarantine: preflight.outbox?.quarantine ?? null,
   });
 }
 
@@ -1728,7 +1729,7 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("two-pass recovery preflight represents ambiguous identity fail closed", async () => {
+  it("two-pass recovery preflight fails closed without a corroborated binding", async () => {
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
     const preflight = await shim.collectRecoveryPreflight({
       environment: {},
@@ -1758,12 +1759,10 @@ describe("managed command wrappers", () => {
         mode: "0644",
         expectedMode: "0644",
       },
-      ancestry: { status: "ambiguous" },
-      parent: null,
       binding: null,
       nonceEnrollment: { classification: "ambiguous" },
     });
-    expect(emitted.preflight.failures).toContain("parent_identity");
+    expect(emitted.preflight.failures).toEqual(expect.arrayContaining(["binding", "nonce_enrollment"]));
     expect(executeAdmitted).not.toHaveBeenCalled();
   });
 
@@ -2016,7 +2015,7 @@ describe("managed command wrappers", () => {
       executeAdmitted,
     });
 
-    expect(calls).toEqual(["consume", "discard", "post-consume", "execute"]);
+    expect(calls).toEqual(["consume", "post-consume", "discard", "execute"]);
     expect(discardAdmission).toHaveBeenCalledWith("/unread/local/artifact");
     expect(sourceHandle.revalidate).toHaveBeenCalledTimes(2);
     expect(sourceHandle.close).toHaveBeenCalledOnce();
@@ -3046,12 +3045,38 @@ describe("managed command wrappers", () => {
     expect(Object.isFrozen(parsed)).toBe(true);
     expect(Object.isFrozen(parsed.parent)).toBe(true);
     expect(Object.isFrozen(parsed.binding)).toBe(true);
+    expect(parsed.outboxQuarantine).toBeNull();
     expect(Object.isFrozen(parsed.receipt)).toBe(true);
     expect(JSON.stringify(parsed)).not.toContain("ownership_token");
     expect(JSON.stringify(parsed)).not.toContain("consumeToken");
     expect(() => parseAdmittedRecoveryContext({
       INGENIUM_ADMITTED_RECOVERY_CONTEXT: JSON.stringify({ ...expected, ownership_token: "secret" }),
     })).toThrow("unavailable");
+  });
+
+  it("rejects admitted overflow quarantine drift before binding or parent discovery", async () => {
+    const preflight = twoPassRecoveryPreflight(repositoryRoot) as Record<string, any>;
+    preflight.outbox = { ...preflight.outbox, ambiguousCount: 1, quarantine: { schemaVersion: 1, status: "fenced",
+      recordKey: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY, recordSha256: sha256("record"), recordCount: 11_617 } };
+    const digest = sha256(canonicalTestJson(preflight));
+    const context = admittedRecoveryContext(preflight, digest);
+    const resolveBinding = vi.fn();
+    const readParentCandidates = vi.fn();
+
+    expect(() => parseAdmittedRecoveryContext({ INGENIUM_ADMITTED_RECOVERY_CONTEXT: JSON.stringify({
+      ...context, outboxQuarantine: { ...context.outboxQuarantine!, recordCount: 11_618 },
+    }) })).toThrow("unavailable");
+    await expect(runProductionRestartAdapter({
+      canonicalWorktree: vi.fn(),
+      revalidateOutboxQuarantine: vi.fn(() => false),
+      resolveBinding,
+      readParentCandidates,
+      retainCandidateRejection: vi.fn(),
+      attestParentProcess: vi.fn(),
+      prepareReplacement: vi.fn(),
+    }, context)).rejects.toThrow("quarantine changed after admission");
+    expect(resolveBinding).not.toHaveBeenCalled();
+    expect(readParentCandidates).not.toHaveBeenCalled();
   });
 
   it("requires Basic authentication for OpenCode recovery requests", async () => {
@@ -3670,7 +3695,7 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("fixed deployment rejects a saturated ambiguous legacy preflight before enrollment or signal", async () => {
+  it("fixed deployment rejects a saturated non-contracted overflow without resolving or mutating it", () => {
     const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-ambiguous-"));
     const priorCanonicalWorktree = process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
     const priorWorktree = process.env.INGENIUM_WORKTREE;
@@ -3705,22 +3730,10 @@ describe("managed command wrappers", () => {
       writePrivateJson(join(restartRoot, "state.json"), retainedState);
 
       const production = productionRestartDependencies(sha256("production-restart-script"));
-      const resolveBinding = vi.fn();
-      const readParentCandidates = vi.fn();
-      const enrollParentCandidate = vi.fn();
-      const prepareReplacement = vi.fn();
-      await expect(runProductionRestartAdapter({
-        ...production,
-        resolveBinding,
-        readParentCandidates,
-        enrollParentCandidate,
-        prepareReplacement,
-      })).rejects.toThrow("coordination state is ambiguous");
-      expect(resolveBinding).not.toHaveBeenCalled();
-      expect(readParentCandidates).not.toHaveBeenCalled();
-      expect(enrollParentCandidate).not.toHaveBeenCalled();
-      expect(prepareReplacement).not.toHaveBeenCalled();
+
+      expect(() => production.canonicalWorktree()).toThrow("coordination state is ambiguous");
       expect(JSON.parse(readFileSync(join(restartRoot, "state.json"), "utf8"))).toEqual(retainedState);
+      expect(existsSync(outbox.dispositionDirectory)).toBe(false);
     } finally {
       if (priorCanonicalWorktree === undefined) delete process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE;
       else process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = priorCanonicalWorktree;
@@ -3738,7 +3751,7 @@ describe("managed command wrappers", () => {
       process.env.INGENIUM_RECOVERY_CANONICAL_WORKTREE = worktree;
       process.env.INGENIUM_WORKTREE = worktree;
       const outbox = new CoordinationOutbox(worktree);
-      const retained = writeIdentitylessOverflow(outbox, PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY, 7);
+      const retained = writeIdentitylessOverflow(outbox, PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY, 11_617);
       const overflowPath = join(outbox.directory, `${PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY}.json`);
 
       const production = productionRestartDependencies(sha256("production-restart-script"));
@@ -3747,7 +3760,7 @@ describe("managed command wrappers", () => {
       expect(readFileSync(overflowPath)).toEqual(retained);
       expect(outbox.unresolved()).toContainEqual(expect.objectContaining({
         key: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
-        count: 7,
+        count: 11_617,
         ambiguous: true,
       }));
       expect(existsSync(outbox.dispositionDirectory)).toBe(false);
@@ -4112,9 +4125,9 @@ describe("managed command wrappers", () => {
       const started = join(worktree, "writer-started");
       const result = join(worktree, "writer-result.json");
       const exactKey = "concurrent-final-check";
-      const unresolved = vi.spyOn(CoordinationOutbox.prototype, "unresolved").mockImplementation(() => {
-        events.push("unresolved");
-        return [];
+      const quarantine = vi.spyOn(CoordinationOutbox.prototype, "assertFencedOverflowQuarantine").mockImplementation((expected) => {
+        expect(expected).toBeNull();
+        events.push("quarantine");
       });
 
       commitProductionRetirement(worktree, sha256("transaction"), () => {
@@ -4153,10 +4166,10 @@ describe("managed command wrappers", () => {
       }
       expect(writer.exitCode).toBe(0);
 
-      expect(events).toEqual(["unresolved", "commit"]);
+      expect(events).toEqual(["quarantine", "commit"]);
       expect(JSON.parse(readFileSync(result, "utf8"))).toEqual({ status: "written" });
       expect(new CoordinationOutbox(worktree).list()).toContainEqual(expect.objectContaining({ key: sha256(exactKey) }));
-      unresolved.mockRestore();
+      quarantine.mockRestore();
     } finally {
       if (writer) await stopRecoveryProcess(writer);
       vi.restoreAllMocks();

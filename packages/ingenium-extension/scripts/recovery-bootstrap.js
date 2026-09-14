@@ -78,11 +78,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SAFE_SESSION = /^[A-Za-z0-9_-]{1,256}$/;
+const SAFE_OPERATIONAL_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const LOWER_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43,128}$/;
 const API_TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const RECOVERY_SOURCE_MAX_BYTES = 256 * 1024;
 const RECOVERY_ADMISSION_MAX_BYTES = 16 * 1024;
 const RECOVERY_ADMISSION_LIFETIME_MS = 15 * 60 * 1_000;
+const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 1024 * 1024;
+const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
 const SERVER_ADMISSION_KEYS = [
   "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
   "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
@@ -93,6 +97,25 @@ const LEGACY_DISPOSITION_KEY = "196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3
 const LEGACY_DISPOSITION_OPERATION_ID = "e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc";
 const LEGACY_DISPOSITION_RECORD_SHA256 = "b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c";
 export const RECOVERY_ADMISSION_RELATIVE_PATH = "tests/artifacts/tui-recovery/production-restart-admission.json";
+export const LEGACY_RECOVERY_SESSION_QUERY = `SELECT s.id AS sessionId,
+       s.directory AS directory,
+       s.parent_id AS parentId,
+       json_extract(p.data, '$.state.input') AS todoInput
+FROM session AS s
+JOIN part AS p ON p.id = (
+  SELECT candidate.id
+  FROM part AS candidate
+  WHERE candidate.session_id = s.id
+    AND json_extract(candidate.data, '$.type') = 'tool'
+    AND json_extract(candidate.data, '$.tool') = 'todowrite'
+    AND json_extract(candidate.data, '$.state.status') = 'completed'
+    AND json_type(candidate.data, '$.state.time.end') = 'integer'
+  ORDER BY json_extract(candidate.data, '$.state.time.end') DESC, candidate.id DESC
+  LIMIT 1
+)
+WHERE s.parent_id IS NULL
+ORDER BY s.id
+LIMIT 129`;
 
 function parsedAttestedContext(value) {
   if (value === undefined) return null;
@@ -954,6 +977,18 @@ function validDispositionSummaryRecord(value, key, name) {
     && Number.isFinite(Date.parse(value.createdAt));
 }
 
+function validOutboxQuarantine(value) {
+  return value === null || hasExactKeys(value, ["schemaVersion", "status", "recordKey", "recordSha256", "recordCount"])
+    && value.schemaVersion === 1 && value.status === "fenced" && value.recordKey === QUARANTINED_OVERFLOW_KEY
+    && HASH.test(value.recordSha256 ?? "") && value.recordCount === QUARANTINED_OVERFLOW_COUNT;
+}
+
+function validRecoveryOutboxQuarantineState(value) {
+  return isRecord(value) && Number.isSafeInteger(value.ambiguousCount) && value.ambiguousCount >= 0
+    && Object.hasOwn(value, "quarantine") && validOutboxQuarantine(value.quarantine)
+    && value.ambiguousCount === (value.quarantine === null ? 0 : 1);
+}
+
 export function summarizeCoordinationOutboxState(protectedIndex) {
   const inspectedOutbox = inspectSummaryDirectory(
     resolve(protectedIndex, "coordination-outbox"),
@@ -997,14 +1032,19 @@ export function summarizeCoordinationOutboxState(protectedIndex) {
         && expires > issued && expires - issued <= 24 * 60 * 60 * 1_000 && issued <= disposed && disposed < expires;
     } catch { return false; }
   };
-  const ambiguousCount = inspectedOutbox.entries.filter(({ sha256: recordSha256, value }) =>
+  const unresolvedAmbiguous = inspectedOutbox.entries.filter(({ sha256: recordSha256, value }) =>
     (value.ambiguous === true || value.kind === "overflow")
     && !versionedDisposed({ sha256: recordSha256, value })
     && !(legacyDisposed && value.key === LEGACY_DISPOSITION_KEY
-      && value.operationId === LEGACY_DISPOSITION_OPERATION_ID
-      && recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256)).length;
+      && value.operationId === LEGACY_DISPOSITION_OPERATION_ID && recordSha256 === LEGACY_DISPOSITION_RECORD_SHA256));
+  const fenced = unresolvedAmbiguous.length === 1 ? unresolvedAmbiguous[0] : undefined;
+  const quarantine = fenced && fenced.value.key === QUARANTINED_OVERFLOW_KEY && fenced.value.kind === "overflow"
+    && fenced.value.ambiguous === true && /^0+$/.test(fenced.value.sessionHash) && fenced.value.mutation === null
+    && fenced.value.count === QUARANTINED_OVERFLOW_COUNT
+    ? Object.freeze({ schemaVersion: 1, status: "fenced", recordKey: fenced.value.key,
+      recordSha256: fenced.sha256, recordCount: fenced.value.count }) : null;
   return {
-    outbox: { ...inspectedOutbox.summary, ambiguousCount },
+    outbox: { ...inspectedOutbox.summary, ambiguousCount: unresolvedAmbiguous.length, quarantine },
     disposition: inspectedDisposition.summary,
   };
 }
@@ -1309,6 +1349,143 @@ async function readLiveRecoverySummary(parent, worktree, request) {
   }
 }
 
+function parseOperationalList(value, maximum) {
+  const items = value.split(",");
+  if (items.length < 1 || items.length > maximum || items.some((item) => !SAFE_OPERATIONAL_TOKEN.test(item))
+    || new Set(items).size !== items.length) throw new Error("Recovery legacy handoff marker is invalid");
+  return items;
+}
+
+export function parseLegacyRecoveryTodoInput(input, parent, binding, sourceHead, sessionId) {
+  if (!hasExactKeys(input, ["todos"]) || !Array.isArray(input.todos) || input.todos.length < 2 || input.todos.length > 64
+    || Buffer.byteLength(canonicalJson(input), "utf8") > LEGACY_TODO_INPUT_MAX_BYTES) {
+    throw new Error("Recovery legacy Todo input is invalid");
+  }
+  const todos = input.todos.map((todo) => {
+    if (!hasExactKeys(todo, ["content", "status", "priority"]) || typeof todo.content !== "string"
+      || todo.content.length < 1 || todo.content.length > 2048 || /[\u0000-\u001f\u007f]/.test(todo.content)
+      || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status)
+      || !["high", "medium", "low"].includes(todo.priority)) throw new Error("Recovery legacy Todo input is invalid");
+    return Object.freeze({ content: todo.content, status: todo.status, priority: todo.priority });
+  });
+  if (new Set(todos.map((todo) => todo.content)).size !== todos.length) throw new Error("Recovery legacy Todo input is invalid");
+  const bindingItems = todos.filter((todo) => todo.content.startsWith("[RECOVERY_BIND"));
+  const handoffItems = todos.filter((todo) => todo.content.startsWith("[RECOVERY_HANDOFF"));
+  if (bindingItems.length === 0 && handoffItems.length === 0) return null;
+  if (bindingItems.length !== 1 || handoffItems.length !== 1) throw new Error("Recovery legacy Todo markers are ambiguous");
+
+  const bindingMatch = /^\[RECOVERY_BIND:([A-Za-z0-9_-]+)\] pid=([1-9][0-9]*) startTicks=([1-9][0-9]*) head=([0-9a-f]{40}) project=([^ ]+) projectId=([0-9a-f-]+) workspace=([^ ]+) worktree=(.+) storageHash=([0-9a-f]{64})$/
+    .exec(bindingItems[0].content);
+  if (!bindingMatch || !SAFE_SESSION.test(sessionId ?? "") || bindingMatch[1] !== sessionId
+    || !SAFE_PROJECT.test(bindingMatch[5]) || !LOWER_UUID.test(bindingMatch[6])
+    || !SAFE_OPERATIONAL_TOKEN.test(bindingMatch[7])) throw new Error("Recovery legacy binding marker is invalid");
+  const pid = Number(bindingMatch[2]);
+  const startTimeTicks = Number(bindingMatch[3]);
+  const markerWorktree = bindingMatch[8];
+  if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(startTimeTicks)
+    || pid !== parent.pid || startTimeTicks !== parent.startTimeTicks || bindingMatch[4] !== sourceHead
+    || bindingMatch[5] !== binding.project || bindingMatch[6] !== binding.projectId
+    || bindingMatch[7] !== binding.workspaceId
+    || markerWorktree !== binding.worktree || resolve(markerWorktree) !== markerWorktree
+    || realpathSync(markerWorktree) !== markerWorktree || bindingMatch[9] !== binding.storageMappingHash) {
+    throw new Error("Recovery legacy binding marker does not match");
+  }
+
+  const handoffMatch = /^\[RECOVERY_HANDOFF\] actions=([^;]+); changedPaths=([^;]+); checks=([^;]+); task=([^;]+); status=([^;]+); nextWork=([^;]+)$/
+    .exec(handoffItems[0].content);
+  if (!handoffMatch || ![handoffMatch[1], handoffMatch[4], handoffMatch[5], handoffMatch[6]]
+    .every((value) => SAFE_OPERATIONAL_TOKEN.test(value))) throw new Error("Recovery legacy handoff marker is invalid");
+  const changedPaths = handoffMatch[2].split(",");
+  if (changedPaths.length > 32 || new Set(changedPaths).size !== changedPaths.length
+    || changedPaths.some((path) => !safeHandoffPath(path)
+      || relative(binding.worktree, resolve(binding.worktree, path)) !== path)) {
+    throw new Error("Recovery legacy handoff marker is invalid");
+  }
+  const checks = parseOperationalList(handoffMatch[3], 32);
+  const declaredOperational = Object.freeze({
+    actionsSha256: sha256(handoffMatch[1]),
+    changedPathsSha256: sha256(canonicalJson(changedPaths)),
+    checksSha256: sha256(canonicalJson(checks)),
+    taskSha256: sha256(handoffMatch[4]),
+    statusSha256: sha256(handoffMatch[5]),
+    nextWorkSha256: sha256(handoffMatch[6]),
+  });
+  return Object.freeze({
+    marker: Object.freeze({ sessionIdSha256: sha256(sessionId), bindingSha256: sha256(bindingItems[0].content),
+      handoffSha256: sha256(handoffItems[0].content) }),
+    todos: Object.freeze(todos.map((todo) => Object.freeze({
+      idSha256: sha256(`todo-${sha256(`todo\0${JSON.stringify(todo.content)}`)}`),
+      status: todo.status,
+    }))),
+    declaredOperational,
+  });
+}
+
+function validLegacyRecoveryTodoHandoff(value, sessionId) {
+  return hasExactKeys(value, ["marker", "todos", "declaredOperational"])
+    && hasExactKeys(value.marker, ["sessionIdSha256", "bindingSha256", "handoffSha256"])
+    && value.marker.sessionIdSha256 === sha256(sessionId)
+    && typeof value.marker.bindingSha256 === "string" && HASH.test(value.marker.bindingSha256)
+    && typeof value.marker.handoffSha256 === "string" && HASH.test(value.marker.handoffSha256)
+    && Array.isArray(value.todos) && value.todos.length >= 2 && value.todos.length <= 64
+    && value.todos.every((todo) => hasExactKeys(todo, ["idSha256", "status"])
+      && HASH.test(todo.idSha256 ?? "") && ["pending", "in_progress", "completed", "cancelled"].includes(todo.status))
+    && new Set(value.todos.map((todo) => todo.idSha256)).size === value.todos.length
+    && hasExactKeys(value.declaredOperational, ["actionsSha256", "changedPathsSha256", "checksSha256", "taskSha256",
+      "statusSha256", "nextWorkSha256"])
+    && Object.values(value.declaredOperational).every((digest) => typeof digest === "string" && HASH.test(digest));
+}
+
+export function discoverLegacyRecoverySession(parent, binding, source, execute = spawnSync) {
+  let stdout;
+  let stderr;
+  try {
+    prepareRecoveryOwnerContract(binding, source?.head);
+    const home = parent?.environment?.HOME;
+    if (!parent || parent.port !== null || parent.cwd !== binding.worktree || !safeRecoveryIdentity(parent)
+      || parent.nonceSha256 !== "0".repeat(64) || parent.sessionId !== null && !SAFE_SESSION.test(parent.sessionId)
+      || source.status !== "validated" || source.dirtyPaths.length !== 0 || !source.sourceMatchesHead
+      || !/^[0-9a-f]{40}$/.test(source.head) || typeof home !== "string" || resolve(home) !== home
+      || typeof parent.dataHome !== "string" || resolve(parent.dataHome) !== parent.dataHome) return null;
+    const result = execute(`/proc/${parent.pid}/exe`, ["db", LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"], {
+      cwd: binding.worktree,
+      encoding: null,
+      timeout: 10_000,
+      maxBuffer: LEGACY_SESSION_DISCOVERY_MAX_BYTES,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
+    });
+    stdout = Buffer.isBuffer(result.stdout) ? result.stdout : undefined;
+    stderr = Buffer.isBuffer(result.stderr) ? result.stderr : undefined;
+    if (result.error || result.signal || result.status !== 0 || !stdout || stdout.length < 2
+      || stdout.length > LEGACY_SESSION_DISCOVERY_MAX_BYTES) return null;
+    const text = stdout.toString("utf8");
+    if (!Buffer.from(text).equals(stdout)) return null;
+    const rows = JSON.parse(text);
+    if (!Array.isArray(rows) || rows.length > 128) return null;
+    const seen = new Set();
+    const matches = [];
+    for (const row of rows) {
+      if (!hasExactKeys(row, ["sessionId", "directory", "parentId", "todoInput"])
+        || !SAFE_SESSION.test(row.sessionId ?? "") || typeof row.directory !== "string" || row.parentId !== null
+        || typeof row.todoInput !== "string" || Buffer.byteLength(row.todoInput, "utf8") > LEGACY_TODO_INPUT_MAX_BYTES
+        || seen.has(row.sessionId)) return null;
+      seen.add(row.sessionId);
+      if (row.directory !== binding.worktree) continue;
+      const input = JSON.parse(row.todoInput);
+      const captured = parseLegacyRecoveryTodoInput(input, parent, binding, source.head, row.sessionId);
+      if (captured) matches.push(Object.freeze({ sessionId: row.sessionId, ...captured }));
+    }
+    if (matches.length !== 1 || parent.sessionId !== null && parent.sessionId !== matches[0].sessionId) return null;
+    return matches[0];
+  } catch {
+    return null;
+  } finally {
+    stdout?.fill(0);
+    stderr?.fill(0);
+  }
+}
+
 async function readDurableLegacyRecoverySummary(parent, worktree, execute = spawnSync) {
   if (!SAFE_SESSION.test(parent?.sessionId ?? "") || !safeRecoveryIdentity(parent)
     || parent.nonceSha256 !== "0".repeat(64) || parent.port !== null
@@ -1357,12 +1534,12 @@ async function readDurableLegacyRecoverySummary(parent, worktree, execute = spaw
 
 export async function captureLegacyRecoveryPreAdmission(parent, binding, source, request = fetch,
   inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) }),
-  exportSession = spawnSync) {
+  executeParent = spawnSync) {
   try { prepareRecoveryOwnerContract(binding, source?.head); } catch { return null; }
   if (!parent || !binding || !source || source.status !== "validated" || source.dirtyPaths.length !== 0
     || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree
     || !safeRecoveryIdentity(parent) || parent.nonceSha256 !== "0".repeat(64)
-    || parent.port === null && !SAFE_SESSION.test(parent.sessionId ?? "")) return null;
+    || parent.port === null && parent.sessionId !== null && !SAFE_SESSION.test(parent.sessionId)) return null;
   const sameProcess = () => {
     const actual = inspect(parent.pid);
     return actual && actual.commandName === "opencode" && actual.pid === parent.pid
@@ -1374,14 +1551,21 @@ export async function captureLegacyRecoveryPreAdmission(parent, binding, source,
   if (!sameProcess()) return null;
   try {
     if (parent.port === null) {
-      const live = await readDurableLegacyRecoverySummary(parent, binding.worktree, exportSession);
+      const discovered = discoverLegacyRecoverySession(parent, binding, source, executeParent);
+      if (!discovered || !sameProcess()) return null;
+      const identifiedParent = { ...parent, sessionId: discovered.sessionId };
+      const live = await readDurableLegacyRecoverySummary(identifiedParent, binding.worktree, executeParent);
       if (!live?.operational || !sameProcess()) return null;
+      if (canonicalJson(live.operational.todos) !== canonicalJson(discovered.todos)) return null;
       const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
       if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
         || config.agent[live.operational.role]?.disable === true) return null;
+      const confirmed = discoverLegacyRecoverySession(parent, binding, source, executeParent);
+      if (!confirmed || canonicalJson(confirmed) !== canonicalJson(discovered) || !sameProcess()) return null;
       const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
       const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
-        nonceProvenance: "absent_process_environment", sessionId: parent.sessionId, binding, sourceHead: source.head,
+        nonceProvenance: "absent_process_environment", sessionId: discovered.sessionId, binding, sourceHead: source.head,
+        marker: discovered.marker, todos: discovered.todos, declaredOperational: discovered.declaredOperational,
         operational: live.operational };
       return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
     }
@@ -1523,7 +1707,8 @@ export function recoveryEnvironmentForBinding(binding, inherited = process.env) 
 const PREPARATION_JOB = "ingenium-recovery-owner.service";
 const PREPARATION_OWNER_ARGUMENT = "--recovery-preparation-owner";
 const PREPARATION_LIFETIME_MS = 15 * 60 * 1_000;
-const PREPARATION_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
+const QUARANTINED_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
+const QUARANTINED_OVERFLOW_COUNT = 11_617;
 const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = Object.freeze({
   code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
   path: "inspect.parent_control_plane",
@@ -1673,54 +1858,41 @@ function writePreparationFile(path, bytes, retainOwnership, mode = 0o600) {
   });
 }
 
-export function planPreparationDisposition(index, now = Date.now()) {
+export function planPreparationQuarantine(index) {
   const state = summarizeCoordinationOutboxState(index);
   if (state.outbox.status === "invalid" || state.disposition.status === "invalid") throw new Error("Recovery preparation outbox is invalid");
   if (state.outbox.ambiguousCount === 0) return null;
-  if (state.outbox.ambiguousCount !== 1) throw new Error("Recovery preparation outbox is ambiguous");
+  if (state.outbox.ambiguousCount !== 1 || state.outbox.quarantine === null
+    || !validOutboxQuarantine(state.outbox.quarantine)) {
+    throw new Error("Recovery preparation outbox is ambiguous");
+  }
   privatePreparationDirectory(index);
   const directory = resolve(index, "coordination-outbox");
-  const authorities = resolve(index, "coordination-outbox-authorizations");
   privatePreparationDirectory(directory);
-  privatePreparationDirectory(authorities);
-  const key = PREPARATION_OVERFLOW_KEY;
+  const key = state.outbox.quarantine.recordKey;
   const path = resolve(directory, `${key}.json`);
   const bytes = readOnlyRegularFile(path, 16 * 1024, false, 0o600);
   const record = JSON.parse(bytes);
   if (!validOutboxSummaryRecord(record, key, `${key}.json`) || record.kind !== "overflow" || record.ambiguous !== true
-    || !/^0+$/.test(record.sessionHash) || record.mutation !== null) throw new Error("Recovery preparation record is not identityless");
-  const authorizationPath = resolve(authorities, `${key}.json`);
-  const authorizationBytes = readOnlyRegularFile(authorizationPath, 16 * 1024, false, 0o600);
-  const authorization = JSON.parse(authorizationBytes);
-  const issued = Date.parse(authorization.issuedAt);
-  const expires = Date.parse(authorization.expiresAt);
-  if (!hasExactKeys(authorization, ["schemaVersion", "authorizationId", "recordKey", "mode", "authority", "scope", "reason", "issuedAt", "expiresAt"])
-    || authorization.schemaVersion !== 1 || authorization.recordKey !== key
-    || authorization.authorizationId !== sha256(`explicit_user_authorization\0abandon_identityless_overflow\0${key}\0exact_key_same_record_family\0nonrecoverable_identityless_overflow`)
-    || authorization.mode !== "abandon_identityless_overflow" || authorization.authority !== "explicit_user_authorization"
-    || authorization.scope !== "exact_key_same_record_family" || authorization.reason !== "nonrecoverable_identityless_overflow"
-    || !isCanonicalRfc3339(authorization.issuedAt) || !isCanonicalRfc3339(authorization.expiresAt)
-    || issued > now || expires <= now || expires <= issued || expires - issued > 24 * 60 * 60 * 1_000) {
-    throw new Error("Recovery preparation authorization is unavailable");
-  }
-  const dispositions = inspectSummaryDirectory(resolve(index, "coordination-outbox-dispositions"), 16 * 1024, validDispositionSummaryRecord);
-  if (dispositions.entries.some(({ value }) => value.authorizationSha256 === sha256(authorizationBytes))) {
-    throw new Error("Recovery preparation authorization was already used");
-  }
-  const disposition = { schemaVersion: 2, recordKey: key, recordSha256: sha256(bytes), recordCount: record.count,
-    operationId: record.operationId, authorizationSha256: sha256(authorizationBytes), decision: "abandoned",
-    authority: authorization.authority, reason: authorization.reason, createdAt: new Date(now).toISOString() };
-  return { path, bytes, authorizationPath, authorizationBytes, disposition,
-    destination: resolve(index, "coordination-outbox-dispositions", `${key}.${disposition.recordSha256}.json`) };
+    || !/^0+$/.test(record.sessionHash) || record.mutation !== null || sha256(bytes) !== state.outbox.quarantine.recordSha256
+    || record.count !== state.outbox.quarantine.recordCount) throw new Error("Recovery preparation quarantine changed");
+  return { path, bytes, ambiguousCount: state.outbox.ambiguousCount, quarantine: state.outbox.quarantine };
 }
 
-function validatePreparationPlan(plan, now = Date.now()) {
+function validatePreparationQuarantine(plan) {
   if (!plan) return;
-  if (!plan.bytes.equals(readOnlyRegularFile(plan.path, 16 * 1024, false, 0o600))
-    || !plan.authorizationBytes.equals(readOnlyRegularFile(plan.authorizationPath, 16 * 1024, false, 0o600))
-    || Date.parse(JSON.parse(plan.authorizationBytes).expiresAt) <= now) {
-    throw new Error("Recovery preparation immutable record changed");
+  const bytes = readOnlyRegularFile(plan.path, 16 * 1024, false, 0o600);
+  if (!Number.isSafeInteger(plan.ambiguousCount) || plan.ambiguousCount !== 1
+    || !plan.bytes.equals(bytes) || sha256(bytes) !== plan.quarantine.recordSha256) {
+    throw new Error("Recovery preparation quarantine changed");
   }
+}
+
+function preparationQuarantineMatches(outbox, plan) {
+  const ambiguousCount = plan === null ? 0 : plan?.ambiguousCount;
+  return Number.isSafeInteger(ambiguousCount) && ambiguousCount >= 0
+    && Number.isSafeInteger(outbox?.ambiguousCount) && outbox.ambiguousCount === ambiguousCount
+    && canonicalJson(outbox.quarantine) === canonicalJson(plan?.quarantine ?? null);
 }
 
 export async function collectPreparationInputs(sourceHandle, options = {}) {
@@ -1738,17 +1910,15 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   }
   const gitSummary = (options.gitSummary ?? collectGitSummary)(worktree, source.path, source.bytes);
   let launch = null;
+  let legacyDeploymentAttested = false;
   if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
-    && ancestry.parent.port === null && ancestry.parent.nonceSha256 === "0".repeat(64)
-    && SAFE_SESSION.test(ancestry.parent.sessionId ?? "")) {
+    && ancestry.parent.port === null && ancestry.parent.nonceSha256 === "0".repeat(64)) {
     const deployment = (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
       options.inspectDeploymentCommand);
     if (deployment.status !== "attested" || deployment.revision !== gitSummary.head) {
       throw new Error("Recovery preparation deployed source is unavailable");
     }
-    launch = (options.inspectLauncher ?? inspectInstalledManagedLauncher)(ancestry.parent, binding, {
-      ...source, ...gitSummary, sha256: source.sha256,
-    }, environment);
+    legacyDeploymentAttested = true;
   } else if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
     && ancestry.parent.port === null) {
     const error = new Error("Recovery preparation parent control plane is unavailable");
@@ -1762,15 +1932,21 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     : await (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
       options.request ?? fetch, options.inspectParent);
   if (!capture) throw new Error("Recovery preparation capture is unavailable");
+  if (legacyDeploymentAttested) {
+    launch = (options.inspectLauncher ?? inspectInstalledManagedLauncher)({
+      ...ancestry.parent,
+      sessionId: capture.snapshot.sessionId,
+    }, binding, { ...source, ...gitSummary, sha256: source.sha256 }, environment);
+  }
   const health = await collectApiHealth(environment, options.request ?? fetch);
   if (health.status !== "healthy") throw new Error("Recovery preparation API health is unavailable");
   const index = resolve(worktree, ".opencode/protected-runtime-index");
   if (summarizeFreeze(resolve(index, "coordination-outbox-mutation.lock")).status !== "clear") {
     throw new Error("Recovery preparation outbox is frozen");
   }
-  const disposition = planPreparationDisposition(index);
+  const quarantine = planPreparationQuarantine(index);
   sourceHandle.revalidate();
-  return { binding, capture, disposition, source, launch, contract: prepareRecoveryOwnerContract(binding, source.head) };
+  return { binding, capture, quarantine, source, launch, contract: prepareRecoveryOwnerContract(binding, source.head) };
 }
 
 function validPreparationLaunch(value, request) {
@@ -1802,13 +1978,14 @@ function readPreparationRequest(worktree) {
   for (const path of [resolve(worktree, ".opencode/protected-runtime-index"), dirname(directory), directory]) privatePreparationDirectory(path);
   const bytes = readOnlyRegularFile(resolve(directory, "request.json"), 64 * 1024, false, 0o600);
   const value = JSON.parse(bytes);
-  const keys = ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "issuedAt", "expiresAt"];
+  const keys = ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "quarantine", "issuedAt", "expiresAt"];
   if (!(hasExactKeys(value, keys) || hasExactKeys(value, [...keys, "launch"]))
     || value.schemaVersion !== 1 || value.kind !== "recovery-preparation" || value.authorizesRestart !== false
     || canonicalJson(value.contract) !== canonicalJson(prepareRecoveryOwnerContract(value.contract?.binding, value.contract?.sourceHead))
     || value.contract.binding.worktree !== worktree || !HASH.test(value.sourceSha256 ?? "") || !OPAQUE_TOKEN.test(value.nonce ?? "")
     || !HASH.test(value.handoffSha256 ?? "") || !safeRecoveryIdentity(value.parent)
     || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+    || !validOutboxQuarantine(value.quarantine)
     || !Number.isSafeInteger(value.issuedAt) || !Number.isSafeInteger(value.expiresAt)
     || value.expiresAt - value.issuedAt !== PREPARATION_LIFETIME_MS
     || value.launch !== undefined && (value.parent.nonceSha256 !== "0".repeat(64)
@@ -1817,11 +1994,16 @@ function readPreparationRequest(worktree) {
   if (sha256(handoff) !== value.handoffSha256) throw new Error("Recovery preparation handoff changed");
   if (value.launch !== undefined) {
     const captured = JSON.parse(handoff);
-    if (!hasExactKeys(captured, ["schemaVersion", "kind", "parent", "nonceProvenance", "sessionId", "binding", "sourceHead", "operational"])
+    if (!hasExactKeys(captured, ["schemaVersion", "kind", "parent", "nonceProvenance", "sessionId", "binding", "sourceHead",
+      "marker", "todos", "declaredOperational", "operational"])
       || captured.schemaVersion !== 1 || captured.kind !== "legacy-pre-admission"
       || captured.sessionId !== value.launch.sessionId || captured.sourceHead !== value.contract.sourceHead
       || canonicalJson(captured.parent) !== canonicalJson(value.parent)
       || canonicalJson(captured.binding) !== canonicalJson(value.contract.binding)) {
+      throw new Error("Recovery preparation handoff changed");
+    }
+    if (!validLegacyRecoveryTodoHandoff({ marker: captured.marker, todos: captured.todos,
+      declaredOperational: captured.declaredOperational }, captured.sessionId)) {
       throw new Error("Recovery preparation handoff changed");
     }
   }
@@ -2212,22 +2394,15 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     request = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
       sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
       parent: inputs.capture.snapshot.parent, ...(inputs.launch ? { launch: inputs.launch } : {}),
-      issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
+      quarantine: inputs.quarantine?.quarantine ?? null, issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
     ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(request)));
     const stagedSource = resolve(directory, "owner.mjs");
     ownedFile(stagedSource, inputs.source.bytes, true, 0o400);
-    validatePreparationPlan(inputs.disposition);
-    if (inputs.disposition) {
-      ownedDirectory(dirname(inputs.disposition.destination), false, false);
-      ownedFile(inputs.disposition.destination, Buffer.from(canonicalJson(inputs.disposition.disposition)), false);
-      const dispositions = inspectSummaryDirectory(dirname(inputs.disposition.destination), 16 * 1024, validDispositionSummaryRecord);
-      if (dispositions.summary.status !== "validated" || dispositions.entries.filter(({ value }) =>
-        value.authorizationSha256 === inputs.disposition.disposition.authorizationSha256).length !== 1) {
-        throw new Error("Recovery preparation authorization changed during application");
-      }
-    }
+    validatePreparationQuarantine(inputs.quarantine);
     const preparedCoordination = summarizeCoordinationOutboxState(index);
-    if (preparedCoordination.outbox.ambiguousCount !== 0) throw new Error("Recovery preparation disposition was not accepted");
+    if (!preparationQuarantineMatches(preparedCoordination.outbox, inputs.quarantine)) {
+      throw new Error("Recovery preparation quarantine changed");
+    }
     sourceHandle.revalidate();
     const runtimePath = realpathSync(process.execPath);
     const runtimeOwner = lstatSync(runtimePath).uid;
@@ -2259,17 +2434,16 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     sourceHandle.revalidate();
     evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
     if (!evidence) throw new Error("Recovery preparation owner changed");
-    validatePreparationPlan(inputs.disposition);
+    validatePreparationQuarantine(inputs.quarantine);
     const finalCoordination = summarizeCoordinationOutboxState(index);
-    if (confirmed.disposition && canonicalJson(confirmed.disposition) !== canonicalJson(inputs.disposition)
+    if (canonicalJson(confirmed.quarantine ?? null) !== canonicalJson(inputs.quarantine ?? null)
       || finalCoordination.outbox.status === "invalid" || finalCoordination.disposition.status === "invalid"
-      || finalCoordination.outbox.ambiguousCount !== 0
+      || !preparationQuarantineMatches(finalCoordination.outbox, inputs.quarantine)
       || canonicalJson(finalCoordination.disposition) !== canonicalJson(preparedCoordination.disposition)) {
-      throw new Error("Recovery preparation final disposition changed");
+      throw new Error("Recovery preparation final quarantine changed");
     }
     return { schemaVersion: 1, action: "recovery-prepare", authorizesRestart: false, status: "prepared", owner: evidence,
-      disposition: inputs.disposition ? { recordSha256: inputs.disposition.disposition.recordSha256,
-        recordCount: inputs.disposition.disposition.recordCount, authorizationSha256: inputs.disposition.disposition.authorizationSha256 } : null };
+      quarantine: inputs.quarantine?.quarantine ?? null };
   } catch (cause) {
     let reconciled = true;
     if (startAttempted) {
@@ -2484,7 +2658,7 @@ export async function collectRecoveryPreflight(options = {}) {
     recovery.summary = { status: "validated", state: recovery.summary.state, handoff: preAdmissionCapture.summary };
   }
   const coordination = protectedIndex ? summarizeCoordinationOutboxState(protectedIndex) : {
-    outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
+    outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null, quarantine: null },
     disposition: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
   };
   const { outbox, disposition } = coordination;
@@ -2509,7 +2683,7 @@ export async function collectRecoveryPreflight(options = {}) {
   if (recovery.summary.state && recovery.summary.state.phase !== "enrolled") failures.push("recovery_phase");
   if (classification === "ambiguous") failures.push("nonce_enrollment");
   if (recoveryOwner.status !== "attested") failures.push("recovery_owner");
-  if (outbox.status === "invalid" || outbox.ambiguousCount > 0) failures.push("outbox");
+  if (outbox.status === "invalid" || !validRecoveryOutboxQuarantineState(outbox)) failures.push("outbox");
   if (disposition.status === "invalid") failures.push("disposition");
   if (freeze.status === "invalid" || freeze.status === "present") failures.push("freeze");
   if (apiHealth.status !== "healthy") failures.push("api_health");
@@ -2574,7 +2748,8 @@ function recoveryAdmissionExists(path) {
 
 function expectedRecoveryAdmission(preflight, preflightDigest) {
   if (!preflight.admissible || !HASH.test(preflightDigest) || preflightDigest !== sha256(canonicalJson(preflight))
-    || !GIT_OID.test(preflight.git?.head ?? "") || !preflight.parent || !preflight.binding) {
+    || !GIT_OID.test(preflight.git?.head ?? "") || !preflight.parent || !preflight.binding
+    || !validRecoveryOutboxQuarantineState(preflight.outbox)) {
     throw new Error("Recovery admission preflight is not admissible");
   }
   return {
@@ -2597,6 +2772,7 @@ function expectedRecoveryAdmission(preflight, preflightDigest) {
       storageMappingHash: preflight.binding.storageMappingHash,
       worktree: preflight.binding.worktree,
     },
+    outboxQuarantine: preflight.outbox?.quarantine ?? null,
   };
 }
 
@@ -2892,7 +3068,7 @@ export async function consumeRecoveryAdmission(admission, context, options = {})
     }
     const receipt = validatedRecoveryAdmissionReceipt(payload.data.receipt, admission.admission);
     return validatedAdmittedRecoveryContext(
-      admittedRecoveryContext(admission.admission, receipt),
+      admittedRecoveryContext(admission.admission, receipt, context.outboxQuarantine),
       context,
       admission.admission,
     );
@@ -2914,7 +3090,7 @@ function validatedRecoveryAdmissionReceipt(receipt, admission) {
   return Object.freeze({ ...receipt });
 }
 
-function admittedRecoveryContext(admission, receipt) {
+function admittedRecoveryContext(admission, receipt, outboxQuarantine) {
   const startTimeTicks = Number(admission.parent.start);
   let executableSha256;
   try { executableSha256 = sha256(readFileSync(realpathSync(admission.parent.executable))); } catch {}
@@ -2940,6 +3116,7 @@ function admittedRecoveryContext(admission, receipt) {
       storageMappingHash: admission.storage,
       worktree: admission.worktree,
     }),
+    outboxQuarantine: outboxQuarantine ? Object.freeze({ ...outboxQuarantine }) : null,
     receipt,
   });
 }
@@ -2953,13 +3130,14 @@ function expectedAdmittedRecoveryContext(preflight, preflightDigest) {
     head: expected.head,
     parent: Object.freeze({ ...expected.parent }),
     binding: Object.freeze({ ...expected.binding }),
+    outboxQuarantine: expected.outboxQuarantine ? Object.freeze({ ...expected.outboxQuarantine }) : null,
   });
 }
 
 function validatedAdmittedRecoveryContext(context, expected, admission) {
-  if (!hasExactKeys(context, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "receipt"])
+  if (!hasExactKeys(context, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "outboxQuarantine", "receipt"])
     || !Object.isFrozen(context) || !Object.isFrozen(context.parent) || !Object.isFrozen(context.binding)
-    || !Object.isFrozen(context.receipt)
+    || !Object.isFrozen(context.receipt) || context.outboxQuarantine !== null && !Object.isFrozen(context.outboxQuarantine)
     || canonicalJson({
       schemaVersion: context.schemaVersion,
       action: context.action,
@@ -2967,6 +3145,7 @@ function validatedAdmittedRecoveryContext(context, expected, admission) {
       head: context.head,
       parent: context.parent,
       binding: context.binding,
+      outboxQuarantine: context.outboxQuarantine,
     }) !== canonicalJson(expected)
     || canonicalJson(validatedRecoveryAdmissionReceipt(context.receipt, admission)) !== canonicalJson(context.receipt)) {
     throw new Error("Recovery admission receipt is invalid");

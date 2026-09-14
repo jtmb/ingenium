@@ -370,6 +370,35 @@ describe("protected coordination outbox", () => {
     }
   });
 
+  it("fences raw overflow from delivery and pins its immutable quarantine identity", async () => {
+    const root = worktree();
+    try {
+      const outbox = new CoordinationOutbox(root);
+      const overflow = writeAuthorizedOverflow(outbox, 11_617);
+      const path = join(outbox.directory, `${overflow.key}.json`);
+      const original = readFileSync(path);
+      const deliver = vi.fn(async () => true);
+
+      const quarantine = outbox.fencedOverflowQuarantine();
+      await outbox.replay(deliver);
+
+      expect(quarantine).toEqual({ schemaVersion: 1, status: "fenced", recordKey: overflow.key,
+        recordSha256: createHash("sha256").update(original).digest("hex"), recordCount: 11_617 });
+      expect(deliver).not.toHaveBeenCalled();
+      expect(readFileSync(path)).toEqual(original);
+      for (const drift of [
+        { ...quarantine!, recordKey: createHash("sha256").update("foreign").digest("hex") },
+        { ...quarantine!, recordSha256: createHash("sha256").update("changed").digest("hex") },
+        { ...quarantine!, recordCount: 11_618 },
+      ]) expect(() => outbox.assertFencedOverflowQuarantine(drift)).toThrow("quarantine changed");
+      outbox.assertFencedOverflowQuarantine(quarantine);
+      writeFileSync(path, `${JSON.stringify({ ...overflow, count: 11_618 })}\n`, { mode: 0o600 });
+      expect(() => outbox.fencedOverflowQuarantine()).toThrow("quarantine is ambiguous");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects invalid and secret-bearing record fields before persistence", () => {
     const root = worktree();
     try {

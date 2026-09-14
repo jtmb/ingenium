@@ -33,8 +33,9 @@ import {
 } from "../extension-binding.js";
 import {
   COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
-  COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
+  COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT,
   CoordinationOutbox,
+  type CoordinationOutboxQuarantine,
 } from "../coordination-outbox.js";
 import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
@@ -79,7 +80,6 @@ const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const REPLACEMENT_SERVER_USERNAME = "opencode";
 const LEGACY_HANDOFF_PATH = ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json";
 export const PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
-const OVERFLOW_AUTHORIZATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 export const ADMITTED_RECOVERY_CONTEXT = "INGENIUM_ADMITTED_RECOVERY_CONTEXT";
@@ -113,6 +113,7 @@ export interface AdmittedRecoveryContext {
     storageMappingHash: string;
     worktree: string;
   }>;
+  readonly outboxQuarantine: Readonly<CoordinationOutboxQuarantine> | null;
   readonly receipt: Readonly<{
     id: string;
     schema: "ingenium.recovery-admission-receipt";
@@ -162,7 +163,12 @@ export interface ProductionRestartAdapterDependencies<Session> {
     worktree: string;
     binding: ProductionRestartBinding;
     parent: ProductionRestartParentCandidate;
+    outboxQuarantine?: Readonly<CoordinationOutboxQuarantine> | null;
   }): Promise<PreparedProductionReplacement<Session>>;
+  revalidateOutboxQuarantine?(
+    worktree: string,
+    expected: Readonly<CoordinationOutboxQuarantine> | null,
+  ): Promise<boolean> | boolean;
 }
 
 interface ReplacementSession {
@@ -214,6 +220,7 @@ interface ProductionPreparedState {
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
+  outboxQuarantine: CoordinationOutboxQuarantine | null;
   productionRestartScriptSha256: string;
   serverAuthentication: RecoveryServerAuthentication;
   serverAuthenticationRetained: boolean;
@@ -251,11 +258,19 @@ function isCanonicalRfc3339(value: unknown): value is string {
     && calendar.getUTCMinutes() === minute && calendar.getUTCSeconds() === second;
 }
 
+function isOutboxQuarantine(value: unknown): value is CoordinationOutboxQuarantine | null {
+  return value === null || hasExactKeys(value, ["schemaVersion", "status", "recordKey", "recordSha256", "recordCount"])
+    && value.schemaVersion === 1 && value.status === "fenced"
+    && value.recordKey === PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY
+    && typeof value.recordSha256 === "string" && SHA256.test(value.recordSha256)
+    && value.recordCount === COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT;
+}
+
 export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process.env): AdmittedRecoveryContext {
   const serialized = source[ADMITTED_RECOVERY_CONTEXT];
   let value: unknown;
   try { value = serialized ? JSON.parse(serialized) : undefined; } catch { value = undefined; }
-  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "receipt"])
+  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "outboxQuarantine", "receipt"])
     || value.schemaVersion !== 1 || value.action !== "production-restart"
     || typeof value.preflightDigest !== "string" || !SHA256.test(value.preflightDigest)
     || typeof value.head !== "string" || !/^[0-9a-f]{40,64}$/.test(value.head)
@@ -273,6 +288,7 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     || typeof value.binding.storageMappingHash !== "string" || !SHA256.test(value.binding.storageMappingHash)
     || typeof value.binding.worktree !== "string" || !isAbsolute(value.binding.worktree)
     || resolve(value.binding.worktree) !== value.binding.worktree
+    || !isOutboxQuarantine(value.outboxQuarantine)
     || !hasExactKeys(value.receipt, ["id", "schema", "version", "action", "admissionDigest", "consumedAt"])
     || typeof value.receipt.id !== "string" || !UUID.test(value.receipt.id)
     || value.receipt.schema !== "ingenium.recovery-admission-receipt"
@@ -286,6 +302,7 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     ...context,
     parent: Object.freeze({ ...context.parent }),
     binding: Object.freeze({ ...context.binding }),
+    outboxQuarantine: context.outboxQuarantine ? Object.freeze({ ...context.outboxQuarantine }) : null,
     receipt: Object.freeze({ ...context.receipt }),
   });
 }
@@ -753,6 +770,10 @@ export async function runProductionRestartAdapter<Session>(
   admittedContext?: AdmittedRecoveryContext,
 ): Promise<ReplacementFirstRestartResult> {
   const worktree = admittedContext?.binding.worktree ?? dependencies.canonicalWorktree();
+  if (admittedContext && (!dependencies.revalidateOutboxQuarantine
+    || !await dependencies.revalidateOutboxQuarantine(worktree, admittedContext.outboxQuarantine))) {
+    throw new Error("Production restart outbox quarantine changed after admission");
+  }
   const binding = await dependencies.resolveBinding(worktree);
   if (admittedContext && (binding.project !== admittedContext.binding.project
     || binding.projectId !== admittedContext.binding.projectId
@@ -806,7 +827,12 @@ export async function runProductionRestartAdapter<Session>(
     if (enrolled) parent = await admit(enrolled, false);
   }
   if (!parent) throw new Error("Production restart parent identity is absent or ambiguous");
-  const prepared = await dependencies.prepareReplacement({ worktree, binding, parent });
+  const prepared = await dependencies.prepareReplacement({
+    worktree,
+    binding,
+    parent,
+    ...(admittedContext ? { outboxQuarantine: admittedContext.outboxQuarantine } : {}),
+  });
   try {
     const request = decodeReplacementFirstRestartRequest(encodeRequest({
       schemaVersion: 1,
@@ -1907,30 +1933,15 @@ async function resume(identity: RestartProcessIdentity, signal: AbortSignal): Pr
   process.kill(identity.pid, "SIGCONT");
 }
 
-function overflowAuthorization(now = Date.now()) {
-  return {
-    schemaVersion: 1 as const,
-    authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
-    recordKey: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
-    mode: "abandon_identityless_overflow" as const,
-    authority: "explicit_user_authorization" as const,
-    scope: "exact_key_same_record_family" as const,
-    reason: "nonrecoverable_identityless_overflow" as const,
-    issuedAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + OVERFLOW_AUTHORIZATION_LIFETIME_MS).toISOString(),
-  };
-}
-
 export function commitProductionRetirement(
   worktree: string,
   transactionSha256: string,
   commit: (subjectWorktree: string, subjectTransactionSha256: string) => void = commitManagedRecoveryReplacement,
+  expectedQuarantine: CoordinationOutboxQuarantine | null = null,
 ): void {
   const outbox = new CoordinationOutbox(worktree);
   outbox.withRetirementFreeze(() => {
-    if (outbox.unresolved().some((record) => record.ambiguous || record.kind === "overflow")) {
-      throw new Error("Production restart coordination state changed before retirement");
-    }
+    outbox.assertFencedOverflowQuarantine(expectedQuarantine);
     commit(worktree, transactionSha256);
   });
 }
@@ -2175,14 +2186,12 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
     },
     prepareRetirement: async (_identity, signal) => {
       signal.throwIfAborted();
-      const outbox = new CoordinationOutbox(state.worktree);
-      const target = outbox.unresolved().find((record) => record.key === PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY);
-      if (!target) return { rollback() {} };
-      return outbox.prepareIdentitylessOverflowDisposition(overflowAuthorization());
+      new CoordinationOutbox(state.worktree).assertFencedOverflowQuarantine(state.outboxQuarantine);
+      return { rollback() {} };
     },
     commitRetirement: async (transactionSha256, signal) => {
       signal.throwIfAborted();
-      commitProductionRetirement(state.worktree, transactionSha256);
+      commitProductionRetirement(state.worktree, transactionSha256, commitManagedRecoveryReplacement, state.outboxQuarantine);
       state.serverAuthenticationRetained = true;
     },
     reconcileRetirement: async (transactionSha256, signal) => {
@@ -2255,7 +2264,13 @@ async function prepareProductionReplacement(input: {
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
+  outboxQuarantine?: Readonly<CoordinationOutboxQuarantine> | null;
 }, productionRestartScriptSha256: string): Promise<PreparedProductionReplacement<ReplacementSession>> {
+  const outbox = new CoordinationOutbox(input.worktree);
+  if (input.outboxQuarantine !== undefined) outbox.assertFencedOverflowQuarantine(input.outboxQuarantine);
+  const outboxQuarantine = input.outboxQuarantine === undefined
+    ? outbox.fencedOverflowQuarantine()
+    : input.outboxQuarantine ? { ...input.outboxQuarantine } : null;
   const selectedExecutable = replacementExecutable(input.parent.oldProcess.pid);
   if (!selectedExecutable) throw new Error("Production OpenCode executable is unavailable");
   const { path: executable, sha256: expectedExecutableSha256 } = selectedExecutable;
@@ -2336,6 +2351,7 @@ async function prepareProductionReplacement(input: {
     worktree: input.worktree,
     binding: input.binding,
     parent: input.parent,
+    outboxQuarantine,
     productionRestartScriptSha256,
     serverAuthentication,
     serverAuthenticationRetained: false,
@@ -2373,10 +2389,9 @@ export function productionRestartDependencies(
   return {
     canonicalWorktree: () => {
       const worktree = productionRestartCanonicalWorktree();
-      if (new CoordinationOutbox(worktree).unresolved().some((record) =>
-        (record.ambiguous || record.kind === "overflow")
-        && (record.key !== PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY || record.kind !== "overflow"
-          || !record.ambiguous || !/^0+$/.test(record.sessionHash) || record.mutation !== null))) {
+      try {
+        new CoordinationOutbox(worktree).fencedOverflowQuarantine();
+      } catch {
         throw new Error("Production restart coordination state is ambiguous; ESCALATE_USER without exact epoch evidence");
       }
       return worktree;
@@ -2394,6 +2409,14 @@ export function productionRestartDependencies(
       }] : readProtectedProductionRestartState(worktree);
     },
     retainCandidateRejection: appendProductionRestartCandidateRejection,
+    revalidateOutboxQuarantine: (worktree, expected) => {
+      try {
+        new CoordinationOutbox(worktree).assertFencedOverflowQuarantine(expected as CoordinationOutboxQuarantine | null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     enrollParentCandidate: enrollRunningProductionParent,
     attestParentProcess: attestProductionParent,
     prepareReplacement: (input) => prepareProductionReplacement(input, productionRestartScriptSha256),
