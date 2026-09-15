@@ -10653,3 +10653,14 @@ instruction.
 Out-of-scope `.opencode/**` and test/profile assertions are not changed by this
 docs boundary. No QA, Docs Workspace, visual, security, implementation, or
 follow-up task is requested by this record.
+
+### Operational evidence update — 2026-09-15 (not completion)
+
+- **Source boundary (`SOURCE/TEST`):** Commit `f9c7287382ca9e677b17eb1f8283474aa3b29587` owns 14 task paths. Three unrelated dirty files remain: `.opencode/package.json`, `.opencode/package-lock.json`, and `packages/ingenium-extension/mcp-launcher.test.ts`.
+- **Source/test evidence:** Core coordination is `52/52`; the extension coordinator is `92/92`; both typechecks, scheduler policy, and full agent validation passed. One QA report, one security report, and one documentation audit were consumed; blockers were remediated; no reviewer was rerun; the minimum validator passed.
+- **Compatibility deployment evidence:** Image ID prefix `79ba394` was used with source commit `f9c72873` and dirty-fingerprint prefix `4a4f3b2e`. Only the `ingenium` compatibility service was recreated. Prior rollback image prefix `9a57173` remains retained.
+- **Health evidence:** API `200`, dashboard/login `200`, VS Code `302/200`, and the OAuth callback's expected `400` were observed. OpenCode/CLI returned `502`; the container is unhealthy.
+- **Stable blocker:** `MCP_BOOTSTRAP_PROVISION_FAILED` remains because installation bootstrap is pending and no installation owner exists; project/owner-bound credential provisioning is unavailable. The user must privately open `http://localhost:3000/bootstrap`, claim or create the installation owner, share no credentials, and reply `claimed`.
+- **Async/recovery boundary:** `backgroundSubagents` capability and true-async runtime proof remain blocked. Full host-parent restart remains **REJECTED** pending a durable typed handoff, external supervisor, replacement health, reconnect/full Todo replay, rollback/adoption, and fencing. The invalidated read-only preflight created and deleted one ephemeral `/tmp` diagnostic but changed no repository, credential, process, Docker-lifecycle, or coordination state; it is not admission evidence and must not be reused.
+- **NextWork after `claimed`:** The existing Premium deployment owner provisions through the configured supported path, rechecks OpenCode/CLI and container health, probes background capability, then runs a fresh mutation-free restart preflight. No parent signal occurs before admission.
+- **Boundary:** This evidence update does not mark ORCH-EFF-01..07 complete or `PASS`; it records no secrets, transcripts, or reasoning and adds no runtime admission.
