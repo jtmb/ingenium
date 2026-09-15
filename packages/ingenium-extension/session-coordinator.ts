@@ -58,7 +58,7 @@ const TRACE_ROOT = "/tmp/opencode/";
 const MAX_TRANSCRIPT_MESSAGES = 16;
 const MAX_TRANSCRIPT_BYTES = 1_572_864;
 export const MAX_COORDINATION_TRANSFORM_BYTES = 256 * 1024;
-export const AUTONOMY_REMINDER_V1 = "AUTONOMY_REMINDER_V1: For already-authorized orchestrator work, keep the full masterTodo/roadmap open until evidence-backed completion. A docs or subtask completion, or a user correction, does not replace or cancel the full rollout. While work remains, take the next supported dependency-ready action instead of ending with an apology or status update. Causally repair or recover internal failures; never invent permissions or prohibitions. Always honor user STOP/CANCELLED and real authorization and security boundaries, and never claim a check passed without running it. This applies only to the active orchestrator: reporting-only subagents must report to their caller rather than take over orchestration. It grants no tools, permissions, or capabilities, including to the hidden broker.";
+export const AUTONOMY_REMINDER_V1 = "AUTONOMY_REMINDER_V1: For already-authorized orchestrator work, work directly first and delegate only when useful. Every new delegated allocation must contain 2-6 useful distinct subagent assignments; prefer 3 as policy, not quota, and never exceed the six-child ceiling. Direct work uses no subagent allocation; existing-team continuation/tails need no new allocation, so never fabricate a singleton allocation. Treat delegated execution as truly background only when the active runtime capability supports background execution. Keep the full masterTodo/roadmap open until evidence-backed completion. A docs or subtask completion, or a user correction, does not replace or cancel the full rollout. While work remains, take the next supported dependency-ready action instead of ending with an apology or status update. Causally repair or recover internal failures; never invent permissions or prohibitions. Always honor user STOP/CANCELLED and real authorization and security boundaries, and never claim a check passed without running it. This applies only to the active orchestrator: reporting-only subagents must report to their caller rather than take over orchestration. It grants no tools, permissions, or capabilities, including to the hidden broker.";
 
 type TraceEvent =
   | "plugin_start"
@@ -828,14 +828,16 @@ function safeManifestRecords(value: Record<string, unknown>): boolean {
   if (Object.hasOwn(value, "allocation")) {
     const a = value.allocation;
     if (!hasExactKeys(a, ["phaseId", "mode", "requestedConcurrency", "agents"]) || !text(a.phaseId) || !["single_todo", "multi_todo"].includes(a.mode as string)
-      || !Number.isSafeInteger(a.requestedConcurrency) || (a.requestedConcurrency as number) < 1
+      || !Number.isSafeInteger(a.requestedConcurrency) || (a.requestedConcurrency as number) < 2 || (a.requestedConcurrency as number) > 6
       || !Array.isArray(a.agents) || a.agents.length !== a.requestedConcurrency) return false;
     const ids = new Set();
+    const todoIds = new Set();
     const territories: string[] = [];
     for (const agent of a.agents) {
       if (!hasExactKeys(agent, ["agentId", "todoId", "writer", "exclusivePaths"]) || !text(agent.agentId) || !text(agent.todoId)
-        || typeof agent.writer !== "boolean" || !paths(agent.exclusivePaths) || ids.has(agent.agentId)) return false;
+        || typeof agent.writer !== "boolean" || !paths(agent.exclusivePaths) || ids.has(agent.agentId) || todoIds.has(agent.todoId)) return false;
       ids.add(agent.agentId);
+      todoIds.add(agent.todoId);
       const owned = (agent.exclusivePaths as string[][]).map((path) => decodeCoordinationPath(path)!);
       if (!agent.writer && owned.length > 0) return false;
       if (agent.writer) {

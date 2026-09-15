@@ -93,10 +93,11 @@ deployment-admission layer was removed by owner decision.
 
 ### Plan and recovery read surface
 
-The built-in Plan mapping has the universal `skill: {"*": "allow"}` loading
-surface, but that does not grant tools. Its exact root-level tool allowance is
-`read`, `glob`, `grep`, `question`, and `ingenium_coordination_status`: all
-repository skills/references are loadable, but the coordination surface is
+The built-in Plan mapping retains `skill: {"*": "allow"}` as a permission
+capability, but active planning loads `@ponytail`, task-matching
+skills/references, and relevant roadmap/context only. That permission does not
+grant tools. Its exact root-level tool allowance is `read`, `glob`, `grep`,
+`question`, and `ingenium_coordination_status`; the coordination surface is
 status-only. It cannot invoke `ingenium_coordination_update`,
 `ingenium_coordination_claim`, `ingenium_coordination_release`, or
 `ingenium_coordination_handoff`.

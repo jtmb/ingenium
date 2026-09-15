@@ -456,7 +456,7 @@ describe("SessionCoordinatorPlugin hooks", () => {
     } finally { await replacement.dispose(); }
   });
 
-  it.each([1, 20])("records a requested %i-agent allocation and rejects invalid allocations and dirty drift", async (requestedConcurrency) => {
+  it.each([2, 3, 6])("records a valid %i-agent allocation and rejects invalid allocations and dirty drift", async (requestedConcurrency) => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-manifest-review-"));
     execFileSync("git", ["clone", "--quiet", "--shared", "--no-checkout", resolve(process.cwd(), "../.."), root]);
     writeFileSync(join(root, "result.ts"), "export const result = 1;\n");
@@ -482,6 +482,11 @@ describe("SessionCoordinatorPlugin hooks", () => {
           agentId: `writer-${index}`, todoId: `R15-${index}`, writer: true,
           exclusivePaths: [encodeCoordinationPath(`src/item-${index}`)!],
         })) };
+      const sevenAgentAllocation = { ...allocation, requestedConcurrency: 7,
+        agents: Array.from({ length: 7 }, (_, index) => ({
+          agentId: `seven-writer-${index}`, todoId: `seven-todo-${index}`, writer: true,
+          exclusivePaths: [encodeCoordinationPath(`seven/item-${index}`)!],
+        })) };
       expect(await coordinator.recordOperationalResult(sessionID, { manifest, reviewAdmission, allocation })).toBe(true);
       expect(fixture.memories[0]).toMatchObject({ manifest, reviewAdmission, allocation });
       for (const records of [
@@ -489,21 +494,29 @@ describe("SessionCoordinatorPlugin hooks", () => {
         { manifest, reviewAdmission: { ...reviewAdmission, observedOutputHash: "f".repeat(64) } },
         { manifest: { ...manifest, finalized: false }, reviewAdmission },
         { manifest, allocation: { ...allocation, agents: [...allocation.agents, ...allocation.agents] } },
+        { manifest, allocation: { ...allocation, requestedConcurrency: 1, agents: allocation.agents.slice(0, 1) } },
+        { manifest, allocation: sevenAgentAllocation },
         { manifest, allocation: { ...allocation, requestedConcurrency: 0, agents: [] } },
         { manifest, allocation: { ...allocation, requestedConcurrency: undefined } },
-        { manifest, allocation: { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0], allocation.agents[0]] } },
         { manifest, allocation: { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
-          { ...allocation.agents[0], agentId: "overlap", exclusivePaths: [encodeCoordinationPath("src/item-0/nested")!] }] } },
+          { ...allocation.agents[1], agentId: allocation.agents[0]!.agentId }] } },
+        { manifest, allocation: { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
+          { ...allocation.agents[1], todoId: allocation.agents[0]!.todoId }] } },
+        { manifest, allocation: { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
+          { ...allocation.agents[0], agentId: "overlap", todoId: "overlap-todo",
+            exclusivePaths: [encodeCoordinationPath("src/item-0/nested")!] }] } },
         ...[
           { todoId: "" }, { writer: false }, { exclusivePaths: [] },
-        ].map((invalid) => ({ manifest, allocation: { ...allocation, requestedConcurrency: 1,
-          agents: [{ ...allocation.agents[0], ...invalid }] } })),
+        ].map((invalid) => ({ manifest, allocation: { ...allocation, requestedConcurrency: 2,
+          agents: [{ ...allocation.agents[0], ...invalid }, allocation.agents[1]] } })),
         { manifest: { ...manifest, unexpected: true } },
       ]) await expect(coordinator.recordOperationalResult(sessionID,
         records as unknown as Parameters<ProductionSessionCoordinator["recordOperationalResult"]>[1])).rejects.toThrow();
+      expect(await coordinator.recordOperationalResult(sessionID, { manifest, reviewAdmission })).toBe(true);
+      expect(fixture.memories.at(-1)!.allocation).toBeUndefined();
       writeFileSync(join(root, "result.ts"), "export const result = 2;\n");
       await expect(coordinator.recordOperationalResult(sessionID, { manifest, reviewAdmission, allocation })).rejects.toThrow("stale manifest input");
-      expect(fixture.memories).toHaveLength(1);
+      expect(fixture.memories).toHaveLength(2);
     } finally { await coordinator.dispose(); rmSync(root, { recursive: true, force: true }); }
   });
 
@@ -888,7 +901,10 @@ describe("SessionCoordinatorPlugin hooks", () => {
       expect(callTool).not.toHaveBeenCalled();
       for (const phrase of ["STOP/CANCELLED", "authorization and security boundaries", "only to the active orchestrator",
         "reporting-only subagents", "hidden broker", "grants no tools, permissions, or capabilities",
-        "never invent permissions or prohibitions", "never claim a check passed without running it"]) {
+        "never invent permissions or prohibitions", "never claim a check passed without running it", "work directly first",
+        "2-6 useful distinct subagent assignments", "prefer 3 as policy, not quota", "six-child ceiling",
+        "Direct work uses no subagent allocation", "existing-team continuation/tails need no new allocation", "never fabricate a singleton allocation",
+        "truly background only when the active runtime capability supports background execution"]) {
         expect(AUTONOMY_REMINDER_V1).toContain(phrase);
       }
     });

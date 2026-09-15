@@ -13,6 +13,11 @@ The archived predecessor is [ROADMAP-2026-07-31-phase-0.md](./archive/ROADMAP-20
 ## Current execution board — restored 23-item master Todo + linked current Todos 24–46 (2026-09-09)
 Board continuation: linked Todo 42 (2026-09-09) records the session-analysis documentation turn and root `AGENTS.md` rebuild; linked Todo 43 (2026-09-09) records exclusive subagent-orchestration ownership, the Plan explore-only task grant, and non-destructive Git read grants; linked Todos 44–45 record documentation upkeep and `ingenium-qa-vision` retirement; linked Todo 46 records the CLI session-context documentation boundary; no row above is altered.
 
+Current scheduling pointer: [ORCH-EFF-01..07 direct-first bounded-team
+supersession](#orch-eff-01-07-supersession-2026-09-15). The appended item is
+the active scheduler overlay; preserved one-agent-per-item and no-cap wording
+below is historical evidence unless an active overlay explicitly says otherwise.
+
 ### Consolidated session summary — 2026-09-09
 
 - **Source/test boundary status (not overall rollout):** **SOURCE/TEST COMPLETE; runtime/deployment/activation gates remain OPEN.** This applies only to the named profile-only governance, memory-contract, MCP-catalog/designation, and documentation-audit boundaries: source tests, validator/gate checks, and typechecks are recorded for those boundaries; no broader rollout or runtime acceptance is inferred.
@@ -20,19 +25,19 @@ Board continuation: linked Todo 42 (2026-09-09) records the session-analysis doc
 - **Still open:** deployment and activation gates, the environment-blocked Playwright browser binary, `SKILL-100` runtime absence after restart, deployment R09/R19, activation T29/T35/T36/R20, visual R22/R21, T41 execution, and final commit R23. The `backgroundSubagents` capability probe is inconclusive: port 3000 redirected to login and only port 3000 responded. MEMORY-100 active-path runtime fresh-session A/B/C acceptance remains open.
 - **Open-roadmap work detection:** A roadmap task or TodoWrite item is open whenever its row, marker, or evidence cell retains an unresolved gate; the explicit open-row list below is authoritative, and open work exists even when a source/test boundary is complete.
 - **Explicit open-row list:** Restored items **1–23** remain enumerated with their row-level gates: item 1 baseline reconciliation; items 2–4 policy, validator, continuation, and activation; items 5–7 recovery/access, verifier, and regression; item 8 focused validator acceptance; items 9–11 compiled/deployment/MCP; items 12–15 loaded-surface, route, memory, and activation; items 16–18 helper, source, and directly affected documentation; and items 19–23 deployment, recovery, fresh-session, visual/containment, and final reconciliation. Current Todos **25–41** retain deterministic admission/resume, activation/runtime, enforcement, active-reference, checkout-retirement, and safe-activation gates. Current Todos **42–46** retain their local boundary evidence but do not close parent activation or broader rollout gates; `RESP-FMT-01` and T-AUX-02 remain open.
-- **Open-roadmap continuation:** Execution resumes synchronously and uninterrupted on the next open dependency-ready item; this is autonomous resumption, and the orchestrator immediately dispatches the next declared phase rather than ending a turn with a status update or waiting for a user reprompt.
+- **Open-roadmap continuation:** A dependency-ready item is handled directly by the active authorized agent when feasible. If useful delegation is necessary, newly eligible work starts without waiting for unrelated team members only when a supported background capability exists; otherwise work proceeds in honest parallel synchronous waves. No async proof is inferred from policy text or a parallel call.
 - **Open-marker terminal guard:** While active `work-started` markers remain, no final completion may be claimed; only the explicitly permitted terminal states or an explicit user `STOP`/`CANCELLED` request can end execution.
-- **Standing instructions:** profile-only tool governance; one documentation audit per finalized docs boundary plus the mechanical doc-config gate; one distinct subagent per dependency-ready item under the explicit user concurrency request; no subagent delegation; preserve the 291 catalog / 289 server-registration boundary.
+- **Standing instructions:** **Retained historical evidence from 2026-09-09; superseded for current topology by 292 catalog entries / 290 server registrations across 32 categories.** Profile-only tool governance; direct-first execution with zero subagents when feasible; when delegation is necessary, a new useful team of 2–6 subagents (3 preferred, 6 active children maximum per parent), with no filler or new singleton and existing-team tails allowed; dependency-ready scheduling; conditional QA/Docs/research and applicable independent, security, visual, deployment, and recovery gates; no subagent delegation; preserve the 291 catalog / 289 server-registration boundary.
 - **Escalation:** only the five permitted conditions; the inconclusive capability probe, internal denials, and pending runtime gates are not user escalation evidence.
 - **Cell rule:** The dated `SOURCE/TEST COMPLETE` overlay is authoritative only for the named source/test evidence; each row's original missing-dependency/gates list and next action remain unchanged, and runtime/activation/model-session/visual/deployment gates are not inferred closed.
 - **Preservation boundary:** No item is deleted or renumbered; the `qa-vision` and `session-id-tui` retirements remain historical. This is a roadmap-only consolidation: no shell, source change, commit, restart, VS Code action, or Docs Workspace mutation.
-- **CLI-DOC-04 current boundary:** The installed-CLI session-context audit is the active documentation continuation; it records valid in-memory PTY-parsed captures, the `CLI_EXPORT_INVALID_JSON` framing failure, non-liveness limits, and the current one-item/one-subagent scheduling decision. It does not close runtime, deployment, review, or model/session gates.
+- **CLI-DOC-04 current boundary:** The installed-CLI session-context audit remains the active documentation continuation; it records valid in-memory PTY-parsed captures, the `CLI_EXPORT_INVALID_JSON` framing failure, and non-liveness limits. Its one-item/one-subagent scheduling decision is historical and superseded by [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15). It does not close runtime, deployment, review, or model/session gates.
 - **CLI-DOC-05 current boundary:** The response-only formatting follow-on is complete as `RESPONSE_STRUCTURE`/readback evidence. It adds no persistent formatter, profile/theme change, restart, or broader rollout completion claim.
 
 #### Current-state consolidation overlay — 2026-09-10
 
 - **Delivered governance and authority (`SOURCE/STATIC`, `SOURCE/TEST`):** Profile-only tool governance is in force in the source boundary: the coordinator tool-execution denial layer was removed, `.opencode/agents/**` is the sole tool authority, and the harness/docs/tests are aligned. Root `opencode.json` entries are model/variant-only; the canonical Plan profile is read-only and Explore-only for delegation, `plan.md` is no longer hidden by `.gitignore`, Scout is retrieval-only, and `AGENTS.md` carries the golden rules plus Correction/Clarification/Evidence safeguards.
-- **Delivered Ponytail and scheduling (`SOURCE/STATIC`, `SOURCE/TEST`, `IN-SESSION`, `RUNTIME OBSERVATION`):** Ponytail is injected canonically by `experimental.chat.system.transform`, profiles require loading it, and the session observed a passing skill call with `PONYTAIL MODE ACTIVE` at full intensity. Allocation is request-scoped with no fixed 6/3 cap, the 20-writer regression and one-agent-per-item policy are recorded, and the reachable runtime observed `backgroundSubagents:false`; the earlier inconclusive probe remains historical.
+- **Delivered Ponytail and scheduling (`SOURCE/STATIC`, `SOURCE/TEST`, `IN-SESSION`, `RUNTIME OBSERVATION`):** Ponytail is injected canonically by `experimental.chat.system.transform`, profiles require loading it, and the session observed a passing skill call with `PONYTAIL MODE ACTIVE` at full intensity. The active documentation policy is direct-first with bounded 2–6-agent teams (3 preferred, 6 active children maximum) only when delegation is useful; the prior no-cap/one-agent allocation and `backgroundSubagents:false` observation remain historical evidence. No live async capability or runtime scheduler acceptance is claimed.
 - **Delivered MCP and Playwright surfaces (`SOURCE/TEST`, `INTEGRATION`, `DEPLOYED`):** Typed launcher/bridge diagnostics, bounded redaction, `Retry-After` handling, the compatibility-only `POST /api/v1/auth/bootstrap-mcp-credential` route, migration 117 receipts, protected `0600`/UID-GID `1105` provisioning at `/run/ingenium-opencode/.ingenium-mcp-credential`, same-path mounting, and `INGENIUM_MCP_CREDENTIAL_PURPOSE=general` precedence are recorded with multiple post-restart `ingenium.status: connected` checks. The server-owned Playwright preset, anchored `@playwright/mcp` resolution, optional description (migration 116), Docker browser path, real navigate/snapshot/close/reconnect/cleanup integration, and the compatibility local-runtime live child lifecycle are complete in the final 2026-09-10 record below.
 - **Delivered memory (`SOURCE/TEST`, `API/BRIDGE LIFECYCLE`, `DASHBOARD`):** Seven `ingenium_memory_*` tools, preference/source tagging, secret rejection, project/workspace/owner isolation, versions/receipts/tombstones/restore suppression, migrations 114–117, and enabled `/chat` controls are recorded. API/bridge lifecycle proof is save `201` → restart → fresh-session recall present → forget → `404` absent; internal `/opencode` model-session recall remains open.
 - **Delivered documentation, review, and operations evidence (`DOC AUDIT`, `REVIEW`, `DEPLOYED`, `VISUAL/CONTAINMENT`):** Documentation audit repairs, the mechanical doc-config gate, Documentation Gates policy, affected README/API/MCP/auth/database/testing updates, security/Ponytail reviews, the resolved Premium `plan.md` hold, compatibility recreation with one image per service, untouched VS Code, strict containment exit `0`, and the 52/52-route HTTP-200 visual sweep with 10 screenshots are recorded in the final append-only block below. The retained non-mail `net::ERR_ABORTED` and `/vscode` wasm-404 observations remain honest findings.
@@ -128,14 +133,14 @@ This board is continued by linked Todo 46 (2026-09-09) below.
 
 - **R08 row reconciliation:** The legacy scheduler-limit details retained in the
   restored item 8 evidence cell are historical evidence only and are superseded
-  by the current no-fixed-ceiling policy in item 2. The current R08 status is
+   by the current direct-first bounded-team policy in [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15). The current R08 status is
   **SOURCE UPDATED; focused validation OPEN; runtime/deployment/activation gates
   remain OPEN**; no obsolete limit is an active scheduling requirement.
 
 | Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
 |---|---|---|---|---|
 | Restored item 1 — current consolidation / [BASELINE-100](#baseline-100--rollout-preflight-and-territory-manifest) | **CONSOLIDATION COMPLETE.** This 23-row board is authoritative for current stage/next action; the broader rollout remains open and resumable. The historical 14-item note is not a current missing-nine state. This is not `BASELINE-100` or whole-feature completion. | Existing contracts, the latest ledger, and the retained 23-item Todo are linked above. This board is `SOURCE/STATIC` only. | Read-only branch/HEAD, dirty-path, task/Todo, claim, outbox, and unknown-outcome reconciliation; cleanup state is unknown. | `@ingenium-orchestrator`: run one supported read-only baseline reconciliation, retain unknowns, and do not replay mutations. |
-| Restored item 2 — scheduler instruction update / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **CURRENT POLICY CORRECTION RECORDED; no fixed active-agent or writer ceiling.** | The 2026-09-09 CLI context record retains the decision to dispatch one distinct subagent per dependency-ready item with exclusive territory and actual-count reporting. The older prospective scheduler clarification remains historical and does not override this live rule. Prior source/test evidence remains intact. | Runtime-loaded policy and enforcement are not proven; historical phase/count contracts remain preserved below. | `@ingenium-orchestrator`: use the current one-item/one-subagent rule for new dispatches, respect explicit user concurrency, and retain the static/runtime boundary. |
+| Restored item 2 — scheduler instruction update / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **CURRENT POLICY POINTER UPDATED; direct-first bounded-team scheduling.** | The 2026-09-09 CLI context and prior validator records retain the former one-item/no-cap decision as historical source/static evidence. The active rule is [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15): direct execution with zero subagents when feasible; otherwise a useful 2–6-agent team, 3 preferred, with six active children maximum, no filler/new singleton, and existing-team tails allowed. | Runtime-loaded policy and enforcement are not proven; historical phase/count contracts remain preserved below. | `@ingenium-orchestrator`: apply the active direct-first policy, use conditional background scheduling, retain the static/runtime boundary, and reconcile Todo/failure evidence. |
 | Restored item 3 — [OPENCODE-100](#opencode-100--copyable-current-session-id-in-the-opencode-tui-sidebar) sidebar roadmap addition | **Roadmap addition DONE; feature remains `PLANNED`.** | The existing [planned feature section](#planned-opencode-tui-session-id-sidebar-feature-2026-09-05) records the contract and static extension-point context only. | Source integration, focused tests, rebuilt/runtime TUI behavior, actual session proof, and wide/narrow screenshots. | `@ingenium-software-engineer-premium`: inspect the installed-versus-supported TUI extension point first; do not treat the roadmap addition as implementation. |
 | Restored item 4 — `AUTONOMY_REMINDER_V1` / coordination continuation gate / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC focused evidence PASS; no active/live hook, enforcement, or true continuation proof.** The actual-idle-continuation candidate is rejected at design level because master/abort/atomicity gaps remain. | The source hook in `packages/ingenium-extension/session-coordinator.ts` plus two autonomy tests `ses_f888cd094ffeeVnN3H7wLOAAo9`, replay-fix set of five `ses_f8830c740ffeRlyIRJYpdWZoqY`, extension typecheck `ses_f88235fb7ffeGnv22T3zpVkI3I`, and hook QA `ses_f87fe064bffe7E0ptoAvfFu8V2` are retained in the [authorization/evidence record](#current-explicit-development-authorization-and-latest-execution-evidence-2026-09-06). | Full 64-test coordinator integration is unrun/denied latest; existing-parent activation, live enforcement, and restart proof are absent. | `@ingenium-orchestrator`: retain the reminder only; close the master/abort/atomicity admission before considering any continuation design. |
 | Restored item 5 — connection reset plus Core unit timeout / [RECOVERY-100](#recovery-100--planmcp-chat-loss-recovery-and-resumable-handoff)–[RECOVERY-102](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing) | **UNKNOWN OUTCOME; recovery OPEN.** | Root npm-workspace Vitest timed out at `300000ms` while Core-only: 28 files / 777 observed tests, 776 PASS and 1 FAIL in `agents.test` (`uses explicit profile disable state during disk sync`, expected `Updated`, got `undefined`). Full output: `/home/brajam/.local/share/opencode/tool-output/tool_078aea7e9001k35Cxr6YKiSkkJ`. All other workspaces were not reached; cleanup is unknown and an accidental empty claim was aborted with unknown outcome. A retained note classifies native `ECONNRESET` as retryable for 1.18.29, but the current typed error/endpoint is unknown and this is not `MCP-107` proof. Current recovery/access probes are retained in the final reconciliation note below; they do not establish absence or an external credential fault. | Authorized live read-only session/supervisor access, exact status, and process/claim/outbox/session/Todo reconciliation; the actual current typed error/endpoint; and an executable verifier. | `@ingenium-orchestrator` with the recovery owner: obtain the authorized live read-only interface and exact status first, preserve the first failure, and do not retry or replay until attribution is known. |
@@ -215,7 +220,7 @@ The compatibility launcher previously discarded provisioned runtime identity and
 | **B1 governance — `git --output` deny rules** under `ORCH-100` | **SOURCE/TEST COMPLETE; remediated; runtime/activation gates remain OPEN.** | The orchestrator profile and agent-validation policy retain deny rules for both `git diff`/`git log` `--output` argument placements; this is a source/static governance remediation, not loaded-runtime proof. | Parent activation, profile-loaded behavior, and broader runtime/deployment acceptance. |
 | **B2 memory boundary — dashboard tag sanitization** under `MEMORY-100` | **SOURCE/TEST COMPLETE; remediated; fresh-session/runtime acceptance pending.** | Dashboard explicit-memory context strips both untrusted-memory delimiters from tags before JSON projection while preserving ordinary tags; the focused dashboard regression records that boundary. | Exact deployment, fresh-session A/B/C acceptance, restart replay, visual, and containment gates. |
 
-**Standing instructions (2026-09-09, owner):** Profile-only tool governance (no wrapper denial layer); one documentation audit per finalized docs boundary plus the mechanical doc-config gate in the validation suite; one distinct subagent per open dependency-ready item under explicit user concurrency requests; ChatGPT-like agent memory feature: **feature source/test complete; fresh-session/runtime acceptance pending** (`7 ingenium_memory_*` tools); MCP catalog 291 entries/289 server registrations.
+**Standing instructions (updated 2026-09-15, owner):** Profile-only tool governance (no wrapper denial layer); direct-first execution with zero subagents when feasible; delegation only as a useful 2–6-agent team (3 preferred, 6 active children maximum per parent), with no filler/new singleton and existing-team tails allowed; exactly one QA report only when a declared finalized boundary has a risk or acceptance need; at most one security report only for a predeclared changed security surface; other documentation, research, visual, deployment, and recovery gates remain conditional; ChatGPT-like agent memory feature: **feature source/test complete; fresh-session/runtime acceptance pending** (`7 ingenium_memory_*` tools); current MCP catalog 292 entries/290 server registrations across 32 categories.
 
 **Partner-report reconciliation:** The five caller reports are represented without
 changing the original 23-row shape: MCP/recovery remain `UNKNOWN`; the current scheduler
@@ -456,14 +461,23 @@ protocol above; the placeholder is not a live marker:
 
 ## Operating model
 
-Execution is synchronous and dependency-ordered. For each dependency-ready
-`TodoWrite` or roadmap item, dispatch one distinct subagent instance with an
-exclusive writer territory when writing is required; there is no fixed active-agent
-or writer ceiling. Respect explicit user concurrency, record the actual active and
-writer counts, and never manufacture a Todo, duplicate research, or overlapping
-territory. Independent work still runs in barrier subwaves: finish and verify a
-subwave before starting dependent work. QA, security, visual timing, review limits,
-STOP/CANCELLED handling, and the full master Todo remain in force.
+Execution is direct-first and dependency-ordered. When the active authorized
+agent can complete a scoped item feasibly and efficiently, use zero subagents.
+When delegation is necessary, newly form one useful team of 2–6 subagents,
+preferably 3, with no more than 6 active children per parent; do not manufacture
+roles, add filler, or create a new singleton. An existing team's one-member
+tail may continue. Every delegated item retains an exclusive writer territory,
+complete contract, and durable Todo/failure evidence.
+
+Open-roadmap work uses autonomous resumption: dependency-ready work starts while
+unrelated work continues only when a supported background capability exists;
+otherwise use honest parallel synchronous waves, finish and verify each wave
+before dependent work, and never claim async proof. QA runs exactly one report
+only when a declared finalized boundary has a risk or acceptance need; security
+runs at most one report only for a predeclared changed security surface. Visual
+timing, Docs/research, deployment, recovery, STOP/CANCELLED handling, and the
+restored master Todo plus linked-Todo reconciliation remain conditional and in
+force.
 
 The older phase/count entries and the 2026-09-07 prospective scheduler clarification
 are retained as historical records. They do not override this current scheduling
@@ -6185,7 +6199,8 @@ first activation.
 
 #### MCP-107 — Exact `-32000` connection-closure diagnosis and causal repair
 
-- **Status:** `PLANNED`.
+- **Status:** `OPEN`; source/static and host-build gates **PASS**; compatibility
+  deployment is **UNHEALTHY/INVALIDATED**; `MODEL/SESSION` proof remains open.
 - **Outcome:** The first stderr/exit/startup stage producing the exact MCP
   `-32000: Connection closed` is retained and classified as credential/API/
   project, import/distribution, or stdio/transport failure. The distribution
@@ -6262,6 +6277,32 @@ first activation.
   reproduction, and focused regression; `DEPLOYED-RUNTIME` covers exact artifact
   health and MCP initialize/list; `MODEL/SESSION` is not inferred from either
   class; `VISUAL` is required only if a user-facing route changes.
+- **Current recovery reconciliation (2026-09-15; user-requested Ingenium MCP
+  repair):** Portable config/test source changes are recorded; focused test,
+  QA, security, Node `22.22.2` checksum/install, non-rotating protected-input
+  bootstrap, static validator, and host MCP distribution build are **PASS**.
+  These are `SOURCE/STATIC`, `SOURCE/TEST`, `HOST/BUILD`, and `REVIEW` evidence
+  only; no `MODEL/SESSION` proof is inferred.
+- **Compatibility deployment (`DEPLOYED-RUNTIME`; unhealthy and invalidated):**
+  Container `49b27edbc760...` and image `sha256:9a57173e...` were recorded; API `200`,
+  dashboard `200/307`, and OpenCode `502` were observed. Runtime is
+  unhealthy because installation `state=pending`, `revision=0`; the internal
+  scoped MCP credential is absent; and OpenCode/ttyd were not started. The
+  source snapshot changed during deployment, so current-source deployment proof
+  is invalid.
+- **Owner-claim blocker:** The explicit `ESCALATE_USER` condition is
+  `mutually exclusive installation-owner identity/password choice`. Until the
+  user claim, blocker owner=`user`; after the claim, next executable
+  owner=`@ingenium-software-engineer-premium`. No credential value is recorded.
+- **Resume signatures and nextWork:** Existing roadmap recovery evidence retains
+  the redacted signatures `INTERRUPTED_CHILD_OUTCOME_UNKNOWN` and
+  `COORDINATION_STATUS_TOOL_UNAVAILABLE`; no replay is inferred. After the user
+  claim, `nextWork` is: fence the current worktree
+  `/home/james/repos/ingenium`; rebuild/recreate the canonical Compose project
+  once; wait for health; verify the scoped credential, processes, and routes;
+  issue/provision the external host scoped MCP credential through the supported
+  path; run host `initialize`/`tools-list`; perform parent restart/reconnect only
+  with the required recovery proof; then acceptance/reconciliation.
 
 #### AGENT-100 — Scout retrieval boundary, Ponytail loading, and profile authority
 
@@ -8677,6 +8718,11 @@ owned by their earlier documentation/profile boundaries.
   and runtime broker absence. A restart acknowledgement or source read is not
   loaded-surface proof.
 
+> **Historical/superseded scheduler record (2026-09-15):** The S3 source/static
+> wording below preserves the former one-agent/no-cap evidence. The active
+> documentation policy is [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15);
+> no historical source, test, or runtime record is rewritten.
+
 ### S3 — Scoped dispatch and evidence integrity
 
 - **Source/static status:** current policy correction is one distinct subagent
@@ -8996,6 +9042,10 @@ gate.
   model-session recall remains open: the embedded UI requires manual session
   creation, automation has no input path, and a one-click manual path is
   available.
+> **Historical/superseded concurrency evidence (2026-09-15):** The following
+> retained runtime/source record is not active scheduler guidance; see
+> [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15).
+
 - **Concurrency — `SOURCE/TEST` + `RUNTIME OBSERVATION`:** Allocation is
   request-scoped with no fixed 6/3 cap; the 20-writer regression and
   one-agent-per-item policy are recorded. On the reachable runtime,
@@ -10524,3 +10574,82 @@ This block appends to Todo 57 and does not rewrite its earlier text or evidence.
   owner must rebuild, restart, and health-check the current committed source;
   then run parallel live COORD/T49/T50/T51 acceptance. Remaining final gates
   stay waiting. Deployment owner for this documentation task: `N/A`.
+
+<a id="orch-eff-01-07-supersession-2026-09-15"></a>
+
+## ORCH-EFF-01..07 — Direct-first bounded-team scheduling supersession — 2026-09-15
+
+This append-only linked item is the active documentation overlay for
+orchestration scheduling. It explicitly supersedes active
+one-agent-per-item/no-cap scheduler language in current guidance. Every older
+row, evidence record, runtime observation, and archive reference remains
+unchanged and is historical evidence; it is not silently converted into live
+policy or runtime proof.
+
+| ID | Active decision |
+|---|---|
+| **ORCH-EFF-01** | Direct-first: when the active authorized agent can complete the scoped work feasibly and efficiently, use zero subagents. This does not widen the coordination-only orchestrator's grants. |
+| **ORCH-EFF-02** | If delegation is necessary, newly form one useful team of 2–6 subagents, with 3 preferred and no more than 6 active children per parent. No filler and no new singleton; an existing team's one-member tail may continue. An explicit concurrency request does not override this shape or deny-default permissions. |
+| **ORCH-EFF-03** | Select only dependency-ready work with exclusive territories. Start newly eligible work without waiting for unrelated team members only when a supported background capability exists; otherwise use honest parallel synchronous waves. Synchronous batches remain synchronous; true async requires correlated results, and no async proof is claimed without those conditions. |
+| **ORCH-EFF-04** | Preserve independent verification and run QA, Docs, research, security, visual, deployment, and recovery work only when the declared boundary genuinely requires it. These are conditional gates, not token-wasting ritual. |
+| **ORCH-EFF-05** | Active loading is `@ponytail` plus task-matching skills and relevant roadmap/context; do not load every skill or the full roadmap by default. Durable Todo, failure, and recovery evidence remains required. |
+| **ORCH-EFF-06** | Directory auto-approval remains limited to the declared project and canonical worktree. Keep orchestrator grants narrow and preserve the other tool surfaces and grants from baseline `e25f5519`. |
+| **ORCH-EFF-07** | Reconcile TodoWrite and roadmap state before terminal output; preserve first failures, stable signatures, unknown outcomes, recovery preflight, and applicable deployment/runtime evidence. No restart, deployment, live async, or model/session proof is claimed by this documentation item. |
+
+**IN_SCOPE:** Active orchestration guidance in `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and the active
+top/current overlay plus operating model in this `ROADMAP.md`; append this
+ORCH-EFF-01..07 supersession record at EOF.
+
+**OUT_OF_SCOPE:** `.opencode/**`, source, tests, configuration, Docs Workspace
+mutation/export, deployment, restart, runtime activation, model/session proof,
+full documentation/agent audit, unrelated documentation cleanup, and rewriting
+or deleting historical rows or records.
+
+**Owner:** Documentation wave writer C. **Dependencies:** current canonical
+worktree and baseline `e25f5519`. **Acceptance:** Active canonical guidance is
+coherent, the direct-first/team and conditional-scheduling rules are explicit,
+historical contradictions are identified as historical/superseded, and links
+and headings read back successfully.
+
+**STOP_CONDITION:** Stop after the scoped searches and readback pass. `PASS`
+applies only to this documentation boundary, not to rollout completion.
+
+**Escalation:** Only unavailable external access, unauthorized destructive
+action, a required mutually exclusive decision, genuine ambiguity, or no
+reproducible cause after bounded diagnosis. A failed scoped check is repaired
+at its named documentation root cause and rerun once; it is not automatic
+user escalation.
+
+**Verification owner/plan:** Writer C performs scoped searches and readback of
+the changed sections and EOF record only. The independent documentation audit
+is a later declared gate; no full audit, runtime command, restart, deployment,
+or session proof is run or implied here. **Deployment owner:** `N/A` for this
+docs-only item; later activation, if separately admitted, is owned by Premium.
+
+**Exclusive writer territory:** `AGENTS.md` and active canonical Markdown under
+`docs/**`. **Evidence class:** `DOC/STATIC` readback only.
+
+**Rollback/safety:** This is append-only documentation work; preserve every
+historical row/record, make no runtime or Workspace mutation, and do not adopt
+source or profile changes as proof. **Tests:** Scoped searches and changed-
+section/EOF readback only. **Docs:** `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and this roadmap.
+**Phase/counts:** Declared existing wave `active=3`, `writers=3`; writer C dispatches
+zero new subagents. **Causal remediation rule:** Fix only the named
+reproducible in-scope documentation root cause, then rerun its targeted search
+and readback. **Finding classification:** In-scope acceptance failures are
+`BLOCKING`; out-of-scope drift is `FOLLOW_UP`; retained historical context is
+`INFORMATIONAL`.
+
+**Remaining-mention classification:** The active mentions in `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and the current
+roadmap overlays point to this policy. Retained CLI-DOC-04, S3/source-static,
+delivered-feature, prior Todo, and archive references to one-agent/no-cap or
+six-active/three-writer scheduling are historical records and remain preserved.
+Older all-skill/full-roadmap wording in those retained contracts and recovery
+records is likewise historical contract/evidence text, not an active loading
+instruction.
+Out-of-scope `.opencode/**` and test/profile assertions are not changed by this
+docs boundary. No QA, Docs Workspace, visual, security, implementation, or
+follow-up task is requested by this record.

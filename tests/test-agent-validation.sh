@@ -8,12 +8,11 @@ QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
 EXPECTED_LOGICAL_AGENT_COUNT=11
 EXPECTED_USER_FACING_AGENT_COUNT=10
 EXPECTED_CUSTOM_SUBAGENT_COUNT=8
-EXPECTED_WRITER_COUNT=4
+EXPECTED_WRITER_COUNT=5
 EXPECTED_CATEGORIZED_PROFILE_COUNT=12
 ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
-ALLOCATION_FIXTURE_DIR=""
 ROLE_MATRIX_ONLY=0
 SKILL_ONLY=0
 PERMISSION_PARITY_ONLY=0
@@ -28,14 +27,6 @@ elif [[ "$#" -ne 0 ]]; then
   printf 'Usage: %s [--role-matrix|--skill-only|--permission-parity]\n' "$0" >&2
   exit 2
 fi
-
-cleanup_allocation_fixtures() {
-  if [[ -n "$ALLOCATION_FIXTURE_DIR" && -d "$ALLOCATION_FIXTURE_DIR" ]]; then
-    rm -rf "$ALLOCATION_FIXTURE_DIR"
-  fi
-}
-
-trap cleanup_allocation_fixtures EXIT
 
 pass() { printf 'PASS: %s\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
@@ -723,7 +714,9 @@ for (const name of byName.keys()) {
   if (!expectedProfileNames.has(name)) errors.push(`unexpected agent profile: ${name}`);
 }
 
-if (isRecord(config?.permission)) errors.push("root permission authority must be absent");
+if (!isRecord(config?.permission) || !same(config.permission, { external_directory: "allow" })) {
+  errors.push("root permission must be exactly { external_directory: allow }");
+}
 if (!isRecord(config?.agent)) {
   errors.push("OpenCode config must define model mappings");
 } else {
@@ -781,7 +774,7 @@ const roleMatrix = {
   "ingenium-software-engineer-fast": { read: "allow", edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
   "ingenium-software-engineer-premium": { read: "allow", edit: "allow", write: "allow", bash: "allow", glob: "allow", grep: "allow", todowrite: "allow" },
   "ingenium-recovery-engineer": { read: "allow", edit: "object", write: "object", bash: "object", glob: "allow", grep: "allow", todowrite: "allow" },
-  "ingenium-orchestrator": { read: "allow", edit: "deny", write: "deny", bash: "object", glob: "deny", grep: "deny", todowrite: "allow" },
+  "ingenium-orchestrator": { read: "allow", edit: "allow", write: "allow", bash: "object", glob: "allow", grep: "allow", todowrite: "allow" },
   "ingenium-qa": { read: "allow", edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
   "ingenium-security-auditor": { read: "allow", edit: "deny", write: "deny", bash: "allow", glob: "allow", grep: "allow", todowrite: "deny" },
   "ingenium-explore": { read: "allow", edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
@@ -803,6 +796,65 @@ for (const [name, expected] of Object.entries(roleMatrix)) {
     if (actual !== value) errors.push(`${name} permission.${tool} must be ${value}, found ${String(actual)}`);
   }
 }
+
+const { execFileSync } = require("node:child_process");
+const { isDeepStrictEqual } = require("node:util");
+const baselineCommit = "e25f5519";
+const repoRoot = path.resolve(agentsDir, "..", "..");
+function readBaselinePermission(relativePath) {
+  try {
+    const source = execFileSync("git", ["show", `${baselineCommit}:${relativePath}`], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    return parsePermission(source, `baseline profile ${relativePath}`).value;
+  } catch (error) {
+    errors.push(`baseline profile is unavailable: ${relativePath} (${error.message})`);
+    return null;
+  }
+}
+
+const orchestratorName = "ingenium-orchestrator";
+const directFilesystemKeys = new Set(["edit", "write", "glob", "grep"]);
+for (const profile of profiles) {
+  const relativePath = path.relative(repoRoot, profile.filePath);
+  const baselinePermission = readBaselinePermission(relativePath);
+  const currentPermission = permissions.get(profile.name);
+  if (!isRecord(baselinePermission) || !isRecord(currentPermission)) continue;
+
+  if (profile.name !== orchestratorName) {
+    if (!same(currentPermission, baselinePermission)) {
+      errors.push(`${profile.name} permission map must remain unchanged from ${baselineCommit}`);
+    }
+    continue;
+  }
+
+  for (const key of new Set([...Object.keys(baselinePermission), ...Object.keys(currentPermission)])) {
+    if (directFilesystemKeys.has(key)) continue;
+    if (!same(currentPermission[key], baselinePermission[key])) {
+      errors.push(`orchestrator permission.${key} must remain exact from ${baselineCommit}`);
+    }
+  }
+
+  const expectedDirectRule = { "*": "allow", "next-steps-plan/**": "deny" };
+  if (!same(currentPermission.edit, expectedDirectRule)) {
+    errors.push("orchestrator edit must allow direct files while denying next-steps-plan/**");
+  }
+  if (!same(currentPermission.write, expectedDirectRule)) {
+    errors.push("orchestrator write must allow direct files while denying next-steps-plan/**");
+  }
+  const reorderedDirectRule = { "next-steps-plan/**": "deny", "*": "allow" };
+  if (!same(expectedDirectRule, { "*": "allow", "next-steps-plan/**": "deny" })
+    || same(reorderedDirectRule, expectedDirectRule)) {
+    errors.push("permission-order fixture must accept ordered broad/protected rules and reject reordered rules");
+  } else {
+    console.log("PASS: permission-order fixture rejects reordered broad/protected rules");
+  }
+  if (currentPermission.glob !== "allow" || currentPermission.grep !== "allow") {
+    errors.push("orchestrator glob and grep must be direct filesystem allows");
+  }
+}
+console.log(`PASS: profile permission maps preserve ${baselineCommit}; only orchestrator direct filesystem grants differ`);
 
 const orchestratorProfile = (byName.get("ingenium-orchestrator") ?? [])[0];
 const expectedRecoveryBash = {
@@ -917,7 +969,7 @@ for (const tool of ["ingenium_task_create", "ingenium_docs_create_page", "ingeni
 }
 
 const catalogSource = readText(path.join(path.dirname(configPath), "packages/ingenium-core/lib/tools/mcp-tool-catalog.ts"), "MCP catalog");
-const catalog = [...(catalogSource ?? "").matchAll(/\bname: "([^"]+)",\s*category: "([^"]+)"/g)].map(([, name, category]) => ({ name, category }));
+const catalog = [...(catalogSource ?? "").matchAll(/\{\s*name: "([^"]+)",\s*category: "([^"]+)"/g)].map(([, name, category]) => ({ name, category }));
 const catalogNames = new Set(catalog.map(({ name }) => name));
 if (catalog.length !== 292 || catalogNames.size !== 292) errors.push("MCP designation audit requires 292 unique catalog entries");
 const categoryCounts = {};
@@ -1171,10 +1223,15 @@ for expected_writer in \
     fail "$expected_writer has edit/write permissions but was not recognized as a writer"
   fi
 done
+if [[ -n "${WRITER_NAMES[ingenium-orchestrator]:-}" ]]; then
+  pass "ingenium-orchestrator is recognized as the direct write-capable primary"
+else
+  fail "ingenium-orchestrator must be recognized as direct write-capable"
+fi
 if [[ "${#WRITER_NAMES[@]}" -ne "$EXPECTED_WRITER_COUNT" ]]; then
   fail "expected $EXPECTED_WRITER_COUNT permission-derived writers, found ${#WRITER_NAMES[@]}"
 else
-  pass "$EXPECTED_WRITER_COUNT permission-derived writers are present"
+  pass "$EXPECTED_WRITER_COUNT permission-derived writers are present, including direct orchestrator execution"
 fi
 if [[ "${#WRITER_NAMES[@]}" -gt 0 ]]; then
   writer_list="$(printf '%s\n' "${!WRITER_NAMES[@]}" | sort | paste -sd ',' -)"
@@ -1416,20 +1473,19 @@ validate_orchestrator_bash_permissions() {
     errors=1
   fi
 
-  if ! awk '
-    /^  edit:[[:space:]]*/ {
-      edit_count++
-      if ($0 ~ /^  edit:[[:space:]]*deny[[:space:]]*$/) edit_denied = 1
-    }
-    /^  write:[[:space:]]*/ {
-      write_count++
-      if ($0 ~ /^  write:[[:space:]]*deny[[:space:]]*$/) write_denied = 1
-    }
-    END {
-      exit(edit_count == 1 && edit_denied && write_count == 1 && write_denied ? 0 : 1)
-    }
-  ' "$ORCHESTRATOR"; then
-    fail "orchestrator edit and write permissions must remain scalar deny rules"
+  if ! node - "$ORCHESTRATOR" <<'NODE'
+const fs = require("fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+const expected = [
+  '  edit:\n    "*": allow\n    "next-steps-plan/**": deny',
+  '  write:\n    "*": allow\n    "next-steps-plan/**": deny',
+];
+for (const block of expected) {
+  if (!source.includes(block)) process.exit(1);
+}
+NODE
+  then
+    fail "orchestrator edit/write permissions must allow direct files and deny next-steps-plan/**"
     errors=1
   fi
 
@@ -1602,9 +1658,9 @@ if (errors.length > 0) {
 console.log("PASS: coordination tools use top-level grants; Recovery has only required recovery operations; Scout remains read-only");
 NODE
   then
-    return 0
+    return 1
   fi
-  return 1
+  return 0
 }
 
 if ! validate_coordination_tool_permissions; then
@@ -1715,7 +1771,11 @@ validate_reporting_agent_task_denial() {
 extract_declared_agent_list() {
   local source="$1"
   local heading="$2"
-  awk -v heading="$heading" 'index($0, heading) == 1 { print; exit }' "$source" \
+  awk -v heading="$heading" '
+    index($0, heading) { capture = 1 }
+    capture { print }
+    capture && NF == 0 { exit }
+  ' "$source" \
     | grep -Eo '@[[:alnum:]-]+' | sed 's/^@//' || true
 }
 
@@ -1763,7 +1823,7 @@ else
   declare -A DECLARED_READ_ONLY_NAMES=()
   mapfile -t TASK_ALLOW_LIST < <(extract_task_allow_names "$ORCHESTRATOR")
   mapfile -t DECLARED_WRITER_LIST < <(
-    extract_declared_agent_list "$ORCHESTRATOR" "Writers (counted by"
+    extract_declared_agent_list "$ORCHESTRATOR" "Dispatchable writers (counted by"
   )
   mapfile -t DECLARED_READ_ONLY_LIST < <(
     extract_declared_agent_list "$ORCHESTRATOR" "Read-only:"
@@ -1871,8 +1931,8 @@ check_policy_pattern() {
 
 contains_normalized_phrase() {
   local normalized_source normalized_phrase
-  normalized_source="$(printf '%s' "$1" | tr -s '[:space:]' ' ')"
-  normalized_phrase="$(printf '%s' "$2" | tr -s '[:space:]' ' ')"
+  normalized_source="$(printf '%s' "$1" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
+  normalized_phrase="$(printf '%s' "$2" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
   [[ "$normalized_source" == *"$normalized_phrase"* ]]
 }
 
@@ -1882,6 +1942,15 @@ if contains_normalized_phrase $'a complete\ncontract, before dispatch.' 'complet
   pass "normalized phrase matcher accepts line wrapping and punctuation but rejects missing policy"
 else
   fail "normalized phrase matcher regression"
+fi
+
+if contains_normalized_phrase 'Existing-Team Members May Finish Dependent Tails Without Forming a New Singleton.' 'existing-team members may finish dependent tails without forming a new singleton' &&
+   ! contains_normalized_phrase 'existing-team members may finish dependent tails' 'existing-team members may finish dependent tails without forming a new singleton' &&
+   ! contains_normalized_phrase 'direct execution is the first path' 'direct execution is the first path zero subagents' &&
+   ! contains_normalized_phrase 'finalized input/output manifest before dispatch' 'finalized input/output manifest before review'; then
+  pass "normalized policy matcher is case-insensitive and rejects missing tail/direct/review policies"
+else
+  fail "normalized policy matcher negative-fixture regression"
 fi
 
 check_normalized_policy_pattern() {
@@ -1902,10 +1971,11 @@ check_normalized_policy_regex_pattern() {
   local label="$2"
   local pattern="$3"
   local description="$4"
-  local normalized_source
+  local normalized_source normalized_pattern
 
   normalized_source="$(tr -s '[:space:]' ' ' < "$source" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$normalized_source" =~ $pattern ]]; then
+  normalized_pattern="$(printf '%s' "$pattern" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$normalized_source" =~ $normalized_pattern ]]; then
     pass "$label $description"
   else
     fail "$label is missing $description"
@@ -1913,10 +1983,10 @@ check_normalized_policy_regex_pattern() {
   fi
 }
 
-if node - "$ORCHESTRATOR" "${AGENT_FILES[@]}" <<'NODE'
+if node - "$ORCHESTRATOR" "$AGENTS_DIR/primary/plan.md" "${AGENT_FILES[@]}" <<'NODE'
 const fs = require("fs");
 const assert = require("node:assert/strict");
-const [orchestrator, ...profiles] = process.argv.slice(2);
+const [orchestrator, plan, ...profiles] = process.argv.slice(2);
 
 function hasDelegationInstruction(source) {
   const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
@@ -1937,6 +2007,21 @@ console.log("PASS: delegation matcher distinguishes positive instructions from d
 let failed = false;
 for (const profile of profiles) {
   if (profile === orchestrator) continue;
+  if (profile === plan) {
+    const normalized = fs.readFileSync(profile, "utf8").replace(/\s+/g, " ").toLowerCase();
+    for (const phrase of [
+      "research repository context directly",
+      "2–6 useful research assignments",
+      "3 preferred",
+      "never a singleton or filler assignment",
+    ]) {
+      if (!normalized.includes(phrase.toLowerCase())) {
+        console.error(`FAIL: Plan is missing its direct-first research rule: ${phrase}`);
+        failed = true;
+      }
+    }
+    continue;
+  }
   if (hasDelegationInstruction(fs.readFileSync(profile, "utf8"))) {
     console.error(`FAIL: non-orchestrator profile contains positive delegation instructions: ${profile}`);
     failed = true;
@@ -1945,9 +2030,9 @@ for (const profile of profiles) {
 process.exit(failed ? 1 : 0);
 NODE
 then
-  pass "only the orchestrator profile contains positive delegation instructions"
+  pass "only the orchestrator and read-only Plan profiles contain positive delegation instructions"
 else
-  fail "delegation instruction ownership must remain exclusive to the orchestrator profile"
+  fail "delegation instruction ownership must remain bounded to the orchestrator and read-only Plan profiles"
   policy_errors=1
 fi
 
@@ -2109,9 +2194,25 @@ done
 
 for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
+  QA_REPORTING_PATTERN='qa produces exactly one report only when the task contract declares a risk or acceptance need'
+  SECURITY_REPORTING_PATTERN='security produces at most one report only when the contract predeclares a changed security surface'
+  AFTER_REMEDIATION_PATTERN='after remediation'
   check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
-    'exactly one qa report.{0,120}at most one security report|qa.{0,320}security.{0,320}(once.{0,160}(implementation|wave|review)|wait.{0,200}(finalized|implementation)|post[-[:space:]]+wave)' \
-    "bounded QA/security post-wave reporting policy"
+    "$QA_REPORTING_PATTERN" \
+    "exactly-one QA reporting policy"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    "$SECURITY_REPORTING_PATTERN" \
+    "at-most-one security reporting policy"
+  check_normalized_policy_regex_pattern "$policy_source" "$policy_label" \
+    "$AFTER_REMEDIATION_PATTERN" \
+    "post-remediation reporting policy"
+  if [[ 'qa produces exactly one report only when the task contract declares a risk or acceptance need; security produces a report only when the contract predeclares a changed security surface; after remediation' =~ $QA_REPORTING_PATTERN ]] && \
+     [[ 'qa produces exactly one report only when the task contract declares a risk or acceptance need; security produces a report only when the contract predeclares a changed security surface; after remediation' =~ $SECURITY_REPORTING_PATTERN ]]; then
+    fail "$policy_label accepts an unbounded QA/security reporting fixture"
+    policy_errors=1
+  else
+    pass "$policy_label rejects an unbounded QA/security reporting fixture"
+  fi
   check_policy_pattern "$policy_source" "$policy_label" \
     'minimum targeted regression' \
     "reviewer-blocker targeted-regression policy"
@@ -2120,11 +2221,45 @@ done
 # These patterns intentionally vary by document format.  That makes this a
 # real cross-source check instead of merely checking that the files exist.
 check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
-  'User-Requested Concurrency Scheduler' \
-  "the user-requested scheduler declaration"
+  'Direct-First Delegation Scheduler' \
+  "the direct-first scheduler declaration"
+DIRECT_PATH_PATTERN='direct execution is the first path[^.]{0,160}zero subagents'
+check_normalized_policy_regex_pattern "$ORCHESTRATOR" "orchestrator" \
+  "$DIRECT_PATH_PATTERN" \
+  "the zero-subagent direct path"
+if [[ 'direct execution is the first path: delegated work remains available' =~ $DIRECT_PATH_PATTERN ]]; then
+  fail "orchestrator direct-path fixture accepts missing zero-subagent meaning"
+  policy_errors=1
+else
+  pass "orchestrator direct-path fixture rejects missing zero-subagent meaning"
+fi
 check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
-  'no fixed active-agent or writer ceiling' \
-  "the absence of a fixed concurrency ceiling"
+  'newly formed delegated team has 2–6 useful assignments, with 3 preferred' \
+  "the bounded delegated-team shape"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'no parent may have more than 6 active children' \
+  "the six-child parent limit"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'never manufacture filler' \
+  "the no-filler rule"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'existing-team members may finish dependent tails without forming a new singleton' \
+  "the existing-team dependent-tail rule"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'never call a synchronous batch background or async' \
+  "the synchronous-batch rule"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'true async requires a supported runtime capability' \
+  "the supported-async rule"
+check_normalized_policy_regex_pattern "$ORCHESTRATOR" "orchestrator" \
+  'conditional on declared risk or acceptance criteria.*never automatic filler' \
+  "the conditional review-gate rule"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'required separation, deployment, and recovery gates remain' \
+  "the required-gate preservation rule"
+check_normalized_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'scoped roadmap and relevant context' \
+  "the scoped context rule"
 check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
   'Phase Declaration Protocol' \
   "the phase declaration protocol"
@@ -2144,16 +2279,6 @@ check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
   'Never replay an uncertain mutation' \
   "the uncertain-mutation replay prohibition"
 
-for policy_source in "$ORCHESTRATOR"; do
-  policy_label="${policy_source#"$REPO_ROOT"/}"
-  check_normalized_policy_pattern "$policy_source" "$policy_label" \
-    'one distinct subagent per open TodoWrite/roadmap item' \
-    "the user-requested item-to-agent allocation"
-  check_normalized_policy_pattern "$policy_source" "$policy_label" \
-    '20 simultaneous subagents' \
-    "the requested concurrency example"
-done
-
 check_normalized_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
   'Current delegation policy follows the explicit user request and the active orchestrator profile' \
   "the scheduler policy ownership boundary"
@@ -2161,8 +2286,8 @@ check_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agent
   'Phase Declaration' \
   "the phase declaration protocol"
 check_normalized_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
-  'one distinct subagent per selected item' \
-  "the documented item-to-agent allocation"
+  'all assignments retain complete contracts, exclusive territories' \
+  "the documented contract and territory allocation"
 
 if ! bash "$REPO_ROOT/tests/test-orchestrator-scheduler-policy.sh"; then
   FAILED=1
@@ -2197,486 +2322,42 @@ else
   pass "orchestrator writer references match permissions-derived writer profiles"
 fi
 
-capture_example() {
-  local source="$1"
-  local start_marker="$2"
-  local end_marker="$3"
-  awk -v start="$start_marker" -v end="$end_marker" '
-    index($0, start) { capture = 1 }
-    capture { print }
-    capture && index($0, end) { exit }
-  ' "$source"
-}
-
-allocation_is_valid() {
-  local active_count="$1"
-  local writer_count="$2"
-  local non_writer_count="$3"
-
-  if ! [[ "$active_count" =~ ^[0-9]+$ &&
-          "$writer_count" =~ ^[0-9]+$ &&
-          "$non_writer_count" =~ ^[0-9]+$ ]]; then
-    return 1
-  fi
-
-  (( writer_count + non_writer_count == active_count ))
-}
-
-todo_allocation_is_valid() {
-  local allocation="$1"
-  local todo_agents
-  local -a todo_allocations=()
-
-  [[ "$allocation" =~ ^[0-9]+(,[0-9]+)*$ ]] || return 1
-  IFS=',' read -r -a todo_allocations <<< "$allocation"
-  if (( ${#todo_allocations[@]} == 0 )); then
-    return 1
-  fi
-
-  for todo_agents in "${todo_allocations[@]}"; do
-    if (( todo_agents != 1 )); then
-      return 1
-    fi
-  done
-
-  return 0
-}
-
-structural_todo_allocation_is_valid() {
-  local fixture="$1"
-
-  printf '%s\n' "$fixture" | awk -F'|' '
-    function trim(value) {
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
-      return value
-    }
-
-    function finish_pair() {
-      if (!in_pair) {
-        valid = 0
-        return
-      }
-      if (pair_agents != 1 || pair_dependencies != 1 ||
-          pair_territories != pair_writers) valid = 0
-      in_pair = 0
-    }
-
-    function territories_overlap(left, right) {
-      return left == right || index(left, right "/") == 1 ||
-        index(right, left "/") == 1
-    }
-
-    BEGIN { valid = 1 }
-
-    /^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
-
-    {
-      record = trim($1)
-
-      if (record == "TODO_PAIR") {
-        if (in_pair) {
-          valid = 0
-          finish_pair()
-        }
-        pair_name = trim($2)
-        if (NF != 2 || pair_name == "" || seen_todo[pair_name]++) valid = 0
-        pair_count++
-        pair_agents = 0
-        pair_writers = 0
-        pair_dependencies = 0
-        pair_territories = 0
-        in_pair = 1
-        next
-      }
-
-      if (record == "AGENT") {
-        agent = trim($2)
-        role = trim($3)
-        key = pair_count SUBSEP agent
-        if (!in_pair || NF != 3 || agent == "" ||
-            (role != "writer" && role != "read-only") || seen_agent[key]++) {
-          valid = 0
-          next
-        }
-        agent_role[key] = role
-        pair_agents++
-        active_count++
-        if (role == "writer") {
-          pair_writers++
-          writer_count++
-        }
-        next
-      }
-
-      if (record == "DEPENDENCY") {
-        dependency = trim($2)
-        if (!in_pair || NF != 2 || dependency == "") valid = 0
-        pair_dependencies++
-        next
-      }
-
-      if (record == "TERRITORY") {
-        agent = trim($2)
-        territory = trim($3)
-        gsub(/\/+$/, "", territory)
-        key = pair_count SUBSEP agent
-        if (!in_pair || NF != 3 || territory == "" ||
-            agent_role[key] != "writer" || declared_territory[key]++) {
-          valid = 0
-          next
-        }
-        for (index_value = 1; index_value <= territory_count; index_value++) {
-          if (territories_overlap(territory, territories[index_value])) valid = 0
-        }
-        territories[++territory_count] = territory
-        pair_territories++
-        next
-      }
-
-      if (record == "END_TODO_PAIR") {
-        if (NF != 1) valid = 0
-        finish_pair()
-        next
-      }
-
-      if (record == "TOTALS") {
-        declared_todos = trim($2)
-        declared_active = trim($3)
-        declared_writers = trim($4)
-        if (in_pair || NF != 4 || totals_seen++ ||
-            declared_todos !~ /^[0-9]+$/ ||
-            declared_active !~ /^[0-9]+$/ ||
-            declared_writers !~ /^[0-9]+$/) valid = 0
-        next
-      }
-
-      valid = 0
-    }
-
-    END {
-      if (in_pair) {
-        valid = 0
-        finish_pair()
-      }
-      if (totals_seen != 1 || pair_count < 1 ||
-          declared_todos + 0 != pair_count ||
-          declared_active + 0 != active_count ||
-          declared_writers + 0 != writer_count) valid = 0
-      exit(valid ? 0 : 1)
-    }
-  '
-}
-
-extract_pair_heading_name() {
-  local line="$1"
-  if [[ "$line" =~ ^[[:space:]]*(Pair|Assignment[[:space:]]for)[[:space:]]\"([^\"]+)\"[[:space:]]*: ]]; then
-    printf '%s\n' "${BASH_REMATCH[2]}"
-  fi
-  return 0
-}
-
-extract_pair_assignment_lines() {
-  local block="$1"
-  printf '%s\n' "$block" | grep -E '^[[:space:]]+@[[:alnum:]-]+[[:space:]]+(→|->)' || true
-}
-
-validate_parsed_pair_blocks() {
-  local label="$1"
-  local block="$2"
-  local expected_pairs="${3:-}"
-  local line pair_name="" pair_block="" next_pair_name
-  local pair_count=0
-  local errors=0
-  local -a assignments=()
-
-  while IFS= read -r line; do
-    next_pair_name="$(extract_pair_heading_name "$line")"
-    if [[ -n "$next_pair_name" ]]; then
-      if [[ -n "$pair_name" ]]; then
-        mapfile -t assignments < <(extract_pair_assignment_lines "$pair_block")
-        if [[ "${#assignments[@]}" -ne 1 ]]; then
-          fail "$label item $pair_name must contain exactly one agent assignment, found ${#assignments[@]}"
-          errors=1
-        fi
-        pair_count=$((pair_count + 1))
-      fi
-      pair_name="$next_pair_name"
-      pair_block="$line"
-    elif [[ -n "$pair_name" ]]; then
-      pair_block+=$'\n'"$line"
-    fi
-  done <<< "$block"
-
-  if [[ -n "$pair_name" ]]; then
-    mapfile -t assignments < <(extract_pair_assignment_lines "$pair_block")
-    if [[ "${#assignments[@]}" -ne 1 ]]; then
-      fail "$label item $pair_name must contain exactly one agent assignment, found ${#assignments[@]}"
-      errors=1
-    fi
-    pair_count=$((pair_count + 1))
-  fi
-
-  if [[ "$pair_count" -eq 0 ]]; then
-    fail "$label contains no parsed Pair blocks"
-    return 1
-  fi
-  if [[ -n "$expected_pairs" && "$pair_count" -ne "$expected_pairs" ]]; then
-    fail "$label declares $expected_pairs Todo pairs but contains $pair_count parsed Pair blocks"
-    errors=1
-  fi
-  if [[ "$errors" -eq 0 ]]; then
-    pass "$label contains $pair_count parsed Todo blocks with exactly one agent assignment each"
-    return 0
-  fi
-  return 1
-}
-
-expect_structural_todo_fixture() {
-  local label="$1"
-  local expected="$2"
-  local fixture="$3"
-  local actual
-
-  if structural_todo_allocation_is_valid "$fixture"; then
-    actual='accept'
-  else
-    actual='reject'
-  fi
-
-  if [[ "$actual" == "$expected" ]]; then
-    pass "structural Todo fixture $label is $actual"
-  else
-    fail "structural Todo fixture $label expected $expected but was $actual"
-  fi
-}
-
-run_structural_todo_fixture_tests() {
-  local count index fixture expected
-  for count in 0 1 2 20; do
-    fixture=$'TODO_PAIR|todo-a\n'
-    for ((index = 1; index <= count; index++)); do
-      fixture+="AGENT|reader-$index|read-only"$'\n'
-    done
-    fixture+=$'DEPENDENCY|none\nEND_TODO_PAIR\nTOTALS|1|'"$count|0"
-    expected=reject
-    if (( count == 1 )); then expected=accept; fi
-    expect_structural_todo_fixture "single-todo-$count-agents" "$expected" "$fixture"
-  done
-  fixture=""
-  for ((index = 1; index <= 20; index++)); do
-    fixture+="TODO_PAIR|todo-$index"$'\n'"AGENT|writer-$index|writer"$'\nDEPENDENCY|none\n'"TERRITORY|writer-$index|src/item-$index"$'\nEND_TODO_PAIR\n'
-  done
-  fixture+='TOTALS|20|20|20'
-  expect_structural_todo_fixture 'twenty-items-twenty-writers' accept "$fixture"
-  expect_structural_todo_fixture 'single-todo-one-agent' accept $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|1|1'
-  expect_structural_todo_fixture 'declared-total-mismatch' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|2|1'
-  expect_structural_todo_fixture 'missing-dependency-declaration' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nTERRITORY|writer-a|src/a\nEND_TODO_PAIR\nTOTALS|1|1|1'
-  expect_structural_todo_fixture 'missing-territory-declaration' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nEND_TODO_PAIR\nTOTALS|1|1|1'
-  expect_structural_todo_fixture 'overlapping-writer-territories' reject $'TODO_PAIR|todo-a\nAGENT|writer-a|writer\nDEPENDENCY|none\nTERRITORY|writer-a|services/api\nEND_TODO_PAIR\nTODO_PAIR|todo-b\nAGENT|writer-b|writer\nDEPENDENCY|none\nTERRITORY|writer-b|services/api/routes\nEND_TODO_PAIR\nTOTALS|2|2|2'
-}
-
-validate_wave_block() {
-  local label="$1"
-  local block="$2"
-  local active_count=0
-  local writer_count=0
-  local non_writer_count=0
-  local agent_line agent_ref agent_name
-  local -a agent_lines=()
-  mapfile -t agent_lines < <(
-    printf '%s\n' "$block" | grep -E '^[[:space:]]+@[[:alnum:]-]+' || true
-  )
-
-  for agent_line in "${agent_lines[@]}"; do
-    active_count=$((active_count + 1))
-    while IFS= read -r agent_ref; do
-      [[ -z "$agent_ref" ]] && continue
-      agent_name="${agent_ref#@}"
-      if [[ -z "${DISPATCHABLE_NAMES[$agent_name]:-}" ]]; then
-        fail "$label references unknown agent $agent_ref"
-        policy_errors=1
-      elif [[ -n "${WRITER_NAMES[$agent_name]:-}" ]]; then
-        writer_count=$((writer_count + 1))
-        if [[ "$agent_line" != *"(writer"* ]]; then
-          fail "$label omits writer annotation for permissions-derived writer $agent_ref"
-          policy_errors=1
-        fi
-      elif [[ "$agent_line" == *"(writer"* ]]; then
-        fail "$label marks permissions-derived non-writer $agent_ref as a writer"
-        policy_errors=1
-      else
-        non_writer_count=$((non_writer_count + 1))
-      fi
-    done < <(printf '%s\n' "$agent_line" | grep -Eo '@[[:alnum:]-]+' || true)
-  done
-
-  if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
-    pass "$label accounts for every active agent by permission-derived role ($active_count/$writer_count/$non_writer_count)"
-  else
-    fail "$label has an unclassified active agent ($active_count/$writer_count/$non_writer_count)"
-    policy_errors=1
-  fi
-
-  local declared_active="" declared_writers="" declared_non_writers=""
-  if [[ "$block" =~ \(([0-9]+)[[:space:]]+active,[[:space:]]*([0-9]+)[[:space:]]+writers?,[[:space:]]*([0-9]+)[[:space:]]+non[-[:space:]]writers? ]]; then
-    declared_active="${BASH_REMATCH[1]}"
-    declared_writers="${BASH_REMATCH[2]}"
-    declared_non_writers="${BASH_REMATCH[3]}"
-  elif [[ "$block" =~ Active:[[:space:]]*([0-9]+),[[:space:]]*Writers:[[:space:]]*([0-9]+),[[:space:]]*Non[-[:space:]]writers:[[:space:]]*([0-9]+) ]]; then
-    declared_active="${BASH_REMATCH[1]}"
-    declared_writers="${BASH_REMATCH[2]}"
-    declared_non_writers="${BASH_REMATCH[3]}"
-  fi
-  if [[ -n "$declared_active" ]]; then
-    if [[ "$declared_active" -eq "$active_count" && \
-          "$declared_writers" -eq "$writer_count" && \
-          "$declared_non_writers" -eq "$non_writer_count" ]]; then
-      pass "$label declaration matches observed agents ($declared_active/$declared_writers/$declared_non_writers)"
-    else
-      fail "$label declares $declared_active/$declared_writers/$declared_non_writers but contains $active_count/$writer_count/$non_writer_count"
-      policy_errors=1
-    fi
-  fi
-  return 0
-}
-
-validate_example_block() {
-  local source="$1"
-  local label="$2"
-  local start_marker="$3"
-  local end_marker="$4"
-  local expected_pairs="${5:-}"
-  local block
-  block="$(capture_example "$source" "$start_marker" "$end_marker")"
-
-  if [[ -z "$block" ]]; then
-    fail "$label is missing or unreadable"
-    policy_errors=1
-    return
-  fi
-
-  # A single captured example can contain several serialized waves.  Validate
-  # each wave independently so actual assignments are counted concurrently, while
-  # still checking every dispatch line in the example.
-  local line wave_block="" wave_index=0 saw_wave=0
-  while IFS= read -r line; do
-    if [[ "$line" == Phase:*Wave* || "$line" == "Post-writer wave:"* || "$line" =~ ^[[:space:]]*Wave[[:space:]][0-9]+ || "$line" =~ ^[[:space:]]*Post-writer ]]; then
-      if [[ "$saw_wave" -eq 1 ]]; then
-        wave_index=$((wave_index + 1))
-        validate_wave_block "$label wave $wave_index" "$wave_block"
-      fi
-      saw_wave=1
-      wave_block="$line"
-    elif [[ "$saw_wave" -eq 1 ]]; then
-      wave_block+=$'\n'"$line"
-    else
-      wave_block+="$line"$'\n'
-    fi
-  done <<< "$block"
-  if [[ "$saw_wave" -eq 1 ]]; then
-    wave_index=$((wave_index + 1))
-    validate_wave_block "$label wave $wave_index" "$wave_block"
-  else
-    validate_wave_block "$label" "$wave_block"
-  fi
-
-  if [[ -n "$expected_pairs" ]] || grep -Eq '^[[:space:]]*(Pair|Assignment for) "' <<< "$block"; then
-    if ! validate_parsed_pair_blocks "$label" "$block" "$expected_pairs"; then
-      policy_errors=1
-    fi
-  fi
-}
-
-run_allocation_fixture_tests() {
-  local fixture_file
-  local label expected active_count writer_count non_writer_count actual
-
-  ALLOCATION_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-agent-validation.XXXXXX")"
-  fixture_file="$ALLOCATION_FIXTURE_DIR/allocations.tsv"
-  printf '%s\n' \
-    'zero-writers-six-read-only|accept|6|0|6' \
-    'one-writer-five-read-only|accept|6|1|5' \
-    'two-writers-four-read-only|accept|6|2|4' \
-    'three-writers-three-read-only|accept|6|3|3' \
-    'three-writers-four-read-only|accept|7|3|4' \
-    'four-writers|accept|4|4|0' \
-    'twenty-writers|accept|20|20|0' \
-    'unclassified-active-agent|reject|6|1|4' \
-    > "$fixture_file"
-
-  while IFS='|' read -r label expected active_count writer_count non_writer_count; do
-    if allocation_is_valid "$active_count" "$writer_count" "$non_writer_count"; then
-      actual='accept'
-    else
-      actual='reject'
-    fi
-
-    if [[ "$actual" == "$expected" ]]; then
-      pass "allocation fixture $label is $actual"
-    else
-      fail "allocation fixture $label expected $expected but was $actual"
-    fi
-  done < "$fixture_file"
-
-  ALLOCATION_FIXTURE_DIR=""
-  cleanup_allocation_fixtures
-}
-
-run_todo_allocation_fixture_tests() {
-  local fixture_file
-  local label expected allocation actual
-
-  ALLOCATION_FIXTURE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ingenium-agent-validation.XXXXXX")"
-  fixture_file="$ALLOCATION_FIXTURE_DIR/todo-allocations.tsv"
-  printf '%s\n' \
-    'one-selected-todo-two-agents|reject|2' \
-    'two-selected-todos-four-agents|reject|2,2' \
-    'three-selected-todos-six-agents|reject|2,2,2' \
-    'single-one-agent|accept|1' \
-    'single-three-agents|reject|3' \
-    'single-four-agents|reject|4' \
-    'single-five-agents|reject|5' \
-    'single-six-agents|reject|6' \
-    'single-zero-agents|reject|0' \
-    'single-seven-agents|reject|7' \
-    'multi-zero-agents|reject|0,2' \
-    'multi-singleton|reject|1,2' \
-    'multi-third-agent|reject|2,3' \
-    'multi-three-uneven|reject|2,1,3' \
-    'six-agents-on-six-todos|accept|1,1,1,1,1,1' \
-    'twenty-agents-on-twenty-todos|accept|1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1' \
-    'uneven-four-agent-allocation|reject|3,1' \
-    'four-todo-pairs|reject|2,2,2,2' \
-    > "$fixture_file"
-
-  while IFS='|' read -r label expected allocation; do
-    if todo_allocation_is_valid "$allocation"; then
-      actual='accept'
-    else
-      actual='reject'
-    fi
-
-    if [[ "$actual" == "$expected" ]]; then
-      pass "Todo allocation fixture $label is $actual"
-    else
-      fail "Todo allocation fixture $label expected $expected but was $actual"
-    fi
-  done < "$fixture_file"
-
-  ALLOCATION_FIXTURE_DIR=""
-  cleanup_allocation_fixtures
-}
-
-run_allocation_fixture_tests
-run_todo_allocation_fixture_tests
-run_structural_todo_fixture_tests
-
 if [[ -f "$ORCHESTRATOR" ]]; then
-  validate_example_block "$ORCHESTRATOR" \
-    "orchestrator bounded dispatch example" \
-    'Phase: "Validation message"' \
-    '→ The writer completes the declared implementation and self-verification.' \
-    1
+  normalized_examples="$(tr '\n' ' ' < "$ORCHESTRATOR" | tr -s '[:space:]' ' ' | tr '[:upper:]' '[:lower:]')"
+  direct_example_pattern='direct[[:space:]]+path.{0,240}zero[[:space:]]+subagents'
+  team_example_pattern='newly[[:space:]]+formed[[:space:]]+delegated[[:space:]]+team[[:space:]]+has[[:space:]]+2–6[[:space:]]+useful[[:space:]]+assignments,[[:space:]]+with[[:space:]]+3[[:space:]]+preferred'
+  tail_example_pattern='dependent[[:space:]]+tail[[:space:]]+may[[:space:]]+finish[[:space:]]+inside[[:space:]]+this[[:space:]]+existing[[:space:]]+team.{0,80}(without[[:space:]]+forming[[:space:]]+a[[:space:]]+new[[:space:]]+singleton|no[[:space:]]+new[[:space:]]+singleton[[:space:]]+is[[:space:]]+formed)'
+  filler_example_pattern='never[[:space:]]+manufacture[[:space:]]+filler'
+  qa_review_example_pattern='qa[[:space:]]+produces[[:space:]]+exactly[[:space:]]+one[[:space:]]+report[[:space:]]+only[[:space:]]+when'
+  security_review_example_pattern='security[[:space:]]+produces[[:space:]]+at[[:space:]]+most[[:space:]]+one[[:space:]]+report[[:space:]]+only[[:space:]]+when'
+  async_example_pattern='true[[:space:]]+async[[:space:]]+requires[[:space:]]+a[[:space:]]+supported[[:space:]]+runtime[[:space:]]+capability[[:space:]]+and[[:space:]]+a[[:space:]]+correlated[[:space:]]+result[[:space:]]+carrying[[:space:]]+the[[:space:]]+original.{0,20}call_id'
+  synchronous_batch_pattern='synchronous[[:space:]]+batches[[:space:]]+stay[[:space:]]+synchronous.{0,160}never[[:space:]]+be[[:space:]]+called[[:space:]]+background[[:space:]]+or[[:space:]]+async'
+  if [[ "$normalized_examples" =~ $direct_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $team_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $tail_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $filler_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $qa_review_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $security_review_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $async_example_pattern ]] && \
+     [[ "$normalized_examples" =~ $synchronous_batch_pattern ]]; then
+    pass "orchestrator examples cover direct zero-subagent work and bounded delegation without a singleton"
+  else
+    fail "orchestrator examples must be direct-first and must not dispatch a singleton"
+    policy_errors=1
+  fi
+  singleton_fixture='newly formed delegated team has 1 active child'
+  filler_fixture='a newly formed delegated team manufactures filler to reach a count'
+  unbounded_review_fixture='qa produces exactly one report only when the task contract declares a risk; security produces a report only when the contract predeclares a changed security surface'
+  unsupported_async_fixture='true async is allowed without a supported runtime capability and without a correlated result carrying the original call_id'
+  if [[ "$singleton_fixture" =~ $team_example_pattern ]] || \
+     [[ "$filler_fixture" =~ $filler_example_pattern ]] || \
+     [[ "$unbounded_review_fixture" =~ $qa_review_example_pattern && "$unbounded_review_fixture" =~ $security_review_example_pattern ]] || \
+     [[ "$unsupported_async_fixture" =~ $async_example_pattern ]]; then
+    fail "orchestrator examples accept singleton, filler, unbounded-review, or unsupported-async fixtures"
+    policy_errors=1
+  else
+    pass "orchestrator examples reject singleton, filler, unbounded-review, and unsupported-async fixtures"
+  fi
 fi
 
 if [[ "$policy_errors" -eq 0 ]]; then
@@ -3089,36 +2770,39 @@ done
 # roadmap state machine and all release gates, not merely source-test guidance.
 for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'roadmap execution continues autonomously.*every scoped roadmap task.*evidence-backed completion' \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'scoped roadmap execution continues autonomously.*every declared task.*evidence-backed completion' \
     'autonomous evidence-backed roadmap completion'
-  require_contract_pattern "$policy_source" "$policy_label" \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
     'never report completion from source tests alone' \
     'source-tests-alone completion prohibition'
-  require_contract_pattern "$policy_source" "$policy_label" \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
     'runtime-impacting changes require.*deployment owner.*deployment (owner|wave)' \
     'deployment owner/wave requirement'
-  require_contract_pattern "$policy_source" "$policy_label" \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
     'rebuild.*restart.*current merged source.*health-check.*actual routes' \
     'current-source deployment and route health-check loop'
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'visual/ui gates and full acceptance are mandatory' \
-    'visual/UI and full-acceptance terminal gates'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'required.*separation, deployment, and recovery gates remain mandatory.*applicable full acceptance remains required' \
+    'required separation/deployment/recovery and full-acceptance gates'
   require_contract_pattern "$policy_source" "$policy_label" \
     'roadmap markers.*TodoWrite' \
     'roadmap-marker/TodoWrite reconciliation'
 done
-require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
-  'exactly one QA report and at most one security report' \
-  'single QA/optional-security implementation boundary'
-require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+require_normalized_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'qa produces exactly one report only when the task contract declares a risk or acceptance need' \
+  'exactly-one QA reporting boundary'
+require_normalized_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'security produces at most one report only when the contract predeclares a changed security surface' \
+  'at-most-one security reporting boundary'
+require_normalized_contract_pattern "$ORCHESTRATOR" "orchestrator" \
   'writer remediation receives only its named minimum targeted regression.*proceeds directly to deploy and acceptance' \
   'targeted-only writer recheck'
-require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
-  'STOP.*CANCELLED.*only when explicitly requested.*remediation request' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'stop.*cancelled.*only when explicitly requested.*remediation request' \
   'explicit-request STOP/CANCELLED boundary'
-require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
-  'named.*authorized.*deployment owner.*writer.*Docker/Compose' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'named.*authorized.*deployment owner.*writer.*docker/compose' \
   'named authorized writer Docker/Compose deployment owner'
 
 # Open-roadmap turn boundary: open roadmap/TodoWrite work requires immediate
@@ -3128,14 +2812,14 @@ OPEN_ROADMAP_TURN_SOURCES=(
 )
 for policy_source in "${OPEN_ROADMAP_TURN_SOURCES[@]}"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'roadmap task or.*TodoWrite.*item remains open.*must not emit a normal final/progress response.*end a turn as a status update.*require a user reprompt.*immediately dispatch the next declared phase' \
-    'open-roadmap immediate-dispatch turn rule'
-  require_contract_pattern "$policy_source" "$policy_label" \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'scoped roadmap task or.*todowrite.*item remains open.*must not emit a normal final/progress response.*end a turn as a status update.*require a user reprompt.*immediately continue the next dependency-ready step' \
+    'open-roadmap immediate direct-or-team continuation rule'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
     'token/turn pressure.*partial agent completion.*unverified source changes are never terminal reasons' \
     'non-terminal pressure/partial/unverified conditions'
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'Only .*PASS.*ESCALATE_USER.*explicit user-requested.*STOP.*explicit user-requested.*CANCELLED.*end a turn' \
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'only .*pass.*escalate_user.*explicit user-requested.*stop.*explicit user-requested.*cancelled.*end a turn' \
     'exclusive terminal response states'
 done
 
@@ -3160,15 +2844,26 @@ require_contract_pattern "$SECURITY_POLICY" "security policy" 'history scan may 
 # sources changed by this contract. Other policy copies are outside this task.
 for policy_source in "$ORCHESTRATOR"; do
   policy_label="${policy_source#"$REPO_ROOT"/}"
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'exactly one QA report and at most one security report' \
-    'one-QA/optional-security implementation boundary'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'qa produces exactly one report only when the task contract declares a risk or acceptance need' \
+    'exactly-one QA reporting boundary'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    'security produces at most one report only when the contract predeclares a changed security surface' \
+    'at-most-one security reporting boundary'
   require_contract_pattern "$policy_source" "$policy_label" \
     'Security.*only.*predeclare.*changed security surface.*ordinary harness or test changes' \
     'predeclared changed-security-surface dispatch gate'
-  require_contract_pattern "$policy_source" "$policy_label" \
-    'Reviewers cannot add acceptance criteria or expand scope|Neither reviewer can add acceptance criteria, expand scope' \
+  REVIEWER_SCOPE_PATTERN='reviewers cannot add acceptance criteria.{0,80}expand scope'
+  require_normalized_contract_pattern "$policy_source" "$policy_label" \
+    "$REVIEWER_SCOPE_PATTERN" \
     'immutable reviewer scope and acceptance criteria'
+  if [[ 'reviewers cannot add acceptance criteria' =~ $REVIEWER_SCOPE_PATTERN ]] || \
+     [[ 'reviewers cannot expand scope' =~ $REVIEWER_SCOPE_PATTERN ]]; then
+    fail "$policy_label accepts a reviewer-scope prohibition loss fixture"
+    causal_policy_errors=1
+  else
+    pass "$policy_label rejects reviewer-scope prohibition loss fixtures"
+  fi
   require_contract_pattern "$policy_source" "$policy_label" \
     'BLOCKING.*user-declared acceptance criterion.*immediately exploitable changed code' \
     'strict BLOCKING classification'
@@ -3302,17 +2997,17 @@ done
 
 # Scenario regressions: ordinary in-scope failures must remain actionable, while
 # the five real decision/access boundaries remain the only normal escalation.
-require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
-  'compile, test, package, scanner, configuration, or runtime defect.*concrete reproducible root cause' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'compile, test, package, scanner, configuration, or runtime defect.{0,160}concrete reproducible root cause' \
   'recognizes scanner rejection as autonomous remediation work'
-require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
-  'source fix.*targeted test.*deploy.*acceptance' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'source fix.{0,160}targeted test.{0,160}deploy.{0,160}acceptance' \
   'continues the planned feature pipeline after a source fix'
-require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
-  'After a writer remediates a reviewer-reported BLOCKING root cause.*minimum targeted regression' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'after a writer remediates a reviewer-reported blocking root cause.{0,160}minimum targeted regression' \
   'runs only the proving regression'
-require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
-  'never rerun QA or security.*minimum targeted regression.*proceed directly.*deploy and acceptance' \
+require_normalized_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'never rerun qa or security.{0,160}minimum targeted regression.{0,160}proceed(s)?.{0,160}directly.{0,160}deploy and acceptance' \
   'prevents reviewer reruns and resumes deploy/acceptance'
 require_contract_pattern "$ORCHESTRATOR" "scenario: unavailable external credential" \
   'required external credential or access.*attempted configured path' \
