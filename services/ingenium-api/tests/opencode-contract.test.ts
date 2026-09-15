@@ -3,7 +3,7 @@
  *
  * These are contract-level tests that verify the proxy route handlers at
  * `routes/opencode.ts` correctly forward fields, construct bodies, and handle
- * edge cases according to the OpenCode v1.18.3 contract. The opencode client
+ * edge cases according to the OpenCode v1.18.9 contract. The opencode client
  * is mocked so no real OpenCode server is needed.
  *
  * Each test maps to a verified defect from the audit:
@@ -20,7 +20,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 
 /* ── Module-level mock of opencode-client ────────────────────────────────── */
 
@@ -57,6 +56,7 @@ vi.mock("../lib/opencode-client.js", () => ({
 
 // eslint-disable-next-line import/first
 import { opencodeRouter } from "../lib/routes/opencode.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 /* ── Types under test (re-imported for verification) ──────────────────────── */
 
@@ -95,18 +95,12 @@ afterEach(() => {
 beforeAll(async () => {
   const app = buildApp();
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const addr = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
   if (server) {
-    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await closeHttpServer(server);
   }
   // Restore password
   if (SAVED_PASSWORD) {
@@ -582,7 +576,7 @@ describe("Defect 4: Permissions response shape", () => {
     // the frontend cannot display which session is requesting permission.
     //
     // To fix: Add `sessionID: string` to PermissionRequest interface and
-    // verify the OpenCode v1.18.3 /permission endpoint returns it.
+    // verify the OpenCode v1.18.9 /permission endpoint returns it.
     const perm: PermissionRequest = {
       id: "test",
       permission: "read",

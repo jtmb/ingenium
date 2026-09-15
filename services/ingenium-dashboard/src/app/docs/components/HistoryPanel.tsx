@@ -3,27 +3,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import type { DocVersion } from "@/lib/docs-types";
+import { formatRelativeTime } from "@/lib/time";
 
 type HistoryPanelProps = {
   pageId: number;
   /** Called with versionId after a successful restore API call */
   onRestore: (versionId: number) => void;
 };
-
-/** Relative timestamp formatting for version list display. */
-function timeAgo(dateStr: string): string {
-  const now = Date.now();
-  const then = new Date(dateStr).getTime();
-  const diffSec = Math.floor((now - then) / 1000);
-  if (diffSec < 60) return "just now";
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return `${diffHr}h ago`;
-  const diffDay = Math.floor(diffHr / 24);
-  if (diffDay < 7) return `${diffDay}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
 
 /**
  * HistoryPanel — version-by-version history with expand-to-preview and
@@ -126,7 +112,7 @@ export default function HistoryPanel({ pageId, onRestore }: HistoryPanelProps) {
                           v{v.revision}
                         </span>
                         <span className="text-xs text-[var(--color-text-muted)]">
-                          {timeAgo(v.createdAt)}
+                          {formatRelativeTime(v.createdAt)}
                         </span>
                         {v.revision === versions.length && (
                           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300">

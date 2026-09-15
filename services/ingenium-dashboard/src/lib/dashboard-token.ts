@@ -88,7 +88,7 @@ type DashboardTokenEnvironment = Readonly<Record<string, string | undefined>>;
 export function loadDashboardApiToken(
   environment: DashboardTokenEnvironment = process.env,
 ): string | null {
-  const configuredFile = environment.INGENIUM_API_TOKEN_FILE;
+  const configuredFile = environment.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
   if (configuredFile !== undefined) {
     try {
       return readDashboardApiTokenFile(configuredFile.trim());

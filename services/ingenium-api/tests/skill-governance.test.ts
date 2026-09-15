@@ -5,15 +5,16 @@
  * submit/approve/reject/rollback), lock gating, camelCase DTOs, cross-project
  * isolation, stale conflict detection, and no hard delete.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Buffer } from "node:buffer";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
-import { projects, skills as skillsModule, maintenanceLocks } from "ingenium-core";
+import { getDb, maintenanceLocks, observations, projects, skills as skillsModule } from "ingenium-core";
 import { skillsRouter } from "../lib/routes/skills.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let tempDir: string;
 let projectId: string;
@@ -45,17 +46,11 @@ beforeAll(async () => {
   const app = buildApp();
   server = createServer(app);
 
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const addr = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -593,11 +588,17 @@ describe("POST /proposals (create)", () => {
         body: JSON.stringify({
           proposalType: "update",
           targetName: "update-target",
-          proposedState: { description: "updated desc", content: "# updated" },
+          proposedState: {
+            description: "updated desc",
+            content: "# updated",
+            fileTreePatch: { "references/new.md": "# New" },
+          },
         }),
       });
       expect(res.status).toBe(201);
-      assertNoSnakeCase((await res.json()).data);
+      const body = await res.json();
+      expect(body.data.proposedState.fileTreePatch).toEqual({ "references/new.md": "# New" });
+      assertNoSnakeCase(body.data);
     } finally {
       await releaseLock(token!);
     }
@@ -724,44 +725,25 @@ describe("POST /proposals (create)", () => {
   });
 });
 
-describe("GET /proposals and GET /proposals/:proposalId", () => {
-  it("lists proposals", async () => {
-    const res = await fetch(skillsPath(`/proposals?project=${projectName}`));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(Array.isArray(body.data)).toBe(true);
-    assertNoSnakeCase(body);
-  });
-
-  it("filters proposals by status", async () => {
-    const token = await acquireLock();
-    expect(token).toBeTruthy();
+describe("GET /proposals retirement and GET /proposals/:proposalId", () => {
+  it("returns the fixed retirement response without preparing a full proposal query", async () => {
+    const prepare = vi.spyOn(getDb(process.env.INGENIUM_CORE_DB_PATH), "prepare");
     try {
-      await fetch(skillsPath(`/proposals?project=${projectName}`), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
-        body: JSON.stringify({
-          proposalType: "create", targetName: "filter-test",
-          proposedState: { description: "x", content: "# x" },
-        }),
+      const res = await fetch(skillsPath(`/proposals?project=${projectName}&status=invalid`));
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({
+        error: {
+          code: "SKILL_PROPOSAL_LIST_RETIRED",
+          message: "Use /api/v1/skills/proposals/page and /api/v1/skills/proposals/counts instead.",
+        },
       });
-
-      const resDraft = await fetch(skillsPath(`/proposals?project=${projectName}&status=draft`));
-      expect(resDraft.status).toBe(200);
-      for (const p of (await resDraft.json()).data) {
-        expect(p.status).toBe("draft");
-      }
-
-      const resApplied = await fetch(skillsPath(`/proposals?project=${projectName}&status=applied`));
-      expect(resApplied.status).toBe(200);
+      expect(prepare).not.toHaveBeenCalled();
+      expect(prepare.mock.calls.some(([sql]) => (
+        typeof sql === "string" && /\bSELECT\s+\*\s+FROM\s+skill_proposals\b/i.test(sql)
+      ))).toBe(false);
     } finally {
-      await releaseLock(token!);
+      prepare.mockRestore();
     }
-  });
-
-  it("returns 422 for invalid status filter", async () => {
-    const res = await fetch(skillsPath(`/proposals?project=${projectName}&status=invalid`));
-    expect(res.status).toBe(422);
   });
 
   it("gets a single proposal by ID", async () => {
@@ -788,9 +770,169 @@ describe("GET /proposals and GET /proposals/:proposalId", () => {
     }
   });
 
+  it("rejects foreign observation IDs and never enriches them", async () => {
+    const localObservation = observations.storeObservation(projectId, "preference", "Local proposal observation");
+    const foreignObservation = observations.storeObservation(secondProjectId, "preference", "Foreign proposal observation");
+    const token = await acquireLock();
+    expect(token).toBeTruthy();
+    try {
+      const foreignCreate = await fetch(skillsPath(`/proposals?project=${projectName}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
+        body: JSON.stringify({
+          proposalType: "create",
+          targetName: "foreign-observation-proposal",
+          proposedState: { description: "x", content: "# x" },
+          observationIds: [foreignObservation.id],
+        }),
+      });
+      expect(foreignCreate.status).toBe(400);
+      expect((await foreignCreate.json()).error.code).toBe("INVALID_OBSERVATION_IDS");
+
+      const localCreate = await fetch(skillsPath(`/proposals?project=${projectName}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
+        body: JSON.stringify({
+          proposalType: "create",
+          targetName: "project-scoped-observation-proposal",
+          proposedState: { description: "x", content: "# x" },
+          observationIds: [localObservation.id],
+        }),
+      });
+      expect(localCreate.status).toBe(201);
+      const created = (await localCreate.json()).data;
+      getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+        "UPDATE skill_proposals SET observation_ids=? WHERE id=?",
+      ).run(JSON.stringify([localObservation.id, foreignObservation.id]), created.id);
+
+      const enriched = await fetch(skillsPath(`/proposals/${created.id}?project=${projectName}`));
+      expect(enriched.status).toBe(200);
+      const body = await enriched.json();
+      expect(body.data.observationIds).toEqual([localObservation.id, foreignObservation.id]);
+      expect(body.data.observations).toEqual([
+        expect.objectContaining({ id: localObservation.id, contentPreview: "Local proposal observation" }),
+      ]);
+    } finally {
+      await releaseLock(token!);
+    }
+  });
+
   it("returns 404 for nonexistent proposal", async () => {
     const res = await fetch(skillsPath(`/proposals/00000000-0000-0000-0000-000000000000?project=${projectName}`));
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /proposals/page and GET /proposals/counts", () => {
+  it("returns bounded summaries, exact counts, and project-scoped cursors", async () => {
+    const pageProject = projects.createProject(`proposal-page-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const foreignProject = projects.createProject(`proposal-page-foreign-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    const timestamp = "2026-08-10T12:00:00.000Z";
+    const oversizedLegacyText = "x".repeat(8 * 1024);
+    const oversizedLegacyName = "🧪".repeat(512);
+    const expectedSummaryName = [...oversizedLegacyName].slice(0, 64).join("");
+    const oversizedLegacyPayload = JSON.stringify({ content: oversizedLegacyText });
+    const oversizedLegacyEvidence = JSON.stringify([{ detail: oversizedLegacyText }]);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const insert = db.prepare(`
+      INSERT INTO skill_proposals (
+        id,project_id,status,proposal_type,target_name,source_name,proposed_state,
+        evidence_json,observation_ids,reviewer,review_reason,created_at,updated_at
+      ) VALUES (?,?,?,'create',?,?,?,?,'[1]',?,?,?,?)
+    `);
+    db.transaction(() => {
+      for (let index = 0; index < 120; index++) {
+        const id = `api-page-${String(index).padStart(3, "0")}`;
+        insert.run(id, pageProject.id, "stale", oversizedLegacyName, oversizedLegacyName, oversizedLegacyPayload, oversizedLegacyEvidence, oversizedLegacyText, oversizedLegacyText, timestamp, timestamp);
+      }
+      insert.run("api-page-draft", pageProject.id, "draft", oversizedLegacyName, oversizedLegacyName, oversizedLegacyPayload, oversizedLegacyEvidence, oversizedLegacyText, oversizedLegacyText, timestamp, timestamp);
+      insert.run("api-page-pending", pageProject.id, "pending", oversizedLegacyName, oversizedLegacyName, oversizedLegacyPayload, oversizedLegacyEvidence, oversizedLegacyText, oversizedLegacyText, timestamp, timestamp);
+      insert.run("api-page-foreign", foreignProject.id, "stale", oversizedLegacyName, oversizedLegacyName, oversizedLegacyPayload, oversizedLegacyEvidence, oversizedLegacyText, oversizedLegacyText, timestamp, timestamp);
+    })();
+
+    const countsResponse = await fetch(skillsPath(`/proposals/counts?project=${pageProject.name}`));
+    expect(countsResponse.status).toBe(200);
+    expect(await countsResponse.json()).toEqual({
+      data: {
+        open: 2,
+        history: 120,
+        byStatus: { draft: 1, pending: 1, stale: 120, rejected: 0, applied: 0, rolledBack: 0 },
+      },
+    });
+
+    const openResponse = await fetch(skillsPath(`/proposals/page?project=${pageProject.name}&view=open&limit=100`));
+    expect(openResponse.status).toBe(200);
+    expect((await openResponse.json()).data.map((proposal: { status: string }) => proposal.status).sort())
+      .toEqual(["draft", "pending"]);
+
+    const firstResponse = await fetch(skillsPath(`/proposals/page?project=${pageProject.name}&view=history&limit=100`));
+    expect(firstResponse.status).toBe(200);
+    const first = await firstResponse.json();
+    expect(first.data).toHaveLength(100);
+    expect(first.pagination).toMatchObject({ hasMore: true });
+    expect(typeof first.pagination.nextCursor).toBe("string");
+    for (const proposal of first.data) {
+      assertNoSnakeCase(proposal);
+      expect(Object.keys(proposal).sort()).toEqual([
+        "createdAt",
+        "id",
+        "noveltyScore",
+        "proposalType",
+        "qualityScore",
+        "sourceName",
+        "status",
+        "targetName",
+      ]);
+      expect(proposal.targetName).toBe(expectedSummaryName);
+      expect(proposal.sourceName).toBe(expectedSummaryName);
+      expect(proposal).not.toHaveProperty("proposedState");
+      expect(proposal).not.toHaveProperty("evidence");
+      expect(proposal).not.toHaveProperty("observationIds");
+      expect(proposal).not.toHaveProperty("reviewer");
+      expect(proposal).not.toHaveProperty("reviewReason");
+    }
+    expect(Buffer.byteLength(JSON.stringify(first), "utf8")).toBeLessThanOrEqual(100 * 1024);
+
+    const detailResponse = await fetch(skillsPath(`/proposals/api-page-119?project=${pageProject.name}`));
+    expect(detailResponse.status).toBe(200);
+    expect((await detailResponse.json()).data.proposedState.content).toBe(oversizedLegacyText);
+
+    const secondResponse = await fetch(skillsPath(
+      `/proposals/page?project=${pageProject.name}&view=history&limit=100&cursor=${encodeURIComponent(first.pagination.nextCursor)}`,
+    ));
+    expect(secondResponse.status).toBe(200);
+    const second = await secondResponse.json();
+    expect(second.data).toHaveLength(20);
+    expect(second.pagination).toEqual({ hasMore: false, nextCursor: null });
+    expect(new Set([...first.data, ...second.data].map((proposal: { id: string }) => proposal.id)).size).toBe(120);
+
+    const foreignResponse = await fetch(skillsPath(
+      `/proposals/page?project=${foreignProject.name}&view=history&cursor=${encodeURIComponent(first.pagination.nextCursor)}`,
+    ));
+    expect(foreignResponse.status).toBe(422);
+    expect((await foreignResponse.json()).error.code).toBe("INVALID_PROPOSAL_PAGE_CURSOR");
+
+    const missingAnchor = Buffer.from(JSON.stringify({
+      v: 1,
+      createdAt: timestamp,
+      id: "api-page-missing-anchor",
+    })).toString("base64url");
+    const missingAnchorResponse = await fetch(skillsPath(
+      `/proposals/page?project=${pageProject.name}&view=history&limit=1&cursor=${encodeURIComponent(missingAnchor)}`,
+    ));
+    expect(missingAnchorResponse.status).toBe(200);
+
+    for (const query of [
+      `project=${pageProject.name}`,
+      `project=${pageProject.name}&view=history&limit=0`,
+      `project=${pageProject.name}&view=history&limit=101`,
+      `project=${pageProject.name}&view=history&limit=1.5`,
+      `project=${pageProject.name}&view=history&cursor=%25%25`,
+      `project=${pageProject.name}&view=history&cursor=${"a".repeat(513)}`,
+    ]) {
+      const response = await fetch(skillsPath(`/proposals/page?${query}`));
+      expect(response.status).toBe(422);
+    }
   });
 });
 
@@ -1190,7 +1332,7 @@ describe("Cross-project isolation", () => {
     const token = await acquireLock();
     expect(token).toBeTruthy();
     try {
-      await fetch(skillsPath(`/proposals?project=${projectName}`), {
+      const createResponse = await fetch(skillsPath(`/proposals?project=${projectName}`), {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
         body: JSON.stringify({
@@ -1199,9 +1341,64 @@ describe("Cross-project isolation", () => {
         }),
       });
 
-      const res = await fetch(skillsPath(`/proposals?project=${secondProjectName}`));
-      const body = await res.json();
-      expect(body.data.some((p: any) => p.targetName === "only-in-a")).toBe(false);
+      const created = (await createResponse.json()).data;
+      const res = await fetch(skillsPath(`/proposals/${created.id}?project=${secondProjectName}`));
+      expect(res.status).toBe(404);
+    } finally {
+      await releaseLock(token!);
+    }
+  });
+
+  it("derives scoped default candidate keys without exposing another project's proposal", async () => {
+    const token = await acquireLock();
+    expect(token).toBeTruthy();
+    try {
+      const firstResponse = await fetch(skillsPath(`/proposals?project=${projectName}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
+        body: JSON.stringify({
+          proposalType: "create",
+          targetName: "scoped-default-candidate",
+          proposedState: { description: "project A", content: "# project A" },
+          candidateGroupKey: "caller-key-one",
+        }),
+      });
+      const repeatedResponse = await fetch(skillsPath(`/proposals?project=${projectName}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-ingenium-lock-token": token! },
+        body: JSON.stringify({
+          proposalType: "create",
+          targetName: "scoped-default-candidate",
+          proposedState: { content: "# project A", description: "project A" },
+          candidateGroupKey: "caller-key-two",
+        }),
+      });
+      const secondResponse = await fetch(skillsPath(`/proposals?project=${secondProjectName}`), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proposalType: "create",
+          targetName: "scoped-default-candidate",
+          proposedState: { description: "project B", content: "# project B" },
+        }),
+      });
+      expect(firstResponse.status).toBe(201);
+      expect(repeatedResponse.status).toBe(201);
+      expect(secondResponse.status).toBe(201);
+      const first = await firstResponse.json();
+      const repeated = await repeatedResponse.json();
+      const second = await secondResponse.json();
+      expect(first.data.projectId).toBe(projectId);
+      expect(repeated.data.id).toBe(first.data.id);
+      expect(second.data.projectId).toBe(secondProjectId);
+      expect(first.data.candidateGroupKey).not.toBe(second.data.candidateGroupKey);
+
+      const firstDetail = await fetch(skillsPath(`/proposals/${first.data.id}?project=${projectName}`));
+      const foreignDetail = await fetch(skillsPath(`/proposals/${first.data.id}?project=${secondProjectName}`));
+      const secondDetail = await fetch(skillsPath(`/proposals/${second.data.id}?project=${secondProjectName}`));
+      expect((await firstDetail.json()).data.projectId).toBe(projectId);
+      expect(foreignDetail.status).toBe(404);
+      expect((await secondDetail.json()).data.projectId).toBe(secondProjectId);
     } finally {
       await releaseLock(token!);
     }
@@ -1280,6 +1477,11 @@ describe("Wire-format contract enforcement", () => {
   });
 
   it("proposal response uses camelCase only, JSON fields parsed", async () => {
+    const observationIds = [
+      observations.storeObservation(projectId, "preference", "Camel proposal observation one").id,
+      observations.storeObservation(projectId, "preference", "Camel proposal observation two").id,
+      observations.storeObservation(projectId, "preference", "Camel proposal observation three").id,
+    ];
     const token = await acquireLock();
     try {
       const cr = await fetch(skillsPath(`/proposals?project=${projectName}`), {
@@ -1290,7 +1492,7 @@ describe("Wire-format contract enforcement", () => {
           targetName: "camel-prop",
           proposedState: { description: "test", content: "# test" },
           evidence: [{ type: "observation" }],
-          observationIds: [1, 2, 3],
+          observationIds,
           qualityScore: 0.75,
         }),
       });

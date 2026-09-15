@@ -5,17 +5,11 @@ import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import { chunkMarkdown } from "../lib/tools/rag-chunker.js";
-import type { Chunk } from "../lib/tools/rag-chunker.js";
 import {
-  createSource,
-  ingestChunks,
+  ingestCanonicalSource,
+  replaceSourceContent,
   searchChunks,
   deleteSource,
-  ingestSource,
-  generateEmbedding,
-  cosineSimilarity,
-  hybridSearch,
-  updateChunkEmbedding,
 } from "../lib/tools/rag.js";
 
 let tempDir: string;
@@ -63,40 +57,25 @@ afterAll(() => {
 });
 
 // ============================================================
-// Source CRUD
+// Canonical source ingestion
 // ============================================================
 
-describe("createSource", () => {
-  it("creates a source record", () => {
-    const source = createSource(projectId, "test-doc");
+describe("ingestCanonicalSource", () => {
+  it("creates a source record and searchable chunks", () => {
+    const source = ingestCanonicalSource(projectId, "test-doc", testMarkdown, {
+      sourcePath: "test-doc.md",
+      metadata: { author: "test" },
+    });
     expect(source).toBeDefined();
     expect(source.id).toBeTruthy();
-    expect(source.name).toBe("test-doc");
+    expect(source.title).toBe("test-doc");
     expect(source.project_id).toBe(projectId);
-    expect(source.chunk_count).toBe(0);
-  });
-
-  it("returns a source with custom metadata", () => {
-    const source = createSource(projectId, "meta-doc", '{"author": "test"}');
-    expect(source.metadata).toBe('{"author": "test"}');
-  });
-});
-
-// ============================================================
-// Chunk Ingestion
-// ============================================================
-
-describe("ingestChunks", () => {
-  it("stores chunks and updates chunk count", () => {
-    const source = createSource(projectId, "ingest-test");
-    const count = ingestChunks(source.id, testChunks);
-    expect(count).toBe(testChunks.length);
-
-    const updated = getDbValue<{ chunk_count: number }>(
-      "SELECT chunk_count FROM rag_sources WHERE id = ?",
-      source.id,
-    );
-    expect(updated.chunk_count).toBe(testChunks.length);
+    expect(source.chunk_count).toBe(testChunks.length);
+    expect(source.metadata).toBe(JSON.stringify({ author: "test" }));
+    expect(searchChunks(projectId, "npm install")[0]?.source_id).toBe(source.id);
+    expect(getDbValue<{ count: number }>(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'rag_embeddings'",
+    ).count).toBe(0);
   });
 });
 
@@ -106,8 +85,7 @@ describe("ingestChunks", () => {
 
 describe("searchChunks", () => {
   beforeAll(() => {
-    const src = createSource(projectId, "src-search");
-    ingestChunks(src.id, testChunks);
+    ingestCanonicalSource(projectId, "src-search", testMarkdown, { sourcePath: "src-search.md" });
   });
 
   it("returns BM25-ranked results for matching query", () => {
@@ -152,6 +130,37 @@ describe("searchChunks", () => {
       expect(typeof r.snippet).toBe("string");
     }
   });
+
+  it("uses a total order for ranking ties, limits, and project isolation", () => {
+    const first = ingestCanonicalSource(projectId, "Total order first", "totalorderneedle.", {
+      sourcePath: "total-order-first.md",
+    });
+    const second = ingestCanonicalSource(projectId, "Total order second", "totalorderneedle!", {
+      sourcePath: "total-order-second.md",
+    });
+    const isolatedProject = createProject("test-rag-total-order-isolated");
+    const isolated = ingestCanonicalSource(isolatedProject.id, "Isolated order", "totalorderneedle?", {
+      sourcePath: "total-order-isolated.md",
+    });
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH!);
+    db.prepare("UPDATE rag_sources SET updated_at = ? WHERE id IN (?, ?)")
+      .run("2026-07-31T00:00:00.000Z", first.id, second.id);
+
+    const expectedIds = (db.prepare(
+      `SELECT chunk.id FROM rag_chunks chunk
+       JOIN rag_sources source ON source.id = chunk.source_id
+       WHERE source.id IN (?, ?)
+       ORDER BY source.id ASC, chunk.chunk_index ASC, chunk.id ASC`,
+    ).all(first.id, second.id) as Array<{ id: string }>).map((chunk) => chunk.id);
+    const firstSearch = searchChunks(projectId, "totalorderneedle", 10, false);
+
+    expect(firstSearch.map((result) => result.id)).toEqual(expectedIds);
+    expect(new Set(firstSearch.map((result) => result.rank)).size).toBe(1);
+    expect(searchChunks(projectId, "totalorderneedle", 10, false).map((result) => result.id)).toEqual(expectedIds);
+    expect(searchChunks(projectId, "totalorderneedle", 1, false).map((result) => result.id)).toEqual(expectedIds.slice(0, 1));
+    expect(firstSearch.map((result) => result.id)).not.toContain(isolated.id);
+    expect(searchChunks(isolatedProject.id, "totalorderneedle", 10, false).map((result) => result.source_id)).toEqual([isolated.id]);
+  });
 });
 
 // ============================================================
@@ -160,8 +169,7 @@ describe("searchChunks", () => {
 
 describe("deleteSource", () => {
   it("cascades to delete chunks", () => {
-    const source = createSource(projectId, "delete-test");
-    ingestChunks(source.id, testChunks);
+    const source = ingestCanonicalSource(projectId, "delete-test", testMarkdown, { sourcePath: "delete-test.md" });
 
     const beforeChunks = getDbValue<{ count: number }>(
       "SELECT count(*) as count FROM rag_chunks WHERE source_id = ?",
@@ -186,148 +194,21 @@ describe("deleteSource", () => {
 });
 
 // ============================================================
-// Ingest Source (pipeline)
+// Canonical replacement
 // ============================================================
 
-describe("ingestSource", () => {
-  it("creates source and ingests chunks in one call", () => {
-    const source = ingestSource(projectId, "pipeline-test", testMarkdown);
-    expect(source.chunk_count).toBe(testChunks.length);
+describe("replaceSourceContent", () => {
+  it("replaces indexed chunks without changing the canonical source", () => {
+    const source = ingestCanonicalSource(projectId, "replacement", "The violet lighthouse is indexed.", {
+      sourcePath: "replacement.md",
+    });
 
-    const results = searchChunks(projectId, "robust RAG implementation");
-    expect(results.length).toBeGreaterThan(0);
-  });
-});
-
-// ============================================================
-// Embedding Generation (no DB needed)
-// ============================================================
-
-describe("generateEmbedding", () => {
-  it("produces a 384-dimensional vector", () => {
-    const vec = generateEmbedding("test text");
-    expect(vec.length).toBe(384);
-  });
-
-  it("produces consistent results for the same text", () => {
-    const a = generateEmbedding("hello world");
-    const b = generateEmbedding("hello world");
-    expect(a).toEqual(b);
-  });
-
-  it("produces different vectors for different text", () => {
-    const a = generateEmbedding("hello world");
-    const b = generateEmbedding("goodbye world");
-    const isDifferent = a.some((v, i) => v !== b[i]);
-    expect(isDifferent).toBe(true);
-  });
-
-  it("produces a unit vector (normalized)", () => {
-    const vec = generateEmbedding("test");
-    let sumSq = 0;
-    for (const v of vec) sumSq += v * v;
-    expect(Math.abs(sumSq - 1)).toBeLessThan(0.01);
-  });
-
-  it("handles empty text", () => {
-    const vec = generateEmbedding("");
-    expect(vec.length).toBe(384);
-    vec.forEach((v) => expect(Number.isFinite(v)).toBe(true));
-  });
-});
-
-// ============================================================
-// Cosine Similarity (no DB needed)
-// ============================================================
-
-describe("cosineSimilarity", () => {
-  it("returns 1.0 for identical vectors", () => {
-    const vec = [1, 0, 0];
-    expect(cosineSimilarity(vec, vec)).toBeCloseTo(1.0, 5);
-  });
-
-  it("returns 0 for orthogonal vectors", () => {
-    const a = [1, 0];
-    const b = [0, 1];
-    expect(cosineSimilarity(a, b)).toBeCloseTo(0, 5);
-  });
-
-  it("returns -1 for opposite vectors", () => {
-    const a = [1, 0];
-    const b = [-1, 0];
-    expect(cosineSimilarity(a, b)).toBeCloseTo(-1, 5);
-  });
-
-  it("handles zero vectors", () => {
-    const a = [0, 0];
-    const b = [1, 0];
-    expect(cosineSimilarity(a, b)).toBe(0);
-  });
-
-  it("handles vectors of different lengths", () => {
-    expect(cosineSimilarity([1, 2], [1, 2, 3])).toBe(0);
-  });
-});
-
-// ============================================================
-// Hybrid Search
-// ============================================================
-
-describe("hybridSearch", () => {
-  it("creates and uses embeddings during ingestion", () => {
-    const src = createSource(projectId, "hybrid-no-emb");
-    ingestChunks(src.id, testChunks);
-
-    const results = hybridSearch(projectId, "database configuration");
-    expect(results.length).toBeGreaterThan(0);
-    expect(results.some((result) => result.vector_score > 0)).toBe(true);
-  });
-
-  it("fuses FTS and vector results", () => {
-    const source = createSource(projectId, "hybrid-fts-vec");
-    // Use unique content so this source's chunks are the only matches
-    const uniqueContent = `# Hybrid Test Doc\n\n## RAG Fusion\n\nRAG fusion XKCD unique content that appears nowhere else in this test suite.`;
-    const uniqueChunks = chunkMarkdown(uniqueContent);
-    ingestChunks(source.id, uniqueChunks);
-
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const chunks = db.prepare(
-      "SELECT chunk_index, content FROM rag_chunks WHERE source_id = ?",
-    ).all(source.id) as Array<{ chunk_index: number; content: string }>;
-
-    for (const c of chunks) {
-      const emb = generateEmbedding(c.content);
-      updateChunkEmbedding(c.chunk_index, emb, source.id);
-    }
-
-    const results = hybridSearch(projectId, "XKCD");
-    expect(results.length).toBeGreaterThan(0);
-
-    const top = results[0]!;
-    expect(top.chunk_id).toBeGreaterThanOrEqual(0);
-    expect(top.combined_score).toBeGreaterThan(0);
-    expect(top.fts_score).toBeGreaterThan(0);
-    // Vector score is clamped to [0, 1]
-    expect(top.vector_score).toBeGreaterThanOrEqual(0);
-    expect(top.rank).toBe(1);
-  });
-
-  it("returns results sorted by combined score descending", () => {
-    const src = createSource(projectId, "hybrid-sorted");
-    // Multi-section content so we get multiple results
-    const multiContent = `# Sorted Doc\n\n## Alpha\n\nAlpha content about API endpoints and references.\n\n## Beta\n\nBeta content also mentions API reference documentation.\n\n## Gamma\n\nGamma content with more API reference details.`;
-    ingestChunks(src.id, chunkMarkdown(multiContent));
-
-    const results = hybridSearch(projectId, "API reference");
-    if (results.length > 1) {
-      for (let i = 1; i < results.length; i++) {
-        expect(results[i]!.combined_score).toBeLessThanOrEqual(results[i - 1]!.combined_score);
-      }
-    }
-  });
-
-  it("returns empty for empty query", () => {
-    const results = hybridSearch(projectId, "");
-    expect(results).toEqual([]);
+    expect(replaceSourceContent(source.id, "The amber beacon replaced the lighthouse.")).toBeGreaterThan(0);
+    expect(searchChunks(projectId, "violet lighthouse")).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ source_id: source.id })]),
+    );
+    expect(searchChunks(projectId, "amber beacon")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ source_id: source.id })]),
+    );
   });
 });

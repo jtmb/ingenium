@@ -81,5 +81,4 @@ Every change MUST be logged with Before and After hashes. Also log via MCP tools
 
 - **`@development-conventions`** — Python/Next.js/API/README conventions for skills targeting those domains
 - **`@devops-conventions`** — Docker/K8s/CLI conventions for skills targeting those domains
-- **`@local-models`** — Command safety rules for running skill validation tests
 - **`@documentation`** — Documentation workspace and audit conventions

@@ -90,7 +90,7 @@ console.log(JSON.stringify(result));
 
 | Date | Task | What Broke | What Worked | Updated By |
 |------|------|------------|-------------|------------|
-| YYYY-MM-DD | &lt;task description&gt; | &lt;error&gt; | &lt;resolution&gt; | browser-agent |
+| YYYY-MM-DD | &lt;task description&gt; | &lt;error&gt; | &lt;resolution&gt; | automation |
 ```
 
 ### Naming Convention

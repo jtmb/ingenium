@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { getTestRunDashboardWorkspace, readTestRunManifest, TEST_RUN_MANIFEST_ENV } from "../test-run-context";
 
 /**
  * Route inventory for the production dashboard smoke suite.
@@ -14,7 +15,8 @@ function findRepositoryRoot(): string {
   let candidate = resolve(process.cwd());
   while (true) {
     if (
-      existsSync(join(candidate, "AGENTS.md"))
+      existsSync(join(candidate, "package.json"))
+      && existsSync(join(candidate, "opencode.json"))
       && existsSync(join(candidate, "services", "ingenium-dashboard"))
     ) {
       return candidate;
@@ -99,6 +101,36 @@ interface RouteManifestEntry {
 export const CANONICAL_SETTINGS_DEEP_LINKS = [
   { id: "general", label: "General", panelTestId: "settings-panel-general" },
   {
+    id: "account",
+    label: "Account",
+    panelTestId: "settings-panel-account",
+    routeLink: { testId: "settings-route-link-account", destination: "/account" },
+  },
+  {
+    id: "security",
+    label: "Security",
+    panelTestId: "settings-panel-security",
+    routeLink: { testId: "settings-route-link-security", destination: "/account#security" },
+  },
+  {
+    id: "sessions",
+    label: "Sessions",
+    panelTestId: "settings-panel-sessions",
+    routeLink: { testId: "settings-route-link-sessions", destination: "/account#sessions" },
+  },
+  {
+    id: "api-tokens",
+    label: "API tokens",
+    panelTestId: "settings-panel-api-tokens",
+    routeLink: { testId: "settings-route-link-api-tokens", destination: "/account#api-tokens" },
+  },
+  {
+    id: "organizations",
+    label: "Organizations",
+    panelTestId: "settings-panel-organizations",
+    routeLink: { testId: "settings-route-link-organizations", destination: "/organizations" },
+  },
+  {
     id: "projects",
     label: "Projects",
     panelTestId: "settings-panel-projects",
@@ -155,6 +187,7 @@ export const CANONICAL_SETTINGS_DEEP_LINKS = [
     routeLink: { testId: "settings-route-link-personality", destination: "/personality" },
   },
   { id: "providers", label: "Providers", panelTestId: "settings-panel-providers" },
+  { id: "cloudflare", label: "Cloudflare", panelTestId: "settings-panel-cloudflare" },
   {
     id: "logs",
     label: "Logs",
@@ -220,8 +253,8 @@ export function discoverCanonicalNavigationRoutes(): readonly string[] {
 
 /** Return the explicit settings deep-link contract used by the parity suite. */
 export function discoverSettingsDeepLinks(): readonly SettingsDeepLink[] {
-  if (CANONICAL_SETTINGS_DEEP_LINKS.length !== 14) {
-    throw new Error("The settings deep-link inventory must contain exactly 14 canonical IDs");
+  if (CANONICAL_SETTINGS_DEEP_LINKS.length !== 20) {
+    throw new Error("The settings deep-link inventory must contain exactly 20 canonical IDs");
   }
 
   const ids = CANONICAL_SETTINGS_DEEP_LINKS.map(({ id }) => id);
@@ -259,8 +292,8 @@ export function routeWithQuery(path: string, query: Readonly<Record<string, stri
  */
 export function buildPageSpecificQueryVariants(
   data: PageSpecificQueryVariantData,
+  project = "global-default",
 ): readonly QueryVariant[] {
-  const project = "global-default";
   const mailState = { account: data.mailAccount, folder: "INBOX" };
 
   return [
@@ -305,6 +338,11 @@ export function buildPageSpecificQueryVariants(
       query: { page: "opencode", standalone: "1" },
     },
     {
+      name: "standalone VS Code page",
+      path: "/standalone",
+      query: { page: "vscode", standalone: "1" },
+    },
+    {
       name: "standalone chat page",
       path: "/standalone",
       query: { page: "chat", standalone: "1" },
@@ -327,7 +365,7 @@ export function buildPageSpecificQueryVariants(
   ];
 }
 
-export function discoverRouteInventory(): RouteInventory {
+export function discoverRouteInventory(project = "global-default"): RouteInventory {
   const canonicalNavigationRoutes = discoverCanonicalNavigationRoutes();
   const settingsDeepLinks = discoverSettingsDeepLinks();
   const supportedSettingsTabs = settingsDeepLinks.map(({ id }) => id);
@@ -337,7 +375,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `${path} with the active project query`,
       path,
-      query: { project: "global-default" },
+      query: { project },
     });
   }
 
@@ -350,7 +388,7 @@ export function discoverRouteInventory(): RouteInventory {
     queryVariants.push({
       name: `home settings deep link (${tab}) with the active project query`,
       path: "/",
-      query: { project: "global-default", settings: tab },
+      query: { project, settings: tab },
     });
   }
 
@@ -367,7 +405,7 @@ export function discoverRouteInventory(): RouteInventory {
   queryVariants.push({
     name: "settings redirect route with the active project query",
     path: "/settings",
-    query: { project: "global-default" },
+    query: { project },
   });
 
   return {
@@ -408,9 +446,13 @@ function appPathManifestRoutes(manifest: unknown): string[] {
 /** Load and validate the production build's route manifests without writing. */
 export function loadProductionArtifactRoutes(): ProductionArtifactRoutes {
   const configuredDirectory = process.env.INGENIUM_DASHBOARD_ARTIFACT_DIR?.trim();
+  const manifestPath = process.env[TEST_RUN_MANIFEST_ENV];
+  const fixtureDirectory = manifestPath
+    ? join(getTestRunDashboardWorkspace(readTestRunManifest(manifestPath)), ".next")
+    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
   const directory = configuredDirectory
     ? resolve(REPOSITORY_ROOT, configuredDirectory)
-    : join(REPOSITORY_ROOT, "services", "ingenium-dashboard", ".next");
+    : fixtureDirectory;
   const buildId = readText(join(directory, "BUILD_ID")).trim();
   if (!buildId) throw new Error(`Production dashboard artifact has no BUILD_ID: ${directory}`);
 

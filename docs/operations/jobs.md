@@ -8,15 +8,76 @@ description: Job queue and background task monitoring — scheduled and running 
 ## What It Does
 Job queue and background task monitoring page. Displays a list of scheduled and running jobs with their status, progress, and execution history.
 
+## Automation identity and scheduling
+
+Each job belongs to one organization/project and names an effective service
+principal. The principal must be active and hold the project's revisioned
+automation `execute` grant when a run is created and whenever recovery resumes.
+Manual runs record their delegator; trusted events preserve source actor plus
+delivery and attempt provenance.
+
+Cron dispatch uniquely claims the job ID, schedule revision, and UTC minute.
+Repeated scheduler ticks cannot start the same occurrence, and schedule edits
+increment the schedule revision so stale claims are rejected. Cron and event
+dispatch advance durable organization round-robin cursors. The global limit is
+two active runs, with one active run per organization and service principal, so
+one tenant cannot occupy both slots.
+
+Vault item IDs remain metadata-only references. Execution also requires an
+active resource grant for the effective service principal, with the exact grant
+revision captured in run provenance. Raw process details and run logs are
+installation surfaces; organization administrators do not gain access to
+user-private prompts, task content, raw output, or vault plaintext by role alone.
+
 ## How to Use
 1. Navigate to `/jobs` from the dashboard nav bar
-2. Jobs are displayed as a **grid of cards**, each showing the job name, agent badge, description, cron schedule, enable/disable toggle, timeout, and a status dot
+2. Use the **Jobs**, **Event queue**, and **Trusted events** views. The Jobs view displays a **grid of cards**, each showing the job name, agent badge, description, cron schedule, enable/disable toggle, timeout, and a status dot.
 3. Each card has a **▶ Run Now** button and an **enable/disable toggle**
 4. **Click a job card** to open its full **Detail View**
+
+The Event queue and Trusted events views load bounded cursor pages. **Load more** requests the next cursor page; filters run in the browser over the results already loaded and are labeled accordingly. Jobs run history and the Event queue poll for refreshed state while open; Trusted events can be refreshed by returning to the view. Loading, empty, retryable refresh, and fatal error states are announced with accessible status or alert text, and desktop tables become responsive mobile cards.
+
+### Trusted event trigger
+
+Job editing uses an exact Select containing **No event** and the three cataloged trusted events: `context.conversation.archived`, `context.conversation.unarchived`, and `context.checkpoint.restored_as_new`. Existing legacy trigger values are preserved while editing and are not added to the trusted catalog for new selections. **Run Now** always creates a fresh manual run; it is not event replay.
 
 ### Editing a Job
 - From the **Detail View**, click the **Edit** button to open the form overlay
 - Change any field and click **Update Job** to save
+
+### Optional vault item references (VAULT-100)
+
+Jobs can opt in to references for up to 16 active vault item IDs in the same
+project. References are authorization metadata only; they do not retrieve,
+decrypt, unseal, inject, or log a secret. Returned `vault_references` entries
+contain only `item_id`, `status`, `authorized_item_version`, and
+`authorized_at`; `status` is `authorized`, `version_stale`, or `unavailable`,
+and is safe to read while the vault is sealed.
+
+- Omit `vault_item_ids` on create for no references, or on update to preserve
+  existing references.
+- Supply a non-empty list to replace the authorized set. Each ID must be a
+  unique UUID and resolve to an active same-project item.
+- Supply `vault_item_ids: []` to revoke all current references.
+
+Missing, foreign-project, deleted, or otherwise unavailable IDs use the same
+generic `422 VAULT_ITEM_NOT_FOUND` response. Malformed, duplicate, or over-limit
+lists use `422 VALIDATION_ERROR`. Authorization and revocation are recorded in
+an immutable audit trail with actor `authenticated_api`; runners and logs do not
+receive vault values.
+
+The job detail view shows a metadata-only audit list through
+`GET /api/v1/jobs/:id/vault-audit`. It can show `authorized`, `revoked`,
+`secret_read`, and `access_denied` actions with bounded actor category,
+item/run identifier, version when applicable, and timestamp. It never shows
+values or ciphertext.
+
+Reference changes in the existing create/edit form require explicit
+confirmation showing Authorize, Refresh, and Revoke rows. While the vault is
+unsealed, the picker can select active item metadata; while sealed, adding or
+refreshing is disabled but existing references may still be revoked. Updates
+use the job revision CAS; on `JOB_REVISION_CONFLICT`, the current draft remains
+open and the user must explicitly reload before trying again.
 
 ### Creating a Job with the Magic-Wand Button
 When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-generate") can derive job configuration from a free-text description:
@@ -28,10 +89,60 @@ When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-gene
    - **Schedule (cron)** — extracted schedule from the description
    - **Trigger Event** — extracted event trigger (if any)
 
+### Timeout and startup recovery
+
+Job timeouts default to **30 minutes**. `timeout_minutes` must be a safe integer
+from **1 through 1,440 minutes inclusive** when a job is created or updated;
+out-of-range values are rejected rather than silently clamped.
+
+At API startup, interrupted `running` runs with a `manual` or `cron` trigger are
+marked `failed`, given a finish time, and assigned exit code `-1`. This clears
+the stale concurrency guard so the job can be run again. Trusted-event runs are
+not changed by this ordinary-run recovery path.
+
 ## API Endpoints
 - `GET /api/v1/jobs?project=<name>` — list all jobs with status
 - `GET /api/v1/jobs/:id?project=<name>` — get job details and run history
 - `POST /api/v1/jobs/suggest?project=<name>` — derive job config from description
+- `GET /api/v1/jobs/events?project=<name>&limit=&cursor=` — bounded trusted-event metadata
+- `GET /api/v1/jobs/event-deliveries?project=<name>&limit=&cursor=` — bounded delivery metadata
+- `GET /api/v1/jobs/event-deliveries/:deliveryId?project=<name>` — get one delivery
+- `POST /api/v1/jobs/runs/:runId/cancel?project=<name>` — cancel a project-owned run
+- `GET /api/v1/jobs/runs/:runId/logs?project=<name>&after=` — read redacted project-owned logs
+- `GET /api/v1/jobs/:id/vault-audit?project=<name>&limit=&cursor=` — bounded job-scoped vault authorization/runtime audit metadata
+
+## Trusted Events and Delivery (JOB-100/JOB-101)
+
+The dormant v1 catalog contains exactly `context.conversation.archived`,
+`context.conversation.unarchived`, and `context.checkpoint.restored_as_new`.
+Events are project-scoped, content-free, provenance-bound to immutable Context
+maintenance audit rows, deduplicated by project plus source audit ID, and
+retained indefinitely as append-only evidence. Unknown values are rejected by
+both the API and SQL boundary; historical `trigger_event` values remain
+unchanged, while new or changed values must be cataloged or `NULL`.
+
+There is no user append endpoint. JOB-101 snapshots each existing event once,
+including zero-match snapshots, then creates one delivery per exact event/job
+match for enabled jobs in the same project. Enqueue is exactly-once; execution
+is bounded at-least-once with five attempts and 30/60/120/300/600-second
+backoffs. Leases use a caller-held token whose SHA-256 hash is persisted with
+CAS revisions. Missing or ambiguous process identity is dead-lettered rather
+than retried, and job deletion returns `409` while a delivery is active before
+disabling the job and preserving delivery history.
+
+There is no payload or prompt interpolation and no manual replay. Durable error
+text is bounded and redacted. The API exposes bounded, project-scoped metadata
+for trusted events and deliveries; run, log, and cancel access is likewise
+project-scoped. Child processes receive an allowlisted environment only; API
+credentials and provider secrets are not inherited.
+
+The UI keeps event and delivery state read-only: it does not expose payloads,
+prompts, process details, or lease owners, and it provides no retry, dead-letter,
+or replay mutation. Delivery states explain the bounded retry policy: queued,
+leased, and retry-wait deliveries may proceed; a delivery is attempted at most
+five times with 30/60/120/300/600-second backoffs, and a dead-letter delivery is
+terminal. Deleting a job with an active delivery returns `409`; disable the job
+and retain its delivery history instead.
 
 ## Code Location
 - Page: `services/ingenium-dashboard/src/app/jobs/page.tsx`
@@ -42,3 +153,29 @@ When creating or editing a job, a magic-wand button (✨ icon labeled "Auto-gene
 - [Logs](logs.md) — Structured logging and event viewer
 - [Status](status.md) — Service status page
 - [Synthesis Configuration](../configure/synthesis.md)
+
+## Vault-backed runner attempts (VAULT-101)
+
+Every runner attempt resolves exactly one provider connection explicitly granted
+to the job's service principal. Organization-owned connections must belong to the
+run organization; installation-owned connections must use an active global-project
+vault credential. Missing, duplicate, expired, or revoked grants fail closed.
+The selected config and auth are written only to the run-owned tmpfs runtime;
+shared OpenCode config/auth files are never copied or inherited.
+Because the selected agent can read its run-local auth file, durable child output
+is reduced to one generic redaction marker for every run.
+
+When a job uses vault references, the runner also makes one explicit authorization
+decision per attempt immediately before spawn. Sealed, missing, deleted,
+foreign-project, revoked, expired, or version-stale references fail closed and
+do not start a child. Retries do not reuse authorization: each attempt resolves
+fresh metadata and authorization, and no automatic unseal is performed.
+
+The runner creates a run-owned `0700` tmpfs directory for every attempt and
+`0600` UUID-named files for referenced secrets. It passes only the non-secret
+`INGENIUM_VAULT_SECRET_FILES` ID-to-path map; values never appear in the
+environment, argv, prompt, logs, API/MCP output, or durable database. Output is
+fully redacted for vault-enabled runs. Process-group recovery and shutdown
+cleanup cover successful, partial, crash, unsafe-directory, and nonce-race
+paths. Unsafe or ambiguous residue is retained and fails closed rather than
+being force-deleted. Same-UID processes are outside this boundary.

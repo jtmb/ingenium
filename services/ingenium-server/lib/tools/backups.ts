@@ -3,51 +3,28 @@
  * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports backup CRUD, download streaming, restore preview/start/status, and schedule management.
  */
-import { createWriteStream, promises as fs } from "node:fs";
-import path from "node:path";
-import { pipeline } from "node:stream/promises";
 import { api } from "../client.js";
-import { apiRequestHeaders, config } from "../../config/index.js";
-
-/** Validated workspace-bounded path for backup downloads. */
-const WORKSPACE_ROOT = "/workspace";
-const HOME_ROOT = process.env.HOME ?? "/home/appuser";
-const FORBIDDEN_PREFIXES = ["/etc", "/root", "/proc", "/sys", "/dev", "/tmp"];
-
-function validateSafePath(outputPath: string): string {
-  const resolved = path.resolve(outputPath);
-  const isInWorkspace = resolved === WORKSPACE_ROOT || resolved.startsWith(WORKSPACE_ROOT + "/");
-  const isInHome = resolved === HOME_ROOT || resolved.startsWith(HOME_ROOT + "/");
-  if (!isInWorkspace && !isInHome) {
-    throw new Error(
-      `Path "${outputPath}" resolves to "${resolved}" — must be within ${WORKSPACE_ROOT} or ${HOME_ROOT}`,
-    );
-  }
-  const forbidden = FORBIDDEN_PREFIXES.find((p) => resolved === p || resolved.startsWith(p + "/"));
-  if (forbidden) {
-    throw new Error(`Path "${outputPath}" resolves to a forbidden location (${forbidden})`);
-  }
-  return resolved;
-}
+import { resolveSafeDownloadPath, streamDownloadResponse } from "../safe-download.js";
+import { textResult } from "./result.js";
 
 /** Create a new backup with an optional type (e.g. "full", "skills", "config"). */
 export async function backupCreate(project: string, type?: string) {
   const body: Record<string, unknown> = {};
   if (type) body.type = type;
   const res = await api.post("/backups", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** List all backups for a project. */
 export async function backupList(project: string) {
   const res = await api.get("/backups", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get a single backup by ID. */
 export async function backupGet(project: string, backupId: string) {
   const res = await api.get(`/backups/${backupId}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /**
@@ -63,37 +40,22 @@ export async function backupDownload(project: string, backupId: string, outputPa
   // 🔴 Validate outputPath before making any network call
   let safePath: string;
   try {
-    safePath = validateSafePath(outputPath);
-  } catch (err: any) {
-    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${err.message}` }) }] };
+    safePath = resolveSafeDownloadPath(outputPath);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Invalid path";
+    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Invalid outputPath: ${message}` }) }] };
   }
 
-  // Ensure the parent directory exists
-  await fs.mkdir(path.dirname(safePath), { recursive: true });
-
-  // Build the API URL and perform a raw fetch for binary response
-  const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
-  const url = new URL(`backups/${backupId}/download`, apiBase);
-  url.searchParams.set("project", project);
-
-  const response = await fetch(url.toString(), { headers: apiRequestHeaders() });
+  const response = await api.settled.getRaw(
+    `/backups/${encodeURIComponent(backupId)}/download`,
+    { project },
+  );
   if (!response.ok) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
-  const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
-
-  // Stream to file — NEVER buffer the full binary in memory
-  if (!response.body) {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    await fs.writeFile(safePath, buffer);
-  } else {
-    const fileStream = createWriteStream(safePath);
-    await pipeline(response.body, fileStream);
-  }
-
-  const stat = await fs.stat(safePath);
-  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size: stat.size }) }] };
+  const { mimeType, size } = await streamDownloadResponse(response.response, safePath);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ savedPath: safePath, mimeType, size }) }] };
 }
 
 /** Delete a backup by ID. */
@@ -102,32 +64,83 @@ export async function backupDelete(project: string, backupId: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: backupId }) }] };
 }
 
-/** Preview what a restore would do without executing it. */
-export async function backupRestorePreview(project: string, backupId: string) {
-  const res = await api.post("/backups/restore/preview", { backupId }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+/** Create or replay a durable dry-run restore plan. */
+export async function backupRestorePreview(project: string, backupId: string, dryRun: true, idempotencyKey: string) {
+  const res = await api.post("/backups/restore/preview", { backupId, dryRun, idempotencyKey }, { project });
+  return textResult(res.data);
 }
 
-/** Start a restore operation. Requires confirm=true to proceed. */
-export async function backupRestoreStart(project: string, backupId: string) {
-  const res = await api.post("/backups/restore", { backupId, confirm: true }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+/** Issue one opaque confirmation token. This wrapper neither logs nor persists it. */
+export async function backupRestoreAuthorize(project: string, planId: string, expectedRevision: number) {
+  const res = await api.post(`/backups/restore/${encodeURIComponent(planId)}/authorize`, { expectedRevision }, { project });
+  return textResult(res.data);
 }
 
-/** Get the status of a restore operation by job ID. */
-export async function backupRestoreStatus(project: string, jobId: string) {
-  const res = await api.get(`/backups/restore/${jobId}`, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+/** Confirm a plan; this advances only to ready_for_executor and never applies a backup. */
+export async function backupRestoreStart(
+  project: string,
+  planId: string,
+  expectedRevision: number,
+  confirmationToken: string,
+  idempotencyKey: string,
+) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/confirm`,
+    { expectedRevision, confirmationToken, idempotencyKey },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+/** Issue the distinct one-time maintenance execution token for a ready plan. */
+export async function backupRestoreExecutionAuthorize(project: string, planId: string, expectedRevision: number) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/execution/authorize`,
+    { expectedRevision },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+/** Queue a fixed maintenance executor. No process or path arguments are accepted. */
+export async function backupRestoreExecute(
+  project: string,
+  planId: string,
+  expectedRevision: number,
+  executionToken: string,
+  idempotencyKey: string,
+) {
+  const res = await api.post(
+    `/backups/restore/${encodeURIComponent(planId)}/execute`,
+    { expectedRevision, executionToken, idempotencyKey },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+/** Get a restore plan's content-free current state. */
+export async function backupRestoreStatus(project: string, planId: string) {
+  const res = await api.get(`/backups/restore/${encodeURIComponent(planId)}`, { project });
+  return textResult(res.data);
+}
+
+/** List bounded immutable restore-plan audit evidence. */
+export async function backupRestoreAuditList(project: string, planId: string, limit?: number) {
+  const res = await api.get(`/backups/restore/${encodeURIComponent(planId)}/audit`, {
+    project,
+    ...(limit === undefined ? {} : { limit: String(limit) }),
+  });
+  return textResult(res.data);
 }
 
 /** Get the current backup schedule configuration. */
 export async function backupScheduleGet(project: string) {
   const res = await api.get("/backups/schedule", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Set/update the backup schedule configuration. */
 export async function backupScheduleSet(project: string, configData: Record<string, unknown>) {
   const res = await api.put("/backups/schedule", configData, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }

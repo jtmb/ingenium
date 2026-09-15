@@ -4,14 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build --workspace=ingenium-email && tsc",
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
-    "test": "vitest run",
+    "check:database-integrity": "node dist/scripts/check-database-integrity.js",
+    "test": "vitest run --config vitest.config.ts",
     "test:live-opencode": "RUN_OPENCODE_LIVE=1 vitest run --config vitest.live.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node scripts/typecheck-with-clean-core.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/formidable": "^3.5.1",
     "cors": "^2.8.5",
     "express": "^4.21.0",
@@ -19,15 +21,11 @@
     "helmet": "^7.1.0",
     "ingenium-core": "*",
     "ingenium-email": "*",
-    "multer": "^2.2.0",
-    "pino": "^9.0.0",
-    "pino-http": "^10.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.0",
     "@types/express": "^4.17.0",
-    "@types/multer": "^2.2.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"

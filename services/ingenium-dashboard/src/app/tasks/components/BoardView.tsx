@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { api, Task, BoardColumn, BoardConfig } from "../../../lib/api";
 import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
+import Select from "../../components/Select";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -137,16 +138,17 @@ function TimePie({ estimated, spent }: { estimated: number; spent: number }) {
   const r = 18;
   const circ = 2 * Math.PI * r;
   const offset = circ * (1 - pct);
-  const fill = pct >= 1 ? "#ef4444" : pct > 0.75 ? "#f59e0b" : "#22c55e";
+  const fill = pct >= 1 ? "var(--color-error-text)" : pct > 0.75 ? "var(--color-warning-text)" : "var(--color-success-text)";
   return (
-    <svg width="18" height="18" viewBox="0 0 40 40" className="inline-block align-middle">
-      <circle cx="20" cy="20" r={r} fill="none" stroke="#e5e7eb" strokeWidth="4" />
+    <svg width="18" height="18" viewBox="0 0 40 40" className="inline-block align-middle"
+      role="img" aria-label={`${spent} hours spent, ${estimated} hours estimated`} focusable="false">
+      <circle cx="20" cy="20" r={r} fill="none" stroke="var(--color-border)" strokeWidth="4" />
       <circle
         cx="20" cy="20" r={r} fill="none" stroke={fill} strokeWidth="4"
         strokeDasharray={circ} strokeDashoffset={offset}
         strokeLinecap="round" transform="rotate(-90 20 20)"
       />
-      <text x="20" y="24" textAnchor="middle" fontSize="10" fill="#4b5563" fontFamily="sans-serif">
+      <text x="20" y="24" textAnchor="middle" fontSize="10" fill="var(--color-text-secondary)" fontFamily="sans-serif">
         {Math.round(pct * 100)}
       </text>
     </svg>
@@ -209,6 +211,7 @@ function SortableCard({
       >
         {bulkMode && (
           <input type="checkbox" checked={isSelected ?? false}
+            aria-label={`Select task ${task.title}`}
             onClick={(e) => e.stopPropagation()}
             onChange={() => onToggleSelect?.(task.id)}
             className="absolute top-1 left-1 rounded" />
@@ -245,6 +248,7 @@ function SortableCard({
     >
       {bulkMode && (
         <input type="checkbox" checked={isSelected ?? false}
+          aria-label={`Select task ${task.title}`}
           onClick={(e) => e.stopPropagation()}
           onChange={() => onToggleSelect?.(task.id)}
           className="absolute top-2 left-2 rounded z-10" />
@@ -699,7 +703,11 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
       {/* Toolbar */}
       <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
-          <select
+          <label className="sr-only" htmlFor="tasks-swimlane">
+            Group tasks by
+          </label>
+          <Select
+            id="tasks-swimlane"
             value={swimlane}
             onChange={(e) => setSwimlane(e.target.value as SwimlaneMode)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-3 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer"
@@ -709,7 +717,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                 {SWIMLANE_LABELS[m]}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -737,18 +745,21 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
       {bulkMode && selectedIds.size > 0 && (
         <div className="flex items-center gap-3 bg-[var(--color-surface)] border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
           <span className="text-sm font-medium text-[var(--color-text-primary)]">{selectedIds.size} selected</span>
-          <select value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
+          <label className="sr-only" htmlFor="tasks-bulk-column">Move selected tasks to status</label>
+          <Select id="tasks-bulk-column" value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Move to...</option>
             {columns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
-          </select>
-          <input value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
+          </Select>
+          <label className="sr-only" htmlFor="tasks-bulk-assignee">Assign selected tasks to</label>
+          <input id="tasks-bulk-assignee" value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
             placeholder="Assign to..." className="border border-[var(--color-border)] rounded px-2 py-1 text-sm w-32" />
-          <select value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
+          <label className="sr-only" htmlFor="tasks-bulk-priority">Set selected task priority</label>
+          <Select id="tasks-bulk-priority" value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Set Priority...</option>
             {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
-          </select>
+          </Select>
           <button onClick={handleBulkApply}
             className="bg-blue-600 text-white py-1.5 px-4 rounded text-sm hover:bg-blue-700">Apply</button>
           <button onClick={() => setSelectedIds(new Set())}

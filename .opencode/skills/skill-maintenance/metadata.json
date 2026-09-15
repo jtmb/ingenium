@@ -1,5 +1,5 @@
 {
   "name": "skill-maintenance",
-  "description": "Create, update, retire, index, and audit skills as projects evolve. Detects patterns and creates new skills autonomously.",
+  "description": "Create, update, retire, index, and audit skills as projects evolve. Detects patterns (new frameworks, repeated conventions, missing coverage) and creates new skills autonomously. Regenerates SKILL-INDEX.md and cross-references against all docs. Use when the codebase has grown new patterns, added dependencies, or when conventions have drifted. Replaces former update-skills, update-skill-index, audit-skills, and create-skills skills.",
   "tags": ["skill", "maintenance", "creation", "audit", "index"]
 }

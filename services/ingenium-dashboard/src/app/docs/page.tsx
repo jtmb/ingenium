@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useProject } from "@/lib/ProjectContext";
 import DocsShell from "./components/DocsShell";
 import PageTree, { collectDescendantIds } from "./components/PageTree";
 import DocsEditor from "./components/DocsEditor";
@@ -13,6 +14,7 @@ import BacklinksPanel from "./components/BacklinksPanel";
 import CommentsPanel from "./components/CommentsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import TrashPanel from "./components/TrashPanel";
+import TaskCaptureModal from "../tasks/components/TaskCaptureModal";
 import { buildDocsUrl, buildDocsWorkspacePopoutState } from "./docs-navigation";
 import { api, type DocSpace, type DocPage } from "@/lib/api";
 import type { DocProjectLink, DocAttachment, DocPageTree } from "@/lib/docs-types";
@@ -678,9 +680,9 @@ function WelcomeScreen() {
     <div className="flex items-center justify-center h-full">
       <div className="text-center space-y-4 max-w-sm">
         <IconFile />
-        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           Welcome to Docs
-        </h2>
+        </h1>
         <p className="text-sm text-[var(--color-text-muted)]">
           Select a page from the tree or create a new one to get started.
         </p>
@@ -886,6 +888,7 @@ function MovePageDialog({
 // ---------------------------------------------------------------------------
 
 function DocsContent() {
+  const project = useProject();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -923,17 +926,18 @@ function DocsContent() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [moveTargetPageId, setMoveTargetPageId] = useState<number | null>(null);
+  const [taskCapturePageId, setTaskCapturePageId] = useState<number | null>(null);
 
   // ---- Inline action state ----
-  const [actionToast, setActionToast] = useState<string | null>(null);
+  const [actionToast, setActionToast] = useState<ReactNode | null>(null);
   /** Currently being renamed: {pageId, currentTitle} */
   const [renameState, setRenameState] = useState<{ pageId: number; title: string } | null>(null);
 
   // ---- Tree data ref (for move dialog) ----
   const treePagesRef = useRef<DocPageTree[]>([]);
 
-  const showToast = useCallback((msg: string) => {
-    setActionToast(msg);
+  const showToast = useCallback((message: ReactNode) => {
+    setActionToast(message);
     setTimeout(() => setActionToast(null), 3000);
   }, []);
 
@@ -1117,7 +1121,7 @@ function DocsContent() {
   /** Save page content with optimistic revision bump and robust error handling. */
   const handleSave = useCallback(
     async (content: string) => {
-      if (!page) return;
+      if (!page) throw new Error("No page selected");
       // Optimistic revision for snappy UX — the API will provide the authoritative revision
       const prevRevision = page.revision;
       setPage((prev) => prev ? { ...prev, revision: prev.revision + 1 } : prev);
@@ -1133,6 +1137,7 @@ function DocsContent() {
         } else {
           showToast("Failed to save page");
         }
+        throw e;
       }
     },
     [page, showToast],
@@ -1200,6 +1205,17 @@ function DocsContent() {
     <>
       {page && (
         <>
+          {page.id === selectedPageId && !pageLoading && !pageError && (
+            <button
+              type="button"
+              onClick={() => setTaskCapturePageId(page.id)}
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center whitespace-nowrap rounded border border-[var(--color-border)] px-2.5 py-1 text-xs font-medium text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] transition-colors"
+              title="Create a task from this page"
+              aria-label="Create task"
+            >
+              Create task
+            </button>
+          )}
           {/* Publish button */}
           {page.status !== "published" && (
             <button
@@ -1326,6 +1342,25 @@ function DocsContent() {
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg text-sm text-[var(--color-text-primary)] animate-pulse" role="status" aria-live="polite">
           {actionToast}
         </div>
+      )}
+
+      {page && taskCapturePageId === page.id && (
+        <TaskCaptureModal
+          isOpen
+          project={project}
+          source={{ source_type: "docs", page_id: page.id }}
+          onClose={() => setTaskCapturePageId(null)}
+          onCaptured={(result) => {
+            showToast(
+              <>
+                Task created: {" "}
+                <a href="/tasks" className="font-medium underline hover:no-underline">
+                  {result.task.title}
+                </a>
+              </>,
+            );
+          }}
+        />
       )}
 
       {/* Dialogs */}

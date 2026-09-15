@@ -199,4 +199,3 @@ async function dismissPopups(page) {
 ## Cross-References
 
 - **`@mcp-tooling`** — Dev Browser tools and patterns for the underlying automation
-- **`@browsing-the-web`** — Parent skill with HARD RULEs and dev-browser integration guide

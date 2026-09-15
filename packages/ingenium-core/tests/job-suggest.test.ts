@@ -121,12 +121,12 @@ describe("generateJobConfig", () => {
     const llmResponse = {
       prompt_template: "When a new issue is created, analyze its content and assign appropriate labels and reviewers.",
       schedule_cron: null,
-      trigger_event: "issue.created",
+      trigger_event: "context.conversation.archived",
     };
     setMockResponse(mockContent(JSON.stringify(llmResponse)));
 
     const result = await generateJobConfig(config(), "Auto-label new GitHub issues when they are created");
-    expect(result.trigger_event).toBe("issue.created");
+    expect(result.trigger_event).toBe("context.conversation.archived");
     expect(result.schedule_cron).toBeNull();
     expect(result.prompt_template).toBe(llmResponse.prompt_template);
   });
@@ -219,7 +219,7 @@ describe("generateJobConfig", () => {
     const result = await generateJobConfig(config(), "Test truncation");
     expect(result.prompt_template).toHaveLength(4000);
     expect(result.schedule_cron).toHaveLength(100);
-    expect(result.trigger_event).toHaveLength(100);
+    expect(result.trigger_event).toBeNull();
   });
 
   it("handles API 500 error gracefully (returns all nulls, no throw)", async () => {
@@ -276,6 +276,17 @@ describe("generateJobConfig", () => {
     const result = await generateJobConfig(config(), "Test");
     expect(result.prompt_template).toBeNull();
     expect(result.schedule_cron).toBeNull();
+    expect(result.trigger_event).toBeNull();
+  });
+
+  it("sanitizes an unknown suggested trigger event to null", async () => {
+    setMockResponse(mockContent(JSON.stringify({
+      prompt_template: "Process an external event.",
+      schedule_cron: null,
+      trigger_event: "issue.created",
+    })));
+
+    const result = await generateJobConfig(config(), "Process a GitHub issue event");
     expect(result.trigger_event).toBeNull();
   });
 });

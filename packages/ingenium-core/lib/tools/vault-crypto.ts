@@ -11,6 +11,25 @@ const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32;
 
+type VaultCryptoBufferObserver = (kind: "decrypt_update" | "decrypt_final", buffer: Buffer) => void;
+let vaultCryptoBufferObserver: VaultCryptoBufferObserver | undefined;
+
+/** Test-only seam proving AES-GCM temporary plaintext chunks are wiped. */
+export function configureVaultCryptoBufferObserverForTesting(
+  observer?: VaultCryptoBufferObserver,
+): () => void {
+  const previous = vaultCryptoBufferObserver;
+  vaultCryptoBufferObserver = observer;
+  return () => {
+    vaultCryptoBufferObserver = previous;
+  };
+}
+
+function zeroDecryptTemporary(kind: "decrypt_update" | "decrypt_final", buffer: Buffer): void {
+  buffer.fill(0);
+  vaultCryptoBufferObserver?.(kind, buffer);
+}
+
 /** Derive a 256-bit vault key from a passphrase using scrypt. */
 export function deriveKey(
   passphrase: string,
@@ -28,16 +47,26 @@ export function deriveKey(
   });
 }
 
-/** Encrypt plaintext with AES-256-GCM as IV || ciphertext || authentication tag. */
-export function encryptSecret(plaintext: string, key: Buffer): Buffer {
+/** Encrypt buffer plaintext with AES-256-GCM as IV || ciphertext || authentication tag. */
+export function encryptSecretBuffer(plaintext: Buffer, key: Buffer): Buffer {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(Buffer.from(plaintext, "utf8")), cipher.final()]);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   return Buffer.concat([iv, ciphertext, cipher.getAuthTag()]);
 }
 
-/** Decrypt an AES-256-GCM payload encoded as IV || ciphertext || authentication tag. */
-export function decryptSecret(ciphertext: Buffer, key: Buffer): Buffer {
+/** Encrypt UTF-8 string plaintext with AES-256-GCM. */
+export function encryptSecret(plaintext: string, key: Buffer): Buffer {
+  const plaintextBuffer = Buffer.from(plaintext, "utf8");
+  try {
+    return encryptSecretBuffer(plaintextBuffer, key);
+  } finally {
+    plaintextBuffer.fill(0);
+  }
+}
+
+/** Decrypt an AES-256-GCM payload into a Buffer without string conversion. */
+export function decryptSecretBuffer(ciphertext: Buffer, key: Buffer): Buffer {
   if (ciphertext.length < IV_LENGTH + AUTH_TAG_LENGTH) {
     throw new Error("Invalid encrypted vault payload");
   }
@@ -46,8 +75,25 @@ export function decryptSecret(ciphertext: Buffer, key: Buffer): Buffer {
   const tag = ciphertext.subarray(ciphertext.length - AUTH_TAG_LENGTH);
   const encrypted = ciphertext.subarray(IV_LENGTH, ciphertext.length - AUTH_TAG_LENGTH);
   const decipher = createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(encrypted), decipher.final()]);
+  let update: Buffer | undefined;
+  let final: Buffer | undefined;
+  try {
+    decipher.setAuthTag(tag);
+    update = decipher.update(encrypted);
+    final = decipher.final();
+    const plaintext = Buffer.allocUnsafe(update.length + final.length);
+    update.copy(plaintext);
+    final.copy(plaintext, update.length);
+    return plaintext;
+  } finally {
+    if (update) zeroDecryptTemporary("decrypt_update", update);
+    if (final) zeroDecryptTemporary("decrypt_final", final);
+  }
+}
+
+/** Backward-compatible buffer decryptor. */
+export function decryptSecret(ciphertext: Buffer, key: Buffer): Buffer {
+  return decryptSecretBuffer(ciphertext, key);
 }
 
 /** Generate a random 256-bit data encryption key. */
@@ -65,7 +111,7 @@ export function wrapKey(key: Buffer, wrappingKey: Buffer): Buffer {
 
 /** Unwrap a data encryption key encrypted by wrapKey. */
 export function unwrapKey(wrapped: Buffer, wrappingKey: Buffer): Buffer {
-  return decryptSecret(wrapped, wrappingKey);
+  return decryptSecretBuffer(wrapped, wrappingKey);
 }
 
 /** Generate a random 256-bit vault salt. */

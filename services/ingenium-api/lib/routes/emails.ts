@@ -1,8 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { NextFunction, Request, Router, Response } from "express";
-import { checkpointAfterWrite, emailCache, execTransaction, getDb, logger, settings, synthesisLlm } from "ingenium-core";
-import { registerMailWatcher, unregisterMailWatcher } from "../mail-watchers.js";
-import { decryptCredentialValue } from "ingenium-email/lib/credential-crypto";
+import { authorization, checkpointAfterWrite, emailCache, execTransaction, getDb, logger, projects, settings, synthesisLlm } from "ingenium-core";
 import {
   // Account CRUD
   listAccounts,
@@ -13,6 +11,7 @@ import {
   removeAccount,
   storeAccount,
   getCredentials,
+  getEmailRuntime,
   storeCredentials,
   storeTokens,
   getGlobalProjectId,
@@ -55,8 +54,11 @@ import {
   setAccountConnected,
   // Providers
   GmailProvider,
+  sanitizeProviderError,
+  normalizeEmailAccountEndpoints,
+  EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING,
+  validateEmailAccountMigrationCredentials,
 } from "ingenium-email";
-import * as emailSecurity from "ingenium-email";
 import type {
   EmailAccount,
   EmailAttachment,
@@ -66,6 +68,7 @@ import type {
   EmailProvider,
   FolderEngineState,
 } from "ingenium-email";
+import { toAuthorizationPrincipal } from "../authorization-policy.js";
 
 // ── Engine-backed helpers (no in-memory sync trackers) ──────────────────────
 
@@ -94,21 +97,9 @@ type MailOperation = "oauth" | "imap" | "smtp" | "sync" | "api";
 
 /**
  * The mail package is the one sanitization boundary for provider failures.
- * The fallback preserves safe behavior in focused route tests that mock only
- * the legacy mail exports; production always uses the centralized sanitizer.
  */
 function safeMailFailure(error: unknown, operation: MailOperation): SafeMailFailure {
-  if (Object.prototype.hasOwnProperty.call(emailSecurity, "sanitizeProviderError")) {
-    const sanitize = Reflect.get(emailSecurity, "sanitizeProviderError") as
-      | ((value: unknown, source: MailOperation) => SafeMailFailure)
-      | undefined;
-    if (sanitize) return sanitize(error, operation);
-  }
-  return {
-    code: "PROVIDER_ERROR",
-    message: "The email operation could not be completed. Try again later.",
-    retryable: true,
-  };
+  return sanitizeProviderError(error, operation);
 }
 
 function safeMailDiagnostic(error: unknown, operation: MailOperation): Record<string, unknown> {
@@ -141,6 +132,46 @@ function resolveEmailProject(): string {
   return getGlobalProjectId();
 }
 
+function currentOrganizationId(req: Request): string | undefined {
+  if (req.principal && "organizationId" in req.principal && req.principal.organizationId) return req.principal.organizationId;
+  return projects.getCanonicalGlobalProject()?.organization_id;
+}
+
+function emailOwner(req: Request, res: Response) {
+  const organizationId = currentOrganizationId(req);
+  if (!organizationId) return undefined;
+  const requestedOwner = req.body?.owner_kind ?? req.query.owner_kind;
+  if (req.principal?.type === "user") {
+    if (requestedOwner === "organization") {
+      const decision = authorization.requireOrganizationPermission(
+        toAuthorizationPrincipal(req.principal),
+        organizationId,
+        "mail",
+        "write",
+      );
+      if (!decision.allowed) {
+        res.status(403).json({ error: { code: "FORBIDDEN", message: "Organization mail ownership requires organization write permission" } });
+        return undefined;
+      }
+      return { organizationId, ownerKind: "organization" as const, ownerUserId: undefined };
+    }
+    return { organizationId, ownerKind: "user" as const, ownerUserId: req.principal.id };
+  }
+  if (requestedOwner === "user") return undefined;
+  return { organizationId, ownerKind: "organization" as const, ownerUserId: undefined };
+}
+
+function canAccessEmailAccount(req: Request, account: EmailAccount, permission: authorization.AuthorizationPermission): boolean {
+  if (!req.principal || !account.organizationId || !account.ownerKind) return req.principal?.type === "compatibility";
+  return authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(req.principal), {
+    resourceType: "mail_account",
+    resourceId: account.id,
+    organizationId: account.organizationId,
+    ownerKind: account.ownerKind,
+    ownerUserId: account.ownerUserId,
+  }, permission).allowed;
+}
+
 /** Resolve account + credentials or send a 422/404 and return null. */
 async function getAccountAuthOrError(
   res: Response,
@@ -152,15 +183,14 @@ async function getAccountAuthOrError(
     });
     return null;
   }
-  const projectId = resolveEmailProject();
-  const account = getAccount(projectId, accountId);
-  if (!account) {
+  const account = getAccount(accountId, currentOrganizationId(res.req));
+  if (!account || !canAccessEmailAccount(res.req, account, res.req.authorizationPolicy?.permission ?? "read")) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
     });
     return null;
   }
-  const creds = getCredentials(projectId, accountId);
+  const creds = getCredentials(accountId, account.organizationId);
   if (!creds) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Credentials for account '${accountId}' not found` },
@@ -171,7 +201,7 @@ async function getAccountAuthOrError(
   let tokens = creds.tokens;
   if (account.authType === "oauth2" && tokens?.expiryDate && tokens.expiryDate < Date.now() + 60_000) {
     try {
-      const refreshed = await getValidTokens(projectId, accountId, account.provider as EmailProvider);
+      const refreshed = await getValidTokens(accountId, account.provider as EmailProvider, account.organizationId);
       if (refreshed) tokens = refreshed;
     } catch { /* use existing tokens */ }
   }
@@ -188,12 +218,11 @@ async function withImapConnection<T>(
   auth: { password?: string; tokens?: OAuthToken },
   fn: (accountId: string) => Promise<T>,
 ): Promise<T> {
-  const projectId = resolveEmailProject();
   await connectAccount(account, auth);
   try {
     const result = await fn(account.id);
     try {
-      setAccountConnected(projectId, account.id, true);
+      setAccountConnected(account.id, true, account.organizationId);
     } catch { /* non-fatal */ }
     return result;
   } catch (error: unknown) {
@@ -221,8 +250,26 @@ emailsRouter.get("/accounts/oauth/url", (_req, res) => {
     return;
   }
 
-  getOAuthUrl(provider as EmailProvider)
-    .then((result) => res.json({ data: result }))
+  if (provider !== "gmail" && provider !== "outlook") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth is supported only for gmail and outlook" } });
+    return;
+  }
+  const owner = emailOwner(_req, res);
+  if (!owner) {
+    if (!res.headersSent) res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
+    return;
+  }
+  const accountId = typeof _req.query.account_id === "string" && _req.query.account_id
+    ? _req.query.account_id
+    : randomUUID();
+  const existing = typeof _req.query.account_id === "string" ? getAccount(accountId, owner.organizationId) : undefined;
+  if (_req.query.account_id !== undefined && (!existing || !canAccessEmailAccount(_req, existing, "write"))) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+    return;
+  }
+  const actorType = _req.principal?.type === "runtime-service" ? "system" : _req.principal?.type ?? "system";
+  getOAuthUrl(provider, { ...owner, accountId, actorType, actorId: _req.principal?.id })
+    .then((result) => res.json({ data: { url: result.url, accountId } }))
     .catch((error: unknown) => {
       respondWithSafeMailError(res, error, "oauth");
     });
@@ -239,36 +286,64 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
   }
 
   try {
-    const projectId = resolveEmailProject();
-    const tokens = await exchangeCode(provider, code, state, redirectUri);
+    const organizationId = currentOrganizationId(req);
+    if (!organizationId || (provider !== "gmail" && provider !== "outlook")) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail organization and OAuth provider are required" } });
+      return;
+    }
+    const stateHash = createHash("sha256").update(state).digest("hex");
+    const actorType = req.principal?.type === "runtime-service" ? "system" : req.principal?.type ?? "system";
+    const actorId = req.principal?.id;
+    const attempt = getDb().prepare(
+      `SELECT organization_id AS organizationId, owner_kind AS ownerKind, owner_user_id AS ownerUserId,
+              account_id AS accountId, actor_type AS actorType, actor_id AS actorId
+       FROM mail_oauth_attempts
+       WHERE state_hash = ? AND organization_id = ? AND provider = ?
+         AND actor_type = ? AND actor_id IS ? AND consumed_at IS NULL AND expires_at > ?`,
+    ).get(stateHash, organizationId, provider, actorType, actorId ?? null, new Date().toISOString()) as {
+      organizationId: string;
+      ownerKind: "user" | "organization";
+      ownerUserId?: string;
+      accountId: string;
+      actorType: "compatibility" | "user" | "service" | "system";
+      actorId?: string;
+    } | undefined;
+    if (!attempt || (accountId && accountId !== attempt.accountId)) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "OAuth attempt not found" } });
+      return;
+    }
+    const tokens = await exchangeCode(provider, code, state, redirectUri, organizationId, { type: actorType, id: actorId });
 
     // Create the account if it doesn't exist yet
-    let acctId = accountId;
-    let createdAccountWithTokens = false;
-    if (!acctId) {
-      const existingAccounts = listAccounts(projectId);
-      const existing = existingAccounts.find(a => a.email === tokens.email);
-      if (existing) {
-        acctId = existing.id;
-      } else {
-        const account = createOAuthAccountWithTokens(projectId, {
-          email: tokens.email || `${provider}-${Date.now()}@unknown`,
-          provider: provider as EmailProvider,
-          authType: "oauth2",
-          name: tokens.email || `${provider} account`,
-        }, tokens);
-        acctId = account.id;
-        createdAccountWithTokens = true;
-      }
+    const acctId = attempt.accountId;
+    const existingAccount = getAccount(acctId, attempt.organizationId);
+    const createdAccountWithTokens = !existingAccount;
+    if (!existingAccount) {
+      createOAuthAccountWithTokens({
+        id: acctId,
+        email: tokens.email || `${provider}-${Date.now()}@unknown`,
+        provider: provider as EmailProvider,
+        authType: "oauth2",
+        name: tokens.email || `${provider} account`,
+      }, tokens, {
+        organizationId: attempt.organizationId,
+        ownerKind: attempt.ownerKind,
+        ownerUserId: attempt.ownerUserId,
+      });
     }
 
     // Existing accounts keep their metadata; only their encrypted token record changes.
     if (!createdAccountWithTokens) {
-      storeTokens(projectId, acctId, tokens);
+      const existing = getAccount(acctId, currentOrganizationId(req));
+      if (!existing || !canAccessEmailAccount(req, existing, "write")) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+        return;
+      }
+      storeTokens(acctId, tokens, existing.organizationId);
     }
     // Replace a parked credential-error worker so OAuth reconnect resumes sync.
     stopAccountWorker(acctId);
-    startEngine(projectId);
+    startEngine();
     res.json({ data: { success: true, accountId: acctId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "oauth");
@@ -280,9 +355,8 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 /** GET /accounts?project=&include_hidden=true — List all email accounts.
  *  Default: only returns non-hidden accounts. Pass include_hidden=true to get all. */
 emailsRouter.get("/accounts", (req, res) => {
-  const projectId = resolveEmailProject();
   const includeHidden = req.query.include_hidden === "true";
-  let accounts = listAccounts(projectId);
+  let accounts = listAccounts().filter((account) => canAccessEmailAccount(req, account, "read"));
   if (!includeHidden) {
     accounts = accounts.filter(a => !a.hidden);
   }
@@ -291,7 +365,6 @@ emailsRouter.get("/accounts", (req, res) => {
 
 /** POST /accounts?project= — Add a new email account. */
 emailsRouter.post("/accounts", (req, res) => {
-  const projectId = resolveEmailProject();
   const { email, provider, authType, name, appPassword, imapHost, smtpHost, imapPort, smtpPort } = req.body;
   if (!email || !provider || !authType) {
     res.status(422).json({
@@ -300,33 +373,44 @@ emailsRouter.post("/accounts", (req, res) => {
     return;
   }
 
+  let endpoints: Pick<EmailAccount, "imapHost" | "imapPort" | "smtpHost" | "smtpPort">;
+  try {
+    endpoints = normalizeEmailAccountEndpoints(provider, { imapHost, imapPort, smtpHost, smtpPort });
+  } catch {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    return;
+  }
+
   const accountInput = {
     email,
-    provider,
+    provider: provider as EmailProvider,
     authType,
     name: name ?? email,
-    imapHost,
-    imapPort,
-    smtpHost,
-    smtpPort,
+    ...endpoints,
   } as Omit<EmailAccount, "id" | "connected">;
+  const owner = emailOwner(req, res);
+  if (!owner) {
+    if (!res.headersSent) res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid mail owner is required" } });
+    return;
+  }
   const account = appPassword
-    ? createAccountWithCredentials(projectId, accountInput, {
+    ? createAccountWithCredentials(accountInput, {
       imapPass: appPassword,
       smtpPass: appPassword,
-    })
-    : addAccount(projectId, accountInput);
+    }, owner)
+    : addAccount(accountInput, owner);
 
-  startEngine(projectId);
+  startEngine();
   res.status(201).json({ data: account });
 });
 
 /** DELETE /accounts/:id?project= — Remove an email account. */
 emailsRouter.delete("/accounts/:id", async (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
-  if (!account) {
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "write")) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
     });
@@ -335,42 +419,88 @@ emailsRouter.delete("/accounts/:id", async (req, res) => {
 
   // Stop the account's sync engine worker BEFORE deleting data
   stopAccountWorker(accountId);
-  await stopWatcher(accountId).catch(() => undefined);
-  unregisterMailWatcher(accountId);
-
-  removeAccount(projectId, accountId);
+  await stopWatcher(resolveEmailProject(), accountId).catch(() => undefined);
+  getEmailRuntime().watcherMarkers.clearAccount(resolveEmailProject(), accountId);
   // Also clear all cached emails, bodies, suggestions, summaries, and sync state for this account
-  emailCache.clearCache(accountId);
+  emailCache.clearCache(accountId, account.organizationId);
+  removeAccount(accountId, account.organizationId);
   res.status(204).send();
 });
 
-/** PATCH /accounts/:id?project= — Update account metadata (e.g., hidden flag). */
+/** PATCH /accounts/:id?project= — Update non-secret account metadata. */
 emailsRouter.patch("/accounts/:id", (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
-  if (!account) {
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "write")) {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
     });
     return;
   }
 
-  const { hidden } = req.body;
+  const {
+    hidden,
+    provider,
+    email,
+    name,
+    imapHost,
+    imapPort,
+    smtpHost,
+    smtpPort,
+  } = req.body as Record<string, unknown>;
+  if (provider !== undefined && provider !== account.provider) {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "provider cannot be changed after account creation" },
+    });
+    return;
+  }
+
+  let endpoints: Pick<EmailAccount, "imapHost" | "imapPort" | "smtpHost" | "smtpPort">;
+  try {
+    endpoints = normalizeEmailAccountEndpoints(account.provider, { imapHost, imapPort, smtpHost, smtpPort });
+  } catch {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "Endpoint overrides are only supported for custom providers" },
+    });
+    return;
+  }
+
+  const isOptionalText = (value: unknown): value is string | undefined =>
+    value === undefined || typeof value === "string";
+  const isOptionalPort = (value: unknown): value is number | undefined =>
+    value === undefined || (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65_535);
+  if (!isOptionalText(email) || !isOptionalText(name) || !isOptionalText(imapHost) || !isOptionalText(smtpHost)
+    || !isOptionalPort(imapPort) || !isOptionalPort(smtpPort)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Account metadata is invalid" } });
+    return;
+  }
+  if (typeof email === "string" && !email.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "email must not be empty" } });
+    return;
+  }
+  if (typeof name === "string" && !name.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name must not be empty" } });
+    return;
+  }
   if (hidden !== undefined) {
     account.hidden = !!hidden;
   }
+  if (typeof email === "string") account.email = email.trim();
+  if (typeof name === "string") account.name = name.trim();
+  if (imapHost !== undefined) account.imapHost = endpoints.imapHost;
+  if (imapPort !== undefined) account.imapPort = endpoints.imapPort;
+  if (smtpHost !== undefined) account.smtpHost = endpoints.smtpHost;
+  if (smtpPort !== undefined) account.smtpPort = endpoints.smtpPort;
 
-  storeAccount(projectId, account);
+  storeAccount(account);
   res.json({ data: account });
 });
 
 /** PATCH /accounts/:id/credentials — Replace app-password credentials in place. */
 emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
-  const projectId = resolveEmailProject();
   const accountId = req.params.id!;
-  const account = getAccount(projectId, accountId);
-  if (!account) {
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "write")) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` } });
     return;
   }
@@ -385,9 +515,9 @@ emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
   }
 
   try {
-    storeCredentials(projectId, accountId, { imapPass: appPassword, smtpPass: appPassword });
+    storeCredentials(accountId, { imapPass: appPassword, smtpPass: appPassword }, account.organizationId);
     stopAccountWorker(accountId);
-    startEngine(projectId);
+    startEngine();
     // Never return the submitted credential or stored encrypted material.
     res.json({ data: { success: true, accountId } });
   } catch (error: unknown) {
@@ -705,8 +835,8 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     };
 
     // Get voice samples from Sent folder
-    const creds = getCredentials(projectId, account.id);
-    const freshToken = await getFreshGmailToken(account.id).catch(() => "");
+    const creds = getCredentials(account.id, account.organizationId);
+    const freshToken = await getFreshGmailToken(account.id, account.organizationId).catch(() => "");
     const tokens: OAuthToken = creds?.tokens ?? { accessToken: freshToken, refreshToken: "", expiryDate: 0, scope: "" };
     const voiceSamples = await getVoiceSamples(account, tokens, 15);
 
@@ -867,10 +997,14 @@ emailsRouter.post("/watch/start", async (req, res) => {
     });
     return;
   }
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "execute")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+    return;
+  }
 
   try {
     await startWatcher(projectId, accountId);
-    registerMailWatcher(accountId);
     res.json({ data: { running: true, accountId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "imap");
@@ -886,10 +1020,14 @@ emailsRouter.post("/watch/stop", async (req, res) => {
     });
     return;
   }
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "execute")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+    return;
+  }
 
   try {
-    await stopWatcher(accountId);
-    unregisterMailWatcher(accountId);
+    await stopWatcher(resolveEmailProject(), accountId);
     res.json({ data: { running: false, accountId } });
   } catch (error: unknown) {
     respondWithSafeMailError(res, error, "imap");
@@ -905,8 +1043,13 @@ emailsRouter.get("/watch/status", (_req, res) => {
     });
     return;
   }
+  const account = getAccount(accountId, currentOrganizationId(_req));
+  if (!account || !canAccessEmailAccount(_req, account, "read")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+    return;
+  }
 
-  const status = getWatcherStatus(accountId);
+  const status = getWatcherStatus(resolveEmailProject(), accountId);
   res.json({ data: status });
 });
 
@@ -924,6 +1067,11 @@ emailsRouter.post("/sync", async (req, res) => {
     res.status(422).json({
       error: { code: "VALIDATION_ERROR", message: "account query parameter is required" },
     });
+    return;
+  }
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "execute")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
     return;
   }
 
@@ -953,7 +1101,7 @@ emailsRouter.post("/sync", async (req, res) => {
 
 /**
  * GET /sync-status?project=&account= — Return per-folder sync status from the engine.
- * Backward-compatible response shape with new `engine` key for raw EngineStatus.
+ * The engine projection contains only the already-authorized account.
  */
 emailsRouter.get("/sync-status", (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -963,10 +1111,16 @@ emailsRouter.get("/sync-status", (req, res) => {
     });
     return;
   }
+  const account = getAccount(accountId, currentOrganizationId(req));
+  if (!account || !canAccessEmailAccount(req, account, "read")) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Email account not found" } });
+    return;
+  }
 
   try {
     const engineStatus = getEngineStatus();
     const acct = engineStatus.accounts.find(a => a.accountId === accountId);
+    const scopedEngineStatus = { accounts: acct ? [acct] : [] };
 
     if (!acct) {
       // Account not in engine — return idle state
@@ -979,7 +1133,7 @@ emailsRouter.get("/sync-status", (req, res) => {
           totalCached: 0,
           totalBodies: 0,
           folders: [],
-          engine: engineStatus,
+          engine: scopedEngineStatus,
         },
       });
       return;
@@ -1024,7 +1178,7 @@ emailsRouter.get("/sync-status", (req, res) => {
         totalCached,
         totalBodies,
         folders,
-        engine: engineStatus,
+        engine: scopedEngineStatus,
       },
     });
   } catch (error: unknown) {
@@ -1109,7 +1263,7 @@ emailsRouter.get("/", async (req, res) => {
   // connection pool constraint — replace with a direct synchronous call.
   if (refresh) {
     try {
-      const freshToken = await getFreshGmailToken(account.id);
+        const freshToken = await getFreshGmailToken(account.id, account.organizationId);
       const REFRESH_WINDOW = 50; // Gmail API returns 50-100 by default; 50 keeps the UI snappy
       // 10s timeout: Gmail API is typically <2s; 10s gives headroom for rate-limiting backoff
       const messages = await Promise.race([
@@ -1285,7 +1439,7 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
 
   try {
     // Get fresh token and fetch attachment via the Gmail REST API provider
-    const freshToken = await getFreshGmailToken(account.id);
+    const freshToken = await getFreshGmailToken(account.id, account.organizationId);
     const att = await GmailProvider.getAttachment(account, { accessToken: freshToken } as any, id, attachmentId);
 
     // ✅ Use the cached filename when available — it's the EXACT filename
@@ -1355,7 +1509,7 @@ emailsRouter.get("/:uid", async (req, res) => {
   // to async engine sync.
   if (cachedListing) {
     try {
-      const freshToken = await getFreshGmailToken(account.id);
+      const freshToken = await getFreshGmailToken(account.id, account.organizationId);
       const body = await Promise.race([
         GmailProvider.getBody(account, { accessToken: freshToken } as any, uid),
         sleep(12000).then(() => null),
@@ -1544,94 +1698,30 @@ interface MailSettingRow {
   value: string;
 }
 
+interface MailAccountMigrationGroup {
+  accountId: string;
+  rows: MailSettingRow[];
+}
+
 function emptyMailMigrationResult(): MailAccountMigrationResult {
   return { migratedSettings: 0, migratedAccounts: 0, collisions: 0, skippedForEncryption: false };
 }
 
-function validateMailMigrationGroup(group: MailSettingRow[]): boolean {
-  const accounts = group.filter((row) => row.key.startsWith("email_account_"));
-  const oauth = group.filter((row) => row.key.startsWith("email_oauth_"));
+function validateMailMigrationGroup(group: MailAccountMigrationGroup): boolean {
+  const accounts = group.rows.filter((row) => row.key.startsWith("email_account_"));
+  const oauth = group.rows.filter((row) => row.key.startsWith("email_oauth_"));
   if (accounts.length !== 1 || oauth.length > 1) return false;
 
   const account = accounts[0]!;
-  const accountId = account.key.slice("email_account_".length);
-  if (Object.prototype.hasOwnProperty.call(emailSecurity, "validateEmailAccountMigrationCredentials")) {
-    const validate = Reflect.get(emailSecurity, "validateEmailAccountMigrationCredentials") as
-      | ((id: string, raw: string, oauthRaw?: string) => { valid: boolean })
-      | undefined;
-    return Boolean(validate?.(accountId, account.value, oauth[0]?.value).valid);
-  }
-
-  // Compatibility only for focused route tests that replace the package root
-  // with a narrow mock. It uses the same AES-GCM decryptor and fails closed;
-  // it is not a blind-copy fallback.
-  return validateMailMigrationGroupWithActiveKey(accountId, account.value, oauth[0]?.value);
+  return validateEmailAccountMigrationCredentials(group.accountId, account.value, oauth[0]?.value).valid;
 }
 
-function isObjectRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function decryptMigrationValue(value: unknown, requireNonEmpty: boolean): string | undefined {
-  if (typeof value !== "string" || !value) return undefined;
-  try {
-    const decrypted = decryptCredentialValue(value);
-    return requireNonEmpty && !decrypted ? undefined : decrypted;
-  } catch {
-    return undefined;
-  }
-}
-
-function validateMailMigrationTokens(value: unknown, email: string): { accessToken: string; refreshToken: string } | undefined {
-  if (!isObjectRecord(value) || typeof value.accessToken !== "string" || typeof value.refreshToken !== "string") {
-    return undefined;
-  }
-  if (typeof value.email === "string" && value.email
-    && value.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
-    return undefined;
-  }
-  const accessToken = decryptMigrationValue(value.accessToken, true);
-  const refreshToken = decryptMigrationValue(value.refreshToken, false);
-  return accessToken === undefined || refreshToken === undefined ? undefined : { accessToken, refreshToken };
-}
-
-function validateMailMigrationGroupWithActiveKey(accountId: string, accountRaw: string, oauthRaw?: string): boolean {
-  let account: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(accountRaw);
-    if (!isObjectRecord(parsed)) return false;
-    account = parsed;
-  } catch {
-    return false;
-  }
-  if (account.id !== accountId || typeof account.email !== "string" || !account.email
-    || (account.provider !== undefined && typeof account.provider !== "string")
-    || (account.authType !== undefined && typeof account.authType !== "string")) {
-    return false;
-  }
-
-  for (const credential of [account.imapPass, account.smtpPass]) {
-    if (credential !== undefined && decryptMigrationValue(credential, true) === undefined) return false;
-  }
-
-  const tokens: Array<{ accessToken: string; refreshToken: string }> = [];
-  if (account.tokens !== undefined) {
-    const value = validateMailMigrationTokens(account.tokens, account.email);
-    if (!value) return false;
-    tokens.push(value);
-  }
-  if (oauthRaw !== undefined) {
-    try {
-      const value = validateMailMigrationTokens(JSON.parse(oauthRaw) as unknown, account.email);
-      if (!value) return false;
-      tokens.push(value);
-    } catch {
-      return false;
-    }
-  }
-  if (tokens.length === 2 && (tokens[0]!.accessToken !== tokens[1]!.accessToken
-    || tokens[0]!.refreshToken !== tokens[1]!.refreshToken)) return false;
-  return account.authType !== "oauth2" || tokens.length > 0;
+function mailMigrationSignature(group: MailAccountMigrationGroup): string {
+  return group.rows
+    .slice()
+    .sort((left, right) => left.key.localeCompare(right.key))
+    .map((row) => `${row.key}\u0000${row.value}`)
+    .join("\u0001");
 }
 
 /**
@@ -1651,39 +1741,74 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
         return { ...emptyMailMigrationResult(), skippedForEncryption: true };
       }
 
-      const rows = db.prepare(
-        `SELECT s.project_id, s.key, s.value
-         FROM settings s
-         JOIN projects p ON s.project_id = p.id
-         WHERE p.is_global = 0
-           AND p.archived_at IS NULL
-            AND (s.key LIKE 'email_account_%' OR s.key LIKE 'email_oauth_%')
-         ORDER BY s.project_id, s.key`,
-      ).all() as MailSettingRow[];
+      const destinationFingerprint = db.prepare(
+        "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+      ).get(globalId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING) as { value: string } | undefined;
+      if (!destinationFingerprint) {
+        return { ...emptyMailMigrationResult(), skippedForEncryption: true };
+      }
 
       const result = emptyMailMigrationResult();
-      const groups = new Map<string, MailSettingRow[]>();
+      const sourceProjectIds = projects.getFormerGlobalProjectIds(globalId);
+      if (sourceProjectIds.length === 0) return result;
+
+      const sourcePlaceholders = sourceProjectIds.map(() => "?").join(", ");
+      const rows = db.prepare(
+        `SELECT s.project_id, s.key, s.value
+        FROM settings s
+         WHERE s.project_id IN (${sourcePlaceholders})
+           AND (s.key LIKE 'email_account_%' OR s.key LIKE 'email_oauth_%')
+         ORDER BY s.project_id, s.key`,
+      ).all(...sourceProjectIds) as MailSettingRow[];
+
+      const groups = new Map<string, MailAccountMigrationGroup>();
       for (const row of rows) {
         const accountId = row.key.startsWith("email_account_")
           ? row.key.slice("email_account_".length)
           : row.key.slice("email_oauth_".length);
         const groupKey = `${row.project_id}\u0000${accountId}`;
-        const group = groups.get(groupKey) ?? [];
-        group.push(row);
+        const group = groups.get(groupKey) ?? { accountId, rows: [] };
+        group.rows.push(row);
         groups.set(groupKey, group);
       }
 
-      // Validate the complete source set before any destination write or source
-      // deletion. A legacy plaintext, malformed, orphaned, or key-mismatched
-      // entry leaves every source row untouched for operator recovery.
-      for (const group of groups.values()) {
-        if (!validateMailMigrationGroup(group)) {
-          return { ...emptyMailMigrationResult(), skippedForEncryption: true };
+      const sourceFingerprints = new Map<string, string | undefined>();
+      const sourceFingerprint = db.prepare(
+        "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+      );
+      const candidates = new Map<string, MailAccountMigrationGroup[]>();
+      for (const [groupKey, group] of groups) {
+        const projectId = groupKey.slice(0, groupKey.indexOf("\u0000"));
+        let fingerprint = sourceFingerprints.get(projectId);
+        if (!sourceFingerprints.has(projectId)) {
+          fingerprint = (sourceFingerprint.get(projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING) as { value: string } | undefined)?.value;
+          sourceFingerprints.set(projectId, fingerprint);
+        }
+        const accountGroups = candidates.get(group.accountId) ?? [];
+        accountGroups.push(group);
+        candidates.set(group.accountId, accountGroups);
+        if (!validateMailMigrationGroup(group)
+          || (fingerprint !== undefined && fingerprint !== destinationFingerprint.value)) {
+          result.skippedForEncryption = true;
         }
       }
 
-      for (const group of groups.values()) {
-        const collision = group.some((row) => {
+      for (const accountGroups of candidates.values()) {
+        const hasUnsafeCandidate = accountGroups.some((group) => {
+          const projectId = group.rows[0]?.project_id;
+          const fingerprint = projectId ? sourceFingerprints.get(projectId) : undefined;
+          return !validateMailMigrationGroup(group)
+            || (fingerprint !== undefined && fingerprint !== destinationFingerprint.value);
+        });
+        if (hasUnsafeCandidate) continue;
+
+        if (new Set(accountGroups.map(mailMigrationSignature)).size > 1) {
+          result.collisions++;
+          continue;
+        }
+
+        const groupRows = accountGroups.flatMap((group) => group.rows);
+        const collision = groupRows.some((row) => {
           const destination = db.prepare(
             "SELECT value FROM settings WHERE project_id = ? AND key = ?",
           ).get(globalId, row.key) as { value: string } | undefined;
@@ -1694,13 +1819,13 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
           continue;
         }
 
-        for (const row of group) {
+        for (const row of groupRows) {
           db.prepare(
             `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
              ON CONFLICT(project_id, key) DO NOTHING`,
           ).run(globalId, row.key, row.value);
         }
-        for (const row of group) {
+        for (const row of groupRows) {
           const destination = db.prepare(
             "SELECT value FROM settings WHERE project_id = ? AND key = ?",
           ).get(globalId, row.key) as { value: string } | undefined;
@@ -1708,12 +1833,12 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
             throw new Error("Mail account migration destination verification failed");
           }
         }
-        for (const row of group) {
+        for (const row of groupRows) {
           db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
             .run(row.project_id, row.key);
           result.migratedSettings++;
-          if (row.key.startsWith("email_account_")) result.migratedAccounts++;
         }
+        result.migratedAccounts++;
       }
       committedWrites = result.migratedSettings > 0;
       return result;
@@ -1727,16 +1852,4 @@ export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrati
     logger.warn("email", "Mail account migration failed; source settings were retained");
     return emptyMailMigrationResult();
   }
-}
-
-/**
- * 🔴 DEPRECATED — use startEngine(projectId) instead.
- * The sync engine now owns all IMAP I/O via its priority-queue background workers.
- * Kept for backward compatibility: just delegates to startEngine.
- * TODO(v3): remove this function and update all callers.
- */
-export async function prefetchAllAccounts(): Promise<void> {
-  const projectId = resolveEmailProject();
-  logger.info("email", "DEPRECATED: prefetchAllAccounts called — delegating to startEngine");
-  startEngine(projectId);
 }

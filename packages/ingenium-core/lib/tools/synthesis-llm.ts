@@ -2,7 +2,9 @@ import { Observation, PersonalityTrait, Skill } from "../schema.js";
 import { getSetting } from "./settings.js";
 import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
-import { safeLlmFetch } from "./endpoint-policy.js";
+import { EndpointPolicyError, safeLlmFetch } from "./endpoint-policy.js";
+import { tryParseJSON } from "./llm-json.js";
+import { isSafeSkillName } from "./skills.js";
 
 /**
  * Structured response from the LLM synthesis engine.
@@ -29,7 +31,22 @@ export interface SynthesisLLMResult {
   }>;
   insights: string[];
   summary: string;
+  unavailable?: boolean;
 }
+
+/**
+ * Text-only execution seam for API-owned broker fallback. It deliberately
+ * carries no provider, model, agent, or tool fields: provider resolution and
+ * the tool-denied broker boundary remain outside core.
+ */
+export type LLMTextExecutor = (request: {
+  system: string;
+  user: string;
+  timeoutMs: number;
+}) => Promise<{ ok: boolean; content: string; error?: string }>;
+
+const SYNTHESIS_SYSTEM_PROMPT = "You are a skill synthesis engine that outputs only valid JSON.";
+const CONSOLIDATION_SYSTEM_PROMPT = "You are a personality model consolidator that outputs only valid JSON.";
 
 /**
  * Build the prompt sent to the LLM.
@@ -163,25 +180,34 @@ function validateResponse(raw: any): SynthesisLLMResult {
 
   if (Array.isArray(raw.skills_to_create)) {
     result.skills_to_create = raw.skills_to_create.slice(0, 5).map((s: any) => {
-      let name = String(s.name || "").slice(0, 64).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-      const item: any = {
+      if (!s || typeof s !== "object") return null;
+      const rawName = typeof s.name === "string" ? s.name : "";
+      const name = rawName.trim().length > 0
+        && rawName.length <= 64
+        && isSafeSkillName(rawName)
+        && /[a-z0-9]/i.test(rawName)
+        ? rawName.replace(/[^a-z0-9-]/gi, "-").toLowerCase()
+        : "";
+      const description = typeof s.description === "string" ? s.description.slice(0, 200) : "";
+      const content = typeof s.content === "string" ? s.content : "";
+      if (!name || !description.trim() || !content.trim()) return null;
+      const item: SynthesisLLMResult["skills_to_create"][number] = {
         name,
-        description: String(s.description || "").slice(0, 200),
-        content: String(s.content || ""),
+        description,
+        content,
         tags: s.tags ? String(s.tags) : undefined,
       };
-      // Handle reference_files for split-skill format
       if (s.reference_files && Array.isArray(s.reference_files)) {
         item.reference_files = s.reference_files
-          .filter((rf: any) => rf.path && rf.content && rf.path.startsWith("references/"))
-          .slice(0, 10)  // cap at 10 reference files per skill
+          .filter((rf: any) => typeof rf?.path === "string" && typeof rf?.content === "string" && rf.path.startsWith("references/"))
+          .slice(0, 10)
           .map((rf: any) => ({
-            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),  // sanitize path
-            content: rf.content.slice(0, 8000),  // cap content length
+            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),
+            content: rf.content.slice(0, 8000),
           }));
       }
       return item;
-    }).filter((s: { name: string; content: string }) => s.name && s.content);
+    }).filter((s: SynthesisLLMResult["skills_to_create"][number] | null): s is SynthesisLLMResult["skills_to_create"][number] => s !== null);
   }
 
   if (Array.isArray(raw.skills_to_update)) {
@@ -271,9 +297,6 @@ export async function callSynthesisLLM(
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");
       logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText.substring(0, 200) });
-      // HACK: The fallback prompt is nearly identical to the primary except
-      // the system message is reworded. Both paths should use a shared format.
-      // Try parsing as non-JSON response format
       const fallbackResponse = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
         headers,
@@ -289,7 +312,7 @@ export async function callSynthesisLLM(
         signal,
       }, { allowPrivateNetwork, timeoutMs: 60_000 });
       if (!fallbackResponse.ok) {
-        return { skills_to_create: [], skills_to_update: [], insights: [], summary: `API error: ${fallbackResponse.status}` };
+        return { skills_to_create: [], skills_to_update: [], insights: [], summary: `API error: ${fallbackResponse.status}`, unavailable: true };
       }
       const fbJson = await fallbackResponse.json();
       const fbContent = fbJson.choices?.[0]?.message?.content || "{}";
@@ -302,37 +325,54 @@ export async function callSynthesisLLM(
     const parsed = tryParseJSON(content);
     return validateResponse(parsed);
   } catch (err: any) {
-    if (err.name === "AbortError") {
+    if (err?.name === "AbortError" || (err instanceof EndpointPolicyError && err.code === "aborted")) {
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
     logger.error("synthesis-llm", `LLM synthesis call failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
-    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed" };
+    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed", unavailable: true };
   }
 }
 
 /**
- * Attempt to parse JSON from an LLM response, handling both raw JSON and
- * markdown-wrapped JSON (```json ... ```). Returns null if all strategies fail.
- *
- * TODO: Deduplicate — this logic is duplicated in `callConsolidationLLM`.
- *       Extract to a shared utility.
+ * Execute skill synthesis through an API-provided text executor when no direct
+ * endpoint is configured. The executor is intentionally incapable of granting
+ * tools or choosing a model; those decisions stay at the API broker boundary.
  */
-function tryParseJSON(text: string): any {
-  try {
-    // Strip markdown code blocks if present
-    let cleaned = text.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-    }
-    return JSON.parse(cleaned);
-  } catch {
-    // Try to extract JSON from markdown — LLMs sometimes wrap even when told not to
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return null;
+export async function callSynthesisLLMWithExecutor(
+  observations: Observation[],
+  existingSkills: Pick<Skill, "name" | "description">[],
+  existingTraits: Pick<PersonalityTrait, "trait_type" | "trait_value" | "confidence">[],
+  executor: LLMTextExecutor,
+): Promise<SynthesisLLMResult> {
+  if (observations.length === 0) {
+    return { skills_to_create: [], skills_to_update: [], insights: [], summary: "No observations to process." };
   }
+
+  const request = {
+    system: SYNTHESIS_SYSTEM_PROMPT,
+    user: buildPrompt(observations, existingSkills, existingTraits),
+    timeoutMs: 60_000,
+  };
+  // Keep the original direct-call behavior: a failed synthesis response gets
+  // one bounded retry before the caller records a safe unavailable result.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await executor(request);
+      if (result.ok && result.content.trim()) {
+        return validateResponse(tryParseJSON(result.content));
+      }
+      if (attempt === 0) continue;
+      logger.warn("synthesis-llm", "Broker skill synthesis did not return usable content", {
+        outcome: result.ok ? "empty" : "failed",
+      });
+    } catch (error) {
+      if (attempt === 0) continue;
+      logger.warn("synthesis-llm", "Broker skill synthesis failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+    }
+  }
+  return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis unavailable", unavailable: true };
 }
 
 // ── LLM Config Resolution ──────────────────────────────────
@@ -404,16 +444,6 @@ export function isLLMSynthesisConfigured(projectId: string): boolean {
 }
 
 /**
- * Get the configured LLM synthesis settings.
- * Falls back: global → project → env vars.
- */
-export function getLLMSynthesisConfig(projectId: string): { model: string; apiKey?: string } | null {
-  const config = resolveLLMConfig(projectId);
-  if (!config || !config.model) return null;
-  return { model: config.model, apiKey: config.apiKey };
-}
-
-/**
  * Result from the trait consolidation LLM call.
  */
 export interface ConsolidationResult {
@@ -430,6 +460,26 @@ export interface ConsolidationResult {
   ignore: number;
 }
 
+function parseConsolidationResponse(content: string): ConsolidationResult | null {
+  const parsed = tryParseJSON(content || "{}");
+  if (!parsed) return null;
+
+  const create = (Array.isArray(parsed.create) ? parsed.create : []).slice(0, 20).map((c: any) => ({
+    trait_type: validTraitTypes.includes(c.trait_type) ? c.trait_type : "code_preference",
+    trait_value: String(c.trait_value || "").slice(0, 200).trim(),
+    confidence_hint: Math.min(0.30, Math.max(0.05, Number(c.confidence_hint) || 0.10)),
+    observation_ids: (Array.isArray(c.observation_ids) ? c.observation_ids : []).map(Number).filter((n: number) => n > 0),
+  })).filter((c: { trait_value: string }) => c.trait_value.length > 0);
+
+  const confirm = (Array.isArray(parsed.confirm) ? parsed.confirm : []).slice(0, 50).map((c: any) => ({
+    trait_id: Number(c.trait_id) || 0,
+    observation_id: Number(c.observation_id) || 0,
+  })).filter((c: { trait_id: number; observation_id: number }) => c.trait_id > 0 && c.observation_id > 0);
+
+  const ignore = Number.isFinite(parsed.ignore_count) ? Math.abs(Math.round(parsed.ignore_count)) : 0;
+  return { create, confirm, ignore };
+}
+
 /**
  * Consolidate raw observations into normalized personality traits via LLM.
  * Returns null if LLM is not configured, signaling the caller to skip trait
@@ -439,11 +489,9 @@ export async function consolidateTraits(
   projectId: string,
   observations: Array<{ id: number; observation_type: string; content: string }>,
   existingTraits: Array<{ id: number; trait_type: string; trait_value: string; confidence: number }>,
+  executor?: LLMTextExecutor,
 ): Promise<ConsolidationResult | null> {
   const config = resolveLLMConfig(projectId);
-  if (!config || !config.model || !config.endpoint) return null;
-
-  const { model, apiKey, endpoint } = config;
 
   // Build prompt
   const obsText = observations.map(o =>
@@ -492,6 +540,32 @@ For each new observation, decide ONE of:
   "ignore_count": 1
 }`;
 
+  if ((!config || !config.model || !config.endpoint) && executor) {
+    try {
+      const result = await executor({
+        system: CONSOLIDATION_SYSTEM_PROMPT,
+        user: prompt,
+        timeoutMs: 60_000,
+      });
+      if (!result.ok || !result.content.trim()) {
+        logger.warn("synthesis-llm", "Broker trait consolidation did not return usable content", {
+          outcome: result.ok ? "empty" : "failed",
+        });
+        return null;
+      }
+      return parseConsolidationResponse(result.content);
+    } catch (error) {
+      logger.warn("synthesis-llm", "Broker trait consolidation failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      return null;
+    }
+  }
+
+  if (!config || !config.model || !config.endpoint) return null;
+
+  const { model, apiKey, endpoint } = config;
+
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
@@ -529,26 +603,7 @@ For each new observation, decide ONE of:
       return null;
     }
 
-    const parsed = tryParseJSON(content || "{}");
-
-    if (!parsed) return null;
-
-    // Parse defensively
-    const create = (Array.isArray(parsed.create) ? parsed.create : []).slice(0, 20).map((c: any) => ({
-      trait_type: validTraitTypes.includes(c.trait_type) ? c.trait_type : "code_preference",
-      trait_value: String(c.trait_value || "").slice(0, 200).trim(),
-      confidence_hint: Math.min(0.30, Math.max(0.05, Number(c.confidence_hint) || 0.10)),
-      observation_ids: (Array.isArray(c.observation_ids) ? c.observation_ids : []).map(Number).filter((n: number) => n > 0),
-    })).filter((c: { trait_value: string }) => c.trait_value.length > 0);
-
-    const confirm = (Array.isArray(parsed.confirm) ? parsed.confirm : []).slice(0, 50).map((c: any) => ({
-      trait_id: Number(c.trait_id) || 0,
-      observation_id: Number(c.observation_id) || 0,
-    })).filter((c: { trait_id: number; observation_id: number }) => c.trait_id > 0 && c.observation_id > 0);
-
-    const ignore = Number.isFinite(parsed.ignore_count) ? Math.abs(Math.round(parsed.ignore_count)) : 0;
-
-    return { create, confirm, ignore };
+    return parseConsolidationResponse(content || "");
   } catch (err: any) {
     logger.warn("synthesis-llm", `consolidateTraits fetch failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     return null;
@@ -810,6 +865,27 @@ SKILL CATALOG:
 ${skillsText}`;
 }
 
+function parseSkillConsolidationResponse(content: string): ConsolidationSkillResult {
+  let parsed: any;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    const match = content.match(/```json\n?([\s\S]*?)\n?```/);
+    parsed = match ? tryParseJSON(match[1] ?? "") : null;
+    if (!parsed) return { merges: [], delete: [] };
+  }
+
+  return {
+    merges: Array.isArray(parsed.merges)
+      ? parsed.merges.filter((m: any) => m.source && m.target && typeof m.source === "string" && typeof m.target === "string")
+          .map((m: any) => ({ source: m.source, target: m.target, reason: String(m.reason || "").slice(0, 200) }))
+      : [],
+    delete: Array.isArray(parsed.delete)
+      ? parsed.delete.filter((d: any) => typeof d === "string" && d.length > 0).map(String)
+      : [],
+  };
+}
+
 /**
  * Call the LLM to audit all skills and propose merges/deletes.
  *
@@ -823,15 +899,35 @@ export async function callConsolidationLLM(
   overrideEndpoint?: string,
   overrideModel?: string,
   overrideApiKey?: string,
+  executor?: LLMTextExecutor,
 ): Promise<ConsolidationSkillResult> {
   // Resolve config with fallback, then apply overrides
   const resolvedConfig = resolveLLMConfig(projectId);
   const model = overrideModel ?? resolvedConfig?.model;
   const apiKey = overrideApiKey ?? resolvedConfig?.apiKey;
-  if (!model) return { merges: [], delete: [] };
-
   const endpointRaw = overrideEndpoint ?? resolvedConfig?.endpoint;
-  if (!endpointRaw) return { merges: [], delete: [] };
+  if ((!model || !endpointRaw) && executor) {
+    try {
+      const result = await executor({
+        system: "You are a skill catalog auditor that outputs only valid JSON.",
+        user: prompt,
+        timeoutMs: 60_000,
+      });
+      if (!result.ok || !result.content.trim()) {
+        logger.warn("synthesis-llm", "Broker skill consolidation did not return usable content", {
+          outcome: result.ok ? "empty" : "failed",
+        });
+        return { merges: [], delete: [] };
+      }
+      return parseSkillConsolidationResponse(result.content);
+    } catch (error) {
+      logger.warn("synthesis-llm", "Broker skill consolidation failed", {
+        error: error instanceof Error ? error.name : "unknown",
+      });
+      return { merges: [], delete: [] };
+    }
+  }
+  if (!model || !endpointRaw) return { merges: [], delete: [] };
 
   const endpoint = endpointRaw.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
@@ -862,28 +958,11 @@ export async function callConsolidationLLM(
     const data = await response.json();
     const content = data?.choices?.[0]?.message?.content || "{}";
 
-    // Parse defensively — handle both raw JSON and markdown-wrapped JSON
-    let parsed: any;
-    try {
-      parsed = JSON.parse(content);
-    } catch {
-      const match = content.match(/```json\n?([\s\S]*?)\n?```/);
-      parsed = match ? tryParseJSON(match[1]) : null;
-      if (!parsed) {
-        logger.warn("synthesis-llm", "Consolidation LLM returned unparseable response", { content_preview: content.substring(0, 200) });
-        return { merges: [], delete: [] };
-      }
+    const result = parseSkillConsolidationResponse(content);
+    if (result.merges.length === 0 && result.delete.length === 0 && !tryParseJSON(content)) {
+      logger.warn("synthesis-llm", "Consolidation LLM returned unparseable response", { content_preview: content.substring(0, 200) });
     }
-
-    return {
-      merges: Array.isArray(parsed.merges)
-        ? parsed.merges.filter((m: any) => m.source && m.target && typeof m.source === "string" && typeof m.target === "string")
-            .map((m: any) => ({ source: m.source, target: m.target, reason: String(m.reason || "").slice(0, 200) }))
-        : [],
-      delete: Array.isArray(parsed.delete)
-        ? parsed.delete.filter((d: any) => typeof d === "string" && d.length > 0).map(String)
-        : [],
-    };
+    return result;
   } catch (err: any) {
     logger.warn("synthesis-llm", `Consolidation LLM fetch failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     return { merges: [], delete: [] };

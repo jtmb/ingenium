@@ -21,6 +21,8 @@ vi.mock("../src/lib/api", () => ({
 
 vi.mock("../src/lib/ProjectContext", () => ({
   useProject: () => selectedProject.value,
+  resolveGlobalProjectName: (projects: Array<{ name: string; is_global?: boolean; archived_at?: string }>) =>
+    projects.find((candidate) => Boolean(candidate.is_global) && !candidate.archived_at)?.name ?? null,
 }));
 
 import MailPanel from "../src/app/components/settings/panels/MailPanel";
@@ -158,5 +160,45 @@ describe("dashboard OAuth secret handling", () => {
     expect(setSetting.mock.calls.every(([, , project]) => project === "global-default")).toBe(true);
     expect(setSetting.mock.calls.some(([, , project]) => project === "external-worktree")).toBe(false);
     expect(await screen.findByText(/saved in global project “global-default”/)).toBeTruthy();
+  });
+
+  it("stacks credential rows and preserves accessible labels on narrow screens", async () => {
+    render(<MailPanel />);
+
+    const gmailId = await screen.findByLabelText("Gmail Client ID");
+    const gmailSecret = screen.getByLabelText("Gmail Client Secret");
+    expect(gmailId.className).toContain("w-full");
+    expect(gmailId.className).toContain("sm:w-64");
+    expect(gmailSecret.className).toContain("min-w-0");
+    expect(gmailSecret.className).toContain("w-full");
+    expect(gmailSecret.parentElement?.className).toContain("flex-wrap");
+    expect(gmailId.closest("div.border-t")?.className).toContain("flex-col");
+    expect(gmailId.closest("div.border-t")?.className).toContain("sm:flex-row");
+    expect(screen.getByLabelText("Outlook Client ID")).toBeTruthy();
+    expect(screen.getByLabelText("Outlook Client Secret")).toBeTruthy();
+  });
+
+  it("gives every Mail settings control an accessible name", async () => {
+    const { container } = render(<MailPanel />);
+
+    await screen.findByRole("button", { name: "Save OAuth Credentials" });
+
+    const namedControls = [
+      ...screen.getAllByRole("button", { name: /.+/ }),
+      ...screen.getAllByRole("textbox", { name: /.+/ }),
+      ...screen.getAllByRole("spinbutton", { name: /.+/ }),
+      ...screen.getAllByRole("combobox", { name: /.+/ }),
+      ...screen.getAllByRole("checkbox", { name: /.+/ }),
+      screen.getByLabelText("Gmail Client Secret"),
+      screen.getByLabelText("Outlook Client Secret"),
+    ];
+
+    expect(container.querySelectorAll("button, input, select, textarea")).toHaveLength(15);
+    expect(namedControls).toHaveLength(15);
+
+    expect(screen.getByRole("spinbutton", { name: "Offline window" })).toBeTruthy();
+    expect(screen.getByRole("spinbutton", { name: "Body window" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Enable Smart Replies" })).toBeTruthy();
+    expect(screen.getByRole("checkbox", { name: "Precompute replies" })).toBeTruthy();
   });
 });

@@ -79,4 +79,4 @@ When a specific change was made, update only the affected docs:
 | Added/removed/modified an agent | `docs/configure/agents.md` (agent table, profiles) |
 | Changed config | `docs/concepts/architecture.md`, `docs/concepts/tech-stack.md` |
 | Added new dependencies | `docs/concepts/tech-stack.md` |
-| Modified self-learning system files | `AGENTS.md` (self-learning section), `.opencode/skills/self-learning/SKILL.md`, `docs/concepts/self-learning.md` (update reference) |
+| Modified self-learning system files | `.opencode/skills/self-learning/SKILL.md`, `docs/concepts/self-learning.md` (update reference), affected `.opencode/agents/**` profiles for role instructions |

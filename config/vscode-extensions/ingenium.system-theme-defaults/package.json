@@ -1,0 +1,15 @@
+{
+  "name": "system-theme-defaults",
+  "publisher": "ingenium",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.131.0"
+  },
+  "contributes": {
+    "configurationDefaults": {
+      "window.autoDetectColorScheme": true,
+      "workbench.preferredDarkColorTheme": "Dark Modern",
+      "workbench.preferredLightColorTheme": "Light Modern"
+    }
+  }
+}

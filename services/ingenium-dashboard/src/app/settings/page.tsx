@@ -2,6 +2,14 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+/** Build the overlay URL without dropping project, query, or fragment context. */
+export function buildSettingsRedirectUrl(search: string, hash: string): string {
+  const params = new URLSearchParams(search);
+  if (!params.has("settings")) params.set("settings", "general");
+  const query = params.toString();
+  return `/${query ? `?${query}` : ""}${hash}`;
+}
+
 /**
  * SettingsPage — Redirect-only page.
  *
@@ -13,7 +21,7 @@ import { useRouter } from "next/navigation";
 export default function SettingsPage() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/?settings=general");
+    router.replace(buildSettingsRedirectUrl(window.location.search, window.location.hash), { scroll: false });
   }, [router]);
   return (
     <p className="p-6 text-[var(--color-text-muted)] animate-pulse">

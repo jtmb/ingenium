@@ -2,45 +2,35 @@
 
 import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
-import type { EmailProvider } from "./types.js";
-import * as core from "ingenium-core";
-import { settings, getDb } from "ingenium-core";
+import type { EmailOwner, EmailProvider } from "./types.js";
 import { getCredentials, getGlobalProjectId, storeOAuthTokens } from "./accounts.js";
 import { decryptCredentialValue, encryptCredentialValue } from "./credential-crypto.js";
 import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
+import { getEmailRuntime } from "./runtime.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
 /**
- * Resolve OAuth client ID/secret: check settings table first, fall back to env vars.
+ * Resolve OAuth client IDs from settings and secrets from protected runtime storage,
+ * then fall back to environment variables.
  *
- * The dual resolution (settings → env var) allows per-instance configuration
- * via the Dashboard UI (settings) while still supporting container-level env
- * overrides for production deployments.
- *
- * When projectId is omitted, only env vars are checked (used during initial
- * setup before a global project exists).
+ * Dashboard-managed values take precedence while production deployments can
+ * still supply container-level environment fallbacks.
  */
 function getOAuthCreds(
   provider: Extract<EmailProvider, "gmail" | "outlook">,
-  projectId?: string,
+  projectId: string,
 ): { clientId: string; clientSecret: string } {
+  const runtime = getEmailRuntime();
+  const settings = runtime.settings;
   if (provider === "gmail") {
-    const clientId = projectId
-      ? (settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "")
-      : (process.env.GOOGLE_OAUTH_CLIENT_ID ?? "");
-    const clientSecret = projectId
-      ? (settings.getSetting(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "")
-      : (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "");
+    const clientId = settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "";
+    const clientSecret = runtime.oauthClientSecrets.getClientSecret(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "";
     return { clientId, clientSecret };
   }
   // outlook
-  const clientId = projectId
-    ? (settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "")
-    : (process.env.MS_OAUTH_CLIENT_ID ?? "");
-  const clientSecret = projectId
-    ? (settings.getSetting(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "")
-    : (process.env.MS_OAUTH_CLIENT_SECRET ?? "");
+  const clientId = settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "";
+  const clientSecret = runtime.oauthClientSecrets.getClientSecret(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "";
   return { clientId, clientSecret };
 }
 
@@ -49,14 +39,6 @@ function getOAuthCreds(
 /** Backward-compatible public encryption helpers. */
 export const encryptCredentials = encryptCredentialValue;
 export const decryptCredentials = decryptCredentialValue;
-
-function checkpointOAuthStateDelete(): void {
-  // Focused legacy tests can mock only the settings APIs. Production has the
-  // checkpoint export; use ownership checking so a partial mock stays safe.
-  if (!Object.prototype.hasOwnProperty.call(core, "checkpointAfterWrite")) return;
-  const checkpoint = Reflect.get(core, "checkpointAfterWrite") as (() => void) | undefined;
-  checkpoint?.();
-}
 
 // ── OAuth token storage ───────────────────────────────────────────────────
 
@@ -68,11 +50,11 @@ function checkpointOAuthStateDelete(): void {
  * plaintext (warns at startup).  Never logs token values.
  */
 export function storeTokens(
-  _projectId: string,
   accountId: string,
   tokens: OAuthToken,
+  organizationId?: string,
 ): void {
-  storeOAuthTokens(_projectId, accountId, tokens);
+  storeOAuthTokens(accountId, tokens, organizationId);
 }
 
 /**
@@ -85,20 +67,19 @@ export function storeTokens(
  * Returns null if no stored tokens exist (account needs re-authentication).
  */
 export async function getValidTokens(
-  _projectId: string,
   accountId: string,
   provider: EmailProvider,
+  organizationId?: string,
 ): Promise<OAuthToken | null> {
-  const projectId = getGlobalProjectId();
-  const tokens = getCredentials(projectId, accountId)?.tokens;
+  const tokens = getCredentials(accountId, organizationId)?.tokens;
   if (!tokens) return null;
 
   // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)
   const now = Date.now();
   if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
     // Auto-refresh
-    const refreshed = await refreshAccessToken(provider, tokens.refreshToken, projectId);
-    storeTokens(projectId, accountId, refreshed);
+    const refreshed = await refreshAccessToken(provider, tokens.refreshToken);
+    storeTokens(accountId, refreshed, organizationId);
     return refreshed;
   }
 
@@ -111,68 +92,24 @@ function getRedirectUri(): string {
   return process.env.OAUTH_REDIRECT_URI ?? "http://localhost:3000/mail/oauth/callback";
 }
 
-/**
- * Singleton cache for the default Gmail OAuth2 client.
- *
- * Cached only for the env-based path (no projectId) to avoid re-initializing
- * the google-auth-library on every call.  Project-specific credentials are
- * short-lived and not cached — they're used during multi-tenant setup flows.
- */
-let _googleOAuthClient: Awaited<ReturnType<typeof cachedGoogleClient>>["client"] | undefined;
-
-async function cachedGoogleClient(projectId?: string): Promise<{ client: import("google-auth-library").OAuth2Client }> {
+async function getGoogleClient(projectId: string): Promise<import("google-auth-library").OAuth2Client> {
   const { clientId, clientSecret } = getOAuthCreds("gmail", projectId);
-
-  // Use cache only for the env-based default path (no projectId override)
-  if (!projectId && _googleOAuthClient) {
-    return { client: _googleOAuthClient };
-  }
-
   const mod = await import("google-auth-library");
-  const client = new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
-
-  // Cache only the env-default client; project-specific clients are ephemeral
-  if (!projectId) {
-    _googleOAuthClient = client;
-  }
-
-  return { client };
+  return new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
 }
 
 // ── Microsoft OAuth2 ──────────────────────────────────────────────────────
 
-/**
- * Singleton cache for the default MSAL ConfidentialClientApplication.
- *
- * Same caching strategy as Google: env-based default is cached; project-specific
- * instances are ephemeral.  Authority uses "common" endpoint for multi-tenant
- * support (any Microsoft account or Azure AD tenant).
- */
-let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
-
-async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
+async function getMsalApp(projectId: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
   const { clientId, clientSecret } = getOAuthCreds("outlook", projectId);
-
-  // Use cache only for the env-based default path (no projectId override)
-  if (!projectId && _msalApp) {
-    return _msalApp;
-  }
-
   const msal = await import("@azure/msal-node");
-  const app = new msal.ConfidentialClientApplication({
+  return new msal.ConfidentialClientApplication({
     auth: {
       clientId,
       clientSecret,
       authority: "https://login.microsoftonline.com/common",
     },
   });
-
-  // Cache only the env-default client; project-specific clients are ephemeral
-  if (!projectId) {
-    _msalApp = app;
-  }
-
-  return app;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -188,17 +125,33 @@ async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node"
  */
 export async function getOAuthUrl(
   provider: EmailProvider,
-  _projectId?: string,
+  owner?: Required<Pick<EmailOwner, "organizationId" | "ownerKind">> & Pick<EmailOwner, "ownerUserId"> & {
+    accountId: string;
+    actorType: "compatibility" | "user" | "service" | "system";
+    actorId?: string;
+  },
 ): Promise<{ url: string; state: string }> {
   try {
     const state = crypto.randomBytes(16).toString("hex");
     const pid = getGlobalProjectId();
 
-    // Store state for CSRF validation on callback
-    settings.setSetting(pid, `oauth_state_${provider}`, state);
+    if (owner && (provider === "gmail" || provider === "outlook")) {
+      const createAttempt = getEmailRuntime().accounts.createOAuthAttempt;
+      if (!createAttempt) throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+      const stateHash = crypto.createHash("sha256").update(state).digest("hex");
+      getEmailRuntime().accounts.mutateGlobalSettings(() => createAttempt(stateHash, {
+        ...owner,
+        provider,
+        expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+      }));
+    } else {
+      getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+        settings.set(`oauth_state_${provider}`, state);
+      });
+    }
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(pid);
+      const gClient = await getGoogleClient(pid);
       const url = gClient.generateAuthUrl({
         access_type: "offline",
         prompt: "consent",
@@ -245,27 +198,33 @@ export async function exchangeCode(
   provider: EmailProvider,
   code: string,
   state: string,
-  _redirectUri?: string,
-  _projectId?: string,
+  redirectUri?: string,
+  organizationId?: string,
+  actor?: { type: "compatibility" | "user" | "service" | "system"; id?: string },
 ): Promise<OAuthToken> {
   try {
     const pid = getGlobalProjectId();
-    const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
-    if (!storedState || storedState !== state) {
-      throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+    if (organizationId && (provider === "gmail" || provider === "outlook")) {
+      const consumeAttempt = getEmailRuntime().accounts.consumeOAuthAttempt;
+      const stateHash = crypto.createHash("sha256").update(state).digest("hex");
+      const attempt = consumeAttempt && getEmailRuntime().accounts.mutateGlobalSettings(() =>
+        consumeAttempt(stateHash, organizationId, provider, actor?.type ?? "system", actor?.id, new Date().toISOString()));
+      if (!attempt) throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+    } else {
+      getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+        const storedState = settings.get(`oauth_state_${provider}`);
+        if (!storedState || storedState !== state) {
+          throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
+        }
+        settings.delete(`oauth_state_${provider}`);
+      });
     }
-    // Delete stored state after validation (one-time use, prevents replay), then
-    // checkpoint after the write commits before contacting the external provider.
-    const db = getDb();
-    db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
-      .run(pid, `oauth_state_${provider}`);
-    checkpointOAuthStateDelete();
 
-    const redirectUri = _redirectUri ?? getRedirectUri();
+    const resolvedRedirectUri = redirectUri ?? getRedirectUri();
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(pid);
-      const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
+      const gClient = await getGoogleClient(pid);
+      const { tokens } = await gClient.getToken({ code, redirect_uri: resolvedRedirectUri });
       // Extract email from id_token JWT (unverified decode — standard for getting email claim)
       let email: string | undefined;
       if (tokens.id_token) {
@@ -296,7 +255,7 @@ export async function exchangeCode(
           "https://outlook.office.com/SMTP.Send",
           "offline_access",
         ],
-        redirectUri,
+        redirectUri: resolvedRedirectUri,
       });
       return {
         accessToken: result?.accessToken ?? "",
@@ -319,9 +278,8 @@ export async function exchangeCode(
  *
  * Throws if no stored tokens exist (account needs re-authentication).
  */
-export async function getFreshGmailToken(accountId: string): Promise<string> {
-  const projectId = getGlobalProjectId();
-  const tokens = await getValidTokens(projectId, accountId, "gmail");
+export async function getFreshGmailToken(accountId: string, organizationId?: string): Promise<string> {
+  const tokens = await getValidTokens(accountId, "gmail", organizationId);
   if (!tokens) {
     throw new ProviderOperationError("AUTH_REQUIRED", "oauth", false);
   }
@@ -332,16 +290,12 @@ export async function getFreshGmailToken(accountId: string): Promise<string> {
 export async function refreshAccessToken(
   provider: EmailProvider,
   refreshToken: string,
-  _projectId?: string,
 ): Promise<OAuthToken> {
   try {
-    // OAuth credentials are shared mail infrastructure. Preserve the optional
-    // argument for API compatibility, but never let a caller select a
-    // non-global project's client credentials.
     const projectId = getGlobalProjectId();
 
     if (provider === "gmail") {
-      const { client: gClient } = await cachedGoogleClient(projectId);
+      const gClient = await getGoogleClient(projectId);
       gClient.setCredentials({ refresh_token: refreshToken });
       const { credentials } = await gClient.refreshAccessToken();
       return {

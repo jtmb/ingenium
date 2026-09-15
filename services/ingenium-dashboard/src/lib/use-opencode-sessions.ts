@@ -8,18 +8,10 @@ import {
   useMemo,
   startTransition,
 } from "react";
-import { opencode, type OpenCodeSession } from "./opencode";
-import { request } from "./api";
-
-/* ------------------------------------------------------------------ */
-/*  Constants                                                          */
-/* ------------------------------------------------------------------ */
+import type { OpenCodeSession } from "./opencode";
+import { useOpenCodeClient } from "./RuntimeContext";
 
 const ACTIVE_SESSION_KEY = "opencode-chat-active-session";
-
-/* ------------------------------------------------------------------ */
-/*  Public interface                                                   */
-/* ------------------------------------------------------------------ */
 
 export interface UseOpenCodeSessionsReturn {
   /** All active sessions filtered by searchQuery, sorted by updatedAt desc. */
@@ -36,8 +28,6 @@ export interface UseOpenCodeSessionsReturn {
   searchQuery: string;
   /** Set the search filter (wrapped in startTransition). */
   setSearchQuery: (q: string) => void;
-
-  /* Actions */
 
   /** Create a new session and auto-select it. Returns the new session ID or null on error. */
   create: (title: string) => Promise<string | null>;
@@ -61,11 +51,9 @@ export interface UseOpenCodeSessionsReturn {
   unarchive: (id: string) => Promise<void>;
   /** True while auto-creating the initial session when the list is empty. */
   autoCreated: boolean;
+  /** True while one session creation request owns the creation slot. */
+  isCreating: boolean;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
 
 function persistActive(id: string | null): void {
   if (typeof window === "undefined") return;
@@ -86,10 +74,6 @@ function supportsArchive(session: OpenCodeSession): boolean {
   return "archived" in (session.time as Record<string, unknown>);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
-
 /**
  * React hook managing OpenCode session CRUD.
  *
@@ -101,25 +85,27 @@ function supportsArchive(session: OpenCodeSession): boolean {
  * - Archive/unarchive with graceful fallback when API lacks archive support
  */
 export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
-  /* ---- state ---- */
-
+  const opencode = useOpenCodeClient();
   const [allSessions, setAllSessions] = useState<OpenCodeSession[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(() =>
-    readPersistedActive(),
-  );
+  // A persisted ID is untrusted until the current session list confirms it.
+  // Starting without an active session prevents a stale localStorage value from
+  // issuing a messages request before that validation completes.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, _setSearchQuery] = useState("");
 
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
+  const refreshGenerationRef = useRef(0);
+  const selectionIntentRef = useRef(0);
+  const creationPendingRef = useRef(false);
   /** Snapshot of previous sessions for optimistic rollback in rename. */
   const renameSnapshotRef = useRef<OpenCodeSession[]>([]);
   /** Guards against duplicate auto-creation when the session list is empty. */
   const autoCreatedRef = useRef(false);
   const [autoCreated, setAutoCreated] = useState(false);
-
-  /* ---- derived: search filter ---- */
+  const [isCreating, setIsCreating] = useState(false);
 
   const sessions = useMemo(() => {
     if (!searchQuery.trim()) return allSessions;
@@ -127,10 +113,8 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     return allSessions.filter((s) => s.title.toLowerCase().includes(q));
   }, [allSessions, searchQuery]);
 
-  /** Archive is not supported in the V1.18.3 API — always empty. */
+  /** Archive is not supported in the V1.18.9 API — always empty. */
   const archivedSessions: OpenCodeSession[] = [];
-
-  /* ---- actions ---- */
 
   const setSearchQuery = useCallback((q: string) => {
     startTransition(() => _setSearchQuery(q));
@@ -141,12 +125,16 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const refreshGeneration = ++refreshGenerationRef.current;
+    const selectionIntent = selectionIntentRef.current;
 
     try {
       setError(null);
       setIsLoading(true);
       const data = await opencode.sessions.list("/workspace");
-      if (!mountedRef.current) return;
+      if (!mountedRef.current
+        || refreshGeneration !== refreshGenerationRef.current
+        || selectionIntent !== selectionIntentRef.current) return;
 
       // Sort by updatedAt descending (newest first)
       const sorted = [...data].sort(
@@ -158,19 +146,27 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       if (
         sorted.length === 0 &&
         !autoCreatedRef.current &&
+        !creationPendingRef.current &&
         mountedRef.current
       ) {
         autoCreatedRef.current = true;
+        creationPendingRef.current = true;
         setAutoCreated(true);
+        setIsCreating(true);
         try {
           const createdSession = await opencode.sessions.create({
             title: "New conversation",
             directory: "/workspace",
           });
-          if (!mountedRef.current) return;
-          setAllSessions([createdSession]);
-          setActiveId(createdSession.id);
-          persistActive(createdSession.id);
+          if (!mountedRef.current || refreshGeneration !== refreshGenerationRef.current) return;
+          if (selectionIntent === selectionIntentRef.current) {
+            setAllSessions([createdSession]);
+            selectionIntentRef.current += 1;
+            setActiveId(createdSession.id);
+            persistActive(createdSession.id);
+          } else {
+            setAllSessions((current) => [createdSession, ...current.filter(({ id }) => id !== createdSession.id)]);
+          }
         } catch (createErr: unknown) {
           if (!mountedRef.current) return;
           if (
@@ -183,29 +179,37 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
               : "Failed to create a new conversation. Please try again.";
           setError(message);
         } finally {
-          if (mountedRef.current) setAutoCreated(false);
+          creationPendingRef.current = false;
+          if (mountedRef.current) {
+            setAutoCreated(false);
+            setIsCreating(false);
+          }
         }
       } else {
-        // Auto-select if no active session and sessions exist
+        // Prefer the persisted session only after this response confirms it.
+        // If it was removed elsewhere, select and persist the current fallback.
+        const persistedActive = readPersistedActive();
         setActiveId((prev) => {
-          if (prev && sorted.some((s) => s.id === prev)) return prev;
-          const first = sorted[0];
-          return first ? first.id : null;
+          const preferred = prev ?? persistedActive;
+          if (preferred && sorted.some((s) => s.id === preferred)) return preferred;
+          const fallback = sorted[0]?.id ?? null;
+          if (preferred) persistActive(fallback);
+          return fallback;
         });
       }
     } catch (err: unknown) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current
+        || refreshGeneration !== refreshGenerationRef.current
+        || selectionIntent !== selectionIntentRef.current) return;
       const message =
         err instanceof Error ? err.message : "Failed to load sessions";
       if (message === "AbortError" || (err as Error)?.name === "AbortError")
         return;
       setError(message);
     } finally {
-      if (mountedRef.current) setIsLoading(false);
+      if (mountedRef.current && refreshGeneration === refreshGenerationRef.current) setIsLoading(false);
     }
-  }, []);
-
-  /* ---- initial load ---- */
+  }, [opencode]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -213,20 +217,30 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
 
     return () => {
       mountedRef.current = false;
+      refreshGenerationRef.current += 1;
       abortRef.current?.abort();
     };
   }, [refresh]);
 
-  /* ---- create ---- */
-
   const create = useCallback(async (title: string): Promise<string | null> => {
+    if (creationPendingRef.current) return null;
+    creationPendingRef.current = true;
+    setIsCreating(true);
+    const selectionIntent = selectionIntentRef.current;
     try {
       setError(null);
       const session = await opencode.sessions.create({
         title,
         directory: "/workspace",
       });
-      // Refresh to get the full sorted list
+      if (!mountedRef.current) return null;
+      setAllSessions((current) => [session, ...current.filter(({ id }) => id !== session.id)]);
+      if (selectionIntent === selectionIntentRef.current) {
+        selectionIntentRef.current += 1;
+        setActiveId(session.id);
+        persistActive(session.id);
+      }
+
       await opencode.sessions
         .list("/workspace")
         .then((data) => {
@@ -234,24 +248,25 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
           const sorted = [...data].sort(
             (a, b) => b.time.updated - a.time.updated,
           );
-          setAllSessions(sorted);
+          setAllSessions(sorted.some(({ id }) => id === session.id)
+            ? sorted
+            : [session, ...sorted]);
         })
         .catch(() => {
           /* refresh failure is non-critical */
         });
-
-      setActiveId(session.id);
-      persistActive(session.id);
       return session.id;
     } catch (err: unknown) {
+      if (!mountedRef.current) return null;
       const message =
         err instanceof Error ? err.message : "Failed to create session";
       setError(message);
       return null;
+    } finally {
+      creationPendingRef.current = false;
+      if (mountedRef.current) setIsCreating(false);
     }
-  }, []);
-
-  /* ---- rename (optimistic) ---- */
+  }, [opencode]);
 
   const rename = useCallback(async (id: string, title: string) => {
     try {
@@ -277,9 +292,7 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         err instanceof Error ? err.message : "Failed to rename session";
       setError(message);
     }
-  }, []);
-
-  /* ---- remove ---- */
+  }, [opencode]);
 
   const remove = useCallback(
     async (id: string) => {
@@ -306,17 +319,14 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         setError(message);
       }
     },
-    [activeId],
+    [activeId, opencode],
   );
 
-  /* ---- select ---- */
-
   const select = useCallback((id: string) => {
+    selectionIntentRef.current += 1;
     setActiveId(id);
     persistActive(id);
   }, []);
-
-  /* ---- fork ---- */
 
   const fork = useCallback(
     async (id: string, messageId?: string): Promise<string | null> => {
@@ -347,10 +357,8 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         return null;
       }
     },
-    [],
+    [opencode],
   );
-
-  /* ---- share ---- */
 
   const share = useCallback(
     async (id: string): Promise<string | null> => {
@@ -374,10 +382,8 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         return null;
       }
     },
-    [],
+    [opencode],
   );
-
-  /* ---- unshare ---- */
 
   const unshare = useCallback(async (id: string) => {
     try {
@@ -392,16 +398,14 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         err instanceof Error ? err.message : "Failed to unshare session";
       setError(message);
     }
-  }, []);
-
-  /* ---- archive / unarchive ---- */
+  }, [opencode]);
 
   const archive = useCallback(
     async (id: string) => {
       const session = allSessions.find((s) => s.id === id);
 
       if (session && supportsArchive(session)) {
-        // V2: archive endpoint would go here — not available in V1.18.3
+        // V2: archive endpoint would go here — not available in V1.18.9
         // Placeholder for when the API is upgraded
         setError("Archive not supported by current API version");
         return;
@@ -429,8 +433,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     [allSessions],
   );
 
-  /* ---- return ---- */
-
   return {
     sessions,
     archivedSessions,
@@ -450,5 +452,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     archive,
     unarchive,
     autoCreated,
+    isCreating,
   };
 }

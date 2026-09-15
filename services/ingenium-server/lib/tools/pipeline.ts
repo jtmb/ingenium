@@ -4,6 +4,7 @@
  * Supports listing events, fetching grouped timelines, and logging new events.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 /** List pipeline events with optional filters */
 export async function pipelineEvents(
@@ -20,7 +21,7 @@ export async function pipelineEvents(
   if (since) params.since = since;
 
   const res = await api.get("/pipeline/events", params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Get grouped timeline with children nested in parents */
@@ -36,7 +37,7 @@ export async function pipelineTimeline(
   if (since) params.since = since;
 
   const res = await api.get("/pipeline/timeline", params);
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Log a new pipeline event */
@@ -63,5 +64,5 @@ export async function pipelineEventLog(
   if (importance !== undefined) body.importance = importance;
 
   const res = await api.post("/pipeline/events", body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }

@@ -22,13 +22,19 @@ This script handles:
 2. **Chrome launch** — Launches Chrome with `--remote-debugging-port=9222` and `--remote-allow-origins=*` if not running
 3. **dev-browser install** — Installs `dev-browser` + Playwright Chromium on Windows if missing
 4. **Script execution** — Pipes JS to `dev-browser.cmd --connect http://localhost:9222` on Windows
-5. **Output filtering** — Removes cmd.exe UNC path warnings, returns clean JSON
+5. **Output filtering** — Removes cmd.exe UNC path warnings; `--json` validates
+   and returns one JSON value, while non-JSON mode permits nonempty plain stdout
 
 ### Three Invocation Styles
 
+Evidence-producing calls must opt into JSON mode and emit exactly one JSON value
+with `JSON.stringify(...)` on script stdout. Invoke the executable helper path
+directly; do not prefix it with `bash`. Non-evidence helper calls may omit
+`--json` and print plain text; empty stdout never proves page authentication.
+
 **Heredoc** (recommended — multi-line scripts, no quoting issues):
 ```bash
-./wsl-chrome-connect.sh <<'EOF'
+.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json <<'EOF'
 const p = await browser.getPage("task");
 await p.goto("https://example.com", { waitUntil: "domcontentloaded" });
 console.log(JSON.stringify({ title: await p.title(), url: p.url() }));
@@ -37,12 +43,12 @@ EOF
 
 **Inline** (single-line tasks):
 ```bash
-./wsl-chrome-connect.sh 'console.log(JSON.stringify(await browser.listPages()));'
+.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json 'console.log(JSON.stringify(await browser.listPages()));'
 ```
 
 **File pipe** (pre-written scripts):
 ```bash
-cat /path/to/script.js | ./wsl-chrome-connect.sh
+cat /path/to/script.js | .opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json
 ```
 
 ### Dev Browser API Quick Reference
@@ -73,7 +79,7 @@ Chrome 150+ ignores `--remote-debugging-address=0.0.0.0` and binds only to `127.
 | Mode | Command | Use Case |
 |------|---------|----------|
 | **Headless** (WSL) | `dev-browser --headless <<'EOF'...` | Sandboxed Chromium, no Windows Chrome needed |
-| **Connect** (Windows) | `./wsl-chrome-connect.sh <<'EOF'...` | Drive real Windows Chrome with cookies, sessions, extensions |
+| **Connect** (Windows) | `.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json <<'EOF'...` | Drive real Windows Chrome with cookies, sessions, extensions |
 
 For detailed mode documentation, see `@mcp-tooling` → `references/dev-browser/setup.md`.
 

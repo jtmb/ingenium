@@ -5,7 +5,8 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, resetDbForTest } from "ingenium-core";
+import { jobs, projects, resetDbForTest } from "ingenium-core";
+import { ensureGlobalProject, recoverInterruptedJobRunsAtStartup, startApiServer as startConfiguredApiServer } from "../scripts/api-server.js";
 
 /**
  * Startup regression tests — verify that the API server does not exit or crash
@@ -87,6 +88,25 @@ afterEach(async () => {
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 describe("API startup — no global project", () => {
+  it("refuses to bind without the injected authentication encryption key file", () => {
+    const originalToken = process.env.INGENIUM_API_TOKEN;
+    const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+    const originalKeyFile = process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+    const originalExitCode = process.exitCode;
+    process.env.INGENIUM_API_TOKEN = "a".repeat(32);
+    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
+    try {
+      expect(startConfiguredApiServer()).toBeNull();
+      expect(process.exitCode).toBe(1);
+    } finally {
+      if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN; else process.env.INGENIUM_API_TOKEN = originalToken;
+      if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE; else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+      if (originalKeyFile === undefined) delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE; else process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE = originalKeyFile;
+      process.exitCode = originalExitCode;
+    }
+  });
+
   it("health endpoint returns 200 even with no projects in DB", async () => {
     const app = buildApp();
     const baseUrl = await startServer(app);
@@ -114,6 +134,11 @@ describe("API startup — no global project", () => {
 });
 
 describe("API startup — ensureGlobalProject", () => {
+  it("propagates reserved broker trust failures instead of degrading startup", () => {
+    freshDb();
+    expect(() => ensureGlobalProject()).toThrow(/Reserved LLM broker profile/);
+  });
+
   /**
    * Simulate the api-server.ts startup logic: ensure a global project exists
    * using the same function pattern as the real server.
@@ -227,5 +252,22 @@ describe("API startup — global project isolation", () => {
     expect(global).toBeDefined();
     // With LIMIT 1 and no ORDER BY, the returned row is arbitrary
     expect([first.id, global!.id]).toContain(global!.id);
+  });
+});
+
+describe("API startup — interrupted job recovery", () => {
+  it("marks ordinary running jobs terminal before the scheduler can rerun them", () => {
+    const project = projects.createProject("startup-job-recovery");
+    const job = jobs.createJob(project.id, "Recover startup job", undefined, "ingenium-qa", "test");
+    const run = jobs.startJobRun(project.id, job.id, "manual");
+    if ("reason" in run) throw new Error(run.reason);
+
+    expect(recoverInterruptedJobRunsAtStartup()).toBe(1);
+    expect(jobs.getJobRun(project.id, run.id)).toMatchObject({
+      status: "failed",
+      exit_code: -1,
+      finished_at: expect.any(String),
+    });
+    expect("reason" in jobs.startJobRun(project.id, job.id, "manual")).toBe(false);
   });
 });

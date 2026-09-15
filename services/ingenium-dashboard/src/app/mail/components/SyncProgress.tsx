@@ -2,8 +2,6 @@
 
 import { badgeTones, BADGE_BASE } from '@/lib/badgeTones';
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 interface FolderProgress {
   folder: string;
   cachedCount: number;
@@ -23,8 +21,6 @@ interface SyncProgressProps {
   hasAuthError?: boolean;
   onReconnect?: () => void;
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function ProgressBar({
   value,
@@ -89,8 +85,6 @@ function StateBadge({ state }: { state: string }) {
   );
 }
 
-// ── Component ────────────────────────────────────────────────────────────────
-
 /**
  * SyncProgress — full-page mailbox sync status display.
  * Shows per-folder progress (headers → bodies), overall completion percentage,
@@ -114,7 +108,6 @@ export default function SyncProgress({
 
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
-      {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="text-center mb-10">
         <div className="text-5xl mb-4">📧</div>
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-2">
@@ -126,7 +119,6 @@ export default function SyncProgress({
         </p>
       </div>
 
-      {/* ── Overall progress bar ────────────────────────────────────── */}
       <div className="mb-8">
         <div className="flex justify-between text-sm mb-1.5">
           <span className="text-[var(--color-text-primary)] font-medium">
@@ -144,7 +136,6 @@ export default function SyncProgress({
         </p>
       </div>
 
-      {/* ── Per-folder cards ────────────────────────────────────────── */}
       <div className="space-y-3">
         {folders.map((f) => {
           const ready = f.cachedCount > 0;
@@ -244,14 +235,12 @@ export default function SyncProgress({
         })}
       </div>
 
-      {/* ── Footer ──────────────────────────────────────────────────── */}
       <p className="text-xs text-[var(--color-text-muted)] text-center mt-8">
         {syncingFolders > 0
           ? `Syncing ${syncingFolders} folder${syncingFolders > 1 ? "s" : ""}. Emails will appear as each folder completes.`
           : "All folders have initial data — loading your mailbox…"}
       </p>
 
-      {/* ── Auth error reconnect banner ─────────────────────────────── */}
       {hasAuthError && (
         <div className="mt-8 p-4 border border-amber-300 bg-amber-50 rounded-lg text-center">
           <p className="text-sm text-amber-800 font-medium mb-3">

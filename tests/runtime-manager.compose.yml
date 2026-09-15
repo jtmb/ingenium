@@ -1,0 +1,82 @@
+services:
+  control-plane:
+    image: node:22.23.1-bookworm-slim
+    container_name: ${CONTROL_PLANE_CONTAINER:?CONTROL_PLANE_CONTAINER is required}
+    labels:
+      com.ingenium.control-plane: "true"
+    command:
+      - node
+      - -e
+      - |
+        require("node:http").createServer(async (request,response) => {
+          try {
+            const runtime = new URL(request.url, "http://fixture").searchParams.get("runtime");
+            if (!runtime) return response.end("ok");
+            for (const port of [4098, 4099, 4100]) {
+              const upstream = await fetch("http://" + runtime + ":" + port + (port === 4100 ? "/healthz" : "/"), {
+                headers: port === 4099 ? { "X-Ingenium-Authenticated-User": "fixture" } : {},
+                signal: AbortSignal.timeout(5000),
+              });
+              if (!upstream.ok) throw new Error("runtime service unavailable");
+            }
+            response.end("ok");
+          } catch {
+            response.writeHead(503).end("unavailable");
+          }
+        }).listen(4096,"0.0.0.0")
+    ports:
+      - 127.0.0.1:${CONTROL_PLANE_HOST_PORT:?CONTROL_PLANE_HOST_PORT is required}:4096
+    networks: [runtime-control]
+
+  runtime-manager:
+    image: ${RUNTIME_MANAGER_IMAGE:?RUNTIME_MANAGER_IMAGE is required}
+    user: "1000:1000"
+    group_add: ["${DOCKER_GID:?DOCKER_GID is required}"]
+    environment:
+      INGENIUM_RUNTIME_MANAGER_PORT: "4110"
+      INGENIUM_RUNTIME_MANAGER_TOKEN_FILE: /run/fixture/token
+      INGENIUM_RUNTIME_WORKSPACE_MAP_FILE: /run/fixture/workspaces.json
+      INGENIUM_USER_RUNTIME_IMAGE: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
+      INGENIUM_RUNTIME_NETWORK_PREFIX: ${RUNTIME_NETWORK_PREFIX:?RUNTIME_NETWORK_PREFIX is required}
+      INGENIUM_CONTROL_PLANE_CONTAINER: ${CONTROL_PLANE_CONTAINER}
+      INGENIUM_RUNTIME_GATEWAY_CONTAINER: ${RUNTIME_GATEWAY_CONTAINER:?RUNTIME_GATEWAY_CONTAINER is required}
+      INGENIUM_RUNTIME_API_URL: http://ingenium-control-plane:4096/api/v1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${MANAGER_TOKEN_FILE:?MANAGER_TOKEN_FILE is required}:/run/fixture/token:ro
+      - ${WORKSPACE_MAP_FILE:?WORKSPACE_MAP_FILE is required}:/run/fixture/workspaces.json:ro
+      - ${PROVISION_REQUEST_FILE:?PROVISION_REQUEST_FILE is required}:/run/fixture/provision.json:ro
+      - ${RUNTIME_WORKSPACE_HOST:?RUNTIME_WORKSPACE_HOST is required}:/mnt/runtime-workspace:rw
+    networks: [runtime-control]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    ports:
+      - 127.0.0.1:${MANAGER_HOST_PORT:?MANAGER_HOST_PORT is required}:4110
+
+  runtime-gateway:
+    image: node:22.23.1-bookworm-slim
+    container_name: ${RUNTIME_GATEWAY_CONTAINER:?RUNTIME_GATEWAY_CONTAINER is required}
+    labels:
+      com.ingenium.runtime-gateway: "true"
+    command: ["node", "-e", "setInterval(() => {}, 60000)"]
+    networks: [runtime-control]
+
+  workspace-source-probe:
+    image: node:22.23.1-bookworm-slim
+    profiles: [fixture-probe]
+    command:
+      - node
+      - -e
+      - |
+        const mountInfo = require("node:fs").readFileSync("/proc/self/mountinfo", "utf8");
+        const line = mountInfo.split("\n").find((entry) => entry.split(" - ")[0].split(" ")[4] === "/mnt/runtime-workspace");
+        if (!line) process.exit(1);
+        process.stdout.write(line.split(" ")[3].replace(/\\(040|011|012|134)/g, (_match, code) => ({ "040": " ", "011": "\t", "012": "\n", "134": "\\" })[code]));
+    volumes:
+      - ${RUNTIME_WORKSPACE_HOST:?RUNTIME_WORKSPACE_HOST is required}:/mnt/runtime-workspace:rw
+    network_mode: none
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+
+networks:
+  runtime-control:

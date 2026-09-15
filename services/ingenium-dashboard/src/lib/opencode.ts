@@ -1,20 +1,19 @@
-/** Frontend API client for the OpenCode proxy at /api/v1/opencode/*. */
-import { request } from "./api";
+import { getApiBase, normalizeChatConfigResponse, request, type ChatConfigResponse } from "./api";
 
 /**
  * Thin wrapper that unwraps the `{ data: T }` envelope the proxy routes return.
  * Every proxy endpoint at /api/v1/opencode/* wraps its payload in `{ data: ... }`.
  */
-async function oc<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await request<{ data: T }>(path, options);
-  return res.data;
+function runtimePath(path: string, runtimeId: string | null): string {
+  if (runtimeId === null) return path;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runtimeId)) {
+    throw new Error("Invalid OpenCode runtime binding");
+  }
+  const url = new URL(path, "http://dashboard.invalid");
+  url.searchParams.set("runtime_id", runtimeId);
+  return `${url.pathname}${url.search}`;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Types matching the verified OpenCode v1.18.3 contract             */
-/* ------------------------------------------------------------------ */
-
-/* ----- Session ----- */
 
 export interface OpenCodeSession {
   id: string;
@@ -41,7 +40,6 @@ export interface OpenCodeSession {
   revert?: { messageID: string; snapshot?: string; diff?: string };
 }
 
-/* ----- Message ----- */
 
 export interface OpenCodeMessage {
   info: MessageInfo;
@@ -68,7 +66,6 @@ export interface MessageInfo {
   finish?: "stop" | string;
 }
 
-/* ----- Part types ----- */
 
 export interface TextPart {
   id: string;
@@ -144,33 +141,133 @@ export type OpenCodePart =
   | ToolPart
   | FilePart;
 
-/* ----- Provider / Model / Agent ----- */
+
+/**
+ * The browser-facing provider DTO returned by the API proxy.
+ *
+ * The proxy intentionally exposes a small, stable shape instead of the raw
+ * OpenCode provider object. Keep consumers on this shape so an upstream
+ * provider contract change cannot break the Settings panel at runtime.
+ */
+export interface OpenCodeProviderModel {
+  id: string;
+  label: string;
+}
 
 export interface OpenCodeProvider {
   id: string;
-  name: string;
-  source: string;
-  env?: string[];
-  options?: Record<string, unknown>;
-  models: Record<string, OpenCodeModel>;
+  label: string;
+  models: OpenCodeProviderModel[];
+  defaultModel: string | null;
+  connected: boolean;
 }
 
-export interface OpenCodeModel {
-  id: string;
-  providerID: string;
-  name: string;
-  capabilities: {
-    temperature?: boolean;
-    reasoning?: boolean;
-    attachment?: boolean;
-    toolcall?: boolean;
-    input?: { text?: boolean; image?: boolean; audio?: boolean; video?: boolean };
-    output?: { text?: boolean; image?: boolean; audio?: boolean };
+export interface OpenCodeProviderCatalog {
+  providers: OpenCodeProvider[];
+}
+
+interface ProviderRecord {
+  [key: string]: unknown;
+}
+
+function isProviderRecord(value: unknown): value is ProviderRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function unwrapDataEnvelope(input: unknown): unknown {
+  let value = input;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!isProviderRecord(value) || !("data" in value)) return value;
+    value = value.data;
+  }
+  return value;
+}
+
+function collectionValues(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (!isProviderRecord(value)) return [];
+  return Object.entries(value).map(([key, entry]) => {
+    if (!isProviderRecord(entry)) return entry;
+    return { ...entry, id: nonEmptyString(entry.id) ?? key };
+  });
+}
+
+function normalizeProviderModels(value: unknown): OpenCodeProviderModel[] {
+  const models: OpenCodeProviderModel[] = [];
+  const modelIds = new Set<string>();
+
+  const addModel = (value: unknown, fallbackId?: string) => {
+    if (typeof value === "string") {
+      const id = nonEmptyString(value) ?? fallbackId ?? null;
+      if (!id || modelIds.has(id)) return;
+      models.push({ id, label: id });
+      modelIds.add(id);
+      return;
+    }
+    if (!isProviderRecord(value)) return;
+    const id = nonEmptyString(value.id) ?? fallbackId ?? null;
+    if (!id || modelIds.has(id)) return;
+    const label = nonEmptyString(value.label) ?? nonEmptyString(value.name) ?? id;
+    models.push({ id, label });
+    modelIds.add(id);
   };
-  cost: { input: number; output: number; cache?: { read: number; write: number } };
-  limit: { context: number; input?: number; output?: number };
-  status: string;
-  variants?: Record<string, { reasoningEffort?: string }>;
+
+  if (Array.isArray(value)) {
+    for (const model of value) addModel(model);
+  } else if (isProviderRecord(value)) {
+    for (const [modelId, model] of Object.entries(value)) addModel(model, modelId);
+  }
+
+  return models;
+}
+
+/**
+ * Normalize both the current browser DTO (`providers`) and the historical
+ * OpenCode response (`all`) into one always-array catalog for callers.
+ */
+export function normalizeOpenCodeProviderCatalog(input: unknown): OpenCodeProviderCatalog {
+  const root = unwrapDataEnvelope(input);
+  if (!isProviderRecord(root)) return { providers: [] };
+
+  const defaults = isProviderRecord(root.default) ? root.default : {};
+  const connected = new Set(
+    Array.isArray(root.connected)
+      ? root.connected.filter((value): value is string => typeof value === "string")
+      : [],
+  );
+  const candidates = collectionValues(root.providers ?? root.all);
+  const providers: OpenCodeProvider[] = [];
+  const providerIds = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (!isProviderRecord(candidate)) continue;
+    const id = nonEmptyString(candidate.id);
+    if (!id || providerIds.has(id)) continue;
+
+    const label = nonEmptyString(candidate.label) ?? nonEmptyString(candidate.name) ?? id;
+    const models = normalizeProviderModels(candidate.models);
+    const configuredDefault = nonEmptyString(candidate.defaultModel) ?? nonEmptyString(defaults[id]);
+    const defaultModel = configuredDefault && models.some((model) => model.id === configuredDefault)
+      ? configuredDefault
+      : null;
+
+    providers.push({
+      id,
+      label,
+      models,
+      defaultModel,
+      connected: typeof candidate.connected === "boolean"
+        ? candidate.connected
+        : connected.has(id),
+    });
+    providerIds.add(id);
+  }
+
+  return { providers };
 }
 
 export interface OpenCodeAgent {
@@ -205,6 +302,111 @@ export interface OpenCodeIntegration {
   connections: Array<{ type: string; id?: string; label?: string; name?: string }>;
 }
 
+function normalizeIntegrationPrompts(value: unknown): OpenCodeIntegrationPrompt[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((prompt): OpenCodeIntegrationPrompt[] => {
+    if (!isProviderRecord(prompt)) return [];
+    const type = prompt.type === "select" ? "select" : prompt.type === "text" ? "text" : null;
+    const key = nonEmptyString(prompt.key);
+    const message = nonEmptyString(prompt.message);
+    if (!type || !key || !message) return [];
+    const options = Array.isArray(prompt.options)
+      ? prompt.options.flatMap((option) => {
+        if (!isProviderRecord(option)) return [];
+        const label = nonEmptyString(option.label);
+        const value = nonEmptyString(option.value);
+        const hint = nonEmptyString(option.hint);
+        if (!label || !value) return [];
+        return [{ label, value, ...(hint ? { hint } : {}) }];
+      })
+      : undefined;
+    const placeholder = nonEmptyString(prompt.placeholder);
+    return [{
+      type,
+      key,
+      message,
+      ...(placeholder ? { placeholder } : {}),
+      ...(options ? { options } : {}),
+    }];
+  });
+}
+
+function normalizeOpenCodeIntegrations(input: unknown): OpenCodeIntegration[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.integrations ?? root.items ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodeIntegration[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const id = nonEmptyString(candidate.id);
+    if (!id) return [];
+    const methods = Array.isArray(candidate.methods)
+      ? candidate.methods.flatMap((method): OpenCodeIntegrationMethod[] => {
+        if (!isProviderRecord(method)) return [];
+        const type = method.type === "key" || method.type === "env" || method.type === "oauth"
+          ? method.type
+          : null;
+        if (!type) return [];
+        const methodId = nonEmptyString(method.id);
+        const methodLabel = nonEmptyString(method.label);
+        return [{
+          type,
+          ...(methodId ? { id: methodId } : {}),
+          ...(methodLabel ? { label: methodLabel } : {}),
+          ...(Array.isArray(method.names)
+            ? { names: method.names.filter((name): name is string => typeof name === "string") }
+            : {}),
+          prompts: normalizeIntegrationPrompts(method.prompts),
+        }];
+      })
+      : [];
+    const connections = Array.isArray(candidate.connections)
+      ? candidate.connections.flatMap((connection) => {
+        if (!isProviderRecord(connection)) return [];
+        const type = nonEmptyString(connection.type);
+        if (!type) return [];
+        const connectionId = nonEmptyString(connection.id);
+        const connectionLabel = nonEmptyString(connection.label);
+        const connectionName = nonEmptyString(connection.name);
+        return [{
+          type,
+          ...(connectionId ? { id: connectionId } : {}),
+          ...(connectionLabel ? { label: connectionLabel } : {}),
+          ...(connectionName ? { name: connectionName } : {}),
+        }];
+      })
+      : [];
+    return [{
+      id,
+      name: nonEmptyString(candidate.name) ?? nonEmptyString(candidate.label) ?? id,
+      methods,
+      connections,
+    }];
+  });
+}
+
+function normalizeOpenCodeAgents(input: unknown): OpenCodeAgent[] {
+  const root = unwrapDataEnvelope(input);
+  if (!Array.isArray(root)) return [];
+  return root.flatMap((agent): OpenCodeAgent[] => {
+    if (!isProviderRecord(agent)) return [];
+    const name = nonEmptyString(agent.name);
+    if (!name) return [];
+    const description = nonEmptyString(agent.description);
+    return [{
+      name,
+      ...(description ? { description } : {}),
+      mode: typeof agent.mode === "string" ? agent.mode : "subagent",
+      ...(typeof agent.native === "boolean" ? { native: agent.native } : {}),
+      ...(typeof agent.hidden === "boolean" ? { hidden: agent.hidden } : {}),
+      ...(Array.isArray(agent.permission) ? { permission: agent.permission } : {}),
+    }];
+  });
+}
+
 export interface OpenCodeIntegrationAttempt {
   attemptID: string;
   url: string;
@@ -213,11 +415,8 @@ export interface OpenCodeIntegrationAttempt {
   time: { created: number; expires: number };
 }
 
-/* ------------------------------------------------------------------ */
-/*  Prompt body types                                                 */
-/* ------------------------------------------------------------------ */
-
 export interface OpenCodePromptParams {
+  messageID?: string;
   parts: Array<
     | { type: "text"; text: string }
     | { type: "file"; mime: string; url: string; filename?: string }
@@ -229,11 +428,17 @@ export interface OpenCodePromptParams {
   variant?: string;
 }
 
-/* ------------------------------------------------------------------ */
-/*  API client                                                        */
-/* ------------------------------------------------------------------ */
+export interface OpenCodePromptAccepted {
+  accepted: boolean;
+}
 
-export const opencode = {
+export function createOpenCodeClient(runtimeId: string | null) {
+  const oc = async <T>(path: string, options?: RequestInit): Promise<T> => {
+    const res = await request<{ data: T }>(runtimePath(path, runtimeId), options);
+    return res.data;
+  };
+
+  return {
   sessions: {
     list: (directory?: string) =>
       oc<OpenCodeSession[]>(
@@ -276,7 +481,7 @@ export const opencode = {
       ),
 
     prompt: (id: string, body: OpenCodePromptParams) =>
-      oc<OpenCodeMessage>(`/opencode/sessions/${encodeURIComponent(id)}/prompt`, {
+      oc<OpenCodePromptAccepted>(`/opencode/sessions/${encodeURIComponent(id)}/prompt`, {
         method: "POST",
         body: JSON.stringify(body),
       }),
@@ -372,21 +577,33 @@ export const opencode = {
   },
 
   providers: {
-    list: (directory?: string) =>
-      oc<{
-        all: OpenCodeProvider[];
-        default: Record<string, string>;
-        connected: string[];
-      }>(
+    list: async (directory?: string): Promise<OpenCodeProviderCatalog> => {
+      const response = await oc<unknown>(
         `/opencode/providers${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
-      ),
+      );
+      return normalizeOpenCodeProviderCatalog(response);
+    },
+  },
+
+  chat: {
+    config: async (): Promise<ChatConfigResponse> => normalizeChatConfigResponse(await oc<unknown>("/opencode/chat-config")),
+    saveSelection: (selection: { providerId: string; modelId: string }) =>
+      oc<{ project: string; providerId: string; modelId: string }>("/opencode/chat-selection", {
+        method: "PUT",
+        body: JSON.stringify(selection),
+      }),
   },
 
   integrations: {
-    list: (directory = "/workspace") =>
-      oc<{ location: Record<string, unknown>; data: OpenCodeIntegration[] }>(
+    list: async (directory = "/workspace") => {
+      const response = await oc<unknown>(
         `/opencode/integrations?directory=${encodeURIComponent(directory)}`,
-      ),
+      );
+      const location = isProviderRecord(response) && isProviderRecord(response.location)
+        ? response.location
+        : {};
+      return { location, data: normalizeOpenCodeIntegrations(response) };
+    },
 
     connectKey: (integrationID: string, key: string) =>
       oc<unknown>(`/opencode/integrations/${encodeURIComponent(integrationID)}/connect/key`, {
@@ -421,7 +638,7 @@ export const opencode = {
   },
 
   agents: {
-    list: () => oc<OpenCodeAgent[]>("/opencode/agents"),
+    list: async () => normalizeOpenCodeAgents(await oc<unknown>("/opencode/agents")),
   },
 
   mcp: {
@@ -466,12 +683,16 @@ export const opencode = {
   questions: {
     /**
      * List pending questions for a session/directory.
-     * v1.18.3 contract: GET /question returns array of { id, text } objects.
+     * v1.18.9 contract: GET /question returns array of { id, text } objects.
      */
     list: (directory?: string) =>
       oc<Array<{ id: string; text?: string }>>(
         `/opencode/questions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
       ),
+  },
+
+  events: {
+    url: (sessionId: string) => `${getApiBase()}${runtimePath(`/opencode/sessions/${encodeURIComponent(sessionId)}/events`, runtimeId)}`,
   },
 
   /* ── File upload ── */
@@ -489,11 +710,14 @@ export const opencode = {
       formData.append("file", file);
       // Use request() with empty headers to override the default JSON Content-Type
       // so the browser auto-sets multipart/form-data with the boundary.
-      return request("/opencode/upload", {
+      return request(runtimePath("/opencode/upload", runtimeId), {
         method: "POST",
         headers: {},
         body: formData,
       });
     },
   },
-};
+  };
+}
+
+export type OpenCodeClient = ReturnType<typeof createOpenCodeClient>;

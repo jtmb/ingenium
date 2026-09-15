@@ -1,30 +1,37 @@
 ---
 title: Skill System Architecture
-description: Canonical taxonomy, three-layer lifecycle, bidirectional sync, security, and MCP tool catalog for the Ingenium skill system.
+description: Canonical taxonomy, three-layer lifecycle, Git-authoritative resource sync, security, and MCP tool catalog for the Ingenium skill system.
 ---
 
 # Skill System Architecture
 
 ## Overview
 
-The Ingenium skill system manages AI agent skills through a **DB-primary, three-layer lifecycle** architecture. Skills define conventions, rules, and patterns that agents load at session startup to guide their behavior.
+The Ingenium skill system manages AI agent skills through a **Git-authoritative,
+three-layer lifecycle** architecture. Skills define conventions, rules, and
+patterns that agents load at session startup to guide their behavior.
 
 ## Canonical Taxonomy
 
-As of Phase 3 (2026-07-16), 36 legacy skills were consolidated into **10 canonical skills**:
+The repository currently exposes **8 canonical skills**. Agent behavior instructions
+live in each respective `.opencode/agents/**` profile, not a shared workflow skill.
 
 | Skill | Domain | Inherits From |
 |-------|--------|---------------|
 | `development-conventions` | Code conventions, API design, testing, refactoring | api-aggregation-patterns, ingenium-ops, language-conventions, mail-app-ui-conventions, visual-standards-conventions |
 | `devops-conventions` | Docker, K8s, git, CLI toolkit | git-history-hygiene, github-cli, onboard-existing-repo, parallel-session-hygiene |
 | `database-conventions` | SQLite WAL, FTS5, migrations | database-migration-management, sqlite-migration-patterns, sqlite-wal-safety |
-| `engineering-workflow` | Agent pipeline, debugging, orchestrator | agent-execution-quality, agent-workflow-patterns, debugging-patterns, configuring-opencode, logging-visibility, orchestrator-primer, per-project-scoping, supervision-logging, uncensored-direct-response |
 | `mcp-tooling` | MCP integration, browser automation | browsing-the-web, dashboard-screenshots |
-| `local-models` | Local model profiles, command safety | — |
 | `security-audit` | Security scanning, leak detection | security-audit-workflow |
 | `documentation` | Docs workspace, conventions, audit | docs-workspace, documentation-architecture, documentation-audit-workflow |
 | `self-learning` | Observations, traits, synthesis | — |
 | `skill-maintenance` | Skill lifecycle management | local-persistence |
+
+“Canonical” and “active” here describe checked-in repository paths and catalog
+state. Source inspection alone does not establish a running session’s loaded
+profiles or runtime retirement. The extension-provided Ponytail skill is
+separately vendored at `packages/ingenium-extension/ponytail/` and is outside
+this eight-skill taxonomy.
 
 ## On-Disk Format
 
@@ -61,16 +68,54 @@ Each skill lives at `.opencode/skills/<name>/` with a split-skill format:
 - Approval checks: revision conflicts, missing/archived targets before applying.
 - Merge approvals create lineage records where applicable.
 
-## Skill Sync (Bidirectional)
+Migration `091_skill_proposal_retention_pagination.sql` retains every proposal:
+the database rejects deletes from `skill_proposals`. Proposal reads use bounded
+keyset pagination over the project/status/created-at/id index. The API and MCP
+surface an `open` view (`draft`/`pending`), a `history` view
+(`stale`/`rejected`/`applied`/`rolled_back`), and separate scoped counts; pages
+default to 25 rows and accept at most 100. The former unbounded list route is
+retired with `410 SKILL_PROPOSAL_LIST_RETIRED`.
 
-The system uses a **Resource Sync Engine** (`packages/ingenium-extension/resource-sync.ts`) with SHA-256 hash manifest for conflict-aware bidirectional sync:
+## Skill Sync
+
+The system uses the Resource Sync Engine with a SHA-256 manifest for the single
+Git-authoritative projection path:
 
 | Direction | Trigger | Mechanism |
 |-----------|---------|-----------|
-| DB → Disk | After API create/update | `writeSkillToDisk()` — reads `file_tree` JSON, writes all files |
-| Disk → DB | `session.created`, `session.idle` | Resource sync engine — hashed manifest comparison |
-| Bidirectional | `/sync-skills` command | Two-phase sync: disk imports → DB writes → disk writes |
-| Scheduled | Every 15 min (API scheduler) | Runs extraction → synthesis for all active projects; resource sync runs separately in the extension on session events |
+| Git worktree → API/DB | `session.created`, `session.idle`, `ingenium_repository_sync` | Resource sync through MCP stdio and authenticated API |
+| API/DB repair → worktree | Explicit administrative repair only | Authenticated API/MCP operation; never automatic external sync |
+| Build/runtime | Extension or plugin change | Rebuild extension and restart OpenCode |
+| Scheduled learning | Every 15 min (API scheduler) | Runs extraction → synthesis; this is separate from resource sync |
+
+The explicit `ingenium_repository_sync` operation projects repository Markdown
+and, when requested, version-2 skills/agents/plugins/commands manifests through
+`POST /api/v1/repository/sync`. It carries an `expectedGeneration` for
+compare-and-swap and has a `dryRun` mode; it does not carry a coordination claim
+proof. Commands are included in the repository resource lifecycle; project and
+global configuration remain excluded.
+
+### Lineage-proven tombstone cleanup
+
+Before an `all`-scope repository sync scans skills or calls the authenticated MCP
+projection, the extension removes only marker-only legacy directories proven by
+`.opencode/skills/consolidation-map.json`. Docs-only sync skips this step. Dry-run
+reports candidates without deleting them.
+
+The cleanup validates the immutable historical canonical-skill set separately
+from the current active target allowlist. It requires unique safe mapping names, a
+64-digit lowercase hexadecimal source hash, a contained non-symlink directory
+whose only child is a regular and exact `MIGRATED-TO.md`, an existing canonical
+target `SKILL.md`, and the exact regular canonical source-index path. It
+revalidates before apply, removes only the marker, then removes the empty legacy
+directory. Any malformed, unmapped, nonempty, symlinked, traversal-mapped, or
+otherwise unproven candidate fails closed and remains on disk. The consolidation
+map and canonical `references/sources/*/source-index.md` lineage are preserved.
+
+The canonical worktree currently contains zero `MIGRATED-TO.md` markers and zero
+root-level legacy skill directories named by the mappings. The map retains all
+28 historical mappings; 19 source indexes survive under active skills. Retired
+targets do not invalidate history or authorize cleanup without an active target.
 
 ## Maintenance Locks
 
@@ -111,13 +156,17 @@ Skills are **never hard-deleted**. `deleteSkill()` delegates to `archiveSkill()`
 | No token leak | Lock owner token stripped from all API responses |
 | Wire compatibility boundary | Legacy CRUD returns `snake_case` raw rows; governance returns `camelCase` DTOs |
 
-## MCP Tool Catalog (25 tools)
+## MCP Tool Catalog (28 tools)
 
-**11 Core:**
-`list`, `load`, `search`, `create`, `update`, `delete` (→ archive), `enable`, `disable`, `sync`, `consolidate`, `sync_all`
+**12 Core:**
+`list`, `load`, `search`, `create`, `update`, `delete` (→ archive), `enable`, `disable`, `sync`, `consolidate`, `sync_all`, `sync_all_preview`
 
-**14 Governance:**
-`archive`, `restore`, `list_archived`, `versions`, `rollback`, `lineage_create`, `lineage_list`, `proposal_create`, `proposal_list`, `proposal_get`, `proposal_submit`, `proposal_approve`, `proposal_reject`, `proposal_rollback`
+**16 Governance:**
+`archive`, `restore`, `list_archived`, `versions`, `rollback`, `lineage_create`, `lineage_list`, `proposal_create`, `proposal_list` (deprecated), `proposal_page`, `proposal_counts`, `proposal_get`, `proposal_submit`, `proposal_approve`, `proposal_reject`, `proposal_rollback`
+
+`ingenium_skill_sync` and `ingenium_skill_sync_all` are API-host/admin repair or
+import tools only. Agents must not run them after edits and they are not the
+automatic external-worktree synchronization path.
 
 ## MCP Tools vs REST Endpoints
 

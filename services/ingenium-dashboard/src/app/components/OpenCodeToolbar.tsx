@@ -1,57 +1,39 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { useOpenCodeHealth } from "@/lib/use-opencode-health";
+import { useEffect } from "react";
 
 export type OpenCodeToolbarMode = "web" | "cli";
 
 interface OpenCodeToolbarProps {
   mode: OpenCodeToolbarMode;
   onModeChange: (newMode: OpenCodeToolbarMode) => void;
-  isLoaded: boolean;
+  status: "pending" | "connected" | "error";
 }
 
 /**
  * Compact integrated toolbar at the top of the OpenCode viewport.
  *
  * Contains a segmented Web/CLI toggle, fullscreen button, pop-out button,
- * and a status indicator (green=loaded, red=loading). Replaces the old
- * floating glass OpenCodeSwitch tab.
+ * and a status indicator (green=loaded, red=loading).
  *
  * Keyboard shortcut: Ctrl+Shift+` toggles Web ↔ CLI mode.
  */
 export default function OpenCodeToolbar({
   mode,
   onModeChange,
-  isLoaded,
+  status,
 }: OpenCodeToolbarProps) {
-  /**
-   * Refs to avoid stale closures in the keyboard shortcut listener.
-   *
-   * The `useEffect` with `[]` deps only runs once, so the callback would
-   * capture the initial values of `mode` and `onModeChange`. Using refs
-   * ensures the handler always reads the latest values without re-registering
-   * the listener on every render.
-   */
-  const modeRef = useRef(mode);
-  modeRef.current = mode;
-  const onModeChangeRef = useRef(onModeChange);
-  onModeChangeRef.current = onModeChange;
-
-  const { status: healthStatus, authScope } = useOpenCodeHealth();
-
   // Global keyboard shortcut: Ctrl+Shift+` — toggles Web ↔ CLI
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "Backquote") {
         e.preventDefault();
-        const next = modeRef.current === "web" ? "cli" : "web";
-        onModeChangeRef.current(next);
+        onModeChange(mode === "web" ? "cli" : "web");
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [mode, onModeChange]);
 
   const handleFullscreen = () => {
     try {
@@ -67,7 +49,7 @@ export default function OpenCodeToolbar({
 
   const handlePopOut = () => {
     window.open(
-      "/standalone?page=opencode",
+      `/standalone?page=opencode&mode=${mode}`,
       "_blank",
       "width=1280,height=900,noopener"
     );
@@ -166,44 +148,12 @@ export default function OpenCodeToolbar({
 
         {/* Health status indicator */}
         <span
-          title={
-            healthStatus === "starting"
-              ? "OpenCode is starting up…"
-              : healthStatus === "auth-required"
-                ? authScope === "dashboard"
-                  ? "Dashboard authentication required"
-                  : "OpenCode gateway authentication required"
-                : healthStatus === "unavailable"
-                  ? "OpenCode is unavailable"
-                  : isLoaded
-                    ? "Connected"
-                    : "Loading…"
-          }
+          title={status === "connected" ? "Connected to runtime" : status === "error" ? "Runtime unavailable" : "Runtime not connected"}
           className={[
             "w-2 h-2 rounded-full shrink-0 transition-colors duration-300",
-            healthStatus === "starting"
-              ? "bg-yellow-500 animate-pulse"
-              : healthStatus === "auth-required"
-                ? "bg-orange-500"
-                : healthStatus === "unavailable"
-                  ? "bg-red-500"
-                  : isLoaded
-                    ? "bg-green-500"
-                    : "bg-red-500 animate-pulse",
+            status === "connected" ? "bg-green-500" : status === "error" ? "bg-red-500" : "bg-yellow-500 animate-pulse",
           ].join(" ")}
-          aria-label={
-            healthStatus === "starting"
-              ? "OpenCode starting"
-              : healthStatus === "auth-required"
-                ? authScope === "dashboard"
-                  ? "Dashboard authentication required"
-                  : "OpenCode authentication required"
-                : healthStatus === "unavailable"
-                  ? "OpenCode unavailable"
-                  : isLoaded
-                    ? "OpenCode connected"
-                    : "OpenCode loading"
-          }
+          aria-label={status === "connected" ? "OpenCode runtime connected" : status === "error" ? "OpenCode runtime unavailable" : "OpenCode runtime not connected"}
         />
       </div>
     </div>

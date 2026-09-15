@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import React from "react";
 import ToolCallCard, {
   extractWebSearchSites,
+  getSafeToolErrorMessage,
 } from "../src/app/chat/components/ToolCallCard";
 
 describe("ToolCallCard", () => {
@@ -67,6 +68,58 @@ describe("ToolCallCard", () => {
     expect(screen.getByTestId("chat-tool-call").querySelector("button")).toBeNull();
   });
 
+  it.each([
+    ["TOOL_DISABLED", "This tool is disabled for the project."],
+    ["TOOL_STATE_UNAVAILABLE", "The tool state could not be verified."],
+    ["PROJECT_IDENTITY_REQUIRED", "This tool requires a valid project identity."],
+    ["private provider diagnostic", "Tool execution failed."],
+  ])("renders a fixed safe message for %s", (error, message) => {
+    render(
+      React.createElement(ToolCallCard, {
+        toolName: "mcp_custom_tool",
+        state: "failed",
+        error,
+      }),
+    );
+
+    expect(screen.getByTestId("chat-tool-error").textContent).toBe(message);
+    expect(screen.queryByText(error, { exact: true })).toBeNull();
+  });
+
+  it("normalizes unknown tool errors without exposing their contents", () => {
+    expect(getSafeToolErrorMessage("Bearer secret-token upstream failure")).toBe("Tool execution failed.");
+    expect(getSafeToolErrorMessage()).toBe("Tool execution failed.");
+  });
+
+  it("reads only an exact MCP JSON error envelope from output", () => {
+    expect(getSafeToolErrorMessage(undefined, JSON.stringify({
+      error: { code: "TOOL_DISABLED", message: "private detail" },
+    }))).toBe("This tool is disabled for the project.");
+    expect(getSafeToolErrorMessage(undefined, JSON.stringify({
+      error: { code: "TOOL_DISABLED_EXTRA", message: "private detail" },
+    }))).toBe("Tool execution failed.");
+    expect(getSafeToolErrorMessage(undefined, {
+      isError: true,
+      content: [{
+        type: "text",
+        text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED" } }),
+      }],
+    })).toBe("This tool requires a valid project identity.");
+  });
+
+  it("never creates an MCP link from an unsafe project name", () => {
+    render(
+      React.createElement(ToolCallCard, {
+        toolName: "mcp_custom_tool",
+        state: "failed",
+        error: "TOOL_DISABLED",
+        mcpProject: "global/default",
+      }),
+    );
+
+    expect(screen.queryByRole("link", { name: /MCP Servers/ })).toBeNull();
+  });
+
   it("preserves the argument summary without an expandable body", () => {
     render(
       React.createElement(ToolCallCard, {
@@ -100,12 +153,14 @@ describe("ToolCallCard", () => {
     );
   });
 
-  it("discloses the actual search query inline when opened", () => {
+  it("opens the shared activity flow instead of rendering inline details", () => {
+    const onWebSearchOpen = vi.fn();
     render(
       React.createElement(ToolCallCard, {
         toolName: "web_search",
         state: "running",
         input: { query: "latest TypeScript release" },
+        onWebSearchOpen,
       }),
     );
 
@@ -115,60 +170,11 @@ describe("ToolCallCard", () => {
 
     fireEvent.click(trigger);
 
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByTestId("chat-tool-details").textContent).toContain(
-      "latest TypeScript release",
-    );
-    expect(screen.getByTestId("chat-tool-details").textContent).toContain(
-      "Search query:",
-    );
+    expect(onWebSearchOpen).toHaveBeenCalledOnce();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("chat-tool-details")).toBeNull();
     expect(screen.queryByTestId("chat-tool-status")).toBeNull();
     expect(screen.queryByText("Completed", { exact: true })).toBeNull();
-    expect(screen.queryByText("Duration", { exact: true })).toBeNull();
-    expect(screen.getByTestId("chat-tool-details").className).not.toMatch(
-      /\b(?:border|rounded|bg-)/,
-    );
-
-    fireEvent.click(trigger);
-    expect(screen.queryByTestId("chat-tool-details")).toBeNull();
-  });
-
-  it("discloses only provider-returned Web Search URLs with explicit labels", () => {
-    render(
-      React.createElement(ToolCallCard, {
-        toolName: "websearch",
-        state: "completed",
-        input: { query: "transparent chat streaming" },
-        output: {
-          results: [
-            {
-              title: "Untrusted result title that must not render",
-              url: "https://results.example.test/chat-streaming",
-            },
-          ],
-          crawled: [
-            { href: "https://visited.example.test/stream-lifecycle" },
-          ],
-        },
-      }),
-    );
-
-    fireEvent.click(screen.getByTestId("chat-tool-trigger"));
-
-    const groups = screen.getAllByTestId("chat-web-search-group");
-    expect(groups.map((group) => group.getAttribute("data-label"))).toEqual([
-      "Visited",
-      "Results",
-    ]);
-    expect(screen.queryByText("Untrusted result title that must not render")).toBeNull();
-
-    const links = screen.getAllByTestId("chat-web-search-link");
-    expect(links).toHaveLength(2);
-    expect(links[0]!.textContent).toContain("https://visited.example.test/stream-lifecycle");
-    expect(links[0]!.getAttribute("href")).toBe("https://visited.example.test/stream-lifecycle");
-    expect(links[0]!.getAttribute("target")).toBe("_blank");
-    expect(links[0]!.getAttribute("rel")).toBe("noopener noreferrer");
-    expect(links[1]!.textContent).toContain("https://results.example.test/chat-streaming");
   });
 
   it("keeps query-only Web Search output free of a fabricated site list", () => {
@@ -187,25 +193,25 @@ describe("ToolCallCard", () => {
   });
 
   it("exposes Web Search as a native keyboard-accessible disclosure control", () => {
+    const onWebSearchOpen = vi.fn();
     render(
       React.createElement(ToolCallCard, {
         toolName: "websearch",
         state: "pending",
         input: { query: "keyboard accessible search" },
+        onWebSearchOpen,
       }),
     );
 
     const trigger = screen.getByTestId("chat-tool-trigger");
     expect(trigger.tagName).toBe("BUTTON");
     expect(trigger.getAttribute("type")).toBe("button");
-    expect(trigger.getAttribute("aria-controls")).toBeTruthy();
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
     trigger.focus();
     expect(document.activeElement).toBe(trigger);
 
-    fireEvent.keyDown(trigger, { key: "Enter" });
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-
-    fireEvent.keyDown(trigger, { key: " " });
+    fireEvent.click(trigger);
+    expect(onWebSearchOpen).toHaveBeenCalledOnce();
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -332,5 +338,43 @@ describe("extractWebSearchSites", () => {
         description: "https://unknown.example.test/not-an-explicit-url-field",
       }),
     ).toEqual([]);
+  });
+
+  it("extracts ordered markdown, autolink, and bare URLs from provider text", () => {
+    expect(
+      extractWebSearchSites(
+        "[First result](https://first.example.test/page)\n"
+        + "<https://second.example.test/page>\n"
+        + "Bare result: https://third.example.test/page.\n"
+        + "Duplicate: https://first.example.test/page",
+      ),
+    ).toEqual([
+      { url: "https://first.example.test/page", label: "Sites" },
+      { url: "https://second.example.test/page", label: "Sites" },
+      { url: "https://third.example.test/page", label: "Sites" },
+    ]);
+  });
+
+  it("rejects unsafe text URLs and an echoed URL query", () => {
+    expect(
+      extractWebSearchSites(
+        "[unsafe](javascript:alert(1)) ftp://unsafe.example.test/file\n"
+        + "https://user:secret@unsafe.example.test/private\n"
+        + "https://unsafe.example.test/control\u0000character\n"
+        + "https://query.example.test/not-a-result",
+        "https://query.example.test/not-a-result",
+      ),
+    ).toEqual([]);
+  });
+
+  it("reads text-bearing provider fields but not arbitrary metadata", () => {
+    expect(
+      extractWebSearchSites({
+        text: "Markdown [result](https://text.example.test/result)",
+        description: "https://metadata.example.test/not-a-result",
+      }),
+    ).toEqual([
+      { url: "https://text.example.test/result", label: "Sites" },
+    ]);
   });
 });

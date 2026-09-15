@@ -4,7 +4,7 @@
  * 🔴 All `EmailAccount` records live in the global project (see accounts.ts for details).
  */
 
-/** Supported email providers. "custom" allows arbitrary IMAP/SMTP host/port overrides. */
+/** Supported email providers. Only "custom" allows IMAP/SMTP host/port overrides. */
 export type EmailProvider = "gmail" | "outlook" | "yahoo" | "custom";
 
 /** Authentication mechanism for IMAP/SMTP. */
@@ -29,11 +29,14 @@ export interface EmailAttachment {
 /** An email account configuration (credentials stored separately, encrypted). */
 export interface EmailAccount {
   id: string;
+  organizationId?: string;
+  ownerKind?: "user" | "organization";
+  ownerUserId?: string;
   email: string;
   name: string;
   provider: EmailProvider;
   authType: AuthType;
-  /** Custom IMAP host override (falls back to provider defaults). */
+  /** Custom-provider IMAP host override (falls back to provider defaults). */
   imapHost?: string;
   imapPort?: number;
   smtpHost?: string;
@@ -42,6 +45,12 @@ export interface EmailAccount {
   lastSync?: string;
   /** If true, account is hidden from the sidebar dropdown but sync still runs. */
   hidden?: boolean;
+}
+
+export interface EmailOwner {
+  organizationId: string;
+  ownerKind?: "user" | "organization";
+  ownerUserId?: string;
 }
 
 /** OAuth2 token set with expiry tracking. `refreshToken` is empty for MSAL (handles refresh internally). */

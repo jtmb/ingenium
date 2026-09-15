@@ -5,9 +5,9 @@ import { basename } from "node:path";
 /**
  * Lightweight OpenCode API fixture server for the chat E2E smoke test.
  *
- * Runs on port 4999 and implements the full OpenCode API surface needed
- * to exercise the browser → Next.js → API → OpenCode → SSE pipeline
- * deterministically, without a real LLM backend.
+ * Implements the OpenCode API surface needed to exercise the browser →
+ * Next.js → API → OpenCode → SSE pipeline deterministically, without a real
+ * LLM backend. The managed runner supplies an isolated port when required.
  *
  * Routes:
  *   POST /session            → create session
@@ -15,17 +15,20 @@ import { basename } from "node:path";
  *   GET  /session/{id}/message → get messages
  *   POST /session/{id}/message → send prompt (201)
  *   GET  /event?session={id} → SSE stream
+ *   GET  /global/health      → healthy fixture status
  *   GET  /provider           → providers (includes "opencode" free model)
  *   GET  /mcp                → empty MCP state
  *   GET  /permission         → empty permission list
  *   GET  /question           → empty question list
  *   GET  /agent              → empty agent list
+ *   POST /__fixture/reset    → clear per-test session state (runner mode only)
  *
  * Any unhandled path returns 404.
  */
 
 export const DEFAULT_FIXTURE_PORT = 4999;
 const FIXTURE_SESSION_ID = "fixture-session-1";
+const FIXTURE_VERSION = "1.18.9";
 
 export function getFixturePort(environment: NodeJS.ProcessEnv = process.env): number {
   const value = environment.CHAT_FIXTURE_PORT;
@@ -53,8 +56,6 @@ function runtime(): FixtureRuntime {
   if (!fixtureRuntime) throw new Error("Chat fixture server has not been created");
   return fixtureRuntime;
 }
-
-/* ── Session store ── */
 
 interface FixtureSession {
   id: string;
@@ -108,7 +109,7 @@ function makeSession(id: string, title: string): FixtureSession {
     projectID: "fixture-project",
     directory: "/workspace",
     path: "/workspace",
-    version: "1.18.3",
+    version: FIXTURE_VERSION,
     time: { created: now, updated: now },
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -142,8 +143,6 @@ function userMessage(): FixtureMessage {
   };
 }
 
-/* ── Provider data ── */
-
 function fixtureProviders(port: number) {
   return {
   all: [
@@ -175,8 +174,6 @@ function fixtureProviders(port: number) {
   connected: ["opencode"],
   };
 }
-
-/* ── Helpers ── */
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -211,7 +208,7 @@ function parseBody(req: IncomingMessage): Promise<string> {
  *
  * Two modes:
  * - "simple": basic text-only response (backward compatible)
- * - "rich": full v1.18.3 pipeline — reasoning deltas, shell and Web Search
+ * - "rich": full v1.18.9 pipeline — reasoning deltas, shell and Web Search
  *           calls, response text, completed metadata, session.idle
  *
  * In rich mode, small delays between event groups give the frontend time
@@ -246,13 +243,12 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
   state.sseResponses.add(res);
   try {
   if (state.shuttingDown || res.destroyed || res.writableEnded) return;
-  // Parse query string for session ID
   const url = new URL(`http://localhost${res.req.url ?? ""}`);
   const sessionId = url.searchParams.get("session");
   const messageID = "fixture-assistant-msg";
   const partID = "fixture-part-1";
 
-  // SSE response headers
+  // These headers keep the stream incremental instead of buffered.
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
@@ -261,9 +257,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
   });
 
   if (mode === "rich") {
-    // ── Rich mode: full v1.18.3 pipeline ──
-
-    // 1. session.status: busy
     writeSse(res,
       `event: session.status\ndata: ${JSON.stringify({
         type: "session.status",
@@ -271,10 +264,9 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // Give frontend time to register the busy state
+    // Allow the client to render the busy state before the next event.
     await delay(300);
 
-    // 2. message.updated — skeleton
     writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
@@ -292,8 +284,8 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 3. v1.18.3 announces the semantic part before its deltas. Reasoning
-    // deltas themselves use field: "text", just like answer text does.
+    // OpenCode announces each semantic part before its deltas; reasoning uses
+    // the same "text" delta field as answer text.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -310,7 +302,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(100);
 
-    // 4. reasoning delta — multiple chunks for streaming visibility
     const reasoningChunks = [
       "Let me think about this...",
       " The user wants to know about the chat pipeline.",
@@ -335,11 +326,10 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     // response events so the rich fixture exercises incremental reasoning.
     await delay(1_500);
 
-    // 5. tool call — pending, then running, then completed
+    // Emit the full lifecycle so the UI can exercise each tool state.
     const toolPartId = "tool-part-1";
     const toolCallId = "call_bash_001";
 
-    // pending
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -363,7 +353,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // running
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -387,7 +376,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // completed
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -413,8 +401,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 6. Web Search — completed output includes concrete result and visited
-    // URLs so the disclosure can be tested without an external provider.
+    // Concrete results let the disclosure be tested without an external provider.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -446,8 +433,8 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 7. The answer part follows the same v1.18.3 part-updated → text-delta
-    // contract. Its different part type keeps answer and reasoning separate.
+    // Keep answer and reasoning as separate parts while following the same
+    // part-updated → text-delta contract.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -464,7 +451,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(100);
 
-    // 8. response text
     writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
@@ -479,8 +465,8 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 9. completed message metadata. Keep the terminal state separate so the
-    // browser can prove reasoning remains open until session.idle.
+    // Keep completion metadata separate so the browser can prove reasoning
+    // remains open until session.idle.
     writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
@@ -500,7 +486,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(1_200);
 
-    // 10. session.idle
     writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",
@@ -520,11 +505,8 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       res.once("close", resolve);
     });
   } else {
-    // ── Simple mode: original text-only response (backward compatible) ──
-
     const streamText = "Hello! I received your message. This confirms the chat pipeline is working.";
 
-    // 1. message.updated — announces the assistant message
     writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
@@ -540,7 +522,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 2. v1.18.3 announces the text part before its text delta.
+    // The text part is announced before its delta.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
@@ -555,7 +537,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 3. message.part.delta — stream a single text chunk
     writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
@@ -568,7 +549,6 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 4. session.idle — signal completion
     writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",
@@ -583,19 +563,30 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
   }
 }
 
-/* ── Router ── */
-
 function route(req: IncomingMessage, res: ServerResponse): void {
   const url = req.url ?? "/";
   const method = (req.method ?? "GET").toUpperCase();
 
-  // Strip query string for path matching
   const path = url.split("?")[0]!;
 
-  // Parse query
   const query = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?")) : "");
 
-  // ── POST /session ──
+  if (method === "POST" && path === "/__fixture/reset") {
+    const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
+    if (
+      process.env.CHAT_FIXTURE_RUNNER !== "1"
+      || !expectedNonce
+      || req.headers["x-ingenium-fixture-run-nonce"] !== expectedNonce
+    ) {
+      notFound(res);
+      return;
+    }
+    sessions.length = 0;
+    res.writeHead(204, { "Cache-Control": "no-store" });
+    res.end();
+    return;
+  }
+
   if (method === "POST" && path === "/session") {
     parseBody(req).then(() => {
       const s = makeSession(FIXTURE_SESSION_ID, "New conversation");
@@ -607,13 +598,11 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  // ── GET /session ──
   if (method === "GET" && path === "/session") {
     json(res, 200, sessions);
     return;
   }
 
-  // ── GET /session/{id} ──
   const sessionDetailMatch = path.match(/^\/session\/([^/]+)$/);
   if (method === "GET" && sessionDetailMatch) {
     const id = sessionDetailMatch[1]!;
@@ -626,7 +615,6 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  // ── GET /session/{id}/message ──
   const getMessagesMatch = path.match(/^\/session\/([^/]+)\/message$/);
   if (method === "GET" && getMessagesMatch) {
     const id = getMessagesMatch[1]!;
@@ -635,19 +623,17 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       // Returning both would cause duplication with the SSE stream.
       json(res, 200, [userMessage()]);
     } else {
-      json(res, 200, []);
+      notFound(res);
     }
     return;
   }
 
-  // ── POST /session/{id}/message ──
   const postMessageMatch = path.match(/^\/session\/([^/]+)\/message$/);
   if (method === "POST" && postMessageMatch) {
     parseBody(req).then((body) => {
       let userText = "";
       try {
         const parsed = JSON.parse(body);
-        // Extract text from parts array
         if (parsed.parts && Array.isArray(parsed.parts)) {
           userText = parsed.parts
             .filter((p: { type: string }) => p.type === "text")
@@ -655,7 +641,6 @@ function route(req: IncomingMessage, res: ServerResponse): void {
             .join(" ");
         }
       } catch {
-        // Best-effort
       }
 
       const createdMsg = userMessage();
@@ -670,12 +655,10 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  // ── GET /event?session={id}&mode={simple|rich} ──
   if (method === "GET" && path === "/event") {
     const sessionParam = query.get("session");
     const mode = (query.get("mode") || "rich") as "simple" | "rich";
     if (sessionParam && sessionParam !== FIXTURE_SESSION_ID) {
-      // Unknown session — return empty SSE that immediately ends
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -689,41 +672,38 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  // ── GET /provider ──
   if (method === "GET" && path === "/provider") {
     json(res, 200, fixtureProviders(runtime().port));
     return;
   }
 
-  // ── GET /mcp ──
+  if (method === "GET" && path === "/global/health") {
+    json(res, 200, { healthy: true, version: FIXTURE_VERSION });
+    return;
+  }
+
   if (method === "GET" && path === "/mcp") {
     json(res, 200, {});
     return;
   }
 
-  // ── GET /permission ──
   if (method === "GET" && path === "/permission") {
     json(res, 200, []);
     return;
   }
 
-  // ── GET /question ──
   if (method === "GET" && path === "/question") {
     json(res, 200, []);
     return;
   }
 
-  // ── GET /agent ──
   if (method === "GET" && path === "/agent") {
     json(res, 200, []);
     return;
   }
 
-  // ── Default: 404 ──
   notFound(res);
 }
-
-/* ── Server lifecycle ── */
 
 export function createChatFixtureServer(port = getFixturePort()): Server {
   const server = createServer(route);

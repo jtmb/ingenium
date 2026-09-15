@@ -23,7 +23,7 @@ import type {
   SearchQuery,
 } from "./types.js";
 import { parseRawEmail } from "./parser.js";
-import { PROVIDERS } from "./providers.js";
+import { resolveProviderEndpoints } from "./providers.js";
 import type { ProviderConfig } from "./providers.js";
 import { ProviderOperationError, providerErrorDiagnostic, sanitizeProviderError } from "./provider-errors.js";
 
@@ -45,7 +45,7 @@ const connectingLocks = new Map<string, Promise<ImapFlow>>();
 
 /** Resolve the provider configuration for an account (IMAP/SMTP defaults). */
 function getProviderConfig(account: EmailAccount): ProviderConfig {
-  return PROVIDERS[account.provider];
+  return resolveProviderEndpoints(account);
 }
 
 /**
@@ -126,8 +126,7 @@ export async function connectAccount(
   // ── Create connection with mutex guard ────────────────────────────
   const connectPromise = (async () => {
     const config = getProviderConfig(account);
-    const host = account.imapHost || config.imap.host;
-    const port = account.imapPort || config.imap.port;
+    const { host, port } = config.imap;
 
     let client: ImapFlow;
     try {
@@ -296,47 +295,6 @@ export async function listEmails(
   const paged = messages.slice(start, start + limit);
 
   return { messages: paged, total };
-}
-
-/**
- * Get a single email by UID.
- * Returns null if the UID doesn't exist in the folder (already deleted, moved, or invalid).
- */
-export async function getEmail(
-  accountId: string,
-  folder: string,
-  uid: string | number,
-): Promise<EmailMessage | null> {
-  const client = getConnection(accountId);
-  await client.mailboxOpen(folder);
-
-  const fetched = await client.fetchOne(uid, { envelope: true, uid: true, flags: true, source: true }, { uid: true });
-  if (!fetched) return null;
-
-  const raw = fetched.source?.toString("utf-8") ?? "";
-  const parsed = await parseRawEmail(raw);
-  parsed.uid = String(fetched.uid);
-  parsed.flags = fetched.flags ? [...fetched.flags] : [];
-  parsed.folder = folder;
-  return parsed;
-}
-
-/**
- * Search emails in a folder and return matching UIDs.
- * Uses IMAP SEARCH under the hood (supports text, from, to, subject, date ranges, flags).
- * Returns an empty array on no matches (imapflow returns false for empty results).
- */
-export async function searchEmails(
-  accountId: string,
-  folder: string,
-  query: SearchQuery,
-): Promise<number[]> {
-  const client = getConnection(accountId);
-  await client.mailboxOpen(folder);
-
-  const criteria = buildSearchCriteria(query);
-  const result = await client.search(criteria);
-  return result === false ? [] : result;
 }
 
 /**

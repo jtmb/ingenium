@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
+import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
+import { createMemoryEmailRuntime } from "./runtime-fixture.js";
 
 const coreMockState = vi.hoisted(() => ({
   settings: new Map<string, string>(),
@@ -39,7 +41,11 @@ vi.mock("ingenium-core", () => {
           }
           return entries;
         }),
-        get: vi.fn(() => ({ id: "global-project-id" })),
+        get: vi.fn((projectId?: string, key?: string) => {
+          if (sql.startsWith("SELECT id FROM projects")) return { id: "global-project-id" };
+          const value = projectId && key ? coreMockState.settings.get(mockSettingKey(projectId, key)) : undefined;
+          return value === undefined ? undefined : { value };
+        }),
         run: vi.fn((...bindParams: unknown[]) => {
           if (sql.startsWith("DELETE FROM settings")) {
             const projectId = bindParams[0];
@@ -51,6 +57,8 @@ vi.mock("ingenium-core", () => {
         }),
       })),
     })),
+    execTransaction: <T>(operation: () => T): T => operation(),
+    checkpointAfterWrite: vi.fn(),
   };
 });
 
@@ -255,9 +263,12 @@ describe("encryptCredentials / decryptCredentials", () => {
 describe("getOAuthUrl / exchangeCode", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
@@ -284,7 +295,7 @@ describe("getOAuthUrl / exchangeCode", () => {
     await expect(exchangeCode("yahoo" as any, "code123", "test-state-123")).rejects.toThrow("not supported");
   });
 
-  it("uses only global Outlook settings when authorizing from a non-global session", async () => {
+  it("uses only global Outlook settings when authorizing", async () => {
     const { settings } = await import("ingenium-core");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_id", "global-outlook-client-id");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_secret", "global-outlook-client-secret");
@@ -292,7 +303,7 @@ describe("getOAuthUrl / exchangeCode", () => {
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_outlook_client_secret", "non-global-outlook-client-secret");
 
     const { getOAuthUrl } = await import("../lib/oauth.js");
-    const result = await getOAuthUrl("outlook", NON_GLOBAL_PROJECT_ID);
+    const result = await getOAuthUrl("outlook");
     const config = msalMockState.configurations[msalMockState.configurations.length - 1];
 
     expect(config).toEqual({
@@ -305,7 +316,7 @@ describe("getOAuthUrl / exchangeCode", () => {
     expect(settings.getSetting(NON_GLOBAL_PROJECT_ID, "oauth_state_outlook")).toBeNull();
   });
 
-  it("uses only global Outlook settings when exchanging from a non-global session", async () => {
+  it("uses only global Outlook settings when exchanging", async () => {
     const { settings } = await import("ingenium-core");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_id", "global-outlook-client-id");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_secret", "global-outlook-client-secret");
@@ -320,7 +331,6 @@ describe("getOAuthUrl / exchangeCode", () => {
       "outlook-auth-code",
       "global-outlook-state",
       "http://localhost:3000/mail/oauth/callback",
-      NON_GLOBAL_PROJECT_ID,
     );
     const config = msalMockState.configurations[msalMockState.configurations.length - 1];
 
@@ -340,13 +350,16 @@ describe("getOAuthUrl / exchangeCode", () => {
 describe("refreshAccessToken global configuration", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
-  it("uses global Gmail OAuth settings when the caller supplies a non-global project", async () => {
+  it("uses global Gmail OAuth settings", async () => {
     const { settings } = await import("ingenium-core");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_gmail_client_id", "global-gmail-client-id");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_gmail_client_secret", "global-gmail-client-secret");
@@ -354,7 +367,7 @@ describe("refreshAccessToken global configuration", () => {
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_gmail_client_secret", "non-global-gmail-client-secret");
 
     const { refreshAccessToken } = await import("../lib/oauth.js");
-    const result = await refreshAccessToken("gmail", "caller-refresh-token", NON_GLOBAL_PROJECT_ID);
+    const result = await refreshAccessToken("gmail", "caller-refresh-token");
 
     expect(googleMockState.configurations.at(-1)).toMatchObject({
       clientId: "global-gmail-client-id",
@@ -370,7 +383,7 @@ describe("refreshAccessToken global configuration", () => {
     });
   });
 
-  it("uses global Outlook OAuth settings when the caller supplies a non-global project", async () => {
+  it("uses global Outlook OAuth settings", async () => {
     const { settings } = await import("ingenium-core");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_id", "global-outlook-client-id");
     settings.setSetting(GLOBAL_PROJECT_ID, "oauth_outlook_client_secret", "global-outlook-client-secret");
@@ -378,7 +391,7 @@ describe("refreshAccessToken global configuration", () => {
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_outlook_client_secret", "non-global-outlook-client-secret");
 
     const { refreshAccessToken } = await import("../lib/oauth.js");
-    const result = await refreshAccessToken("outlook", "caller-refresh-token", NON_GLOBAL_PROJECT_ID);
+    const result = await refreshAccessToken("outlook", "caller-refresh-token");
 
     expect(msalMockState.configurations.at(-1)).toEqual({
       clientId: "global-outlook-client-id",
@@ -396,9 +409,12 @@ describe("refreshAccessToken global configuration", () => {
 describe("compiled email release OAuth contract", () => {
   beforeEach(() => {
     resetOAuthMocks();
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   afterEach(() => {
+    resetEmailRuntimeForTest();
     restoreOAuthEnvironment();
   });
 
@@ -409,9 +425,12 @@ describe("compiled email release OAuth contract", () => {
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_gmail_client_id", "release-non-global-gmail-client-id");
     settings.setSetting(NON_GLOBAL_PROJECT_ID, "oauth_gmail_client_secret", "release-non-global-gmail-client-secret");
 
+    const builtRuntime = await import("../dist/lib/runtime.js");
+    builtRuntime.resetEmailRuntimeForTest();
+    builtRuntime.configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
     const built = await import("../dist/index.js");
     expect(built.refreshAccessToken).toBeTypeOf("function");
-    const result = await built.refreshAccessToken("gmail", "release-refresh-token", NON_GLOBAL_PROJECT_ID);
+    const result = await built.refreshAccessToken("gmail", "release-refresh-token");
 
     expect(googleMockState.configurations.at(-1)).toMatchObject({
       clientId: "release-global-gmail-client-id",
@@ -429,12 +448,18 @@ describe("storeTokens / getValidTokens", () => {
   });
 
   afterAll(() => {
+    resetEmailRuntimeForTest();
     delete process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+  });
+
+  beforeEach(() => {
+    resetEmailRuntimeForTest();
+    configureEmailRuntime(createMemoryEmailRuntime(coreMockState.settings, GLOBAL_PROJECT_ID));
   });
 
   it("should return null for non-existent account", async () => {
     const { getValidTokens } = await import("../lib/oauth.js");
-    const result = await getValidTokens("test-project", "nonexistent-id", "gmail");
+    const result = await getValidTokens("nonexistent-id", "gmail");
     expect(result).toBeNull();
   });
 });

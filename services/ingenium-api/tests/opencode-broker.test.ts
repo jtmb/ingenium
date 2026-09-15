@@ -16,7 +16,13 @@ import {
   redactHeaders,
   brokerExecute,
   LLM_BROKER_AGENT,
+  DOCS_AI_BROKER_TIMEOUT_MS,
+  DEFAULT_BROKER_TIMEOUT_MS,
+  BACKGROUND_BROKER_TIMEOUT_MS,
+  MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+  MAX_BROKER_TIMEOUT_MS,
   opencodeClient,
+  resolveBrokerTimeout,
 } from "../lib/opencode-client.js";
 import { logger } from "ingenium-core";
 
@@ -146,6 +152,51 @@ describe("redactHeaders", () => {
   it("does not modify non-authorization headers", () => {
     const headers = { "X-Custom": "value", Host: "localhost" };
     expect(redactHeaders(headers)).toEqual(headers);
+  });
+});
+
+describe("broker timeout policy", () => {
+  it("preserves the default consumer cap while Docs AI receives its explicit 60-second policy", () => {
+    expect(resolveBrokerTimeout(DOCS_AI_BROKER_TIMEOUT_MS)).toEqual({
+      policy: "default",
+      requestedTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: DEFAULT_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(DOCS_AI_BROKER_TIMEOUT_MS, "docs-ai")).toEqual({
+      policy: "docs-ai",
+      requestedTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+    });
+  });
+
+  it("never permits the Docs AI policy to exceed the broker-wide hard maximum", () => {
+    expect(resolveBrokerTimeout(MAX_BROKER_TIMEOUT_MS + 1, "docs-ai")).toEqual({
+      policy: "docs-ai",
+      requestedTimeoutMs: MAX_BROKER_TIMEOUT_MS + 1,
+      effectiveTimeoutMs: MAX_BROKER_TIMEOUT_MS,
+    });
+  });
+
+  it("permits bounded background synthesis time without raising interactive limits", () => {
+    expect(resolveBrokerTimeout(BACKGROUND_BROKER_TIMEOUT_MS, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: BACKGROUND_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS + 1, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS + 1,
+      effectiveTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS)).toMatchObject({
+      policy: "default",
+      effectiveTimeoutMs: DEFAULT_BROKER_TIMEOUT_MS,
+    });
   });
 });
 
@@ -438,7 +489,7 @@ describe("brokerExecute — mocked lifecycle", () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
 
     // Provide a response that has no assistant finish — broker should eventually time out.
-    // Use a very short timeout (the function clamps to 0..30000).
+    // Use a very short timeout so the test does not wait for the policy cap.
     const fetchSpy = vi
       .fn()
       // 1. createSession → succeeds
@@ -493,10 +544,40 @@ describe("brokerExecute — mocked lifecycle", () => {
     expect(lastCall[0]).toContain("/session/ses_tmo");
     expect(lastCall[1]).toHaveProperty("method", "DELETE");
   });
+
+  it("deletes a background broker session after its bounded timeout", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, { id: "ses_background_timeout", title: "Broker Session" }))
+      .mockResolvedValueOnce(mockResponse(200, { info: { id: "msg_u", sessionID: "ses_background_timeout", role: "user" }, parts: [] }));
+    for (let index = 0; index < 10; index += 1) {
+      fetchSpy.mockResolvedValueOnce(mockResponse(200, [{
+        info: { id: "msg_u", sessionID: "ses_background_timeout", role: "user" },
+        parts: [],
+      }]));
+    }
+    fetchSpy.mockResolvedValueOnce(mockResponse(200, true));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await brokerExecute({
+      providerID: "opencode",
+      modelID: "opencode/zen-free",
+      system: "You are helpful",
+      user: "say hello",
+      timeoutMs: 1,
+      timeoutPolicy: "background",
+    });
+
+    expect(result).toEqual({ ok: false, content: "", error: "timeout" });
+    const deleteCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1]!;
+    expect(deleteCall[0]).toContain("/session/ses_background_timeout");
+    expect(deleteCall[1]).toHaveProperty("method", "DELETE");
+  });
 });
 
 describe("ingenium-llm-broker permission contract", () => {
-  it("is wildcard-denied with no capability exceptions", () => {
+  it("is wildcard-denied with no capability exceptions", async () => {
     const profile = readFileSync(
       new URL("../../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url),
       "utf8",
@@ -511,9 +592,34 @@ describe("ingenium-llm-broker permission contract", () => {
     const rootConfig = JSON.parse(readFileSync(
       new URL("../../../opencode.json", import.meta.url),
       "utf8",
-    )) as { permission?: Record<string, string> };
-    // The normal root profile is permissive; the broker's explicit wildcard
-    // deny must remain a stricter agent-level boundary.
-    expect(rootConfig.permission?.["*"]).toBe("allow");
+    )) as {
+      permission?: Record<string, string>;
+      agent?: Record<string, { permission?: Record<string, unknown> }>;
+    };
+    expect(rootConfig.agent).not.toHaveProperty(LLM_BROKER_AGENT);
+
+    const managedConfig = JSON.parse(readFileSync(
+      new URL("../../../config/opencode-managed/opencode.json", import.meta.url), "utf8",
+    ));
+    const deniedPermissions = {
+      "*": "deny",
+      external_directory: {
+        "/home/appuser/.local/share/opencode/tool-output/*": "deny",
+        "/home/ingenium-opencode/.local/share/opencode/tool-output/*": "deny",
+      },
+    };
+    expect(managedConfig.agent[LLM_BROKER_AGENT].permission).toEqual(deniedPermissions);
+    const pluginUrl = new URL("../../../config/opencode-managed/enforce-reserved-broker.mjs", import.meta.url);
+    const { ProtectedBrokerPlugin } = await import(pluginUrl.href);
+    const plugin = await ProtectedBrokerPlugin({}, {
+      profilePath: new URL("../../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url).pathname,
+    });
+    const config = {
+      permission: { "*": "allow" },
+      agent: { [LLM_BROKER_AGENT]: { permission: { "*": "allow", question: "allow" } } },
+    };
+    await plugin.config(config);
+    expect(config.agent[LLM_BROKER_AGENT]).toMatchObject({ hidden: true, permission: deniedPermissions });
+    expect(config.agent[LLM_BROKER_AGENT].permission).toEqual(deniedPermissions);
   });
 });
