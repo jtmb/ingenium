@@ -1,8 +1,8 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Agent } from "../schema.js";
-import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, unlinkSync, existsSync, lstatSync, mkdirSync } from "node:fs";
-import { resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { accessSync, closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, resolve, sep } from "node:path";
 import { logger } from "../logger.js";
 import { getConfigPath } from "./paths.js";
 
@@ -15,6 +15,11 @@ export const LLM_BROKER_MODE = "subagent";
 export const LLM_BROKER_PERMISSIONS = '{"*":"deny"}';
 export const LLM_BROKER_METADATA = '{"hidden":true}';
 export const LLM_BROKER_SKILLS = "[]";
+export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-managed";
+export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
+export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker.mjs`;
+const LLM_BROKER_CONFIG_SHA256 = "4dd82cf42295fd9dba7594f101702fb6d356db66d77adc98efc3d70dcc240d47";
+const LLM_BROKER_ENFORCER_SHA256 = "aae2499e9c1fa92e236d7f406df29720d2160447665f8fe792d24251543b84e1";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
 Its wildcard-deny permission boundary intentionally has no exceptions: it has no
@@ -79,7 +84,7 @@ export function isCanonicalBrokerMetadata(value: unknown): boolean {
 }
 
 function canonicalPermissionsForAgent(name: string, value: string | null | undefined): string {
-  return isReservedAgentName(name) ? LLM_BROKER_PERMISSIONS : serializeAgentObject(value);
+  return JSON.stringify(defaultPermissionsForAgent(name, parseSerializedAgentObject(value)));
 }
 
 function canonicalMetadataForAgent(name: string, value: string | null | undefined): string {
@@ -91,8 +96,9 @@ function defaultPermissionsForAgent(name: string, permissions: JsonObject): Json
   // `permission` block must never turn a wildcard-deny broker into an allow-all
   // profile when the definition is restored from storage.
   if (isReservedAgentName(name)) return { "*": "deny" };
-  if (Object.keys(permissions).length > 0) return permissions;
-  return { read: "allow", write: "allow", bash: "allow" };
+  const withDefaultDeny = { "*": "deny", ...permissions };
+  withDefaultDeny["*"] = "deny";
+  return withDefaultDeny;
 }
 
 function canonicalMetadataForDisk(name: string, metadata: JsonObject): JsonObject {
@@ -118,6 +124,26 @@ function appendYamlObject(lines: string[], value: JsonObject, indent: number): v
       lines.push(`${prefix}${yamlKey(key)}: ${yamlScalar(child)}`);
     }
   }
+}
+
+function writePermissionFrontmatter(frontmatter: string, permissions: JsonObject): string {
+  const lines = frontmatter.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^permission:\s*/.test(line));
+  const replacement = ["permission:"];
+  appendYamlObject(replacement, permissions, 2);
+  if (start === -1) return `${frontmatter}\n${replacement.join("\n")}`;
+
+  let end = start + 1;
+  while (end < lines.length && (!lines[end]!.trim() || /^\s/.test(lines[end]!))) end += 1;
+  lines.splice(start, end - start, ...replacement);
+  return lines.join("\n");
+}
+
+function ensureDefaultDenyPermission(frontmatter: string): string {
+  return writePermissionFrontmatter(
+    frontmatter,
+    defaultPermissionsForAgent("", parsePermissionFrontmatter(frontmatter)),
+  );
 }
 
 function unquoteYamlScalar(value: string): string {
@@ -191,6 +217,10 @@ function parseAgentMetadata(frontmatter: string): JsonObject {
   return hidden === "true" ? { hidden: true } : hidden === "false" ? { hidden: false } : {};
 }
 
+function parseAgentEnabled(frontmatter: string): boolean {
+  return frontmatter.match(/^disable:\s*(true|false)\s*$/mi)?.[1] !== "true";
+}
+
 function reservedBrokerFileContent(): string {
   const escapedDescription = LLM_BROKER_DESCRIPTION.replace(/"/g, '\\"');
   return [
@@ -205,6 +235,179 @@ function reservedBrokerFileContent(): string {
     "",
     LLM_BROKER_CONTENT,
   ].join("\n");
+}
+
+function protectedOpenCodeArtifactError(artifact: string, message: string, cause?: unknown): Error {
+  const code = typeof cause === "object" && cause !== null && "code" in cause
+    ? ` (${String(cause.code)})`
+    : "";
+  return new Error(`${artifact} ${message}${code}`, { cause });
+}
+
+interface BrokerProfileChain {
+  descriptors: number[];
+  stats: ReturnType<typeof fstatSync>[];
+}
+
+interface ProtectedArtifactLocation {
+  root: string;
+  components: string[];
+}
+
+function closeBrokerProfileChain(chain: BrokerProfileChain | undefined): void {
+  if (!chain) return;
+  for (const descriptor of chain.descriptors.reverse()) closeSync(descriptor);
+}
+
+function descriptorIsWritable(descriptor: number): boolean {
+  try {
+    accessSync(`/proc/self/fd/${descriptor}`, constants.W_OK);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "EACCES") return false;
+    throw error;
+  }
+}
+
+function deploymentRoot(): string {
+  return process.env.VITEST
+    ? resolve(getAgentsDir(), "..", "..")
+    : LLM_BROKER_DEPLOYMENT_ROOT;
+}
+
+function brokerProfileLocation(): ProtectedArtifactLocation {
+  return process.env.VITEST
+    ? {
+        root: deploymentRoot(),
+        components: [".opencode", "agents", LLM_BROKER_CATEGORY, `${LLM_BROKER_AGENT}.md`],
+      }
+    : {
+        root: deploymentRoot(),
+        components: ["agents", `${LLM_BROKER_AGENT}.md`],
+      };
+}
+
+function protectedArtifactLocation(file: "config" | "enforcer"): ProtectedArtifactLocation {
+  if (process.env.VITEST) {
+    return {
+      root: deploymentRoot(),
+      components: file === "config"
+        ? [".opencode", "protected", "opencode.json"]
+        : [".opencode", "protected", "plugins", "enforce-reserved-broker.mjs"],
+    };
+  }
+  return {
+    root: deploymentRoot(),
+    components: file === "config"
+      ? ["opencode.json"]
+      : ["plugins", "enforce-reserved-broker.mjs"],
+  };
+}
+
+function openProtectedArtifactChain(location: ProtectedArtifactLocation, artifact: string): BrokerProfileChain {
+  if (process.platform !== "linux" || typeof process.getuid !== "function"
+    || typeof constants.O_DIRECTORY !== "number" || typeof constants.O_NOFOLLOW !== "number") {
+    throw protectedOpenCodeArtifactError(artifact, "validation requires Linux descriptor safety");
+  }
+  const descriptors: number[] = [];
+  const stats: ReturnType<typeof fstatSync>[] = [];
+  try {
+    let descriptor = openSync(location.root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    descriptors.push(descriptor);
+    let stat = fstatSync(descriptor);
+    if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o555 || descriptorIsWritable(descriptor)) {
+      throw protectedOpenCodeArtifactError(artifact, "trust root must be deployment-owned mode 0555");
+    }
+    const trustedOwner = { uid: stat.uid, gid: stat.gid };
+    if (trustedOwner.uid === process.getuid!()) {
+      throw protectedOpenCodeArtifactError(artifact, "trust root is owned by the runtime");
+    }
+    stats.push(stat);
+
+    for (const [index, component] of location.components.entries()) {
+      const isProfile = index === location.components.length - 1;
+      descriptor = openSync(
+        `/proc/self/fd/${descriptor}/${component}`,
+        constants.O_RDONLY | constants.O_NOFOLLOW | (isProfile ? 0 : constants.O_DIRECTORY),
+      );
+      descriptors.push(descriptor);
+      stat = fstatSync(descriptor);
+      if (stat.uid !== trustedOwner.uid || stat.gid !== trustedOwner.gid) {
+        throw protectedOpenCodeArtifactError(artifact, "owner does not match the trusted deployment chain");
+      }
+      if (isProfile) {
+        if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o444 || descriptorIsWritable(descriptor)) {
+          throw protectedOpenCodeArtifactError(artifact, "must be an exclusive read-only deployment file");
+        }
+      } else if (!stat.isDirectory() || (stat.mode & 0o777) !== 0o555 || descriptorIsWritable(descriptor)) {
+        throw protectedOpenCodeArtifactError(artifact, "parent chain must be deployment-owned mode 0555");
+      }
+      stats.push(stat);
+    }
+    return { descriptors, stats };
+  } catch (error) {
+    closeBrokerProfileChain({ descriptors, stats });
+    if (error instanceof Error && error.message.startsWith(artifact)) throw error;
+    throw protectedOpenCodeArtifactError(artifact, "could not be opened safely", error);
+  }
+}
+
+function validateProtectedArtifact(
+  location: ProtectedArtifactLocation,
+  artifact: string,
+  isCanonical: (content: string) => boolean,
+): void {
+  let first: BrokerProfileChain | undefined;
+  let second: BrokerProfileChain | undefined;
+  try {
+    first = openProtectedArtifactChain(location, artifact);
+    const profileDescriptor = first.descriptors[first.descriptors.length - 1]!;
+    const before = fstatSync(profileDescriptor);
+    const content = readFileSync(profileDescriptor, "utf-8");
+    const after = fstatSync(profileDescriptor);
+    if (!isCanonical(content)
+      || before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeMs !== after.mtimeMs) {
+      throw protectedOpenCodeArtifactError(artifact, "content or descriptor identity is not canonical");
+    }
+    second = openProtectedArtifactChain(location, artifact);
+    if (first.stats.some((stat, index) => {
+      const current = second!.stats[index]!;
+      return stat.dev !== current.dev || stat.ino !== current.ino;
+    })) {
+      throw protectedOpenCodeArtifactError(artifact, "path identity changed during validation");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith(artifact)) throw error;
+    throw protectedOpenCodeArtifactError(artifact, "could not be read safely", error);
+  } finally {
+    closeBrokerProfileChain(second);
+    closeBrokerProfileChain(first);
+  }
+}
+
+export function validateReservedBrokerDeployment(): void {
+  validateProtectedArtifact(
+    brokerProfileLocation(),
+    "Reserved LLM broker profile",
+    (content) => content === reservedBrokerFileContent(),
+  );
+}
+
+export function validateProtectedOpenCodeDeployment(): void {
+  validateReservedBrokerDeployment();
+  validateProtectedArtifact(
+    protectedArtifactLocation("config"),
+    "Protected OpenCode config",
+    (content) => createHash("sha256").update(content).digest("hex") === LLM_BROKER_CONFIG_SHA256,
+  );
+  validateProtectedArtifact(
+    protectedArtifactLocation("enforcer"),
+    "Protected OpenCode broker enforcer",
+    (content) => createHash("sha256").update(content).digest("hex") === LLM_BROKER_ENFORCER_SHA256,
+  );
 }
 
 /** Exact broker row shape permitted by migration 058's connection-independent trigger set. */
@@ -248,7 +451,71 @@ function getAgentsDir(): string {
   return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..", ".opencode", "agents");
 }
 
-type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean }>;
+function lstatIfPresent(path: string) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/** Resolve a category only through real directories beneath the repository root. */
+function safeAgentCategoryDirectory(category: AgentCategory, create = false): string | undefined {
+  const agentsDir = resolve(getAgentsDir());
+  const opencodeDir = resolve(agentsDir, "..");
+  const projectRoot = resolve(opencodeDir, "..");
+  const categoryDir = resolve(agentsDir, category);
+  if (!categoryDir.startsWith(agentsDir + sep)) return undefined;
+
+  for (const directory of [projectRoot, opencodeDir, agentsDir, categoryDir]) {
+    let stat = lstatIfPresent(directory);
+    if (!stat) {
+      if (!create || directory === projectRoot) return undefined;
+      mkdirSync(directory, { mode: 0o755 });
+      stat = lstatIfPresent(directory);
+    }
+    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) return undefined;
+  }
+  return categoryDir;
+}
+
+/** Return a regular, contained profile path without following a symlink. */
+function safeAgentFilePath(category: AgentCategory, name: string, create = false): string | undefined {
+  const categoryDir = safeAgentCategoryDirectory(category, create);
+  if (!categoryDir) return undefined;
+  const filePath = resolve(categoryDir, `${name}.md`);
+  if (!filePath.startsWith(categoryDir + sep)) return undefined;
+  const stat = lstatIfPresent(filePath);
+  if (stat && (stat.isSymbolicLink() || !stat.isFile())) return undefined;
+  return filePath;
+}
+
+/** Write a public profile with an exact readable mode and no symlink following. */
+function writePublicAgentProfile(filePath: string, content: string): void {
+  let descriptor: number | undefined;
+  try {
+    const existing = lstatIfPresent(filePath);
+    if (existing && (existing.isSymbolicLink() || !existing.isFile())) {
+      throw new Error("Unsafe agent profile path");
+    }
+    descriptor = openSync(
+      filePath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+      0o644,
+    );
+    if (!fstatSync(descriptor).isFile()) throw new Error("Unsafe agent profile path");
+    writeFileSync(descriptor, content, "utf-8");
+    // Existing files retain their mode and a restrictive umask affects new files.
+    fchmodSync(descriptor, 0o644);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean; [key: string]: unknown }>;
 
 function parseConfig(content: string): Record<string, unknown> {
   return JSON.parse(content.replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
@@ -276,7 +543,7 @@ function configuredAgentModel(projectId: string, name: string): string | null {
 function updateAgentRuntimeConfig(
   projectId: string,
   name: string,
-  options: { model?: string | null; disabled?: boolean; remove?: boolean },
+  options: { model?: string | null; remove?: boolean },
 ): void {
   // Resolve the DB/disk fallback before taking the write lock. `readProjectConfig`
   // can read opencode.json when the database copy is missing or malformed, and
@@ -300,13 +567,12 @@ function updateAgentRuntimeConfig(
     if (options.remove) {
       delete agents[name];
     } else {
+      for (const key of Object.keys(entry)) {
+        if (key !== "model" && key !== "variant") delete entry[key];
+      }
       if (options.model !== undefined) {
         if (options.model) entry.model = options.model;
         else delete entry.model;
-      }
-      if (options.disabled !== undefined) {
-        if (options.disabled) entry.disable = true;
-        else delete entry.disable;
       }
       if (Object.keys(entry).length > 0) agents[name] = entry;
       else delete agents[name];
@@ -333,33 +599,129 @@ function updateAgentRuntimeConfig(
   }
 }
 
+interface ReservedBrokerConfigReconciliation {
+  content: string;
+  storedId?: string;
+}
+
+function writeConfigAtomically(path: string, content: string): void {
+  const parentPath = resolve(path, "..");
+  let parentDescriptor: number | undefined;
+  let temporaryDescriptor: number | undefined;
+  let temporaryName = "";
+  try {
+    parentDescriptor = openSync(parentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const targetName = basename(path);
+    const existing = lstatIfPresent(path);
+    if (existing && (existing.isSymbolicLink() || !existing.isFile() || existing.nlink !== 1)) {
+      throw new Error("unsafe config target");
+    }
+    const mode = existing ? existing.mode & 0o777 : 0o644;
+    temporaryName = `.${targetName}.${randomUUID()}.tmp`;
+    temporaryDescriptor = openSync(
+      `/proc/self/fd/${parentDescriptor}/${temporaryName}`,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      mode,
+    );
+    writeFileSync(temporaryDescriptor, content, "utf-8");
+    fchmodSync(temporaryDescriptor, mode);
+    fsyncSync(temporaryDescriptor);
+    const temporaryStat = fstatSync(temporaryDescriptor);
+    if (!temporaryStat.isFile() || temporaryStat.nlink !== 1
+      || readFileSync(`/proc/self/fd/${parentDescriptor}/${temporaryName}`, "utf-8") !== content) {
+      throw new Error("config verification failed");
+    }
+    closeSync(temporaryDescriptor);
+    temporaryDescriptor = undefined;
+    renameSync(
+      `/proc/self/fd/${parentDescriptor}/${temporaryName}`,
+      `/proc/self/fd/${parentDescriptor}/${targetName}`,
+    );
+    temporaryName = "";
+    try { fsyncSync(parentDescriptor); } catch { /* rename is already the atomic commit point */ }
+  } catch (error) {
+    if (temporaryDescriptor !== undefined) closeSync(temporaryDescriptor);
+    if (parentDescriptor !== undefined && temporaryName) {
+      try { unlinkSync(`/proc/self/fd/${parentDescriptor}/${temporaryName}`); } catch { /* preserve failure */ }
+    }
+    const code = typeof error === "object" && error !== null && "code" in error
+      ? ` (${String(error.code)})`
+      : "";
+    throw new Error(`Reserved LLM broker runtime config reconciliation failed${code}`, { cause: error });
+  } finally {
+    if (parentDescriptor !== undefined) {
+      try { closeSync(parentDescriptor); } catch { /* no failure remains after the atomic commit point */ }
+    }
+  }
+}
+
+function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerConfigReconciliation | undefined {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const stored = db.prepare("SELECT id, content FROM configs WHERE project_id = ? AND type = 'project'")
+    .get(projectId) as { id: string; content: string } | undefined;
+  let storedConfig: Record<string, unknown> | undefined;
+  try {
+    storedConfig = stored ? parseConfig(stored.content) : undefined;
+  } catch (error) {
+    throw new Error("Reserved LLM broker runtime config metadata is malformed", { cause: error });
+  }
+
+  const path = getConfigPath(projectId);
+  const diskStat = lstatIfPresent(path);
+  if (diskStat && (diskStat.isSymbolicLink() || !diskStat.isFile() || diskStat.nlink !== 1)) {
+    throw new Error("Reserved LLM broker runtime config path is unsafe");
+  }
+  let diskConfig: Record<string, unknown> | undefined;
+  if (diskStat) {
+    try {
+      diskConfig = parseConfig(readFileSync(path, "utf-8"));
+    } catch (error) {
+      const code = typeof error === "object" && error !== null && "code" in error
+        ? ` (${String(error.code)})`
+        : "";
+      throw new Error(`Reserved LLM broker runtime config could not be read${code}`, { cause: error });
+    }
+  }
+
+  const storedAgents = storedConfig?.agent;
+  const diskAgents = diskConfig?.agent;
+  const storedHasOverride = isJsonObject(storedAgents)
+    && Object.prototype.hasOwnProperty.call(storedAgents, LLM_BROKER_AGENT);
+  const diskHasOverride = isJsonObject(diskAgents)
+    && Object.prototype.hasOwnProperty.call(diskAgents, LLM_BROKER_AGENT);
+  if (!storedHasOverride && !diskHasOverride) return undefined;
+
+  const config = structuredClone(storedConfig ?? diskConfig ?? {});
+  if (isJsonObject(config.agent)) {
+    delete config.agent[LLM_BROKER_AGENT];
+    if (Object.keys(config.agent).length === 0) delete config.agent;
+  }
+  const content = JSON.stringify(config, null, 2);
+  writeConfigAtomically(path, content);
+  return { content, storedId: stored?.id };
+}
+
 /**
  * Write an agent definition to `.opencode/agents/<category>/<name>.md` as a YAML-frontmatter markdown file.
  *
- * If the file already exists, it does an in-place field update (replacing only name, description,
- * mode in the YAML frontmatter) — this preserves any handwritten fields (like
- * permissions, skills, or custom YAML keys) that OpenCode's agent system uses.
+ * Existing profiles retain handwritten permissions and body unless explicitly
+ * updated. Custom YAML and skills always remain profile-authoritative.
  *
  * If the file doesn't exist, it creates a full frontmatter block from the DB record, including
  * permissions (read/write/bash/task/mcp/skill), skills list, and content body.
  */
-function writeAgentToDisk(agent: Agent, force = false): void {
+function writeAgentToDisk(
+  agent: Agent,
+  options: { replacePermissions?: boolean; preserveBody?: boolean } = {},
+): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  if (!agent.enabled && !force) return;
-  const categoryDir = resolve(getAgentsDir(), agent.category);
-  if (!existsSync(categoryDir)) mkdirSync(categoryDir, { recursive: true });
-
-  const filePath = resolve(categoryDir, `${agent.name}.md`);
-  const escapedDesc = agent.description.replace(/"/g, '\\"');
-
-  // The reserved profile is a complete static template, not a serialization
-  // of a database row. This keeps first bootstrap and later repair writes
-  // byte-identical and prevents malformed persisted fields from reaching disk.
   if (isReservedAgentName(agent.name)) {
-    writeFileSync(filePath, reservedBrokerFileContent());
-    return;
+    throw new Error("Reserved LLM broker profile is deployment-owned");
   }
+  const filePath = safeAgentFilePath(agent.category, agent.name, true);
+  if (!filePath) throw new Error("Unsafe agent profile path");
+  const escapedDesc = agent.description.replace(/"/g, '\\"');
 
   if (existsSync(filePath)) {
     const existingContent = readFileSync(filePath, "utf-8");
@@ -367,10 +729,10 @@ function writeAgentToDisk(agent: Agent, force = false): void {
     if (fmMatch) {
       const frontmatter = fmMatch[1]!;
 
-        let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
-       // Models are runtime configuration only. Remove stale active model lines while
-       // retaining comments that document historical model choices.
-       updated = updated.replace(/^model:\s*.*(?:\r?\n|$)/gm, "");
+      let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
+      // Models are runtime configuration only. Remove stale active model lines while
+      // retaining comments that document historical model choices.
+      updated = updated.replace(/^model:\s*.*(?:\r?\n|$)/gm, "");
 
       if (frontmatter.match(/^description:\s*".*"$/m)) {
         updated = updated.replace(/^description:\s*".*"$/m, `description: "${escapedDesc}"`);
@@ -378,50 +740,59 @@ function writeAgentToDisk(agent: Agent, force = false): void {
         updated = updated.replace(/^description:\s*.+$/m, `description: "${escapedDesc}"`);
       }
 
-       if (updated.match(/^mode:\s*.+$/m)) {
-         updated = updated.replace(/^mode:\s*.+$/m, `mode: ${agent.mode}`);
-       } else {
-         updated += `\nmode: ${agent.mode}`;
-       }
+      if (updated.match(/^mode:\s*.+$/m)) {
+        updated = updated.replace(/^mode:\s*.+$/m, `mode: ${agent.mode}`);
+      } else {
+        updated += `\nmode: ${agent.mode}`;
+      }
+      if (updated.match(/^disable:\s*.+$/m)) {
+        updated = updated.replace(/^disable:\s*.+$/m, `disable: ${agent.enabled ? "false" : "true"}`);
+      } else {
+        updated += `\ndisable: ${agent.enabled ? "false" : "true"}`;
+      }
 
-       const metadata = canonicalMetadataForDisk(
-         agent.name,
-         parseSerializedAgentObject(agent.metadata),
-       );
-       if (metadata.hidden === true) {
-         if (updated.match(/^hidden:\s*.+$/m)) {
-           updated = updated.replace(/^hidden:\s*.+$/m, "hidden: true");
-         } else {
-           updated += "\nhidden: true";
-         }
-       } else {
-         updated = updated.replace(/^hidden:\s*.+(?:\r?\n|$)/gm, "");
-       }
+      const metadata = canonicalMetadataForDisk(
+        agent.name,
+        parseSerializedAgentObject(agent.metadata),
+      );
+      const hidden = metadata.hidden === true;
+      if (updated.match(/^hidden:\s*.+$/m)) {
+        updated = updated.replace(/^hidden:\s*.+$/m, `hidden: ${hidden ? "true" : "false"}`);
+      } else {
+        updated += `\nhidden: ${hidden ? "true" : "false"}`;
+      }
+      updated = options.replacePermissions
+        ? writePermissionFrontmatter(
+            updated,
+            defaultPermissionsForAgent(agent.name, parseSerializedAgentObject(agent.permissions)),
+          )
+        : ensureDefaultDenyPermission(updated);
 
-        writeFileSync(filePath, `---\n${updated}\n---\n\n${agent.content}`);
+      const body = options.preserveBody ? fmMatch[2]! : `\n${agent.content}`;
+      writePublicAgentProfile(filePath, `---\n${updated}\n---\n${body}`);
       return;
     }
   }
 
-  // File doesn't exist — create full frontmatter from scratch
-   const permissions = defaultPermissionsForAgent(
-      agent.name,
-      parseSerializedAgentObject(agent.permissions),
-   );
-   const metadata = canonicalMetadataForDisk(
-     agent.name,
-     parseSerializedAgentObject(agent.metadata),
-   );
-   const skills = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
+  const permissions = defaultPermissionsForAgent(
+    agent.name,
+    parseSerializedAgentObject(agent.permissions),
+  );
+  const metadata = canonicalMetadataForDisk(
+    agent.name,
+    parseSerializedAgentObject(agent.metadata),
+  );
+  const skills = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
 
   const frontmatter = [
     "---",
     `name: ${agent.name}`,
-   `description: "${escapedDesc}"`,
-   `mode: ${agent.mode}`,
+    `description: "${escapedDesc}"`,
+    `mode: ${agent.mode}`,
+    `disable: ${agent.enabled ? "false" : "true"}`,
   ];
   if (agent.reasoning_effort) frontmatter.push(`reasoning_effort: "${agent.reasoning_effort}"`);
-  if (metadata.hidden === true) frontmatter.push("hidden: true");
+  frontmatter.push(`hidden: ${metadata.hidden === true ? "true" : "false"}`);
   if (Object.keys(permissions).length > 0) {
     frontmatter.push("permission:");
     appendYamlObject(frontmatter, permissions, 2);
@@ -432,57 +803,38 @@ function writeAgentToDisk(agent: Agent, force = false): void {
   frontmatter.push("");
   frontmatter.push(agent.content);
 
-  writeFileSync(filePath, frontmatter.join("\n"));
+  writePublicAgentProfile(filePath, frontmatter.join("\n"));
 }
 
 /**
  * Remove an agent's .md file from disk. Silently ignores if the file doesn't exist.
- * Used by disable/delete/update (on category change) operations.
+ * Used by delete/update (on category change) operations.
  */
 function removeAgentFromDisk(agent: Agent): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  const filePath = resolve(getAgentsDir(), agent.category, `${agent.name}.md`);
-  try { if (existsSync(filePath)) unlinkSync(filePath); } catch {}
+  const categoryDir = safeAgentCategoryDirectory(agent.category);
+  if (!categoryDir) return;
+  const filePath = resolve(categoryDir, `${agent.name}.md`);
+  if (!filePath.startsWith(categoryDir + sep)) return;
+  try {
+    const stat = lstatIfPresent(filePath);
+    if (stat?.isFile() || stat?.isSymbolicLink()) unlinkSync(filePath);
+  } catch {}
 }
 
 /**
  * The broker definition is never imported from disk. Migration 058 validates
- * the persisted record as the exact canonical template; disk sync only
- * rematerializes that template and never performs a database repair write.
+ * the persisted record as the exact canonical template; disk sync validates
+ * the deployment-owned profile without changing either source of truth.
  */
-function restoreReservedBrokerFromTrustedState(agent: Agent): Agent | undefined {
+function validateReservedBrokerState(agent: Agent): Agent | undefined {
   if (!isCanonicalBrokerAgent(agent)) {
     logger.error("agents", "Reserved broker row failed canonical template validation", { id: agent.id });
     return undefined;
   }
-  writeAgentToDisk(agent, true);
+  validateReservedBrokerDeployment();
   return agent;
-}
-
-/**
- * A broker file without a persisted broker row has no trusted source of truth.
- * Remove only regular files or file symlinks beneath a real category directory;
- * never follow a category-directory symlink while quarantining it.
- */
-function quarantineUntrustedBrokerFiles(): void {
-  const agentsRoot = resolve(getAgentsDir());
-  for (const category of AGENT_CATEGORIES) {
-    const categoryDir = resolve(agentsRoot, category);
-    if (!categoryDir.startsWith(agentsRoot + sep)) continue;
-    try {
-      if (!existsSync(categoryDir) || lstatSync(categoryDir).isSymbolicLink() || !lstatSync(categoryDir).isDirectory()) {
-        continue;
-      }
-      const filePath = resolve(categoryDir, `${LLM_BROKER_AGENT}.md`);
-      if (!filePath.startsWith(categoryDir + sep) || !existsSync(filePath)) continue;
-      unlinkSync(filePath);
-      logger.warn("agents", "Removed untrusted reserved broker profile with no persisted record", { category });
-    } catch {
-      // A failed quarantine leaves no DB record to activate. Do not follow or
-      // overwrite an uncertain path merely to make cleanup best-effort.
-    }
-  }
 }
 
 /**
@@ -547,10 +899,10 @@ export function createAgent(
       safeCategory,
       mode ?? "subagent",
       model ?? null,
-       canonicalPermissionsForAgent(name, permissions),
-       canonicalMetadataForAgent(name, metadata),
-       content,
-       enabled ? 1 : 0,
+      canonicalPermissionsForAgent(name, permissions),
+      canonicalMetadataForAgent(name, metadata),
+      content,
+      enabled ? 1 : 0,
       now,
       now,
     );
@@ -559,8 +911,8 @@ export function createAgent(
     return agent;
   });
   // Filesystem effects must happen after the database transaction commits.
-  if (agent.enabled) writeAgentToDisk(agent);
-  updateAgentRuntimeConfig(projectId, name, { model: model ?? null, disabled: !agent.enabled });
+  writeAgentToDisk(agent);
+  updateAgentRuntimeConfig(projectId, name, { model: model ?? null });
   checkpointAfterWrite();
   return agent;
 }
@@ -571,24 +923,47 @@ export function createAgent(
  * API, MCP, and resource-sync callers must never be able to author the broker.
  */
 export function bootstrapReservedBroker(projectId: string): Agent {
-  const broker = execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const existing = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const persisted = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+    .get(projectId, LLM_BROKER_AGENT) as Agent | undefined;
+  if (persisted && !isCanonicalBrokerAgent(persisted)) {
+    throw new Error("Reserved LLM broker failed canonical template validation");
+  }
+  if (!persisted && !db.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL").get(projectId)) {
+    throw new Error("Cannot bootstrap reserved LLM broker for a missing or archived project");
+  }
+
+  validateReservedBrokerDeployment();
+  const configReconciliation = prepareReservedBrokerRuntimeConfig(projectId);
+
+  const result = execTransaction(() => {
+    const transactionDb = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = transactionDb.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
       .get(projectId, LLM_BROKER_AGENT) as Agent | undefined;
     if (existing) {
       if (!isCanonicalBrokerAgent(existing)) {
         throw new Error("Reserved LLM broker failed canonical template validation");
       }
-      return existing;
+      if (configReconciliation) {
+        const now = new Date().toISOString();
+        if (configReconciliation.storedId) {
+          transactionDb.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?")
+            .run(configReconciliation.content, now, configReconciliation.storedId);
+        } else {
+          transactionDb.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, 'project', ?, ?, ?)")
+            .run(`config_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, projectId, configReconciliation.content, now, now);
+        }
+      }
+      return { broker: existing, changed: Boolean(configReconciliation) };
     }
 
-    const project = db.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL")
+    const project = transactionDb.prepare("SELECT 1 FROM projects WHERE id = ? AND archived_at IS NULL")
       .get(projectId);
     if (!project) throw new Error("Cannot bootstrap reserved LLM broker for a missing or archived project");
 
     const now = new Date().toISOString();
     const id = randomUUID();
-    db.prepare(
+    transactionDb.prepare(
       `INSERT INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, 1, ?, ?)`,
     ).run(
@@ -605,11 +980,19 @@ export function bootstrapReservedBroker(projectId: string): Agent {
       now,
       now,
     );
-    return db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Agent;
+    if (configReconciliation) {
+      if (configReconciliation.storedId) {
+        transactionDb.prepare("UPDATE configs SET content = ?, updated_at = ? WHERE id = ?")
+          .run(configReconciliation.content, now, configReconciliation.storedId);
+      } else {
+        transactionDb.prepare("INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, 'project', ?, ?, ?)")
+          .run(`config_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, projectId, configReconciliation.content, now, now);
+      }
+    }
+    return { broker: transactionDb.prepare("SELECT * FROM agents WHERE id = ?").get(id) as Agent, changed: true };
   });
-  writeAgentToDisk(broker, true);
-  checkpointAfterWrite();
-  return broker;
+  if (result.changed) checkpointAfterWrite();
+  return result.broker;
 }
 
 /**
@@ -669,7 +1052,10 @@ export function updateAgent(
     if (updated.agent.category !== updated.previous.category) {
       removeAgentFromDisk(updated.previous);
     }
-    writeAgentToDisk(updated.agent);
+    writeAgentToDisk(updated.agent, {
+      replacePermissions: updates.permissions !== undefined,
+      preserveBody: updates.content === undefined,
+    });
   }
   if (updated && updates.model !== undefined) {
     updateAgentRuntimeConfig(projectId, name, { model: updates.model || null });
@@ -713,14 +1099,14 @@ export function enableAgent(projectId: string, name: string): Agent | undefined 
     return agent;
   });
   if (agent) {
-    writeAgentToDisk(agent);
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined, disabled: false });
+    writeAgentToDisk(agent, { preserveBody: true });
+    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
 }
 
-/** Disable an agent and remove its `.md` file from disk. */
+/** Disable an agent while retaining its profile with `disable: true`. */
 export function disableAgent(projectId: string, name: string): Agent | undefined {
   if (!isSafeAgentName(name)) return undefined;
   // The reserved broker may not enter the ordinary disable lifecycle.
@@ -735,8 +1121,8 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
     return agent;
   });
   if (agent) {
-    removeAgentFromDisk(agent);
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model, disabled: true });
+    writeAgentToDisk(agent, { preserveBody: true });
+    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
@@ -747,7 +1133,7 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
  * Used by the bidirectional agent sync engine to reconcile disk → DB changes.
  *
  * If the agent exists in DB, its category from the DB is used to locate the file.
- * If not, all four category directories (primary, execution, research, security) are searched.
+ * If not, every supported category directory is searched.
  *
  * Parses the full YAML frontmatter structure including:
  * - Basic fields: name, description, mode, reasoning_effort
@@ -764,34 +1150,23 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const dbAgent = db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
     .get(projectId, name) as Agent | undefined;
 
-  // Disk frontmatter is untrusted for the system broker. This must run before
-  // generic missing-frontmatter, name-mismatch, and permission parsing paths:
-  // all of them restore the trusted profile when a row exists, while an orphan
-  // file is safely quarantined rather than imported as a new trusted profile.
+  // Disk frontmatter is untrusted for the system broker. Validate the
+  // deployment-owned profile before returning metadata, and never import or
+  // repair an orphan profile through resource sync.
   if (isReservedAgentName(name)) {
-    if (dbAgent) return restoreReservedBrokerFromTrustedState(dbAgent);
-    quarantineUntrustedBrokerFiles();
+    if (dbAgent) return validateReservedBrokerState(dbAgent);
+    validateReservedBrokerDeployment();
     return undefined;
-  }
-
-  if (dbAgent && !dbAgent.enabled) {
-    return dbAgent;
   }
 
   if (dbAgent) {
     if (!isAgentCategory(dbAgent.category)) return undefined;
-    filePath = resolve(
-      process.env.INGENIUM_CORE_DB_PATH ?? "./data",
-      "..", "..", ".opencode", "agents", dbAgent.category, `${name}.md`
-    );
+    filePath = safeAgentFilePath(dbAgent.category, name) ?? "";
     category = dbAgent.category;
   } else {
     for (const cat of categories) {
-      const candidate = resolve(
-        process.env.INGENIUM_CORE_DB_PATH ?? "./data",
-        "..", "..", ".opencode", "agents", cat, `${name}.md`
-      );
-      if (existsSync(candidate)) {
+      const candidate = safeAgentFilePath(cat, name);
+      if (candidate && lstatIfPresent(candidate)?.isFile()) {
         filePath = candidate;
         category = cat;
         break;
@@ -804,7 +1179,13 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
     return undefined;
   }
 
-  const content = readFileSync(filePath, "utf-8");
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch {
+    logger.warn("agents", "Agent profile is not readable from disk", { name });
+    return undefined;
+  }
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!fmMatch) {
     logger.warn("agents", "Agent file has no frontmatter", { name });
@@ -813,6 +1194,11 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
 
   const frontmatter = fmMatch[1]!;
   const body = fmMatch[2]!.trim();
+  if (!/^disable:\s*(?:true|false)\s*$/mi.test(frontmatter)
+    || !/^hidden:\s*(?:true|false)\s*$/mi.test(frontmatter)) {
+    logger.warn("agents", "Agent profile has incomplete lifecycle metadata", { name });
+    return undefined;
+  }
 
   const nameMatch = frontmatter.match(/^name:\s*(.+)$/m);
   const descMatch = frontmatter.match(/^description:\s*"(.+)"$/m);
@@ -820,42 +1206,47 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const reasoningMatch = frontmatter.match(/^reasoning_effort:\s*"(.+)"$/m);
   const skillMatches = [...frontmatter.matchAll(/^\s+-\s(.+)$/gm)].map(m => m[1]!);
 
-   const agentName = nameMatch?.[1] ?? name;
-   if (!isSafeAgentName(agentName) || agentName !== name || !isAgentCategory(category)) return undefined;
+  const agentName = nameMatch?.[1] ?? name;
+  if (!isSafeAgentName(agentName) || agentName !== name || !isAgentCategory(category)) return undefined;
   const description = descMatch?.[1] ?? "";
   const mode = modeMatch?.[1] ?? "subagent";
-   // Markdown model lines are deliberately ignored. Config is authoritative;
-   // absent a configured model, retain existing API metadata for compatibility.
-   const model = configuredAgentModel(projectId, name) ?? dbAgent?.model ?? null;
+  const enabled = parseAgentEnabled(frontmatter);
+  // Markdown model lines are deliberately ignored. Config is authoritative;
+  // absent a configured model, retain existing API metadata for compatibility.
+  const model = configuredAgentModel(projectId, name) ?? dbAgent?.model ?? null;
   const reasoningEffort = reasoningMatch?.[1] ?? null;
+  const profilePermissions = parsePermissionFrontmatter(frontmatter);
+  if (Object.keys(profilePermissions)[0] !== "*" || profilePermissions["*"] !== "deny") {
+    logger.warn("agents", "Agent profile is not default-deny", { name });
+    return undefined;
+  }
 
-   const permissions = canonicalPermissionsForAgent(
-     agentName,
-     JSON.stringify(defaultPermissionsForAgent(agentName, parsePermissionFrontmatter(frontmatter))),
-   );
-   const metadata = canonicalMetadataForAgent(
-     agentName,
-     JSON.stringify(parseAgentMetadata(frontmatter)),
-   );
+  const permissions = canonicalPermissionsForAgent(
+    agentName,
+    JSON.stringify(profilePermissions),
+  );
+  const metadata = canonicalMetadataForAgent(
+    agentName,
+    JSON.stringify(parseAgentMetadata(frontmatter)),
+  );
 
-   const agent = execTransaction(() => {
+  const agent = execTransaction(() => {
     const now = new Date().toISOString();
     if (dbAgent) {
       db.prepare(
-         `UPDATE agents SET name = ?, description = ?, category = ?, mode = ?, model = ?, reasoning_effort = ?, permissions = ?, metadata = ?, skills = ?, content = ?, updated_at = ? WHERE id = ?`
-       ).run(agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, now, dbAgent.id);
+        `UPDATE agents SET name = ?, description = ?, category = ?, mode = ?, model = ?, reasoning_effort = ?, permissions = ?, metadata = ?, skills = ?, content = ?, enabled = ?, updated_at = ? WHERE id = ?`
+      ).run(agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, enabled ? 1 : 0, now, dbAgent.id);
     } else {
       const id = randomUUID();
       db.prepare(
-         `INSERT OR IGNORE INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
-       ).run(id, projectId, agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, now, now);
+        `INSERT OR IGNORE INTO agents (id, project_id, name, description, category, mode, model, reasoning_effort, permissions, metadata, skills, content, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(id, projectId, agentName, description, category, mode, model, reasoningEffort, permissions, metadata, JSON.stringify(skillMatches), body, enabled ? 1 : 0, now, now);
     }
-     return db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
-       .get(projectId, agentName) as Agent | undefined;
-   });
-    if (agent && !dbAgent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined, disabled: true });
-    if (agent && isReservedAgentName(agent.name)) writeAgentToDisk(agent, true);
-    checkpointAfterWrite();
-   return agent;
+    return db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
+      .get(projectId, agentName) as Agent | undefined;
+  });
+  if (agent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
+  checkpointAfterWrite();
+  return agent;
 }

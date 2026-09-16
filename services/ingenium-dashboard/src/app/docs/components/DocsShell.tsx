@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import WorkspaceControl from "../../components/WorkspaceControl";
+import Select from "../../components/Select";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import type { DocSpace } from "@/lib/api";
 
 /** Inline SVG icon components — kept local to avoid external icon library dependency. */
@@ -134,11 +136,15 @@ export default function DocsShell({
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
 
   const selectedSpace = spaces.find((s) => s.id === selectedSpaceId);
+  const handleTreeDrawerClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest("[data-page-tree-select]")) {
+      setTreeDrawerOpen(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-[var(--color-surface)]">
-      {/* ── Top bar ── */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)] h-11" role="toolbar" aria-label="Docs workspace toolbar">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 px-3 py-1.5 border-b border-[var(--color-border)] shrink-0 bg-[var(--color-surface)] min-h-11 h-auto lg:flex-nowrap lg:h-11" role="toolbar" aria-label="Docs workspace toolbar">
         {/* Mobile: hamburger to open tree drawer */}
         <button
           type="button"
@@ -156,14 +162,14 @@ export default function DocsShell({
         ) : spaces.length === 0 ? (
           <span className="text-sm text-[var(--color-text-muted)] px-2 shrink-0">No spaces</span>
         ) : (
-          <div className="relative shrink-0">
-            <select
+          <Select
+              wrapperClassName="w-36 max-w-full min-w-0 shrink-0 sm:w-48"
               value={selectedSpaceId ?? ""}
               onChange={(e) => {
                 const id = Number(e.target.value);
                 if (!Number.isNaN(id)) onSelectSpace(id);
               }}
-              className="appearance-none border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-3 py-1.5 pr-7 text-[var(--color-text-primary)]"
+              className="w-full min-w-0 truncate appearance-none border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-3 py-1.5 pr-7 text-[var(--color-text-primary)]"
               aria-label="Select space"
             >
               {spaces.map((s) => (
@@ -171,17 +177,7 @@ export default function DocsShell({
                   {s.name}
                 </option>
               ))}
-            </select>
-            {/* Chevron */}
-            <svg
-              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-[var(--color-text-muted)]"
-              fill="none"
-              viewBox="0 0 12 12"
-              aria-hidden="true"
-            >
-              <path d="M3 5l3 3 3-3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
+            </Select>
         )}
 
         {/* Search button */}
@@ -235,7 +231,7 @@ export default function DocsShell({
 
         {/* Extra top bar actions slot (e.g., publish/archive control, breadcrumb indicator) */}
         {topBarActions && (
-          <div className="flex items-center gap-1.5 shrink-0">{topBarActions}</div>
+          <div className="flex max-w-full flex-wrap items-center gap-1.5 shrink-0">{topBarActions}</div>
         )}
 
         {/* Right side controls */}
@@ -270,7 +266,6 @@ export default function DocsShell({
         </div>
       </div>
 
-      {/* ── Three-pane body ── */}
       <div className="flex flex-1 min-h-0">
         {/* Left pane: page tree (lg+ inline, mobile drawer) */}
         <aside className="hidden lg:block w-[260px] shrink-0 border-r border-[var(--color-border)] overflow-y-auto bg-[var(--color-surface-muted)]">
@@ -290,35 +285,19 @@ export default function DocsShell({
         )}
       </div>
 
-      {/* ── Mobile tree drawer overlay ── */}
-      <div
-        className={`lg:hidden fixed inset-0 z-40 transition-opacity duration-200 ${
-          treeDrawerOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-        aria-hidden={!treeDrawerOpen}
+      <EdgeDrawer
+        open={treeDrawerOpen}
+        side="left"
+        className="lg:hidden fixed inset-0 z-40"
+        outerProps={{ "aria-hidden": !treeDrawerOpen }}
+        panelClassName="absolute top-0 left-0 bottom-0 w-72 max-w-[85vw] bg-[var(--color-surface)] border-r border-[var(--color-border)] overflow-y-auto"
+        panelProps={{
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Page tree",
+        }}
+        onBackdropClick={() => setTreeDrawerOpen(false)}
       >
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 bg-black/50"
-          onClick={() => setTreeDrawerOpen(false)}
-          aria-hidden="true"
-        />
-
-        {/* Slide-out panel */}
-        <div
-          className={`
-            absolute top-0 left-0 bottom-0
-            w-72 max-w-[85vw]
-            bg-[var(--color-surface)]
-            border-r border-[var(--color-border)]
-            overflow-y-auto
-            transition-transform duration-200 ease-in-out
-            ${treeDrawerOpen ? "translate-x-0" : "-translate-x-full"}
-          `}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Page tree"
-        >
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--color-border)]">
             <span className="text-sm font-semibold text-[var(--color-text-primary)]">
               {selectedSpace?.name ?? "Pages"}
@@ -333,41 +312,24 @@ export default function DocsShell({
               </svg>
             </button>
           </div>
-          {/* Clicking a tree item closes the drawer */}
-          <div onClick={() => setTreeDrawerOpen(false)}>{tree}</div>
-        </div>
-      </div>
+          {/* Only actual page selection closes the drawer; actions and expanders stay usable. */}
+          <div onClick={handleTreeDrawerClick}>{tree}</div>
+      </EdgeDrawer>
 
-      {/* ── Mobile/tablet right panel overlay ── */}
       {sidebar && (
-        <div
-          className={`lg:hidden fixed inset-0 z-40 transition-opacity duration-200 ${
-            rightPanelOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-          }`}
-          aria-hidden={!rightPanelOpen}
+        <EdgeDrawer
+          open={rightPanelOpen}
+          side="right"
+          className="lg:hidden fixed inset-0 z-40"
+          outerProps={{ "aria-hidden": !rightPanelOpen }}
+          panelClassName="absolute top-0 right-0 bottom-0 w-80 max-w-[85vw] bg-[var(--color-surface)] border-l border-[var(--color-border)] overflow-y-auto"
+          panelProps={{
+            role: "dialog",
+            "aria-modal": "true",
+            "aria-label": "Page details",
+          }}
+          onBackdropClick={() => setRightPanelOpen(false)}
         >
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setRightPanelOpen(false)}
-            aria-hidden="true"
-          />
-
-          {/* Slide-out panel */}
-          <div
-            className={`
-              absolute top-0 right-0 bottom-0
-              w-80 max-w-[85vw]
-              bg-[var(--color-surface)]
-              border-l border-[var(--color-border)]
-              overflow-y-auto
-              transition-transform duration-200 ease-in-out
-              ${rightPanelOpen ? "translate-x-0" : "translate-x-full"}
-            `}
-            role="dialog"
-            aria-modal="true"
-            aria-label="Page details"
-          >
             <div className="flex items-center justify-between px-3 py-2.5 border-b border-[var(--color-border)]">
               <span className="text-sm font-semibold text-[var(--color-text-primary)]">
                 Details
@@ -383,8 +345,7 @@ export default function DocsShell({
               </button>
             </div>
             {sidebar}
-          </div>
-        </div>
+        </EdgeDrawer>
       )}
     </div>
   );

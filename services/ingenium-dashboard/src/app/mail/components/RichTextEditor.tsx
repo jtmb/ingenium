@@ -5,6 +5,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { TextStyle } from "@tiptap/extension-text-style";
 import TextAlign from "@tiptap/extension-text-align";
 import { forwardRef, useImperativeHandle, useRef, useEffect } from "react";
+import Select from "../../components/Select";
 
 // Augment ChainedCommands with custom command names
 declare module "@tiptap/core" {
@@ -465,32 +466,36 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, {
         <div className="w-px h-5 bg-[var(--color-border)] mx-1 shrink-0" />
 
         {/* Font Family */}
-        <select
+        <Select
+          wrapperClassName="shrink-0"
           value={getActiveFontFamily()}
           onChange={(e) => editor.chain().focus().setFontFamily(e.target.value).run()}
           className="shrink-0 text-xs border border-[var(--color-border)] rounded px-1 py-0.5 min-h-[32px] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer min-w-[80px]"
           title="Font family"
+          aria-label="Font family"
         >
           {FONT_OPTIONS.map((f) => (
             <option key={f.label} value={f.value}>
               {f.label}
             </option>
           ))}
-        </select>
+        </Select>
 
         {/* Font Size */}
-        <select
+        <Select
+          wrapperClassName="shrink-0"
           value={getActiveFontSize()}
           onChange={(e) => editor.chain().focus().setFontSize(e.target.value).run()}
           className="shrink-0 text-xs border border-[var(--color-border)] rounded px-1 py-0.5 min-h-[32px] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer min-w-[60px]"
           title="Font size"
+          aria-label="Font size"
         >
           {FONT_SIZE_OPTIONS.map((s) => (
             <option key={s.label} value={s.value}>
               {s.label}
             </option>
           ))}
-        </select>
+        </Select>
 
         {/* Separator */}
         <div className="w-px h-5 bg-[var(--color-border)] mx-1 shrink-0" />

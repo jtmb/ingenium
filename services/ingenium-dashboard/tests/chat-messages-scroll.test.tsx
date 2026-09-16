@@ -17,7 +17,6 @@ import type { ChatMessage } from "../src/app/chat/components/ChatMessages";
  *   • Returning near bottom resumes following
  */
 
-// ── Mock child components ─────────────────────────────────────────────────────
 // Keep tests focused on ChatMessages scroll behavior, not children's rendering.
 
 vi.mock("../src/app/chat/components/ChatMarkdown", () => ({
@@ -38,7 +37,6 @@ vi.mock("../src/app/chat/components/QuestionPrompt", () => ({
 
 import ChatMessages from "../src/app/chat/components/ChatMessages";
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const msg1: ChatMessage = {
   id: "1",
@@ -68,7 +66,6 @@ const msg4: ChatMessage = {
   timestamp: 4000,
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
  * Mock scroll geometry properties on an element.
@@ -100,7 +97,6 @@ function mockScrollGeometry(
   });
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("ChatMessages — scroll behavior (UX-004)", () => {
   beforeEach(() => {
@@ -108,7 +104,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     cleanup();
   });
 
-  // ── Baseline ──────────────────────────────────────────────────────────────
 
   it("renders container with data-testid", () => {
     render(
@@ -117,7 +112,15 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
         isLoading: false,
       }),
     );
-    expect(screen.getByTestId("chat-messages-container")).toBeDefined();
+    const container = screen.getByTestId("chat-messages-container");
+    expect(container).toBeDefined();
+    expect(container.className).toContain("overflow-y-auto");
+    expect(container.className).toContain("[scrollbar-gutter:stable]");
+    const rail = screen.getByTestId("chat-message-rail");
+    expect(rail.className).toContain("mx-auto");
+    expect(rail.className).toContain("w-full");
+    expect(rail.className).toContain("max-w-3xl");
+    expect(rail.className).toContain("space-y-6");
   });
 
   it("uses scrollTop assignment instead of scrollIntoView", () => {
@@ -227,9 +230,49 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
 
     const assistant = screen.getByTestId("chat-assistant-message");
     expect(assistant.className).not.toMatch(/\b(?:border|rounded|bg-)/);
-    expect(screen.getByTestId("chat-stream-error").className).not.toMatch(
+    const streamError = screen.getByTestId("chat-stream-error");
+    expect(streamError.closest('[data-testid="chat-message-rail"]')).not.toBeNull();
+    expect(streamError.className).not.toMatch(
       /\b(?:border|rounded|bg-)/,
     );
+  });
+
+  it("renders project context status and source metadata without rendering source excerpts", () => {
+    render(
+      React.createElement(ChatMessages, {
+        messages: [{
+          id: "grounded-user",
+          role: "user",
+          content: "Summarize the handoff",
+          timestamp: 6_000,
+          grounding: {
+            requested: true,
+            status: "used",
+            project: "selected-project",
+            sources: [{
+              citationId: "citation-ctx-101",
+              sourceId: "source-1",
+              title: "Context handoff",
+              sourceHash: "a".repeat(64),
+              chunkIndex: 0,
+              availability: "available",
+              heading: "Current status",
+              provenance: "direct_upload",
+              sourceReference: "work-item:CTX-100",
+            }],
+          },
+        }],
+        isLoading: false,
+      }),
+    );
+
+    const grounding = screen.getByTestId("chat-project-context");
+    expect(grounding.textContent).toContain("Project context: requested — 1 source used from selected-project");
+    expect(grounding.textContent).toContain("Context handoff — Heading: Current status — Provenance: direct_upload — Source: work-item:CTX-100");
+    expect(screen.getByTestId("chat-context-citation-id").textContent).toBe("citation-ctx-101");
+    expect(grounding.textContent).toContain("Source hash: ".concat("a".repeat(64)));
+    expect(grounding.textContent).toContain("Chunk index: 0 — Availability: available");
+    expect(grounding.textContent).not.toContain("source excerpt body");
   });
 
   it("renders assistant-generated file output without card chrome", () => {
@@ -312,7 +355,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     );
   });
 
-  // ── Initial auto-follow ───────────────────────────────────────────────────
 
   it("auto-scrolls to bottom when new messages arrive (user near bottom)", () => {
     const { container, rerender } = render(
@@ -345,7 +387,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollEl.scrollTop).toBe(1200);
   });
 
-  // ── Scroll-away guard ─────────────────────────────────────────────────────
 
   it("does NOT auto-scroll when user has scrolled away from bottom", () => {
     const { container, rerender } = render(
@@ -382,7 +423,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollEl.scrollTop).toBe(400);
   });
 
-  // ── Resume following after scrolling back down ────────────────────────────
 
   it("resumes auto-scroll after user scrolls back near bottom", () => {
     const { container, rerender } = render(
@@ -433,7 +473,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollEl.scrollTop).toBe(1200);
   });
 
-  // ── isLoading changes trigger auto-scroll ─────────────────────────────────
 
   it("auto-scrolls when isLoading changes (user near bottom)", () => {
     const { container, rerender } = render(
@@ -464,7 +503,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollEl.scrollTop).toBe(1200);
   });
 
-  // ── Empty state does not render scroll container ─────────────────────────
 
   it("does not render scroll container in empty state", () => {
     render(
@@ -475,9 +513,9 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     );
     expect(screen.queryByTestId("chat-messages-container")).toBeNull();
     expect(screen.getByTestId("chat-empty-state")).toBeDefined();
+    expect(screen.getByTestId("chat-message-rail").className).toContain("max-w-3xl");
   });
 
-  // ── Exact boundary: <4px tolerance ───────────────────────────────────────
 
   it("auto-scrolls when within 4px of bottom but not beyond (boundary test)", () => {
     const { container, rerender } = render(
@@ -541,7 +579,6 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollEl.scrollTop).toBe(695);
   });
 
-  // ── Loading spinner (no messages) does not crash ─────────────────────────
 
   it("does not crash when loading with no messages", () => {
     render(

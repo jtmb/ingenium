@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../../lib/api";
+import { useVaultAttemptCooldown } from "./useVaultAttemptCooldown";
 
 interface CreateVaultModalProps {
   isOpen: boolean;
@@ -30,10 +31,12 @@ export default function CreateVaultModal({
   const [acknowledged, setAcknowledged] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { remainingSeconds, isCoolingDown, startCooldownFor } = useVaultAttemptCooldown();
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstInputRef = useRef<HTMLInputElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const initializationAttemptRef = useRef(false);
 
   // --- Focus trap + Escape ---
   useEffect(() => {
@@ -91,11 +94,15 @@ export default function CreateVaultModal({
     }
   }, [isOpen]);
 
-  const passwordsMatch = passphrase === confirmation && passphrase.length >= 12;
-  const canSubmit = acknowledged && passwordsMatch && !loading;
+  const passphraseLength = Array.from(passphrase).length;
+  const lengthOk = passphraseLength >= 12;
+  const hasNonWhitespaceContent = passphrase.trim().length > 0;
+  const passwordsMatch = passphrase === confirmation && lengthOk && hasNonWhitespaceContent;
+  const canSubmit = acknowledged && passwordsMatch && !loading && !isCoolingDown;
 
   const handleInitialize = useCallback(async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || initializationAttemptRef.current) return;
+    initializationAttemptRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -105,17 +112,21 @@ export default function CreateVaultModal({
       } else {
         setError("Failed to create vault. Please try again.");
       }
-    } catch (e: any) {
-      setError(e.message ?? "Failed to create vault");
+    } catch (error: unknown) {
+      if (startCooldownFor(error)) {
+        setError("Too many vault creation attempts. Wait for the countdown before trying again.");
+      } else {
+        setError("Unable to create the vault. Check the passphrase requirements and try again.");
+      }
     } finally {
+      initializationAttemptRef.current = false;
       setLoading(false);
     }
-  }, [canSubmit, passphrase, confirmation, project, onSuccess]);
+  }, [canSubmit, passphrase, confirmation, project, onSuccess, startCooldownFor]);
 
   if (!isOpen) return null;
 
   const bothHaveValue = passphrase.length > 0 && confirmation.length > 0;
-  const lengthOk = passphrase.length >= 12;
   const matchOk = passphrase === confirmation;
 
   return (
@@ -162,8 +173,9 @@ export default function CreateVaultModal({
 
         {/* Error display */}
         {error && (
-          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] p-2 rounded text-xs text-[var(--color-error-text)] mb-3">
+          <div role="alert" className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] p-2 rounded text-xs text-[var(--color-error-text)] mb-3">
             {error}
+            {remainingSeconds !== null && <span> Try again in {remainingSeconds}s.</span>}
           </div>
         )}
 
@@ -194,7 +206,7 @@ export default function CreateVaultModal({
               onChange={(e) => setPassphrase(e.target.value)}
               placeholder="At least 12 characters"
               className="w-full border border-[var(--color-border)] rounded px-3 py-2 pr-10 text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)]"
-              aria-invalid={passphrase.length > 0 && !lengthOk}
+              aria-invalid={passphrase.length > 0 && (!lengthOk || !hasNonWhitespaceContent)}
               aria-describedby="create-vault-passphrase-hint"
               autoComplete="new-password"
             />
@@ -224,7 +236,9 @@ export default function CreateVaultModal({
             aria-live="polite"
           >
             {passphrase.length > 0 && !lengthOk
-              ? `At least 12 characters (${passphrase.length}/12)`
+              ? `At least 12 characters (${passphraseLength}/12)`
+              : passphrase.length > 0 && !hasNonWhitespaceContent
+                ? "Passphrase must not be blank"
               : "At least 12 characters"}
           </p>
         </div>
@@ -313,7 +327,7 @@ export default function CreateVaultModal({
             disabled={!canSubmit}
             className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {loading ? "Creating..." : "Create & Unseal Vault"}
+            {loading ? "Creating..." : isCoolingDown ? `Try again in ${remainingSeconds}s` : "Create & Unseal Vault"}
           </button>
         </div>
       </div>

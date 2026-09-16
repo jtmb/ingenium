@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useId } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useId } from "react";
 import { createPortal } from "react-dom";
 
 type OverlayProps = {
@@ -9,11 +9,83 @@ type OverlayProps = {
   title: string;
   subtitle?: string;
   fullScreen?: boolean;
+  /** Replaces the default panel sizing classes without changing dialog behavior. */
+  panelClassName?: string;
+  /** Replaces the default body layout classes without changing dialog behavior. */
+  bodyClassName?: string;
   children: React.ReactNode;
 };
 
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+let bodyScrollLockCount = 0;
+let bodyOverflowBeforeFirstLock = "";
+const OverlayNestingContext = createContext<(() => () => void) | null>(null);
+
+function lockBodyScroll(): void {
+  if (bodyScrollLockCount === 0) {
+    bodyOverflowBeforeFirstLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLockCount += 1;
+}
+
+function unlockBodyScroll(): void {
+  bodyScrollLockCount = Math.max(0, bodyScrollLockCount - 1);
+  if (bodyScrollLockCount === 0) {
+    document.body.style.overflow = bodyOverflowBeforeFirstLock;
+    bodyOverflowBeforeFirstLock = "";
+  }
+}
+
+type BackgroundInertState = {
+  count: number;
+  inert: boolean;
+  ariaHidden: string | null;
+};
+
+const backgroundInertStates = new Map<HTMLElement, BackgroundInertState>();
+
+/**
+ * Keep all direct body siblings out of the accessibility tree while the
+ * portalled dialog is open. Capturing their prior state makes this safe for
+ * consumers that already manage an inert or aria-hidden application shell.
+ */
+function makeBackgroundInert(overlayRoot: HTMLElement): () => void {
+  const background = Array.from(document.body.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement && child !== overlayRoot);
+
+  for (const element of background) {
+    const existing = backgroundInertStates.get(element);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    backgroundInertStates.set(element, {
+      count: 1,
+      inert: element.inert,
+      ariaHidden: element.getAttribute("aria-hidden"),
+    });
+    element.inert = true;
+    element.setAttribute("aria-hidden", "true");
+  }
+
+  return () => {
+    for (const element of background) {
+      const state = backgroundInertStates.get(element);
+      if (!state) continue;
+      state.count -= 1;
+      if (state.count > 0) continue;
+
+      element.inert = state.inert;
+      if (state.ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", state.ariaHidden);
+      backgroundInertStates.delete(element);
+    }
+  };
+}
 
 /**
  * Full-screen settings overlay with backdrop, Escape-to-close, body scroll lock,
@@ -30,38 +102,69 @@ const FOCUSABLE_SELECTOR =
  * - Focus returns to the trigger element when the overlay closes
  * - Enter/Space activate buttons (browser default — no custom handling needed)
  */
-export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, children }: OverlayProps) {
+export default function Overlay({
+  isOpen,
+  onClose,
+  title,
+  subtitle,
+  fullScreen,
+  panelClassName,
+  bodyClassName,
+  children,
+}: OverlayProps) {
+  const overlayRootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   const titleId = useId();
+  const registerWithParent = useContext(OverlayNestingContext);
+  const nestedOverlayCountRef = useRef(0);
+  const registerNestedOverlay = useCallback(() => {
+    nestedOverlayCountRef.current += 1;
+    return () => {
+      nestedOverlayCountRef.current = Math.max(0, nestedOverlayCountRef.current - 1);
+    };
+  }, []);
 
-  // Keep the onClose ref in sync so the effect never needs to re-register
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     // Capture the currently focused element so we can restore it later
     previousFocus.current = document.activeElement as HTMLElement;
+    const unregisterFromParent = registerWithParent?.();
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (nestedOverlayCountRef.current > 0) return;
       if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onCloseRef.current();
         return;
       }
       if (e.key === "Tab") {
+        e.stopImmediatePropagation();
         const panel = panelRef.current;
         if (!panel) return;
         const focusable = Array.from(
           panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter(
+          (element) =>
+            !element.matches(':disabled, [aria-disabled="true"], [tabindex="-1"]') &&
+            !element.closest("[hidden], [inert]"),
         );
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (!first || !last) return;
 
-        if (e.shiftKey && document.activeElement === first) {
+        if (!panel.contains(document.activeElement)) {
+          e.preventDefault();
+          (e.shiftKey ? last : first).focus();
+        } else if (e.shiftKey && document.activeElement === first) {
           e.preventDefault();
           last.focus();
         } else if (!e.shiftKey && document.activeElement === last) {
@@ -71,39 +174,50 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
       }
     };
 
-    document.addEventListener("keydown", handleKeyDown);
-    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown, true);
+    lockBodyScroll();
+    const restoreBackground = overlayRootRef.current
+      ? makeBackgroundInert(overlayRootRef.current)
+      : () => {};
 
     // Focus the close button after a tick to ensure the portal has rendered
-    setTimeout(() => closeBtnRef.current?.focus(), 0);
+    const focusTimer = window.setTimeout(() => closeBtnRef.current?.focus(), 0);
 
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      window.clearTimeout(focusTimer);
+      document.removeEventListener("keydown", handleKeyDown, true);
+      unregisterFromParent?.();
+      unlockBodyScroll();
+      restoreBackground();
 
       // Restore focus to the element that triggered the overlay
-      if (previousFocus.current) {
+      if (previousFocus.current?.isConnected) {
         previousFocus.current.focus();
-        previousFocus.current = null;
       }
+      previousFocus.current = null;
     };
-  }, [isOpen]);
+  }, [isOpen, registerWithParent]);
 
   if (!isOpen) return null;
 
+  const defaultPanelClassName = fullScreen
+    ? "w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 max-w-none"
+    : "mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]";
+  const defaultBodyClassName = `flex-1 overflow-y-auto px-6 py-4 ${fullScreen ? "flex flex-col" : ""}`;
+
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start justify-center" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <OverlayNestingContext.Provider value={registerNestedOverlay}>
+      <div ref={overlayRootRef} className="fixed inset-0 z-50 flex items-start justify-center">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
       
       {/* Panel */}
       <div
         ref={panelRef}
-        className={`relative bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col ${
-          fullScreen
-            ? "w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 max-w-none"
-            : "mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]"
-        }`}
+        className={`relative bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col ${panelClassName ?? defaultPanelClassName}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
@@ -124,11 +238,12 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
         </div>
 
         {/* Body */}
-        <div className={`flex-1 overflow-y-auto px-6 py-4 ${fullScreen ? "flex flex-col" : ""}`}>
+        <div className={bodyClassName ?? defaultBodyClassName}>
           {children}
         </div>
       </div>
-    </div>,
+      </div>
+    </OverlayNestingContext.Provider>,
     document.body
   );
 }

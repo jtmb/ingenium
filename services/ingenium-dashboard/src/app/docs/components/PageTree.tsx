@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api, type DocSpace, type DocPageTree } from "@/lib/api";
+import { Dropdown, DropdownItem, DropdownPanel, DropdownTrigger } from "@/app/components/Dropdown";
 
 /** Inline SVG icons for the tree — avoids external icon library dependency. */
 
@@ -115,145 +116,94 @@ function TreeNode({
   const hasChildren = node.children && node.children.length > 0;
   const isSelected = node.id === selectedPageId;
   const isDisabled = disabledIds?.has(node.id) ?? false;
+  const childrenId = `page-tree-children-${node.id}`;
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => onSelectPage(node.id)}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setContextOpen((v) => !v);
-        }}
-        disabled={isDisabled}
-        className={`
-          w-full flex items-center gap-1.5 text-left text-sm py-1.5 pr-2 group
-          transition-colors
-          ${isSelected
-            ? "bg-[var(--color-surface-selected)] text-[var(--color-text-link)] border-l-2 border-[var(--color-text-link)]"
-            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] border-l-2 border-transparent"
-          }
-          ${isDisabled ? "opacity-40 cursor-not-allowed" : ""}
-        `}
+      <div
+        role="treeitem"
+        aria-selected={isSelected}
+        className={`group flex w-full items-center gap-1.5 py-1.5 pr-2 text-left text-sm transition-colors ${
+          isSelected
+            ? "border-l-2 border-[var(--color-text-link)] bg-[var(--color-surface-selected)] text-[var(--color-text-link)]"
+            : "border-l-2 border-transparent text-[var(--color-text-secondary)]"
+        } ${isDisabled ? "opacity-40" : ""}`}
         style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        title={node.title + (isDisabled ? " (cannot select as parent)" : "")}
-        aria-current={isSelected ? "page" : undefined}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setContextOpen(true);
+        }}
       >
         {/* Expand toggle */}
         {hasChildren ? (
-          <span
-            className="shrink-0 p-0.5 hover:bg-[var(--color-surface-hover)] rounded"
-            onClick={(e) => {
-              e.stopPropagation();
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 outline-none hover:bg-[var(--color-surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+            onClick={() => {
               setExpanded((v) => !v);
             }}
             aria-label={expanded ? "Collapse children" : "Expand children"}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation();
-                setExpanded((v) => !v);
-              }
-            }}
+            aria-expanded={expanded}
+            aria-controls={childrenId}
           >
             <IconChevronRight open={expanded} />
-          </span>
+          </button>
         ) : (
           <span className="shrink-0 w-5" />
         )}
-        <span className="shrink-0 text-[var(--color-text-muted)]">
-          {node.status === "published" ? <IconPagePublished /> : <IconPage />}
-        </span>
-        <span className="truncate flex-1">{node.title}</span>
+        <button
+          type="button"
+          onClick={() => onSelectPage(node.id)}
+          disabled={isDisabled}
+          data-page-tree-select
+          className="min-w-0 flex-1 truncate text-left outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          title={node.title + (isDisabled ? " (cannot select as parent)" : "")}
+          aria-current={isSelected ? "page" : undefined}
+        >
+          <span className="mr-1.5 inline-flex shrink-0 align-middle text-[var(--color-text-muted)]">
+            {node.status === "published" ? <IconPagePublished /> : <IconPage />}
+          </span>
+          <span className="align-middle">{node.title}</span>
+        </button>
 
-        {/* Context menu trigger (visible on hover) */}
-        <span className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            type="button"
-            className="p-0.5 rounded hover:bg-[var(--color-surface-selected)] text-[var(--color-text-muted)]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextOpen((v) => !v);
-            }}
+        <Dropdown open={contextOpen} onOpenChange={setContextOpen} className="relative shrink-0">
+          <DropdownTrigger
+            aria-label={`Page actions for ${node.title}`}
             title="Page actions"
-            aria-label="Page actions"
+            className="rounded p-0.5 text-[var(--color-text-muted)] opacity-100 outline-none transition-opacity hover:bg-[var(--color-surface-selected)] focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] sm:opacity-0 sm:group-hover:opacity-100"
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
               <circle cx="3" cy="6" r="1.2" />
               <circle cx="6" cy="6" r="1.2" />
               <circle cx="9" cy="6" r="1.2" />
             </svg>
-          </button>
-        </span>
-      </button>
-
-      {/* Inline context menu */}
-      {contextOpen && (
-        <div
-          className="ml-6 mr-2 mb-1 border border-[var(--color-border)] rounded bg-[var(--color-surface)] shadow-sm overflow-hidden"
-          role="menu"
-          aria-label={`Actions for ${node.title}`}
-        >
+          </DropdownTrigger>
+          <DropdownPanel aria-label={`Actions for ${node.title}`} className="right-0 top-full mt-1 w-32">
           {onRenamePage && (
-            <button
-              type="button"
-              className="w-full text-left px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                setContextOpen(false);
-                onRenamePage(node.id, node.title);
-              }}
-              role="menuitem"
-            >
+            <DropdownItem onClick={() => onRenamePage(node.id, node.title)} className="text-xs">
               Rename
-            </button>
+            </DropdownItem>
           )}
           {onMovePage && (
-            <button
-              type="button"
-              className="w-full text-left px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                setContextOpen(false);
-                onMovePage(node.id);
-              }}
-              role="menuitem"
-            >
+            <DropdownItem onClick={() => onMovePage(node.id)} className="text-xs">
               Move
-            </button>
+            </DropdownItem>
           )}
           {onArchivePage && (
-            <button
-              type="button"
-              className="w-full text-left px-3 py-1.5 text-xs text-red-600 hover:bg-[var(--color-error-bg)]"
-              onClick={(e) => {
-                e.stopPropagation();
-                setContextOpen(false);
-                onArchivePage(node.id);
-              }}
-              role="menuitem"
-            >
+            <DropdownItem onClick={() => onArchivePage(node.id)} className="text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)]">
               Archive
-            </button>
+            </DropdownItem>
           )}
-          <button
-            type="button"
-            className="w-full text-left px-3 py-1.5 text-xs text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
-            onClick={(e) => {
-              e.stopPropagation();
-              setContextOpen(false);
-            }}
-            role="menuitem"
-          >
+          <DropdownItem className="text-xs text-[var(--color-text-muted)]">
             Cancel
-          </button>
-        </div>
-      )}
+          </DropdownItem>
+          </DropdownPanel>
+        </Dropdown>
+      </div>
 
       {/* Children */}
       {hasChildren && expanded && (
-        <div>
+        <div id={childrenId} role="group">
           {node.children.map((child) => (
             <TreeNode
               key={child.id}

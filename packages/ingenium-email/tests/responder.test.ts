@@ -1,4 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { configureEmailRuntime, resetEmailRuntimeForTest } from "../lib/runtime.js";
+import { createMemoryEmailRuntime } from "./runtime-fixture.js";
+
+beforeEach(() => {
+  resetEmailRuntimeForTest();
+  configureEmailRuntime(createMemoryEmailRuntime());
+});
+
+afterEach(() => {
+  resetEmailRuntimeForTest();
+});
 
 describe("extractTemplate", () => {
   it("should extract a template between ```template markers", async () => {
@@ -75,6 +86,24 @@ describe("fillTemplate", () => {
     const { fillTemplate } = await import("../lib/responder.js");
     const result = fillTemplate("{{sender}}-{{subject}}", { sender: "", subject: "", date: "" });
     expect(result).toBe("-");
+  });
+});
+
+describe("parseReplyRecipient", () => {
+  it("uses the RFC822 parser to return a valid reply recipient", async () => {
+    const { parseReplyRecipient } = await import("../lib/responder.js");
+
+    await expect(parseReplyRecipient('Ada Example <ada@example.test>')).resolves.toEqual({
+      name: "Ada Example",
+      address: "ada@example.test",
+    });
+  });
+
+  it("rejects an empty or malformed sender instead of producing an empty recipient", async () => {
+    const { parseReplyRecipient } = await import("../lib/responder.js");
+
+    await expect(parseReplyRecipient("")).resolves.toBeNull();
+    await expect(parseReplyRecipient("not an address")).resolves.toBeNull();
   });
 });
 

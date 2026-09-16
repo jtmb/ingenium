@@ -112,8 +112,3 @@ export function deleteContext(projectId: string, id: number): boolean {
   if (changes) checkpointAfterWrite();
   return changes > 0;
 }
-
-/** Get the most recent context entries for a project, ordered by creation time descending. */
-export function recentContext(projectId: string, limit = 20): ContextEntry[] {
-  return listContext(projectId, limit).data;
-}

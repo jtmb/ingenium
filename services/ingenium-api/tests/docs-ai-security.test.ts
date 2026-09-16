@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { errorHandler } from "../lib/middleware/errors.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   executeSynthesisBroker: vi.fn(),
@@ -24,7 +25,10 @@ vi.mock("ingenium-core", () => ({
   logger: { warn: mocks.warn, error: mocks.error },
 }));
 
-vi.mock("../lib/opencode-client.js", () => ({ executeSynthesisBroker: mocks.executeSynthesisBroker }));
+vi.mock("../lib/opencode-client.js", () => ({
+  DOCS_AI_BROKER_TIMEOUT_MS: 60_000,
+  executeSynthesisBroker: mocks.executeSynthesisBroker,
+}));
 vi.mock("../lib/chat-provider-catalog.js", () => ({
   getChatProviderCatalog: mocks.getChatProviderCatalog,
   getStoredOrDefaultChatSelection: mocks.getStoredOrDefaultChatSelection,
@@ -49,21 +53,18 @@ const catalog = {
 beforeAll(async () => {
   const { router } = await import("../lib/routes/docs-ai.js");
   const app = express();
-  app.use(express.json());
+  // Match the deployed API body parser so this route's own document bound,
+  // rather than Express's default 100 KiB parser limit, is exercised.
+  app.use(express.json({ limit: "2mb" }));
   app.use("/api/v1/docs", router);
+  app.use(errorHandler);
   server = createServer(app);
 
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const address = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${address.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
 });
 
 beforeEach(() => {
@@ -88,6 +89,14 @@ function postAi(body: Record<string, unknown> = {}): Promise<Response> {
   });
 }
 
+function postRawAi(body: string): Promise<Response> {
+  return nativeFetch(`${baseUrl}/api/v1/docs/ai`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+}
+
 describe("POST /docs/ai Chat selection and global-project contract", () => {
   it("ignores a browser selection override and uses the server-owned global Chat selection", async () => {
     mocks.getStoredOrDefaultChatSelection.mockReturnValue({ providerId: "server-provider", modelId: "server-model" });
@@ -106,6 +115,8 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
     );
     expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
       projectId: "docs-global",
+      timeoutMs: 60_000,
+      timeoutPolicy: "docs-ai",
       selection: { providerID: "server-provider", modelID: "server-model" },
     }));
   });
@@ -120,11 +131,41 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
     }));
   });
 
+  it("invokes the server-derived Zen default when no managed synthesis selection exists", async () => {
+    const zenCatalog = {
+      providers: [{
+        providerId: "opencode",
+        label: "OpenCode Zen",
+        models: [{ id: "opencode/zen-free", label: "Zen Free" }],
+        defaultModel: "opencode/zen-free",
+        source: "builtin" as const,
+      }],
+      unavailable: null,
+    };
+    mocks.getChatProviderCatalog.mockResolvedValue(zenCatalog);
+    mocks.getStoredOrDefaultChatSelection.mockReturnValue({
+      providerId: "opencode",
+      modelId: "opencode/zen-free",
+    });
+
+    const response = await postAi({
+      providerId: "browser-provider",
+      modelId: "browser-model",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.getStoredOrDefaultChatSelection).toHaveBeenCalledWith("docs-global", zenCatalog.providers);
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      selection: { providerID: "opencode", modelID: "opencode/zen-free" },
+      timeoutMs: 60_000,
+      timeoutPolicy: "docs-ai",
+    }));
+  });
+
   it.each([
     ["missing action", { action: undefined }],
     ["invalid action", { action: "run_tools" }],
     ["empty content", { content: "" }],
-    ["oversized content", { content: "x".repeat(16_001) }],
     ["oversized title", { title: "t".repeat(513) }],
     ["non-string selection text", { selectedText: { text: "not allowed" } }],
   ])("rejects %s before global, catalog, or broker access", async (_label, body) => {
@@ -134,9 +175,57 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "INVALID_AI_REQUEST",
-        message: "Provide a supported action and non-empty documentation content within the allowed size.",
+        message: "Provide a supported action and non-empty content, a title for a blank outline, or selected text for rewrite.",
       },
     });
+    expect(mocks.getChatProviderCatalog).not.toHaveBeenCalled();
+    expect(mocks.getStoredOrDefaultChatSelection).not.toHaveBeenCalled();
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it("accepts a 70 KiB document and bounds Continue to its trailing prompt context", async () => {
+    const leadingMarker = "DOCUMENT_START_MARKER";
+    const trailingMarker = "DOCUMENT_END_MARKER";
+    const content = `${leadingMarker}${"x".repeat((70 * 1024) - leadingMarker.length - trailingMarker.length)}${trailingMarker}`;
+
+    const response = await postAi({ action: "continue", content });
+
+    expect(response.status).toBe(200);
+    const brokerRequest = mocks.executeSynthesisBroker.mock.calls[0]?.[0] as { user: string };
+    expect(brokerRequest.user).toContain(trailingMarker);
+    expect(brokerRequest.user).not.toContain(leadingMarker);
+    expect(brokerRequest.user.length).toBeLessThan(5_000);
+  });
+
+  it("accepts a 70 KiB document for Summarize while keeping its prompt context bounded", async () => {
+    const leadingMarker = "SUMMARY_DOCUMENT_START_MARKER";
+    const trailingMarker = "SUMMARY_DOCUMENT_END_MARKER";
+    const content = `${leadingMarker}${"x".repeat((70 * 1024) - leadingMarker.length - trailingMarker.length)}${trailingMarker}`;
+
+    const response = await postAi({ action: "summarize", content });
+
+    expect(response.status).toBe(200);
+    const brokerRequest = mocks.executeSynthesisBroker.mock.calls[0]?.[0] as { user: string };
+    expect(brokerRequest.user).toContain(leadingMarker);
+    expect(brokerRequest.user).not.toContain(trailingMarker);
+    expect(brokerRequest.user.length).toBeLessThan(5_000);
+  });
+
+  it("rejects content over the safe action limit without exposing document text", async () => {
+    const privateMarker = "PRIVATE_DOCUMENT_CONTENT";
+    const content = `${privateMarker}${"x".repeat((128 * 1024) - privateMarker.length + 1)}`;
+
+    const response = await postAi({ action: "continue", content });
+    const payload = await response.json();
+
+    expect(response.status).toBe(413);
+    expect(payload).toEqual({
+      error: {
+        code: "DOCS_AI_CONTENT_TOO_LARGE",
+        message: "The continue action accepts documentation content up to 131,072 UTF-8 bytes.",
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain(privateMarker);
     expect(mocks.getChatProviderCatalog).not.toHaveBeenCalled();
     expect(mocks.getStoredOrDefaultChatSelection).not.toHaveBeenCalled();
     expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
@@ -184,6 +273,22 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
   });
 
   it("returns a distinct catalog failure without calling the broker", async () => {
+    mocks.getChatProviderCatalog.mockResolvedValue({ providers: [], unavailable: "catalog" });
+
+    const response = await postAi();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toEqual({
+      error: {
+        code: "LLM_CATALOG_UNAVAILABLE",
+        message: "The Chat model catalog is temporarily unavailable. Try again later.",
+      },
+    });
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes a thrown catalog lookup failure without calling the broker", async () => {
     mocks.getChatProviderCatalog.mockRejectedValue(new Error("private provider endpoint failed"));
 
     const response = await postAi();
@@ -227,9 +332,105 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
       user: expect.stringContaining("Only this selection"),
     }));
   });
+
+  it("uses the complete bounded Rewrite selection instead of truncating it to document context", async () => {
+    const selectionTail = "REWRITE_SELECTION_END";
+    const selectedText = `${"s".repeat(16_000 - selectionTail.length)}${selectionTail}`;
+    const response = await postAi({ action: "rewrite", selectedText });
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      user: expect.stringContaining(selectionTail),
+    }));
+  });
+
+  it("allows an outline for blank content when a non-whitespace title is supplied", async () => {
+    const response = await postAi({ action: "outline", content: "  \n", title: "Release notes" });
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      user: expect.stringContaining("Page title: Release notes"),
+    }));
+  });
+
+  it("rejects a blank outline without a usable title", async () => {
+    const response = await postAi({ action: "outline", content: "\t", title: "  " });
+
+    expect(response.status).toBe(400);
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "continue",
+    "summarize",
+    "fix_grammar",
+    "tone_professional",
+    "tone_casual",
+    "tone_technical",
+  ])("rejects whitespace-only content for %s", async (action) => {
+    const response = await postAi({ action, content: " \n\t" });
+
+    expect(response.status).toBe(400);
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it("requires non-whitespace selected text for rewrite", async () => {
+    const response = await postAi({ action: "rewrite", content: "Full page", selectedText: " \n" });
+
+    expect(response.status).toBe(400);
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it("allows Rewrite to use a non-whitespace selection even when the page content is blank", async () => {
+    const response = await postAi({ action: "rewrite", content: " \n", selectedText: "Selected text" });
+
+    expect(response.status).toBe(200);
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      user: expect.stringContaining("Selected text"),
+    }));
+  });
+
+  it("maps malformed JSON to a sanitized 400 response before any AI dependency is used", async () => {
+    const privateMarker = "PRIVATE_MALFORMED_DOCUMENT_CONTENT";
+    const response = await postRawAi(`{"action":"summarize","content":"${privateMarker}"`);
+    const body = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      error: expect.objectContaining({
+        code: "MALFORMED_JSON",
+        message: "Malformed JSON request body",
+      }),
+    });
+    expect(JSON.stringify(body)).not.toContain(privateMarker);
+    expect(mocks.getChatProviderCatalog).not.toHaveBeenCalled();
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /docs/ai sanitized broker failures", () => {
+  it("maps a broker timeout to the stable Docs timeout contract without provider details", async () => {
+    const privateProviderId = "provider-private.example/api-key=must-not-leak";
+    mocks.getStoredOrDefaultChatSelection.mockReturnValue({
+      providerId: privateProviderId,
+      modelId: "private-model",
+    });
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: "timeout" });
+
+    const response = await postAi();
+    const body = await response.json();
+
+    expect(response.status).toBe(504);
+    expect(body).toEqual({
+      error: {
+        code: "LLM_BROKER_TIMEOUT",
+        message: "The AI service timed out. Please try again later.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(privateProviderId);
+    expect(mocks.warn).toHaveBeenCalledWith("docs-ai", "Broker request timed out", { projectId: "docs-global" });
+  });
+
   it("does not expose upstream response text", async () => {
     const upstreamBody = "provider diagnostics endpoint=https://private.example apiKey=must-not-leak";
     mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: upstreamBody });
@@ -278,7 +479,7 @@ describe("POST /docs/ai sanitized broker failures", () => {
     expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
   });
 
-  it("returns a generic internal contract for unexpected non-broker failures", async () => {
+  it("maps global Chat-selection resolution failures to a sanitized unavailable-catalog contract", async () => {
     mocks.getStoredOrDefaultChatSelection.mockImplementation(() => {
       throw new Error("internal database location must not leak");
     });
@@ -286,10 +487,24 @@ describe("POST /docs/ai sanitized broker failures", () => {
     const response = await postAi();
     const body = await response.json();
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(503);
     expect(body).toEqual({
-      error: { code: "INTERNAL_ERROR", message: "Unable to generate documentation assistance. Please try again later." },
+      error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." },
     });
     expect(JSON.stringify(body)).not.toContain("internal database location must not leak");
+    expect(mocks.warn).toHaveBeenCalledWith("docs-ai", "Unable to resolve the global Chat selection", { projectId: "docs-global" });
+  });
+
+  it("maps an empty successful broker result to the same sanitized broker contract", async () => {
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: true, content: "   " });
+
+    const response = await postAi();
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({
+      error: { code: "LLM_BROKER_ERROR", message: "The AI service is unavailable. Please try again later." },
+    });
+    expect(mocks.warn).toHaveBeenCalledWith("docs-ai", "Broker request returned no usable content", { projectId: "docs-global" });
   });
 });

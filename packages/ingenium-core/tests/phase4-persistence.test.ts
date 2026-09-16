@@ -5,8 +5,12 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import {
+  archiveProject,
   createProject,
   deleteProject,
+  ensureCanonicalGlobalProject,
+  getCanonicalGlobalProject,
+  getFormerGlobalProjectIds,
   getGlobalProject,
   migrateWorkspaceProject,
   setProjectGlobal,
@@ -119,6 +123,53 @@ describe("Phase 4 core persistence boundaries", () => {
     expect(openDatabase().prepare("SELECT COUNT(*) AS count FROM projects WHERE is_global = 1").get()).toEqual({
       count: 1,
     });
+  });
+
+  it("does not let a noncanonical active global project capture server-owned resources", () => {
+    createProject("alternate-global", true);
+
+    expect(() => getCanonicalGlobalProject()).toThrow(/global-default/i);
+    expect(() => ensureCanonicalGlobalProject()).toThrow(/global-default/i);
+
+    const canonical = createProject("global-default", true);
+    expect(getCanonicalGlobalProject()?.id).toBe(canonical.id);
+  });
+
+  it("seeds only the active global when provenance is first installed", () => {
+    const db = openDatabase();
+    const activeGlobalId = randomUUID();
+    const archivedGlobalId = randomUUID();
+    const now = new Date().toISOString();
+    db.prepare(
+      "INSERT INTO projects (id, name, path, is_global, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
+    ).run(activeGlobalId, "global-default", "global-default", now, now);
+    db.prepare(
+      "INSERT INTO projects (id, name, path, is_global, created_at, updated_at, archived_at) VALUES (?, ?, ?, 1, ?, ?, ?)",
+    ).run(archivedGlobalId, "archived-legacy-global", "archived-legacy-global", now, now, now);
+    db.exec("DROP TABLE server_global_project_provenance");
+
+    resetDbForTest();
+    const reopened = openDatabase();
+
+    expect(reopened.prepare(
+      "SELECT source_project_id, event_type FROM server_global_project_provenance ORDER BY id",
+    ).all()).toEqual([{ source_project_id: activeGlobalId, event_type: "became_global" }]);
+    expect(getFormerGlobalProjectIds(activeGlobalId)).toEqual([]);
+  });
+
+  it("records lifecycle-proven former globals without selecting ordinary projects", () => {
+    const canonical = createProject("global-default", true);
+    const ordinaryActive = createProject("ordinary-active");
+    const ordinaryArchived = createProject("ordinary-archived");
+    const former = createProject("former-global");
+
+    expect(archiveProject(ordinaryArchived.name)).toBe(true);
+    expect(setProjectGlobal(former.name, true)).toBe(true);
+    expect(setProjectGlobal(canonical.name, true)).toBe(true);
+
+    expect(getFormerGlobalProjectIds(canonical.id)).toEqual([former.id]);
+    expect(getFormerGlobalProjectIds(canonical.id)).not.toContain(ordinaryActive.id);
+    expect(getFormerGlobalProjectIds(canonical.id)).not.toContain(ordinaryArchived.id);
   });
 
   it("runs workspace migration once and preserves disabled skill metadata", () => {

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   executeSynthesisBroker: vi.fn(),
@@ -51,18 +51,13 @@ beforeAll(async () => {
   app.use(express.json());
   app.use("/api/v1/rag", ragRouter);
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      baseUrl = `http://127.0.0.1:${(server!.address() as AddressInfo).port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterEach(() => vi.clearAllMocks());
 
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  if (server) await closeHttpServer(server);
 });
 
 function ask(): Promise<Response> {
@@ -74,6 +69,28 @@ function ask(): Promise<Response> {
 }
 
 describe("POST /rag/ask broker failures", () => {
+  it("uses the server-resolved broker path for a Zen-only request and ignores provider/model body fields", async () => {
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: true, content: "Zen answer. [1]" });
+
+    const response = await nativeFetch(`${baseUrl}/api/v1/rag/ask?project=rag-security-test`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question: "What does the context say?",
+        providerID: "attacker-provider",
+        modelID: "attacker-model",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.answer).toBe("Zen answer. [1]");
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: "rag-project",
+      timeoutMs: 30_000,
+    }));
+    expect(mocks.executeSynthesisBroker.mock.calls[0]![0]).not.toHaveProperty("selection");
+  });
+
   it("returns a generic error and structured diagnostics without upstream text", async () => {
     const upstreamMessage = "provider rejected credential=secret-value";
     mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: upstreamMessage });

@@ -1,0 +1,12 @@
+{
+  "schema": "ingenium.multi-session-bundle-checksums/v1",
+  "schemaVersion": 1,
+  "digestAlgorithm": "sha256",
+  "files": [
+    {"name":"README.md","sha256":"65846b4aff88af47ce5f087095e4e30e5d9f4cf942b3cd3ae5ceb8994f190aa7"},
+    {"name":"artifact-ledger.json","sha256":"3c4f0cfad57325e234ecc5314e1182768589597577961636e5868150af33106f"},
+    {"name":"event-excerpts.json","sha256":"a8d4e09629bb2af8b9a12aaa497214c11ee8699f04e75f8ab90590f32c49827a"},
+    {"name":"proof.json","sha256":"1f1125476826950063efb51687e0394f0547c41d461f773cb2c175478e2f4e90"},
+    {"name":"validate.mjs","sha256":"0dbcf3b67dc116068780561c6cea8ff85929e1008c22874acbedc1e562096b76"}
+  ]
+}

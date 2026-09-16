@@ -1,10 +1,15 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
 import {
   cleanupTestRun,
+  getCanonicalRepoRoot,
+  getPlaywrightOutputDirectory,
   readTestRunManifest,
   TEST_RUN_MANIFEST_ENV,
 } from "./test-run-context";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
+
+const PLAYWRIGHT_REPO_ROOT = getCanonicalRepoRoot(resolve(__dirname, ".."));
 
 /**
  * Playwright E2E configuration for the isolated fixture run.
@@ -47,20 +52,31 @@ console.log(`[playwright] api=${context.ports.api} dashboard=${context.ports.das
 export default defineConfig({
   testDir: ".",
   // Explicit deterministic allow-list. Docker, live-provider, live-mail, and
-  // manual visual suites are selected only by their dedicated configs.
+  // manual visual suites are selected only by their dedicated configs. The
+  // current Context contract remains in mcp-tools.spec.ts; retired learning,
+  // archive, and server page suites are intentionally not selected.
   testMatch: [
     "**/mcp-tools.spec.ts",
+    "**/ingenium-dashboard/mcp-tool-controls.spec.ts",
     "**/ingenium-dashboard/homepage.spec.ts",
+    "**/ingenium-dashboard/local-auth-cookie.spec.ts",
+    "**/ingenium-dashboard/fixture-project-context.spec.ts",
     "**/ingenium-dashboard/dashboard.spec.ts",
+    "**/ingenium-dashboard/docs-ai.spec.ts",
     "**/ingenium-dashboard/chat-states.spec.ts",
     "**/ingenium-dashboard/chat-e2e-smoke.spec.ts",
     "**/ingenium-dashboard/opencode-chat.spec.ts",
+    "**/ingenium-dashboard/vscode.spec.ts",
+    "**/ingenium-dashboard/runtime-audiences.spec.ts",
     "**/ingenium-dashboard/jobs.spec.ts",
     "**/ingenium-dashboard/pipeline.spec.ts",
     "**/ingenium-dashboard/settings-providers.spec.ts",
+    "**/ingenium-dashboard/task-capture.spec.ts",
     "**/ingenium-dashboard/vault-first-run.spec.ts",
     "**/ingenium-dashboard/lan-api-assertions.spec.ts",
     "**/ingenium-dashboard/theme-flash.spec.ts",
+    "**/ingenium-dashboard/usage.spec.ts",
+    "**/ingenium-dashboard/route-responsive.spec.ts",
   ],
   timeout: 30_000,
   expect: { timeout: 10_000 },
@@ -70,7 +86,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
-  outputDir: "artifacts/playwright/default",
+  outputDir: getPlaywrightOutputDirectory("default", PLAYWRIGHT_REPO_ROOT),
   globalSetup: "./playwright-global-setup.ts",
   globalTeardown: "./playwright-global-teardown.ts",
   use: {

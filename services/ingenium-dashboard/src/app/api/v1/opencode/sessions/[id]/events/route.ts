@@ -1,12 +1,9 @@
-import { loadDashboardApiToken } from "../../../../../../../lib/dashboard-token";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_API_PORT = 4097;
-
 function apiPort(): number | null {
-  const configured = process.env.INGENIUM_API_PORT ?? String(DEFAULT_API_PORT);
+  const configured = process.env.INGENIUM_API_PORT
+    ?? (process.env.NODE_ENV === "production" ? "4096" : "4097");
   if (!/^\d{1,5}$/.test(configured)) return null;
 
   const port = Number(configured);
@@ -34,15 +31,6 @@ export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
-  const token = loadDashboardApiToken();
-  if (!token) {
-    return jsonError(
-      503,
-      "DASHBOARD_API_PROXY_MISCONFIGURED",
-      "Dashboard API proxy is not configured",
-    );
-  }
-
   const port = apiPort();
   if (!port) {
     return jsonError(
@@ -64,10 +52,9 @@ export async function GET(
   );
   upstreamUrl.search = incomingUrl.search;
 
-  const headers = new Headers({
-    Accept: "text/event-stream",
-    Authorization: `Bearer ${token}`,
-  });
+  const cookie = request.headers.get("cookie");
+  if (!cookie) return jsonError(401, "UNAUTHORIZED", "Authentication is required");
+  const headers = new Headers({ Accept: "text/event-stream", Cookie: cookie });
   const lastEventId = request.headers.get("last-event-id");
   if (lastEventId) headers.set("Last-Event-ID", lastEventId);
 

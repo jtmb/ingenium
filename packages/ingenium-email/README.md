@@ -7,7 +7,7 @@ IMAP/SMTP email client for the Ingenium MCP Server.
 - SMTP sending via `nodemailer` — compose and send with HTML formatting, CC/BCC
 - MIME parsing via `mailparser`
 - **OAuth2 support** for Gmail (google-auth-library) and Outlook (@azure/msal-node)
-- IMDb IDLE watcher for real-time email monitoring and auto-drafting
+- IMAP IDLE watcher for real-time email monitoring and auto-drafting
 - AES-256-GCM credential encryption
 - Background smart-reply precomputation with durable queue and retry
 

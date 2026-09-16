@@ -4,11 +4,12 @@
  * Manages OpenCode provider listing, API key connection, disconnection, and status.
  */
 import { api } from "../client.js";
+import { textResult } from "./result.js";
 
 /** List all available LLM providers from OpenCode. */
 export async function providerList(project: string) {
   const res = await api.get("/opencode/providers", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Connect a provider with an API key. */
@@ -22,7 +23,7 @@ export async function providerConnect(project: string, providerId: string, key: 
     }
   }
   const res = await api.post(`/opencode/auth/${providerId}`, body, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }
 
 /** Disconnect a provider. */
@@ -34,5 +35,5 @@ export async function providerDisconnect(project: string, providerId: string) {
 /** Get provider connection status (keys redacted by API). */
 export async function providerStatus(project: string) {
   const res = await api.get("/opencode/auth/status", { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+  return textResult(res.data);
 }

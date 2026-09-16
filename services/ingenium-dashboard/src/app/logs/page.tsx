@@ -3,19 +3,17 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
-import { api, type LogEntry } from "../../lib/api";
+import { api, ApiError, type LogEntry } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
-// ── Constants ────────────────────────────────────────────────────────────
 // 500-entry cap prevents unbounded memory growth in long-running sessions.
-// 2s poll interval gives near-real-time log display without saturating the API.
+// A one-shot timer starts only after the previous request settles.
 const MAX_ENTRIES = 500;
 const POLL_MS = 2_000;
 
 const ALL_LEVELS = ["debug", "info", "warn", "error"] as const;
 type Level = (typeof ALL_LEVELS)[number];
 
-// ── Color maps ───────────────────────────────────────────────────────────
 function sourceBadgeColor(src: string): string {
   const hues: Record<string, string> = {
     agent: "blue",
@@ -59,7 +57,6 @@ const SOURCE_LABEL: Record<string, string> = {
   email: "Email",
 };
 
-// ── Helpers ──────────────────────────────────────────────────────────────
 function fmtTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString("en-GB", { hour12: false });
@@ -72,8 +69,6 @@ function fmtFull(iso: string): string {
 function dedupeKey(e: LogEntry): string {
   return `${e.timestamp}|${e.source}|${e.level}|${e.message}`;
 }
-
-// ── Page ─────────────────────────────────────────────────────────────────
 
 /**
  * LogsPage — Live system log stream with source/level filters and search.
@@ -94,33 +89,68 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
   const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set(["all"]));
   const [selectedLevels, setSelectedLevels] = useState<Set<Level>>(new Set(["info", "warn", "error"]));
   const [searchText, setSearchText] = useState("");
 
-  // UI state
   const [paused, setPaused] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
   const seenKeys = useRef(new Set<string>());
   const lastTimestampRef = useRef<string>("");
 
-  // ── Fetch ──────────────────────────────────────────────────────────────
-  const fetchLogs = useCallback(() => {
-    api.logs
-      .list(project, lastTimestampRef.current || undefined, 200)
-      .then((r: any) => {
-        const data = r.data || r;
+  useEffect(() => {
+    let disposed = false;
+    let hidden = document.hidden;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let controller: AbortController | null = null;
+
+    const clearTimer = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
+
+    const abortRequest = () => {
+      const activeController = controller;
+      controller = null;
+      activeController?.abort();
+    };
+
+    const canPoll = () => !disposed && !paused && !hidden;
+
+    const schedule = (delay: number) => {
+      if (!canPoll()) return;
+      clearTimer();
+      timer = setTimeout(() => {
+        timer = null;
+        void poll();
+      }, delay);
+    };
+
+    const poll = async (): Promise<void> => {
+      if (!canPoll() || controller) return;
+
+      const requestController = new AbortController();
+      controller = requestController;
+      try {
+        const response = await api.logs.list(
+          project,
+          lastTimestampRef.current || undefined,
+          200,
+          requestController.signal,
+        );
+        if (!canPoll() || requestController.signal.aborted) return;
+
+        const data = response.data || response;
         const newEntries: LogEntry[] = data.entries || [];
         const newSources: string[] = data.sources || [];
 
         if (newEntries.length > 0) {
-          // Deduplicate using seenKeys
-          const unseen = newEntries.filter((e) => {
-            const key = dedupeKey(e);
+          const unseen = newEntries.filter((entry) => {
+            const key = dedupeKey(entry);
             if (seenKeys.current.has(key)) return false;
             seenKeys.current.add(key);
             return true;
@@ -129,14 +159,11 @@ export default function LogsPage() {
           if (unseen.length > 0) {
             setEntries((prev) => {
               const merged = [...prev, ...unseen];
-              // Enforce MAX_ENTRIES limit
               return merged.length > MAX_ENTRIES
                 ? merged.slice(merged.length - MAX_ENTRIES)
                 : merged;
             });
-            // Update last timestamp for `since` pagination
-            const latest = unseen[unseen.length - 1]!;
-            lastTimestampRef.current = latest.timestamp;
+            lastTimestampRef.current = unseen[unseen.length - 1]!.timestamp;
           }
         }
 
@@ -145,34 +172,55 @@ export default function LogsPage() {
         setLastUpdate(new Date().toISOString());
         setError(null);
         setLoading(false);
-      })
-      .catch((err: Error) => {
-        setError(err.message || "Failed to fetch logs");
+        schedule(POLL_MS);
+      } catch (err: unknown) {
+        if (disposed || requestController.signal.aborted) return;
+
         setLoading(false);
-      });
-  }, [project]);
+        if (err instanceof ApiError && err.status === 429) {
+          if (err.retryAfterStatus === "valid" && err.retryAfterSeconds !== null) {
+            setError(`${err.message} Retrying in ${err.retryAfterSeconds}s.`);
+            schedule(err.retryAfterSeconds * 1_000);
+          } else {
+            const retryMessage = err.retryAfterStatus === "excessive"
+              ? "The server supplied an excessive Retry-After delay."
+              : err.retryAfterStatus === "invalid"
+                ? "The server supplied an invalid Retry-After delay."
+                : "The server did not supply a valid Retry-After delay.";
+            setError(`${err.message} ${retryMessage} Polling stopped.`);
+            clearTimer();
+          }
+          return;
+        }
 
-  // Initial fetch
-  useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
-
-  // ── Polling ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (paused) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+        setError(err instanceof Error ? err.message || "Failed to fetch logs" : "Failed to fetch logs");
+        schedule(POLL_MS);
+      } finally {
+        if (controller === requestController) controller = null;
       }
-    } else {
-      intervalRef.current = setInterval(fetchLogs, POLL_MS);
-    }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [paused, fetchLogs]);
 
-  // ── Auto-scroll ────────────────────────────────────────────────────────
+    const handleVisibilityChange = () => {
+      hidden = document.hidden;
+      if (hidden) {
+        clearTimer();
+        abortRequest();
+      } else if (!paused) {
+        schedule(0);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (!hidden && !paused) void poll();
+
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      clearTimer();
+      abortRequest();
+    };
+  }, [paused, project]);
+
   useEffect(() => {
     if (shouldAutoScroll.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -186,7 +234,6 @@ export default function LogsPage() {
     shouldAutoScroll.current = scrollHeight - scrollTop - clientHeight < 4;
   }, []);
 
-  // ── Filter logic ───────────────────────────────────────────────────────
   const filteredEntries = useMemo(() => {
     const showAllSources = selectedSources.has("all");
     return entries.filter((e) => {
@@ -201,13 +248,11 @@ export default function LogsPage() {
     });
   }, [entries, selectedSources, selectedLevels, searchText]);
 
-  // Derived stats
   const activeSourcesCount = useMemo(
     () => new Set(entries.map((e) => e.source)).size,
     [entries],
   );
 
-  // ── Toggle helpers ─────────────────────────────────────────────────────
   const toggleSource = (src: string) => {
     setSelectedSources((prev) => {
       const next = new Set(prev);
@@ -240,18 +285,16 @@ export default function LogsPage() {
     });
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
-      {/* ── Status Header ──────────────────────────────────────────────── */}
+    <div className="space-y-4 min-w-0">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">System Logs</h1>
+        <div className="min-w-0">
+          <h1 className="break-words text-3xl font-bold">System Logs</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
             Live log stream from the Ingenium server
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--color-text-secondary)] sm:w-auto sm:justify-end">
           <span>
             Total: <strong>{total}</strong>
           </span>
@@ -282,14 +325,11 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {/* ── Filter Bar ──────────────────────────────────────────────────── */}
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow space-y-3">
-        {/* Source pills */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-[var(--color-text-muted)] mr-1 font-medium">
             Sources:
           </span>
-          {/* All pill */}
           <button
             onClick={() => toggleSource("all")}
             className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
@@ -319,8 +359,7 @@ export default function LogsPage() {
           })}
         </div>
 
-        {/* Level checkboxes + search */}
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
           <span className="text-xs text-[var(--color-text-muted)] font-medium">Levels:</span>
           {ALL_LEVELS.map((lvl) => {
             const isSelected = selectedLevels.has(lvl);
@@ -347,7 +386,7 @@ export default function LogsPage() {
               </label>
             );
           })}
-          <div className="flex-1 min-w-[200px]">
+          <div className="w-full min-w-0 sm:min-w-[200px] sm:flex-1">
             <input
               type="text"
               value={searchText}
@@ -359,15 +398,14 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {/* ── Log Table ────────────────────────────────────────────────────── */}
       {loading && entries.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
           Loading logs...
         </div>
       )}
 
-      {error && entries.length === 0 && (
-        <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
+      {error && (
+        <div role="alert" className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
           {error}
         </div>
       )}
@@ -383,9 +421,12 @@ export default function LogsPage() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
+          role="region"
+          aria-label="System logs table"
+          tabIndex={0}
+          className="min-w-0 max-w-full overflow-x-auto overflow-y-auto overscroll-x-contain rounded border border-[var(--color-border)] bg-[var(--color-surface)] max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
         >
-          <table className="w-full text-sm font-mono">
+          <table className="w-full min-w-[680px] text-sm font-mono">
             <thead className="sticky top-0 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] z-10">
               <tr className="text-left text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
                 <th className="px-4 py-2 whitespace-nowrap w-[80px]">Time</th>

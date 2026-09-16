@@ -73,6 +73,6 @@ ls -lhS /tmp/opencode/ingenium-acceptance/
 
 ## Related Documentation
 
-- Main skill: `.opencode/skills/dashboard-screenshots/SKILL.md`
+- Main skill: `.opencode/skills/mcp-tooling/SKILL.md` (absorbing canonical skill)
 - MCP tools: `playwright_browser_navigate`, `playwright_browser_take_screenshot`
-- Testing conventions: `@useful-tests` skill
+- Testing conventions: the testing references in `@development-conventions`

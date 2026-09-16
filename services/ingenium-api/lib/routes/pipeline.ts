@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { pipelineEvents } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requestContentActor, requestOwnerScope, requireProject } from "../helpers.js";
 
 /** Handles /api/v1/pipeline — event logging and timeline grouping used by the Pipeline dashboard page. */
 export const pipelineRouter = Router();
@@ -23,6 +23,7 @@ pipelineRouter.get("/events", (req, res) => {
     limit,
     since,
     parentEventId,
+    ownerUserId: requestOwnerScope(req),
   });
 
   res.json({ data: list, total: list.length });
@@ -41,6 +42,7 @@ pipelineRouter.get("/timeline", (req, res) => {
     source: source as any,
     limit,
     since,
+    ownerUserId: requestOwnerScope(req),
   });
 
   res.json({ data: timeline, total: timeline.length });
@@ -58,6 +60,8 @@ pipelineRouter.post("/events", (req, res) => {
     return;
   }
 
+  const actor = requestContentActor(req, projectId);
+  const visibility = req.body.visibility === "private" && actor?.ownerUserId ? "private" : "organization";
   const event = pipelineEvents.logEvent(
     projectId,
     event_type,
@@ -68,6 +72,7 @@ pipelineRouter.post("/events", (req, res) => {
     parent_event_id,
     session_id,
     importance,
+    { ownerUserId: visibility === "private" ? actor!.ownerUserId : null, visibility },
   );
 
   res.status(201).json({ data: event });

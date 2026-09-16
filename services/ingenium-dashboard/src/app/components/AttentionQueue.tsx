@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import type { AttentionData } from "../../lib/api";
+import { formatRelativeTime } from "../../lib/time";
 
 interface AttentionQueueProps {
   data: AttentionData | null;
@@ -12,7 +13,6 @@ interface AttentionQueueProps {
  * Renders severity-coded cards with action buttons.
  */
 export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md transition-shadow">
@@ -28,7 +28,6 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────────────────
   const items = data?.items;
   const count = data?.count ?? 0;
 
@@ -45,7 +44,6 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
     );
   }
 
-  // ── Severity helpers ───────────────────────────────────────────────────────
   // Left-border accent colours map severity directly to recognisable visual cues
   const severityStyles: Record<string, string> = {
     critical: "border-l-4 border-l-red-500 bg-[var(--color-error-bg)]",
@@ -99,7 +97,7 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
                 {item.description}
               </p>
               <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                {relativeTime(item.timestamp)}
+                {formatRelativeTime(item.timestamp)}
               </p>
             </div>
             {item.action && (
@@ -116,20 +114,4 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
       </div>
     </div>
   );
-}
-
-/** Format a relative time string from an ISO date. */
-function relativeTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const diff = Date.now() - new Date(iso).getTime();
-  const seconds = Math.floor(diff / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  return `${weeks}w ago`;
 }

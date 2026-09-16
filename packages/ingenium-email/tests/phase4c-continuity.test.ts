@@ -6,6 +6,7 @@ import {
   encryptCredentialValue,
   getEmailEncryptionKeyFingerprint,
 } from "../lib/credential-crypto.js";
+import { createCoreEmailRuntime } from "./runtime-fixture.js";
 
 const TEST_KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const WRONG_KEY = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
@@ -32,6 +33,8 @@ async function createFixture(): Promise<Fixture> {
 
   const core = await import("ingenium-core");
   core.resetDbForTest();
+  const runtime = await import("../lib/runtime.js");
+  runtime.configureEmailRuntime(createCoreEmailRuntime(core));
   const accounts = await import("../lib/accounts.js");
   const global = core.projects.createProject("global-default", true);
 
@@ -103,7 +106,7 @@ describe("Phase 4C email encryption continuity", () => {
       status: "ready",
       globalProjectId: fixture!.globalId,
     });
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toMatchObject({
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toMatchObject({
       password: "phase4c-imap-password",
       tokens: {
         accessToken: "phase4c-access-token",
@@ -117,8 +120,8 @@ describe("Phase 4C email encryption continuity", () => {
     const corrupt = "not-a-valid-encrypted-credential";
     writeAccount(corrupt);
 
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain(corrupt);
   });
 
@@ -126,8 +129,8 @@ describe("Phase 4C email encryption continuity", () => {
     markKeyReady();
     writeAccount("legacy-plaintext-password");
 
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain("legacy-plaintext-password");
   });
 
@@ -138,8 +141,8 @@ describe("Phase 4C email encryption continuity", () => {
     process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = WRONG_KEY;
 
     expect(fixture!.accounts.getEmailEncryptionDiagnostics()).toMatchObject({ status: "mismatch" });
-    expect(fixture!.accounts.getCredentials("ignored-project", "phase4c-account")).toBeUndefined();
-    expect(JSON.stringify(fixture!.accounts.getCredentials("ignored-project", "phase4c-account") ?? {}))
+    expect(fixture!.accounts.getCredentials("phase4c-account")).toBeUndefined();
+    expect(JSON.stringify(fixture!.accounts.getCredentials("phase4c-account") ?? {}))
       .not.toContain(ciphertext);
   });
 
