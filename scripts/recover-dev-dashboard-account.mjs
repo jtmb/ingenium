@@ -6,16 +6,17 @@ import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const root = '/home/brajam/repos/ingenium';
-const email = 'bootstrap-admin@localhost';
 const api = 'http://localhost:4097/api/v1';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function updateEnv(source, password) {
+export function updateEnv(source, email, password) {
+  if (typeof email !== 'string' || email.length < 3 || email.length > 320 || !email.includes('@')
+    || email.includes('=') || [...email].some(character => character.charCodeAt(0) <= 32)) throw new Error('Invalid owner email');
   if (!/^[A-Za-z0-9_-]{32}$/.test(password)) throw new Error('Invalid generated password');
   for (const [key, value] of [['INGENIUM_DASHBOARD_EMAIL', email], ['INGENIUM_DASHBOARD_PASSWORD', password]]) {
     const pattern = new RegExp(`^[ \\t]*(?:export[ \\t]+)?${key}[ \\t]*=[^\\r\\n]*`, 'gm');
     source = pattern.test(source)
-      ? source.replace(pattern, `${key}=${value}`)
+      ? source.replace(pattern, () => `${key}=${value}`)
       : `${source}${source && !source.endsWith('\n') ? '\n' : ''}${key}=${value}\n`;
   }
   return source;
@@ -69,20 +70,21 @@ export async function recover(tokenPath) {
     stage = 'organization lookup';
     const organizations = await request('/organizations');
     if (!Array.isArray(organizations)) throw new Error();
-    const matches = new Set();
+    const matches = new Map();
     for (const organization of organizations) {
       if (!uuid.test(organization?.id)) throw new Error();
       stage = 'member lookup';
       const members = await request(`/organizations/${organization.id}/members`);
       if (!Array.isArray(members)) throw new Error();
       for (const member of members) {
-        if (member.email === email && member.status === 'active' && uuid.test(member.userId)) matches.add(member.userId);
+        if (member.role === 'owner' && member.status === 'active' && uuid.test(member.userId)
+          && typeof member.email === 'string') matches.set(member.userId, member.email);
       }
     }
     if (matches.size !== 1) { stage = 'unique active account not found'; throw new Error(); }
-    const [userId] = matches;
+    const [[userId, email]] = matches;
     const password = randomBytes(24).toString('base64url');
-    const contents = updateEnv(source, password);
+    const contents = updateEnv(source, email, password);
     stage = 'env staging';
     temporary = resolve(root, `.env.${randomUUID()}.tmp`);
     fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);

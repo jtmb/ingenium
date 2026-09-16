@@ -29,19 +29,24 @@ test('env install enforces exactly 0600 on an existing permissive inode under um
 });
 
 test('env update preserves unrelated lines and replaces credentials idempotently', () => {
+  const email = 'installation-owner@example.test';
   const password = randomBytes(24).toString('base64url');
   const source = '# preserved\r\nOTHER=value\r\n';
-  const first = updateEnv(source, password);
-  const second = updateEnv(first, password);
+  const first = updateEnv(source, email, password);
+  const second = updateEnv(first, email, password);
   if (!first.startsWith(source) || first !== second
     || !first.includes(`INGENIUM_DASHBOARD_PASSWORD=${password}\n`)
-    || !first.includes('INGENIUM_DASHBOARD_EMAIL=bootstrap-admin@localhost\n')) throw new Error('Env preservation failed');
-  const replaced = updateEnv(`export INGENIUM_DASHBOARD_PASSWORD=\r\n${source}`, password);
+    || !first.includes(`INGENIUM_DASHBOARD_EMAIL=${email}\n`)) throw new Error('Env preservation failed');
+  const replaced = updateEnv(`export INGENIUM_DASHBOARD_PASSWORD=\r\n${source}`, email, password);
   if (!replaced.startsWith(`INGENIUM_DASHBOARD_PASSWORD=${password}\r\n${source}`)) throw new Error('Replacement failed');
+  const literal = 'owner$&@example.test';
+  assert.ok(updateEnv('INGENIUM_DASHBOARD_EMAIL=old@example.test\n', literal, password)
+    .includes(`INGENIUM_DASHBOARD_EMAIL=${literal}\n`));
 });
 
 test('env update rejects invalid generated values without reflecting them', () => {
   let rejected = false;
-  try { updateEnv('', '\n'); } catch { rejected = true; }
+  try { updateEnv('', 'owner@example.test', '\n'); } catch { rejected = true; }
   if (!rejected) throw new Error('Invalid value accepted');
+  assert.throws(() => updateEnv('', 'owner@example.test\nINJECTED=value', randomBytes(24).toString('base64url')));
 });
