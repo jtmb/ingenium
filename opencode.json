@@ -62,7 +62,8 @@
         "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
         "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "ingenium",
-        "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium"
+        "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
+        "INGENIUM_WORKTREE": "/home/james/repos/ingenium"
       }
     },
     "playwright": {

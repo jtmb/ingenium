@@ -10664,3 +10664,51 @@ follow-up task is requested by this record.
 - **Async/recovery boundary:** `backgroundSubagents` capability and true-async runtime proof remain blocked. Full host-parent restart remains **REJECTED** pending a durable typed handoff, external supervisor, replacement health, reconnect/full Todo replay, rollback/adoption, and fencing. The invalidated read-only preflight created and deleted one ephemeral `/tmp` diagnostic but changed no repository, credential, process, Docker-lifecycle, or coordination state; it is not admission evidence and must not be reused.
 - **NextWork after `claimed`:** The existing Premium deployment owner provisions through the configured supported path, rechecks OpenCode/CLI and container health, probes background capability, then runs a fresh mutation-free restart preflight. No parent signal occurs before admission.
 - **Boundary:** This evidence update does not mark ORCH-EFF-01..07 complete or `PASS`; it records no secrets, transcripts, or reasoning and adds no runtime admission.
+
+### Operational continuation — 2026-09-16 (credential-blocked recovery)
+
+- **Git boundary:** Source commit `f9c7287382ca9e677b17eb1f8283474aa3b29587`
+  and prior evidence commit `e7a2470fc27308d911de5c9f0a85c719b45d10cc`
+  are pushed to `origin/context-upload-hardening-opencode-1.18.9`.
+  The three unrelated dirty paths remain unchanged and unstaged.
+- **Current-source deployment:** After the user-requested container cleanup, the
+  compatibility service was rebuilt and recreated from HEAD `e7a2470f` with
+  dirty fingerprint `4a4f3b2e12299e99a684bb3194440e8a3a1ed2b5130f9c60b26f6c861493be58`.
+  Image `sha256:bce5bfcc527c129518cd5bdb1adef6db2142f261bf10a8ccc05205a56f01b573`
+  is healthy; rollback images remain retained. API, dashboard/login, OpenCode,
+  ttyd, and VS Code checks passed, the OAuth callback returned its expected
+  unauthenticated `400`, and standard MCP initialization listed `42` tools.
+- **Background capability:** Authenticated
+  `GET /experimental/capabilities` returned `200` with
+  `backgroundSubagents: false`. No background child or canary was created, no
+  interrupted call was replayed, and synchronous Task remains the only
+  supported execution mode. This is runtime capability evidence, not async
+  acceptance.
+- **Recovery preflight:** Fresh read-only recovery, durable-memory, and static
+  source streams returned `REJECT_AND_REPLAN`. The deployed MCP registers
+  `coordination_status` and `coordination_memory_read`, and the recovery/scout
+  profiles permit those reads, but the current host parent cannot inject them
+  because `.opencode/.ingenium-mcp-credential` is absent. The current parent
+  was not signalled or restarted; no claim, handoff, or replay was created.
+- **Local prerequisite repair:** Root `opencode.json` now declares the exact
+  canonical `INGENIUM_WORKTREE=/home/james/repos/ingenium` required by the
+  reset validator. The owner-controlled `.opencode` directory mode is `0755`,
+  and the full agent validation passes. This static/config evidence is not
+  parent activation proof.
+- **Stable external blocker:** `ORCH_ACT_03C_PREFLIGHT_BLOCKED` remains at the
+  protected owner-provider boundary. The configured encrypted owner credential
+  failed integrity/decryption once and was not retried. Host MCP credential
+  issuance therefore did not occur; the ignored target remains absent. The
+  outbox has retained authentication failures and changed autonomously under
+  the already-loaded parent, so no unknown record is replayed.
+- **NextWork:** The installation owner must re-enrol the protected coordination
+  owner provider through the documented owner-controlled flow without sharing
+  credentials. After that causal change, run exactly one fresh host MCP reset,
+  verify read-only status and typed memory, and repeat the mutation-free
+  replacement-first preflight. Restart remains forbidden until durable handoff,
+  external-supervisor health, reconnect/Todo replay, rollback or adoption, and
+  split-brain fencing all have current retained proof.
+- **Boundary:** Deployment health, runtime capability, and recovery admission
+  are separate evidence classes. ORCH-EFF-01..06 source/policy behavior is
+  delivered; ORCH-EFF-07 and parent activation remain open until the protected
+  credential and recovery gates are reconciled.
