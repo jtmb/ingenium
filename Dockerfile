@@ -64,7 +64,7 @@ ARG OPENCODE_SHA256=408bfbcae7d8760b4fa15f11d4b342afef25a2ea64c4807706f8180bacdb
 ARG CLOUDFLARED_VERSION=2026.8.3
 ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor nginx curl ca-certificates tzdata git acl libcap2-bin && \
+    supervisor nginx curl ca-certificates tzdata git acl libcap2-bin musl && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64-musl.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
