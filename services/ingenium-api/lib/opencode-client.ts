@@ -285,6 +285,10 @@ interface V2SessionMessagesResponse {
   cursor?: { next?: string };
 }
 
+interface V2SessionResponse {
+  data: SessionV2Info;
+}
+
 /* ── Provider shape on the retained OpenCode REST surface ── */
 
 export interface ProviderModel {
@@ -728,9 +732,9 @@ async function getV2Session(sessionId: string, directory?: string): Promise<Open
     return { error: { code: "INVALID_SESSION_ID", message: "Invalid OpenCode session identifier" } };
   }
   const expectedDirectory = expectedOpenCodeDirectory(directory);
-  const result = await v2Call<SessionV2Info>((client) => client.session.get({ sessionID: sessionId }), expectedDirectory);
+  const result = await v2Call<V2SessionResponse>((client) => client.session.get({ sessionID: sessionId }), expectedDirectory);
   if (isOpenCodeError(result)) return result;
-  return validateV2Session(result, expectedDirectory) ? result : bindingError();
+  return validateV2Session(result.data, expectedDirectory) ? result.data : bindingError();
 }
 
 async function getV2MessagePage(

@@ -19,10 +19,28 @@ if (!block.includes(`user=${user}`)) process.exit(1);
 NODE
 }
 
+require_supervisor_file_logs() {
+  node - "$1" <<'NODE' || exit 1
+const fs = require("node:fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+const paths = new Set();
+for (const section of source.split(/\n(?=\[)/)) {
+  const program = section.match(/^\[program:([^\]]+)\]/)?.[1];
+  if (!program || program === "ingenium-gateway") continue;
+  for (const stream of ["stdout", "stderr"]) {
+    const path = section.match(new RegExp(`^${stream}_logfile=([^\\n]+)$`, "m"))?.[1];
+    if (!path?.startsWith("/run/ingenium-supervisor/") || paths.has(path)) process.exit(1);
+    paths.add(path);
+  }
+}
+NODE
+}
+
 for config in "$ROOT/supervisord.conf" "$ROOT/control-plane-supervisord.conf"; do
   grep -Fq '[unix_http_server]' "$config" || fail "Supervisor does not use its private Unix socket"
   ! grep -Fq '[inet_http_server]' "$config" || fail "Supervisor exposes unauthenticated HTTP control"
   grep -Fq 'chown=root:ingenium-api' "$config" || fail "API cannot read Supervisor status through the private socket"
+  require_supervisor_file_logs "$config"
   require_pair "$config" ingenium-api ingenium-api
   require_pair "$config" ingenium-api-boundary ingenium-boundary
   require_pair "$config" ingenium-dashboard ingenium-dashboard

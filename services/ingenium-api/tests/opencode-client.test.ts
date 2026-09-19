@@ -575,7 +575,7 @@ describe("opencodeClient — method routing", () => {
   });
 
   it("rejects a native session whose directory does not match the requested worktree", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, v2Session("ses-1", "/foreign")));
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: v2Session("ses-1", "/foreign") }));
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.getSession("ses-1", "/workspace");
@@ -587,7 +587,7 @@ describe("opencodeClient — method routing", () => {
 
   it("maps v2 assistant content to the retained message envelope without leaking non-text parts", async () => {
     const fetchSpy = vi.fn()
-      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1")))
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1") }))
       .mockResolvedValueOnce(mockResponse(200, {
         data: [{
             id: "msg-1",
@@ -623,12 +623,12 @@ describe("opencodeClient — method routing", () => {
   it("keeps order only on the first v2 message request and carries opaque cursors unchanged", async () => {
     const nextCursor = "opaque.cursor/with?=+";
     const fetchSpy = vi.fn()
-      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1", "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1", "/workspace") }))
       .mockResolvedValueOnce(mockResponse(200, {
         data: [{ id: "msg-1", type: "user", time: { created: 1 }, text: "one" }],
         cursor: { next: nextCursor },
       }))
-      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1", "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1", "/workspace") }))
       .mockResolvedValueOnce(mockResponse(200, {
         data: [{ id: "msg-2", type: "user", time: { created: 2 }, text: "two" }],
         cursor: {},
@@ -658,7 +658,7 @@ describe("opencodeClient — method routing", () => {
     const sessionId = `session-${createHash("sha256").update(nativeSessionId, "utf8").digest("hex")}`;
     const fetchSpy = vi.fn()
       .mockResolvedValueOnce(mockResponse(200, { data: [v2Session(nativeSessionId, "/workspace")], cursor: {} }))
-      .mockResolvedValueOnce(mockResponse(200, v2Session(nativeSessionId, "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session(nativeSessionId, "/workspace") }))
       .mockResolvedValueOnce(mockResponse(200, {
         data: [{ id: "msg-user", type: "user", time: { created: 10 }, text: "visible" }], cursor: {},
       }));

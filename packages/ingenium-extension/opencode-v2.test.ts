@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   eventSessionId,
+  getV2SessionInfo,
   legacySessionMessage,
   readV2Messages,
   type OpenCodeV2Client,
@@ -35,6 +36,18 @@ describe("OpenCode v2 adapter", () => {
       info: { role: "assistant", sessionID: "ses-1", modelID: "model", providerID: "provider" },
       parts: [{ type: "text", text: "answer" }],
     });
+  });
+
+  it("unwraps the v2 session detail response envelope", async () => {
+    const session = {
+      id: "ses-1",
+      projectID: "project-1",
+      location: { directory: "/workspace" },
+    };
+    const get = vi.fn().mockResolvedValue({ data: { data: session } });
+    const client = { session: { get } } as unknown as OpenCodeV2Client;
+
+    await expect(getV2SessionInfo(client, "ses-1")).resolves.toEqual(session);
   });
 
   it("follows v2 cursors and fails closed when the server repeats one", async () => {

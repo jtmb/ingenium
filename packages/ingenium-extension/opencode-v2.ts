@@ -59,10 +59,11 @@ export function eventSessionId(event: unknown): string | undefined {
 
 export async function getV2SessionInfo(client: OpenCodeV2Client, sessionID: string): Promise<SessionV2Info> {
   const response = await client.session.get({ sessionID });
-  if (!isSessionInfo(response?.data) || response.data.id !== sessionID) {
+  const session = record(record(response?.data)?.data);
+  if (!isSessionInfo(session) || session.id !== sessionID) {
     throw new Error("OPENCODE_V2_SESSION_UNAVAILABLE");
   }
-  return response.data;
+  return session;
 }
 
 export async function readV2Messages(
