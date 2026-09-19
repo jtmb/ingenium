@@ -10,6 +10,8 @@ configuration, perform a full parent OpenCode restart; restarting only the
 child MCP process is insufficient. A restart acknowledgement alone is not
 loaded-surface proof, so an independently read-capable verifier must check the
 new parent's mapping, profile, and effective grants.
+For this migration only, `ingenium-software-engineer-premium` is review-only;
+this does not change the canonical profile's permanent role.
 
 This reference records 11 mapped entries: the built-in `plan` entry plus 10
 named Ingenium agents. Root `opencode.json` remains authoritative; the hidden
@@ -17,17 +19,17 @@ named Ingenium agents. Root `opencode.json` remains authoritative; the hidden
 
 | Agent | Model | Variant | Canonical profile |
 |---|---|---|---|
-| `plan` (built-in) | `openai/gpt-6-astra` | `max` | Built-in Plan mode (root mapping) |
+| `plan` (built-in) | `openai/gpt-5.6-luna` | `max` | Built-in Plan mode (root mapping) |
 | `ingenium-explore` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-explore.md` |
 | `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
 | `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
 | `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
 | `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
-| `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
-| `ingenium-orchestrator` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-recovery-engineer` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
+| `ingenium-orchestrator` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/primary/ingenium-orchestrator.md` |
 | `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
 | `ingenium-chat` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
-| `ingenium-security-auditor` | `openai/gpt-6-astra` | `max` | `.opencode/agents/security/ingenium-security-auditor.md` |
+| `ingenium-security-auditor` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/security/ingenium-security-auditor.md` |
 
 The canonical `ingenium-chat` profile is
 `.opencode/agents/chat/ingenium-chat.md`; runtime bootstrap may project ordinary

@@ -1286,12 +1286,12 @@ const expected = {
   "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
   "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max"],
   "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "xhigh"],
-  "ingenium-recovery-engineer": ["openai/gpt-5.6-sol", "xhigh"],
-  "ingenium-orchestrator": ["openai/gpt-5.6-sol", "xhigh"],
+  "ingenium-recovery-engineer": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-orchestrator": ["openai/gpt-5.6-luna", "max"],
   "ingenium-explore": ["openai/gpt-5.6-luna", "max"],
   "ingenium-scout": ["openai/gpt-5.6-luna", "max"],
   "ingenium-chat": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-security-auditor": ["openai/gpt-6-astra", "max"],
+  "ingenium-security-auditor": ["openai/gpt-5.6-luna", "max"],
 };
 
 const repositoryMappedNames = Object.keys(expected);
@@ -1317,7 +1317,7 @@ if (agent.explore !== undefined && Object.keys(agent.explore).some((key) => key 
   errors.push("optional built-in explore mapping must remain model-only");
 }
 if (!agent.plan || Object.keys(agent.plan).some((key) => !["model", "variant"].includes(key))
-  || agent.plan.model !== "openai/gpt-6-astra" || agent.plan.variant !== "max") {
+  || agent.plan.model !== "openai/gpt-5.6-luna" || agent.plan.variant !== "max") {
   errors.push("Plan root mapping must contain only its exact model/variant");
 }
 if (agent["ingenium-llm-broker"] !== undefined) {

@@ -8,7 +8,7 @@
   "subagent_depth": 1,
   "agent": {
     "plan": {
-      "model": "openai/gpt-6-astra",
+      "model": "openai/gpt-5.6-luna",
       "variant": "max"
     },
     "ingenium-explore": {
@@ -32,12 +32,12 @@
       "variant": "xhigh"
     },
     "ingenium-recovery-engineer": {
-      "model": "openai/gpt-5.6-sol",
-      "variant": "xhigh"
+      "model": "openai/gpt-5.6-luna",
+      "variant": "max"
     },
     "ingenium-orchestrator": {
-      "model":  "openai/gpt-5.6-sol",
-      "variant": "xhigh"
+      "model":  "openai/gpt-5.6-luna",
+      "variant": "max"
     },
     "ingenium-scout": {
       "model": "openai/gpt-5.6-luna",
@@ -48,7 +48,7 @@
       "variant": "max"
     },
     "ingenium-security-auditor": {
-      "model": "openai/gpt-6-astra",
+      "model": "openai/gpt-5.6-luna",
       "variant": "max"
     }
   },
@@ -63,7 +63,7 @@
         "INGENIUM_MCP_AUDIENCE": "mcp",
         "INGENIUM_PROJECT": "ingenium",
         "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
-        "INGENIUM_WORKTREE": "/home/james/repos/ingenium"
+        "INGENIUM_WORKTREE": "/home/brajam/repos/ingenium"
       }
     },
     "playwright": {

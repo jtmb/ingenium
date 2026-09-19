@@ -18,7 +18,7 @@ Work stopped at the user's explicit request. Do not infer completion.
 | Field | Value |
 |---|---|
 | Project | `ingenium` |
-| Canonical worktree | `/home/james/repos/ingenium` |
+| Canonical worktree | `/home/brajam/repos/ingenium` |
 | Branch | `context-upload-hardening-opencode-1.18.9` |
 | Last pushed pre-handoff commit | `452fab4ea8ba6aee57413ab53270c7584c974f21` |
 | Previous evidence/config commit | `88182df2a8ca8e338e1bccf2f03069a19f19154b` |
@@ -35,7 +35,7 @@ The branch was synchronized at `452fab4e` before later uncommitted work began.
 
 The first three paths contain an unfinished host-workspace binding change:
 
-- root `opencode.json` uses workspace `shared-memory-ingenium-host`;
+- root `opencode.json` uses workspace `shared-memory-ingenium`;
 - coordination reset reads the workspace ID from canonical root config rather
   than hardcoding `shared-memory-ingenium` for credential issuance, prior
   matching, response validation, and preflight headers;
