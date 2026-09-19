@@ -18,7 +18,7 @@ export const LLM_BROKER_SKILLS = "[]";
 export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-managed";
 export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
 export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker.mjs`;
-const LLM_BROKER_CONFIG_SHA256 = "4dd82cf42295fd9dba7594f101702fb6d356db66d77adc98efc3d70dcc240d47";
+const LLM_BROKER_CONFIG_SHA256 = "956b2d514cbcb1478a21084292035fc0b6e7d05262c63c5867bb653e08e5662f";
 const LLM_BROKER_ENFORCER_SHA256 = "aae2499e9c1fa92e236d7f406df29720d2160447665f8fe792d24251543b84e1";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
