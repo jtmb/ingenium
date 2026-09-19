@@ -371,6 +371,8 @@ for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
   fi
 done
 test "$(stat -c '%a:%u:%g' /run/ingenium-opencode)" = 700:1105:1105 || fail 'MCP runtime directory is not private'
+test "$(stat -c '%a:%u:%g' /run/ingenium-opencode/.ingenium-learning-credential)" = 600:1105:1105 || fail 'learning credential projection is not OpenCode-owned'
+runuser -u ingenium-opencode -- test -r /run/ingenium-opencode/.ingenium-learning-credential || fail 'OpenCode cannot read projected learning credential'
 printf 'COMPATIBILITY_ENTRYPOINT_ACL_OK\n'
 EOF
 chmod 0555 "$RUN_ROOT/bin/find" "$RUN_ROOT/bin/run-entrypoint" "$RUN_ROOT/bin/supervisord"
@@ -386,8 +388,9 @@ services:
         printf "%064d\n" 0 > /fixture/api-token
         printf "%064d\n" 1 > /fixture/opencode-server-password
         printf "%064d\n" 2 > /fixture/email-encryption-key
-        chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key
-        chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key
+        printf 'ing_%012d_%043d\n' 3 4 > /fixture/learning-credential
+        chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/learning-credential
+        chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/learning-credential
     volumes:
       - bootstrap:/fixture
 
@@ -398,6 +401,7 @@ services:
       PATH: /test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       INGENIUM_DEPLOYMENT_MODE: compatibility
       INGENIUM_API_TOKEN_FILE: /run/ingenium-bootstrap/api-token
+      INGENIUM_LEARNING_CREDENTIAL_FILE: /run/ingenium-bootstrap/learning-credential
       OPENCODE_SERVER_PASSWORD_FILE: /run/ingenium-bootstrap/opencode-server-password
       INGENIUM_EMAIL_ENCRYPTION_KEY_FILE: /run/ingenium-bootstrap/email-encryption-key
     entrypoint: ["/test-bin/run-entrypoint"]

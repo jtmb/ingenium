@@ -376,8 +376,12 @@ if grep -Fq '.ingenium-api-token' "$ROOT/scripts/docker-entrypoint.sh"; then
 fi
 grep -Fq '${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE is required}' "$ROOT/scripts/docker-entrypoint.sh" \
   || fail 'root entrypoint no longer requires the canonical protected token source'
+grep -Fq '${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE is required}' "$ROOT/scripts/docker-entrypoint.sh" \
+  || fail 'root entrypoint no longer requires the protected learning credential source'
 grep -Fq 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"' "$ROOT/scripts/docker-entrypoint.sh" \
   || fail 'root entrypoint no longer exports the service-owned canonical token copy'
+grep -Fq 'export INGENIUM_LEARNING_CREDENTIAL_FILE="$RUNTIME_LEARNING_CREDENTIAL_FILE"' "$ROOT/scripts/docker-entrypoint.sh" \
+  || fail 'root entrypoint no longer exports the OpenCode-owned learning credential copy'
 
 mkdir -p "$RUN_ROOT/valid"
 helper directory "$RUN_ROOT/valid/config" "$uid" "$gid" 2770

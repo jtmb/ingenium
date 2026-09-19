@@ -37,6 +37,7 @@ services:
       # The host credential is mounted read-only; entrypoint copies it to the
       # owner-only runtime file consumed by supervised services.
       - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
+      - INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       # Forward an optional operator override; blank values fall back safely.
       - INGENIUM_BACKUPS_DIR=${INGENIUM_BACKUPS_DIR:-}
@@ -65,6 +66,7 @@ services:
       # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
       - vscode-data:/home/ingenium-vscode/vscode-data
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
@@ -113,6 +115,7 @@ services:
       # never bake this server-side credential into source or an image layer.
       - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
       - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
+      - INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       - INGENIUM_API_PORT=4096
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/ingenium-opencode/.config/opencode
@@ -149,6 +152,7 @@ services:
       - opencode-config:/home/ingenium-opencode/.config
       - opencode-data:/home/ingenium-opencode/.local
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"

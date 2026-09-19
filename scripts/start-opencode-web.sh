@@ -77,6 +77,7 @@ while [ "$attempt" -le "$attempts" ]; do
       OPENCODE_SERVER_PASSWORD="" \
       INGENIUM_API_URL="http://localhost:4097/api/v1" \
       INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential" \
+      INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential" \
       INGENIUM_MCP_AUDIENCE="mcp" \
       INGENIUM_MCP_CREDENTIAL_PURPOSE="general" \
       INGENIUM_WORKTREE="/home/brajam/repos/ingenium" \

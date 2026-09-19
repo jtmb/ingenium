@@ -190,6 +190,38 @@ describe("extension API authentication", () => {
     expect(apiRequestHeaders(worktree, undefined, { purpose: "learning" }).get("Authorization")).toBe(`Bearer ${learningToken}`);
   });
 
+  it("uses the projected learning credential for native preflight without general fallback", async () => {
+    const generalToken = "m".repeat(32);
+    const learningToken = `ing_${"a".repeat(12)}_${"b".repeat(43)}`;
+    const learningScopes = [
+      "projects:read", "extraction:write", "extraction:execute", "synthesis:write",
+      "synthesis:execute", "pipeline:write", "observe:write",
+    ];
+    writeFallbackToken(generalToken);
+    const projectedDirectory = join(worktree, "projected-learning");
+    mkdirSync(projectedDirectory, { mode: 0o700 });
+    chmodSync(projectedDirectory, 0o700);
+    const projectedPath = join(projectedDirectory, ".ingenium-learning-credential");
+    writeFileSync(projectedPath, `${learningToken}\n`, { mode: 0o600 });
+    chmodSync(projectedPath, 0o600);
+    process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = projectedPath;
+    process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = "learning";
+    process.env.INGENIUM_MCP_AUDIENCE = "mcp";
+
+    const request = vi.fn<typeof fetch>(async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("Authorization")).toBe(`Bearer ${learningToken}`);
+      expect(headers.get("X-Ingenium-Audience")).toBe("mcp");
+      expect(headers.get("X-Ingenium-Workspace")).toBe("api-auth-workspace");
+      return successfulPreflight("mcp", { scopes: learningScopes });
+    });
+
+    await expect(preflightApiAuthentication("http://localhost:4097/api/v1", worktree, request, {
+      credentialPurpose: "learning",
+    })).resolves.toMatchObject({ authenticated: true, binding: { audience: "mcp", scopes: learningScopes } });
+    expect(JSON.stringify(request.mock.calls)).not.toContain(generalToken);
+  });
+
   it("rejects an explicit invalid path without falling back to the protected default", () => {
     writeFallbackToken("f".repeat(32));
     process.env.INGENIUM_MCP_CREDENTIAL_PURPOSE = "general";

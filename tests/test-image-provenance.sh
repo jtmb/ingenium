@@ -92,6 +92,7 @@ node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[
 node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[1],"utf8"); const quote=String.fromCharCode(39); const marker="node -e "+quote; const start=source.indexOf(marker, source.indexOf("EXTENSION_MANIFEST=")); const end=source.indexOf(quote+"; "+String.fromCharCode(92), start); if (start < 0 || end < 0) throw new Error("VSIX manifest validator was not found"); new Function(source.slice(start + marker.length, end));' "$REPO_ROOT/Dockerfile"
 
 if ! OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
+  INGENIUM_LEARNING_CREDENTIAL_FILE=/tmp/learning-credential \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
   DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \

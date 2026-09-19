@@ -88,6 +88,14 @@ test("projected config, launcher environment and same-path mount match the issue
     const compose = readFileSync(new URL("../docker-compose.yml", import.meta.url), "utf8");
     assert.ok(compose.includes('"${HOME}/repos/ingenium:/home/brajam/repos/ingenium"'));
     assert.ok(compose.includes('/repos:/workspace"'));
+    assert.ok(compose.includes("INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential"));
+    assert.ok(compose.includes("/run/ingenium-bootstrap/learning-credential:ro"));
+    const entrypoint = readFileSync(new URL("../scripts/docker-entrypoint.sh", import.meta.url), "utf8");
+    assert.ok(entrypoint.includes('RUNTIME_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"'));
+    assert.ok(entrypoint.includes('"${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE is required}"'));
+    assert.ok(entrypoint.includes('"$RUNTIME_LEARNING_CREDENTIAL_FILE" mcp-learning'));
+    assert.ok(entrypoint.includes('export INGENIUM_LEARNING_CREDENTIAL_FILE="$RUNTIME_LEARNING_CREDENTIAL_FILE"'));
+    assert.ok(launcher.indexOf('INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"') > launcher.indexOf("exec env -i"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

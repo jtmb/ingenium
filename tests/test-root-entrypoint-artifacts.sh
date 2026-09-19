@@ -18,6 +18,8 @@ cat > "$RUN_ROOT/supervisord" <<'EOF'
 #!/bin/sh
 test ! -e /home/ingenium-opencode/.config/opencode/agents/ingenium-llm-broker.md
 test ! -e /workspace/.opencode/agents/ingenium-llm-broker.md
+test "$(stat -c '%a:%u:%g' /run/ingenium-opencode/.ingenium-learning-credential)" = 600:1105:1105
+runuser -u ingenium-opencode -- test -r /run/ingenium-opencode/.ingenium-learning-credential
 printf 'ROOT_ENTRYPOINT_OK\n'
 EOF
 chmod 0555 "$RUN_ROOT/supervisord"
@@ -61,10 +63,11 @@ docker run --rm --entrypoint sh -v "$TOKEN_VOLUME:/fixture" "$IMAGE" -ec '
   printf "%064d\n" 0 > /fixture/api-token
   printf "%064d\n" 1 > /fixture/opencode-server-password
   printf "%064d\n" 2 > /fixture/email-encryption-key
+  printf 'ing_%012d_%043d\n' 3 4 > /fixture/learning-credential
   printf "%064d\n" 3 > /fixture/runtime-manager-token
   printf "%064d\n" 4 > /fixture/runtime-gateway-token
-  chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token
-  chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/runtime-manager-token /fixture/runtime-gateway-token
+  chown appuser:appuser /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/learning-credential /fixture/runtime-manager-token /fixture/runtime-gateway-token
+  chmod 0600 /fixture/api-token /fixture/opencode-server-password /fixture/email-encryption-key /fixture/learning-credential /fixture/runtime-manager-token /fixture/runtime-gateway-token
 '
 
 docker run --rm --entrypoint sh -v "$POISON_VOLUME:/fixture" "$IMAGE" -ec '
@@ -73,6 +76,7 @@ docker run --rm --entrypoint sh -v "$POISON_VOLUME:/fixture" "$IMAGE" -ec '
 docker run --rm --entrypoint sh \
   -e INGENIUM_DEPLOYMENT_MODE=control-plane \
   -e INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token \
+  -e INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential \
   -e OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password \
   -e INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-bootstrap/email-encryption-key \
   -e INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/runtime-manager-token \
@@ -229,6 +233,7 @@ startup_output="$(docker run --rm \
   -e PATH=/test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   -e INGENIUM_DEPLOYMENT_MODE=control-plane \
   -e INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token \
+  -e INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential \
   -e OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password \
   -e INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-bootstrap/email-encryption-key \
   -e INGENIUM_RUNTIME_MANAGER_TOKEN_FILE=/run/ingenium-runtime-manager/runtime-manager-token \

@@ -39,6 +39,7 @@ const patterns = {
   "installation-api": /^[A-Za-z0-9_-]{32,128}$/,
   "opencode-server": /^[A-Za-z0-9_-]{64}$/,
   "email-encryption": /^[A-Za-z0-9_-]{64}$/,
+  "mcp-learning": /^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/,
 };
 let sourceDescriptor;
 let temporaryDescriptor;

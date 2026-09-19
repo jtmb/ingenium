@@ -198,6 +198,8 @@ reject_pattern "$compose_file" '(^|[^0-9])4100:4100([^0-9]|$)'
 reject_literal "$compose_file" "INGENIUM_API_TOKEN=\${INGENIUM_API_TOKEN:-}"
 require_literal "$compose_file" "INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token"
 require_literal "$compose_file" '${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro'
+require_literal "$compose_file" "INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential"
+require_literal "$compose_file" '${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro'
 require_literal "$compose_file" "INGENIUM_BACKUPS_DIR=\${INGENIUM_BACKUPS_DIR:-}"
 require_literal "$compose_file" "DASHBOARD_ALLOWED_ORIGINS=\${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
 reject_literal "$compose_file" "1455:4097"
@@ -262,7 +264,9 @@ reject_literal "$entrypoint" "htpasswd"
 require_literal "$entrypoint" 'INGENIUM_API_TOKEN_FILE is required'
 require_literal "$entrypoint" "unset INGENIUM_API_TOKEN"
 require_literal "$entrypoint" 'RUNTIME_API_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/installation-api-token"'
+require_literal "$entrypoint" 'RUNTIME_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"'
 require_literal "$entrypoint" 'node /app/scripts/read-protected-api-token.mjs'
+require_literal "$entrypoint" 'mcp-learning'
 require_literal "$entrypoint" 'node /app/scripts/validate-root-entrypoint-chain.mjs'
 require_literal "$protected_token_reader" 'constants.O_RDONLY | constants.O_NOFOLLOW'
 require_literal "$protected_token_reader" '(metadata.mode & 0o777) !== 0o600'
@@ -300,6 +304,7 @@ reject_literal "$entrypoint" '.ingenium-api-token'
 reject_literal "$entrypoint" 'cmp -s "$RUNTIME_API_TOKEN_FILE"'
 reject_literal "$env_example" "INGENIUM_API_TOKEN="
 require_literal "$env_example" "INGENIUM_API_TOKEN_FILE=/home/you/.config/ingenium/live-production/installation-api.token"
+require_literal "$env_example" "INGENIUM_LEARNING_CREDENTIAL_FILE=/home/you/repos/ingenium/.opencode/.ingenium-learning-credential"
 require_literal "$env_example" "OPENCODE_SERVER_PASSWORD="
 require_literal "$env_example" "OPENCODE_SERVER_PASSWORD_FILE=/absolute/path/to/opencode-server.password"
 require_literal "$env_example" "INGENIUM_EMAIL_ENCRYPTION_KEY="
@@ -413,6 +418,7 @@ require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'fail("recover
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"'
 require_literal "$entrypoint" '[ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="mcp"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_PURPOSE="general"'
 reject_literal "${repo_root}/scripts/start-opencode-web.sh" '.ingenium-repository-sync-credential'
