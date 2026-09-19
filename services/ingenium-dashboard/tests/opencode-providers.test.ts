@@ -7,7 +7,9 @@ const { request } = vi.hoisted(() => ({
 vi.mock("../src/lib/api", () => ({ request }));
 
 import {
+  normalizeOpenCodePermissionRequests,
   normalizeOpenCodeProviderCatalog,
+  normalizeOpenCodeQuestions,
   createOpenCodeClient,
 } from "../src/lib/opencode";
 
@@ -83,5 +85,65 @@ describe("OpenCode provider catalog client", () => {
     expect(normalizeOpenCodeProviderCatalog(undefined)).toEqual({ providers: [] });
     expect(normalizeOpenCodeProviderCatalog({ providers: undefined })).toEqual({ providers: [] });
     expect(normalizeOpenCodeProviderCatalog({ data: null })).toEqual({ providers: [] });
+  });
+
+  it("normalizes v2 permission resources into the stable prompt shape", () => {
+    expect(normalizeOpenCodePermissionRequests({
+      data: [{
+        id: "per_1",
+        sessionID: "ses_1",
+        action: "read",
+        resources: ["src/**", "tests/**"],
+      }],
+    })).toEqual([{
+      id: "per_1",
+      permission: "read",
+      pattern: "src/**\ntests/**",
+      action: "read",
+      sessionID: "ses_1",
+    }]);
+  });
+
+  it("normalizes v2 question requests and preserves legacy text questions", () => {
+    expect(normalizeOpenCodeQuestions([{
+      id: "que_1",
+      sessionID: "ses_1",
+      questions: [
+        {
+          header: "Scope",
+          question: "Which files?",
+          options: [{ label: "Source", description: "Application code" }],
+        },
+        { question: "Continue?", options: [], multiple: true },
+      ],
+    }, { id: "legacy-1", text: "Continue?" }])).toEqual([
+      {
+        id: "que_1:0",
+        requestId: "que_1",
+        question: "Which files?",
+        header: "Scope",
+        options: [{ label: "Source", description: "Application code" }],
+      },
+      {
+        id: "que_1:1",
+        requestId: "que_1",
+        question: "Continue?",
+        multiple: true,
+      },
+      { id: "legacy-1", requestId: "legacy-1", question: "Continue?" },
+    ]);
+  });
+
+  it("drops malformed permission and question entries", () => {
+    expect(normalizeOpenCodePermissionRequests([{ id: "per_bad", action: "read" }])).toEqual([]);
+    expect(normalizeOpenCodeQuestions([{ id: "que_bad", questions: [{ options: [] }] }])).toEqual([]);
+  });
+
+  it("keeps legacy questionID events addressable", () => {
+    expect(normalizeOpenCodeQuestions([{ questionID: "legacy-request", text: "Continue?" }])).toEqual([{
+      id: "legacy-request",
+      requestId: "legacy-request",
+      question: "Continue?",
+    }]);
   });
 });

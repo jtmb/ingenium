@@ -801,6 +801,14 @@ const { execFileSync } = require("node:child_process");
 const { isDeepStrictEqual } = require("node:util");
 const baselineCommit = "e25f5519";
 const repoRoot = path.resolve(agentsDir, "..", "..");
+const retiredCoordinationPermissionKeys = new Set([
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+  "ingenium_coordination_handoff",
+]);
 function readBaselinePermission(relativePath) {
   try {
     const source = execFileSync("git", ["show", `${baselineCommit}:${relativePath}`], {
@@ -818,7 +826,10 @@ const orchestratorName = "ingenium-orchestrator";
 const directFilesystemKeys = new Set(["edit", "write", "glob", "grep"]);
 for (const profile of profiles) {
   const relativePath = path.relative(repoRoot, profile.filePath);
-  const baselinePermission = readBaselinePermission(relativePath);
+  const baselinePermission = Object.fromEntries(
+    Object.entries(readBaselinePermission(relativePath) ?? {})
+      .filter(([key]) => !retiredCoordinationPermissionKeys.has(key)),
+  );
   const currentPermission = permissions.get(profile.name);
   if (!isRecord(baselinePermission) || !isRecord(currentPermission)) continue;
 
@@ -908,7 +919,7 @@ const plan = permissions.get("plan");
 const expectedPlanPermission = {
   "*": "deny", read: "allow", glob: "allow", grep: "allow", question: "allow",
   edit: "deny", write: "deny", bash: "deny", todowrite: "deny",
-  ingenium_coordination_status: "allow", skill: { "*": "allow" },
+  skill: { "*": "allow" },
   task: { "*": "deny", "ingenium-explore": "allow" },
 };
 if (!require("node:util").isDeepStrictEqual(plan, expectedPlanPermission)) {
@@ -930,12 +941,11 @@ if (!scoutProfile?.source.includes("No generic repository source reviews, edits,
 for (const tool of ["glob", "grep", "webfetch", "websearch", "task", "todowrite"]) {
   if (isRecord(scout) && scout[tool] === "allow") errors.push(`Scout must not allow ${tool}`);
 }
-for (const tool of ["ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page", "ingenium_coordination_status", "ingenium_coordination_memory_read"]) {
+for (const tool of ["ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page"]) {
   if (!isRecord(scout) || scout[tool] !== "allow") errors.push(`Scout must allow ${tool}`);
 }
 const scoutAllowedTools = new Set([
   "ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page",
-  "ingenium_coordination_status", "ingenium_coordination_memory_read",
 ]);
 if (isRecord(scout)) {
   for (const [tool, rule] of Object.entries(scout)) {
@@ -945,17 +955,16 @@ if (isRecord(scout)) {
 }
 
 const memoryReads = ["ingenium_memory_read", "ingenium_memory_list", "ingenium_memory_search", "ingenium_memory_operation_status"];
-const coordination = ["ingenium_coordination_status", "ingenium_coordination_memory_read", "ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"];
 const docsReads = ["ingenium_docs_search", "ingenium_docs_get_page"];
 const designatedMcp = {
-  "ingenium-orchestrator": [...coordination, ...memoryReads, ...docsReads],
-  "ingenium-software-engineer-premium": [...coordination, ...memoryReads, ...docsReads, "ingenium_docs_list_spaces", "ingenium_docs_get_page_tree"],
+  "ingenium-orchestrator": [...memoryReads, ...docsReads],
+  "ingenium-software-engineer-premium": [...memoryReads, ...docsReads, "ingenium_docs_list_spaces", "ingenium_docs_get_page_tree"],
   "ingenium-software-engineer-fast": docsReads,
   "ingenium-explore": docsReads,
-  "ingenium-recovery-engineer": coordination,
+  "ingenium-recovery-engineer": [],
   "ingenium-qa": [...docsReads, "ingenium_docs_get_page_tree", "ingenium_docs_list_comments", "ingenium_playwright_*"],
   "ingenium-security-auditor": [...docsReads, "ingenium_docs_list_comments"],
-  "ingenium-scout": [...docsReads, "ingenium_docs_search_semantic", "ingenium_coordination_status", "ingenium_coordination_memory_read"],
+  "ingenium-scout": [...docsReads, "ingenium_docs_search_semantic"],
 };
 for (const [name, expected] of Object.entries(designatedMcp)) {
   const actual = Object.entries(permissions.get(name) ?? {}).filter(([key, rule]) => key.startsWith("ingenium_") && rule === "allow").map(([key]) => key);
@@ -964,18 +973,18 @@ for (const [name, expected] of Object.entries(designatedMcp)) {
 for (const tool of [...memoryReads, "ingenium_memory_save", "ingenium_memory_update", "ingenium_memory_forget", ...docsReads]) {
   if (permissions.get("ingenium-chat")?.[tool] !== "allow") errors.push(`Chat must allow designated tool ${tool}`);
 }
-for (const tool of ["ingenium_task_create", "ingenium_docs_create_page", "ingenium_email_send", "ingenium_config_set", "ingenium_coordination_update"]) {
+for (const tool of ["ingenium_task_create", "ingenium_docs_create_page", "ingenium_email_send", "ingenium_config_set"]) {
   if (effectiveRule(permissions.get("ingenium-chat") ?? {}, tool) !== "deny") errors.push(`Chat must deny ${tool} outside saved memory`);
 }
 
 const catalogSource = readText(path.join(path.dirname(configPath), "packages/ingenium-core/lib/tools/mcp-tool-catalog.ts"), "MCP catalog");
 const catalog = [...(catalogSource ?? "").matchAll(/\{\s*name: "([^"]+)",\s*category: "([^"]+)"/g)].map(([, name, category]) => ({ name, category }));
 const catalogNames = new Set(catalog.map(({ name }) => name));
-if (catalog.length !== 292 || catalogNames.size !== 292) errors.push("MCP designation audit requires 292 unique catalog entries");
+if (catalog.length !== 286 || catalogNames.size !== 286) errors.push("MCP designation audit requires 286 unique catalog entries");
 const categoryCounts = {};
 for (const { category } of catalog) categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-if (categoryCounts.Tasks !== 32 || categoryCounts.Memory !== 7 || Object.keys(categoryCounts).length !== 32) {
-  errors.push("MCP designation audit requires 32 Tasks, 7 Memory tools, and 32 categories");
+if (categoryCounts.Tasks !== 26 || categoryCounts.Memory !== 7 || Object.keys(categoryCounts).length !== 32) {
+  errors.push("MCP designation audit requires 26 Tasks, 7 Memory tools, and 32 categories");
 }
 console.log(`MCP catalog categories: ${JSON.stringify(categoryCounts)}`);
 const owners = new Map(catalog.map(({ name }) => [name, []]));
@@ -994,7 +1003,7 @@ for (const { name, category } of catalog) {
 // These non-agent workflows must not acquire model grants merely to raise coverage.
 const internalOnlyCounts = {
   "Repository Sync": 1, Settings: 2, Skills: 20, Observe: 1, Observations: 4,
-  Personality: 5, Synthesis: 3, Extraction: 2, Tasks: 17, Plans: 1, Context: 22,
+  Personality: 5, Synthesis: 3, Extraction: 2, Tasks: 16, Plans: 1, Context: 22,
   Projects: 7, Plugins: 5, Providers: 4, Servers: 5, Agents: 6, Commands: 3,
   Config: 2, Email: 16, Jobs: 5, Pipeline: 1, Vault: 10, Backups: 14,
   RAG: 7, Documentation: 8, Usage: 1,
@@ -1558,7 +1567,7 @@ NODE
   return 1
 }
 
-validate_coordination_tool_permissions() {
+validate_retired_coordination_tool_permissions() {
   local premium_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
   local recovery_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-recovery-engineer.md"
   local scout_profile="$REPO_ROOT/.opencode/agents/research/ingenium-scout.md"
@@ -1567,29 +1576,19 @@ validate_coordination_tool_permissions() {
 const fs = require("fs");
 
 const [orchestratorPath, premiumPath, recoveryPath, scoutPath] = process.argv.slice(2);
+const retired = [
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+  "ingenium_coordination_handoff",
+];
 const expected = new Map([
-  [orchestratorPath, {
-    required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
-    forbidden: [],
-  }],
-  [premiumPath, {
-    required: ["ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
-    forbidden: [],
-  }],
-  [recoveryPath, {
-    required: [
-      "ingenium_coordination_status",
-      "ingenium_coordination_memory_read",
-      "ingenium_coordination_update",
-      "ingenium_coordination_claim",
-      "ingenium_coordination_release",
-    ],
-    forbidden: ["ingenium_coordination_handoff"],
-  }],
-  [scoutPath, {
-    required: ["ingenium_docs_search_semantic", "ingenium_coordination_status", "ingenium_coordination_memory_read"],
-    forbidden: ["ingenium_coordination_handoff", "ingenium_coordination_update", "ingenium_coordination_claim", "ingenium_coordination_release"],
-  }],
+  [orchestratorPath, { required: [], forbidden: retired }],
+  [premiumPath, { required: [], forbidden: retired }],
+  [recoveryPath, { required: [], forbidden: retired }],
+  [scoutPath, { required: ["ingenium_docs_search_semantic"], forbidden: retired }],
 ]);
 const errors = [];
 
@@ -1646,7 +1645,7 @@ for (const [profilePath, tools] of expected) {
   }
   for (const tool of tools.forbidden) {
     if ((topLevel.get(tool) ?? []).includes("allow")) {
-      errors.push(`${profilePath} must not grant mixed or mutating coordination tool ${tool}`);
+       errors.push(`${profilePath} must not grant retired coordination tool ${tool}`);
     }
   }
 }
@@ -1655,7 +1654,7 @@ if (errors.length > 0) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: coordination tools use top-level grants; Recovery has only required recovery operations; Scout remains read-only");
+console.log("PASS: retired coordination tools are absent from active profiles");
 NODE
   then
     return 1
@@ -1663,7 +1662,7 @@ NODE
   return 0
 }
 
-if ! validate_coordination_tool_permissions; then
+if ! validate_retired_coordination_tool_permissions; then
   FAILED=1
 fi
 

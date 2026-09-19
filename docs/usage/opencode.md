@@ -9,21 +9,22 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime roots only after explicit start/resume. Special-use `.localhost` roots use browser-trusted HTTP on loopback only; remote/custom roots require HTTPS. Direct 4098/4099 ports remain private.
 
-The supported embedded/container runtime is OpenCode **1.18.9**. Docker verifies the pinned
+The supported embedded/container runtime is OpenCode **1.18.31**. Docker verifies the pinned
 archive SHA-256 and executable version, while package compatibility tests verify
 that the root, extension, and local `.opencode` manifests and lockfiles all
-resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.9`. OpenCode
+resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.31`. OpenCode
 **1.18.3+** is retained as the historical boundary for root-relative assets;
-the current contract is tested against 1.18.9.
+the current contract is tested against 1.18.31.
 
 The installed `opencode` CLI used for the session-export check below was
 **1.18.30**. That retrieval result documents the CLI's export behavior only; it
-does not change the embedded/container 1.18.9 compatibility contract.
+does not change the embedded/container 1.18.31 compatibility contract.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
-For coordinated external A/B and internal C sessions sharing one canonical
-worktree, see [Multi-session OpenCode](multi-session.md).
+For multiple ordinary sessions and safe worktree isolation, see
+[Multi-session OpenCode](multi-session.md). Ingenium does not provide a custom
+session-coordination protocol.
 
 ### Runtime selection and binding
 
@@ -119,12 +120,11 @@ API-authorized project UUID remains authoritative. The project must exist before
 credential issuance because its immutable UUID is part of the credential grant.
 
 After MCP initialization and `tools/list`, use a read that the credential is
-already authorized to perform. Coordination acceptance uses the state-bearing
-`ingenium_coordination_status` tool with the current exact project, worktree,
-session, incarnation, and ownership identity. Verify `GET /api/v1/health`
-separately. `ingenium_health_check` is available only when the credential has
-`health:read`; do not widen or rotate a least-privilege credential merely to use
-that tool as a transport canary.
+already authorized to perform, then verify `GET /api/v1/health` separately.
+The retired coordination MCP tools are not part of the current transport; do not
+use a historical coordination canary or widen a least-privilege credential just
+to probe the transport. `ingenium_health_check` is available only when the
+credential has `health:read`.
 
 OpenCode loads plugins in the parent process; the `environment` block on the
 `ingenium` MCP entry belongs only to the child MCP process and does not supply
@@ -141,9 +141,9 @@ credential files, and mismatched bindings fail closed. The canonical `/workspace
 worktree still requires an explicit project and exact worktree binding.
 
 The container also projects its persistent global config at startup with five
-registered plugins: `auto-observer`, `observer`, `resource-sync`,
-`session-coordinator`, and the `ponytail` adapter. The `auto-observer`, `observer`,
-and `resource-sync` plugins resolve the owner-only
+registered plugins: `auto-observer`, `observer`, `resource-sync`, `lifecycle`,
+and the `ponytail` adapter. The `auto-observer`, `observer`, `resource-sync`,
+and `lifecycle` plugins resolve the owner-only
 `.opencode/.ingenium-repository-sync-credential`, while the MCP child resolves
 `.opencode/.ingenium-mcp-credential`. `ingenium-init-project` preflights the
 repository-sync credential before it syncs repository resources. The shared
@@ -333,7 +333,7 @@ The supported Ponytail integration is an immutable upstream checkout pinned to
 in `PROVENANCE.md`. It is loaded once from the project-relative path in local
 `opencode.json`, or once from the container-absolute path in the generated
 global config. The published `@dietrichgebert/ponytail@4.8.4` package is not
-used because its named export is incompatible with OpenCode 1.18.9.
+used because its named export is incompatible with OpenCode 1.18.31.
 
 Ponytail contributes six slash commands (`/ponytail`, `/ponytail-audit`,
 `/ponytail-debt`, `/ponytail-gain`, `/ponytail-help`, `/ponytail-review`) and
@@ -355,8 +355,8 @@ as Chat through the scoped Ingenium MCP server. The seven tools are
 `ingenium_memory_search`, `ingenium_memory_update`,
 `ingenium_memory_forget`, and `ingenium_memory_operation_status`. General-MCP
 credentials issued by the package-owned reset include `memory:read` and
-`memory:write` for private memory; coordination-lease and runtime capability
-credentials include `memory:read` only. Project-visible memory additionally
+`memory:write` for private memory; runtime capability credentials include
+`memory:read` only. Project-visible memory additionally
 requires `memory:share`.
 
 Use a mutation only after the current user explicitly asks to remember, correct,
@@ -436,4 +436,4 @@ handoff, rather than a separate generic transcript-import surface.
 ## Related Features
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- Use the OpenCode interface to interact with the built-in 292-tool Ingenium MCP catalog across 32 baseline categories (290 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the 286-active-tool Ingenium MCP surface across 32 baseline categories (284 active `ingenium_` server registrations plus 2 extension tools). Retired coordination tools are not in the active catalog; project-scoped child discovery can add tools and categories dynamically.

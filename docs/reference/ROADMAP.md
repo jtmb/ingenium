@@ -10712,3 +10712,34 @@ follow-up task is requested by this record.
   are separate evidence classes. ORCH-EFF-01..06 source/policy behavior is
   delivered; ORCH-EFF-07 and parent activation remain open until the protected
   credential and recovery gates are reconciled.
+
+### Native OpenCode and coordination-retirement implementation continuation — 2026-09-19 (source/test evidence, not rollout completion)
+
+- **Scope:** The current implementation retires the six public coordination MCP
+  names, removes TUI session-memory injection, routes session/message reads
+  through the pinned OpenCode `1.18.31` v2 SDK, and preserves ordinary task
+  reservations, repository-sync credentials, historical coordination data, and
+  guarded migrations.
+- **Source boundary:** The active catalog is `286` tools (`284` server
+  registrations plus `2` extension tools) across `32` categories. Retired
+  coordination names are absent from the active catalog and profiles; negative
+  parity/retirement fixtures remain intentionally retained.
+- **Focused evidence:** Extension managed-command wrapper `112/112`; recovery
+  pre-admission `155/155`; v2/extension adapter boundary `37/37`; API OpenCode
+  contract/status tests `117/117`; core coordination/task regressions `63/63`;
+  core backup/repository/restore migration tests `59/59`; API restore-maintenance
+  `18/18`; extension repository/plugin/auth tests `62/62`; server retirement and
+  parity `6/6`; core catalog parity `7/7`; documentation and permission audits
+  passed; affected core/API/extension typechecks passed.
+- **Causal repair:** Migration 121's new repository-sync generation foreign key
+  now receives its parent worktree row before retained coordination compatibility
+  paths upsert the generation child. The foreign-key failure was reproduced first,
+  then the focused coordination and restore-maintenance regressions passed.
+- **Open gates:** Lint scripts are not defined in the affected workspaces; no
+  current-source deployment, live OpenCode session proof, parent restart, commit,
+  or reset was performed. Profile/config changes still require a full parent
+  OpenCode restart, and the shared worktree remains broadly uncommitted.
+- **Next work:** Reconcile the mixed diff against its owning rollout, preserve
+  historical roadmap evidence, and perform only separately authorized deployment,
+  live-session, or restart acceptance. This marker does not claim overall rollout
+  completion or `PASS`.

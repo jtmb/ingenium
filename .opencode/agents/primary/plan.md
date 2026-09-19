@@ -14,7 +14,6 @@ permission:
   write: deny
   bash: deny
   todowrite: deny
-  ingenium_coordination_status: allow
   task:
     "*": deny
     ingenium-explore: allow

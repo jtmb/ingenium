@@ -3,7 +3,7 @@
  *
  * These are contract-level tests that verify the proxy route handlers at
  * `routes/opencode.ts` correctly forward fields, construct bodies, and handle
- * edge cases according to the OpenCode v1.18.9 contract. The opencode client
+ * edge cases according to the retained OpenCode REST contract. The opencode client
  * is mocked so no real OpenCode server is needed.
  *
  * Each test maps to a verified defect from the audit:
@@ -33,6 +33,7 @@ const mockRevertSession = vi.fn();
 const mockSendCommand = vi.fn();
 const mockGetSession = vi.fn();
 const mockShareSession = vi.fn();
+const mockReadRecentOpenCodeUserMessages = vi.fn();
 
 vi.mock("../lib/opencode-client.js", () => ({
   opencodeClient: {
@@ -47,6 +48,7 @@ vi.mock("../lib/opencode-client.js", () => ({
     getSession: (...args: unknown[]) => mockGetSession(...args),
     shareSession: (...args: unknown[]) => mockShareSession(...args),
   },
+  readRecentOpenCodeUserMessages: (...args: unknown[]) => mockReadRecentOpenCodeUserMessages(...args),
   isOpenCodeError: (result: unknown) =>
     typeof result === "object" && result !== null && "error" in result,
   buildAuthHeader: () => "Basic dGVzdDpwYXNz",
@@ -113,6 +115,21 @@ afterAll(async () => {
 function api(path: string): string {
   return `${baseUrl}/api/v1/opencode${path}`;
 }
+
+describe("v2 message read availability", () => {
+  it("returns 503 instead of an empty successful result when OpenCode is unavailable", async () => {
+    mockReadRecentOpenCodeUserMessages.mockResolvedValue({
+      error: { code: "NETWORK_ERROR", message: "Network error contacting OpenCode server" },
+    });
+
+    const res = await fetch(api("/messages?since=0&limit=10&project=ingenium"));
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode messages are temporarily unavailable" },
+    });
+  });
+});
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Defect 1: Prompt should forward model/agent/system/variant/tools
@@ -576,7 +593,7 @@ describe("Defect 4: Permissions response shape", () => {
     // the frontend cannot display which session is requesting permission.
     //
     // To fix: Add `sessionID: string` to PermissionRequest interface and
-    // verify the OpenCode v1.18.9 /permission endpoint returns it.
+    // Verify the retained OpenCode /permission endpoint returns it.
     const perm: PermissionRequest = {
       id: "test",
       permission: "read",

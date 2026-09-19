@@ -124,7 +124,7 @@ function readConfig(configPath) {
 
 function isManagedPlugin(value) {
   return typeof value === "string" && (
-    /(?:^|\/)(?:auto-observer|observer|resource-sync|session-coordinator)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
+    /(?:^|\/)(?:auto-observer|observer|resource-sync|lifecycle)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
     || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)
     || /(?:^|\/)\.opencode\/plugins\/ponytail\.mjs$/.test(value)
   );

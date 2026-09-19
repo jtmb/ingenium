@@ -6,6 +6,8 @@ import { isControlPlaneMode } from "./runtime-mode.js";
 export interface OpenCodeRuntimeTarget {
   baseUrl: string;
   password?: string;
+  /** Native OpenCode directory used to bind runtime requests to the workspace. */
+  directory?: string;
 }
 
 const context = new AsyncLocalStorage<OpenCodeRuntimeTarget>();
@@ -35,5 +37,5 @@ export function runtimeOpenCodeContext(req: Request, res: Response, next: NextFu
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Runtime not found" } });
     return;
   }
-  withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098` }, next);
+  withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098`, directory: "/workspace" }, next);
 }

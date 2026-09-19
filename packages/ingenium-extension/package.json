@@ -35,13 +35,13 @@
       "types": "./dist/plugins/resource-sync.d.ts",
       "import": "./dist/plugins/resource-sync.js"
     },
-    "./session-coordinator": {
-      "types": "./dist/session-coordinator.d.ts",
-      "import": "./dist/session-coordinator.js"
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "import": "./dist/lifecycle.js"
     },
-    "./plugins/session-coordinator": {
-      "types": "./dist/plugins/session-coordinator.d.ts",
-      "import": "./dist/plugins/session-coordinator.js"
+    "./plugins/lifecycle": {
+      "types": "./dist/plugins/lifecycle.d.ts",
+      "import": "./dist/plugins/lifecycle.js"
     },
     "./plugins/ponytail": "./ponytail/.opencode/plugins/ponytail.mjs",
     "./plugin-specs": "./plugin-specs.mjs",
@@ -76,7 +76,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@opencode-ai/plugin": "1.18.9",
+    "@opencode-ai/plugin": "1.18.31",
+    "@opencode-ai/sdk": "1.18.31",
     "pino": "^9.0.0"
   }
 }

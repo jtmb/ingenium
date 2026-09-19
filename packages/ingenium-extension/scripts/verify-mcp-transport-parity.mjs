@@ -13,6 +13,14 @@ const MCP_REPORT_SCHEMA_MARKER = "mcpReportFilters";
 const REPOSITORY_SYNC_TRANSPORT_NAME = "repository_sync";
 const REPOSITORY_SYNC_CATALOG_NAME = `ingenium_${REPOSITORY_SYNC_TRANSPORT_NAME}`;
 const REPOSITORY_SYNC_SCHEMA_MARKER = "repositoryDocsManifestParam";
+const RETIRED_COORDINATION_CATALOG_NAMES = new Set([
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+  "ingenium_coordination_handoff",
+]);
 
 function readRequiredFile(path) {
   if (!existsSync(path)) {
@@ -62,7 +70,8 @@ export function assertMcpTransportParity(repositoryRoot, distributionRoot) {
   const packagedTransport = readRequiredFile(paths.packagedTransport);
   const catalogSource = readRequiredFile(paths.catalogSource);
   const catalogNames = new Set(extractNames(catalogSource, CATALOG_NAME_PATTERN, "catalog tool names"));
-  const expectedTransportCount = [...catalogNames].filter((name) => name.startsWith("ingenium_")).length;
+  const expectedTransportCount = [...catalogNames]
+    .filter((name) => name.startsWith("ingenium_") && !RETIRED_COORDINATION_CATALOG_NAMES.has(name)).length;
 
   const serverToolNames = extractNames(serverTransport, TRANSPORT_REGISTRATION_PATTERN, "server transport registrations");
   const packagedToolNames = extractNames(packagedTransport, TRANSPORT_REGISTRATION_PATTERN, "packaged transport registrations");

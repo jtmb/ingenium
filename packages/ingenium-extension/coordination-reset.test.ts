@@ -25,8 +25,11 @@ const organizationId = "00000000-0000-4000-8000-000000000002";
 const servicePrincipalId = "00000000-0000-4000-8000-000000000005";
 const coordinationResetModule = fileURLToPath(new URL("./coordination-reset.ts", import.meta.url));
 const generalMcpScopes = [
-  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+  "projects:read", "repository:sync", "documentation:read", "rag:read",
   "memory:read", "memory:write",
+] as const;
+const legacyMcpScopes = [
+  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
 ] as const;
 const directories: string[] = [];
 const originalSecretFile = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
@@ -200,16 +203,16 @@ function expectNoCredentialQuarantine(worktree: string): void {
   expect(readdirSync(join(worktree, ".opencode")).filter((entry) => entry !== ".ingenium-mcp-credential")).toEqual([]);
 }
 
-describe("protected coordination reset", () => {
-  it.each(["active", "revoked", "preflight failure"])("reuses the principal across the six-to-eight scope upgrade (%s)", async (scenario) => {
+describe("protected MCP credential reset", () => {
+  it.each(["active", "revoked", "preflight failure"])("reuses the principal across the retained scope set (%s)", async (scenario) => {
     const { worktree, credential } = fixture();
     const { request, calls, collisions } = requestFixture({
       existingPrincipal: true,
       priorCredentials: [{
         id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
-        name: "Ingenium coordination", organizationId, projectId,
+        name: "Ingenium MCP", organizationId, projectId,
         kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
-        launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6),
+        launcherWorktree: worktree, scopes: legacyMcpScopes,
         revokedAt: scenario === "revoked" ? "2026-08-01T00:00:00Z" : null,
       }],
     });
@@ -237,10 +240,10 @@ describe("protected coordination reset", () => {
     const { worktree } = fixture();
     const { request, calls } = requestFixture({ priorCredentials: scenario === "none" ? [] : [{
       id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
-      name: scenario === "other name" ? "Ingenium learning" : "Ingenium coordination",
+      name: scenario === "other name" ? "Ingenium learning" : "Ingenium MCP",
       organizationId: scenario === "other organization" ? "other-org" : organizationId,
       projectId, kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
-      launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6), revokedAt: null,
+       launcherWorktree: worktree, scopes: legacyMcpScopes, revokedAt: null,
     }] });
     await resetCoordinationCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") });
     const issue = calls.find(({ url, init }) => url.endsWith("/auth/mcp-credentials") && init?.method === "POST");

@@ -14,7 +14,7 @@ const LoginSchema = z.object({ email: z.string().max(320), password: z.string().
 const TokenSchema = z.object({ token: z.string().min(32).max(512) }).strict();
 const PasswordSchema = TokenSchema.extend({ password: z.string().min(12).max(1024) }).strict();
 const RuntimePreflightSchema = z.object({ runtime_id: z.string().uuid() }).strict();
-const CoordinationLeaseSchema = z.object({ runtimeId: z.string().uuid() }).strict();
+const RepositorySyncCredentialSchema = z.object({ runtimeId: z.string().uuid() }).strict();
 const IMAGE_REVISION = /^[0-9a-f]{40}$/;
 const OIDC_TRANSACTION_COOKIE = "__Host-ingenium_oidc_transaction";
 
@@ -337,7 +337,7 @@ authPreflightRouter.post("/bootstrap-mcp-credential", (req, res, next) => {
       servicePrincipalId: principal?.id,
       servicePrincipalName: "Compatibility OpenCode",
       kind: "service", audience: "mcp", name: "Compatibility OpenCode",
-      scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
+       scopes: ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
       organizationId: project.organization_id, projectId: project.id,
       workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000), createdByUserId: owner.id,
@@ -406,17 +406,17 @@ authPreflightRouter.post("/mcp-credentials", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.status(201).location(`/api/v1/auth/mcp-credentials/${credential.id}`).json({ data: credential });
 });
-authPreflightRouter.post("/coordination-lease", (req, res) => {
+authPreflightRouter.post("/repository-sync-credential", (req, res) => {
   if (req.principal?.type !== "compatibility" || req.get("x-ingenium-internal-service") !== "1"
     || req.headers.cookie !== undefined || req.get("origin") !== undefined) {
     throw new AppError("Resource not found", "NOT_FOUND", 404);
   }
-  const input = CoordinationLeaseSchema.parse(req.body);
-  let issued: ReturnType<typeof mcpCredentials.issueCoordinationLeaseCredentials>;
+  const input = RepositorySyncCredentialSchema.parse(req.body);
+  let issued: ReturnType<typeof mcpCredentials.issueRepositorySyncCredential>;
   try {
-    issued = mcpCredentials.issueCoordinationLeaseCredentials(input.runtimeId);
+    issued = mcpCredentials.issueRepositorySyncCredential(input.runtimeId);
   } catch (error) {
-    if (error instanceof mcpCredentials.CoordinationLeaseUnavailableError) {
+    if (error instanceof mcpCredentials.RepositorySyncCredentialUnavailableError) {
       throw new AppError("Resource not found", "NOT_FOUND", 404);
     }
     throw error;
@@ -424,9 +424,8 @@ authPreflightRouter.post("/coordination-lease", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.status(201).json({ data: {
     runtimeId: input.runtimeId,
-    expiresAt: issued.coordination.expiresAt,
-    coordinationCredential: { id: issued.coordination.id, token: issued.coordination.token },
-    repositorySyncCredential: { id: issued.repositorySync.id, token: issued.repositorySync.token },
+    expiresAt: issued.expiresAt,
+    repositorySyncCredential: { id: issued.id, token: issued.token },
   } });
 });
 authPreflightRouter.post("/mcp-credentials/:id/rotate", (req, res) => {
@@ -532,8 +531,8 @@ authPreflightRouter.get("/preflight", async (req, res, next) => {
     }
 
     const { runtime_id: runtimeId } = RuntimePreflightSchema.parse(req.query);
-    if (principal?.type !== "service" || (principal.audience !== "mcp" && principal.audience !== "runtime")
-      || !principal.scopes.includes("projects:read") || !principal.scopes.includes("coordination:read")) {
+    if (principal?.type !== "service" || principal.audience !== "runtime"
+      || !principal.scopes.includes("projects:read") || !principal.scopes.includes("runtime:activity")) {
       throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
     }
     const identity = req.attestedCoordinationIdentity;

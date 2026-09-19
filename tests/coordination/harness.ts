@@ -64,8 +64,8 @@ const execFileAsync = promisify(execFile);
 const POLL_INTERVAL_MS = 250;
 const INTERNAL_READINESS_POLL_INTERVAL_MS = 5_000;
 const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-const sessionCoordinatorPlugin = (worktree: string): string =>
-  pathToFileURL(join(worktree, "packages/ingenium-extension/plugins/session-coordinator.ts")).href;
+const lifecyclePlugin = (worktree: string): string =>
+  pathToFileURL(join(worktree, "packages/ingenium-extension/plugins/lifecycle.ts")).href;
 export const MAPPED_CHECK_COMMAND = "npm run typecheck --workspace=@ingenium/extension";
 
 type JsonRecord = Record<string, unknown>;
@@ -840,7 +840,7 @@ export function buildExternalConfig(
   config.default_agent = name;
   config.permission = { "*": "deny" };
   delete config.tools;
-  config.plugin = [sessionCoordinatorPlugin(options.worktree)];
+  config.plugin = [lifecyclePlugin(options.worktree)];
   config.agent = { [name]: { ...agent, permission } };
   return `${JSON.stringify(config, null, 2)}\n`;
 }
@@ -1040,7 +1040,7 @@ export function assertOpenCodeInspection(label: "A" | "B" | "C", value: JsonReco
     required(configured.model === mapping.model && configured.variant === mapping.variant && configured.prompt === mapping.prompt,
       `${label} exact profile mapping changed`);
     required(configured.tools === undefined && config.tools === undefined
-      && isDeepStrictEqual(config.plugin, [sessionCoordinatorPlugin(options.worktree)]), `${label} synthetic tool override detected`);
+      && isDeepStrictEqual(config.plugin, [lifecyclePlugin(options.worktree)]), `${label} synthetic tool override detected`);
   }
   const providers = record(value.providers, `${label} provider catalog is invalid`);
   const providerConnected = label === "C"
@@ -1378,7 +1378,7 @@ export function assertFreshOperationalMemory(entry: PersistentOperationalEntry, 
   required(entry.changedPaths.some((change) => decodeChangedPath(change.pathSegments) === path)
     && entry.manifest?.dirtyHashes.some((change) => decodeChangedPath(change.pathSegments) === path && change.sha256 === sha256(`${marker}\n`)),
   "Persistent memory lacks the fresh changed-path/hash evidence");
-  required(projected.todoCounts.inProgress > 0 && entry.manifest.todoWrite.some((todo) => todo.status === "in_progress")
+  required(projected.todoCounts.inProgress > 0 && entry.manifest!.todoWrite.some((todo) => todo.status === "in_progress")
     && projected.nextWork.kind === "continue_task", "Persistent memory lacks task/todo/next-work state");
 }
 
@@ -1857,9 +1857,9 @@ export async function runCoordinationHarness(
         ...state,
         workspace: {
           project: options.project,
-          projectId: binding.projectId,
-          workspaceId: binding.workspaceId,
-          storageMappingHash: binding.storageMappingHash,
+          projectId: binding!.projectId,
+          workspaceId: binding!.workspaceId,
+          storageMappingHash: binding!.storageMappingHash,
           canonicalWorktree: options.worktree,
         },
         oldParent: { pid: oldExternalB.child.pid, port: oldExternalB.port, sessionIdHash: sha256(sessionB) },

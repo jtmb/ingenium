@@ -52,9 +52,9 @@ const originalProject = process.env.INGENIUM_PROJECT;
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const configuredPluginPaths = [
   "packages/ingenium-extension/plugins/auto-observer.ts",
+  "packages/ingenium-extension/plugins/lifecycle.ts",
   "packages/ingenium-extension/plugins/observer.ts",
   "packages/ingenium-extension/plugins/resource-sync.ts",
-  "packages/ingenium-extension/plugins/session-coordinator.ts",
   "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
 ];
 
@@ -312,6 +312,7 @@ describe("repository-authoritative manifest v2", () => {
       "execution/ingenium-software-engineer-fast.md",
       "execution/ingenium-software-engineer-premium.md",
       "primary/ingenium-orchestrator.md",
+      "primary/plan.md",
       "research/ingenium-explore.md",
       "research/ingenium-scout.md",
       "security/ingenium-security-auditor.md",

@@ -34,8 +34,8 @@ try {
   const configPath = join(workspace, "opencode.json");
   writeFileSync(configPath, `${JSON.stringify({ permission: { "*": "deny" }, mcp: {}, plugin })}\n`, "utf8");
   const version = spawnSync(opencode, ["--version"], { encoding: "utf8", timeout: 10_000 });
-  if (version.status !== 0 || version.stdout.trim() !== "1.18.9") {
-    throw new Error(`Expected OpenCode 1.18.9, received ${version.stdout.trim() || version.stderr.trim()}`);
+  if (version.status !== 0 || version.stdout.trim() !== "1.18.31") {
+    throw new Error(`Expected OpenCode 1.18.31, received ${version.stdout.trim() || version.stderr.trim()}`);
   }
   const result = spawnSync(opencode, ["debug", "config"], {
     cwd: workspace,

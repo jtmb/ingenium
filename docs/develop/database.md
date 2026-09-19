@@ -149,7 +149,7 @@ another Compose project volume.
 | 105 | `105_runtime_localhost_browser_origins.sql` | Rebuilds runtime browser launch-ticket and session tables so exact HTTPS host origins remain valid and HTTP is accepted only when the exact persisted host ends in the special-use `.localhost` domain. |
 | 106 | `106_session_csrf_grants.sql` | Adds bounded hash-only browser CSRF grants tied to one auth session, user, security epoch, and expiry. Session deletion cascades; revocation and user security changes delete grants through triggers. |
 
-### Coordination, transcript, saved-memory, and child-MCP migrations (107–117)
+### Coordination, transcript, saved-memory, child-MCP, and repository-sync migrations (107–121)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -165,7 +165,15 @@ another Compose project volume.
 | 116 | `116_child_mcp_description.sql` | Adds the nullable operator description column to `mcp_child_server_definitions`. |
 | 117 | `117_mcp_credential_receipts.sql` | Adds encrypted replay receipts keyed by idempotency key and request hash, bound to the issued MCP credential so bootstrap retries reuse it without persisting plaintext. |
 | 118 | `118_repository_command_resources.sql` | Rebuilds repository-managed resource state so the resource type includes `command`, preserving existing project-scoped identities and hashes. |
-| 119 | `119_plugin_description.sql` | Adds project-local editable plugin descriptions and backfills the bundled plugin labels without changing plugin source or global authority. |
+| 119 | `119_plugin_description.sql` | Historical plugin-description migration: adds project-local editable descriptions and backfills bundled labels, including the retained `session-coordinator` label. That label is migration data only; it does not describe an active plugin or coordination route. |
+| 120 | `120_lifecycle_plugin_description.sql` | Forward repair after `lifecycle` replaced `session-coordinator`: updates an existing empty/default `lifecycle` description to “Uploads session context and records external usage at lifecycle boundaries.” |
+| 121 | `121_repository_sync_worktree_state.sql` | Moves retained repository-sync worktree/generation state into `repository_sync_worktrees`, copies existing rows, rebuilds `repository_sync_generations` with its composite foreign key to the new table, and leaves historical coordination data intact. |
+
+Migrations 120 and 121 are forward-only startup repairs. `runMigrations()`
+applies 120's idempotent description update on startup, and applies 121 when
+the repository-sync worktree table or its generation foreign key is absent. The
+121 copy preserves existing repository-sync state; it does not delete or rename
+the historical coordination registry.
 
 Migration 095's AUTH-103 upgrade replaces the invitation consume-once trigger so
 a pending invitation may transition exactly once to either accepted or revoked.

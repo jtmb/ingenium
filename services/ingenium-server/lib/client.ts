@@ -65,7 +65,6 @@ interface RequestOptions {
   idempotencyKey?: string;
   /** Use only for the fixed child-MCP server-to-server secret handoff. */
   trustedChildMcpRuntime?: boolean;
-  coordinationOwnershipToken?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -255,7 +254,6 @@ function bodyIdempotencyKey(body: unknown): string | undefined {
 function hasApiEnforcedIdempotency(path: string, method: string): boolean {
   const route = path.split("?", 1)[0] ?? path;
   if (route === "/tasks" || route.startsWith("/tasks/")) return true;
-  if (route === "/coordination" || route.startsWith("/coordination/")) return true;
   if (method !== "POST") return false;
   return route === "/context/conversations"
     || /^\/context\/conversations\/[^/]+\/(?:messages|checkpoints)$/.test(route)
@@ -324,9 +322,6 @@ async function request(path: string, opts: RequestOptions, retries = canRetry(pa
       }
       if (opts.idempotencyKey !== undefined) {
         (init.headers as Headers).set("Idempotency-Key", opts.idempotencyKey);
-      }
-      if (opts.coordinationOwnershipToken !== undefined) {
-        (init.headers as Headers).set("X-Ingenium-Coordination-Ownership", opts.coordinationOwnershipToken);
       }
       if (opts.octetBody !== undefined) init.body = opts.octetBody as unknown as BodyInit;
       else if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
@@ -430,24 +425,6 @@ export const api = {
       return settledJson(`/mcp-tools/${encodeURIComponent(toolName)}/state`, {
         method: "GET",
         params: { project },
-      });
-    },
-    getCoordinationSnapshot: async (
-      project: string,
-      worktreeId: string,
-      sessionId: string,
-      incarnation: number,
-      ownershipToken: string,
-    ) => {
-      return settledJson("/coordination/snapshot", {
-        method: "GET",
-        params: {
-          project,
-          worktree_id: worktreeId,
-          session_id: sessionId,
-          incarnation: String(incarnation),
-        },
-        coordinationOwnershipToken: ownershipToken,
       });
     },
     /** Fetch server-only child-MCP runtime data outside the dashboard API namespace. */

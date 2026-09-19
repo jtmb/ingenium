@@ -1,4 +1,3 @@
-import { SessionCoordinator } from "../../packages/ingenium-extension/session-coordinator";
 import { createServer } from "node:http";
 import {
   CanaryDispatcher,
@@ -45,16 +44,10 @@ async function main(): Promise<void> {
     server.listen(port, "127.0.0.1");
     await new Promise<void>(() => {});
   }
-  const coordinator = new SessionCoordinator({ worktree: input.plan.worktree, client: {} });
-  try {
-    await coordinator.initialize();
-    const dispatcher = new CanaryDispatcher(input.plan, new RealCanaryActions(input.plan, coordinator.hooks()));
-    const result = await dispatcher.dispatch(input.request, { ...input.context, abort: actionController.signal });
-    const encoded = Buffer.from(JSON.stringify({ result }), "utf8").toString("base64url");
-    process.stdout.write(`\nINGENIUM_CANARY_RESULT:${encoded}\n`);
-  } finally {
-    await coordinator.dispose();
-  }
+  const dispatcher = new CanaryDispatcher(input.plan, new RealCanaryActions(input.plan));
+  const result = await dispatcher.dispatch(input.request, { ...input.context, abort: actionController.signal });
+  const encoded = Buffer.from(JSON.stringify({ result }), "utf8").toString("base64url");
+  process.stdout.write(`\nINGENIUM_CANARY_RESULT:${encoded}\n`);
 }
 
 void main().catch((error) => {

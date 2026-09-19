@@ -48,7 +48,7 @@ describe("ObserverPlugin — session.created error reporting", () => {
 
     // This must NOT throw — session startup must survive a rejected log
     await expect(
-      plugin.event({ event: { type: "session.created", session: { id: "sess-1" } } }),
+      plugin.event({ event: { type: "session.created", properties: { sessionID: "sess-1" } } }),
     ).resolves.toBeUndefined();
 
     const logged = JSON.stringify(log.mock.calls);
@@ -69,7 +69,7 @@ describe("ObserverPlugin — session.created error reporting", () => {
       client: { app: { log } },
     });
 
-    await plugin.event({ event: { type: "session.created", session: { id: "sess-2" } } });
+    await plugin.event({ event: { type: "session.created", properties: { sessionID: "sess-2" } } });
 
     // importObservationsFromFile still ran (session startup not blocked)
     expect(mockImportObservations).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe("ObserverPlugin — session.created error reporting", () => {
       client: { app: { log: vi.fn() } },
     });
 
-    await plugin.event({ event: { type: "session.created", session: { id: "sess-3" } } });
+    await plugin.event({ event: { type: "session.created", properties: { sessionID: "sess-3" } } });
 
     // No process output on success either.
     expect(stdout).not.toHaveBeenCalled();
@@ -103,7 +103,7 @@ describe("ObserverPlugin — session.created error reporting", () => {
       client: { app: { log: vi.fn() } },
     });
 
-    await plugin.event({ event: { type: "session.created", session: { id: "sess-4" } } });
+    await plugin.event({ event: { type: "session.created", properties: { sessionID: "sess-4" } } });
 
     // logPipelineEvent was called with the worktree-derived project path
     expect(mockLogPipelineEvent.mock.calls[0]?.slice(0, 6)).toEqual([

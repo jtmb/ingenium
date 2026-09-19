@@ -17,7 +17,7 @@ export function defaultPluginDescription(name: string): string {
     "auto-observer": "Extracts learning observations from user conversations.",
     observer: "Imports fallback observations and triggers learning synthesis.",
     "resource-sync": "Synchronizes repository resources into the project workspace.",
-    "session-coordinator": "Coordinates shared-worktree sessions, ownership, and recovery.",
+    lifecycle: "Uploads session context and records external usage at lifecycle boundaries.",
     ponytail: "Encourages minimal, practical implementations through Ponytail mode.",
   };
   return Object.hasOwn(descriptions, name) ? descriptions[name]! : "Project-local OpenCode plugin.";

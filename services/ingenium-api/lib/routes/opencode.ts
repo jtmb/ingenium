@@ -3,13 +3,13 @@ import formidable from "formidable";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
 import { logger, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
   buildAuthHeader,
   isOpenCodeError,
+  readRecentOpenCodeUserMessages,
   type OpenCodeResult,
   type SendPromptBody,
 } from "../opencode-client.js";
@@ -81,14 +81,10 @@ function removeUploads(paths: Iterable<string>): void {
 }
 
 /**
- * Handles /api/v1/opencode — reads recent user messages from the OpenCode SQLite DB,
- * AND proxies the full OpenCode REST API surface through the OpenCode HTTP server.
+ * Handles /api/v1/opencode — reads recent user messages through the authenticated
+ * OpenCode v2 API and proxies the retained OpenCode REST surface.
  *
- * The DB-based /messages route is the ONLY route file that directly accesses a
- * SQLite database outside the API authority pattern, because the OpenCode DB is a
- * separate process's database mounted via docker-compose volume.
- *
- * Proxy routes validated against the v1.18.9 contract at /tmp/opencode-contract.md.
+ * Proxy routes are covered by the retained OpenCode REST contract tests.
  */
 export const opencodeRouter = Router();
 
@@ -506,73 +502,20 @@ opencodeRouter.post("/upload", async (req, res) => {
   }
 });
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   Existing: DB-based OpenCode message reader
-   ═══════════════════════════════════════════════════════════════════════════ */
+opencodeRouter.get("/messages", async (req, res) => {
+  const sinceValue = Number.parseInt(typeof req.query.since === "string" ? req.query.since : "0", 10);
+  const limitValue = Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "500", 10);
+  const since = Number.isFinite(sinceValue) && sinceValue >= 0 ? sinceValue : 0;
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 0), 2000) : 500;
+  const project = typeof req.query.project === "string" ? req.query.project : "";
 
-opencodeRouter.get("/messages", (req, res) => {
-  const since = parseInt(req.query.since as string || "0", 10);
-  const limit = Math.min(parseInt(req.query.limit as string || "500", 10), 2000);
-  const project = (req.query.project as string) || "";
-
-  try {
-    // Host OpenCode DB mounted at /var/opencode/ via docker-compose
-    const dbPath = process.env.INGENIUM_OPENCODE_DB_PATH || "/var/opencode/opencode.db";
-
-    if (!existsSync(dbPath)) {
-      logger.warn("opencode", "OpenCode DB not found", { path: dbPath });
-      res.json({ data: { messages: [], total: 0 } });
-      return;
-    }
-
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
-
-    // Build query with optional project (worktree directory) filter
-    const projectClause = project
-      ? "AND (s.directory LIKE ('%/' || ?) OR s.directory LIKE ('%\\' || ?))"
-      : "";
-
-    const sql = `
-      SELECT
-        m.id as message_id,
-        m.session_id as session_id,
-        json_extract(p.data, '$.text') as text,
-        p.time_created
-      FROM part p
-      JOIN message m ON p.message_id = m.id
-      JOIN session s ON m.session_id = s.id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
-        AND length(json_extract(p.data, '$.text')) > 10
-        AND p.time_created > ?
-        AND s.parent_id IS NULL
-        ${projectClause}
-      ORDER BY p.time_created DESC
-      LIMIT ?
-    `;
-
-    const params: any[] = [since];
-    if (project) params.push(project, project);
-    params.push(limit);
-
-    const rows = db.prepare(sql).all(...params);
-
-    db.close();
-
-    const messages = rows.map((r: any) => ({
-      text: String(r.text || ""),
-      time_created: r.time_created,
-      messageId: r.message_id ? String(r.message_id) : undefined,
-      sessionId: r.session_id ? String(r.session_id) : undefined,
-    }));
-
-    logger.info("opencode", `Returned ${messages.length} user messages from OpenCode DB (since=${since}, limit=${limit}, project=${project || "any"})`);
-
-    res.json({ data: { messages, total: messages.length } });
-  } catch (err: any) {
-    logger.error("opencode", `Failed to read OpenCode DB: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.json({ data: { messages: [], total: 0, error: err.message } });
+  const result = await readRecentOpenCodeUserMessages({ since, limit, project });
+  if (isOpenCodeError(result)) {
+    logger.warn(SOURCE, "OpenCode v2 message read unavailable", { code: result.error.code });
+    res.status(503).json({ error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode messages are temporarily unavailable" } });
+    return;
   }
+  res.json({ data: { messages: result, total: result.length } });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -717,7 +660,7 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   OpenCode HTTP API proxy routes (v1.18.9 contract)
+   OpenCode HTTP API proxy routes (retained compatibility surface)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Health ── */
@@ -815,7 +758,7 @@ opencodeRouter.delete("/sessions/:id/messages/:msgId", async (req, res) => {
   sendResult(req, res, result);
 });
 
-/* ── Prompt (POST /sessions/:id/message — uses parts array per v1.18.9) ── */
+/* ── Prompt (POST /sessions/:id/message — uses the parts array) ── */
 
 function isPromptPart(part: unknown): boolean {
   if (part === null || typeof part !== "object") return false;

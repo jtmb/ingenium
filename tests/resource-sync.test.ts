@@ -14,12 +14,14 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, realpathSync, lstatSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync, realpathSync, lstatSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 const mockCallMcpTool = vi.hoisted(() => vi.fn());
+const TEST_API_BASE = "https://api.test/api/v1";
+const TEST_TOKEN = "r".repeat(32);
 
 vi.mock("../packages/ingenium-extension/mcp-client.js", () => ({
   callMcpTool: mockCallMcpTool,
@@ -36,6 +38,22 @@ function writeFile(filePath: string, content: string): void {
   const parent = resolve(filePath, "..");
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
   writeFileSync(filePath, content, "utf-8");
+}
+
+function configureBinding(worktree: string, project: string, purpose: "general" | "repository-sync" = "general"): void {
+  const credentialName = purpose === "repository-sync"
+    ? ".ingenium-repository-sync-credential"
+    : ".ingenium-mcp-credential";
+  const credentialPath = resolve(worktree, ".opencode", credentialName);
+  mkdirSync(resolve(worktree, ".opencode"), { recursive: true });
+  writeFileSync(credentialPath, `${TEST_TOKEN}\n`, { mode: 0o600 });
+  chmodSync(credentialPath, 0o600);
+  process.env.INGENIUM_PROJECT = project;
+  process.env.INGENIUM_WORKSPACE_ID = `${project}-workspace`;
+  process.env.INGENIUM_TRUSTED_API_URL = TEST_API_BASE;
+  if (purpose === "repository-sync") {
+    process.env.INGENIUM_REPOSITORY_SYNC_CREDENTIAL_FILE = `.opencode/${credentialName}`;
+  }
 }
 
 const originalFetch = globalThis.fetch;
@@ -102,11 +120,11 @@ describe("Project Resolution", () => {
     resetProjectCache();
   });
 
-  it("requires a credential-bound project locator when env var is empty", async () => {
+  it("derives a safe worktree project when env var is empty", async () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/home/user/repos/gh-llm-bootstrap")).toThrow(/credential-bound INGENIUM_PROJECT/);
+    expect(resolveProject("/home/user/repos/gh-llm-bootstrap")).toBe("gh-llm-bootstrap");
     resetProjectCache();
   });
 
@@ -133,7 +151,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/some/path/valid-worktree")).toThrow(/credential-bound INGENIUM_PROJECT/);
+    expect(resolveProject("/some/path/valid-worktree")).toBe("valid-worktree");
     resetProjectCache();
   });
 
@@ -141,7 +159,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/")).toThrow(/credential-bound INGENIUM_PROJECT/);
+    expect(() => resolveProject("/")).toThrow(/Worktree does not resolve to a safe project name/);
     resetProjectCache();
   });
 
@@ -149,7 +167,7 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/workspace")).toThrow(/credential-bound INGENIUM_PROJECT/);
+    expect(() => resolveProject("/workspace")).toThrow(/Worktree does not resolve to a safe project name/);
   });
 
   it("allows the container workspace only with an explicit global project", async () => {
@@ -173,7 +191,8 @@ describe("Project Resolution", () => {
 
   it("deduplicates concurrent extension project provisioning and retries failures", async () => {
     process.env.INGENIUM_PROJECT = "provisioned-project";
-    process.env.INGENIUM_WORKSPACE_ID = "fixture-workspace";
+    const worktree = tmpDir();
+    configureBinding(worktree, "provisioned-project");
     vi.resetModules();
     const { ensureExtensionProject, resetEnsuredProjects } = await import("../packages/ingenium-extension/project-resolver.js");
     let detailAttempts = 0;
@@ -188,8 +207,9 @@ describe("Project Resolution", () => {
           projectId: "fixture-project-id",
           projectIds: ["fixture-project-id"],
           audience: "mcp",
-          workspaceId: "fixture-workspace",
-          launcherWorktree: "/worktrees/provisioned-project",
+          workspaceId: "provisioned-project-workspace",
+          launcherWorktree: realpathSync(worktree),
+          storageMappingHash: "a".repeat(64),
           restartRequiredOnCredentialChange: true,
         } }),
       } as Response;
@@ -202,24 +222,29 @@ describe("Project Resolution", () => {
     });
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
-    await expect(Promise.all([
-      ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1/"),
-      ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1"),
-    ])).resolves.toEqual(["provisioned-project", "provisioned-project"]);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(1);
+    try {
+      await expect(Promise.all([
+        ensureExtensionProject(worktree, `${TEST_API_BASE}/`),
+        ensureExtensionProject(worktree, TEST_API_BASE),
+      ])).resolves.toEqual(["provisioned-project", "provisioned-project"]);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(1);
 
-    resetEnsuredProjects();
-    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toMatchObject({ failure: "rejected" });
-    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).resolves.toBe("provisioned-project");
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(3);
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(3);
-    resetEnsuredProjects();
+      resetEnsuredProjects();
+      await expect(ensureExtensionProject(worktree, TEST_API_BASE)).rejects.toMatchObject({ failure: "rejected" });
+      await expect(ensureExtensionProject(worktree, TEST_API_BASE)).resolves.toBe("provisioned-project");
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(3);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects/provisioned-project/detail"))).toHaveLength(3);
+    } finally {
+      resetEnsuredProjects();
+      rmSync(worktree, { recursive: true, force: true });
+    }
   });
 
   it("submits the configured project through MCP on session creation without direct mutation fetches", async () => {
     process.env.INGENIUM_PROJECT = "startup-project";
     const worktree = tmpDir();
+    configureBinding(worktree, "startup-project", "repository-sync");
     writeFile(resolve(worktree, "docs", "index.md"), "# MCP fixture\n");
     vi.resetModules();
     const fetchMock = vi.fn();
@@ -229,7 +254,9 @@ describe("Project Resolution", () => {
         type: "text",
         text: JSON.stringify({
           docs: { summary: { created: 1 } },
-          resources: { summary: { skill: {}, agent: {}, plugin: {} } },
+          resources: { summary: { skill: {}, agent: {}, plugin: {}, command: {} } },
+          generation: 1,
+          manifestHash: "a".repeat(64),
         }),
       }],
     });
@@ -237,7 +264,9 @@ describe("Project Resolution", () => {
 
     try {
       const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log: vi.fn() } } });
-      await plugin.event({ event: { type: "session.created" } });
+      plugin.event({ event: { type: "session.created" } });
+      const { drainRepositoryLifecycleQueue } = await import("../packages/ingenium-extension/resource-sync.js");
+      await drainRepositoryLifecycleQueue(worktree);
 
       expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
         project: "startup-project",
@@ -282,9 +311,10 @@ describe("Manifest", () => {
     const manifestDir = resolve(worktree, ".opencode");
     mkdirSync(manifestDir, { recursive: true });
     const manifestData = {
-      version: 1,
+      version: 2,
       project: "test-project",
       projectId: "project-instance-1",
+      generation: 0,
       lastFullSync: "2025-01-01T00:00:00.000Z",
       resources: {
         skills: { "my-skill": "abc123" },
@@ -395,6 +425,15 @@ describe("API project recreation recovery", () => {
       { pattern: "/commands", method: "POST", status: 201, body: { data: {} } },
       { pattern: "/config", method: "GET", status: 200, body: { data: null } },
     ]);
+    configureBinding(worktree, "test-project", "repository-sync");
+    mockCallMcpTool.mockImplementation(async (_worktree: string, _tool: string, args: { expectedGeneration: number }) => ({
+      content: [{ type: "text", text: JSON.stringify({
+        docs: { summary: {} },
+        resources: { summary: { skill: {}, agent: {}, plugin: {}, command: {} } },
+        generation: args.expectedGeneration + 1,
+        manifestHash: "a".repeat(64),
+      }) }],
+    }));
     const { fullSync } = await import("../packages/ingenium-extension/resource-sync.js");
 
     const result = await fullSync(worktree);
@@ -402,7 +441,13 @@ describe("API project recreation recovery", () => {
     expect(existsSync(commandPath)).toBe(true);
     expect(result.commands.pushed).toBe(0);
     const manifest = JSON.parse(readFileSync(resolve(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8"));
-    expect(manifest.projectId).toBe("old-project-id");
+    expect(manifest.version).toBe(2);
+    expect(manifest.generation).toBe(1);
+    expect(manifest).not.toHaveProperty("projectId");
+    expect(mockCallMcpTool).toHaveBeenCalledWith(worktree, "repository_sync", expect.objectContaining({
+      project: "test-project",
+      resourcesManifest: expect.objectContaining({ commands: [expect.objectContaining({ path: ".opencode/commands/keep-me.md" })] }),
+    }));
   });
 });
 
@@ -717,7 +762,7 @@ describe("Plugin opencode.json Merge", () => {
       "./packages/ingenium-extension/plugins/auto-observer.ts",
       "./packages/ingenium-extension/plugins/observer.ts",
       "./packages/ingenium-extension/plugins/resource-sync.ts",
-      "./packages/ingenium-extension/plugins/session-coordinator.ts",
+      "./packages/ingenium-extension/plugins/lifecycle.ts",
     ]);
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [] } },
@@ -733,7 +778,7 @@ describe("Plugin opencode.json Merge", () => {
         "./packages/ingenium-extension/plugins/auto-observer.ts",
         "./packages/ingenium-extension/plugins/observer.ts",
         "./packages/ingenium-extension/plugins/resource-sync.ts",
-        "./packages/ingenium-extension/plugins/session-coordinator.ts",
+        "./packages/ingenium-extension/plugins/lifecycle.ts",
       ]);
     } finally {
       restoreFetch();

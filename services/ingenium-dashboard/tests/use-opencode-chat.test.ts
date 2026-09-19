@@ -17,9 +17,10 @@ import {
 } from "../src/lib/use-opencode-chat";
 import type { OpenCodePart } from "../src/lib/opencode";
 
-const { mockPrompt, mockMessages, mockContextLink, mockPersistTurn } = vi.hoisted(() => ({
+const { mockPrompt, mockMessages, mockPermissionsList, mockContextLink, mockPersistTurn } = vi.hoisted(() => ({
   mockPrompt: vi.fn(),
   mockMessages: vi.fn(),
+  mockPermissionsList: vi.fn(),
   mockContextLink: vi.fn(),
   mockPersistTurn: vi.fn(),
 }));
@@ -32,7 +33,7 @@ const mockOpenCodeClient = {
     revert: vi.fn(),
   },
   permissions: {
-    list: vi.fn().mockResolvedValue([]),
+    list: mockPermissionsList,
   },
   questions: {
     list: vi.fn().mockResolvedValue([]),
@@ -1000,6 +1001,7 @@ describe("useOpenCodeChat hook — send() integration", () => {
     mockMessages.mockReset();
     mockMessages.mockResolvedValue([]);
     mockPrompt.mockReset();
+    mockPermissionsList.mockReset().mockResolvedValue([]);
     mockContextLink.mockReset();
     mockPersistTurn.mockReset();
 
@@ -1038,6 +1040,56 @@ describe("useOpenCodeChat hook — send() integration", () => {
 
     // Streaming must be false after error
     expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("normalizes v2 nested models and file parts from session history", async () => {
+    mockMessages.mockResolvedValue([{
+      info: {
+        id: "assistant-file",
+        sessionID: "session-1",
+        role: "assistant",
+        time: { created: 1, completed: 2 },
+        model: { providerID: "openai", modelID: "gpt-5" },
+        finish: "stop",
+      },
+      parts: [{
+        id: "file-part",
+        sessionID: "session-1",
+        messageID: "assistant-file",
+        type: "file",
+        mime: "text/plain",
+        url: "file:///tmp/notes.txt",
+        filename: "notes.txt",
+        size: 12,
+      }],
+    }]);
+
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.messages[0]?.model).toEqual({ providerID: "openai", modelID: "gpt-5" });
+    expect(result.current.messages[0]?.parts[0]).toMatchObject({
+      type: "file",
+      mime: "text/plain",
+      url: "file:///tmp/notes.txt",
+      filename: "notes.txt",
+      size: 12,
+    });
+  });
+
+  it("keeps v2 permission prompts scoped to the active session", async () => {
+    mockPermissionsList.mockResolvedValue([
+      { id: "per-current", permission: "read", pattern: "src/**", action: "read", sessionID: "session-1" },
+      { id: "per-other", permission: "read", pattern: "other/**", action: "read", sessionID: "session-2" },
+      { id: "per-legacy", permission: "read", pattern: "legacy/**", action: "read" },
+    ]);
+
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await vi.waitFor(() => expect(result.current.permissions.map(({ id }) => id)).toEqual([
+      "per-current",
+      "per-legacy",
+    ]));
   });
 
   it("correlates an optimistic user to the server parent ID without duplicating the completed turn", async () => {

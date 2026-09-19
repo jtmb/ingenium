@@ -1,8 +1,9 @@
 /**
  * McpToolCatalog — canonical single source of truth for all Ingenium MCP tools.
  *
- * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls
- * plus extension-registered tools (synthesize_observations, auto_observe_now).
+ * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls,
+ * retained compatibility entries, and extension-registered tools
+ * (synthesize_observations, auto_observe_now).
  *
  * Every tool known to the system MUST be listed here. The mcp-tool-states
  * category projection derives from this catalog.
@@ -1060,14 +1061,6 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     defaultEnabled: true,
     apiEndpoints: TASKS_ENDPOINTS,
   },
-
-  // ── Task Coordination (6) ─────────────────────────────
-  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
-  { name: "ingenium_coordination_memory_read", category: "Tasks", description: "Read typed operational coordination memory updates for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/memory/read"] },
-  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot or renew its attested runtime activity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/runtimes/activity", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
-  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
-  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },
-  { name: "ingenium_coordination_handoff", category: "Tasks", description: "Exchange sanitized handoffs, operational memory, and linked-session transcripts.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/handoffs/publish", "POST /api/v1/coordination/handoffs/read", "POST /api/v1/coordination/handoffs/ack", "POST /api/v1/coordination/handoffs/consume", "POST /api/v1/coordination/memory/publish", "POST /api/v1/coordination/memory/read", "POST /api/v1/coordination/memory/ack", "POST /api/v1/coordination/sessions/link", "POST /api/v1/coordination/transcripts/publish", "POST /api/v1/coordination/transcripts/read", "POST /api/v1/coordination/transcripts/ack"] },
 
   // ── Plans (3) ────────────────────────────────────────
   {

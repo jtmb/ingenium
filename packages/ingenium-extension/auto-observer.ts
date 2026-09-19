@@ -6,6 +6,7 @@ import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
 import { callMcpTool, mcpToolData } from "./mcp-client.js"
 import { classifyObserverFailure, type ObserverRequestFailure } from "./observer-core.js"
 import { visibleContextExport } from "@ingenium/extension/context-upload-codec"
+import { eventSessionId, getV2SessionInfo, legacySessionInfo, legacySessionMessage, readV2Messages, v2Client } from "./opencode-v2.js"
 
 type ExtractionRequestFailure = Extract<ObserverRequestFailure, "authentication" | "timeout" | "request_failed">
 
@@ -35,7 +36,7 @@ async function triggerExtraction(worktree: string): Promise<{
   }
 }
 
-export const AutoObserverPlugin = async (ctx: { worktree: string; client: any }) => {
+export const AutoObserverPlugin = async (ctx: { worktree: string; client: any; serverUrl?: URL }) => {
   const pending = new Map<string, Promise<void>>()
   const reportWarning = (reason: ExtractionRequestFailure) => {
     logPluginLifecycle(ctx.client, "auto-observer", "warn", `trigger_extraction: ${reason}`)
@@ -52,16 +53,19 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
       ctx.worktree, "extraction_run", { project: binding.project, external: input }, { timeoutMs: 60_000 },
     )) as { enabled?: boolean }
     if ((await invoke(external)).enabled !== true) return
-    const args = { path: { id: sessionId }, query: { directory: binding.launcherWorktree } }
-    const info = (await ctx.client.session.get(args))?.data
-    const messages = (await ctx.client.session.messages({ ...args, query: { ...args.query, limit: 100 } }))?.data
-    if (!Array.isArray(messages) || messages.length > 100) throw new Error("EXTERNAL_OBSERVATION_INVALID")
-    const users = messages.filter((message) => message?.info?.role === "user").slice(-20)
+    const client = v2Client(ctx)
+    const info = await getV2SessionInfo(client, sessionId)
+    const messages = await readV2Messages(client, sessionId, { maxPages: 1, order: "desc" })
+    if (messages.length > 100) throw new Error("EXTERNAL_OBSERVATION_INVALID")
+    const users = messages.map((message) => legacySessionMessage(message, sessionId))
+      .reverse().filter((message) => message.info.role === "user").slice(-20)
     if (Buffer.byteLength(JSON.stringify(users)) > 1024 * 1024) {
       throw new Error("EXTERNAL_OBSERVATION_INVALID")
     }
     // Bound each idle pass; replay is safe because the API persists per-message receipts.
-    const visible = visibleContextExport({ info, messages: users }, sessionId, binding.launcherWorktree)
+    const visible = visibleContextExport({
+      info: legacySessionInfo(info, sessionId, binding.launcherWorktree), messages: users,
+    }, sessionId, binding.launcherWorktree)
     for (const message of visible.messages) {
       const text = message.parts[0]?.text
       if (!text || text.length > 6000) continue
@@ -73,8 +77,8 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
   return {
     event: async ({ event }: { event: any }) => {
       if (event.type !== "session.idle") return
-      const sessionId = event.properties?.sessionID
-      if (typeof sessionId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sessionId)) return
+       const sessionId = eventSessionId(event)
+       if (!sessionId) return
       const existing = pending.get(sessionId)
       if (existing) return existing
       const promise = collect(sessionId).catch((error) => reportWarning(classifyExtractionFailure(error)))

@@ -85,10 +85,11 @@ fixed executable, browser path, arguments, and namespace above.
 
 ## Tool Manager
 
-The Tools tab shows the current project-scoped total. The built-in catalog
-contains 292 tools in 32 baseline categories (290 `ingenium_` catalog entries
-plus 2 extension tools); discovered child tools are added dynamically and may increase
-both the total and the category list for that project.
+The Tools tab shows the current project-scoped total. The active built-in surface
+contains 286 tools in 32 baseline categories (284 active `ingenium_` server registrations
+plus 2 extension tools). Retired coordination tools are not in the active catalog;
+discovered child tools are added dynamically and may increase both the total and the
+category list for that project.
 
 ### Per-Tool Enable/Disable
 - Each tool has a toggle switch to enable or disable it

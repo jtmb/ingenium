@@ -22,13 +22,12 @@ import {
 import { createServer, type Server } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import {
   apiRequestHeaders,
   preflightApiAuthentication,
 } from "../api-auth.js";
 import {
-  coordinationCredentialPurpose,
+  effectiveExtensionCredentialPurpose,
   resolveExtensionBinding,
 } from "../extension-binding.js";
 import {
@@ -37,7 +36,6 @@ import {
   CoordinationOutbox,
   type CoordinationOutboxQuarantine,
 } from "../coordination-outbox.js";
-import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
   isSafeRestartHandoffPath,
@@ -89,7 +87,6 @@ const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
   identityMs: 5_000,
   healthMs: 60_000,
   sessionMs: 10_000,
-  memoryAckMs: 120_000,
   terminalIdleMs: 120_000,
   retirementMs: 10_000,
 };
@@ -174,40 +171,16 @@ export interface ProductionRestartAdapterDependencies<Session> {
 interface ReplacementSession {
   id: string;
   initialMessageCount: number;
-  captureOffset: number;
   transactionSha256: string;
 }
 
-export interface RestartHandoffPublisher {
-  client: McpToolClient;
-  identity: {
-    project: string;
-    worktree_id: string;
-    session_id: string;
-    incarnation: number;
-  };
-  ownershipToken: string;
-  revision: number;
-  fence: number;
-  acceptedMemory?: Record<string, unknown>;
-}
-
-interface RestartCaptureClaim extends RestartHandoffPublisher {
-  acceptedEpoch: number;
-  operationId: string;
-  clientClaimKey: string;
-}
-
 interface ProductionPreparedState {
-  acknowledgementFile: string;
   child?: ChildProcess;
-  captureFile: string;
   evidenceFile: string;
   executable: string;
   expectedExecutableSha256: string;
   expectedVersion: string;
   healthEvidenceFile: string;
-  handoffPublisher?: RestartHandoffPublisher;
   logDescriptor: number;
   nonce: string;
   parentStateFile: string;
@@ -216,7 +189,6 @@ interface ProductionPreparedState {
   reservation: Server;
   runDirectory: string;
   scoutEvidenceFile: string;
-  traceFile: string;
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
@@ -333,39 +305,6 @@ export function restartHandoffEvidence(handoff: RedactedRestartHandoff, handoffS
   const validated = parseRedactedRestartHandoff(handoff);
   if (hash(JSON.stringify(validated)) !== handoffSha256) throw new Error("Production restart handoff hash changed");
   return { schemaVersion: 1, handoffSha256, ...handoffCounts(validated), handoff: validated };
-}
-
-export function typedMemoryAcknowledgementEvidence(input: {
-  handoff: RedactedRestartHandoff;
-  handoffSha256: string;
-  captureFile: string;
-  captureOffset: number;
-  sessionId: string;
-  replacementIdentity: RestartProcessIdentity;
-  transactionSha256: string;
-}): Record<string, unknown> {
-  if (!isAbsolute(input.captureFile) || resolve(input.captureFile) !== input.captureFile
-    || !Number.isSafeInteger(input.captureOffset) || input.captureOffset < 0
-    || !SAFE_SESSION_ID.test(input.sessionId) || !SHA256.test(input.transactionSha256)) {
-    throw new Error("Typed memory acknowledgement evidence is invalid");
-  }
-  const handoff = restartHandoffEvidence(input.handoff, input.handoffSha256);
-  return {
-    schemaVersion: 1,
-    handoffSha256: input.handoffSha256,
-    originalSessionSha256: input.handoff.replay.sessionIdSha256,
-    todoReplaySha256: hash(JSON.stringify(input.handoff.replay.todos)),
-    actionCount: handoff.actionCount,
-    changedPathCount: handoff.changedPathCount,
-    checkCount: handoff.checkCount,
-    captureFile: input.captureFile,
-    captureOffset: input.captureOffset,
-    successorSessionSha256: hash(input.sessionId),
-    replacementIdentitySha256: restartIdentitySha256(input.replacementIdentity),
-    transactionSha256: input.transactionSha256,
-    assistantResult: "completed",
-    terminalStatus: "idle",
-  };
 }
 
 function exactMode(mode: number, expected: number): boolean {
@@ -1517,7 +1456,7 @@ async function enrollRunningProductionParent(
     timeouts: DEFAULT_TIMEOUTS,
   };
   validateParentCandidate(parent, worktree);
-  if (parent.oldPort === null) await persistClaimedLegacyHandoff(worktree, binding, parent, discovered.sessionId);
+  if (parent.oldPort === null) persistLegacyHandoff(worktree, binding, parent, discovered.sessionId);
   await bootstrapLegacyRecoveryOwner(worktree, {
     project: binding.project,
     projectId: binding.projectId,
@@ -1551,67 +1490,6 @@ async function attestProductionParent(parent: ProductionRestartParentCandidate):
         && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff)));
 }
 
-export function restartHandoffMemoryEntry(
-  handoff: RedactedRestartHandoff,
-  owner: { actorId: string; fence: number },
-): Record<string, unknown> {
-  const validated = parseRedactedRestartHandoff(handoff);
-  const pathSegments = (path: string) => path.split("/").map((segment) => Buffer.from(segment, "utf8").toString("base64url"));
-  return {
-    manifest: {
-      baseCommit: null, dirtyHashes: [], dependencyResults: [], exclusivePaths: [], profileRevision: null, toolRevision: null,
-      ownerId: owner.actorId, fence: owner.fence, unresolvedOperations: [], todoWrite: validated.replay.todos,
-      inputHash: hash(JSON.stringify(validated.replay)), finalized: false,
-    },
-    status: validated.status,
-    actions: validated.actions.map((action) => ({
-      kind: action.kind,
-      result: action.result,
-      pathSegments: action.path === null ? null : pathSegments(action.path),
-      targetHash: action.targetHash,
-    })),
-    checks: validated.checks.map((check) => ({ kind: check.name, result: check.result, targetHash: check.targetHash })),
-    todos: validated.todos,
-    currentTaskId: validated.taskHash === null ? null : `task-${validated.taskHash}`,
-    changedPaths: validated.changedPaths.map(({ path, ...entry }) => ({ pathSegments: pathSegments(path), ...entry })),
-    nextWork: validated.nextWork,
-  };
-}
-
-export function hasCapturedHandoff(
-  path: string,
-  expectedHandoff: RedactedRestartHandoff,
-  expectedSha256: string,
-  offset: number,
-  acceptedMemory: Record<string, unknown>,
-  sessionId: string,
-): boolean {
-  let source: Buffer;
-  try { source = readPrivateProductionRestartFile(path, MAX_SESSION_EXPORT_BYTES); } catch { return false; }
-  if (!Number.isSafeInteger(offset) || offset < 0 || !SAFE_SESSION_ID.test(sessionId)) return false;
-  if (source.length <= offset) return false;
-  if (hash(JSON.stringify(expectedHandoff)) !== expectedSha256) return false;
-  if (typeof acceptedMemory.actorId !== "string" || !UUID.test(String(acceptedMemory.entryId))
-    || !Number.isSafeInteger(acceptedMemory.sourceRevision) || Number(acceptedMemory.sourceRevision) < 1
-    || !isRecord(acceptedMemory.manifest)) return false;
-  const expectedEntry = restartHandoffMemoryEntry(expectedHandoff, {
-    actorId: acceptedMemory.actorId, fence: Number(acceptedMemory.manifest.fence),
-  });
-  if (!isDeepStrictEqual(Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, acceptedMemory[key]])), expectedEntry)) return false;
-  for (const line of source.subarray(offset).toString("utf8").split(/\r?\n/).filter(Boolean).reverse()) {
-    let capture: unknown;
-    try { capture = JSON.parse(line); } catch { continue; }
-    if (!isRecord(capture) || capture.sessionIdSha256 !== hash(sessionId) || !Array.isArray(capture.operationalEntries)) continue;
-    for (const entry of [...capture.operationalEntries].reverse()) {
-      if (!isRecord(entry) || entry.entryId !== acceptedMemory.entryId || entry.actorId !== acceptedMemory.actorId
-        || entry.sourceRevision !== acceptedMemory.sourceRevision) continue;
-      const projected = Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, entry[key]]));
-      if (isDeepStrictEqual(projected, expectedEntry)) return true;
-    }
-  }
-  return false;
-}
-
 function sessionIds(value: unknown): Set<string> | undefined {
   const sessions = messageList(value);
   if (!sessions) return undefined;
@@ -1624,251 +1502,38 @@ function hasScoutCapabilities(value: unknown): boolean {
   if (!isRecord(scout)) return false;
   const permissions = scout.permission;
   if (!Array.isArray(permissions)) return false;
-  const required = ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"];
+  const required = ["ingenium_docs_search", "ingenium_docs_get_page"];
   return required.every((permission) => permissions.some((rule: unknown) => isRecord(rule) && rule.permission === permission
     && rule.pattern === "*" && rule.action === "allow"));
 }
 
-function restartPublisherMutation(value: unknown): { revision: number; fence: number } {
-  if (!isRecord(value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0
-    || !Number.isSafeInteger(value.fence) || (value.fence as number) < 1) {
-    throw new Error("Production restart handoff publication failed");
-  }
-  return { revision: value.revision as number, fence: value.fence as number };
-}
-
-function restartCaptureClaim(value: unknown): {
-  revision: number;
-  fence: number;
-  acceptedEpoch: number;
-  operationId: string;
-} {
-  const mutation = restartPublisherMutation(responseRecord(value)?.session);
-  const result = responseRecord(value);
-  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-    || typeof result.operationId !== "string" || !UUID.test(result.operationId)) {
-    throw new Error("Production restart capture claim failed");
-  }
-  return {
-    ...mutation,
-    acceptedEpoch: result.acceptedEpoch as number,
-    operationId: result.operationId,
-  };
-}
-
-function restartCaptureClaimProof(value: unknown): { revision: number; fence: number; acceptedEpoch: number } {
-  const result = responseRecord(value);
-  const mutation = restartPublisherMutation(result?.session);
-  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1) {
-    throw new Error("Production restart capture claim verification failed");
-  }
-  return { ...mutation, acceptedEpoch: result.acceptedEpoch as number };
-}
-
-function optionalPrivateFileSha256(path: string): string | null {
-  try {
-    return hash(readPrivateProductionRestartFile(path, MAX_STATE_BYTES));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-export async function persistClaimedLegacyHandoff(
+export function persistLegacyHandoff(
   worktree: string,
   binding: ProductionRestartBinding,
   parent: ProductionRestartParentCandidate,
   parentSessionId: string,
-  openClient: typeof openMcpToolClient = openMcpToolClient,
-): Promise<void> {
+): void {
   if (parent.oldPort !== null || !SAFE_SESSION_ID.test(parentSessionId)) {
     throw new Error("Production restart durable capture input is invalid");
   }
   if (!bindingsMatch(parent.binding, binding)) throw new Error("Production restart durable capture binding changed");
   const absolutePath = resolve(worktree, LEGACY_HANDOFF_PATH);
-  const beforeSha256 = optionalPrivateFileSha256(absolutePath);
-  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
-  const identity = {
+  const retainedPath = persistLegacyRecoveryHandoff(worktree, {
     project: binding.project,
-    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
-    session_id: `session-${hash(randomBytes(32))}`,
-    incarnation: Date.now(),
-  };
-  const ownershipToken = randomBytes(32).toString("base64url");
-  let publisher: RestartHandoffPublisher | undefined;
-  try {
-    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
-      ...identity,
-      operation: "register",
-      ownership_token: ownershipToken,
-      ttl_ms: 60_000,
-      idempotency_key: randomUUID(),
-    })));
-    const registration = restartPublisherMutation(registered?.session);
-    publisher = { client, identity, ownershipToken, ...registration };
-    const clientClaimKey = randomBytes(32).toString("base64url");
-    const acquired = restartCaptureClaim(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: registration.revision,
-      fence: registration.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      claims: [{
-        claim: { kind: "path", path: LEGACY_HANDOFF_PATH },
-        baseline_sha256: beforeSha256,
-        current_sha256: beforeSha256,
-        repository_sha256: null,
-      }],
-      operation: beforeSha256 === null ? "create" : "edit",
-      idempotency_key: randomUUID(),
-    })));
-    const claim: RestartCaptureClaim = { ...publisher, ...acquired, clientClaimKey };
-    publisher = claim;
-    const retainedPath = persistLegacyRecoveryHandoff(worktree, {
-      project: binding.project,
-      projectId: binding.projectId,
-      workspaceId: binding.workspaceId,
-      launcherWorktree: binding.launcherWorktree,
-      storageMappingHash: binding.storageMappingHash,
-    }, {
-      ...parent.oldProcess,
-      port: null,
-      dataHome: parent.oldDataHome,
-    }, parent.handoff, {
-      sessionIdSha256: hash(parentSessionId),
-      incarnation: identity.incarnation,
-      revision: acquired.revision,
-      fence: acquired.fence,
-      captureClaimEpoch: acquired.acceptedEpoch,
-      captureClaimSha256: hash(`${clientClaimKey}\0${acquired.operationId}`),
-    });
-    const retained = readLegacyRecoveryHandoff(worktree);
-    if (retainedPath !== absolutePath || !retained
-      || hash(JSON.stringify(retained.handoff)) !== hash(JSON.stringify(parent.handoff))
-      || retained.coordination.captureClaimEpoch !== acquired.acceptedEpoch
-      || retained.coordination.captureClaimSha256 !== hash(`${clientClaimKey}\0${acquired.operationId}`)) {
-      throw new Error("Production restart durable capture verification failed");
-    }
-    const verified = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: acquired.revision,
-      fence: acquired.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      accepted_epoch: acquired.acceptedEpoch,
-      action: "verify",
-      idempotency_key: randomUUID(),
-    })));
-    if (verified.acceptedEpoch !== acquired.acceptedEpoch || verified.fence !== acquired.fence) {
-      throw new Error("Production restart capture claim verification failed");
-    }
-    const afterSha256 = optionalPrivateFileSha256(absolutePath);
-    if (!afterSha256) throw new Error("Production restart durable capture verification failed");
-    const completed = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: verified.revision,
-      fence: verified.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      accepted_epoch: acquired.acceptedEpoch,
-      action: "complete",
-      operation_id: acquired.operationId,
-      operation: beforeSha256 === null ? "create" : "edit",
-      footprint: [{
-        path: LEGACY_HANDOFF_PATH,
-        path_sha256: hash(LEGACY_HANDOFF_PATH),
-        before_sha256: beforeSha256,
-        after_sha256: afterSha256,
-      }],
-      idempotency_key: randomUUID(),
-    })));
-    if (completed.acceptedEpoch !== acquired.acceptedEpoch) {
-      throw new Error("Production restart capture claim verification failed");
-    }
-    publisher = { ...publisher, revision: completed.revision, fence: completed.fence };
-  } finally {
-    if (publisher) await closeRestartHandoffPublisher(publisher, true);
-    else await client.close().catch(() => undefined);
+    projectId: binding.projectId,
+    workspaceId: binding.workspaceId,
+    launcherWorktree: binding.launcherWorktree,
+    storageMappingHash: binding.storageMappingHash,
+  }, {
+    ...parent.oldProcess,
+    port: null,
+    dataHome: parent.oldDataHome,
+  }, parent.handoff);
+  const retained = readLegacyRecoveryHandoff(worktree);
+  if (retainedPath !== absolutePath || !retained
+    || hash(JSON.stringify(retained.handoff)) !== hash(JSON.stringify(parent.handoff))) {
+    throw new Error("Production restart durable capture verification failed");
   }
-}
-
-export async function publishRestartHandoff(
-  worktree: string,
-  binding: ProductionRestartBinding,
-  handoff: RedactedRestartHandoff,
-  openClient: typeof openMcpToolClient = openMcpToolClient,
-): Promise<RestartHandoffPublisher> {
-  handoff = parseRedactedRestartHandoff(handoff);
-  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
-  const identity = {
-    project: binding.project,
-    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
-    session_id: `session-${hash(randomBytes(32))}`,
-    incarnation: Date.now(),
-  };
-  const ownershipToken = randomBytes(32).toString("base64url");
-  let registeredPublisher: RestartHandoffPublisher | undefined;
-  let published = false;
-  try {
-    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
-      ...identity,
-      operation: "register",
-      ownership_token: ownershipToken,
-      ttl_ms: 60_000,
-      idempotency_key: randomUUID(),
-    })));
-    const registeredSession = restartPublisherMutation(registered?.session);
-    registeredPublisher = { client, identity, ownershipToken, ...registeredSession };
-    const actorId = `actor-${hash(`${identity.session_id}\0${identity.incarnation}`)}`;
-    const memoryEntry = restartHandoffMemoryEntry(handoff, { actorId, fence: registeredSession.fence });
-    const response = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
-      ...identity,
-      operation: "memory",
-      ownership_token: ownershipToken,
-      expected_revision: registeredSession.revision,
-      fence: registeredSession.fence,
-      idempotency_key: randomUUID(),
-      memory_entry: memoryEntry,
-    })));
-    const publishedSession = restartPublisherMutation(response?.session);
-    const memory = responseRecord(response?.memory);
-    const acceptedMemory = responseRecord(memory?.entry);
-    if (!acceptedMemory || acceptedMemory.actorId !== actorId || !UUID.test(String(acceptedMemory.entryId))
-      || acceptedMemory.sourceRevision !== publishedSession.revision
-      || !isDeepStrictEqual(Object.fromEntries(Object.keys(memoryEntry).map((key) => [key, acceptedMemory[key]])), memoryEntry)) {
-      throw new Error("Production restart typed handoff was not accepted");
-    }
-    published = true;
-    return { client, identity, ownershipToken, ...publishedSession, acceptedMemory };
-  } finally {
-    if (!published) {
-      if (registeredPublisher) await closeRestartHandoffPublisher(registeredPublisher, true);
-      else await client.close().catch(() => undefined);
-    }
-  }
-}
-
-async function closeRestartHandoffPublisher(publisher: RestartHandoffPublisher, refresh = false): Promise<void> {
-  let revision = publisher.revision;
-  let fence = publisher.fence;
-  if (refresh) {
-    try {
-      const status = responseRecord(mcpToolData(await publisher.client.callTool("coordination_status", {
-        ...publisher.identity,
-        ownership_token: publisher.ownershipToken,
-      })));
-      ({ revision, fence } = restartPublisherMutation(status?.session));
-    } catch {}
-  }
-  await publisher.client.callTool("coordination_update", {
-    ...publisher.identity,
-    operation: "close",
-    ownership_token: publisher.ownershipToken,
-    expected_revision: revision,
-    fence,
-    idempotency_key: randomUUID(),
-  }).catch(() => undefined);
-  await publisher.client.close().catch(() => undefined);
 }
 
 function hasSuccessfulTerminalAssistant(
@@ -1965,9 +1630,6 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
     INGENIUM_WORKTREE: state.worktree,
     INGENIUM_MCP_AUDIENCE: "mcp",
     INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
-    INGENIUM_COORDINATION_TRANSFORM_CAPTURE: "1",
-    INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE: state.captureFile,
-    INGENIUM_COORDINATION_TRACE_FILE: state.traceFile,
     INGENIUM_RESTART_NONCE: state.nonce,
     INGENIUM_RECOVERY_OWNER_NONCE: process.env.INGENIUM_RECOVERY_OWNER_NONCE,
     INGENIUM_RECOVERY_OWNER_PID: process.env.INGENIUM_RECOVERY_OWNER_PID,
@@ -2055,7 +1717,7 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
               writePrivateFile(state.scoutEvidenceFile, `${JSON.stringify({
                 schemaVersion: 1,
                 agent: "ingenium-scout",
-                capabilities: ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"],
+                capabilities: ["ingenium_docs_search", "ingenium_docs_get_page"],
                 runtimeVersion: state.expectedVersion,
               })}\n`);
               return;
@@ -2096,33 +1758,11 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
         session: {
           id: session.id,
           initialMessageCount: initial.length,
-          captureOffset: readPrivateProductionRestartFile(state.captureFile, MAX_STATE_BYTES).length,
           transactionSha256,
         },
       };
     },
-    acknowledgeTypedMemory: async (_identity, session, handoffSha256, transactionSha256, signal) => {
-      if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
-      const expectedText = `READY ${transactionSha256}`;
-      const prompted = await request(`${baseUrl}/session/${encodeURIComponent(session.id)}/prompt_async`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          agent: "ingenium-scout",
-          parts: [{ type: "text", text: `Return only ${expectedText}. Do not use tools.` }],
-        }),
-      }, signal);
-      if (![200, 202, 204].includes(prompted.status)) throw new Error("Replacement acknowledgement prompt failed");
-      while (true) {
-        signal.throwIfAborted();
-        if (state.handoffPublisher?.acceptedMemory && hasCapturedHandoff(state.captureFile, state.parent.handoff,
-          handoffSha256, session.captureOffset, state.handoffPublisher.acceptedMemory, session.id)) {
-          return { status: "acknowledged", handoffSha256, transactionSha256 };
-        }
-        await wait(100, signal);
-      }
-    },
-    awaitTerminalIdleAcknowledgement: async (identity, session, handoffSha256, transactionSha256, signal) => {
+    awaitTerminalIdleAcknowledgement: async (_identity, session, handoffSha256, transactionSha256, signal) => {
       if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
       const expectedText = `READY ${transactionSha256}`;
       while (true) {
@@ -2141,15 +1781,6 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
           const current = statuses?.[session.id];
           if (statusResponse.status === 200 && statuses
             && (current === undefined || (isRecord(current) && (current.type === "idle" || current.status === "idle")))) {
-            writePrivateFile(state.acknowledgementFile, `${JSON.stringify(typedMemoryAcknowledgementEvidence({
-              handoff: state.parent.handoff,
-              handoffSha256,
-              captureFile: state.captureFile,
-              captureOffset: session.captureOffset,
-              sessionId: session.id,
-              replacementIdentity: identity,
-              transactionSha256,
-            }))}\n`);
             return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
           }
         }
@@ -2222,13 +1853,13 @@ export function productionDependencies(state: ProductionPreparedState): Replacem
 }
 
 async function resolveProductionBinding(worktree: string): Promise<ProductionRestartBinding> {
-  const purpose = coordinationCredentialPurpose();
+  const purpose = effectiveExtensionCredentialPurpose("general");
   if (purpose === "general") hardenLegacyProductionCredentialPermissions(worktree);
   return inspectProductionRestartBinding(worktree);
 }
 
 export async function inspectProductionRestartBinding(worktree: string, request: typeof fetch = fetch): Promise<ProductionRestartBinding> {
-  const purpose = coordinationCredentialPurpose();
+  const purpose = effectiveExtensionCredentialPurpose("general");
   const local = resolveExtensionBinding(worktree, { purpose });
   if (local.audience !== "mcp") throw new Error("Production restart requires an MCP binding");
   const authentication = await preflightApiAuthentication(local.apiUrl, worktree, request, {
@@ -2308,14 +1939,9 @@ async function prepareProductionReplacement(input: {
   const authSource = readPrivateProductionRestartFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
   const authDestination = join(dataHome, "opencode", "auth.json");
   writePrivateBuffer(authDestination, authSource);
-  const captureFile = join(runDirectory, "coordination-capture.jsonl");
-  writePrivateFile(captureFile, "\n");
-  const traceFile = join(runDirectory, "coordination-trace.jsonl");
-  writePrivateFile(traceFile, "\n");
-  const evidenceFile = join(runDirectory, "phase-history.jsonl");
-  writePrivateFile(evidenceFile, "\n");
-  const acknowledgementFile = join(runDirectory, "typed-memory-acknowledgement.json");
-  const healthEvidenceFile = join(runDirectory, "health-gate.json");
+   const evidenceFile = join(runDirectory, "phase-history.jsonl");
+   writePrivateFile(evidenceFile, "\n");
+   const healthEvidenceFile = join(runDirectory, "health-gate.json");
   const scoutEvidenceFile = join(runDirectory, "scout-capabilities.json");
   const logFile = join(runDirectory, "opencode.log");
   const logDescriptor = openSync(logFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -2332,8 +1958,6 @@ async function prepareProductionReplacement(input: {
   writePrivateNewFile(recoveryServerAuthenticationPath(dataHome), `${JSON.stringify(serverAuthentication)}\n`);
   const nonce = randomBytes(32).toString("base64url");
   const state: ProductionPreparedState = {
-    acknowledgementFile,
-    captureFile,
     evidenceFile,
     executable,
     expectedExecutableSha256,
@@ -2347,7 +1971,6 @@ async function prepareProductionReplacement(input: {
     reservation: reservation.server,
     runDirectory,
     scoutEvidenceFile,
-    traceFile,
     worktree: input.worktree,
     binding: input.binding,
     parent: input.parent,
@@ -2356,14 +1979,6 @@ async function prepareProductionReplacement(input: {
     serverAuthentication,
     serverAuthenticationRetained: false,
   };
-  try {
-    state.handoffPublisher = await publishRestartHandoff(input.worktree, input.binding, input.parent.handoff);
-  } catch (error) {
-    await closeServer(reservation.server);
-    closeSync(logDescriptor);
-    removeRecoveryServerAuthentication(dataHome, serverAuthentication);
-    throw error;
-  }
   return {
     replacement: {
       port: reservation.port,
@@ -2372,7 +1987,6 @@ async function prepareProductionReplacement(input: {
     },
     dependencies: productionDependencies(state),
     release: async () => {
-      if (state.handoffPublisher) await closeRestartHandoffPublisher(state.handoffPublisher);
       await closeServer(reservation.server);
       closeSync(logDescriptor);
       if (!state.serverAuthenticationRetained) {

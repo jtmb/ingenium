@@ -1,7 +1,15 @@
 "use client";
 
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
-import type { OpenCodePart, FilePart, ToolPart, OpenCodePromptParams } from "./opencode";
+import {
+  normalizeOpenCodePermissionRequests,
+  normalizeOpenCodeQuestions,
+  type OpenCodePart,
+  type FilePart,
+  type ToolPart,
+  type OpenCodePromptParams,
+  type OpenCodeQuestion,
+} from "./opencode";
 import { api, ApiError } from "./api";
 import { useOpenCodeClient } from "./RuntimeContext";
 import type { ChatGrounding } from "./chat-grounding";
@@ -58,6 +66,7 @@ interface OpenCodeApiMessage {
     time: { created: number; completed?: number };
     modelID?: string;
     providerID?: string;
+    model?: { providerID?: string; modelID?: string };
     finish?: string;
     parentID?: string;
     mode?: string;
@@ -84,6 +93,16 @@ interface OpenCodeApiMessage {
     reason?: string;
     tokens?: unknown;
     cost?: number;
+    tool?: string;
+    callID?: string;
+    state?: unknown;
+    mime?: string;
+    url?: string;
+    filename?: string;
+    size?: number;
+    data?: string;
+    dataUrl?: string;
+    content?: string;
   }>;
 }
 
@@ -582,13 +601,16 @@ interface SSEEnvelope {
 }
 
 function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
+  const rawRecord = raw as unknown as Record<string, unknown>;
   const base: Partial<OpenCodePart> = {
     id: raw.id,
     sessionID: raw.sessionID,
     messageID: raw.messageID,
     type: raw.type as OpenCodePart["type"],
     text: raw.text,
-    ...(raw.time?.start ? { time: { start: raw.time.start, end: raw.time.end } } : {}),
+    ...(raw.time?.start !== undefined || raw.time?.end !== undefined
+      ? { time: { start: raw.time.start, end: raw.time.end } }
+      : {}),
     ...(raw.snapshot ? { snapshot: raw.snapshot } : {}),
     ...(raw.reason ? { reason: raw.reason } : {}),
     ...(raw.tokens !== undefined ? { tokens: raw.tokens } : {}),
@@ -597,25 +619,51 @@ function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
 
   // 🔴 Preserve tool-specific fields
   if (raw.type === "tool") {
-    const toolRaw = raw as unknown as Record<string, unknown>;
     return {
       ...base,
-      tool: toolRaw.tool,
-      callID: toolRaw.callID,
-      state: toolRaw.state,
+      tool: rawRecord.tool,
+      callID: rawRecord.callID,
+      state: rawRecord.state,
     } as ToolPart;
   }
 
+  if (raw.type === "file") {
+    return {
+      ...base,
+      mime: typeof rawRecord.mime === "string" ? rawRecord.mime : "",
+      ...(typeof rawRecord.url === "string" ? { url: rawRecord.url } : {}),
+      ...(typeof rawRecord.filename === "string" ? { filename: rawRecord.filename } : {}),
+      ...(typeof rawRecord.size === "number" ? { size: rawRecord.size } : {}),
+      ...(typeof rawRecord.data === "string" ? { data: rawRecord.data } : {}),
+      ...(typeof rawRecord.dataUrl === "string" ? { dataUrl: rawRecord.dataUrl } : {}),
+      ...(typeof rawRecord.content === "string" ? { content: rawRecord.content } : {}),
+    } as FilePart;
+  }
+
   return base as OpenCodePart;
+}
+
+function normalizeModelInfo(info: {
+  providerID?: unknown;
+  modelID?: unknown;
+  model?: unknown;
+}): { providerID: string; modelID: string } | undefined {
+  if (typeof info.providerID === "string" && typeof info.modelID === "string") {
+    return { providerID: info.providerID, modelID: info.modelID };
+  }
+  const model = info.model;
+  if (typeof model !== "object" || model === null || Array.isArray(model)) return undefined;
+  const nested = model as { providerID?: unknown; modelID?: unknown };
+  return typeof nested.providerID === "string" && typeof nested.modelID === "string"
+    ? { providerID: nested.providerID, modelID: nested.modelID }
+    : undefined;
 }
 
 function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
   // Convert OpenCode parts to our part format
   const parts: OpenCodePart[] = raw.parts.map(normalizePart);
 
-  const model = raw.info.providerID && raw.info.modelID
-    ? { providerID: raw.info.providerID, modelID: raw.info.modelID }
-    : undefined;
+  const model = normalizeModelInfo(raw.info);
 
   return {
     id: raw.info.id,
@@ -632,6 +680,16 @@ function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
 
 function normalizeMessages(rawMessages: OpenCodeApiMessage[]): ChatMessage[] {
   return rawMessages.map(normalizeMessage);
+}
+
+function toChatQuestion(question: OpenCodeQuestion): ChatQuestionItem {
+  return {
+    id: question.id,
+    question: question.question,
+    ...(question.header ? { header: question.header } : {}),
+    ...(question.options ? { options: question.options } : {}),
+    ...(question.multiple !== undefined ? { multiple: question.multiple } : {}),
+  };
 }
 
 interface SSEConnection {
@@ -1253,22 +1311,13 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         } else {
           streamPartTypesRef.current.delete(mapKey);
         }
-        const normalizedPart: OpenCodePart = {
+        const normalizedPart = normalizePart({
+          ...part,
           id: part.id as string,
           sessionID,
           messageID,
           type: (part.type as OpenCodePart["type"]) ?? "text",
-          text: part.text as string | undefined,
-          ...(part.time
-            ? { time: part.time as { start?: number; end?: number } }
-            : {}),
-          ...(part.snapshot ? { snapshot: part.snapshot } : {}),
-          ...(part.reason ? { reason: part.reason } : {}),
-          ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
-          ...(part.tool ? { tool: part.tool } : {}),
-          ...(part.callID ? { callID: part.callID } : {}),
-          ...(part.state ? { state: part.state } : {}),
-        } as unknown as OpenCodePart;
+        } as unknown as OpenCodeApiMessage["parts"][number]);
 
         dispatch({
           type: "UPSERT_PART",
@@ -1308,10 +1357,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         const info = props.info as Record<string, unknown>;
         if (!info || !info.id) break;
         if (typeof info.sessionID === "string" && info.sessionID !== sid) break;
-        const modelInfo =
-          info.providerID && info.modelID
-            ? { providerID: info.providerID as string, modelID: info.modelID as string }
-            : undefined;
+        const modelInfo = normalizeModelInfo(info);
         const msg: ChatMessage = {
           id: info.id as string,
           role: (info.role as ChatMessage["role"]) ?? "assistant",
@@ -1333,28 +1379,51 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         break;
       }
 
+      case "question.asked":
+      case "question.v2.asked":
       case "session.question":
       case "message.question": {
-        // Dedicated question SSE event — extract question data
-        const qText =
-          (props.question as string) ||
-          (props.text as string) ||
-          "";
-        const qId =
-          (props.id as string) ||
-          (props.questionID as string) ||
-          `q-${Date.now()}`;
-        if (qText) {
-          dispatch({
-            type: "ADD_QUESTION",
-            question: {
-              id: qId,
-              question: qText,
-              options: (props.options as Array<{ label: string; description?: string }>) ?? undefined,
-              multiple: props.multiple as boolean | undefined,
-            },
-          });
-        }
+        const questions = normalizeOpenCodeQuestions([props]).map(toChatQuestion);
+        if (questions.length > 0) dispatch({ type: "ADD_QUESTIONS", questions });
+        break;
+      }
+
+      case "question.replied":
+      case "question.v2.replied":
+      case "question.rejected":
+      case "question.v2.rejected": {
+        dispatch({ type: "REMOVE_QUESTIONS" });
+        break;
+      }
+
+      case "permission.asked":
+      case "permission.v2.asked": {
+        const request = normalizeOpenCodePermissionRequests([props])[0];
+        if (!request) break;
+        setPermissionState((previous) => ({
+          scopeKey: connectionScope,
+          requests: [
+            ...(previous.scopeKey === connectionScope
+              ? previous.requests.filter(({ id }) => id !== request.id)
+              : []),
+            request,
+          ],
+          replied: previous.scopeKey === connectionScope ? previous.replied : new Set(),
+        }));
+        break;
+      }
+
+      case "permission.replied":
+      case "permission.v2.replied": {
+        const requestId = typeof props.requestID === "string"
+          ? props.requestID
+          : typeof props.id === "string" ? props.id : null;
+        if (!requestId) break;
+        setPermissionState((previous) => {
+          const replied = new Set(previous.scopeKey === connectionScope ? previous.replied : []);
+          replied.add(requestId);
+          return { ...previous, scopeKey: connectionScope, replied };
+        });
         break;
       }
 
@@ -1367,7 +1436,11 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
               cost: typeof info.cost === "number" ? info.cost : undefined,
               tokens: info.tokens as SessionInfo["tokens"],
               summary: info.summary as SessionInfo["summary"],
-              shareUrl: typeof info.shareUrl === "string" ? info.shareUrl : undefined,
+              shareUrl: typeof info.shareUrl === "string"
+                ? info.shareUrl
+                : typeof (info.share as { url?: unknown } | undefined)?.url === "string"
+                  ? (info.share as { url: string }).url
+                  : undefined,
             },
           });
         }
@@ -1423,20 +1496,17 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     if (!sessionId || !scopeKey) return;
     const requestScope = scopeKey;
     try {
-      const all = (await opencode.permissions.list()) as unknown as Array<{
-        id: string;
-        permission: string;
-        pattern: string;
-        action: string;
-      }>;
+      const all = normalizeOpenCodePermissionRequests(await opencode.permissions.list());
       if (activeScopeRef.current !== requestScope) return;
-      // Permissions are scoped globally or by SSE stream — no sessionID field
-      const relevant = all.map((p) => ({
-        id: p.id,
-        permission: p.permission,
-        pattern: p.pattern,
-        action: p.action,
-      }));
+      // Legacy requests omit sessionID; v2 requests must stay on their session.
+      const relevant = all
+        .filter((p) => !p.sessionID || p.sessionID === sessionId)
+        .map((p) => ({
+          id: p.id,
+          permission: p.permission,
+          pattern: p.pattern,
+          action: p.action,
+        }));
       setPermissionState((prev) => ({
         scopeKey: requestScope,
         requests: relevant,
@@ -1479,13 +1549,8 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     try {
       const raw = await opencode.questions.list();
       if (activeScopeRef.current !== requestScope) return;
-      if (raw && raw.length > 0) {
-        const items: ChatQuestionItem[] = raw.map(
-          (q: { id: string; text?: string }) => ({
-            id: q.id,
-            question: q.text ?? "Continue?",
-          }),
-        );
+      const items = normalizeOpenCodeQuestions(raw).map(toChatQuestion);
+      if (items.length > 0) {
         dispatch({ type: "ADD_QUESTIONS", questions: items });
       }
       // Don't clear on empty — SSE-delivered questions are authoritative

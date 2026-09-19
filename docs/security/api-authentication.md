@@ -81,34 +81,19 @@ step-up; plaintext appears only in the create/rotate response. Restart OpenCode 
 replacing a protected credential file. The project must already exist so
 its immutable UUID can be included in the credential grant.
 
-### Internal coordination lease
+### Internal runtime and repository-sync provisioning
 
-`POST /api/v1/auth/coordination-lease` is the internal installation path used by
-the managed coordination harness. It accepts only an installation
-`Authorization: Bearer <token>` together with
-`X-Ingenium-Internal-Service: 1`. Cookie-authenticated or Origin-bearing
-requests are rejected, so this route is not a browser credential-issuance path.
-The body is strict and contains only `{ "runtimeId": "<runtime-uuid>" }`; the
-caller cannot choose the owner, organization, project, workspace, worktree,
-storage mapping, scopes, or lifetime.
+Compatibility runtime provisioning uses authenticated internal bootstrap routes.
+Runtime capability credentials are issued for the runtime audience with only the
+child-MCP, project, documentation, RAG, memory, and runtime scopes required by
+that runtime. Repository synchronization receives a separate `repository-sync`
+credential with only `projects:read` and `repository:sync`.
 
-The API derives those bindings by joining the requested runtime to its active
-authorized workspace, runtime capability binding, runtime credential, and
-active service principal. The runtime must be `READY` or `IDLE` and have a
-future absolute expiry. The resulting expiry is capped at 15 minutes and at
-the runtime, binding, and capability expiries. One transaction creates exactly
-two credentials: an `mcp` credential with the five scopes
-`coordination:read`, `coordination:write`, `memory:read`, `projects:read`, and
-`repository:sync`, plus a `repository-sync` credential with only
-`projects:read` and `repository:sync`.
-
-The `201` response is `Cache-Control: no-store` and contains the runtime ID,
-shared effective expiry, and one `{ id, token }` object for each credential.
-Token bytes are hashed for storage and are returned as plaintext only in that
-one response. Invalid or extra body fields return `422`; missing/invalid
-installation authentication returns `401`; unavailable or ineligible runtime
-state returns neutral `404 NOT_FOUND`. Installation authentication does not
-grant arbitrary credential listing, rotation, or revocation.
+These internal paths derive the organization, project, workspace, worktree,
+principal, and expiry from the authorized runtime. Callers cannot choose those
+bindings or widen the scopes. Browser cookies and Origin-bearing requests are not
+accepted by the compatibility-only bootstrap paths, and token responses are
+`Cache-Control: no-store`.
 
 The existing `DELETE /api/v1/auth/mcp-credentials/:id` route permits a service
 principal to revoke only its own currently authenticated credential. The path
@@ -119,7 +104,7 @@ malformed, or mismatched IDs remain non-enumerating `404 NOT_FOUND`. Browser
 administrators continue to use the existing recent-step-up path and receive
 the unchanged `204` success behavior.
 
-### Coordination harness credential ownership and recovery
+### Credential ownership and recovery
 
 The live harness owns its credential files inside the run context's
 `.ingenium` home directory. It creates `.ingenium-mcp-credential` and
@@ -245,7 +230,7 @@ On every container start, the entrypoint projects the container-owned Ingenium
 MCP and plugin entries into the persistent global OpenCode config. This replaces
 the legacy `skill-sync` bootstrap entry with the canonical `resource-sync`
 projection and configures the `auto-observer`, `observer`, `resource-sync`,
-`session-coordinator`, and Ponytail adapter entries without projecting the
+`lifecycle`, and Ponytail adapter entries without projecting the
 installation bearer. The projection removes accidental `INGENIUM_API_TOKEN` and
 `INGENIUM_API_TOKEN_FILE` entries from the Ingenium MCP environment, preserves
 unrelated operator settings, and never logs credential contents.
@@ -320,18 +305,17 @@ project, workspace, worktree, or scope argument. It reuses the normal login,
 recent-step-up, project authorization, and scoped MCP issuance routes, validates
 the exact configured coordination binding, and atomically replaces the
 owner-only credential file.
-The general-MCP credential issued by this reset has exactly these eight scopes:
-`coordination:read`, `coordination:write`, `projects:read`, `repository:sync`,
-`documentation:read`, `rag:read`, `memory:read`, and `memory:write`. It does not
+The general-MCP credential issued by this reset has exactly these six scopes:
+`projects:read`, `repository:sync`, `documentation:read`, `rag:read`,
+`memory:read`, and `memory:write`. It does not
 include `health:read` or `memory:share`; project-visible saved memory therefore
-requires a separate sharing grant. The coordination-lease `mcp` credential and
-the runtime capability credential are narrower, read-only memory bindings and
-must not be conflated with the reset credential.
+requires a separate sharing grant. Runtime capability credentials are a separate
+audience and must not be conflated with the general MCP credential.
 
-When the session-coordinator plugin is already loaded, its exact reset-command
-exception reconnects the MCP client and registers a fresh accepted epoch in the
-same OpenCode process. Lookalike commands and unrelated mutations remain denied.
-`ingenium-coordination-reset reset-learning` independently restores the exact
+After changing a credential, restart the parent OpenCode process so its root
+hooks and v2 client reload the authenticated binding. Lookalike commands and
+unrelated mutations remain denied. `ingenium-coordination-reset reset-learning`
+independently restores the exact
 seven-scope learning credential through the same encrypted provider and fixed
 binding. It does not replace the general MCP credential or receive the
 same-process coordination exception.

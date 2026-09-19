@@ -1,7 +1,7 @@
 import { Router } from "express";
-import { extraction, logger, coordination } from "ingenium-core";
+import { extraction, logger, worktreeBinding } from "ingenium-core";
 import { requireProject } from "../helpers.js";
-import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
+import { createBackgroundSynthesisBrokerExecutor, isOpenCodeError, verifyOpenCodeNativeMessage } from "../opencode-client.js";
 import { createOpenCodeMessagesClient } from "../opencode-messages-client.js";
 
 /**
@@ -33,8 +33,27 @@ extractionRouter.post("/run", async (req, res) => {
       return;
     }
     try {
-      const worktreeId = coordination.coordinationWorktreeId(principal.workspaceId, principal.storageMappingHash);
-      const data = await extraction.extractExternalObservation(projectId, worktreeId, parsed.data);
+      const nativeBinding = await verifyOpenCodeNativeMessage({
+        worktree: parsed.data.worktree,
+        sessionId: parsed.data.sessionId,
+        messageId: parsed.data.message?.id,
+        role: "user",
+        text: parsed.data.message?.text,
+      });
+      if (isOpenCodeError(nativeBinding)) {
+        const unavailable = nativeBinding.error.code === "NETWORK_ERROR"
+          || nativeBinding.error.code === "AUTH_NOT_CONFIGURED"
+          || nativeBinding.error.code.startsWith("HTTP_5");
+        res.status(unavailable ? 503 : 403).json({
+          error: {
+            code: unavailable ? "OPENCODE_UNAVAILABLE" : "EXTERNAL_OBSERVATION_BINDING_REJECTED",
+            message: unavailable ? "OpenCode session binding is temporarily unavailable" : "External session binding rejected",
+          },
+        });
+        return;
+      }
+      const worktreeId = worktreeBinding.worktreeBindingId(principal.workspaceId, principal.storageMappingHash);
+      const data = await extraction.extractExternalObservation(projectId, worktreeId, parsed.data, undefined, { nativeOpenCode: true });
       res.json({ data });
     } catch (error) {
       const code = error instanceof Error ? error.message : "";

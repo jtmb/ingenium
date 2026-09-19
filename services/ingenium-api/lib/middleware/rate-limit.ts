@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { createHash } from "node:crypto";
-import { authentication, coordination } from "ingenium-core";
+import { authentication } from "ingenium-core";
 import { config } from "../../config/index.js";
 import { isDashboardSafeReadCandidate, normalizeDashboardReadPath } from "../dashboard-safe-read-policy.js";
 import { isPublicHealthRequest, isRuntimeGatewayPrivateRequest } from "./auth.js";
@@ -33,9 +33,6 @@ export const AUTH_PREFLIGHT_READ_MAX_REQUESTS = 60;
 export const DASHBOARD_READ_MAX_REQUESTS = 480;
 // Credential grants and runtime launcher aliases can vary without changing the
 // immutable credential or canonical workspace identities that own these limits.
-export const COORDINATION_CREDENTIAL_MAX_REQUESTS = 300;
-export const COORDINATION_WORKSPACE_MAX_REQUESTS = 600;
-export const COORDINATION_RATE_LIMIT_WINDOW_MS = 60_000;
 // Run d5a… observed 79 eligible service reads; the existing 12-read fanout
 // allowance brings the bounded startup profile to 91, rounded to 100.
 export const SERVICE_SAFE_READ_MAX_REQUESTS = 100;
@@ -150,16 +147,6 @@ const dashboardReadRateLimiter = createRateLimiter(
   60_000,
   (req) => `${normalizeTrustedClientIp(req)}\0${req.principal?.type === "user" ? req.principal.session?.id ?? "no-session" : "no-session"}`,
 );
-const coordinationCredentialRateLimiter = createRateLimiter(
-  COORDINATION_CREDENTIAL_MAX_REQUESTS,
-  COORDINATION_RATE_LIMIT_WINDOW_MS,
-  (req) => coordinationRateLimitKeys(req)!.credential,
-);
-const coordinationWorkspaceRateLimiter = createRateLimiter(
-  COORDINATION_WORKSPACE_MAX_REQUESTS,
-  COORDINATION_RATE_LIMIT_WINDOW_MS,
-  (req) => coordinationRateLimitKeys(req)!.workspace,
-);
 const serviceSafeReadRateLimiter = createRateLimiter(
   SERVICE_SAFE_READ_MAX_REQUESTS,
   60_000,
@@ -174,8 +161,6 @@ export function clearRateLimitEntries(): void {
   authPreflightReadRateLimiter.clear();
   safeReadAdmissionRateLimiter.clear();
   dashboardReadRateLimiter.clear();
-  coordinationCredentialRateLimiter.clear();
-  coordinationWorkspaceRateLimiter.clear();
   serviceSafeReadRateLimiter.clear();
   runtimeGatewayRateLimiter.clear();
 }
@@ -186,10 +171,6 @@ export function authPreflightReadRateLimit(req: Request, res: Response, next: Ne
     return;
   }
   authPreflightReadRateLimiter(req, res, next);
-}
-
-export function isCoordinationApiRequest(req: Pick<Request, "path">): boolean {
-  return typeof req.path === "string" && req.path.startsWith("/api/v1/coordination/");
 }
 
 const SERVICE_SAFE_READ_PATHS = new Set([
@@ -210,24 +191,6 @@ function serviceSafeReadRateLimitKey(req: Request): string | undefined {
   return createHash("sha256").update("service-safe-read\0").update(req.principal.id).digest("hex");
 }
 
-export function coordinationRateLimitKeys(req: Request): { credential: string; workspace: string } | undefined {
-  const principal = req.principal;
-  const identity = req.attestedCoordinationIdentity;
-  if (principal?.type !== "service" || (principal.audience !== "mcp" && principal.audience !== "runtime")
-    || !identity || principal.tokenId !== identity.credentialId || principal.workspaceId !== identity.workspaceId
-    || principal.storageMappingHash !== identity.storageMappingHash || !req.authorizedProjectId) return undefined;
-  let worktreeId: string;
-  try {
-    worktreeId = coordination.coordinationWorktreeId(identity.workspaceId, identity.storageMappingHash);
-  } catch {
-    return undefined;
-  }
-  return {
-    credential: createHash("sha256").update("coordination-credential\0").update(identity.credentialId).digest("hex"),
-    workspace: createHash("sha256").update("coordination-workspace\0").update(req.authorizedProjectId).update("\0").update(worktreeId).digest("hex"),
-  };
-}
-
 export const rateLimit = Object.assign(
   (req: Request, res: Response, next: NextFunction) => {
     if (isPublicHealthRequest(req)) {
@@ -240,10 +203,6 @@ export const rateLimit = Object.assign(
     }
     if (isBoundaryAttestedRuntimeGatewayRequest(req)) {
       runtimeGatewayRateLimiter(req, res, next);
-      return;
-    }
-    if (isCoordinationApiRequest(req)) {
-      defaultRateLimiter.check(req, res, next);
       return;
     }
     if (isServiceSafeReadCandidate(req)) {
@@ -263,29 +222,10 @@ export function recordCandidateAuthenticationFailure(
 ): void {
   // Candidate reads are not charged up front, so only failed authentication
   // records a strict attempt; the next request is blocked before repeated auth work.
-  if (isServiceSafeReadCandidate(req) || isCoordinationApiRequest(req)) {
+  if (isServiceSafeReadCandidate(req)) {
     defaultRateLimiter.record(req);
   }
   next(error);
-}
-
-export function recordCoordinationAttestationFailure(
-  error: unknown,
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-): void {
-  if (isCoordinationApiRequest(req) && req.principal) defaultRateLimiter.record(req);
-  next(error);
-}
-
-export function coordinationRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const keys = coordinationRateLimitKeys(req);
-  if (!keys) {
-    defaultRateLimiter(req, res, next);
-    return;
-  }
-  coordinationWorkspaceRateLimiter(req, res, () => coordinationCredentialRateLimiter(req, res, next));
 }
 
 export function authenticatedReadRateLimit(req: Request, res: Response, next: NextFunction): void {

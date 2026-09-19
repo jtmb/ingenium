@@ -63,15 +63,6 @@ export interface ManagedRecoveryEnrollment {
   handoff: RedactedRestartHandoff;
 }
 
-export interface LegacyRecoveryCoordination {
-  sessionIdSha256: string;
-  incarnation: number;
-  revision: number;
-  fence: number;
-  captureClaimEpoch: number;
-  captureClaimSha256: string;
-}
-
 type RecoveryOwnerIdentity = RestartProcessIdentity;
 
 interface EnrolledParent extends RestartProcessIdentity {
@@ -132,7 +123,6 @@ interface LegacyOwnerBootstrap {
 
 export interface LegacyRecoveryHandoff extends ManagedRecoveryEnrollment {
   schemaVersion: 1;
-  coordination: LegacyRecoveryCoordination;
 }
 
 type RecoveryEventName = "attach_started" | "attach_healthy" | "adoption" | "rollback" | "fence_transition";
@@ -926,18 +916,12 @@ export function persistLegacyRecoveryHandoff(
   binding: ManagedRecoveryBinding,
   parent: RestartProcessIdentity & { port: null; dataHome: string },
   handoff: RedactedRestartHandoff,
-  coordination: LegacyRecoveryCoordination,
 ): string {
   const canonicalWorktree = realpathSync(resolve(worktree));
   const validatedHandoff = parseRedactedRestartHandoff(handoff);
   if (binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(binding.project)
     || !UUID.test(binding.projectId) || !SAFE_ID.test(binding.workspaceId) || !HASH.test(binding.storageMappingHash)
-    || resolve(parent.dataHome) !== parent.dataHome || !processMatchesAttestedIdentity(parseIdentity(parent), true)
-    || !HASH.test(coordination.sessionIdSha256) || !Number.isSafeInteger(coordination.incarnation)
-    || coordination.incarnation < 1 || !Number.isSafeInteger(coordination.revision) || coordination.revision < 0
-    || !Number.isSafeInteger(coordination.fence) || coordination.fence < 1
-    || !Number.isSafeInteger(coordination.captureClaimEpoch) || coordination.captureClaimEpoch < 1
-    || !HASH.test(coordination.captureClaimSha256)) {
+    || resolve(parent.dataHome) !== parent.dataHome || !processMatchesAttestedIdentity(parseIdentity(parent), true)) {
     throw new Error("Legacy recovery handoff is invalid");
   }
   const path = join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json");
@@ -946,7 +930,6 @@ export function persistLegacyRecoveryHandoff(
     binding,
     parent,
     handoff: validatedHandoff,
-    coordination,
   } satisfies LegacyRecoveryHandoff);
   return path;
 }
@@ -955,27 +938,17 @@ export function readLegacyRecoveryHandoff(worktree: string): LegacyRecoveryHando
   try {
     const canonicalWorktree = realpathSync(resolve(worktree));
     const value = readJson(join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json"));
-    if (!hasExactKeys(value, ["schemaVersion", "binding", "parent", "handoff", "coordination"])
+    if (!hasExactKeys(value, ["schemaVersion", "binding", "parent", "handoff"])
       || value.schemaVersion !== 1
       || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
-      || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])
-      || !hasExactKeys(value.coordination, [
-        "sessionIdSha256", "incarnation", "revision", "fence", "captureClaimEpoch", "captureClaimSha256",
-      ])) return undefined;
+      || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])) return undefined;
     const parent = parseIdentity(value.parent);
-    const coordination = value.coordination;
     if (value.binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(value.binding.project)
       || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
       || typeof value.binding.workspaceId !== "string" || !SAFE_ID.test(value.binding.workspaceId)
       || typeof value.binding.storageMappingHash !== "string" || !HASH.test(value.binding.storageMappingHash)
       || value.parent.port !== null || typeof value.parent.dataHome !== "string"
       || resolve(value.parent.dataHome) !== value.parent.dataHome
-      || typeof coordination.sessionIdSha256 !== "string" || !HASH.test(coordination.sessionIdSha256)
-      || !Number.isSafeInteger(coordination.incarnation) || (coordination.incarnation as number) < 1
-      || !Number.isSafeInteger(coordination.revision) || (coordination.revision as number) < 0
-      || !Number.isSafeInteger(coordination.fence) || (coordination.fence as number) < 1
-      || !Number.isSafeInteger(coordination.captureClaimEpoch) || (coordination.captureClaimEpoch as number) < 1
-      || typeof coordination.captureClaimSha256 !== "string" || !HASH.test(coordination.captureClaimSha256)
       || !processMatchesAttestedIdentity(parent, true)) return undefined;
     return {
       schemaVersion: 1,
@@ -988,7 +961,6 @@ export function readLegacyRecoveryHandoff(worktree: string): LegacyRecoveryHando
       },
       parent: { ...parent, port: null, dataHome: value.parent.dataHome },
       handoff: parseRedactedRestartHandoff(value.handoff),
-      coordination: coordination as unknown as LegacyRecoveryCoordination,
     };
   } catch {
     return undefined;

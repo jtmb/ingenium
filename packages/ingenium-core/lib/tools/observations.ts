@@ -22,14 +22,21 @@ export interface ExternalObservationSource {
   fingerprint: string;
 }
 
-export function requireExternalObservationSession(projectId: string, worktreeId: string, sessionId: string): void {
-  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
-  if (!/^worktree-[a-f0-9]{64}$/.test(worktreeId)
+export interface ExternalObservationValidation {
+  nativeOpenCode?: boolean;
+}
+
+export function requireExternalObservationSession(
+  projectId: string,
+  worktreeId: string,
+  sessionId: string,
+  validation: ExternalObservationValidation = {},
+): void {
+  if (typeof projectId !== "string" || projectId.length === 0
+    || !/^worktree-[a-f0-9]{64}$/.test(worktreeId)
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(sessionId)
     || redactContextText(sessionId) !== sessionId
-    || !db.prepare(`SELECT 1 FROM coordination_sessions s JOIN projects p ON p.id = s.project_id
-      WHERE s.project_id = ? AND s.worktree_id = ? AND s.session_id = ?
-      AND s.state = 'active' AND p.archived_at IS NULL LIMIT 1`).get(projectId, worktreeId, sessionId)) {
+    || !validation.nativeOpenCode) {
     throw new Error("EXTERNAL_OBSERVATION_BINDING_REJECTED");
   }
 }
@@ -50,9 +57,10 @@ export function externalObservationReceipt(projectId: string, source: ExternalOb
 
 /** The existing project/key uniqueness makes the content-free receipt and observation one atomic write. */
 export function storeExternalObservation(projectId: string, source: ExternalObservationSource,
-  rule?: { type: Observation["observation_type"]; content: string; importance?: number }) {
+  rule?: { type: Observation["observation_type"]; content: string; importance?: number },
+  validation: ExternalObservationValidation = {}) {
   const result = execTransaction(() => {
-    requireExternalObservationSession(projectId, source.worktreeId, source.sessionId);
+    requireExternalObservationSession(projectId, source.worktreeId, source.sessionId, validation);
     if (!isAutomaticLearningEnabled(projectId)) return { enabled: false, created: false, observationId: null };
     const existing = externalObservationReceipt(projectId, source);
     if (existing) return { enabled: true, created: false, ...existing };

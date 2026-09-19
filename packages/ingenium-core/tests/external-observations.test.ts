@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
-import { coordinationWorktreeId, registerCoordinationSession } from "../lib/tools/coordination.js";
 import { extractExternalObservation } from "../lib/tools/extraction.js";
 import { getObservations, deleteObservation } from "../lib/tools/observations.js";
 import { setSetting } from "../lib/tools/settings.js";
 import { runSynthesis } from "../lib/tools/synthesis.js";
 import { listProposals } from "../lib/tools/skill-governance.js";
 
-const worktreeId = coordinationWorktreeId("workspace-external", "a".repeat(64));
+const worktreeId = `worktree-${"a".repeat(64)}`;
+const nativeValidation = { nativeOpenCode: true } as const;
 const input = { worktree: "/home/brajam/repos/ingenium", sessionId: "ses-external",
   message: { id: "msg-user", role: "user", text: "I prefer concise replies in all future sessions. Bearer secret-canary" } };
 let directory: string;
@@ -27,8 +27,6 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "ingenium-external-observations-"));
   vi.stubEnv("INGENIUM_CORE_DB_PATH", join(directory, "test.db"));
   projectId = createProject("ingenium-external").id;
-  registerCoordinationSession(projectId, { worktreeId, sessionId: input.sessionId, incarnation: 1,
-    ownershipToken: "A".repeat(32), ttlMs: 60_000, idempotencyKey: "register-external" });
   executor.mockClear();
 });
 
@@ -39,9 +37,17 @@ afterEach(() => {
 });
 
 describe("external observation provenance and durable dedupe", () => {
+  it("accepts an API-verified native binding without consulting coordination sessions", async () => {
+    const nativeProject = createProject("ingenium-native-observation").id;
+    const result = await extractExternalObservation(nativeProject, worktreeId, input, executor, nativeValidation);
+
+    expect(result).toMatchObject({ enabled: true, created: true });
+    expect(getObservations(nativeProject)).toHaveLength(1);
+  });
+
   it("atomically keeps one attributable observation across concurrent events, restart, and synthesis replay", async () => {
-    const results = await Promise.all([extractExternalObservation(projectId, worktreeId, input, executor),
-      extractExternalObservation(projectId, worktreeId, input, executor)]);
+    const results = await Promise.all([extractExternalObservation(projectId, worktreeId, input, executor, nativeValidation),
+      extractExternalObservation(projectId, worktreeId, input, executor, nativeValidation)]);
     expect(results.filter((result) => result.created)).toHaveLength(1);
     const [observation] = getObservations(projectId);
     expect(observation.content).toBe("User prefers concise replies. [REDACTED]");
@@ -56,7 +62,7 @@ describe("external observation provenance and durable dedupe", () => {
 
     resetDbForTest();
     executor.mockClear();
-    expect(await extractExternalObservation(projectId, worktreeId, input, executor)).toMatchObject({ created: false, observationId: observation.id });
+    expect(await extractExternalObservation(projectId, worktreeId, input, executor, nativeValidation)).toMatchObject({ created: false, observationId: observation.id });
     expect(executor).not.toHaveBeenCalled();
 
     const synthesisExecutor = vi.fn(async ({ system }: { system: string }) => ({ ok: true as const,
@@ -77,43 +83,42 @@ describe("external observation provenance and durable dedupe", () => {
   });
 
   it("rejects changed source text, unknown/foreign bindings and operational or assistant payloads", async () => {
-    await extractExternalObservation(projectId, worktreeId, input, executor);
+    await extractExternalObservation(projectId, worktreeId, input, executor, nativeValidation);
     await expect(extractExternalObservation(projectId, worktreeId, { ...input,
-      message: { ...input.message, text: "I prefer verbose replies in every future session." } }, executor)).rejects.toThrow("SOURCE_CONFLICT");
-    await expect(extractExternalObservation(createProject("foreign").id, worktreeId, input, executor)).rejects.toThrow("BINDING_REJECTED");
-    await expect(extractExternalObservation(projectId, coordinationWorktreeId("foreign", "a".repeat(64)), input, executor)).rejects.toThrow("BINDING_REJECTED");
-    await expect(extractExternalObservation(projectId, worktreeId, { ...input, sessionId: "unknown" }, executor)).rejects.toThrow("BINDING_REJECTED");
+      message: { ...input.message, text: "I prefer verbose replies in every future session." } }, executor, nativeValidation)).rejects.toThrow("SOURCE_CONFLICT");
+    await expect(extractExternalObservation(projectId, "foreign", input, executor, nativeValidation)).rejects.toThrow("BINDING_REJECTED");
+    await expect(extractExternalObservation(projectId, worktreeId, input, executor)).rejects.toThrow("BINDING_REJECTED");
     for (const message of [{ ...input.message, role: "assistant" }, { ...input.message, metadata: "operational" },
       { ...input.message, id: "sk-secret-canary" }]) {
-      await expect(extractExternalObservation(projectId, worktreeId, { ...input, message }, executor)).rejects.toThrow("INVALID");
+      await expect(extractExternalObservation(projectId, worktreeId, { ...input, message }, executor, nativeValidation)).rejects.toThrow("INVALID");
     }
     expect(getObservations(projectId)).toHaveLength(1);
   });
 
   it("disabled learning prevents extraction, receipts, and ingestion even if disabled during the LLM call", async () => {
     setSetting(projectId, "automatic_learning_enabled", "false");
-    expect(await extractExternalObservation(projectId, worktreeId, input, executor)).toMatchObject({ enabled: false });
+    expect(await extractExternalObservation(projectId, worktreeId, input, executor, nativeValidation)).toMatchObject({ enabled: false });
     expect(executor).not.toHaveBeenCalled();
     setSetting(projectId, "automatic_learning_enabled", "true");
     await extractExternalObservation(projectId, worktreeId, input, async () => {
       setSetting(projectId, "automatic_learning_enabled", "false");
       return executor();
-    });
+    }, nativeValidation);
     expect(getObservations(projectId)).toHaveLength(0);
     expect(getDb().prepare("SELECT key FROM settings WHERE key LIKE 'external_observation_receipt_v1:%'").all()).toHaveLength(0);
   });
 
   it("does not retain task instructions or failed extraction and does not replay deleted observations", async () => {
     const task = { ...input, message: { ...input.message, text: "Operation: use this task metadata to implement a feature now." } };
-    expect(await extractExternalObservation(projectId, worktreeId, task, executor)).toMatchObject({ created: false });
+    expect(await extractExternalObservation(projectId, worktreeId, task, executor, nativeValidation)).toMatchObject({ created: false });
     expect(executor).not.toHaveBeenCalled();
     const failed = { ...input, message: { ...input.message, id: "msg-failed" } };
-    await expect(extractExternalObservation(projectId, worktreeId, failed, async () => ({ ok: false, content: "" }))).rejects.toThrow("EXTRACTOR_UNAVAILABLE");
-    const result = await extractExternalObservation(projectId, worktreeId, failed, executor);
+    await expect(extractExternalObservation(projectId, worktreeId, failed, async () => ({ ok: false, content: "" }), nativeValidation)).rejects.toThrow("EXTRACTOR_UNAVAILABLE");
+    const result = await extractExternalObservation(projectId, worktreeId, failed, executor, nativeValidation);
     expect(result.created).toBe(true);
     deleteObservation(projectId, result.observationId!);
     resetDbForTest();
-    expect(await extractExternalObservation(projectId, worktreeId, failed, executor)).toMatchObject({ created: false });
+    expect(await extractExternalObservation(projectId, worktreeId, failed, executor, nativeValidation)).toMatchObject({ created: false });
     expect(getObservations(projectId)).toHaveLength(0);
   });
 });

@@ -5,8 +5,9 @@ set -euo pipefail
 # Scan canonical docs, root/package/service READMEs, AGENTS, and the model table;
 # do not whitelist current drift to make this pass. Historical denial/removal prose
 # is not a current barrier claim. Extend claim patterns when an audit finds new wording.
-# Catalog parity currently exports no counts: derive them from its source catalog,
-# using the same name/category-entry convention checked by catalog-parity.test.ts.
+# Catalog parity currently exports no counts: derive canonical and active counts from
+# its source catalog, using the same name/category-entry convention checked by
+# catalog-parity.test.ts.
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 node - "$REPO_ROOT" <<'NODE'
 const fs = require('node:fs');
@@ -44,8 +45,8 @@ function proseFindings(text, counts) {
   if (countClaim.test(value) && !retainedEvidence) findings.push(`${counts.entries} catalog entries / ${counts.server} server registrations / ${counts.categories} categories`);
   const pluginList = /\bships\s+(?:\w+\s+){0,3}plugins\b|\b(?:shipped|registered|configured|loaded|enabled|root)\s+plugins\s*(?:are|include|:|—)|\bplugin list\s*(?:is|includes|:)|\bplugins\s*\((?:observer|resource-sync|auto-observer)/i;
   if (pluginList.test(value)
-      && (!value.includes('session-coordinator') || !value.includes('ponytail'))) {
-    findings.push('plugin list includes session-coordinator and ponytail');
+      && (!value.includes('lifecycle') || !value.includes('ponytail'))) {
+    findings.push('plugin list includes lifecycle and ponytail');
   }
   if (/session-id-tui\.ts/.test(value) && /\b(?:registered|loaded|enabled)\b/i.test(value)
       && !/\b(?:not|never|unregistered|removed|absent)\b/i.test(value)) {
@@ -90,6 +91,14 @@ function auditModels(text, agents, emit) {
   }
 }
 
+const retiredCoordinationCatalogNames = new Set([
+  'ingenium_coordination_status',
+  'ingenium_coordination_memory_read',
+  'ingenium_coordination_update',
+  'ingenium_coordination_claim',
+  'ingenium_coordination_release',
+  'ingenium_coordination_handoff',
+]);
 const fixtureCounts = { entries: 292, server: 290, categories: 32 };
 for (const [startMarker, endMarker, claimMarker] of historicalRoadmapCountRanges) {
   const roadmapFixture = [startMarker, `${claimMarker} Retained 291/289 evidence.`, endMarker, `${claimMarker} Active 291/289 claim.`].join('\n');
@@ -106,7 +115,7 @@ for (const text of [
 for (const text of [
   '292 tools / 290 server registrations plus 2 extension tools across 32 baseline categories', 'Timeout: 28800000',
   'The audit passed with 291 catalog entries / 289 server registrations across 31 categories.',
-  'Registered plugins: observer, session-coordinator, ponytail',
+  'Registered plugins: observer, lifecycle, ponytail',
   'session-id-tui.ts is not registered.',
   'The lease scopes include coordination:read, coordination:write, memory:read, projects:read, repository:sync.',
   'The former managed-command denial barrier was removed.',
@@ -146,6 +155,14 @@ try {
     server: catalog.filter(({ name }) => name.startsWith('ingenium_')).length,
     categories: new Set(catalog.map(({ category }) => category)).size,
   };
+  const activeServer = catalog.filter(({ name }) => name.startsWith('ingenium_') && !retiredCoordinationCatalogNames.has(name)).length;
+  assert.deepEqual(
+    catalog.filter(({ name }) => retiredCoordinationCatalogNames.has(name)),
+    [],
+    'retired coordination names must stay out of the active catalog',
+  );
+  assert.equal(activeServer, 284, 'active server registration count must remain 284');
+  assert.equal(activeServer + (counts.entries - counts.server), 286, 'active built-in tool count must include two extension tools');
   assert.equal(counts.entries - counts.server, 2, 'catalog must retain 2 extension tools');
   const files = ['README.md', 'AGENTS.md', '.opencode/models.md', ...markdownFiles('docs'), ...markdownFiles('packages', true), ...markdownFiles('services', true)];
   for (const file of files) {
@@ -164,8 +181,8 @@ try {
     }
     for (const match of text.matchAll(/"plugin"\s*:\s*\[([^\]]*)\]/g)) {
       const list = match[1];
-      if (!list.includes('session-coordinator') || !list.includes('ponytail') || list.includes('session-id-tui.ts')) {
-        report(file, lineAt(text, match.index), 'plugin array includes session-coordinator and ponytail, excludes session-id-tui.ts', plain(list));
+      if (!list.includes('lifecycle') || !list.includes('ponytail') || list.includes('session-id-tui.ts')) {
+        report(file, lineAt(text, match.index), 'plugin array includes lifecycle and ponytail, excludes session-id-tui.ts', plain(list));
       }
     }
     if (file === '.opencode/models.md') auditModels(text, config.agent, (line, expected, actual) => report(file, line, expected, actual));
@@ -173,7 +190,7 @@ try {
   if (errors.length) {
     console.error(errors.join('\n'));
     process.exitCode = 1;
-  } else console.log(`PASS: doc-config audit (${counts.entries} catalog entries / ${counts.server} server registrations / ${counts.categories} categories)`);
+  } else console.log(`PASS: doc-config audit (${counts.entries} catalog entries / ${activeServer} active server registrations / ${counts.categories} categories / ${activeServer + (counts.entries - counts.server)} active tools)`);
 } catch (error) {
   console.error(`tests/test-doc-config-audit.sh:1: expected readable authority and documentation inputs; actual ${error.message}`);
   process.exitCode = 1;

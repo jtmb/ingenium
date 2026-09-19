@@ -11,6 +11,7 @@ import {
   realpathSync,
   rmSync,
   type BigIntStats,
+  type Stats,
   type Dir,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -624,7 +625,7 @@ export interface OwnedMisplacedTestResults {
   inventory: OwnedArtifactInventoryEntry[];
 }
 
-function optionalLstat(path: string): ReturnType<typeof lstatSync> | undefined {
+function optionalLstat(path: string): Stats | undefined {
   try {
     return lstatSync(path);
   } catch (error) {

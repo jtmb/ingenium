@@ -125,9 +125,9 @@ describe("packaged Ingenium MCP launcher", () => {
     expect(localConfig.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL_FILE).toBe(".opencode/.ingenium-mcp-credential");
     expect(localConfig.mcp.ingenium.environment.INGENIUM_PROJECT).toBe("ingenium");
     expect(entrypoint).toContain('"command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
-    expect(entrypoint).toContain('"INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential"');
+    expect(entrypoint).toContain('"INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-opencode/.ingenium-mcp-credential"');
     expect(entrypoint).not.toContain('"INGENIUM_MCP_CREDENTIAL": "{file:.opencode/.ingenium-mcp-credential}"');
-    expect(entrypoint).toContain('"INGENIUM_PROJECT": "global-default"');
+    expect(entrypoint).toContain('"INGENIUM_PROJECT": "ingenium"');
     expect(entrypoint).not.toContain('"INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token"');
     expect(dockerfile).toContain('"command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"]');
   });

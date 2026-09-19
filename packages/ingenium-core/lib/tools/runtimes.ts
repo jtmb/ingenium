@@ -620,11 +620,6 @@ export function recordRuntimeCapabilityActivity(input: {
       .get(timestamp, timestamp, input.runtimeId, input.credentialId, input.servicePrincipalId,
         input.organizationId, input.projectId, input.workspaceId, input.storageMappingHash, timestamp) as RuntimeRow | undefined;
     if (!runtime) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
-    const worktreeId = `worktree-${sha256(`${input.workspaceId}\0${input.storageMappingHash}`)}`;
-    const activeSession = db.prepare(`SELECT 1 FROM coordination_sessions
-      WHERE project_id = ? AND worktree_id = ? AND state = 'active' AND expires_at > ? LIMIT 1`)
-      .get(input.projectId, worktreeId, timestamp);
-    if (!activeSession) throw new RuntimeConflictError("ACTIVITY_UNAVAILABLE");
     const requestedExpiry = new Date(observedTime + input.idleLeaseMs).toISOString();
     const idleExpiresAt = [requestedExpiry, runtime.absolute_expires_at!].sort()[0]!;
     if (runtime.idle_expires_at && runtime.idle_expires_at >= idleExpiresAt) {

@@ -21,7 +21,7 @@ runtime closure is vendored at
 `packages/ingenium-extension/ponytail/PROVENANCE.md`. It is not installed from
 npm, and it does not configure or invoke Ponytail MCP. The published
 `@dietrichgebert/ponytail@4.8.4` package is deliberately not used: its named
-export is incompatible with OpenCode 1.18.9's plugin loader.
+export is incompatible with OpenCode 1.18.31's plugin loader.
 
 Register exactly one Ponytail entry alongside the other extension plugins for the environment.
 The canonical five-entry list is exported by
@@ -33,7 +33,7 @@ The canonical five-entry list is exported by
   "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
   "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
   "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-  "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
   "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
 ]
 ```
@@ -44,10 +44,11 @@ Do not register both entries in one config, recursively discover the checkout,
 or add the old npm package. The adapter is intentionally outside the worktree
 `.opencode/plugins/` discovery root.
 
-The `session-coordinator.ts` entry is a server-plugin wrapper. Its implementation
-handles lifecycle events, `/add-session`, and system-prompt transforms; it does
-not register `tool.execute.before` or `tool.execute.after` and does not grant,
-deny, or gate tool execution. Profile permissions remain authoritative.
+The `lifecycle.ts` entry is a root-hook adapter for the lifecycle events that the
+OpenCode v2 promise plugin API does not expose. It reads sessions through the
+v2 SDK for automatic context upload and metadata-only usage telemetry; it does
+not coordinate sessions or inject saved memory into TUI turns. Profile
+permissions remain authoritative.
 
 The separate `plugins/session-id-tui.ts` source is not in the canonical plugin
 specs, root config, or package exports. Runtime activation is explicitly deferred;

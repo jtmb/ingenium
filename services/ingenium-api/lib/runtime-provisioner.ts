@@ -4,7 +4,7 @@ import { provisionManagedRuntime, removeManagedRuntime } from "./runtime-manager
 import { deploymentMode } from "./runtime-mode.js";
 
 export const LOCAL_RUNTIME_SCOPES = [
-  "child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write",
+  "child-mcp:runtime", "child-mcp:execute", "mcp-servers:write",
   "projects:read", "documentation:read", "rag:read", "memory:write",
 ].sort();
 
@@ -159,7 +159,7 @@ async function provision(workspaceId: string): Promise<runtimes.RuntimeInstance>
       kind: "runtime",
       audience: "runtime",
       name: principalName,
-      scopes: ["child-mcp:execute", "child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
+       scopes: ["child-mcp:execute", "child-mcp:runtime", "memory:read", "projects:read", "runtime:activity"],
       organizationId: runtime.organizationId,
       projectId: runtime.projectId,
       workspaceId: runtime.workspaceId,

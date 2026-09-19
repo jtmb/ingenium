@@ -2,6 +2,7 @@ import { tool } from "@opencode-ai/plugin"
 import { importObservationsFromFile, triggerSynthesis, logPipelineEvent, type ObserverFailureReporter, type ObserverRequestFailure } from "./observer-core.js"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
+import { eventSessionId } from "./opencode-v2.js"
 
 /**
  * How many session.idle events to skip between synthesis checks.
@@ -43,7 +44,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
 
   return {
     event: async ({ event }: { event: any }) => {
-      const sessionId = (event as any).session?.id || undefined;
+      const sessionId = eventSessionId(event)
 
       if (event.type === "session.created") {
         try {

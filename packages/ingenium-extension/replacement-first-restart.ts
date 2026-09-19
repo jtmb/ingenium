@@ -130,7 +130,6 @@ export interface ReplacementFirstRestartRequest {
     identityMs: number;
     healthMs: number;
     sessionMs: number;
-    memoryAckMs: number;
     terminalIdleMs: number;
     retirementMs: number;
   };
@@ -141,7 +140,6 @@ export type ReplacementFirstRestartPhase =
   | "replacement_started"
   | "replacement_healthy"
   | "session_created"
-  | "typed_memory_acknowledged"
   | "terminal_idle_acknowledged"
   | "recovery_owner_ready"
   | "old_parent_quiesced"
@@ -203,13 +201,6 @@ export interface ReplacementFirstRestartDependencies<Session> {
     transactionSha256: string,
     signal: AbortSignal,
   ): Promise<ReplacementSessionCreation<Session>>;
-  acknowledgeTypedMemory(
-    identity: RestartProcessIdentity,
-    session: Session,
-    handoffSha256: string,
-    transactionSha256: string,
-    signal: AbortSignal,
-  ): Promise<{ status: "acknowledged"; handoffSha256: string; transactionSha256: string }>;
   awaitTerminalIdleAcknowledgement(
     identity: RestartProcessIdentity,
     session: Session,
@@ -438,7 +429,7 @@ export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHand
 }
 
 function timeouts(value: unknown): ReplacementFirstRestartRequest["timeouts"] {
-  const keys = ["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "memoryAckMs", "terminalIdleMs", "retirementMs"] as const;
+  const keys = ["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "terminalIdleMs", "retirementMs"] as const;
   if (!hasExactKeys(value, keys)) throw new Error("timeouts are invalid");
   return Object.fromEntries(keys.map((key) => [key, boundedInteger(value[key], `timeouts.${key}`, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)])) as unknown as ReplacementFirstRestartRequest["timeouts"];
 }
@@ -616,13 +607,6 @@ export async function runReplacementFirstRestart<Session>(
     const session = creation.session as Session;
     await persist("session_created");
 
-    const memoryAcknowledgement = await bounded("typed memory acknowledgement", request.timeouts.memoryAckMs, (signal) =>
-      dependencies.acknowledgeTypedMemory(replacement!, session, handoffDigest, transaction, signal));
-    if (memoryAcknowledgement.status !== "acknowledged" || memoryAcknowledgement.handoffSha256 !== handoffDigest
-      || memoryAcknowledgement.transactionSha256 !== transaction) {
-      throw new Error("Typed memory acknowledgement is invalid");
-    }
-    await persist("typed_memory_acknowledged");
     const idleAcknowledgement = await bounded("terminal idle acknowledgement", request.timeouts.terminalIdleMs, (signal) =>
       dependencies.awaitTerminalIdleAcknowledgement(replacement!, session, handoffDigest, transaction, signal));
     if (idleAcknowledgement.status !== "idle" || idleAcknowledgement.handoffSha256 !== handoffDigest

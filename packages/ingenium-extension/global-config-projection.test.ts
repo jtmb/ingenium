@@ -10,7 +10,7 @@ import { CANONICAL_PLUGIN_SPECS } from "./plugin-specs.mjs";
 import { ProtectedBrokerPlugin } from "../../config/opencode-managed/enforce-reserved-broker.mjs";
 
 const directories: string[] = [];
-const canonicalPluginOrder = ["auto-observer", "observer", "resource-sync", "session-coordinator", "ponytail"];
+const canonicalPluginOrder = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"];
 
 function pluginName(path: string): string | undefined {
   if (path.includes("ponytail")) return "ponytail";

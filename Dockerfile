@@ -59,14 +59,14 @@ RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
 LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}"
 
-ARG OPENCODE_VERSION=1.18.9
-ARG OPENCODE_SHA256=a0fa4b7b8bdacbd013e79a5f69d4220d36b545cd3ea296ba765f3016fa501b5b
+ARG OPENCODE_VERSION=1.18.31
+ARG OPENCODE_SHA256=408bfbcae7d8760b4fa15f11d4b342afef25a2ea64c4807706f8180bacdb4008
 ARG CLOUDFLARED_VERSION=2026.8.3
 ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor nginx curl ca-certificates tzdata git acl libcap2-bin && \
     rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
+RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64-musl.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
     chmod +x /usr/local/bin/opencode && \
@@ -278,7 +278,7 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json

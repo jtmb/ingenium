@@ -6,13 +6,22 @@ import { childMcpAuthorizationPolicy, explicitMcpAuthorizationPolicy } from "../
 import { policyForRequest } from "../../ingenium-api/lib/authorization-policy.js";
 
 const serverSource = readFileSync(fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url)), "utf8");
+const RETIRED_COORDINATION_TOOLS = new Set([
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+  "ingenium_coordination_handoff",
+]);
 
 describe("AUTH-102 MCP policy parity", () => {
   it("declares authorization for every registered tool", () => {
     const registered = [...serverSource.matchAll(/(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"/g)]
       .map((match) => `ingenium_${match[1]}`);
     const policyByName = new Map(MCP_TOOL_CATALOG.map((tool) => [tool.name, tool.authorization]));
-    expect(registered).toHaveLength(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_")).length);
+    expect(registered).toHaveLength(MCP_TOOL_CATALOG.filter((tool) =>
+      tool.name.startsWith("ingenium_") && !RETIRED_COORDINATION_TOOLS.has(tool.name)).length);
     expect(registered.filter((name) => !policyByName.get(name))).toEqual([]);
     expect(MCP_TOOL_CATALOG.filter((tool) => !tool.authorization || tool.authorization.scopes.length === 0)).toEqual([]);
     for (const tool of MCP_TOOL_CATALOG) expect(tool.authorization).toEqual(explicitMcpAuthorizationPolicy(tool.name, tool.category));
@@ -68,17 +77,6 @@ describe("AUTH-102 MCP policy parity", () => {
     expect(byName.get("ingenium_backup_create")?.authorization?.target).toBe("installation");
     expect(byName.get("ingenium_docs_get_page")?.authorization?.target).toBe("organization");
     expect(byName.get("ingenium_synthesis_cross_project")?.projectScope).toBe("global");
-    expect(byName.get("ingenium_coordination_status")?.apiEndpoints).toEqual(["GET /api/v1/coordination/snapshot"]);
-    expect(byName.get("ingenium_coordination_status")?.authorization?.scopes).toEqual(["coordination:read"]);
-    expect(byName.get("ingenium_coordination_memory_read")?.apiEndpoints).toEqual(["POST /api/v1/coordination/memory/read"]);
-    expect(byName.get("ingenium_coordination_memory_read")?.authorization).toMatchObject({
-      permission: "read",
-      target: "project",
-      scopes: ["coordination:read"],
-      launcherBinding: "required",
-    });
-    expect(byName.get("ingenium_coordination_update")?.authorization?.scopes).toEqual(["coordination:write"]);
-    expect(byName.get("ingenium_coordination_handoff")?.authorization?.scopes).toEqual(["coordination:write"]);
     expect(byName.get("ingenium_context_message_retrieve")?.authorization?.target).toBe("private");
     expect(byName.get("ingenium_memory_save")?.authorization).toMatchObject({
       permission: "write",

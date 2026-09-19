@@ -8,7 +8,7 @@
  * Only LLM output becomes observations. Raw snippets never enter the DB.
  */
 import { getSetting, isAutomaticLearningEnabled, setSetting } from "./settings.js";
-import { storeObservation, requireExternalObservationSession, externalObservationReceipt, storeExternalObservation } from "./observations.js";
+import { storeObservation, requireExternalObservationSession, externalObservationReceipt, storeExternalObservation, type ExternalObservationValidation } from "./observations.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { redactContextText } from "@ingenium/extension/context-upload-codec";
@@ -28,11 +28,11 @@ export const ExternalExtractionSchema = z.object({
 }).strict();
 
 export async function extractExternalObservation(projectId: string, worktreeId: string, input: unknown,
-  executor?: LLMTextExecutor) {
+  executor?: LLMTextExecutor, validation: ExternalObservationValidation = {}) {
   const parsed = ExternalExtractionSchema.safeParse(input);
   if (!parsed.success) throw new Error("EXTERNAL_OBSERVATION_INVALID");
   const { sessionId, message } = parsed.data;
-  requireExternalObservationSession(projectId, worktreeId, sessionId);
+  requireExternalObservationSession(projectId, worktreeId, sessionId, validation);
   if (!isAutomaticLearningEnabled(projectId)) return { enabled: false, created: false, observationId: null };
   if (!message) return { enabled: true, created: false, observationId: null };
   const text = redactContextText(message.text).trim();
@@ -40,7 +40,7 @@ export async function extractExternalObservation(projectId: string, worktreeId: 
     fingerprint: createHash("sha256").update(text).digest("hex") };
   const receipt = externalObservationReceipt(projectId, source);
   if (receipt) return { enabled: true, created: false, ...receipt };
-  if (!SIGNAL_RE.test(text) || TASK_MARKER_RE.test(text)) return storeExternalObservation(projectId, source);
+  if (!SIGNAL_RE.test(text) || TASK_MARKER_RE.test(text)) return storeExternalObservation(projectId, source, undefined, validation);
   const config = getFullLLMSynthesisConfig(projectId);
   // A broker session would persist the extraction prompt. External source text uses only a direct text endpoint.
   if (!config?.endpoint && !executor) throw new Error("EXTERNAL_OBSERVATION_EXTRACTOR_UNAVAILABLE");
@@ -51,7 +51,7 @@ export async function extractExternalObservation(projectId: string, worktreeId: 
     && ["preference", "correction", "workflow", "terminology", "pattern"].includes(candidate.type));
   return storeExternalObservation(projectId, source, rule ? {
     ...rule, type: rule.type as Observation["observation_type"], content: redactContextText(rule.content),
-  } : undefined);
+  } : undefined, validation);
 }
 
 // ── Types ──────────────────────────────────────────────────

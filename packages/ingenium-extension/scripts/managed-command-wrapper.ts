@@ -34,7 +34,6 @@ const EXTENSION_TEST_FILES = new Set([
   "agent-validation.test.ts",
   "coordination-outbox.test.ts",
   "managed-command-wrapper.test.ts",
-  "session-coordinator.test.ts",
   "session-id-tui.test.ts",
 ]);
 const DEPLOYMENT_OPERATIONS = new Set(["mcp-status", "compose-ps", "compose-build", "compose-up", "compose-restart", "health", "production-restart", "recovery-preflight", "recovery-prepare"]);

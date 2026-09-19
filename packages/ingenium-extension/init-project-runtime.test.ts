@@ -26,10 +26,11 @@ const extensionPluginPaths = [
   "packages/ingenium-extension/plugins/auto-observer.ts",
   "packages/ingenium-extension/plugins/observer.ts",
   "packages/ingenium-extension/plugins/resource-sync.ts",
-  "packages/ingenium-extension/plugins/session-coordinator.ts",
+  "packages/ingenium-extension/plugins/lifecycle.ts",
 ];
 const ponytailPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
 const configuredPluginPaths = [...extensionPluginPaths, ponytailPluginPath];
+const manifestPluginPaths = [...configuredPluginPaths].sort();
 const manifestHash = "b".repeat(64);
 
 function temporaryDirectory(prefix: string): string {
@@ -453,7 +454,7 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(payload.resourcesManifest.agents).toHaveLength(11);
       expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/sync-diagnostics.md");
       expect(payload.resourcesManifest.agents.map((entry) => entry.name)).not.toContain("browser-agent");
-      expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
+      expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(manifestPluginPaths);
       for (const plugin of payload.resourcesManifest.plugins) {
         expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
       }

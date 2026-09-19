@@ -28,33 +28,22 @@ describe("AUTH-102 canonical API policy", () => {
     ["POST", "/api/v1/runtimes/gateway/validate", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/gateway/activity", "gateway-private", "execute"],
     ["POST", "/api/v1/runtimes/activity", "runtime-capability", "write"],
-    ["POST", "/api/v1/coordination/memory/read", "project", "read"],
-    ["POST", "/api/v1/coordination/epoch/recover", "project", "write"],
     ["GET", "/api/v1/mcp-tools/ingenium_skill_list/state", "project", "read"],
     ["POST", "/api/v1/synthesis/cross-project", "installation", "execute"],
     ["GET", "/api/v1/docs/spaces", "organization", "read"],
     ["DELETE", "/api/v1/projects/example/purge", "project", "admin"],
     ["GET", "/api/v1/auth/oidc/providers", "public", "read"],
-    ["POST", "/api/v1/auth/coordination-lease", "private", "write"],
+    ["POST", "/api/v1/auth/repository-sync-credential", "private", "write"],
   ] as const)("classifies %s %s", (method, path, target, permission) => {
     expect(policyForRequest({ method, path } as Pick<Request, "method" | "path">)).toMatchObject({ target, permission });
   });
 
   it.each([
-    "/api/v1/coordination/memory/publish",
-    "/api/v1/coordination/memory/ack",
+    "/api/v1/coordination/memory/read",
+    "/api/v1/coordination/epoch/recover",
     "/api/v1/coordination/handoffs/publish",
-    "/api/v1/coordination/handoffs/read",
-    "/api/v1/coordination/handoffs/ack",
-    "/api/v1/coordination/sessions/link",
-    "/api/v1/coordination/transcripts/publish",
-    "/api/v1/coordination/transcripts/read",
-    "/api/v1/coordination/transcripts/ack",
-  ])("keeps POST %s classified as a project write", (path) => {
-    expect(policyForRequest({ method: "POST", path } as Pick<Request, "method" | "path">)).toMatchObject({
-      target: "project",
-      permission: "write",
-    });
+  ])("does not register retired coordination route %s", (path) => {
+    expect(policyForRequest({ method: "POST", path } as Pick<Request, "method" | "path">)).toBeUndefined();
   });
 
   it("fails closed for a route without an explicit family policy", () => {
@@ -296,47 +285,6 @@ describe("AUTH-102 canonical API policy", () => {
         statusCode: 404,
       }));
     }
-  });
-
-  it("retains the immutable authorized project for post-auth coordination limiting", () => {
-    const projectId = "11111111-1111-4111-8111-111111111111";
-    vi.spyOn(projects, "getProject").mockReturnValue({
-      id: projectId,
-      name: "coordination-project",
-      organization_id: "22222222-2222-4222-8222-222222222222",
-      archived_at: null,
-    } as ReturnType<typeof projects.getProject>);
-    vi.spyOn(authorization, "requireProjectPermission").mockReturnValue({
-      allowed: true,
-      visible: true,
-      projectId,
-      organizationId: "22222222-2222-4222-8222-222222222222",
-    });
-    vi.spyOn(securityAudit, "appendSecurityAuditEvent").mockReturnValue("audit-id");
-    const req = {
-      method: "POST",
-      path: "/api/v1/coordination/memory/read",
-      query: { project: "coordination-project" },
-      params: {},
-      principal: {
-        type: "service",
-        id: "service-id",
-        tokenId: "credential-id",
-        scopes: ["coordination:read"],
-        organizationId: "22222222-2222-4222-8222-222222222222",
-        projectId,
-        projectIds: [projectId],
-        audience: "mcp",
-        workspaceId: "workspace-id",
-        launcherWorktree: "/workspace",
-      },
-    } as unknown as Request;
-    const next = vi.fn();
-
-    authorizationMiddleware(req, {} as Response, next);
-
-    expect(next).toHaveBeenCalledOnce();
-    expect(req.authorizedProjectId).toBe(projectId);
   });
 
   it("confines report credentials to read-only tool state for their exact project", () => {

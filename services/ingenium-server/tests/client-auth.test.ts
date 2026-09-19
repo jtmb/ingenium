@@ -228,29 +228,6 @@ describe("Ingenium API client authentication", () => {
     expect(new Headers(fetchMock.mock.calls[0]?.[1].headers).get("Authorization")).toBe("Bearer test-server-token");
   });
 
-  it("sends coordination ownership proof only in the dedicated internal header", async () => {
-    process.env.INGENIUM_API_TOKEN = "test-server-token";
-    const ownershipToken = "C".repeat(32);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ data: { session: {}, claims: [], peers: [] } }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { api } = await import("../lib/client.js");
-    await api.settled.getCoordinationSnapshot(
-      "coordination-project", "worktree-main", "session-main", 1, ownershipToken,
-    );
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "http://localhost:4097/api/v1/coordination/snapshot?project=coordination-project&worktree_id=worktree-main&session_id=session-main&incarnation=1",
-    );
-    expect(fetchMock.mock.calls[0]?.[0]).not.toContain(ownershipToken);
-    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1].headers);
-    expect(requestHeaders.get("X-Ingenium-Coordination-Ownership")).toBe(ownershipToken);
-  });
-
   it("does not synthesize an Authorization header when the API token is absent", async () => {
     delete process.env.INGENIUM_API_TOKEN;
     process.env.INGENIUM_API_TOKEN_FILE = ".opencode/not-a-token-file";

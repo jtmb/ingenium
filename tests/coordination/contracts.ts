@@ -19,7 +19,6 @@ import {
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { parse as parseYaml } from "yaml";
-import type { ResultManifest } from "../../packages/ingenium-extension/session-coordinator";
 import { isSafeRestartHandoffPath } from "../../packages/ingenium-extension/replacement-first-restart";
 
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -48,6 +47,21 @@ const REDACTION_PATTERNS = [
   /\bing_[A-Za-z0-9_-]+\b/g,
   /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{20,}\b/g,
 ] as const;
+
+interface ResultManifest {
+  baseCommit: string;
+  dirtyHashes: Array<{ pathSegments: string[]; sha256: string }>;
+  dependencyResults: unknown[];
+  exclusivePaths: string[];
+  profileRevision: string | null;
+  toolRevision: string | null;
+  ownerId: string;
+  fence: number;
+  unresolvedOperations: unknown[];
+  todoWrite: Array<{ id: string; content: string; status: string; priority: string }>;
+  inputHash: string | null;
+  finalized: boolean;
+}
 
 export const COORDINATION_MEMORY_PREFIX = "COORDINATION_MEMORY_V2\n";
 export const HARNESS_ARTIFACT_SCHEMA = "ingenium.coordination-harness/v1";

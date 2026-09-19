@@ -10,10 +10,9 @@ import { createOrganization } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createServicePrincipal } from "../lib/tools/security-tokens.js";
 import {
-  COORDINATION_LEASE_CREDENTIAL_TTL_MS,
   createMcpCredential,
   incrementServicePrincipalSecurityEpoch,
-  issueCoordinationLeaseCredentials,
+  issueRepositorySyncCredential,
   listMcpCredentials,
   resolveMcpCredential,
   revokeMcpCredential,
@@ -285,25 +284,13 @@ describe("AUTH-107 MCP credentials", () => {
     expect(listMcpCredentials(original.createdByUserId)).toHaveLength(3);
   });
 
-  it("issues only the fixed short-lived coordination and repository credentials for an exact ready runtime", () => {
+  it("issues only the fixed short-lived repository credential for an exact ready runtime", () => {
     const { capability, runtime } = readyRuntimeFixture();
     const before = new Date();
 
-    const issued = issueCoordinationLeaseCredentials(runtime.id, before);
+    const issued = issueRepositorySyncCredential(runtime.id, before);
 
-    expect(issued.coordination).toMatchObject({
-      servicePrincipalId: capability.servicePrincipalId,
-      kind: "service",
-      audience: "mcp",
-      scopes: ["coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync"],
-      organizationId: capability.organizationId,
-      projectId: capability.projectId,
-      projectIds: [capability.projectId],
-      workspaceId: capability.workspaceId,
-      launcherWorktree: capability.launcherWorktree,
-      storageMappingHash: capability.storageMappingHash,
-    });
-    expect(issued.repositorySync).toMatchObject({
+    expect(issued).toMatchObject({
       servicePrincipalId: capability.servicePrincipalId,
       kind: "repository-sync",
       audience: "repository-sync",
@@ -314,35 +301,31 @@ describe("AUTH-107 MCP credentials", () => {
       launcherWorktree: capability.launcherWorktree,
       storageMappingHash: capability.storageMappingHash,
     });
-    expect(new Date(issued.coordination.expiresAt).getTime() - before.getTime())
-      .toBeLessThanOrEqual(COORDINATION_LEASE_CREDENTIAL_TTL_MS);
-    expect(issued.repositorySync.expiresAt).toBe(issued.coordination.expiresAt);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")?.id).toBe(issued.coordination.id);
-    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
-    expect(() => issueCoordinationLeaseCredentials(randomUUID())).toThrow("Coordination lease runtime is unavailable");
+    expect(new Date(issued.expiresAt).getTime() - before.getTime()).toBeLessThanOrEqual(15 * 60_000);
+    expect(resolveMcpCredential(issued.token, "repository-sync")?.id).toBe(issued.id);
+    expect(() => issueRepositorySyncCredential(randomUUID())).toThrow("Repository sync credential runtime is unavailable");
   });
 
   it("revokes only the exact attested service credential and remains idempotent", () => {
     const { runtime } = readyRuntimeFixture();
-    const issued = issueCoordinationLeaseCredentials(runtime.id);
+    const issued = issueRepositorySyncCredential(runtime.id);
     const exact = {
-      credentialId: issued.coordination.id,
-      authenticatedCredentialId: issued.coordination.id,
-      servicePrincipalId: issued.coordination.servicePrincipalId,
-      audience: issued.coordination.audience,
-      organizationId: issued.coordination.organizationId,
-      projectId: issued.coordination.projectId,
-      workspaceId: issued.coordination.workspaceId,
-      launcherWorktree: issued.coordination.launcherWorktree,
-      storageMappingHash: issued.coordination.storageMappingHash,
+      credentialId: issued.id,
+      authenticatedCredentialId: issued.id,
+      servicePrincipalId: issued.servicePrincipalId,
+      audience: issued.audience,
+      organizationId: issued.organizationId,
+      projectId: issued.projectId,
+      workspaceId: issued.workspaceId,
+      launcherWorktree: issued.launcherWorktree,
+      storageMappingHash: issued.storageMappingHash,
     };
 
-    expect(revokeOwnMcpCredential({ ...exact, authenticatedCredentialId: issued.repositorySync.id })).toBe(false);
+    expect(revokeOwnMcpCredential({ ...exact, authenticatedCredentialId: randomUUID() })).toBe(false);
     expect(revokeOwnMcpCredential({ ...exact, storageMappingHash: "f".repeat(64) })).toBe(false);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeDefined();
+    expect(resolveMcpCredential(issued.token, "repository-sync")).toBeDefined();
     expect(revokeOwnMcpCredential(exact)).toBe(true);
     expect(revokeOwnMcpCredential(exact)).toBe(true);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeUndefined();
-    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
+    expect(resolveMcpCredential(issued.token, "repository-sync")).toBeUndefined();
   });
 });

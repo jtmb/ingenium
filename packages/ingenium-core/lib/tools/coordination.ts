@@ -1428,6 +1428,14 @@ function worktreeEpoch(db: Db, projectId: string, worktreeId: string, current: s
 
 function repositoryGeneration(db: Db, projectId: string, worktreeId: string, current: string): number {
   db.prepare(
+    `INSERT INTO repository_sync_worktrees (project_id, worktree_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
+  ).run(projectId, worktreeId, current, current);
+  const worktreeExists = db.prepare(
+    "SELECT 1 FROM repository_sync_worktrees WHERE project_id = ? AND worktree_id = ?",
+  ).get(projectId, worktreeId);
+  if (!worktreeExists) throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  db.prepare(
     `INSERT INTO repository_sync_generations (project_id, worktree_id, generation, manifest_hash, updated_at)
      VALUES (?, ?, 0, NULL, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
   ).run(projectId, worktreeId, current);

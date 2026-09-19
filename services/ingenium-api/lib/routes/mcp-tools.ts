@@ -18,12 +18,6 @@ export interface McpToolsRouterOptions {
 
 const REPORT_MAX_BYTES = 64 * 1024;
 const REPORT_QUERY_KEYS = new Set(["project", "q", "category", "enabled", "boundary", "visibility", "invocation"]);
-const REPOSITORY_COORDINATION_TOOLS = new Set([
-  "ingenium_coordination_update",
-  "ingenium_coordination_claim",
-  "ingenium_coordination_release",
-]);
-
 interface ReportFilters {
   q?: string;
   category?: string;
@@ -126,10 +120,6 @@ export function authorizedCatalog(req: import("express").Request, projectId: str
     const policy = tool.authorization;
     if (!policy) return false;
     if (principal.type === "compatibility") return true;
-    if (principal.type === "service" && principal.audience === "repository-sync"
-      && REPOSITORY_COORDINATION_TOOLS.has(tool.name)) {
-      return authorization.requireProjectPermission(authorizationPrincipal, projectId, "repository", "execute").allowed;
-    }
     if (policy.target === "installation") return authorization.requireInstallationPermission(authorizationPrincipal, policy.resource, policy.permission).allowed;
     if (policy.target === "organization") return Boolean(projectAccess.organizationId)
       && authorization.requireOrganizationPermission(authorizationPrincipal, projectAccess.organizationId!, policy.resource, policy.permission).allowed;

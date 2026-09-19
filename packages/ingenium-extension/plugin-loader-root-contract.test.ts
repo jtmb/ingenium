@@ -32,16 +32,16 @@ const wrapperSpecs = [
   "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
   "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
   "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-  "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
 ] as const;
 const ponytailPluginSpec = "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
-const OPENCODE_VERSION = "1.18.9";
-const OPENCODE_PLUGIN_INTEGRITY = "sha512-0kFX9Usj+3N+WupIe9VnEdDNzMNbW4/C5GeIzdj02/t5kQoXsNrFpW3Br9aABebazcaYsQEWdlaLV0zQISy3OA==";
-const OPENCODE_SDK_INTEGRITY = "sha512-oDJSmsmiGW+3lNLmZYj3EpUkpiT3ITZBKffH3mrmu2KMJXlkxQ/Nvv7jqPffSM7o8lCdBZS/aCE+2GkA3/92gQ==";
-const OPENCODE_HOOK_SOURCES = ["1.18.9", "1.18.22"].map((version) => ({
+const OPENCODE_VERSION = "1.18.31";
+const OPENCODE_PLUGIN_INTEGRITY = "sha512-Rdc1bPK06PByaGyGd0kf7JUZ4pTkexz2OOUNlqZWLpHOiMEZ+/rFGjt46ypZ3QwA697gNdWwwwQbHbKG5NMwGA==";
+const OPENCODE_SDK_INTEGRITY = "sha512-Raouthf8Lhe9edjvYeeSK7SgvdoU6bBjH9qV3f70dHoa6h+z0X2TMz/e22/wKp/StlFUZ4kIRpYYxFnY8/k01w==";
+const OPENCODE_HOOK_SOURCES = ["1.18.31"].map((version) => ({
   version,
   plugin: `https://unpkg.com/@opencode-ai/plugin@${version}/dist/index.d.ts`,
-  sdk: `https://unpkg.com/@opencode-ai/sdk@${version}/dist/gen/types.gen.d.ts`,
+  sdk: `https://unpkg.com/@opencode-ai/sdk@${version}/dist/v2/gen/types.gen.d.ts`,
 }));
 const OPENCODE_HOOK_MATRIX = {
   sessionCreated: { event: { type: "session.created", properties: { info: { id: "session-fixture" } } } },
@@ -54,7 +54,7 @@ const OPENCODE_HOOK_MATRIX = {
   systemTransform: { input: { sessionID: "session-fixture", model: {} }, output: { system: [] as string[] } },
 } as const;
 
-type V1Plugin = {
+type RootPlugin = {
   id: string;
   server: (input: unknown) => Promise<unknown> | unknown;
 };
@@ -63,14 +63,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Mirrors OpenCode 1.18.9's path-plugin classification. */
-function isOpenCode1189PathPluginSpec(spec: string): boolean {
+/** Mirrors the supported root plugin loader's path-plugin classification. */
+function isOpenCodePathPluginSpec(spec: string): boolean {
   return spec.startsWith("file://") || spec.startsWith(".") || isAbsolute(spec);
 }
 
-/** Mirrors the local-file branch of OpenCode 1.18.9's resolvePathPluginTarget(). */
-function resolveOpenCode1189PathPlugin(spec: string, cwd: string): string {
-  if (!isOpenCode1189PathPluginSpec(spec)) {
+/** Mirrors the local-file branch of the supported root plugin loader. */
+function resolveOpenCodePathPlugin(spec: string, cwd: string): string {
+  if (!isOpenCodePathPluginSpec(spec)) {
     throw new TypeError(`OpenCode would treat ${spec} as an npm package spec`);
   }
   const path = spec.startsWith("file://") ? fileURLToPath(spec) : resolve(cwd, spec);
@@ -96,8 +96,8 @@ function deduplicateOpenCodePluginUrls(specs: string[]): string[] {
  * must not sit alongside the extension package manifest (whose `main` points
  * to the broad named-export entrypoint).
  */
-function resolveOpenCode1189ServerEntrypoint(spec: string, cwd: string): string {
-  const target = resolveOpenCode1189PathPlugin(spec, cwd);
+function resolveOpenCodeServerEntrypoint(spec: string, cwd: string): string {
+  const target = resolveOpenCodePathPlugin(spec, cwd);
   const targetPath = fileURLToPath(target);
   const packagePath = resolve(dirname(targetPath), "package.json");
   if (!existsSync(packagePath)) return target;
@@ -108,10 +108,10 @@ function resolveOpenCode1189ServerEntrypoint(spec: string, cwd: string): string 
 }
 
 /**
- * Mirrors OpenCode 1.18.9's readV1Plugin(..., "server", "detect") and the
+ * Mirrors the root plugin loader's readPlugin(..., "server", "detect") and the
  * following server invocation. Named exports deliberately remain untouched.
  */
-function readOpenCode1189V1Server(mod: Record<string, unknown>, spec: string): V1Plugin | undefined {
+function readOpenCodeRootServer(mod: Record<string, unknown>, spec: string): RootPlugin | undefined {
   const value = mod.default;
   if (!isRecord(value)) return undefined;
   if (!("id" in value) && !("server" in value) && !("tui" in value)) return undefined;
@@ -124,16 +124,16 @@ function readOpenCode1189V1Server(mod: Record<string, unknown>, spec: string): V
   if ("tui" in value) {
     throw new TypeError(`Plugin ${spec} must default export either server() or tui(), not both`);
   }
-  return value as V1Plugin;
+  return value as RootPlugin;
 }
 
-async function applyOpenCode1189V1Server(mod: Record<string, unknown>, spec: string, input: unknown): Promise<unknown> {
-  const plugin = readOpenCode1189V1Server(mod, spec);
-  if (!plugin) throw new TypeError(`Plugin ${spec} is not a V1 server plugin`);
+async function applyOpenCodeRootServer(mod: Record<string, unknown>, spec: string, input: unknown): Promise<unknown> {
+  const plugin = readOpenCodeRootServer(mod, spec);
+  if (!plugin) throw new TypeError(`Plugin ${spec} is not a root server plugin`);
   return plugin.server(input);
 }
 
-describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
+describe.sequential("OpenCode 1.18.31 root plugin-loader contract", () => {
   let fixtureWorktree: string | undefined;
   const originalProject = process.env.INGENIUM_PROJECT;
   const originalToken = process.env.INGENIUM_API_TOKEN;
@@ -166,29 +166,29 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(config.plugin).toEqual([...wrapperSpecs, ponytailPluginSpec]);
     for (const spec of config.plugin) {
       const substituted = substituteOpenCodeConfigEnvironment(spec, { PWD: repositoryRoot });
-      expect(isOpenCode1189PathPluginSpec(substituted)).toBe(true);
-      expect(resolveOpenCode1189PathPlugin(substituted, repositoryRoot)).toBe(substituted);
-      expect(resolveOpenCode1189ServerEntrypoint(substituted, repositoryRoot)).toBe(substituted);
+      expect(isOpenCodePathPluginSpec(substituted)).toBe(true);
+      expect(resolveOpenCodePathPlugin(substituted, repositoryRoot)).toBe(substituted);
+      expect(resolveOpenCodeServerEntrypoint(substituted, repositoryRoot)).toBe(substituted);
     }
 
-    expect(() => resolveOpenCode1189PathPlugin("packages/ingenium-extension/resource-sync.ts", repositoryRoot))
+    expect(() => resolveOpenCodePathPlugin("packages/ingenium-extension/resource-sync.ts", repositoryRoot))
       .toThrow("npm package spec");
-    expect(resolveOpenCode1189ServerEntrypoint("./packages/ingenium-extension/resource-sync.ts", repositoryRoot)).toBe(
+    expect(resolveOpenCodeServerEntrypoint("./packages/ingenium-extension/resource-sync.ts", repositoryRoot)).toBe(
       pathToFileURL(resolve(extensionRoot, "dist/index.js")).href,
     );
   });
 
-  it("deduplicates global, project, and managed declarations to five exact file URLs on 1.18.9 and 1.18.22", () => {
+  it("deduplicates global, project, and managed declarations to five exact file URLs", () => {
     for (const version of OPENCODE_HOOK_SOURCES.map((source) => source.version)) {
       const resolved = CANONICAL_PLUGIN_SPECS.map((spec: string) =>
-        resolveOpenCode1189PathPlugin(substituteOpenCodeConfigEnvironment(spec, { PWD: "/app" }), "/workspace"));
+        resolveOpenCodePathPlugin(substituteOpenCodeConfigEnvironment(spec, { PWD: "/app" }), "/workspace"));
       expect(deduplicateOpenCodePluginUrls([...resolved, ...resolved, ...resolved]), version).toEqual(resolved);
       expect(resolved).toHaveLength(5);
       expect(new Set(resolved).size).toBe(5);
     }
   });
 
-  it("pins every direct plugin declaration and its locked SDK transitively to 1.18.9", () => {
+  it("pins every direct plugin declaration and its locked SDK transitively to 1.18.31", () => {
     const rootManifest = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8")) as {
       devDependencies: Record<string, string>;
     };
@@ -227,17 +227,12 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     }
   });
 
-  it("covers the source-backed 1.18.9 and 1.18.22 lifecycle hook matrix without changing the pin", () => {
+  it("covers the source-backed 1.18.31 lifecycle hook matrix", () => {
     expect(OPENCODE_HOOK_SOURCES).toEqual([
       {
-        version: "1.18.9",
-        plugin: "https://unpkg.com/@opencode-ai/plugin@1.18.9/dist/index.d.ts",
-        sdk: "https://unpkg.com/@opencode-ai/sdk@1.18.9/dist/gen/types.gen.d.ts",
-      },
-      {
-        version: "1.18.22",
-        plugin: "https://unpkg.com/@opencode-ai/plugin@1.18.22/dist/index.d.ts",
-        sdk: "https://unpkg.com/@opencode-ai/sdk@1.18.22/dist/gen/types.gen.d.ts",
+        version: "1.18.31",
+        plugin: "https://unpkg.com/@opencode-ai/plugin@1.18.31/dist/index.d.ts",
+        sdk: "https://unpkg.com/@opencode-ai/sdk@1.18.31/dist/v2/gen/types.gen.d.ts",
       },
     ]);
     for (const source of OPENCODE_HOOK_SOURCES) {
@@ -254,38 +249,38 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     }
   });
 
-  it("packages V1-only default wrappers and invokes only their server implementations", async () => {
-    const [autoWrapper, observerWrapper, resourceWrapper, coordinatorWrapper, autoImplementation, observerImplementation, resourceImplementation, coordinatorImplementation] = await Promise.all([
+  it("packages root default wrappers and invokes only their server implementations", async () => {
+    const [autoWrapper, observerWrapper, resourceWrapper, lifecycleWrapper, autoImplementation, observerImplementation, resourceImplementation, lifecycleImplementation] = await Promise.all([
       import("./plugins/auto-observer.js"),
       import("./plugins/observer.js"),
       import("./plugins/resource-sync.js"),
-      import("./plugins/session-coordinator.js"),
+      import("./plugins/lifecycle.js"),
       import("./auto-observer.js"),
       import("./observer.js"),
       import("./resource-sync.js"),
-      import("./session-coordinator.js"),
+      import("./lifecycle.js"),
     ]);
-    const wrappers = [autoWrapper, observerWrapper, resourceWrapper, coordinatorWrapper];
+    const wrappers = [autoWrapper, observerWrapper, resourceWrapper, lifecycleWrapper];
 
     for (const wrapper of wrappers) {
       expect(Object.keys(wrapper)).toEqual(["default"]);
-      expect(readOpenCode1189V1Server(wrapper, "wrapper")).toBeDefined();
+      expect(readOpenCodeRootServer(wrapper, "wrapper")).toBeDefined();
     }
-    expect([autoWrapper.default.id, observerWrapper.default.id, resourceWrapper.default.id, coordinatorWrapper.default.id]).toEqual([
+    expect([autoWrapper.default.id, observerWrapper.default.id, resourceWrapper.default.id, lifecycleWrapper.default.id]).toEqual([
       "ingenium-auto-observer",
       "ingenium-observer",
       "ingenium-resource-sync",
-      "ingenium-session-coordinator",
+      "ingenium-lifecycle",
     ]);
     expect(new Set(wrappers.map((wrapper) => wrapper.default.id)).size).toBe(4);
     expect(autoWrapper.default.server).toBe(autoImplementation.AutoObserverPlugin);
     expect(observerWrapper.default.server).toBe(observerImplementation.ObserverPlugin);
     expect(resourceWrapper.default.server).toBe(resourceImplementation.ResourceSyncPlugin);
-    expect(coordinatorWrapper.default.server).toBe(coordinatorImplementation.SessionCoordinatorPlugin);
+    expect(lifecycleWrapper.default.server).toBe(lifecycleImplementation.LifecyclePlugin);
 
     const server = vi.fn().mockResolvedValue({ loaded: true });
     const callableNamedExport = vi.fn();
-    await expect(applyOpenCode1189V1Server({
+    await expect(applyOpenCodeRootServer({
       default: { id: "v1-server-only", server },
       callableNamedExport,
     }, "./fixture.ts", {})).resolves.toEqual({ loaded: true });
@@ -293,9 +288,9 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(callableNamedExport).not.toHaveBeenCalled();
   });
 
-  it("registers existing lifecycle hooks through the V1 wrappers", async () => {
-    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-v1-"));
-    process.env.INGENIUM_PROJECT = "plugin-loader-v1-test";
+  it("registers existing lifecycle hooks through the root wrappers", async () => {
+    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-"));
+    process.env.INGENIUM_PROJECT = "plugin-loader-test";
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
       const path = new URL(String(url)).pathname;
       return {
@@ -318,15 +313,15 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
       },
     };
 
-    const autoHooks = await applyOpenCode1189V1Server(autoWrapper, wrapperSpecs[0], input) as {
+    const autoHooks = await applyOpenCodeRootServer(autoWrapper, wrapperSpecs[0], input) as {
       event: unknown;
       tool: Record<string, unknown>;
     };
-    const observerHooks = await applyOpenCode1189V1Server(observerWrapper, wrapperSpecs[1], input) as {
+    const observerHooks = await applyOpenCodeRootServer(observerWrapper, wrapperSpecs[1], input) as {
       event: unknown;
       tool: Record<string, unknown>;
     };
-    const resourceSyncHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as {
+    const resourceSyncHooks = await applyOpenCodeRootServer(resourceWrapper, wrapperSpecs[2], input) as {
       event: unknown;
       tool?: Record<string, unknown>;
     };
@@ -391,7 +386,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
 
     try {
       const resourceWrapper = await import("./plugins/resource-sync.js");
-      const hooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], {
+      const hooks = await applyOpenCodeRootServer(resourceWrapper, wrapperSpecs[2], {
         worktree,
         client: { app: { log: vi.fn() } },
       }) as { event: (input: unknown) => Promise<void> };
@@ -408,9 +403,9 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     }
   });
 
-  it("keeps unavailable binding failures from every V1 lifecycle wrapper off stdio", async () => {
-    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-v1-failure-"));
-    process.env.INGENIUM_PROJECT = "plugin-loader-v1-failure";
+  it("keeps unavailable binding failures from every lifecycle wrapper off stdio", async () => {
+    fixtureWorktree = mkdtempSync(join(tmpdir(), "ingenium-plugin-loader-failure-"));
+    process.env.INGENIUM_PROJECT = "plugin-loader-failure";
     process.env.INGENIUM_API_TOKEN = "a".repeat(32);
     const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
@@ -427,11 +422,11 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     const log = vi.fn().mockRejectedValue(new Error("logger rejected Bearer secret-token"));
     const input = { worktree: fixtureWorktree, client: { app: { log } } };
 
-    const autoHooks = await applyOpenCode1189V1Server(autoWrapper, wrapperSpecs[0], input) as { event: (input: unknown) => Promise<void> };
-    const observerHooks = await applyOpenCode1189V1Server(observerWrapper, wrapperSpecs[1], input) as { event: (input: unknown) => Promise<void> };
-    const resourceHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as { event: (input: unknown) => void };
+    const autoHooks = await applyOpenCodeRootServer(autoWrapper, wrapperSpecs[0], input) as { event: (input: unknown) => Promise<void> };
+    const observerHooks = await applyOpenCodeRootServer(observerWrapper, wrapperSpecs[1], input) as { event: (input: unknown) => Promise<void> };
+    const resourceHooks = await applyOpenCodeRootServer(resourceWrapper, wrapperSpecs[2], input) as { event: (input: unknown) => void };
 
-    await expect(autoHooks.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    await expect(autoHooks.event({ event: { type: "session.idle", properties: { sessionID: "ses-failure" } } })).resolves.toBeUndefined();
     await expect(observerHooks.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
     expect(resourceHooks.event({ event: { type: "session.created" } })).toBeUndefined();
     const { drainRepositoryLifecycleQueue } = await import("./resource-sync.js");
@@ -448,7 +443,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(stderr).not.toHaveBeenCalled();
   });
 
-  it("publishes the V1 wrapper artifacts through package exports", () => {
+  it("publishes the root wrapper artifacts through package exports", () => {
     const packageJson = JSON.parse(readFileSync(resolve(extensionRoot, "package.json"), "utf8")) as {
       exports: Record<string, { types: string; import: string } | string>;
       files: string[];
@@ -466,9 +461,9 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
       types: "./dist/plugins/resource-sync.d.ts",
       import: "./dist/plugins/resource-sync.js",
     });
-    expect(packageJson.exports["./plugins/session-coordinator"]).toEqual({
-      types: "./dist/plugins/session-coordinator.d.ts",
-      import: "./dist/plugins/session-coordinator.js",
+    expect(packageJson.exports["./plugins/lifecycle"]).toEqual({
+      types: "./dist/plugins/lifecycle.d.ts",
+      import: "./dist/plugins/lifecycle.js",
     });
     expect(packageJson.exports["./plugins/ponytail"]).toBe("./ponytail/.opencode/plugins/ponytail.mjs");
     expect(packageJson.exports["./plugin-specs"]).toBe("./plugin-specs.mjs");

@@ -5487,6 +5487,24 @@ function runMigrations(db: Database.Database): void {
     })();
     logger.info("db", "Applied migration 119_plugin_description.sql");
   }
+  db.exec(readFileSync(resolve(migrationsDir, "120_lifecycle_plugin_description.sql"), "utf-8"));
+  logger.info("db", "Applied migration 120_lifecycle_plugin_description.sql");
+  const repositorySyncWorktreeState = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_worktrees'",
+  ).get() as { count: number };
+  const repositorySyncGenerationSchema = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_generations'",
+  ).get() as { sql?: string } | undefined;
+  if (repositorySyncWorktreeState.count === 0 || !repositorySyncGenerationSchema?.sql?.includes("REFERENCES repository_sync_worktrees")) {
+    db.transaction(() => {
+      db.exec(readFileSync(resolve(migrationsDir, "121_repository_sync_worktree_state.sql"), "utf-8"));
+      if (db.prepare("PRAGMA foreign_key_check(repository_sync_worktrees)").all().length > 0
+        || db.prepare("PRAGMA foreign_key_check(repository_sync_generations)").all().length > 0) {
+        throw new Error("Migration 121 failed repository-sync worktree foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 121_repository_sync_worktree_state.sql");
+  }
   enforceReservedBrokerInvariant(db);
 }
 

@@ -18,10 +18,10 @@ do not share a save or synthesis path:
 |------|---------------------|---------|
 | **Explicit saved preference memory** | `ingenium_memory_save`, `/api/v1/memory` | Content the current user explicitly asks to remember. It defaults to a private owner/project/workspace scope, is returned as `source=user-directive`, and can be updated or forgotten with receipts and versions. It is not inferred or synthesized. |
 | **Inferred learning** | `ingenium_observe`, server-side extraction, `observations` | Durable user-behavior rules extracted from eligible interactions and then consolidated into personality traits or governed skill proposals. An observation is not an explicit-memory receipt. |
-| **Operational coordination memory** | `ingenium_coordination_memory_read` | Typed session/worktree handoff and recovery state used by agents. It is not a user preference and is not a personality observation. |
-| **Context, documents, and transcripts** | Context conversations/RAG, repository Docs, linked-session transcript storage | User-provided working material, canonical guidance, or transcript replay. These remain separate from both saved preferences and inferred observations. |
+| **Private recovery handoff** | Authenticated internal recovery artifacts | Bounded replacement-first recovery state used by the recovery path. It is not a user preference and is not a personality observation. |
+| **Context, documents, and OpenCode sessions** | Context conversations/RAG, repository Docs, native OpenCode session/message APIs | User-provided working material, canonical guidance, or native session history. These remain separate from both saved preferences and inferred observations. |
 
-Retrieved explicit memory, coordination entries, Context content, and transcripts
+Retrieved explicit memory, recovery artifacts, Context content, and session data
 are reference data. They do not become instructions merely because they are
 inserted into a model context.
 
@@ -244,13 +244,12 @@ Allow automatic learning removes the `auto_observe_now` and
 `synthesize_observations` tools from that Chat turn, but does not disable the
 scheduled extraction/synthesis cycle.
 
-The extension's `SessionCoordinator` in
-`packages/ingenium-extension/session-coordinator.ts` retains an independent
-per-turn read in `experimental.chat.system.transform`: it invokes `memory_list`
-through the general binding's `memory:read` grant, and
-`packages/ingenium-extension/explicit-memory.ts` injects only validated private
-memory as untrusted data. This finalizer path is separate from the dashboard
-controls and must not be confused with operational `coordination_memory_read`.
+The extension does not inject explicit saved memory into TUI turns. The
+`memory_*` API/MCP paths and dashboard controls remain independent. The former
+`coordination_memory_read` name is retained only in historical migration data
+and negative fixtures; it is not an operational memory path. Current recovery
+state is private authenticated replacement-first handoff data, not user memory
+or self-learning input.
 
 ### Explicit current-learning RAG snapshots
 

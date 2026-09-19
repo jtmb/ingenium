@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as filesystem from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -35,7 +35,7 @@ const gateways: ChildMcpGateway[] = [];
 const runtimeDirectories: string[] = [];
 
 describe("compatibility runtime MCP launcher handoff", () => {
-  const launcher = readFileSync(new URL("../../../scripts/start-opencode-web.sh", import.meta.url), "utf8")
+  const launcherTemplate = readFileSync(new URL("../../../scripts/start-opencode-web.sh", import.meta.url), "utf8")
     .replace("node /app/scripts/probe-api.mjs", "true")
     .replace("opencode serve --port 4098 --hostname 127.0.0.1", `${process.execPath} -e 'console.log(JSON.stringify(process.env))'`);
   const identity = {
@@ -46,40 +46,76 @@ describe("compatibility runtime MCP launcher handoff", () => {
     INGENIUM_RUNTIME_OWNER_ID: "44444444-4444-4444-8444-444444444444",
     INGENIUM_WORKSPACE_ID: "shared-memory-ingenium",
     INGENIUM_STORAGE_MAPPING_HASH: "a".repeat(64),
+    INGENIUM_WORKTREE: "/workspace",
+  };
+  const createLauncher = (runtimeIdentity: Record<string, string> | null = identity) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "ingenium-compatibility-launcher-"));
+    const credentialPath = join(fixtureDirectory, ".ingenium-mcp-credential");
+    const runtimeEnvironmentPath = join(fixtureDirectory, "environment");
+    const runtimeCapabilityPath = join(fixtureDirectory, "capability");
+    writeFileSync(credentialPath, `${"f".repeat(32)}\n`, { mode: 0o600 });
+    writeFileSync(runtimeEnvironmentPath, runtimeIdentity === null
+      ? "# legacy compatibility runtime\n"
+      : `${Object.entries(runtimeIdentity).map(([name, value]) => `${name}=${value}`).join("\n")}\n`, { mode: 0o600 });
+    writeFileSync(runtimeCapabilityPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    return {
+      launcher: launcherTemplate
+        .replaceAll("/run/ingenium-opencode/.ingenium-mcp-credential", credentialPath)
+        .replaceAll("/run/ingenium-runtime/environment", runtimeEnvironmentPath)
+        .replaceAll("/run/ingenium-runtime/capability", runtimeCapabilityPath),
+      runtimeCapabilityPath,
+      cleanup: () => rmSync(fixtureDirectory, { recursive: true, force: true }),
+    };
   };
 
   it("passes provisioned identity and an enabled runtime MCP entry instead of the persistent global-default entry", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: identity, encoding: "utf8" });
-    expect(result.status).toBe(0);
-    const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    expect(environment).toMatchObject(identity);
-    expect(environment.INGENIUM_MCP_AUDIENCE).toBe("runtime");
-    const config = JSON.parse(environment.OPENCODE_CONFIG_CONTENT.replace(/\{env:([^}]+)\}/g,
-      (_match: string, key: string) => environment[key]));
-    expect(config.mcp.ingenium).toMatchObject({
-      enabled: true,
-      command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      environment: { INGENIUM_MCP_AUDIENCE: "runtime", INGENIUM_MCP_CREDENTIAL_PURPOSE: "runtime",
-        INGENIUM_RUNTIME_CREDENTIAL_FILE: "/run/ingenium-runtime/capability",
-        INGENIUM_PROJECT: "ingenium", INGENIUM_WORKSPACE_ID: "shared-memory-ingenium", INGENIUM_WORKTREE: "/workspace" },
-    });
+    const launcherFixture = createLauncher();
+
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: identity, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      expect(environment).toMatchObject(identity);
+      expect(environment.INGENIUM_MCP_AUDIENCE).toBe("runtime");
+      const config = JSON.parse(environment.OPENCODE_CONFIG_CONTENT.replace(/\{env:([^}]+)\}/g,
+        (_match: string, key: string) => environment[key]));
+      expect(config.mcp.ingenium).toMatchObject({
+        enabled: true,
+        command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        environment: { INGENIUM_MCP_AUDIENCE: "runtime", INGENIUM_MCP_CREDENTIAL_PURPOSE: "runtime",
+          INGENIUM_RUNTIME_CREDENTIAL_FILE: launcherFixture.runtimeCapabilityPath,
+          INGENIUM_PROJECT: "ingenium", INGENIUM_WORKSPACE_ID: "shared-memory-ingenium", INGENIUM_WORKTREE: "/workspace" },
+      });
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 
   it("rejects incomplete runtime identity before starting OpenCode", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: { ...identity, INGENIUM_PROJECT_ID: "" }, encoding: "utf8" });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain("compatibility runtime identity is incomplete");
-    expect(result.stdout).not.toContain("OPENCODE_CONFIG_CONTENT");
+    const launcherFixture = createLauncher({ ...identity, INGENIUM_PROJECT_ID: "" });
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: identity, encoding: "utf8" });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("compatibility runtime identity is incomplete");
+      expect(result.stdout).not.toContain("OPENCODE_CONFIG_CONTENT");
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 
   it("does not manufacture empty runtime identity fields for a legacy compatibility launch", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: {}, encoding: "utf8" });
-    expect(result.status).toBe(0);
-    const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    expect(environment.INGENIUM_MCP_AUDIENCE).toBe("mcp");
-    expect(environment.INGENIUM_RUNTIME_ID).toBeUndefined();
-    expect(environment.INGENIUM_PROJECT_ID).toBeUndefined();
-    expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    const launcherFixture = createLauncher(null);
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: {}, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      expect(environment.INGENIUM_MCP_AUDIENCE).toBe("mcp");
+      expect(environment.INGENIUM_RUNTIME_ID).toBeUndefined();
+      expect(environment.INGENIUM_PROJECT_ID).toBeUndefined();
+      expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 });
 

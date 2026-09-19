@@ -55,11 +55,6 @@ export function effectiveExtensionCredentialPurpose(
   return requested;
 }
 
-/** Coordination follows the protected runtime audience, never a caller-selected purpose. */
-export function coordinationCredentialPurpose(): "general" | "runtime" {
-  return effectiveExtensionCredentialPurpose("general") as "general" | "runtime";
-}
-
 export class ExtensionBindingError extends Error {
   constructor() {
     super("Unable to resolve the Ingenium extension binding");

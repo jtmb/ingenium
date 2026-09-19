@@ -32,7 +32,6 @@ export const RECOVERY_BOOTSTRAP_RESTART_TIMEOUT_MS = 600_000;
 export const RECOVERY_BOOTSTRAP_CHECKS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["/usr/bin/bash", ["tests/test-agent-validation.sh"]],
   [NPM, ["run", "test", "--workspace=packages/ingenium-extension", "--", "managed-command-wrapper.test.ts", "-t", "autonomous-recovery|recovery checkpoint|source recovery shim|installed current managed wrapper|fixed deployment|Basic authentication|recovery server secret|typed coordination"]],
-  [NPM, ["run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "abort_without_after|idle_stale_pending|ambiguous_quarantine_replay|collision|outbox|trusteddeployment|protected runtime"]],
   [NPM, ["run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts"]],
   [NPM, ["run", "typecheck", "--workspace=packages/ingenium-extension"]],
   [NPM, ["run", "build", "--workspace=packages/ingenium-extension"]],

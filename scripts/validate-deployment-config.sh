@@ -398,7 +398,7 @@ for binding in 'INGENIUM_PROJECT ingenium' 'INGENIUM_WORKSPACE_ID shared-memory-
   require_literal "${repo_root}/scripts/project-opencode-global-config.mjs" "environment.$name = \"$value\";"
 done
 require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts"'
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"'
+  require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts"'
 require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
 require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups'
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
@@ -426,7 +426,7 @@ require_literal "${repo_root}/scripts/start-opencode-web.sh" '"$@"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime"'
 require_literal "$entrypoint" 'install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-runtime'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" '. /run/ingenium-runtime/environment'
-require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'
+require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'
 require_literal "${repo_root}/scripts/start-runtime-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'attempts=10'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'

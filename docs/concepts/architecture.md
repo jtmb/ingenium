@@ -23,7 +23,7 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 - **Project name**: A display locator that must resolve to an immutable project UUID granted by the scoped credential
 - **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
 - **Plugin target**: Explicit `--project` or `INGENIUM_PROJECT` locators take precedence; otherwise extension plugins use the validated worktree basename
-- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the canonical `resource-sync`, `observer`, `auto-observer`, `session-coordinator`, and Ponytail adapter plugins
+- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the canonical `resource-sync`, `observer`, `auto-observer`, `lifecycle`, and Ponytail adapter plugins
 
 ### External Worktree Project Initialization
 
@@ -160,7 +160,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **290 server registrations** across **32 baseline categories**. Two extension-registered tools bring the built-in catalog to **292**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **284 active server registrations** across **32 baseline categories**. Two extension-registered tools bring the active built-in surface to **286**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **24 primary navigation routes plus the 19-tab Settings overlay**. It talks to the API over HTTP.
 
 ### Resource tenancy (AUTH-104)
@@ -571,7 +571,7 @@ upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`. Local projects register
 the project-relative plugin path once; the container registers the equivalent
 `/app/.../ponytail.mjs` path once in its global config. The published npm
 package `@dietrichgebert/ponytail@4.8.4` is excluded because its named export
-does not match the OpenCode 1.18.9 loader contract.
+does not match the OpenCode 1.18.31 loader contract.
 
 The adapter's boundary is prompt-only: it appends the Ponytail ruleset to chat
 system prompts and registers six commands, but adds no MCP tools or execution
@@ -1297,7 +1297,7 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Private Express REST API on :4096 behind the authenticated :4097 boundary. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 290 server registrations. Two extension tools bring the built-in catalog to 292; project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 284 active server registrations. Historical coordination names are excluded from the active catalog; two extension tools bring the active built-in surface to 286. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 24 primary navigation routes plus the 19-tab Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
@@ -1348,8 +1348,8 @@ Additional `page.tsx` entrypoints support `/account`, the `/settings` redirect, 
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **292 tools** across **32 baseline
-categories** (**290 `ingenium_` catalog entries + 2 extension tools**). Project-scoped child discovery can increase the effective total
+The canonical system catalog contains **286 entries** across **32 baseline
+categories** (**284 active `ingenium_` server registrations + 2 extension tools**). The active built-in surface is **286 tools**. Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -1367,7 +1367,7 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
 | Health | 1 | health_check |
 | OpenCode | 1 | opencode_messages |
-| Tasks | 32 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff |
+| Tasks | 26 | create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update |
 | Plans (Context) | 3 | save, search, list |
 | Context | 22 | get, update, delete, batch_get, upload_file, conversation_create, conversation_get, conversation_list, message_append, message_list, message_search, message_retrieve, message_batch_retrieve, checkpoint_create, checkpoint_list, checkpoint_get, checkpoint_restore, checkpoint_maintenance_preview, checkpoint_maintenance_authorize, conversation_archive, conversation_unarchive, checkpoint_audit_list |
 | Memory | 7 | memory_save, memory_read, memory_list, memory_search, memory_update, memory_forget, memory_operation_status |

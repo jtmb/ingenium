@@ -12,6 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
   request,
   isOpenCodeError,
   opencodeClient,
+  verifyOpenCodeNativeMessage,
 } from "../lib/opencode-client.js";
 import { logger } from "ingenium-core";
 
@@ -54,6 +56,18 @@ function mockNetworkError(): Error {
   const err = new Error("fetch failed") as Error & { name: string };
   err.name = "TypeError";
   return err;
+}
+
+function v2Session(id = "s1", directory = "/workspace") {
+  return {
+    id,
+    projectID: "project-1",
+    title: "Session",
+    location: { directory },
+    time: { created: 1, updated: 2 },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+  };
 }
 
 /* ── Tests ───────────────────────────────────────────────────────────────── */
@@ -362,7 +376,7 @@ describe("request — error normalization", () => {
     }
   });
 
-  it("extracts error code from name field (OpenCode v1.18.9 errors)", async () => {
+  it("extracts error code from name field (OpenCode errors)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -478,7 +492,7 @@ describe("opencodeClient — method routing", () => {
   it("health() calls GET /global/health", async () => {
     const fetchSpy = vi
       .fn()
-      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.9" }));
+      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.31" }));
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.health();
@@ -486,7 +500,7 @@ describe("opencodeClient — method routing", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const url = fetchSpy.mock.calls[0][0] as string;
     expect(url).toContain("/global/health");
-    expect(result).toEqual({ healthy: true, version: "1.18.9" });
+    expect(result).toEqual({ healthy: true, version: "1.18.31" });
   });
 
   it("updateGlobalConfig() patches the running global configuration", async () => {
@@ -502,30 +516,43 @@ describe("opencodeClient — method routing", () => {
     expect(init.body).toBe(JSON.stringify({ config: { provider: { lmstudio: { models: {} } } } }));
   });
 
-  it("listSessions() calls GET /session with directory query", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, [{ id: "s1" }]));
+  it("listSessions() calls the official v2 session endpoint with directory query", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: [v2Session()], cursor: { next: "session-next" } }))
+      .mockResolvedValueOnce(mockResponse(200, { data: [v2Session("s2")], cursor: {} }));
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.listSessions("/workspace");
 
-    const url = fetchSpy.mock.calls[0][0] as string;
-    expect(url).toContain("/session");
-    expect(url).toContain("directory=%2Fworkspace");
+    const firstUrl = new URL((fetchSpy.mock.calls[0][0] as Request).url);
+    const secondUrl = new URL((fetchSpy.mock.calls[1][0] as Request).url);
+    expect(firstUrl.pathname).toBe("/api/session");
+    expect(firstUrl.searchParams.get("directory")).toBe("/workspace");
+    expect(firstUrl.searchParams.get("order")).toBe("desc");
+    expect(secondUrl.searchParams.get("directory")).toBe("/workspace");
+    expect(secondUrl.searchParams.get("limit")).toBe("100");
+    expect(secondUrl.searchParams.get("cursor")).toBe("session-next");
+    expect(secondUrl.searchParams.has("order")).toBe(false);
     expect(Array.isArray(result)).toBe(true);
+    expect(result).toEqual([
+      expect.objectContaining({ id: "s1", directory: "/workspace" }),
+      expect.objectContaining({ id: "s2", directory: "/workspace" }),
+    ]);
   });
 
-  it("encodes dynamic session, message, action, and permission IDs as one path segment", async () => {
+  it("encodes dynamic v2 session IDs and preserves legacy action path safety", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
     vi.stubGlobal("fetch", fetchSpy);
 
     await opencodeClient.getSession("../global/config");
+    await opencodeClient.getSession("session_a");
     await opencodeClient.getSessionMessage("session/a", "message/b");
     await opencodeClient.abortSession("session/a");
     await opencodeClient.replyPermission("session/a", "permission/b", { response: "once" });
 
-    const urls = fetchSpy.mock.calls.map(([url]) => url as string);
+    const urls = fetchSpy.mock.calls.map(([url]) => typeof url === "string" ? url : (url as Request).url);
     expect(urls).toEqual(expect.arrayContaining([
-      expect.stringMatching(/\/session\/\.\.%2Fglobal%2Fconfig$/),
+      expect.stringMatching(/\/api\/session\/session_a$/),
       expect.stringMatching(/\/session\/session%2Fa\/message\/message%2Fb$/),
       expect.stringMatching(/\/session\/session%2Fa\/abort$/),
       expect.stringMatching(/\/session\/session%2Fa\/permissions\/permission%2Fb$/),
@@ -535,26 +562,130 @@ describe("opencodeClient — method routing", () => {
     expect(fetchSpy.mock.calls.at(-1)![0]).toMatch(/\/session\/session_1\/message\/message_1$/);
   });
 
-  it("maps empty and dot path segments to one fixed upstream segment", async () => {
+  it("rejects unsafe v2 session identifiers before transport", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
     vi.stubGlobal("fetch", fetchSpy);
 
     for (const segment of ["", ".", ".."]) {
-      await opencodeClient.getSession(segment);
-      await opencodeClient.getSessionMessage("session_1", segment);
+      const result = await opencodeClient.getSession(segment);
+      expect(result).toEqual(expect.objectContaining({ error: expect.objectContaining({ code: "INVALID_SESSION_ID" }) }));
     }
 
-    const paths = fetchSpy.mock.calls.map(([url]) => new URL(url as string).pathname);
-    expect(paths).toHaveLength(6);
-    expect(paths).toEqual(expect.arrayContaining([
-      "/session/__invalid_opencode_path_segment__",
-      "/session/session_1/message/__invalid_opencode_path_segment__",
-    ]));
-    for (const path of paths) {
-      expect(path).not.toBe("/");
-      expect(path).not.toBe("/session/");
-      expect(path).not.toContain("/global/config");
-    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects a native session whose directory does not match the requested worktree", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, v2Session("ses-1", "/foreign")));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await opencodeClient.getSession("ses-1", "/workspace");
+
+    expect(result).toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: "EXTERNAL_OBSERVATION_BINDING_REJECTED" }),
+    }));
+  });
+
+  it("maps v2 assistant content to the retained message envelope without leaking non-text parts", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1")))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{
+            id: "msg-1",
+            type: "assistant",
+            agent: "agent-1",
+            model: { providerID: "provider-1", id: "model-1" },
+            time: { created: 10, completed: 20 },
+            finish: "stop",
+            tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+            cost: 6,
+            content: [
+              { id: "part-text", type: "text", text: "visible" },
+              { id: "part-reasoning", type: "reasoning", text: "private" },
+              { id: "part-tool", type: "tool", name: "secret-tool", state: { status: "completed" } },
+            ],
+        }],
+        cursor: {},
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await opencodeClient.getMessages("ses-1", 100, undefined, "/workspace");
+
+    expect(result).toMatchObject([{
+      info: expect.objectContaining({ role: "assistant", finish: "stop", providerID: "provider-1", modelID: "model-1" }),
+      parts: expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: "visible" }),
+        expect.objectContaining({ type: "step-finish", cost: 6 }),
+      ]),
+    }]);
+    expect(JSON.stringify(result)).not.toContain("secret-tool");
+  });
+
+  it("keeps order only on the first v2 message request and carries opaque cursors unchanged", async () => {
+    const nextCursor = "opaque.cursor/with?=+";
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1", "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ id: "msg-1", type: "user", time: { created: 1 }, text: "one" }],
+        cursor: { next: nextCursor },
+      }))
+      .mockResolvedValueOnce(mockResponse(200, v2Session("ses-1", "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ id: "msg-2", type: "user", time: { created: 2 }, text: "two" }],
+        cursor: {},
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const first = await opencodeClient.getMessagesPage("ses-1", 100, undefined, "/workspace");
+    const second = await opencodeClient.getMessagesPage("ses-1", 100, nextCursor, "/workspace");
+    const firstMessageUrl = new URL((fetchSpy.mock.calls[1][0] as Request).url);
+    const secondMessageUrl = new URL((fetchSpy.mock.calls[3][0] as Request).url);
+
+    expect(first).toMatchObject({ nextCursor, messages: [{ info: { id: "msg-1" } }] });
+    expect(second).toMatchObject({ messages: [{ info: { id: "msg-2" } }] });
+    expect(second).not.toHaveProperty("nextCursor");
+    expect(firstMessageUrl.searchParams.get("directory")).toBe("/workspace");
+    expect(firstMessageUrl.searchParams.get("limit")).toBe("100");
+    expect(firstMessageUrl.searchParams.get("order")).toBe("asc");
+    expect(firstMessageUrl.searchParams.has("cursor")).toBe(false);
+    expect(secondMessageUrl.searchParams.get("directory")).toBe("/workspace");
+    expect(secondMessageUrl.searchParams.get("limit")).toBe("100");
+    expect(secondMessageUrl.searchParams.get("cursor")).toBe(nextCursor);
+    expect(secondMessageUrl.searchParams.has("order")).toBe(false);
+  });
+
+  it("verifies a hashed native session and exact user message binding", async () => {
+    const nativeSessionId = "ses-native";
+    const sessionId = `session-${createHash("sha256").update(nativeSessionId, "utf8").digest("hex")}`;
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: [v2Session(nativeSessionId, "/workspace")], cursor: {} }))
+      .mockResolvedValueOnce(mockResponse(200, v2Session(nativeSessionId, "/workspace")))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ id: "msg-user", type: "user", time: { created: 10 }, text: "visible" }], cursor: {},
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await verifyOpenCodeNativeMessage({
+      worktree: "/workspace", sessionId, messageId: "msg-user", role: "user", text: "visible",
+    });
+
+    expect(result).toMatchObject({ nativeSessionId, message: { info: { id: "msg-user", role: "user" } } });
+    expect(fetchSpy.mock.calls.map(([url]) => typeof url === "string" ? url : (url as Request).url)).toEqual([
+      expect.stringContaining("/api/session"),
+      expect.stringContaining(`/api/session/${nativeSessionId}`),
+      expect.stringContaining(`/api/session/${nativeSessionId}/message`),
+    ]);
+  });
+
+  it("rejects an invalid native session binding before transport", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await verifyOpenCodeNativeMessage({ worktree: "/workspace", sessionId: "unknown" });
+
+    expect(result).toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: "EXTERNAL_OBSERVATION_BINDING_REJECTED" }),
+    }));
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("listIntegrations() discovers native authentication methods", async () => {

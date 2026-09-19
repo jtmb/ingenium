@@ -19,7 +19,7 @@
     "@playwright/mcp": "0.0.78"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.9",
+    "@opencode-ai/plugin": "1.18.31",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@types/react-dom": "^19.2.3"

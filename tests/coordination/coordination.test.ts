@@ -1993,7 +1993,7 @@ test("T65 F4 preserves mapped profiles without granting synthetic tools or chang
   assert.equal(serialized.includes(legacyCoordination), false);
   assert.equal(serialized.includes(legacyRepository), false);
   const config = JSON.parse(serialized);
-  const expectedPlugin = pathToFileURL(join(options.worktree, "packages/ingenium-extension/plugins/session-coordinator.ts")).href;
+  const expectedPlugin = pathToFileURL(join(options.worktree, "packages/ingenium-extension/plugins/lifecycle.ts")).href;
   assert.deepEqual(Object.keys(config.agent), [options.agents.A.name]);
   assert.equal(config.tools, undefined);
   assert.deepEqual(config.permission, { "*": "deny" });
@@ -2028,8 +2028,8 @@ test("T65 F4 preserves mapped profiles without granting synthetic tools or chang
     { ...reader, plugin: [] },
     { ...reader, plugin: [expectedPlugin, expectedPlugin] },
     { ...reader, plugin: [expectedPlugin, "file:///unexpected-plugin.ts"] },
-    { ...reader, plugin: ["file:///foreign/worktree/packages/ingenium-extension/plugins/session-coordinator.ts"] },
-    { ...reader, plugin: ["file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"] },
+    { ...reader, plugin: ["file:///foreign/worktree/packages/ingenium-extension/plugins/lifecycle.ts"] },
+    { ...reader, plugin: ["file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts"] },
   ]) {
     assert.throws(() => assertOpenCodeInspection("B", { ...inspection, config: invalid }, options), /B synthetic tool override detected/);
   }

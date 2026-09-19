@@ -48,9 +48,6 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_COORDINATION_OWNER_SECRET_FILE` | _(none)_ | `ingenium-coordination-reset` | Absolute path to an owner-private mode-`0600` JSON file containing the bootstrap owner's login and step-up credentials. Exactly one protected file or descriptor source is required; the value is never accepted through argv or printed. |
 | `INGENIUM_COORDINATION_OWNER_SECRET_FD` | _(none)_ | `ingenium-coordination-reset` | Already-open owner-private regular-file descriptor containing the same JSON payload. Mutually exclusive with `INGENIUM_COORDINATION_OWNER_SECRET_FILE`; descriptor numbers below 3 are rejected. |
 | `OBSERVER_CHECK_INTERVAL` | `0` | `observer.ts` | Session idle check interval; `0` disables observer checks. |
-| `INGENIUM_COORDINATION_TRACE_FILE` | _(unset)_ | `session-coordinator.ts` | Optional coordination lifecycle trace file. The resolved path must remain below `/tmp/opencode/` in an owner-only `0700` directory and `0600` regular file; diagnostic write failures never affect coordination. |
-| `INGENIUM_COORDINATION_TRANSFORM_CAPTURE` | _(unset)_ | `session-coordinator.ts` | Set to `1` to enable the optional private capture of non-empty coordination transform values. Leave unset in normal operation. |
-| `INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE` | _(unset)_ | `session-coordinator.ts` | Owner-only `0600` capture file below `/tmp/opencode/`, used only when `INGENIUM_COORDINATION_TRANSFORM_CAPTURE=1`. |
 
 When both coordination owner overrides are absent, the reset command reads the
 fixed ignored `.opencode/.ingenium-coordination-owner-provider.json` path. This

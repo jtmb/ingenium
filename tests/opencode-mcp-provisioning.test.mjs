@@ -11,7 +11,7 @@ const token = `ing_${"a".repeat(12)}_${"b".repeat(43)}`;
 const binding = {
   name: "Compatibility OpenCode", kind: "service", audience: "mcp", token,
   projectName: "ingenium", workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
-  scopes: ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
+  scopes: ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
   expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
 };
 
@@ -99,7 +99,7 @@ test("local capability and validated launcher identity are installed privately w
     writeFileSync(source, "c".repeat(64), { mode: 0o600 });
     const id = "11111111-1111-4111-8111-111111111111";
     const credential = { ...binding, name: `Runtime ${id}`, kind: "runtime", audience: "runtime",
-      scopes: ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write", "projects:read", "documentation:read", "rag:read", "memory:write"],
+      scopes: ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"],
       createdByUserId: id, organizationId: id, projectId: id, securityEpoch: 0, storageMappingHash: "a".repeat(64) };
     const runtime = { id, state: "READY", backendContainerId: null, ownerUserId: id, organizationId: id,
       projectId: id, workspaceId: binding.workspaceId, securityEpoch: 0 };

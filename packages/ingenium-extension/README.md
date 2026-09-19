@@ -11,8 +11,8 @@ with lifecycle plugins and managed CLI tools.
 - **observer.ts** — Session event handling, observation import, synthesis trigger
 - **resource-sync.ts** — SHA-256 manifest-based Git-authoritative projection for repository docs, skills, agents, plugins, and commands through authenticated MCP
 - **auto-observer.ts** — Thin trigger (~62 lines) that POSTs to `/api/v1/extraction/run` on session idle
-- **session-coordinator.ts** — Managed session identity, leases, claims, handoffs, and recovery-safe coordination
-- **ponytail/** — Official immutable Ponytail OpenCode checkout pinned to upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance. It is loaded once from `./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs` in repository configs; the container uses the equivalent `/app/.../ponytail.mjs` path. The published `@dietrichgebert/ponytail@4.8.4` package is not used because its named export is incompatible with OpenCode 1.18.9. The adapter is prompt-only and provides six `/ponytail*` commands; it adds no MCP tools or permissions.
+- **lifecycle.ts** — v2 session reads for automatic context upload and metadata-only usage telemetry
+- **ponytail/** — Official immutable Ponytail OpenCode checkout pinned to upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance. It is loaded once from `./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs` in repository configs; the container uses the equivalent `/app/.../ponytail.mjs` path. The published `@dietrichgebert/ponytail@4.8.4` package is not used because its named export is incompatible with OpenCode 1.18.31. The adapter is prompt-only and provides six `/ponytail*` commands; it adds no MCP tools or permissions.
 
 The canonical server-plugin specs are exported from `plugin-specs.mjs`; the
 published `package.json` exports the individual server wrappers and
@@ -20,7 +20,7 @@ published `package.json` exports the individual server wrappers and
 that canonical list or the root config, so its runtime activation is deferred;
 its mocked contract tests do not promise a live session-ID sidebar.
 
-**MCP server:** `dist/scripts/mcp-server.js` — stdio server with 290 `ingenium_`-prefixed registrations. The package's 2 extension-registered tools bring the built-in catalog to 292 across 32 baseline categories.
+**MCP server:** `dist/scripts/mcp-server.js` — stdio server with 284 retained `ingenium_`-prefixed registrations. The package's 2 extension-registered tools bring the active built-in surface to 286 across 32 baseline categories.
 
 ## Repository initialization CLI
 

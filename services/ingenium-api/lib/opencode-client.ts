@@ -1,11 +1,15 @@
 import { logger, runtimes } from "ingenium-core";
+import { createOpencodeClient as createV2OpenCodeClient, type SessionMessage, type SessionV2Info } from "@opencode-ai/sdk/v2";
+import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "../config/index.js";
 import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
 
 /**
- * Server-side typed HTTP client for the OpenCode v1.18.9 REST API.
+ * Server-side typed HTTP client for OpenCode. Session and message reads use the
+ * official v2 SDK; the remaining methods retain the established compatibility
+ * surface until their v2 request/response mappings are complete.
  *
  * Routes all requests through `fetch` with HTTP Basic auth, normalizing errors
  * into a consistent `{ error: { message, code } }` shape. The SSE streaming
@@ -16,7 +20,8 @@ import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runti
  * - The Authorization header value is never serialized to error messages.
  * - Runtime checks prevent `undefined` passwords from reaching the wire.
  *
- * 🔴 Verified against: OpenCode v1.18.9 contract (see /tmp/opencode-contract.md)
+ * 🔴 v2 session/message reads are bound to the native session location before
+ * their data is returned to API consumers.
  */
 
 /* ── Types ── */
@@ -67,7 +72,7 @@ export interface FilePartInput {
   filename?: string;
 }
 
-/** Shape for prompt send request body (v1.18.9 contract) */
+/** Shape for prompt send request body on the retained OpenCode REST surface. */
 export interface SendPromptBody {
   messageID?: string;
   parts: Array<TextPartInput | FilePartInput>;
@@ -166,12 +171,12 @@ export interface CommandBody {
   arguments?: string[];
 }
 
-/* ── Message shape (v1.18.9 contract) ── */
+/* ── Message shape on the retained OpenCode REST surface ── */
 
 export interface MessageInfo {
   id: string;
   sessionID: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   time: {
     created: number;
     completed?: number;
@@ -192,6 +197,7 @@ export interface MessageInfo {
     cache?: { read: number; write: number };
   };
   finish?: string;
+  error?: unknown;
   summary?: { diffs?: unknown[] };
 }
 
@@ -213,7 +219,7 @@ export interface MessageEnvelope {
   parts: MessagePart[];
 }
 
-/* ── Session shape (v1.18.9 contract) ── */
+/* ── Session shape on the retained OpenCode REST surface ── */
 
 export interface SessionTime {
   created: number;
@@ -253,6 +259,7 @@ export interface SessionInfo {
   id: string;
   slug: string;
   projectID: string;
+  parentID?: string;
   directory: string;
   path: string;
   title: string;
@@ -268,7 +275,17 @@ export interface SessionInfo {
   revert?: SessionRevert;
 }
 
-/* ── Provider shape (v1.18.9 contract) ── */
+interface V2SessionListResponse {
+  data: SessionV2Info[];
+  cursor?: { next?: string };
+}
+
+interface V2SessionMessagesResponse {
+  data: SessionMessage[];
+  cursor?: { next?: string };
+}
+
+/* ── Provider shape on the retained OpenCode REST surface ── */
 
 export interface ProviderModel {
   id: string;
@@ -353,7 +370,7 @@ interface V2Response<T> {
   data: T;
 }
 
-/* ── Agent shape (v1.18.9 contract) ── */
+/* ── Agent shape on the retained OpenCode REST surface ── */
 
 export interface AgentInfo {
   name: string;
@@ -368,7 +385,7 @@ export interface AgentInfo {
   options: Record<string, unknown>;
 }
 
-/* ── Skill shape (v1.18.9 contract) ── */
+/* ── Skill shape on the retained OpenCode REST surface ── */
 
 export interface SkillInfo {
   name: string;
@@ -381,9 +398,9 @@ export interface SkillInfo {
 
 export interface McpServerInfo {
   name: string;
-  /** OpenCode v1.18.9 connection state. */
+  /** Current OpenCode connection state. */
   status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
-  /** Legacy compatibility for pre-v1.18.9 servers. */
+  /** Legacy compatibility for older servers. */
   connected?: boolean;
   toolCount?: number;
   tools?: number | unknown[];
@@ -455,7 +472,7 @@ type SafeProviderOperation =
 
 /**
  * Build a Basic auth header value from the configured password.
- * Uses "opencode" as the username per the v1.18.9 contract:
+ * Uses "opencode" as the username per the retained OpenCode REST contract:
  *   Authorization: Basic base64("opencode:<PASSWORD>")
  *
  * Returns `null` if OPENCODE_SERVER_PASSWORD is not set — callers
@@ -508,6 +525,316 @@ function pathSegment(value: string): string {
     return INVALID_PATH_SEGMENT;
   }
   return encodeURIComponent(value);
+}
+
+type V2OpenCodeClient = ReturnType<typeof createV2OpenCodeClient>["v2"];
+
+interface OpenCodeMessagePage {
+  messages: MessageEnvelope[];
+  nextCursor?: string;
+}
+
+interface OpenCodeUserMessage {
+  text: string;
+  time_created: number;
+  messageId?: string;
+  sessionId?: string;
+}
+
+export interface NativeOpenCodeMessageBinding {
+  worktree: string;
+  sessionId: string;
+  messageId?: string;
+  role?: "user" | "assistant";
+  text?: string;
+}
+
+const V2_PAGE_SIZE = 100;
+const MAX_V2_LIST_PAGES = 100;
+const V2_BINDING_ERROR: OpenCodeErrorShape["error"] = {
+  code: "EXTERNAL_OBSERVATION_BINDING_REJECTED",
+  message: "OpenCode session binding rejected",
+};
+
+function v2Client(directory?: string): V2OpenCodeClient | OpenCodeErrorShape {
+  const target = currentOpenCodeRuntimeTarget();
+  const requestedDirectory = directory ?? target?.directory;
+  const auth = target
+    ? target.password
+      ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}`
+      : undefined
+    : buildAuthHeader();
+  if (!target && !auth) {
+    return { error: { code: "AUTH_NOT_CONFIGURED", message: "OPENCODE_SERVER_PASSWORD is not configured" } };
+  }
+
+  return createV2OpenCodeClient({
+    baseUrl: target?.baseUrl ?? config.opencodeUrl,
+    ...(auth ? { headers: { Authorization: auth } } : {}),
+    ...(requestedDirectory ? { directory: requestedDirectory } : {}),
+  }).v2;
+}
+
+function statusOf(value: unknown): number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const response = (value as Record<string, unknown>).response;
+  if (!response || typeof response !== "object") return undefined;
+  const status = (response as Record<string, unknown>).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function v2Error(value: unknown, fallback = "OPENCODE_V2_UNAVAILABLE"): OpenCodeErrorShape {
+  const status = statusOf(value);
+  const code = status === 401 || status === 403
+    ? "AUTHENTICATION_FAILED"
+    : status === 404
+      ? "NOT_FOUND"
+      : status && status >= 500
+        ? "HTTP_" + status
+        : fallback;
+  const error: OpenCodeErrorShape["error"] = {
+    code,
+    message: code === "AUTHENTICATION_FAILED"
+      ? "OpenCode authentication failed"
+      : code === "NOT_FOUND"
+        ? "OpenCode resource not found"
+        : "OpenCode request failed",
+  };
+  if (status !== undefined) Object.defineProperty(error, "status", { value: status, enumerable: false });
+  return { error };
+}
+
+async function v2Call<T>(call: (client: V2OpenCodeClient) => Promise<unknown>, directory?: string): Promise<OpenCodeResult<T>> {
+  const client = v2Client(directory);
+  if (isOpenCodeError(client)) return client;
+  try {
+    const result = await call(client);
+    if (!result || typeof result !== "object" || !("data" in result) || (result as { data?: unknown }).data === undefined) {
+      return v2Error(result);
+    }
+    return (result as { data: T }).data;
+  } catch {
+    return { error: { code: "NETWORK_ERROR", message: "Network error contacting OpenCode server" } };
+  }
+}
+
+function expectedOpenCodeDirectory(directory?: string): string | undefined {
+  return directory ?? currentOpenCodeRuntimeTarget()?.directory;
+}
+
+function validNativeSessionId(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+}
+
+function validateV2Session(info: unknown, directory?: string): info is SessionV2Info {
+  if (!info || typeof info !== "object") return false;
+  const value = info as Partial<SessionV2Info> & { location?: { directory?: unknown } };
+  return typeof value.id === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.id)
+    && typeof value.projectID === "string"
+    && typeof value.location?.directory === "string"
+    && (directory === undefined || value.location.directory === directory);
+}
+
+function bindingError(): OpenCodeErrorShape {
+  const error: OpenCodeErrorShape["error"] = { ...V2_BINDING_ERROR };
+  Object.defineProperty(error, "status", { value: 404, enumerable: false });
+  return { error };
+}
+
+function mapV2Session(info: SessionV2Info): SessionInfo {
+  return {
+    id: info.id,
+    slug: info.id,
+    projectID: info.projectID,
+    parentID: info.parentID,
+    directory: info.location.directory,
+    path: info.location.directory,
+    title: info.title,
+    version: "v2",
+    time: info.time,
+    cost: info.cost,
+    tokens: info.tokens,
+    agent: info.agent,
+    model: info.model,
+    revert: info.revert
+      ? { messageID: info.revert.messageID, snapshot: info.revert.snapshot ?? "", diff: info.revert.diff ?? "" }
+      : undefined,
+  };
+}
+
+function messagePartId(messageId: string, suffix: string): string {
+  return `${messageId}:${suffix}`;
+}
+
+function mapV2Message(message: SessionMessage, sessionId: string): MessageEnvelope | null {
+  const base = { id: message.id, sessionID: sessionId };
+  if (message.type === "user") {
+    return {
+      info: { ...base, role: "user", time: message.time },
+      parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text: message.text }],
+    };
+  }
+  if (message.type === "assistant") {
+    const parts: MessagePart[] = message.content.flatMap((part): MessagePart[] => {
+      if (part.type === "text" || part.type === "reasoning") {
+        return [{ id: part.id, sessionID: sessionId, messageID: message.id, type: part.type, text: part.text }];
+      }
+      if (part.type === "tool") {
+        return [{ id: part.id, sessionID: sessionId, messageID: message.id, type: "tool" }];
+      }
+      return [];
+    });
+    const finishTime = message.time.completed ?? message.time.created;
+    parts.push({
+      id: messagePartId(message.id, "step-finish"),
+      sessionID: sessionId,
+      messageID: message.id,
+      type: "step-finish",
+      time: { start: message.time.created, end: finishTime },
+      tokens: message.tokens,
+      cost: message.cost,
+      reason: message.finish,
+    });
+    return {
+      info: {
+        ...base,
+        role: "assistant",
+        time: message.time,
+        agent: message.agent,
+        model: { providerID: message.model.providerID, modelID: message.model.id },
+        modelID: message.model.id,
+        providerID: message.model.providerID,
+        tokens: message.tokens,
+        cost: message.cost,
+        finish: message.finish,
+        error: message.error,
+      },
+      parts,
+    };
+  }
+  if (message.type === "system" || message.type === "synthetic" || message.type === "shell") {
+    const text = message.type === "shell" ? message.output : message.text;
+    return {
+      info: { ...base, role: "system", time: message.time },
+      parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text }],
+    };
+  }
+  return null;
+}
+
+async function getV2Session(sessionId: string, directory?: string): Promise<OpenCodeResult<SessionV2Info>> {
+  if (!validNativeSessionId(sessionId)) {
+    return { error: { code: "INVALID_SESSION_ID", message: "Invalid OpenCode session identifier" } };
+  }
+  const expectedDirectory = expectedOpenCodeDirectory(directory);
+  const result = await v2Call<SessionV2Info>((client) => client.session.get({ sessionID: sessionId }), expectedDirectory);
+  if (isOpenCodeError(result)) return result;
+  return validateV2Session(result, expectedDirectory) ? result : bindingError();
+}
+
+async function getV2MessagePage(
+  sessionId: string,
+  directory: string | undefined,
+  limit: number | undefined,
+  cursor: string | undefined,
+): Promise<OpenCodeResult<{ messages: MessageEnvelope[]; nextCursor?: string }>> {
+  const session = await getV2Session(sessionId, directory);
+  if (isOpenCodeError(session)) return session;
+  const pageLimit = limit === undefined ? V2_PAGE_SIZE : Math.min(Math.max(limit, 1), V2_PAGE_SIZE);
+  const request = cursor === undefined
+    ? { sessionID: sessionId, limit: pageLimit, order: "asc" as const }
+    : { sessionID: sessionId, limit: pageLimit, cursor };
+  const result = await v2Call<V2SessionMessagesResponse>(
+    (client) => client.session.messages(request),
+    directory ?? session.location.directory,
+  );
+  if (isOpenCodeError(result) || !Array.isArray(result.data)) return isOpenCodeError(result) ? result : v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+  if (result.data.length > V2_PAGE_SIZE) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+  const nextCursor = result.cursor?.next;
+  if (nextCursor !== undefined && (typeof nextCursor !== "string" || nextCursor.length === 0)) {
+    return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+  }
+  const messages = result.data.flatMap((message) => {
+    const mapped = mapV2Message(message, sessionId);
+    return mapped ? [mapped] : [];
+  });
+  return { messages, ...(nextCursor === undefined ? {} : { nextCursor }) };
+}
+
+function projectDirectoryMatches(directory: string, project: string): boolean {
+  if (!project) return true;
+  return directory === project || directory.endsWith(`/${project}`) || directory.endsWith(`\\${project}`);
+}
+
+export async function readRecentOpenCodeUserMessages(params: {
+  since: number;
+  limit: number;
+  project?: string;
+}): Promise<OpenCodeResult<OpenCodeUserMessage[]>> {
+  const sessions = await opencodeClient.listSessions();
+  if (isOpenCodeError(sessions)) return sessions;
+  const messages: OpenCodeUserMessage[] = [];
+  for (const session of sessions) {
+    if (session.parentID || !projectDirectoryMatches(session.directory, params.project ?? "")) continue;
+    let cursor: string | undefined;
+    const cursors = new Set<string>();
+    for (let page = 0; page < MAX_V2_LIST_PAGES; page += 1) {
+      const result = await getV2MessagePage(session.id, session.directory, V2_PAGE_SIZE, cursor);
+      if (isOpenCodeError(result)) return result;
+      for (const message of result.messages) {
+        if (message.info.role !== "user") continue;
+        const part = message.parts.find((candidate) => candidate.type === "text" && typeof candidate.text === "string");
+        const timeCreated = message.info.time.created;
+        if (!part || typeof part.text !== "string" || part.text.length <= 10 || timeCreated <= params.since) continue;
+        messages.push({ text: part.text, time_created: timeCreated, messageId: message.info.id, sessionId: session.id });
+      }
+      if (!result.nextCursor || result.messages.length === 0) break;
+      if (cursors.has(result.nextCursor)) return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination failed" } };
+      cursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+  }
+  messages.sort((left, right) => right.time_created - left.time_created);
+  return messages.slice(0, Math.max(0, Math.min(params.limit, 2000)));
+}
+
+export async function verifyOpenCodeNativeMessage(
+  binding: NativeOpenCodeMessageBinding,
+): Promise<OpenCodeResult<{ nativeSessionId: string; message?: MessageEnvelope }>> {
+  if (!/^session-[a-f0-9]{64}$/.test(binding.sessionId)
+    || !binding.worktree.startsWith("/")
+    || binding.worktree.length > 1024
+    || /[\u0000-\u001f\u007f]/.test(binding.worktree)) {
+    return bindingError();
+  }
+  const sessions = await opencodeClient.listSessions(binding.worktree);
+  if (isOpenCodeError(sessions)) return sessions;
+  for (const session of sessions) {
+    const expectedSessionId = `session-${createHash("sha256").update(session.id, "utf8").digest("hex")}`;
+    if (expectedSessionId !== binding.sessionId) continue;
+    if (!binding.messageId) return { nativeSessionId: session.id };
+    let cursor: string | undefined;
+    const cursors = new Set<string>();
+    for (let page = 0; page < MAX_V2_LIST_PAGES; page += 1) {
+      const result = await getV2MessagePage(session.id, session.directory, V2_PAGE_SIZE, cursor);
+      if (isOpenCodeError(result)) return result;
+      const message = result.messages.find((candidate) => candidate.info.id === binding.messageId);
+      if (message && (!binding.role || message.info.role === binding.role)) {
+        if (binding.text !== undefined) {
+          const text = message.parts.find((part) => part.type === "text")?.text;
+          if (text !== binding.text) return bindingError();
+        }
+        return { nativeSessionId: session.id, message };
+      }
+      if (!result.nextCursor || result.messages.length === 0) break;
+      if (cursors.has(result.nextCursor)) return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination failed" } };
+      cursors.add(result.nextCursor);
+      cursor = result.nextCursor;
+    }
+    return bindingError();
+  }
+  return bindingError();
 }
 
 /**
@@ -748,12 +1075,13 @@ export function isOpenCodeError<T>(result: OpenCodeResult<T>): result is OpenCod
 /* ── Client ── */
 
 /**
- * Singleton OpenCode API client for v1.18.9.
+ * Singleton OpenCode API client. Session reads use the official v2 SDK;
+ * remaining methods retain the compatibility REST surface.
  *
  * Every method returns a `OpenCodeResult<T>` — callers should check
  * `isOpenCodeError(result)` before accessing the payload.
  *
- * Endpoints verified against the v1.18.9 contract at /tmp/opencode-contract.md.
+ * Endpoints are covered by the retained OpenCode REST contract tests.
  */
 export const opencodeClient = {
   /* ── Health ── */
@@ -788,8 +1116,30 @@ export const opencodeClient = {
 
   /* ── Sessions ── */
 
-  listSessions: (directory?: string): Promise<OpenCodeResult<SessionInfo[]>> =>
-    request<SessionInfo[]>("/session", { query: { directory } }),
+  listSessions: async (directory?: string): Promise<OpenCodeResult<SessionInfo[]>> => {
+    const expectedDirectory = expectedOpenCodeDirectory(directory);
+    const sessions: SessionInfo[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_V2_LIST_PAGES; page += 1) {
+      const request = cursor === undefined
+        ? { directory: expectedDirectory, limit: V2_PAGE_SIZE, order: "desc" as const }
+        : { directory: expectedDirectory, limit: V2_PAGE_SIZE, cursor };
+      const result = await v2Call<V2SessionListResponse>((client) => client.session.list(request), expectedDirectory);
+      if (isOpenCodeError(result)) return result;
+      if (!Array.isArray(result.data)) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+      for (const session of result.data) {
+        if (!validateV2Session(session, expectedDirectory)) return bindingError();
+        sessions.push(mapV2Session(session));
+      }
+      const next = result.cursor?.next;
+      if (!next) return sessions;
+      if (cursors.has(next)) return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination failed" } };
+      cursors.add(next);
+      cursor = next;
+    }
+    return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination exceeded its safety limit" } };
+  },
 
   createSession: (
     body: CreateSessionBody,
@@ -801,11 +1151,13 @@ export const opencodeClient = {
       query: { directory },
     }),
 
-  getSession: (
+  getSession: async (
     id: string,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(id)}`, { query: { directory } }),
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    const result = await getV2Session(id, directory);
+    return isOpenCodeError(result) ? result : mapV2Session(result);
+  },
 
   updateSession: (
     id: string,
@@ -834,15 +1186,23 @@ export const opencodeClient = {
 
   /* ── Messages ── */
 
-  getMessages: (
+  getMessagesPage: (
+    sessionId: string,
+    limit?: number,
+    cursor?: string,
+    directory?: string,
+  ): Promise<OpenCodeResult<OpenCodeMessagePage>> =>
+    getV2MessagePage(sessionId, directory, limit, cursor),
+
+  getMessages: async (
     sessionId: string,
     limit?: number,
     before?: string,
     directory?: string,
-  ): Promise<OpenCodeResult<MessageEnvelope[]>> =>
-    request<MessageEnvelope[]>(`/session/${pathSegment(sessionId)}/message`, {
-      query: { limit, before, directory },
-    }),
+  ): Promise<OpenCodeResult<MessageEnvelope[]>> => {
+    const result = await getV2MessagePage(sessionId, directory, limit, before);
+    return isOpenCodeError(result) ? result : result.messages;
+  },
 
   getSessionMessage: (
     sessionId: string,
@@ -1090,7 +1450,7 @@ export const opencodeClient = {
   listAgents: (): Promise<OpenCodeResult<AgentInfo[]>> =>
     request<AgentInfo[]>("/agent"),
 
-  /* ── Skills (v1.18.9: GET /skill works, but we DO NOT proxy it — skills are
+   /* ── Skills (GET /skill works, but we DO NOT proxy it — skills are
          managed by the Ingenium skill system, not OpenCode) ── */
 
   listSkills: (): Promise<OpenCodeResult<SkillInfo[]>> =>
@@ -1120,14 +1480,14 @@ export const opencodeClient = {
 
   /**
    * Get pending permission requests (global).
-   * v1.18.9 contract: GET /permission returns array of PermissionRequest objects.
+    * Retained contract: GET /permission returns an array of PermissionRequest objects.
    */
   getPermissions: (directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> =>
     request<PermissionRequest[]>("/permission", { query: { directory } }),
 
   /**
    * Reply to a session-scoped permission request.
-   * v1.18.9 contract: POST /session/{sessionId}/permissions/{permissionId}
+    * Retained contract: POST /session/{sessionId}/permissions/{permissionId}
    *   body: { "response": "once" | "always" | "reject" }
    */
   replyPermission: (
@@ -1146,7 +1506,7 @@ export const opencodeClient = {
 
   /**
    * Get pending questions (global).
-   * v1.18.9 contract: GET /question returns array of QuestionInfo objects.
+    * Retained contract: GET /question returns an array of QuestionInfo objects.
    * Note: Questions also arrive via SSE events and message parts.
    */
   getQuestions: (directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> =>
@@ -1156,7 +1516,7 @@ export const opencodeClient = {
 
   /**
    * Returns a ReadableStream piping SSE events from the OpenCode /event endpoint.
-   * v1.18.9 contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
+    * Retained contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
    * When `sessionId` is provided, events are filtered to that session.
    * When `directory` is provided, events are filtered to that directory.
    */

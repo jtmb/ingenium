@@ -5,12 +5,12 @@ import { join } from "node:path";
 import { getDb, projects, resetDbForTest, usage } from "ingenium-core";
 
 const mockListSessions = vi.fn();
-const mockGetMessages = vi.fn();
+const mockGetMessagesPage = vi.fn();
 vi.mock("../lib/opencode-client.js", () => ({
   isOpenCodeError: (value: unknown) => typeof value === "object" && value !== null && "error" in value,
   opencodeClient: {
     listSessions: (...args: unknown[]) => mockListSessions(...args),
-    getMessages: (...args: unknown[]) => mockGetMessages(...args),
+    getMessagesPage: (...args: unknown[]) => mockGetMessagesPage(...args),
   },
 }));
 
@@ -23,13 +23,13 @@ import {
 let directory = "";
 const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
 
-function assistantEnvelope(sessionId: string) {
+function assistantEnvelope(sessionId: string, messageId = "msg-safe", partId = "part-safe", created = Date.parse("2026-03-01T00:00:00.000Z")) {
   return {
     info: {
-      id: "msg-safe",
+      id: messageId,
       sessionID: sessionId,
       role: "assistant",
-      time: { created: Date.parse("2026-03-01T00:00:00.000Z"), completed: Date.parse("2026-03-01T00:00:01.000Z") },
+      time: { created, completed: created + 1_000 },
       agent: "assistant-agent",
       model: { providerID: "Provider/Exact-ID", modelID: "Model/Exact-ID" },
       cost: 1.5,
@@ -37,11 +37,11 @@ function assistantEnvelope(sessionId: string) {
       finish: "stop",
     },
     parts: [
-      { id: "reasoning-secret", sessionID: sessionId, messageID: "msg-safe", type: "reasoning", text: "do not persist reasoning" },
-      { id: "tool-secret", sessionID: sessionId, messageID: "msg-safe", type: "tool", text: "do not persist tool payload" },
+      { id: "reasoning-secret", sessionID: sessionId, messageID: messageId, type: "reasoning", text: "do not persist reasoning" },
+      { id: "tool-secret", sessionID: sessionId, messageID: messageId, type: "tool", text: "do not persist tool payload" },
       {
-        id: "part-safe", sessionID: sessionId, messageID: "msg-safe", type: "step-finish",
-        time: { start: Date.parse("2026-03-01T00:00:00.000Z"), end: Date.parse("2026-03-01T00:00:01.000Z") },
+        id: partId, sessionID: sessionId, messageID: messageId, type: "step-finish",
+        time: { start: created, end: created + 1_000 },
         tokens: { total: 21, input: 13, output: 8, reasoning: 5, cache: { read: 4, write: 2 } },
         cost: 1.5,
         reason: "stop",
@@ -154,6 +154,7 @@ describe("metadata-only OpenCode usage ingestion", () => {
     const mappedSession = {
       id: "ses-safe",
       projectID: "oc-mapped-project",
+      directory: "/workspace",
       time: { created: Date.parse("2026-03-01T00:00:00.000Z"), updated: Date.parse("2026-03-01T00:00:02.000Z") },
       agent: "session-agent-must-not-be-used",
       model: { id: "session-model", providerID: "session-provider" },
@@ -165,7 +166,7 @@ describe("metadata-only OpenCode usage ingestion", () => {
       model: { id: "session-model", providerID: "session-provider" },
     };
     mockListSessions.mockResolvedValue([mappedSession, unmappedSession]);
-    mockGetMessages.mockResolvedValue([assistantEnvelope(mappedSession.id)]);
+    mockGetMessagesPage.mockResolvedValue({ messages: [assistantEnvelope(mappedSession.id)] });
 
     const synced = await syncUsageFromOpenCode();
     expect(synced).toMatchObject({ sessionsScanned: 2, sessionsQuarantined: 1, unavailable: false });
@@ -192,5 +193,48 @@ describe("metadata-only OpenCode usage ingestion", () => {
     const replayed = await syncUsageFromOpenCode();
     expect(replayed.projects).toMatchObject([{ projectId: destination.id, eventsUpserted: 1 }]);
     expect(getDb().prepare("SELECT COUNT(*) AS count FROM usage_events").get()).toEqual({ count: 1 });
+  });
+
+  it("follows opaque server cursors across a multi-page transcript in oldest-to-newest order", async () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-usage-pages-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    resetDbForTest();
+    const destination = projects.createProject("usage-pages-destination");
+    const sourceInstance = getOpenCodeUsageSourceInstance();
+    usage.mapOpenCodeProject(sourceInstance, "oc-mapped-project", destination.id);
+    const session = {
+      id: "ses-pages",
+      projectID: "oc-mapped-project",
+      directory: "/workspace",
+      time: { created: Date.parse("2026-03-01T00:00:00.000Z"), updated: Date.parse("2026-03-01T01:00:00.000Z") },
+      model: { id: "session-model", providerID: "session-provider" },
+    };
+    const messages = Array.from({ length: 201 }, (_, index) => assistantEnvelope(
+      session.id,
+      `msg-${index}`,
+      `part-${index}`,
+      Date.parse("2026-03-01T00:00:00.000Z") + index * 1_000,
+    ));
+    const pages = new Map<string | undefined, { messages: typeof messages; nextCursor?: string }>([
+      [undefined, { messages: messages.slice(0, 100), nextCursor: "opaque-page-2" }],
+      ["opaque-page-2", { messages: messages.slice(100, 200), nextCursor: "opaque-page-3" }],
+      ["opaque-page-3", { messages: messages.slice(200) }],
+    ]);
+    mockListSessions.mockResolvedValue([session]);
+    mockGetMessagesPage.mockImplementation(async (_sessionId: string, _limit: number, cursor?: string, directory?: string) => {
+      expect(directory).toBe("/workspace");
+      return pages.get(cursor) ?? { messages: [] };
+    });
+
+    const synced = await syncUsageFromOpenCode();
+
+    expect(synced.projects).toMatchObject([{ projectId: destination.id, sessionsProcessed: 1, eventsUpserted: 201, errorCode: null }]);
+    expect(mockGetMessagesPage.mock.calls.map(([sessionId, limit, cursor, requestedDirectory]) => [sessionId, limit, cursor, requestedDirectory])).toEqual([
+      [session.id, 100, undefined, "/workspace"],
+      [session.id, 100, "opaque-page-2", "/workspace"],
+      [session.id, 100, "opaque-page-3", "/workspace"],
+    ]);
+    const persisted = getDb().prepare("SELECT source_message_id FROM usage_events ORDER BY occurred_at").all() as Array<{ source_message_id: string }>;
+    expect(persisted.map((row) => row.source_message_id)).toEqual(messages.map((message) => message.info.id));
   });
 });

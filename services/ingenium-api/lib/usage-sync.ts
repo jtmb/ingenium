@@ -13,7 +13,7 @@ const SOURCE = "usage-sync";
 const LOOKBACK_MS = 5 * 60_000;
 const MAX_SESSIONS_PER_PROJECT = 100;
 const MAX_MESSAGE_PAGES_PER_SESSION = 5;
-const MESSAGE_PAGE_SIZE = 200;
+const MESSAGE_PAGE_SIZE = 100;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 
 export function getUsageSyncInterval(): number {
@@ -263,14 +263,20 @@ async function processSession(
 ): Promise<ProcessSessionResult> {
   let eventCount = 0;
   let lastPartId: string | null = null;
-  let before: string | undefined;
+  let cursor: string | undefined;
+  const cursors = new Set<string>();
   for (let page = 0; page < MAX_MESSAGE_PAGES_PER_SESSION; page += 1) {
-    const result = await opencodeClient.getMessages(syncSession.sessionId, MESSAGE_PAGE_SIZE, before);
-    if (isOpenCodeError(result) || !Array.isArray(result)) {
+    const result = await opencodeClient.getMessagesPage(
+      syncSession.sessionId,
+      MESSAGE_PAGE_SIZE,
+      cursor,
+      syncSession.session.directory,
+    );
+    if (isOpenCodeError(result) || !Array.isArray(result.messages)) {
       return { eventCount, lastPartId, errorCode: "OPENCODE_UNAVAILABLE" };
     }
-    if (result.length === 0) break;
-    for (const message of result) {
+    if (result.messages.length === 0) break;
+    for (const message of result.messages) {
       if (message.info.role !== "assistant" || message.info.sessionID !== syncSession.sessionId) continue;
       const stepFinishCount = message.parts.filter((part) => part.type === "step-finish").length;
       if (stepFinishCount === 0) continue;
@@ -289,10 +295,13 @@ async function processSession(
         if (!lastPartId || event.sourcePartId > lastPartId) lastPartId = event.sourcePartId;
       }
     }
-    if (result.length < MESSAGE_PAGE_SIZE) break;
-    const nextBefore = safeIdentifier(result[result.length - 1]?.info?.id);
-    if (!nextBefore || nextBefore === before) break;
-    before = nextBefore;
+    if (!result.nextCursor || result.messages.length === 0) break;
+    const nextCursor = safeIdentifier(result.nextCursor);
+    if (!nextCursor || cursors.has(nextCursor)) {
+      return { eventCount, lastPartId, errorCode: "OPENCODE_UNAVAILABLE" };
+    }
+    cursors.add(nextCursor);
+    cursor = nextCursor;
   }
   return { eventCount, lastPartId, errorCode: null };
 }

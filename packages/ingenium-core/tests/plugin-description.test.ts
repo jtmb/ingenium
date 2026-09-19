@@ -22,21 +22,31 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-it("migration 119 preserves every existing column and seeds shipped and custom plugins", () => {
+it("migration 119 preserves historical descriptions and migration 120 repairs lifecycle", () => {
   const db = new Database(":memory:");
   try {
     db.exec("CREATE TABLE plugins (id TEXT PRIMARY KEY, name TEXT, source_content TEXT, enabled INTEGER, updated_at TEXT)");
-    const names = ["auto-observer", "observer", "resource-sync", "session-coordinator", "ponytail", "custom"];
+    const names = ["auto-observer", "observer", "resource-sync", "session-coordinator", "lifecycle", "ponytail", "custom"];
     for (const name of names) db.prepare("INSERT INTO plugins VALUES (?, ?, ?, 0, 'original')").run(name, name, "export {};");
     const before = db.prepare("SELECT * FROM plugins").all();
     db.transaction(() => db.exec(readFileSync(new URL("../data/migrations/119_plugin_description.sql", import.meta.url), "utf8")))();
     expect(db.prepare("SELECT id, name, source_content, enabled, updated_at FROM plugins").all()).toEqual(before);
     for (const row of db.prepare("SELECT name, description FROM plugins").all() as Array<{ name: string; description: string }>) {
-      expect(row.description).toBe(plugins.defaultPluginDescription(row.name));
+      expect(row.description).toBe(
+        row.name === "lifecycle"
+          ? "Project-local OpenCode plugin."
+          : row.name === "session-coordinator"
+            ? "Coordinates shared-worktree sessions, ownership, and recovery."
+            : plugins.defaultPluginDescription(row.name),
+      );
       expect(row.description.length).toBeGreaterThan(20);
     }
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(db.prepare("PRAGMA table_info(plugins)").all()).toContainEqual(expect.objectContaining({ name: "description", notnull: 1, dflt_value: "''" }));
+    db.transaction(() => db.exec(readFileSync(new URL("../data/migrations/120_lifecycle_plugin_description.sql", import.meta.url), "utf8")))();
+    expect(db.prepare("SELECT description FROM plugins WHERE name = 'lifecycle'").get()).toEqual({
+      description: "Uploads session context and records external usage at lifecycle boundaries.",
+    });
   } finally { db.close(); }
 });
 

@@ -5,12 +5,23 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ContextAutoUploader } from "./context-upload.js";
 import { redactContextText, visibleContextExport } from "./context-upload-codec.mjs";
+import type { OpenCodeV2Client } from "./opencode-v2.js";
 
 const directories: string[] = [];
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 function message(id: string, role = "user", complete = true, text = "visible") {
   return { info: { id, sessionID: "ses_exact", role, ...(complete ? { time: { completed: 1 } } : {}) },
     parts: [{ type: "text", text }, { type: "tool", text: "excluded" }, { type: "reasoning", text: "excluded" }] };
+}
+function v2Message(id: string, text = "visible") {
+  return { id, type: "user" as const, time: { created: 1 }, text };
+}
+function v2Client(worktree: string, messages: ReturnType<typeof v2Message>[]) {
+  const session = {
+    get: vi.fn(async () => ({ data: { id: "ses_exact", location: { directory: worktree } } })),
+    messages: vi.fn(async () => ({ data: { data: messages, cursor: {} } })),
+  };
+  return { client: { session } as unknown as OpenCodeV2Client, session };
 }
 
 describe("Context upload boundary", () => {
@@ -96,8 +107,11 @@ describe("Context upload boundary", () => {
     let appended = false;
     const captured: number[] = [];
     const value = randomUUID();
-    const client = { session: { get: vi.fn(async () => ({ data: { id: "ses_exact", directory: worktree } })),
-      messages: vi.fn(async () => ({ data: [message("m1", "user", true, `token=${value}`), ...(appended ? [message("m2")] : [])] })) } };
+    const fixture = v2Client(worktree, [v2Message("m1", `token=${value}`)]);
+    fixture.session.messages.mockImplementation(async () => ({
+      data: { data: [v2Message("m1", `token=${value}`), ...(appended ? [v2Message("m2")] : [])], cursor: {} },
+    }));
+    const client = fixture.client;
     const invoke = vi.fn(async (name: string, args: Record<string, unknown>) => {
       expect(args.project).toBe("exact-project");
       if (name === "setting_get") return { value: enabled ? "true" : undefined };
@@ -112,7 +126,7 @@ describe("Context upload boundary", () => {
     });
     const uploader = new ContextAutoUploader("exact-project", worktree, client, invoke);
     await uploader.sync("ses_exact");
-    expect(client.session.get).not.toHaveBeenCalled();
+    expect(fixture.session.get).not.toHaveBeenCalled();
     enabled = true;
     await Promise.all([uploader.sync("ses_exact"), uploader.sync("ses_exact"), uploader.sync("ses_exact")]);
     expect(invoke.mock.calls.filter(([name]) => name === "context_upload_file")).toHaveLength(2);
@@ -127,22 +141,26 @@ describe("Context upload boundary", () => {
 
   it("reads every history page before uploading and refuses a cursor that does not advance", async () => {
     const worktree = mkdtempSync(join(tmpdir(), "context-pages-")); directories.push(worktree);
-    const latest = Array.from({ length: 100 }, (_, index) => message(`m${index + 1}`));
-    const messages = vi.fn(async (args: any) => ({ data: args.query.before ? [message("m0")] : latest }));
-    const client = { session: { get: async () => ({ data: { id: "ses_exact", directory: worktree } }), messages } };
+    const latest = Array.from({ length: 100 }, (_, index) => v2Message(`m${index}`));
+    const messages = vi.fn(async (args: { cursor?: string }) => ({
+      data: { data: args.cursor ? [v2Message("m100")] : latest, cursor: args.cursor ? {} : { next: "page-2" } },
+    }));
+    const session = { get: async () => ({ data: { id: "ses_exact", location: { directory: worktree } } }), messages };
+    const client = { session } as unknown as OpenCodeV2Client;
     const invoke = vi.fn(async (name: string, args: Record<string, unknown>) => {
       if (name === "setting_get") return { value: "true" };
       if (name === "context_upload_file") {
         const exported = JSON.parse(readFileSync(args.file_path as string, "utf8"));
         expect(exported.messages).toHaveLength(101);
         expect(exported.messages[0].info.id).toBe("m0");
+        expect(exported.messages.at(-1).info.id).toBe("m100");
       }
       return {};
     });
     await new ContextAutoUploader("exact-project", worktree, client, invoke).sync("ses_exact");
-    expect(messages).toHaveBeenLastCalledWith({ path: { id: "ses_exact" }, query: { directory: worktree, limit: 100, before: "m1" } });
+    expect(messages).toHaveBeenLastCalledWith({ sessionID: "ses_exact", limit: 100, cursor: "page-2" });
     invoke.mockClear();
-    messages.mockImplementation(async () => ({ data: latest }));
+    messages.mockImplementation(async () => ({ data: { data: latest, cursor: { next: "same-page" } } }));
     await new ContextAutoUploader("exact-project", worktree, client, invoke).sync("ses_exact");
     expect(invoke.mock.calls.some(([name]) => name === "context_upload_file")).toBe(false);
     expect(invoke.mock.calls.some(([name, args]) => name === "setting_set" && JSON.parse(args.value as string).status === "failed")).toBe(true);

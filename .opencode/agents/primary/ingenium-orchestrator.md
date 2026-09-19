@@ -68,11 +68,6 @@ permission:
     "cargo test*": allow
     "cargo check*": allow
     "cargo build*": allow
-  "ingenium_coordination_update": allow
-  "ingenium_coordination_claim": allow
-  "ingenium_coordination_release": allow
-  ingenium_coordination_status: allow
-  ingenium_coordination_memory_read: allow
   ingenium_memory_read: allow
   ingenium_memory_list: allow
   ingenium_memory_search: allow
@@ -289,8 +284,6 @@ Unknown outcomes, dirty footprints, mismatched bindings, stale proof, and
 quarantined epochs remain unresolved until reconciled.
 
 Maintain `TodoWrite` and `docs/reference/ROADMAP.md` markers/checklists continuously as evidence changes. Reconcile both before every terminal response; never ignore an open roadmap gate.
-
-For the coordination rollout, shared-memory acceptance requires simultaneous external A, external B, and internal C OpenCode processes under one canonical workspace identity. Retained evidence must prove persistent typed operational memory for actions, changed paths, checks/results, task/todo/status/next-work, and restart replay. File visibility or native OpenCode forks alone do not satisfy this gate, and no `PASS` is valid without real three-window evidence.
 
 Label evidence honestly: source tests, deployed canaries, and actual model/session artifacts prove different boundaries. Never present a missing artifact as proof.
 

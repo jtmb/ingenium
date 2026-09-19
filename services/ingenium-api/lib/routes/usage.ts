@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { usage, coordination } from "ingenium-core";
+import { usage, worktreeBinding } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { isOpenCodeError, verifyOpenCodeNativeMessage } from "../opencode-client.js";
 import { getOpenCodeUsageSourceInstance, getUsageSyncInterval, syncUsageFromOpenCode } from "../usage-sync.js";
 
 const MAX_RANGE_MS = 366 * 86_400_000;
@@ -250,7 +251,7 @@ function csvCell(value: string | number | null): string {
   return `"${spreadsheetSafe.replace(/"/g, '""')}"`;
 }
 
-usageRouter.post("/external", (req, res) => {
+usageRouter.post("/external", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
@@ -263,8 +264,24 @@ usageRouter.post("/external", (req, res) => {
       || principal.launcherWorktree !== parsed.data.worktree || req.get("x-ingenium-ui") !== undefined) {
       throw new usage.UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
     }
+    const verified = await verifyOpenCodeNativeMessage({
+      worktree: parsed.data.worktree,
+      sessionId: parsed.data.sessionId,
+      messageId: parsed.data.messageId,
+      role: "assistant",
+    });
+    if (isOpenCodeError(verified)) {
+      const unavailable = verified.error.code === "NETWORK_ERROR"
+        || verified.error.code === "AUTH_NOT_CONFIGURED"
+        || verified.error.code.startsWith("HTTP_5");
+      if (unavailable) {
+        res.status(503).json({ error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode session binding is temporarily unavailable" } });
+        return;
+      }
+      throw new usage.UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
+    }
     const result = usage.ingestExternalUsage(projectId,
-      coordination.coordinationWorktreeId(principal.workspaceId, principal.storageMappingHash), parsed.data);
+      worktreeBinding.worktreeBindingId(principal.workspaceId, principal.storageMappingHash), parsed.data, { nativeOpenCode: true });
     res.status(result.created ? 201 : 200).location(`/api/v1/usage/events?project=${encodeURIComponent(projectId)}`)
       .json({ data: { created: result.created, event: eventDto(result.event) } });
   } catch (error) {

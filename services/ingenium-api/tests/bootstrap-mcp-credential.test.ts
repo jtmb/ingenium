@@ -16,7 +16,7 @@ import { CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter, mcpServersRouter
 import { authorizedCatalog } from "../lib/routes/mcp-tools.js";
 
 const installationToken = "b".repeat(64);
-const scopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
+const scopes = ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
 let directory: string;
 let server: Server;
 let baseUrl: string;
@@ -87,7 +87,7 @@ describe("compatibility MCP bootstrap", () => {
       : Date.parse(first.credential.expiresAt) - remainingCapabilityMs;
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(now);
-    const lease = () => fetch(`${baseUrl}/api/v1/auth/coordination-lease`, {
+    const lease = () => fetch(`${baseUrl}/api/v1/auth/repository-sync-credential`, {
       method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" },
       body: JSON.stringify({ runtimeId: first.runtime.id }),
     });
@@ -191,18 +191,18 @@ describe("compatibility MCP bootstrap", () => {
     expect(data.credential).toMatchObject({ kind: "runtime", audience: "runtime", scopes: LOCAL_RUNTIME_SCOPES,
       launcherWorktree: "/home/brajam/repos/ingenium" });
     expect(data.credential.scopes).toEqual([
-      "child-mcp:execute", "child-mcp:runtime", "coordination:write", "documentation:read",
+      "child-mcp:execute", "child-mcp:runtime", "documentation:read",
       "mcp-servers:write", "memory:write", "projects:read", "rag:read",
     ]);
     const catalog = authorizedCatalog({
       authorizationPolicy: {},
       principal: { ...data.credential, type: "service", id: data.credential.servicePrincipalId },
     } as Parameters<typeof authorizedCatalog>[0], data.credential.projectId);
-    for (const name of ["coordination_status", "coordination_memory_read", "coordination_update", "coordination_claim",
-      "coordination_release", "memory_read", "memory_list", "memory_search", "memory_save", "memory_update",
+    for (const name of ["memory_read", "memory_list", "memory_search", "memory_save", "memory_update",
       "memory_forget", "memory_operation_status", "project_detail", "docs_search", "docs_get_page", "docs_search_semantic",
       "docs_rag_sources_list"]) expect(catalog.has(`ingenium_${name}`), name).toBe(true);
-    for (const name of ["repository_sync", "docs_create_page", "docs_ingest"])
+    for (const name of ["coordination_status", "coordination_memory_read", "coordination_update", "coordination_claim",
+      "coordination_release", "coordination_handoff", "repository_sync", "docs_create_page", "docs_ingest"])
       expect(catalog.has(`ingenium_${name}`), name).toBe(false);
     expect(data.runtimeWorktree).toBe("/workspace");
     expect(mcpCredentials.resolveMcpCredential(data.credential.token, "runtime")?.id).toBe(data.credential.id);

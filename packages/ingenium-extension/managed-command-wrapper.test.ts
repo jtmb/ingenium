@@ -70,7 +70,6 @@ import type {
   RestartProcessIdentity,
 } from "./replacement-first-restart.js";
 import { CoordinationOutbox } from "./coordination-outbox.js";
-import type { McpToolClient } from "./mcp-client.js";
 import {
   commitManagedRecoveryReplacement,
   parseLegacyRecoveryOwnerPayload,
@@ -93,8 +92,7 @@ import {
   parseListeningLoopbackPorts,
   parseAdmittedRecoveryContext,
   parseProductionSessionExport,
-  persistClaimedLegacyHandoff,
-  publishRestartHandoff,
+  persistLegacyHandoff,
   probeReplacementHealthGate,
   productionRestartCanonicalWorktree,
   productionRestartDependencies,
@@ -102,10 +100,8 @@ import {
   readPrivateProductionRestartFile,
   redactedHandoffFromExport,
   restartHandoffEvidence,
-  restartHandoffMemoryEntry,
   runProductionRestartCli,
   runProductionRestartAdapter,
-  typedMemoryAcknowledgementEvidence,
   type ProductionRestartAdapterDependencies,
   type AdmittedRecoveryContext,
   type ProductionRestartBinding,
@@ -629,7 +625,6 @@ function replacementRequest(worktree: string): ReplacementFirstRestartRequest {
       identityMs: 1_000,
       healthMs: 1_000,
       sessionMs: 1_000,
-      memoryAckMs: 1_000,
       terminalIdleMs: 1_000,
       retirementMs: 1_000,
     },
@@ -900,7 +895,7 @@ describe("staged_distribution_build", () => {
         "index.js", "index.d.ts",
         ...["mcp-server", "init-project", "managed-command-wrapper", "recovery-bootstrap", "repository-command",
           "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner"].map((name) => `scripts/${name}.js`),
-        ...["auto-observer", "observer", "resource-sync", "session-coordinator"].map((name) => `plugins/${name}.js`),
+        ...["auto-observer", "observer", "resource-sync", "lifecycle"].map((name) => `plugins/${name}.js`),
       ];
       for (const path of paths) {
         mkdirSync(dirname(join(output, path)), { recursive: true });
@@ -1122,7 +1117,11 @@ describe("managed command wrappers", () => {
       const paths = recoveryPaths(worktree);
       owner = startRecoveryOwner(worktree, "o".repeat(43), payload, join(worktree, "owner-result.json"));
       if (owner.pid === undefined) throw new Error("Recovery owner did not start");
-      const enrolled = await waitForRecoveryState(paths.state, (state) => state.phase === "enrolled" && state.owner?.pid === owner!.pid);
+      const enrolled = await waitForRecoveryState(
+        paths.state,
+        (state) => state.phase === "enrolled" && state.owner?.pid === owner!.pid
+          && !existsSync(join(dirname(paths.state), "mutation.lock")),
+      );
       process.env.INGENIUM_RECOVERY_OWNER_NONCE = "o".repeat(43);
       process.env.INGENIUM_RECOVERY_OWNER_PID = String(owner.pid);
       process.env.INGENIUM_RECOVERY_OWNER_START_TICKS = String(enrolled.owner.startTimeTicks);
@@ -1378,9 +1377,9 @@ describe("managed command wrappers", () => {
     expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify(["run", "typecheck"])).toString("base64url")))
       .toEqual(["run", "typecheck"]);
     expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify([
-      "run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "identity",
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "identity",
     ])).toString("base64url"))).toEqual([
-      "run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "identity",
+      "run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "identity",
     ]);
     expect(decodeManagedBuildArgv(Buffer.from(JSON.stringify([
       "run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "overflow",
@@ -1484,7 +1483,7 @@ describe("managed command wrappers", () => {
       ["run", "pretest"],
       ["exec", "build"],
       ["build", "--workspace=outside"],
-      ["run", "test", "--workspace=packages/ingenium-extension", "--", "session-coordinator.test.ts", "-t", "has spaces"],
+      ["run", "test", "--workspace=packages/ingenium-extension", "--", "coordination-outbox.test.ts", "-t", "has spaces"],
       ["run", "typecheck", "--workspace=services/ingenium-api"],
       ["test\nmalicious"],
     ]) expect(() => validateManagedBuildArgv(argv)).toThrow("Build wrapper rejected the command");
@@ -3180,7 +3179,7 @@ describe("managed command wrappers", () => {
   it("records Basic authentication rejection, health, and agent success without the secret", async () => {
     const authentication = { username: "opencode", password: "p".repeat(43) };
     const expected = `Basic ${Buffer.from(`${authentication.username}:${authentication.password}`).toString("base64")}`;
-    const permissions = ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"]
+    const permissions = ["ingenium_docs_search", "ingenium_docs_get_page"]
       .map((permission) => ({ permission, pattern: "*", action: "allow" }));
     const server = createHttpServer((request, response) => {
       if (request.headers.authorization !== expected) {
@@ -3191,7 +3190,7 @@ describe("managed command wrappers", () => {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(request.url === "/agent"
         ? [{ name: "ingenium-scout", permission: permissions }]
-        : { healthy: true, version: "1.18.9" }));
+        : { healthy: true, version: "1.18.31" }));
     });
     await new Promise<void>((resolvePromise, reject) => {
       server.once("error", reject);
@@ -3202,7 +3201,7 @@ describe("managed command wrappers", () => {
       if (!address || typeof address === "string") throw new Error("Test server did not bind");
       const evidence = await probeReplacementHealthGate(
         `http://127.0.0.1:${address.port}`,
-        "1.18.9",
+        "1.18.31",
         authentication,
         AbortSignal.timeout(2_000),
       );
@@ -3226,7 +3225,7 @@ describe("managed command wrappers", () => {
     const server = createHttpServer((request, response) => {
       if (request.headers.authorization) authenticatedRequests += 1;
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ healthy: true, version: "1.18.9" }));
+      response.end(JSON.stringify({ healthy: true, version: "1.18.31" }));
     });
     await new Promise<void>((resolvePromise, reject) => {
       server.once("error", reject);
@@ -3237,7 +3236,7 @@ describe("managed command wrappers", () => {
       if (!address || typeof address === "string") throw new Error("Test server did not bind");
       await expect(probeReplacementHealthGate(
         `http://127.0.0.1:${address.port}`,
-        "1.18.9",
+        "1.18.31",
         { username: "opencode", password: "p".repeat(43) },
         AbortSignal.timeout(2_000),
       )).resolves.toMatchObject({
@@ -3269,72 +3268,18 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("projects the exact captured handoff arrays into typed coordination memory", () => {
-    const handoff = recoveryHandoff();
-    const owner = { actorId: `actor-${sha256("owner")}`, fence: 1 };
-    expect(restartHandoffMemoryEntry(handoff, owner)).toEqual({
-      manifest: { baseCommit: null, dirtyHashes: [], dependencyResults: [], exclusivePaths: [], profileRevision: null,
-        toolRevision: null, ownerId: owner.actorId, fence: 1, unresolvedOperations: [], todoWrite: handoff.replay.todos,
-        inputHash: sha256(JSON.stringify(handoff.replay)), finalized: false },
-      status: handoff.status,
-      actions: [{ kind: "edit", result: "succeeded", pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], targetHash: null }],
-      checks: [{ kind: "test", result: "passed", targetHash: sha256("recovery-check") }],
-      todos: handoff.todos,
-      currentTaskId: `task-${handoff.taskHash}`,
-      changedPaths: [{
-        pathSegments: ["c3Jj", "cmVjb3ZlcnkudHM"], operation: "edit", additions: 2, deletions: 1, changeRevision: 1,
-      }],
-      nextWork: handoff.nextWork,
-    });
-  });
-
-  it("records exact bounded handoff and typed coordination acknowledgement evidence", () => {
+  it("retains a bounded restart handoff without operational-memory projection", () => {
     const handoff = recoveryHandoff();
     const handoffSha256 = sha256(JSON.stringify(handoff));
-    const replacementIdentity = {
-      pid: 2001,
-      startTimeTicks: 3001,
-      executableSha256: sha256("replacement-executable"),
-      nonceSha256: sha256("replacement-nonce"),
-    };
-    expect(restartHandoffEvidence(handoff, handoffSha256)).toEqual({
+    expect(restartHandoffEvidence(handoff, handoffSha256)).toMatchObject({
       schemaVersion: 1,
       handoffSha256,
       actionCount: 1,
       changedPathCount: 1,
       checkCount: 1,
       handoff,
-    });
-    expect(typedMemoryAcknowledgementEvidence({
-      handoff,
-      handoffSha256,
-      captureFile: "/tmp/opencode/recovery/capture.jsonl",
-      captureOffset: 128,
-      sessionId: "successor-session",
-      replacementIdentity,
-      transactionSha256: sha256("transaction"),
-    })).toEqual({
-      schemaVersion: 1,
-      handoffSha256,
-      actionCount: 1,
-      changedPathCount: 1,
-      checkCount: 1,
-      captureFile: "/tmp/opencode/recovery/capture.jsonl",
-      captureOffset: 128,
-      successorSessionSha256: sha256("successor-session"),
-      originalSessionSha256: handoff.replay.sessionIdSha256,
-      todoReplaySha256: sha256(JSON.stringify(handoff.replay.todos)),
-      replacementIdentitySha256: recoveryIdentitySha256(replacementIdentity),
-      transactionSha256: sha256("transaction"),
-      assistantResult: "completed",
-      terminalStatus: "idle",
     });
     expect(() => restartHandoffEvidence(handoff, sha256("wrong-handoff"))).toThrow("handoff hash changed");
-    for (const invalid of [
-      { ...handoff, actions: Array(65).fill(handoff.actions[0]) },
-      { ...handoff, changedPaths: Array(33).fill(handoff.changedPaths[0]) },
-      { ...handoff, checks: Array(33).fill(handoff.checks[0]) },
-    ]) expect(() => restartHandoffEvidence(invalid, sha256(JSON.stringify(invalid)))).toThrow();
   });
 
   it("fixed deployment appends hashed stale-candidate quarantine evidence without rewriting retained state", () => {
@@ -3482,73 +3427,22 @@ describe("managed command wrappers", () => {
       binding.workspaceId = "legacy-workspace";
       binding.storageMappingHash = storageMappingHash;
       const artifact = join(worktree, ".opencode", "protected-runtime-index", "tui-recovery", "legacy-handoff.json");
-      const calls: string[] = [];
-      const operationId = "00000000-0000-4000-8000-000000000010";
-      const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
-        calls.push(`${name}:${String(args.operation ?? args.action ?? "status")}:${existsSync(artifact)}`);
-        if (name === "coordination_update" && args.operation === "register") {
-          return mcpResult({ data: { session: { revision: 0, fence: 3 } } });
-        }
-        if (name === "coordination_claim" && args.action === undefined) {
-          expect(args.claims).toEqual([{
-            claim: { kind: "path", path: ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json" },
-            baseline_sha256: null,
-            current_sha256: null,
-            repository_sha256: null,
-          }]);
-          return mcpResult({ data: { session: { revision: 1, fence: 3 }, acceptedEpoch: 5, operationId } });
-        }
-        if (name === "coordination_claim" && args.action === "verify") {
-          return mcpResult({ data: { session: { revision: 1, fence: 3 }, acceptedEpoch: 5 } });
-        }
-        if (name === "coordination_claim" && args.action === "complete") {
-          expect(args.footprint).toEqual([expect.objectContaining({
-            path: ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json",
-            before_sha256: null,
-            after_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-          })]);
-          return mcpResult({ data: { session: { revision: 2, fence: 3 }, acceptedEpoch: 5 } });
-        }
-        if (name === "coordination_status") {
-          return mcpResult({ data: { session: { revision: 2, fence: 3 } } });
-        }
-        if (name === "coordination_update" && args.operation === "close") return mcpResult({ data: {} });
-        throw new Error(`Unexpected MCP call: ${name}`);
-      });
-      const close = vi.fn(async () => {});
-      await persistClaimedLegacyHandoff(worktree, binding, {
+      persistLegacyHandoff(worktree, binding, {
         binding: request.binding,
         oldProcess: request.oldProcess,
         oldPort: null,
         oldDataHome: dataHome,
         handoff,
         timeouts: request.timeouts,
-      }, sessionId, async () => ({ callTool, close }));
+      }, sessionId);
 
       const retained = readLegacyRecoveryHandoff(worktree);
       expect(retained).toMatchObject({
         binding: { project: "legacy-project", projectId, launcherWorktree: worktree, storageMappingHash },
         parent: { pid: process.pid, port: null, dataHome },
         handoff,
-        coordination: {
-          sessionIdSha256: sha256(sessionId),
-          incarnation: expect.any(Number),
-          revision: 1,
-          fence: 3,
-          captureClaimEpoch: 5,
-          captureClaimSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
-        },
       });
-      expect(calls).toEqual([
-        "coordination_update:register:false",
-        "coordination_claim:create:false",
-        "coordination_claim:verify:true",
-        "coordination_claim:create:true",
-        "coordination_status:status:true",
-        "coordination_update:close:true",
-      ]);
-      expect(readFileSync(artifact, "utf8")).not.toMatch(/ownershipToken|clientClaimKey|raw-session/);
-      expect(close).toHaveBeenCalledOnce();
+      expect(readFileSync(artifact, "utf8")).not.toMatch(/ownershipToken|clientClaimKey|raw-session|coordination/);
     } finally {
       if (priorNonce === undefined) delete process.env.INGENIUM_RESTART_NONCE;
       else process.env.INGENIUM_RESTART_NONCE = priorNonce;
@@ -3665,10 +3559,6 @@ describe("managed command wrappers", () => {
                 calls.push("session");
                 return { status: "created", transactionSha256, session: "fresh-session" };
               },
-              acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
-                calls.push("memory-ack");
-                return { status: "acknowledged", handoffSha256, transactionSha256 };
-              },
               awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
                 calls.push("terminal-idle");
                 return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
@@ -3700,70 +3590,11 @@ describe("managed command wrappers", () => {
         "worktree", "resolve-binding", "read-parent", "attest-parent:900001", "reject:unattested:900001",
         `reject:missing_nonce:${process.pid}`, "enroll-parent", "attest-parent:1001", "prepare", "binding", "identity:old", "publish",
         "persist:handoff_published", "launch", "identity:replacement", "persist:replacement_started", "health",
-        "persist:replacement_healthy", "session", "persist:session_created", "memory-ack",
-        "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged", "owner-ready",
+        "persist:replacement_healthy", "session", "persist:session_created", "terminal-idle", "persist:terminal_idle_acknowledged", "owner-ready",
         "persist:recovery_owner_ready", "binding", "identity:replacement", "quiesce-old", "identity:old",
         "persist:old_parent_quiesced", "prepare-retirement", "retirement-commit",
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired", "release",
       ]);
-    } finally {
-      rmSync(worktree, { recursive: true, force: true });
-    }
-  });
-
-  it.each([
-    ["handoff and status requests fail", "request", 0],
-    ["handoff status is malformed", "malformed", 1],
-  ] as const)("closes a registered restart publisher when %s", async (_title, failure, expectedRevision) => {
-    const worktree = mkdtempSync(join(tmpdir(), "ingenium-production-restart-publisher-"));
-    try {
-      const request = replacementRequest(worktree);
-      const binding: ProductionRestartBinding = {
-        ...request.binding,
-        apiUrl: "http://127.0.0.1:4097/api/v1",
-        project: "production-project",
-        credentialFile: join(worktree, ".opencode", ".ingenium-mcp-credential"),
-      };
-      const callTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
-        if (name === "coordination_update" && args.operation === "register") {
-          return mcpResult({ data: { session: { revision: 0, fence: 7 } } });
-        }
-        if (name === "coordination_handoff") {
-          if (failure === "request") throw new Error("handoff failed");
-          return mcpResult({ data: { session: { revision: "invalid", fence: 7 } } });
-        }
-        if (name === "coordination_status") {
-          if (failure === "request") throw new Error("status failed");
-          return mcpResult({ data: { session: { revision: 1, fence: 7 } } });
-        }
-        if (name === "coordination_update" && args.operation === "close") return mcpResult({ data: {} });
-        throw new Error(`Unexpected MCP call: ${name}`);
-      });
-      const close = vi.fn(async () => {});
-      const client = { callTool, close } satisfies McpToolClient;
-      const openClient = vi.fn(async () => client);
-
-      await expect(publishRestartHandoff(worktree, binding, request.handoff, openClient))
-        .rejects.toThrow(failure === "request" ? "handoff failed" : "handoff publication failed");
-
-      const register = callTool.mock.calls.find(([, args]) => args.operation === "register")![1];
-      const closed = callTool.mock.calls.find(([, args]) => args.operation === "close")![1];
-      expect(callTool.mock.calls.map(([name, args]) => `${name}:${String(args.operation ?? "status")}`)).toEqual([
-        "coordination_update:register",
-        "coordination_handoff:memory",
-        "coordination_status:status",
-        "coordination_update:close",
-      ]);
-      expect(closed).toMatchObject({
-        worktree_id: register.worktree_id,
-        session_id: register.session_id,
-        incarnation: register.incarnation,
-        ownership_token: register.ownership_token,
-        expected_revision: expectedRevision,
-        fence: 7,
-      });
-      expect(openClient).toHaveBeenCalledWith(worktree, { project: binding.project, credentialPurpose: "general" });
-      expect(close).toHaveBeenCalledOnce();
     } finally {
       rmSync(worktree, { recursive: true, force: true });
     }
@@ -3918,7 +3749,6 @@ describe("managed command wrappers", () => {
               createReplacementSession: async (_identity, _port, transactionSha256) => ({
                 status: "created", transactionSha256, session: {},
               }),
-              acknowledgeTypedMemory: async () => { throw new Error("typed memory acknowledgement failed"); },
               awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
                 status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
               }),
@@ -3959,10 +3789,11 @@ describe("managed command wrappers", () => {
         { candidate: foreign, reason: "binding_mismatch" },
       ]);
       expect(prepared).toBe(0);
-      await expect(runProductionRestartAdapter(base([parent])))
-        .rejects.toThrow("typed memory acknowledgement failed");
-      expect(retired).toBe(false);
-      expect(stopped).toEqual(replacement);
+      await expect(runProductionRestartAdapter(base([parent]))).resolves.toMatchObject({
+        handoffSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(retired).toBe(true);
+      expect(stopped).toBeUndefined();
       expect(released).toBe(true);
       expect(() => process.kill(process.pid, 0)).not.toThrow();
     } finally {
@@ -3994,11 +3825,6 @@ describe("managed command wrappers", () => {
           calls.push("session");
           return { status: "created", transactionSha256, session: "raw-session-id" };
         },
-        acknowledgeTypedMemory: async (_identity, session, handoffSha256, transactionSha256) => {
-          expect(session).toBe("raw-session-id");
-          calls.push("memory-ack");
-          return { status: "acknowledged", handoffSha256, transactionSha256 };
-        },
         awaitTerminalIdleAcknowledgement: async (_identity, session, handoffSha256, transactionSha256) => {
           expect(session).toBe("raw-session-id");
           calls.push("terminal-idle");
@@ -4026,7 +3852,7 @@ describe("managed command wrappers", () => {
       expect(calls).toEqual([
         "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
         "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
-        "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "persist:terminal_idle_acknowledged",
+        "terminal-idle", "persist:terminal_idle_acknowledged",
         "owner-ready", "persist:recovery_owner_ready", "binding", "identity:replacement", "quiesce-old", "identity:old",
         "persist:old_parent_quiesced", "prepare-retirement", "retirement-commit",
         "persist:retirement_committed", "retire-old", "persist:old_parent_retired",
@@ -4043,7 +3869,7 @@ describe("managed command wrappers", () => {
       expect(retained.every((entry) => entry.handoffSha256 === result.handoffSha256
         && entry.actionCount === 1 && entry.changedPathCount === 1 && entry.checkCount === 1
         && typeof entry.occurredAt === "string")).toBe(true);
-      expect(retained.filter((entry) => entry.phase !== "handoff_published").every((entry) =>
+       expect(retained.filter((entry) => entry.phase !== "handoff_published").every((entry) =>
         /^[0-9a-f]{64}$/.test(entry.replacementIdentitySha256) && /^[0-9a-f]{64}$/.test(entry.transactionSha256))).toBe(true);
 
       await expect(managedReplacementFirstRestart([JSON.stringify(request)], dependencies, worktree))
@@ -4085,9 +3911,6 @@ describe("managed command wrappers", () => {
         verifyReplacementHealth: async () => { calls.push("health"); },
         createReplacementSession: async (_identity, _port, transactionSha256) => ({
           status: "created", transactionSha256, session: {},
-        }),
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
-          status: "acknowledged", handoffSha256, transactionSha256,
         }),
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
           status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
@@ -4155,9 +3978,6 @@ describe("managed command wrappers", () => {
           verifyReplacementHealth: async () => {},
           createReplacementSession: async (_identity, _port, transactionSha256) => ({
             status: "created", transactionSha256, session: {},
-          }),
-          acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
-            status: "acknowledged", handoffSha256, transactionSha256,
           }),
           awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
             status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
@@ -4273,10 +4093,6 @@ describe("managed command wrappers", () => {
           calls.push("session");
           return { status: "created", transactionSha256, session: {} };
         },
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
-          calls.push("memory-ack");
-          return { status: "acknowledged", handoffSha256, transactionSha256 };
-        },
         awaitTerminalIdleAcknowledgement: async () => { calls.push("terminal-idle"); throw new Error("idle acknowledgement failed"); },
         quiesceOldProcess: async () => { calls.push("quiesce-old"); },
         resumeOldProcess: async () => { calls.push("resume-old"); },
@@ -4294,15 +4110,15 @@ describe("managed command wrappers", () => {
         .rejects.toThrow("idle acknowledgement failed");
 
       expect(calls).toEqual([
-        "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
-        "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
-        "memory-ack", "persist:typed_memory_acknowledged", "terminal-idle", "identity:replacement",
+         "binding", "identity:old", "publish", "persist:handoff_published", "launch", "identity:replacement",
+         "persist:replacement_started", "health", "persist:replacement_healthy", "session", "persist:session_created",
+         "terminal-idle", "identity:replacement",
         "stop-replacement", "persist:failed",
       ]);
       expect(calls).not.toContain("retire-old");
       expect(evidence.at(-1)).toMatchObject({
         phase: "failed",
-        lastCompletedPhase: "typed_memory_acknowledged",
+         lastCompletedPhase: "session_created",
         oldParentRetired: false,
         replacementStopped: true,
       });
@@ -4334,9 +4150,6 @@ describe("managed command wrappers", () => {
         createReplacementSession: async (_identity, _port, transactionSha256) => ({
           status: "created", transactionSha256, session: {},
         }),
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
-          status: "acknowledged", handoffSha256, transactionSha256,
-        }),
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
           status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",
         }),
@@ -4361,8 +4174,8 @@ describe("managed command wrappers", () => {
     }
   });
 
-  it("rejects malformed or reused restart sessions, stale acknowledgements, and failed assistants before retirement", async () => {
-    for (const variant of ["malformed", "reused", "stale-ack", "failed-assistant"] as const) {
+  it("rejects malformed or reused restart sessions and failed assistants before retirement", async () => {
+    for (const variant of ["malformed", "reused", "failed-assistant"] as const) {
       const worktree = mkdtempSync(join(tmpdir(), `ingenium-replacement-session-${variant}-`));
       try {
         const request = replacementRequest(worktree);
@@ -4384,11 +4197,6 @@ describe("managed command wrappers", () => {
             if (variant === "reused") return { status: "reused", transactionSha256, session: {} } as any;
             return { status: "created", transactionSha256, session: {} };
           },
-          acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
-            status: "acknowledged",
-            handoffSha256,
-            transactionSha256: variant === "stale-ack" ? hash("stale") : transactionSha256,
-          }),
           awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
             status: "idle",
             handoffSha256,
@@ -4404,8 +4212,7 @@ describe("managed command wrappers", () => {
           persistEvidence: async () => {},
         };
         const expected = variant === "malformed" || variant === "reused"
-          ? "Replacement session creation is invalid"
-          : variant === "stale-ack" ? "Typed memory acknowledgement is invalid" : "Terminal idle acknowledgement is invalid";
+          ? "Replacement session creation is invalid" : "Terminal idle acknowledgement is invalid";
 
         await expect(managedReplacementFirstRestart([encodedRestart(request)], dependencies, worktree)).rejects.toThrow(expected);
         expect(retired).toBe(false);
@@ -4436,9 +4243,6 @@ describe("managed command wrappers", () => {
         verifyReplacementHealth: async () => {},
         createReplacementSession: async (_identity, _port, transactionSha256) => ({
           status: "created", transactionSha256, session: {},
-        }),
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => ({
-          status: "acknowledged", handoffSha256, transactionSha256,
         }),
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => ({
           status: "idle", handoffSha256, transactionSha256, assistantResult: "completed",

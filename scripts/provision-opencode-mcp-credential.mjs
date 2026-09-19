@@ -7,8 +7,8 @@ import { setTimeout } from "node:timers/promises";
 
 const credentialFile = "/run/ingenium-opencode/.ingenium-mcp-credential";
 const api = "http://127.0.0.1:4097/api/v1";
-const scopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
-const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();
+const scopes = ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
+const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();
 
 function openPrivateDirectory(path, uid, gid) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);

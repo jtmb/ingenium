@@ -45,11 +45,14 @@ separate and documented below:
 |--------|----------|---------|
 | GET | `/api/v1/auth/preflight` | Authenticated capability probe. Scoped credentials receive server-derived scopes, audience, organization/project grants, workspace/worktree binding, and restart guidance. Invalid credentials return `401`, missing scope `403`, and inaccessible bindings `404`; failures never disclose credential or upstream details. |
 | GET/POST | `/api/v1/auth/mcp-credentials` | List redacted metadata or issue a scoped service/runtime/repository-sync credential. Human issuance requires recent step-up; plaintext is returned once. `servicePrincipalId` is optional and omission creates the credential's service principal atomically. |
-| POST | `/api/v1/auth/coordination-lease` | Internal installation-only issuance of the fixed coordination and repository-sync credential pair for one ready/idle runtime. Plaintext is returned once. |
 | POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
 | DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Browser users require recent step-up; an exactly bound service credential may revoke only itself. |
 
-### Internal coordination lease
+### Retired internal coordination lease (historical)
+
+> This section is retained for migration archaeology only. The coordination-lease
+> route and its public coordination surface are retired; current provisioning uses
+> the authenticated runtime/bootstrap and repository-sync credential paths above.
 
 `POST /api/v1/auth/coordination-lease` is not a browser or general credential
 issuance route. It requires the installation bearer plus
@@ -97,11 +100,9 @@ and `repository:sync`. This is separate from the runtime capability credential,
 whose `runtime` audience uses `child-mcp:runtime`, `coordination:read`,
 `coordination:write`, `memory:read`, `projects:read`, and `runtime:activity`.
 It is also separate from the package-owned general-MCP reset command,
-`ingenium-coordination-reset reset`, which issues exactly these eight scopes:
+`ingenium-coordination-reset reset`, which currently issues exactly these six scopes:
 
 ```text
-coordination:read
-coordination:write
 projects:read
 repository:sync
 documentation:read
@@ -111,8 +112,8 @@ memory:write
 ```
 
 The general-MCP reset does not issue `health:read`; the installation-wide
-health tool remains outside both the reset credential and the runtime-issued
-coordination lease. The effective expiry is the earliest of 15 minutes,
+health tool remains outside both the reset credential and the runtime capability
+credential. The effective expiry is the earliest of 15 minutes,
 the runtime absolute expiry, the capability-binding expiry, and the runtime
 credential expiry. The database stores only token hashes; each plaintext token
 appears only in this response.
@@ -322,14 +323,18 @@ project owner creates an explicit mapping.
 `POST /usage/external` accepts strict metadata only: the launcher `worktree`,
 external `sessionId` and `messageId`, `role: "assistant"`, `completedAt`,
 optional provider/model/agent IDs, nullable token/cache fields, and optional
-provider-reported `costAmount`. It requires an `mcp` service credential whose
-project, workspace, storage mapping, launcher worktree, and active coordination
-session match. Missing metrics remain unknown; prompt text, reasoning content,
+provider-reported `costAmount`. It requires an authenticated `mcp` service
+credential whose project and project grant match the query, with a workspace,
+storage-mapping hash, and launcher worktree that exactly matches the request;
+dashboard/UI callers are rejected. The API then verifies the native OpenCode
+session and assistant message with `verifyOpenCodeNativeMessage` before
+ingestion. This path does not require a coordination route or coordination
+session lease. Missing metrics remain unknown; prompt text, reasoning content,
 tool payloads, credentials, and upstream envelopes are never accepted. An
 identical replay is idempotent; a conflicting replay returns `409
-EXTERNAL_USAGE_SOURCE_CONFLICT`, and a foreign or inactive binding returns `403
-EXTERNAL_USAGE_BINDING_REJECTED`. The MCP adapter is
-`ingenium_usage_ingest`.
+EXTERNAL_USAGE_SOURCE_CONFLICT`, a foreign or inactive binding returns `403
+EXTERNAL_USAGE_BINDING_REJECTED`, and an unavailable OpenCode upstream returns
+`503 OPENCODE_UNAVAILABLE`. The MCP adapter is `ingenium_usage_ingest`.
 
 #### Advisory thresholds (USAGE-100)
 
@@ -445,7 +450,11 @@ in SQL before returning rows.
 
 The extraction trigger also accepts one external-session request in the strict
 shape `{ "external": { "worktree", "sessionId", "message?" } }`. It requires
-the same active `mcp` launcher binding. The optional message is one redacted,
+the same authenticated `mcp` binding: project and project grant, workspace,
+storage-mapping hash, and launcher worktree must match, and dashboard/UI callers
+are rejected. The API verifies the native OpenCode session and, when supplied,
+the native user message ID and text before extraction; it does not use a
+coordination route or session lease. The optional message is one redacted,
 visible user message (maximum 6,000 characters); omitting it only probes
 learning eligibility. External source receipts are keyed by session/message
 identity and content fingerprint, so a replay does not create a second
@@ -636,7 +645,12 @@ Both routes return the task in `data` and use `422 INVALID_TASK_MUTATION_INPUT`,
 
 ### Task source references
 
-### Coordination registry (COORD-102)
+### Retired coordination registry (COORD-102 historical)
+
+> The following route and MCP descriptions are archival migration records, not
+> active API contracts. The public coordination router and six coordination tools
+> are retired; private replacement-first recovery uses separate authenticated
+> internal handoff paths.
 
 The project-scoped coordination transport exposes 28 routes. Every route uses
 `?project=<name>`; mutation bodies use strict snake_case fields and require an
@@ -1015,10 +1029,9 @@ the same binding and ownership checks.
 The package-owned general-MCP reset credential includes `memory:read` and
 `memory:write`, so an attested general binding can use private saved-memory
 reads and mutations. It does not include `memory:share`; project-visible memory
-still requires that separate permission. The coordination-lease `mcp` audience
-and the runtime capability audience are read-only for saved memory (`memory:read`);
-they do not gain `memory:write` merely from their coordination or child-runtime
-scopes.
+still requires that separate permission. The runtime capability audience is
+read-only for saved memory (`memory:read`) and does not gain `memory:write` from
+its child-runtime scopes.
 
 The MCP save operation is the remember path: use it only after an explicit
 current-user request, with private preference visibility by default, and confirm
@@ -1488,7 +1501,7 @@ mode omits the runtime binding and uses the fixed local path.
 | GET | `/api/v1/opencode/sessions/:id/messages` | Get messages (with optional `limit` and `before` pagination) |
 | GET | `/api/v1/opencode/sessions/:id/messages/:msgId` | Get a single message |
 | DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Delete a message |
-| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the current OpenCode 1.18.9 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
+| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the current OpenCode 1.18.31 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
 | POST | `/api/v1/opencode/sessions/:id/abort` | Abort session |
 | POST | `/api/v1/opencode/sessions/:id/fork` | Fork session |
 | POST | `/api/v1/opencode/sessions/:id/share` | Share session |
@@ -1513,7 +1526,7 @@ mode omits the runtime binding and uses the fixed local path.
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | Accepts one MIME-allowlisted multipart file, maximum 5 MiB, stores it temporarily in `/tmp/ingenium-chat-uploads/`, and schedules deletion after one hour. This endpoint is not the Chat composer multi-file path. |
-| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in OpenCode 1.18.9) |
+| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in the retained OpenCode 1.18.31 surface) |
 
 ### Chat Context project authority
 
@@ -1565,7 +1578,7 @@ values, endpoints, headers, cookies, sessions, or other credentials. Unsafe
 scalars are rejected or replaced with a safe fallback; they are never partially
 redacted and returned as opaque identifiers.
 
-> **Known gap**: Questions cannot be replied to via the REST API in OpenCode 1.18.9. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
+> **Known gap**: Questions cannot be replied to via the REST API in OpenCode 1.18.31. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
 
 ## Data Flow
 

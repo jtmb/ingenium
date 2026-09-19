@@ -1,12 +1,13 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 292-tool built-in Ingenium MCP catalog across 32 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 286 active built-in Ingenium MCP tools across 32 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **292 tools** across **32 baseline categories**:
-290 `ingenium_` catalog entries and 2 extension-registered tools. A project-scoped
+The canonical catalog contains **286 active entries** across **32 baseline
+categories**: 284 active `ingenium_` server registrations and 2
+extension-registered tools. The active built-in surface contains **286 tools**. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** display locator (except where noted). The locator
@@ -91,9 +92,8 @@ plugins, so plugins use this same resolver rather than relying on the child
 environment. Run
 `npm run build --workspace=packages/ingenium-extension` after changing the
 launcher or transport. After initialization and `tools/list`, select a read that
-the scoped credential already authorizes. Coordination acceptance uses the
-state-bearing `ingenium_coordination_status` tool with the current exact identity
-and verifies `GET /api/v1/health` separately. `ingenium_health_check` needs no
+the scoped credential already authorizes. Verify `GET /api/v1/health` separately;
+the retired coordination tools are not transport canaries. `ingenium_health_check` needs no
 project argument but does require `health:read`; do not broaden a least-privilege
 credential solely to use it as a transport smoke test. Authentication,
 unavailable transport, and unrecognized status failures are reported with fixed
@@ -147,11 +147,9 @@ include `CHILD_MCP_STARTUP_TIMEOUT`, `CHILD_MCP_REQUEST_TIMEOUT`,
 ### General-MCP reset scopes
 
 The package-owned `ingenium-coordination-reset reset` command currently issues
-exactly eight scopes for the general MCP credential:
+exactly six scopes for the general MCP credential:
 
 ```text
-coordination:read
-coordination:write
 projects:read
 repository:sync
 documentation:read
@@ -160,12 +158,8 @@ memory:read
 memory:write
 ```
 
-It excludes `health:read`. The runtime-issued coordination lease is a separate
-five-scope credential (`coordination:read`, `coordination:write`, `memory:read`,
-`projects:read`, and `repository:sync`); do not treat that lease list as the
-general reset list. The separately provisioned runtime capability credential is
-also distinct and carries `child-mcp:runtime`, `coordination:read`,
-`coordination:write`, `memory:read`, `projects:read`, and `runtime:activity`.
+It excludes `health:read`. Runtime capability credentials use the separate
+`runtime` audience and are distinct from the general MCP credential.
 
 ### MCP usefulness report (public/developer schema)
 
@@ -376,7 +370,7 @@ coordination canaries and the credential-free API `GET /api/v1/health` route.
 
 ## TASKS — Full task management (Kanban)
 
-32 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update, coordination_status, coordination_memory_read, coordination_update, coordination_claim, coordination_release, coordination_handoff.
+26 tools: create, list, move, reserve, release, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update.
 
 `ingenium_task_reserve` and `ingenium_task_release` are cooperative managed-agent
 operations. They require the same project and canonical worktree boundary,
@@ -385,85 +379,16 @@ expected revision, idempotency key, owner, worktree, and a caller-held
 hash is stored; neither the token nor hash is returned. Manual editors and
 external processes are outside the guarantee.
 
-The six coordination tools are project-scoped and use strict snake_case
-inputs. Their catalog authorization is `coordination:read` for
-`ingenium_coordination_status` and `ingenium_coordination_memory_read`, and
-`coordination:write` for the other four. The coordination catalog policies
-require no additional `repository:sync` scope. All six require the exact
-launcher/workspace binding. The coordination session lease binding separately
-requests the five scopes `coordination:read`, `coordination:write`,
-`memory:read`, `projects:read`, and `repository:sync`; this is coordination transport
-authorization, not a tool-execution admission check. Agent profile permissions
-are the sole tool gate. The packaged transport uses the `mcp` audience; runtime
-activity uses the separate `runtime` audience, and repository-authoritative
-synchronization uses `repository-sync` with its restricted route set. The API
-also verifies the project and derived worktree identity; the MCP transport never
-accesses the database directly.
+The former coordination tools and their public routes are retired. They are not
+available through the active catalog, packaged transport, server transport, or
+agent profiles. Private replacement-first recovery may use authenticated internal
+handoff artifacts, but those artifacts are not public MCP tools. Agent profile
+permissions remain the sole tool gate; the API remains the only database boundary.
 
-| Tool | Operation and API mapping |
-|------|---------------------------|
-| `ingenium_coordination_status` | Requires `project`, `worktree_id`, `session_id`, `incarnation`, and `ownership_token`; reads `GET /api/v1/coordination/snapshot` and sends the ownership proof in the dedicated header. |
-| `ingenium_coordination_memory_read` | Requires the session lease plus `idempotency_key` and optional `limit` (maximum 8); posts `/api/v1/coordination/memory/read` and reads typed operational memory without advancing its cursor. |
-| `ingenium_coordination_update` | Requires `project`, `operation`, the session identity, and operation-specific lease fields. Operations are `register` → `POST /api/v1/coordination/register`, `recover` → `POST /api/v1/coordination/recover`, `recovery_state` → `POST /api/v1/coordination/epoch/recovery-state`, `reconcile_epoch` → `POST /api/v1/coordination/epoch/reconcile`, `recover_epoch` → `POST /api/v1/coordination/epoch/recover`, `update` → `PATCH /api/v1/coordination/update`, `heartbeat` → `POST /api/v1/coordination/heartbeat`, `close` → `POST /api/v1/coordination/close`, and `takeover` → `POST /api/v1/coordination/takeover`. `runtime_activity` maps to `POST /api/v1/runtimes/activity` with `runtime_id` and `observed_at`. |
-| `ingenium_coordination_claim` | Defaults to `action: acquire` and posts `/api/v1/coordination/claims/batch`; `verify`, `renew`, `mark`, `quarantine`, and `complete` post their matching `/api/v1/coordination/claims/<action>` routes. Acquire requires `client_claim_key` and `claims[]`; proof actions require `client_claim_key` and `accepted_epoch`; renew adds `ttl_ms`, mark adds `state`, quarantine may add `code`, and complete adds `operation_id`, `operation`, and `footprint[]`. |
-| `ingenium_coordination_release` | Requires the session lease plus `client_claim_key`; posts `/api/v1/coordination/claims/release`. |
-| `ingenium_coordination_handoff` | `publish`, `read`, `ack`, and `consume` map to the matching `/api/v1/coordination/handoffs/*` routes. `memory` and `memory_ack` map to `/api/v1/coordination/memory/publish` and `/api/v1/coordination/memory/ack`; `link` maps to `/api/v1/coordination/sessions/link`; and `transcript_publish`, `transcript_read`, and `transcript_ack` map to the matching `/api/v1/coordination/transcripts/*` routes. Handoff and transcript reads use durable sequence cursors; memory reads use a durable revision cursor. |
-
-#### Linked-session transcript operations
-
-`ingenium_coordination_handoff` accepts these transcript-related operations in
-addition to ordinary handoffs and memory:
-
-| Operation | Required operation-specific fields | Result and limits |
-|---|---|---|
-| `link` | `target_session_id`, `link_kind` (`linked` or `fork`) | Posts `/api/v1/coordination/sessions/link`; returns a redacted session plus `link: { id, kind, createdAt }`. |
-| `transcript_publish` | `transcript_messages[]` | Posts `/api/v1/coordination/transcripts/publish`; accepts 1–16 messages and returns `accepted`. |
-| `transcript_read` | Optional `limit` | Posts `/api/v1/coordination/transcripts/read`; the generic MCP limit allows 1–32, but transcript reads are capped by the core at 16 and do not advance the cursor. |
-| `transcript_ack` | `through_sequence` | Posts `/api/v1/coordination/transcripts/ack`; advances the durable cursor only through a sequence visible to the receiver. |
-
-All four operations require the common session lease and `idempotency_key`.
-Transcript messages use `message_id` plus a payload whose boundary is exactly
-`info` and `parts`. `info` requires `id`, `sessionID`, and role `user` or
-`assistant`; every part requires `id`, matching `sessionID` and `messageID`, and
-a non-empty `type` of at most 64 characters. The coordination session ID is
-`session-<sha256(raw OpenCode session ID)>`. A publish batch is limited to 16
-messages and 1,572,864 UTF-8 bytes. See [the multi-session workflow](../usage/multi-session.md#link-existing-sessions-and-share-transcripts)
-for the `/add-session` command and the untrusted prompt-projection behavior.
-
-The separate `ingenium_coordination_memory_read` tool has the common session
-lease, required `idempotency_key`, and optional `limit` capped at 8. It is the
-read-only catalog entry for typed operational memory; the combined handoff tool
-remains write-classified because it also publishes and acknowledges state.
-
-Common lease fields are `worktree_id`, `session_id`, `incarnation`,
-`expected_revision`, `fence`, and caller-held `ownership_token`; mutation
-operations require `idempotency_key` (or the equivalent `Idempotency-Key`
-header). Tokens are 32–512 URL-safe characters, TTLs are 1,000–300,000 ms,
-claim batches are limited to 128 entries, handoff batches to 32, and memory
-windows to 8. Claims are safe relative `path`/`tree` values or reserved
-`@build`/`@repository` claims. All operation-specific fields are validated
-strictly, including SHA-256 baselines, accepted epochs, safe footprint paths,
-and typed operational-memory entries. Successful results still expose only the
-allowlisted sanitized path/hash metadata defined for each operation.
-
-Status responses contain only redacted session/peer metadata and claim
-`kind`, `state`, and lifecycle timestamps—never claim IDs, claim values,
-baselines, client claim keys, ownership hashes, or tokens. Claim mutations
-return the redacted session, `acceptedEpoch`, `manifestGeneration`, and an
-optional managed `operationId`; they do not echo request fields or expose claim
-identifiers. Handoff and memory responses are similarly allowlisted and bounded;
-memory records contain operational actions/checks/todos/changed paths and
-`nextWork`, not prompts, commands, or source content.
-
-Every coordination failure is returned as `isError: true`. Transport failures
-return `COORDINATION_UNAVAILABLE`; malformed or unexpected API data returns
-`COORDINATION_INVALID_RESPONSE`; an unrecognized upstream failure becomes
-`COORDINATION_REQUEST_FAILED`. Recognized upstream codes are allowlisted and
-use the fixed message `The coordination request failed.`; raw upstream
-messages, tokens, and claim data never enter the MCP response. The API-specific
-`TARGET_SESSION_NOT_FOUND`, `SESSION_LINK_CONFLICT`, and `TRANSCRIPT_CONFLICT`
-codes are currently not in the MCP allowlist, so those link/transcript failures
-are projected as `COORDINATION_REQUEST_FAILED`.
+The former coordination tools, leases, claims, handoffs, and transcript
+operations are retired. Native OpenCode session/message APIs and the separate
+explicit saved-memory tools are the supported alternatives; private recovery
+handoff artifacts are not public MCP tools.
 
 ## PLANS — Saved notes & context (legacy)
 
@@ -570,8 +495,8 @@ or `memory:share`), mutations use `memory:write`, and `visibility: "project"`
 requires `memory:share`; project mutations therefore require both
 `memory:write` and `memory:share`. Broad wildcard scopes remain subject to the
 same project/workspace binding. The package-owned general-MCP reset credential
-includes `memory:read` and `memory:write`, while the coordination-lease and
-runtime capability credentials include `memory:read` only. Returned memory content
+ includes `memory:read` and `memory:write`, while runtime capability credentials
+ include `memory:read` only. Returned memory content
 has `contentKind: "untrusted_memory_data"` and
 `instructionAuthority: false`; clients must retain that trust boundary when
 injecting it into a model context.
@@ -709,6 +634,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 292 tools across 32 categories (290 `ingenium_` catalog entries + 2 extension).** Project-scoped child
+**Canonical baseline: 286 entries across 32 categories; active baseline: 286 tools (284 `ingenium_` server registrations + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

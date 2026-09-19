@@ -187,11 +187,11 @@ export function applyRepositorySync(projectId: string, input: RepositorySyncAppl
     const updatedAt = new Date().toISOString();
     if (!input.dryRun) {
       db.prepare(
-        `INSERT INTO coordination_worktrees (project_id, worktree_id, next_fence, created_at, updated_at)
-         VALUES (?, ?, 1, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
+        `INSERT INTO repository_sync_worktrees (project_id, worktree_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
       ).run(projectId, input.worktreeId, updatedAt, updatedAt);
       const worktreeExists = db.prepare(
-        "SELECT 1 FROM coordination_worktrees WHERE project_id = ? AND worktree_id = ?",
+        "SELECT 1 FROM repository_sync_worktrees WHERE project_id = ? AND worktree_id = ?",
       ).get(projectId, input.worktreeId);
       if (!worktreeExists) throw new RepositorySyncError("INVALID_REPOSITORY_SYNC");
       db.prepare(

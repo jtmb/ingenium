@@ -23,7 +23,7 @@ export interface OpenCodeSession {
   path: string;
   title: string;
   version: string;
-  time: { created: number; updated: number }; // epoch millis
+  time: { created: number; updated: number; archived?: number }; // epoch millis
   cost: number;
   tokens: {
     input: number;
@@ -193,6 +193,99 @@ function collectionValues(value: unknown): unknown[] {
   return Object.entries(value).map(([key, entry]) => {
     if (!isProviderRecord(entry)) return entry;
     return { ...entry, id: nonEmptyString(entry.id) ?? key };
+  });
+}
+
+export interface OpenCodePermissionRequest {
+  id: string;
+  permission: string;
+  pattern: string;
+  action: string;
+  sessionID?: string;
+}
+
+/** Keep the browser permission prompt stable across legacy and v2 request shapes. */
+export function normalizeOpenCodePermissionRequests(input: unknown): OpenCodePermissionRequest[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.requests ?? root.permissions ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodePermissionRequest[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const id = nonEmptyString(candidate.id);
+    const action = nonEmptyString(candidate.action);
+    const permission = nonEmptyString(candidate.permission) ?? action;
+    const patterns = Array.isArray(candidate.patterns)
+      ? candidate.patterns.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : Array.isArray(candidate.resources)
+        ? candidate.resources.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [];
+    const pattern = nonEmptyString(candidate.pattern) ?? patterns.join("\n");
+    if (!id || !permission || !action || !pattern) return [];
+    const sessionID = nonEmptyString(candidate.sessionID);
+    return [{ id, permission, pattern, action, ...(sessionID ? { sessionID } : {}) }];
+  });
+}
+
+export interface OpenCodeQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface OpenCodeQuestion {
+  id: string;
+  requestId?: string;
+  question: string;
+  header?: string;
+  options?: OpenCodeQuestionOption[];
+  multiple?: boolean;
+}
+
+/** Flatten legacy text questions and v2 question requests for the existing prompt UI. */
+export function normalizeOpenCodeQuestions(input: unknown): OpenCodeQuestion[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.requests ?? root.questions ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodeQuestion[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const requestId = nonEmptyString(candidate.requestID)
+      ?? nonEmptyString(candidate.questionID)
+      ?? nonEmptyString(candidate.id);
+    const nested = Array.isArray(candidate.questions) ? candidate.questions : [candidate];
+
+    return nested.flatMap((question, index): OpenCodeQuestion[] => {
+      if (!isProviderRecord(question)) return [];
+      const text = nonEmptyString(question.question) ?? nonEmptyString(question.text);
+      const id = nonEmptyString(question.id)
+        ?? (requestId ? nested.length === 1 ? requestId : `${requestId}:${index}` : null);
+      if (!text || !id) return [];
+
+      const options = Array.isArray(question.options)
+        ? question.options.flatMap((option): OpenCodeQuestionOption[] => {
+          if (!isProviderRecord(option)) return [];
+          const label = nonEmptyString(option.label);
+          if (!label) return [];
+          const description = nonEmptyString(option.description);
+          return [{ label, ...(description ? { description } : {}) }];
+        })
+        : [];
+      const header = nonEmptyString(question.header);
+      return [{
+        id,
+        ...(requestId ? { requestId } : {}),
+        question: text,
+        ...(header ? { header } : {}),
+        ...(options.length > 0 ? { options } : {}),
+        ...(typeof question.multiple === "boolean" ? { multiple: question.multiple } : {}),
+      }];
+    });
   });
 }
 
@@ -454,7 +547,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
     get: (id: string) =>
       oc<OpenCodeSession>(`/opencode/sessions/${encodeURIComponent(id)}`),
 
-    update: (id: string, body: { title?: string }) =>
+    update: (id: string, body: { title?: string; time?: { archived?: number } }) =>
       oc<OpenCodeSession>(`/opencode/sessions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
@@ -658,15 +751,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
   },
 
   permissions: {
-    list: () =>
-      oc<
-        Array<{
-          id: string;
-          permission: string;
-          pattern: string;
-          action: string;
-        }>
-      >("/opencode/permissions"),
+    list: async () => normalizeOpenCodePermissionRequests(await oc<unknown>("/opencode/permissions")),
 
     reply: (sessionId: string, permissionId: string, response: "once" | "always" | "reject") =>
       oc<unknown>(
@@ -681,14 +766,9 @@ export function createOpenCodeClient(runtimeId: string | null) {
   /* ── Questions ── */
 
   questions: {
-    /**
-     * List pending questions for a session/directory.
-     * v1.18.9 contract: GET /question returns array of { id, text } objects.
-     */
-    list: (directory?: string) =>
-      oc<Array<{ id: string; text?: string }>>(
-        `/opencode/questions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
-      ),
+    list: async (directory?: string) => normalizeOpenCodeQuestions(await oc<unknown>(
+      `/opencode/questions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
+    )),
   },
 
   events: {

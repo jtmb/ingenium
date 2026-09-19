@@ -62,20 +62,14 @@ export interface ServiceCredentialIdentity {
   storageMappingHash: string;
 }
 
-export interface CoordinationLeaseCredentials {
-  coordination: McpCredential & { token: string };
-  repositorySync: McpCredential & { token: string };
-}
+export type RepositorySyncCredential = McpCredential & { token: string };
 
-export const COORDINATION_LEASE_CREDENTIAL_TTL_MS = 15 * 60_000;
-export const COORDINATION_LEASE_SCOPES = [
-  "coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync",
-] as const;
+export const REPOSITORY_SYNC_CREDENTIAL_TTL_MS = 15 * 60_000;
 export const REPOSITORY_SYNC_SCOPES = ["projects:read", "repository:sync"] as const;
 
-export class CoordinationLeaseUnavailableError extends Error {
+export class RepositorySyncCredentialUnavailableError extends Error {
   constructor() {
-    super("Coordination lease runtime is unavailable");
+    super("Repository sync credential runtime is unavailable");
   }
 }
 
@@ -256,9 +250,8 @@ export function createMcpCredential(
   return { ...created.credential, token: created.encryptedToken ? decryptAuthSecret(created.encryptedToken) : token };
 }
 
-export function issueCoordinationLeaseCredentials(runtimeId: string, now = new Date()): CoordinationLeaseCredentials {
+export function issueRepositorySyncCredential(runtimeId: string, now = new Date()): RepositorySyncCredential {
   const timestamp = now.toISOString();
-  const coordinationToken = newCredentialToken();
   const repositoryToken = newCredentialToken();
   const issued = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
@@ -304,15 +297,15 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
         absolute_expires_at: string; storage_path: string; storage_mapping_hash: string;
         binding_expires_at: string; capability_expires_at: string; service_principal_id: string;
       } | undefined;
-    if (!scope) throw new CoordinationLeaseUnavailableError();
+    if (!scope) throw new RepositorySyncCredentialUnavailableError();
     const expiresAt = new Date(Math.min(
-      now.getTime() + COORDINATION_LEASE_CREDENTIAL_TTL_MS,
+      now.getTime() + REPOSITORY_SYNC_CREDENTIAL_TTL_MS,
       Date.parse(scope.absolute_expires_at),
       Date.parse(scope.binding_expires_at),
       Date.parse(scope.capability_expires_at),
     ));
     if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now.getTime()) {
-      throw new CoordinationLeaseUnavailableError();
+      throw new RepositorySyncCredentialUnavailableError();
     }
     const base = {
       servicePrincipalId: scope.service_principal_id,
@@ -323,14 +316,6 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
       expiresAt,
       createdByUserId: scope.owner_user_id,
     };
-    const coordination = insertMcpCredential(db, {
-      ...base,
-      kind: "service",
-      audience: "mcp",
-      name: `Coordination lease ${runtimeId}`,
-      scopes: [...COORDINATION_LEASE_SCOPES],
-    }, [...COORDINATION_LEASE_SCOPES], [scope.project_id], coordinationToken.id,
-    coordinationToken.tokenPrefix, coordinationToken.token);
     const repositorySync = insertMcpCredential(db, {
       ...base,
       kind: "repository-sync",
@@ -339,13 +324,10 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
       scopes: [...REPOSITORY_SYNC_SCOPES],
     }, [...REPOSITORY_SYNC_SCOPES], [scope.project_id], repositoryToken.id,
     repositoryToken.tokenPrefix, repositoryToken.token);
-    return { coordination, repositorySync };
+    return repositorySync;
   });
   checkpointAfterWrite();
-  return {
-    coordination: { ...issued.coordination, token: coordinationToken.token },
-    repositorySync: { ...issued.repositorySync, token: repositoryToken.token },
-  };
+  return { ...issued, token: repositoryToken.token };
 }
 
 function insertServicePrincipal(db: Database.Database, input: CreateMcpCredentialInput): string {

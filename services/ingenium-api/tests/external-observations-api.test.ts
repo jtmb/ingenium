@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { coordination, extraction, observations, projects, resetDbForTest, settings, synthesisLlm } from "ingenium-core";
+import { extraction, observations, projects, resetDbForTest, settings, synthesisLlm } from "ingenium-core";
 import * as endpointPolicy from "ingenium-core/lib/tools/endpoint-policy";
 import { extractionRouter } from "../lib/routes/extraction.js";
+import * as opencodeClient from "../lib/opencode-client.js";
 import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 let directory: string;
@@ -14,7 +16,9 @@ let server: Server;
 let baseUrl: string;
 let projectId: string;
 let principal: any;
-const input = { worktree: "/home/brajam/repos/ingenium", sessionId: "ses-external" };
+const nativeSessionId = "ses-external";
+const input = { worktree: "/home/brajam/repos/ingenium", sessionId: `session-${createHash("sha256").update(nativeSessionId, "utf8").digest("hex")}` };
+const bindingRejected = { error: { code: "EXTERNAL_OBSERVATION_BINDING_REJECTED", message: "OpenCode session binding rejected" } };
 
 beforeEach(async () => {
   resetDbForTest();
@@ -25,10 +29,8 @@ beforeEach(async () => {
   principal = { type: "service", id: "learning-service", tokenId: "learning-token", scopes: ["extraction:write"], audience: "mcp",
     organizationId: project.organization_id, projectId, projectIds: [projectId], workspaceId: "workspace-external",
     launcherWorktree: input.worktree, storageMappingHash: "a".repeat(64) };
-  coordination.registerCoordinationSession(projectId, {
-    worktreeId: coordination.coordinationWorktreeId(principal.workspaceId, principal.storageMappingHash),
-    sessionId: input.sessionId, incarnation: 1, ownershipToken: "A".repeat(32), ttlMs: 60_000, idempotencyKey: "register-external",
-  });
+  vi.spyOn(opencodeClient, "verifyOpenCodeNativeMessage").mockImplementation(async ({ sessionId }) =>
+    sessionId === input.sessionId ? { nativeSessionId } : bindingRejected);
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => { req.principal = principal; next(); });

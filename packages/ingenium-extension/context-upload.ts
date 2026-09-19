@@ -2,22 +2,14 @@ import { mkdirSync, realpathSync, lstatSync, writeFileSync, unlinkSync } from "n
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { visibleContextExport } from "@ingenium/extension/context-upload-codec";
+import { getV2SessionInfo, legacySessionInfo, legacySessionMessage, readV2Messages, type OpenCodeV2Client } from "./opencode-v2.js";
 
 type Invoke = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
-type Client = { session?: {
-  get?: (args: unknown) => Promise<unknown>;
-  messages?: (args: unknown) => Promise<unknown>;
-} };
-
-function data(response: unknown): unknown {
-  return response && typeof response === "object" && "data" in response ? response.data : undefined;
-}
-
 export class ContextAutoUploader {
   private readonly pending = new Map<string, { again: boolean; promise: Promise<void> }>();
 
   constructor(private readonly project: string, private readonly worktree: string,
-    private readonly client: unknown, private readonly invoke: Invoke) {}
+    private readonly client: OpenCodeV2Client, private readonly invoke: Invoke) {}
 
   sync(session: string): Promise<void> {
     const pending = this.pending.get(session);
@@ -42,28 +34,19 @@ export class ContextAutoUploader {
     if (setting.value !== "true") return;
     let path: string | undefined;
     try {
-      const args = { path: { id: session }, query: { directory: this.worktree } };
-      const client = this.client as Client | undefined;
-      const info = data(await client?.session?.get?.(args));
-      const pages: unknown[][] = [];
+      const info = await getV2SessionInfo(this.client, session);
+      const messages = await readV2Messages(this.client, session);
       const seen = new Set<string>();
-      let before: string | undefined;
-      let sourceBytes = 0;
-      for (;;) {
-        const page = data(await client?.session?.messages?.({ ...args, query: { ...args.query, limit: 100, ...(before ? { before } : {}) } }));
-        if (!Array.isArray(page)) throw new Error("CONTEXT_UPLOAD_UNAVAILABLE");
-        sourceBytes += Buffer.byteLength(JSON.stringify(page));
-        if (sourceBytes > 64 * 1024 * 1024) throw new Error("CONTEXT_UPLOAD_TOO_LARGE");
-        for (const message of page) {
-          const id = message?.info?.id;
-          if (typeof id !== "string" || seen.has(id)) throw new Error("CONTEXT_UPLOAD_PAGINATION_FAILED");
-          seen.add(id);
-        }
-        pages.push(page);
-        if (page.length < 100) break;
-        before = page[0]?.info?.id;
+      const sourceBytes = Buffer.byteLength(JSON.stringify(messages));
+      if (sourceBytes > 64 * 1024 * 1024) throw new Error("CONTEXT_UPLOAD_TOO_LARGE");
+      for (const message of messages) {
+        if (typeof message.id !== "string" || seen.has(message.id)) throw new Error("CONTEXT_UPLOAD_PAGINATION_FAILED");
+        seen.add(message.id);
       }
-      const visible = visibleContextExport({ info, messages: pages.reverse().flat() }, session, this.worktree);
+      const visible = visibleContextExport({
+        info: legacySessionInfo(info, session, this.worktree),
+        messages: messages.map((message) => legacySessionMessage(message, session)),
+      }, session, this.worktree);
       if (!visible.messages.length) return;
       visible.info.contextUploadAutomatic = true;
       const bytes = JSON.stringify(visible);

@@ -30,8 +30,8 @@ const LEARNING_CREDENTIAL_REFERENCE = ".opencode/.ingenium-learning-credential";
 const REPOSITORY_SYNC_CREDENTIAL_REFERENCE = ".opencode/.ingenium-repository-sync-credential";
 const OWNER_PROVIDER_REFERENCE = ".opencode/.ingenium-coordination-owner-provider.json";
 const OWNER_EMAIL = "bootstrap-admin@localhost";
-const COORDINATION_SCOPES = [
-  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+const MCP_SCOPES = [
+  "projects:read", "repository:sync", "documentation:read", "rag:read",
   "memory:read", "memory:write",
 ] as const;
 const LEARNING_SCOPES = [
@@ -124,7 +124,7 @@ interface CanonicalBinding {
 
 interface CredentialProfile {
   credentialFile: string;
-  name: "Ingenium coordination" | "Ingenium learning" | "Ingenium repository sync";
+  name: "Ingenium MCP" | "Ingenium learning" | "Ingenium repository sync";
   kind: "service" | "repository-sync";
   audience: "mcp" | "repository-sync";
   scopes: readonly string[];
@@ -1070,7 +1070,7 @@ async function resetCredential(
 ): Promise<{ status: "completed" }> {
   const binding = canonicalBinding(worktree);
   const profile: CredentialProfile = purpose === "coordination"
-    ? { credentialFile: binding.credentialFile, name: "Ingenium coordination", scopes: COORDINATION_SCOPES, kind: "service", audience: "mcp" }
+    ? { credentialFile: binding.credentialFile, name: "Ingenium MCP", scopes: MCP_SCOPES, kind: "service", audience: "mcp" }
     : purpose === "learning" ? {
       credentialFile: resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE),
       name: "Ingenium learning",

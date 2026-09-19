@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { completedAssistant, redactContextText } from "@ingenium/extension/context-upload-codec";
+import { getV2SessionInfo, legacySessionMessage, readV2Messages, type OpenCodeV2Client } from "./opencode-v2.js";
 
 type Invoke = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
-type Client = { session?: { get?: (args: unknown) => Promise<unknown>; messages?: (args: unknown) => Promise<unknown> } };
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
@@ -45,7 +45,7 @@ export class ExternalUsageCollector {
   private readonly pending = new Map<string, { again: boolean; promise: Promise<void> }>();
 
   constructor(private readonly project: string, private readonly worktree: string,
-    private readonly client: unknown, private readonly invoke: Invoke) {}
+    private readonly client: OpenCodeV2Client, private readonly invoke: Invoke) {}
 
   sync(sessionId: string): Promise<void> {
     const existing = this.pending.get(sessionId);
@@ -66,29 +66,19 @@ export class ExternalUsageCollector {
 
   private async collect(sessionId: string): Promise<void> {
     if (!identifier(sessionId)) throw new Error("EXTERNAL_USAGE_BINDING_REJECTED");
-    const client = this.client as Client | undefined;
-    const args = { path: { id: sessionId }, query: { directory: this.worktree } };
-    const info = record(record(await client?.session?.get?.(args))?.data);
-    if (info?.id !== sessionId || info.directory !== this.worktree) throw new Error("EXTERNAL_USAGE_BINDING_REJECTED");
+    const info = await getV2SessionInfo(this.client, sessionId);
+    if (info.location.directory !== this.worktree) throw new Error("EXTERNAL_USAGE_BINDING_REJECTED");
     const seen = new Set<string>();
-    let before: string | undefined;
-    for (;;) {
-      const response = record(await client?.session?.messages?.({ ...args,
-        query: { ...args.query, limit: 100, ...(before ? { before } : {}) } }));
-      const page = response?.data;
-      if (!Array.isArray(page) || page.length > 100) throw new Error("EXTERNAL_USAGE_INVALID");
-      for (const envelope of page) {
-        const message = record(record(envelope)?.info);
-        const id = identifier(message?.id);
-        if (!id || seen.has(id) || message?.sessionID !== sessionId) throw new Error("EXTERNAL_USAGE_BINDING_REJECTED");
-        seen.add(id);
-        const event = externalUsageEvent(message, sessionId, this.worktree);
-        if (!event) continue;
-        const result = await this.invoke("usage_ingest", { project: this.project, event });
-        if (typeof result.created !== "boolean") throw new Error("EXTERNAL_USAGE_UNAVAILABLE");
-      }
-      if (page.length < 100) return;
-      before = identifier(record(record(page[0])?.info)?.id);
+    const messages = await readV2Messages(this.client, sessionId);
+    for (const raw of messages) {
+      const message = legacySessionMessage(raw, sessionId).info;
+      const id = identifier(message.id);
+      if (!id || seen.has(id) || message.sessionID !== sessionId) throw new Error("EXTERNAL_USAGE_BINDING_REJECTED");
+      seen.add(id);
+      const event = externalUsageEvent(message, sessionId, this.worktree);
+      if (!event) continue;
+      const result = await this.invoke("usage_ingest", { project: this.project, event });
+      if (typeof result.created !== "boolean") throw new Error("EXTERNAL_USAGE_UNAVAILABLE");
     }
   }
 }

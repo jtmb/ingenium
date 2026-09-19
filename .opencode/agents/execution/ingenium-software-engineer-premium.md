@@ -27,11 +27,6 @@ permission:
   ingenium_docs_get_page: allow
   ingenium_docs_list_spaces: allow
   ingenium_docs_get_page_tree: allow
-  "ingenium_coordination_update": allow
-  "ingenium_coordination_claim": allow
-  "ingenium_coordination_release": allow
-  ingenium_coordination_status: allow
-  ingenium_coordination_memory_read: allow
   ingenium_memory_read: allow
   ingenium_memory_list: allow
   ingenium_memory_search: allow

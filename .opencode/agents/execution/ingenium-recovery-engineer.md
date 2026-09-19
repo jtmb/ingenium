@@ -42,11 +42,6 @@ permission:
     "*": deny
   playwright_*: deny
   browser_*: deny
-  ingenium_coordination_status: allow
-  ingenium_coordination_memory_read: allow
-  ingenium_coordination_update: allow
-  ingenium_coordination_claim: allow
-  ingenium_coordination_release: allow
   skill:
     development-conventions: allow
     devops-conventions: allow
@@ -99,7 +94,7 @@ On transport abort, preserve the unknown outcome and first failure, reconcile du
 ## 🔴 Tool boundary
 
 - Use Read, Glob, and Grep for inspection; Edit/Write only for `docs/reference/ROADMAP.md` and declared `tests/artifacts/tui-recovery/` evidence.
-- Use only coordination status, typed-memory read, update/recovery, claim, and release operations required by the assigned recovery state.
+- Use only the declared recovery commands and evidence operations required by the assigned recovery state.
 - Do not delegate, ask interactive questions, browse the web, automate a browser, mutate Docs Workspace, access credentials, or expand scope.
 
 ## Process

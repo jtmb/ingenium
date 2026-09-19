@@ -34,7 +34,7 @@ const ADMIN_PROJECT_PREFIXES = ["/api/v1/mcp-tools", "/api/v1/mcp-servers"];
 const INSTALLATION_PROJECT_PREFIXES = ["/api/v1/config"];
 const PRIVATE_PREFIXES = ["/api/v1/context", "/api/v1/emails"];
 const PROJECT_PREFIXES = [
-  "/api/v1/skills", "/api/v1/tasks", "/api/v1/coordination", "/api/v1/context",
+  "/api/v1/skills", "/api/v1/tasks", "/api/v1/context",
   "/api/v1/plugins", "/api/v1/servers", "/api/v1/settings", "/api/v1/agents",
   "/api/v1/observations", "/api/v1/personality", "/api/v1/pipeline", "/api/v1/emails",
   "/api/v1/commands", "/api/v1/extraction", "/api/v1/jobs", "/api/v1/dashboard",
@@ -50,8 +50,6 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
   if (req.method === "DELETE" && req.path.startsWith("/api/v1/memory/")) return "write";
-  if (req.method === "POST" && req.path === "/api/v1/coordination/memory/read") return "read";
-  if (req.method === "POST" && req.path === "/api/v1/coordination/epoch/recover") return "write";
   if (/\/(run|sync|execute|test|connect|disconnect|prompt|command|abort|compact|fork|revert|unrevert)(?:\/|$)/.test(req.path)) return "execute";
   if (req.method === "DELETE" || /\/(purge|restore|global|authorize|approve|rollback|recover)(?:\/|$)/.test(req.path)) return "admin";
   return "write";

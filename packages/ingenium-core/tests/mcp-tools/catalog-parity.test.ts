@@ -27,40 +27,17 @@ describe("MCP Tool Catalog Parity", () => {
     expect([...inventory.all].sort()).toEqual([...catalog.keys()].sort());
     expect(catalogExtensionTools.map(({ name }) => name).sort()).toEqual([...inventory.extension].sort());
     expect(new Set(MCP_TOOL_CATALOG.map(({ name }) => name)).size).toBe(MCP_TOOL_CATALOG.length);
-    expect(MCP_TOOL_CATALOG).toHaveLength(291);
-    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(289);
-    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(31);
+    expect(MCP_TOOL_CATALOG).toHaveLength(286);
+    expect(MCP_TOOL_CATALOG.filter(({ name }) => name.startsWith("ingenium_"))).toHaveLength(284);
+    expect(new Set(MCP_TOOL_CATALOG.map(({ category }) => category)).size).toBe(32);
     for (const name of [
       "ingenium_coordination_status",
       "ingenium_coordination_memory_read",
       "ingenium_coordination_update",
       "ingenium_coordination_claim",
       "ingenium_coordination_release",
-    ]) expect(catalog.get(name)?.category).toBe("Tasks");
-    for (const name of [
-      "ingenium_coordination_update",
-      "ingenium_coordination_claim",
-      "ingenium_coordination_release",
-    ]) expect(catalog.get(name)?.authorization).toMatchObject({
-      permission: "write",
-      scopes: ["coordination:write"],
-    });
-    expect(catalog.get("ingenium_coordination_handoff")?.authorization).toMatchObject({
-      permission: "write",
-      scopes: ["coordination:write"],
-    });
-    expect(catalog.get("ingenium_coordination_memory_read")).toMatchObject({
-      category: "Tasks",
-      projectScope: "per-project",
-      defaultEnabled: true,
-      apiEndpoints: ["POST /api/v1/coordination/memory/read"],
-      authorization: {
-        permission: "read",
-        target: "project",
-        scopes: ["coordination:read"],
-        launcherBinding: "required",
-      },
-    });
+      "ingenium_coordination_handoff",
+    ]) expect(catalog.has(name)).toBe(false);
     const catalogSource = readFileSync(CATALOG_SOURCE_PATH, "utf8");
     expect(catalogSource.match(/name: "/g)).toHaveLength(MCP_TOOL_CATALOG.length);
     expect(catalogSource).toMatch(/name: "ingenium_mcp_report_get",\s+category: "Servers",\s+description: "Get the bounded MCP usefulness report for a project\.",\s+projectScope: "per-project",\s+defaultEnabled: true,\s+apiEndpoints: MCP_REPORT_ENDPOINTS,/);

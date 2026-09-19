@@ -92,7 +92,7 @@ cat > "$config_file" <<EOF
     "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
     "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
     "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
     "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
   ]
 }

@@ -59,9 +59,9 @@ describe("profile-only MCP designations", () => {
   );
 
   it.each([
-    ["primary/ingenium-orchestrator.md", "ingenium_coordination_status"],
+    ["primary/ingenium-orchestrator.md", "ingenium_docs_search"],
     ["primary/ingenium-orchestrator.md", "ingenium_memory_list"],
-    ["execution/ingenium-software-engineer-premium.md", "ingenium_coordination_memory_read"],
+    ["execution/ingenium-software-engineer-premium.md", "ingenium_memory_read"],
     ["chat/ingenium-chat.md", "ingenium_memory_save"],
     ["execution/ingenium-qa.md", "ingenium_docs_search"],
     ["research/ingenium-scout.md", "ingenium_docs_search_semantic"],

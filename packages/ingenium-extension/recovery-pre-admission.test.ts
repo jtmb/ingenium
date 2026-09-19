@@ -1680,7 +1680,7 @@ describe("secret-safe recovery admission bridge", () => {
       oldProcess: parentIdentity, oldPort: 4098, oldDataHome,
       replacement: { port: 4099, dataHome: join(root, "replacement-data"), expectedIdentity: {
         executableSha256: replacement.executableSha256, nonceSha256: replacement.nonceSha256 } }, handoff,
-      timeouts: Object.fromEntries(["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "memoryAckMs",
+      timeouts: Object.fromEntries(["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs",
         "terminalIdleMs", "retirementMs"].map((key) => [key, 1_000])) } as any;
     const phases: string[] = [];
     const signals: string[] = [];
@@ -1696,9 +1696,6 @@ describe("secret-safe recovery admission bridge", () => {
         verifyReplacementHealth: async () => { expect(signals).toEqual([]); phases.push("healthy"); },
         createReplacementSession: async (_identity, _port, transactionSha256) => ({ status: "created", transactionSha256,
           session: { id: "successor" } }),
-        acknowledgeTypedMemory: async (_identity, _session, handoffSha256, transactionSha256) => {
-          expect(signals).toEqual([]); phases.push("memory"); return { status: "acknowledged", handoffSha256, transactionSha256 };
-        },
         awaitTerminalIdleAcknowledgement: async (_identity, _session, handoffSha256, transactionSha256) => {
           expect(signals).toEqual([]); phases.push("idle");
           return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
@@ -1709,8 +1706,8 @@ describe("secret-safe recovery admission bridge", () => {
         },
         quiesceOldProcess: async () => {
           expect(signals).toEqual([]);
-          expect(phases.filter((phase) => ["healthy", "memory", "idle", "adopted"].includes(phase)))
-            .toEqual(["healthy", "memory", "idle", "adopted"]);
+          expect(phases.filter((phase) => ["healthy", "idle", "adopted"].includes(phase)))
+            .toEqual(["healthy", "idle", "adopted"]);
           signals.push("quiesced");
         },
         resumeOldProcess: async () => { throw new Error("old process must not resume after commit"); },
@@ -1738,7 +1735,7 @@ describe("secret-safe recovery admission bridge", () => {
     expect(signals).toEqual(["quiesced", "retired"]);
     expect(activeOwner).toBe("replacement");
     expect(fence).toBe(8);
-    expect(phases).toEqual(expect.arrayContaining(["memory", "idle", "adopted", "fenced", "old_parent_retired"]));
+     expect(phases).toEqual(expect.arrayContaining(["idle", "adopted", "fenced", "old_parent_retired"]));
     expect(existsSync(f.path)).toBe(false);
     expect(sourceHandle.close).toHaveBeenCalledOnce();
   });

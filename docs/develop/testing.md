@@ -94,8 +94,9 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **292-tool** inventory
-(290 `ingenium_` catalog entries plus 2 extension tools).
+also verifies `ingenium_context_upload_file` and the **286-active-tool** inventory
+(284 active `ingenium_` server registrations plus 2 extension tools; historical
+coordination names are excluded from the active catalog).
 
 ## Explicit full/release/cross-cutting acceptance gates
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { redactContextText } from "@ingenium/extension/context-upload-codec";
-import { requireExternalObservationSession } from "./observations.js";
+import { requireExternalObservationSession, type ExternalObservationValidation } from "./observations.js";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 
 export const USAGE_STATUS_VALUES = ["success", "error", "partial", "unknown"] as const;
@@ -91,7 +91,12 @@ export const ExternalUsageSchema = z.object({
   costAmount: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
 }).strict();
 
-export function ingestExternalUsage(projectId: string, worktreeId: string, input: unknown) {
+export function ingestExternalUsage(
+  projectId: string,
+  worktreeId: string,
+  input: unknown,
+  validation: ExternalObservationValidation = {},
+) {
   const parsed = ExternalUsageSchema.safeParse(input);
   if (!parsed.success) throw new UsageError("INVALID_USAGE_INPUT");
   const metadata = parsed.data;
@@ -117,7 +122,7 @@ export function ingestExternalUsage(projectId: string, worktreeId: string, input
     costStatus: metadata.costAmount == null ? "unavailable" : "known",
   });
   const result = execTransaction(() => {
-    try { requireExternalObservationSession(projectId, worktreeId, metadata.sessionId); }
+    try { requireExternalObservationSession(projectId, worktreeId, metadata.sessionId, validation); }
     catch (error) {
       if (error instanceof Error && error.message === "EXTERNAL_OBSERVATION_BINDING_REJECTED") {
         throw new UsageError("EXTERNAL_USAGE_BINDING_REJECTED");

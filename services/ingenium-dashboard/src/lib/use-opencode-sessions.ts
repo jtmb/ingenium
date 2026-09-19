@@ -16,7 +16,7 @@ const ACTIVE_SESSION_KEY = "opencode-chat-active-session";
 export interface UseOpenCodeSessionsReturn {
   /** All active sessions filtered by searchQuery, sorted by updatedAt desc. */
   sessions: OpenCodeSession[];
-  /** Archived sessions (empty array when archive not supported by API). */
+  /** Archived sessions filtered by searchQuery. */
   archivedSessions: OpenCodeSession[];
   /** Currently selected session ID. */
   activeId: string | null;
@@ -45,9 +45,9 @@ export interface UseOpenCodeSessionsReturn {
   unshare: (id: string) => Promise<void>;
   /** Re-fetch the session list from the server. */
   refresh: () => Promise<void>;
-  /** Archive a session (falls back to delete when API lacks archive support). */
+  /** Archive a session without deleting its history. */
   archive: (id: string) => Promise<void>;
-  /** Un-archive a session (no-op when API lacks archive support). */
+  /** Restore an archived session. */
   unarchive: (id: string) => Promise<void>;
   /** True while auto-creating the initial session when the list is empty. */
   autoCreated: boolean;
@@ -69,9 +69,8 @@ function readPersistedActive(): string | null {
   return localStorage.getItem(ACTIVE_SESSION_KEY);
 }
 
-/** Check whether the session shape includes a V2 archive field. */
-function supportsArchive(session: OpenCodeSession): boolean {
-  return "archived" in (session.time as Record<string, unknown>);
+function isArchived(session: OpenCodeSession): boolean {
+  return typeof session.time.archived === "number";
 }
 
 /**
@@ -82,7 +81,7 @@ function supportsArchive(session: OpenCodeSession): boolean {
  * - Persists `activeId` to localStorage under `opencode-chat-active-session`
  * - Supports create, rename, remove, select, fork, share, unshare
  * - Client-side search filtering via `searchQuery` (case-insensitive title match)
- * - Archive/unarchive with graceful fallback when API lacks archive support
+ * - Archive/unarchive through the OpenCode session update contract
  */
 export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
   const opencode = useOpenCodeClient();
@@ -108,13 +107,18 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
   const [isCreating, setIsCreating] = useState(false);
 
   const sessions = useMemo(() => {
-    if (!searchQuery.trim()) return allSessions;
+    const active = allSessions.filter((session) => !isArchived(session));
+    if (!searchQuery.trim()) return active;
     const q = searchQuery.toLowerCase();
-    return allSessions.filter((s) => s.title.toLowerCase().includes(q));
+    return active.filter((s) => s.title.toLowerCase().includes(q));
   }, [allSessions, searchQuery]);
 
-  /** Archive is not supported in the V1.18.9 API — always empty. */
-  const archivedSessions: OpenCodeSession[] = [];
+  const archivedSessions = useMemo(() => {
+    const archived = allSessions.filter(isArchived);
+    if (!searchQuery.trim()) return archived;
+    const q = searchQuery.toLowerCase();
+    return archived.filter((s) => s.title.toLowerCase().includes(q));
+  }, [allSessions, searchQuery]);
 
   const setSearchQuery = useCallback((q: string) => {
     startTransition(() => _setSearchQuery(q));
@@ -141,10 +145,11 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         (a, b) => b.time.updated - a.time.updated,
       );
       setAllSessions(sorted);
+      const active = sorted.filter((session) => !isArchived(session));
 
       // Auto-create session when the list is empty (once per mount)
       if (
-        sorted.length === 0 &&
+        active.length === 0 &&
         !autoCreatedRef.current &&
         !creationPendingRef.current &&
         mountedRef.current
@@ -160,7 +165,7 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
           });
           if (!mountedRef.current || refreshGeneration !== refreshGenerationRef.current) return;
           if (selectionIntent === selectionIntentRef.current) {
-            setAllSessions([createdSession]);
+            setAllSessions([createdSession, ...sorted]);
             selectionIntentRef.current += 1;
             setActiveId(createdSession.id);
             persistActive(createdSession.id);
@@ -191,8 +196,8 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
         const persistedActive = readPersistedActive();
         setActiveId((prev) => {
           const preferred = prev ?? persistedActive;
-          if (preferred && sorted.some((s) => s.id === preferred)) return preferred;
-          const fallback = sorted[0]?.id ?? null;
+          if (preferred && active.some((s) => s.id === preferred)) return preferred;
+          const fallback = active[0]?.id ?? null;
           if (preferred) persistActive(fallback);
           return fallback;
         });
@@ -402,35 +407,38 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
 
   const archive = useCallback(
     async (id: string) => {
-      const session = allSessions.find((s) => s.id === id);
-
-      if (session && supportsArchive(session)) {
-        // V2: archive endpoint would go here — not available in V1.18.9
-        // Placeholder for when the API is upgraded
-        setError("Archive not supported by current API version");
-        return;
+      try {
+        setError(null);
+        const archived = await opencode.sessions.update(id, { time: { archived: Date.now() } });
+        if (!mountedRef.current) return;
+        setAllSessions((prev) => {
+          const next = prev.map((session) => session.id === id ? archived : session);
+          if (activeId === id) {
+            const nextId = next.find((session) => session.id !== id && !isArchived(session))?.id ?? null;
+            setActiveId(nextId);
+            persistActive(nextId);
+          }
+          return next;
+        });
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to archive session");
       }
-
-      // V1 fallback: treat as delete
-      await remove(id);
     },
-    [allSessions, remove],
+    [activeId, opencode],
   );
 
   const unarchive = useCallback(
     async (id: string) => {
-      const session = allSessions.find((s) => s.id === id);
-
-      if (session && supportsArchive(session)) {
-        // V2: unarchive endpoint would go here
-        setError("Unarchive not supported by current API version");
-        return;
+      try {
+        setError(null);
+        const restored = await opencode.sessions.update(id, { time: {} });
+        if (!mountedRef.current) return;
+        setAllSessions((prev) => prev.map((session) => session.id === id ? restored : session));
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Failed to restore session");
       }
-
-      // V1 fallback: cannot recover deleted sessions — no-op
-      setError("Unarchive not supported by current API version");
     },
-    [allSessions],
+    [opencode],
   );
 
   return {
