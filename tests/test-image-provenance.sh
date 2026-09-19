@@ -52,10 +52,8 @@ require_text Dockerfile 'builtin_dir="$(dirname "$builtin_manifest")"'
 require_text Dockerfile 'test -d "/usr/local/lib/code-server/lib/vscode/extensions"'
 require_text Dockerfile 'chmod 0755 "$builtin_dir"'
 require_text Dockerfile 'runuser -u appuser -- test -r /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json'
-require_text Dockerfile 'manifest.name!=="system-theme-defaults"'
-require_text Dockerfile 'manifest.publisher!=="ingenium"'
-require_text Dockerfile 'manifest.version!=="1.0.0"'
-require_text Dockerfile 'configurationDefaults'
+require_text Dockerfile 'COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs'
+require_text Dockerfile 'node /tmp/validate-vscode-theme-manifest.mjs "$builtin_manifest"'
 [[ ! -e "$REPO_ROOT/scripts/ensure-vscode-settings.mjs" ]] || fail 'obsolete settings helper remains'
 [[ ! -e "$REPO_ROOT/scripts/ensure-vscode-settings.test.mjs" ]] || fail 'obsolete settings helper test remains'
 require_text config/vscode-extensions/ingenium.system-theme-defaults/package.json '"name": "system-theme-defaults"'
@@ -88,7 +86,7 @@ require_text docs/operations/deployment.md './scripts/validate-image-provenance.
 node --check "$REPO_ROOT/scripts/validate-image-provenance.mjs"
 node --check "$REPO_ROOT/scripts/owned-compose-container.mjs"
 node --check "$REPO_ROOT/scripts/validate-database-integrity.mjs"
-node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[1],"utf8"); const quote=String.fromCharCode(39); const marker="node -e "+quote; const start=source.indexOf(marker, source.indexOf("BUILTIN_MANIFEST=")); const end=source.indexOf(quote+";", start); if (start < 0 || end < 0) throw new Error("built-in manifest validator was not found"); new Function(source.slice(start + marker.length, end));' "$REPO_ROOT/Dockerfile"
+node --check "$REPO_ROOT/scripts/validate-vscode-theme-manifest.mjs"
 node -e 'const fs=require("node:fs"); const source=fs.readFileSync(process.argv[1],"utf8"); const quote=String.fromCharCode(39); const marker="node -e "+quote; const start=source.indexOf(marker, source.indexOf("EXTENSION_MANIFEST=")); const end=source.indexOf(quote+"; "+String.fromCharCode(92), start); if (start < 0 || end < 0) throw new Error("VSIX manifest validator was not found"); new Function(source.slice(start + marker.length, end));' "$REPO_ROOT/Dockerfile"
 
 if ! OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
