@@ -66,6 +66,19 @@ export async function getV2SessionInfo(client: OpenCodeV2Client, sessionID: stri
   return session;
 }
 
+export async function resolveSessionDirectory(
+  input: Pick<PluginInput, "client" | "worktree"> & { serverUrl?: URL },
+  sessionID: string | undefined,
+  fallback: string,
+): Promise<string> {
+  if (!sessionID) return fallback;
+  try {
+    return (await getV2SessionInfo(v2Client(input), sessionID)).location.directory;
+  } catch {
+    return fallback;
+  }
+}
+
 export async function readV2Messages(
   client: OpenCodeV2Client,
   sessionID: string,

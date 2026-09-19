@@ -6,7 +6,7 @@ import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
 import { callMcpTool, mcpToolData } from "./mcp-client.js"
 import { classifyObserverFailure, type ObserverRequestFailure } from "./observer-core.js"
 import { visibleContextExport } from "@ingenium/extension/context-upload-codec"
-import { eventSessionId, getV2SessionInfo, legacySessionInfo, legacySessionMessage, readV2Messages, v2Client } from "./opencode-v2.js"
+import { eventSessionId, getV2SessionInfo, legacySessionInfo, legacySessionMessage, readV2Messages, resolveSessionDirectory, v2Client } from "./opencode-v2.js"
 
 type ExtractionRequestFailure = Extract<ObserverRequestFailure, "authentication" | "timeout" | "request_failed">
 
@@ -92,8 +92,11 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any; s
         description:
           "Schedule server-side extraction. Returns only whether asynchronous extraction started; results are available later through pipeline status.",
         args: {},
-        async execute(_args: any, context: { worktree: string; directory?: string }) {
-          const worktree = context.directory ?? context.worktree
+        async execute(_args: any, context: { worktree: string; directory?: string; sessionID?: string }) {
+          const fallback = context.directory ?? context.worktree
+          const worktree = fallback === "/"
+            ? await resolveSessionDirectory(ctx, context.sessionID, fallback)
+            : fallback
           await assertExtensionToolEnabled("auto_observe_now", worktree)
           const { failure: _failure, ...result } = await triggerExtraction(worktree)
           return JSON.stringify(result, null, 2)

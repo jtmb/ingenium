@@ -75,6 +75,24 @@ describe("manual extension MCP tool state enforcement", () => {
     expect(mockTriggerSynthesis).toHaveBeenCalledWith(worktree);
   });
 
+  it("resolves the session location when OpenCode supplies only its global root", async () => {
+    const client = {
+      app: { log: vi.fn() },
+      v2: { session: { get: vi.fn().mockResolvedValue({ data: { data: {
+        id: "ses-global", location: { directory: worktree },
+      } } }) } },
+    };
+    const auto = await AutoObserverPlugin({ worktree: "/", client });
+    const observer = await ObserverPlugin({ worktree: "/", client });
+
+    await (auto.tool.auto_observe_now as any).execute({}, { worktree: "/", directory: "/", sessionID: "ses-global" });
+    await (observer.tool.synthesize_observations as any).execute({}, { worktree: "/", directory: "/", sessionID: "ses-global" });
+
+    expect(mockAssertExtensionToolEnabled).toHaveBeenNthCalledWith(1, "auto_observe_now", worktree);
+    expect(mockAssertExtensionToolEnabled).toHaveBeenNthCalledWith(2, "synthesize_observations", worktree);
+    expect(mockTriggerSynthesis).toHaveBeenCalledWith(worktree);
+  });
+
   it("propagates only the fixed state code for a disabled manual tool", async () => {
     mockAssertExtensionToolEnabled.mockRejectedValue(new Error("TOOL_DISABLED"));
     const auto = await AutoObserverPlugin({ worktree, client: { app: { log: vi.fn() } } });
