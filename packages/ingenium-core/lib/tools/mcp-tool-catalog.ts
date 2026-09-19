@@ -164,6 +164,7 @@ const MEMORY_ENDPOINTS = {
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
   "POST /api/v1/projects",
+  "POST /api/v1/projects/migrate-workspace",
   "DELETE /api/v1/projects/:name",
   "POST /api/v1/projects/:name/restore",
   "GET /api/v1/projects/archive",

@@ -207,6 +207,8 @@ describe("MCP Tool Catalog Parity", () => {
       expect(entry?.apiEndpoints.length).toBeGreaterThan(0);
     }
     expect(catalogMap.get("ingenium_project_set_global")?.defaultEnabled).toBe(false);
+    expect(catalogMap.get("ingenium_project_migrate_workspace")?.apiEndpoints)
+      .toContain("POST /api/v1/projects/migrate-workspace");
   });
 
   it("catalogs the protected Context upload transport and API contract", () => {
