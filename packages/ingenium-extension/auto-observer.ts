@@ -94,9 +94,7 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any; s
         args: {},
         async execute(_args: any, context: { worktree: string; directory?: string; sessionID?: string }) {
           const fallback = context.directory ?? context.worktree
-          const worktree = fallback === "/"
-            ? await resolveSessionDirectory(ctx, context.sessionID, fallback)
-            : fallback
+          const worktree = await resolveSessionDirectory(ctx, context.sessionID, fallback)
           await assertExtensionToolEnabled("auto_observe_now", worktree)
           const { failure: _failure, ...result } = await triggerExtraction(worktree)
           return JSON.stringify(result, null, 2)

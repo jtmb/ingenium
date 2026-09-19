@@ -115,9 +115,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any; serve
         args: {},
         async execute(_args: any, context: { worktree: string; directory?: string; sessionID?: string }) {
           const fallback = context.directory ?? context.worktree
-          const worktree = fallback === "/"
-            ? await resolveSessionDirectory(ctx, context.sessionID, fallback)
-            : fallback
+          const worktree = await resolveSessionDirectory(ctx, context.sessionID, fallback)
           await assertExtensionToolEnabled("synthesize_observations", worktree)
           const result = await triggerSynthesis(worktree)
           return JSON.stringify(result, null, 2)
