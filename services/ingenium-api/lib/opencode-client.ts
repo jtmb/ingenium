@@ -277,12 +277,12 @@ export interface SessionInfo {
 
 interface V2SessionListResponse {
   data: SessionV2Info[];
-  cursor?: { next?: string };
+  cursor?: { next?: string | null };
 }
 
 interface V2SessionMessagesResponse {
   data: SessionMessage[];
-  cursor?: { next?: string };
+  cursor?: { next?: string | null };
 }
 
 interface V2SessionResponse {
@@ -756,14 +756,15 @@ async function getV2MessagePage(
   if (isOpenCodeError(result) || !Array.isArray(result.data)) return isOpenCodeError(result) ? result : v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   if (result.data.length > V2_PAGE_SIZE) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   const nextCursor = result.cursor?.next;
-  if (nextCursor !== undefined && (typeof nextCursor !== "string" || nextCursor.length === 0)) {
+  if (nextCursor !== undefined && nextCursor !== null
+    && (typeof nextCursor !== "string" || nextCursor.length === 0)) {
     return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   }
   const messages = result.data.flatMap((message) => {
     const mapped = mapV2Message(message, sessionId);
     return mapped ? [mapped] : [];
   });
-  return { messages, ...(nextCursor === undefined ? {} : { nextCursor }) };
+  return { messages, ...(typeof nextCursor === "string" ? { nextCursor } : {}) };
 }
 
 function projectDirectoryMatches(directory: string, project: string): boolean {

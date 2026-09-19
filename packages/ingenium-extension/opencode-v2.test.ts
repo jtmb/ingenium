@@ -53,7 +53,7 @@ describe("OpenCode v2 adapter", () => {
   it("follows v2 cursors and fails closed when the server repeats one", async () => {
     const messages = vi.fn()
       .mockResolvedValueOnce({ data: { data: [{ id: "m1", type: "user", time: { created: 1 }, text: "one" }], cursor: { next: "next" } } })
-      .mockResolvedValueOnce({ data: { data: [{ id: "m2", type: "user", time: { created: 2 }, text: "two" }], cursor: {} } });
+      .mockResolvedValueOnce({ data: { data: [{ id: "m2", type: "user", time: { created: 2 }, text: "two" }], cursor: { next: null } } });
     const client = { session: { messages } } as unknown as OpenCodeV2Client;
     const result = await readV2Messages(client, "ses-1");
     expect(result.map((message) => message.id)).toEqual(["m1", "m2"]);

@@ -88,7 +88,8 @@ export async function readV2Messages(
     if (options.maxPages !== undefined && pageNumber >= options.maxPages) return messages;
 
     const next = record(payload?.cursor)?.next;
-    if (typeof next !== "string" || next.length === 0) return messages;
+    if (next === undefined || next === null) return messages;
+    if (typeof next !== "string" || next.length === 0) throw new Error("OPENCODE_V2_CURSOR_FAILED");
     if (cursors.has(next)) throw new Error("OPENCODE_V2_CURSOR_FAILED");
     if (page.length === 0) return messages;
     cursors.add(next);

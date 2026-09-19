@@ -604,7 +604,7 @@ describe("opencodeClient — method routing", () => {
               { id: "part-tool", type: "tool", name: "secret-tool", state: { status: "completed" } },
             ],
         }],
-        cursor: {},
+        cursor: { previous: null, next: null },
       }));
     vi.stubGlobal("fetch", fetchSpy);
 
