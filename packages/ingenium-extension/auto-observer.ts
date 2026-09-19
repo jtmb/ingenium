@@ -92,9 +92,10 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any; s
         description:
           "Schedule server-side extraction. Returns only whether asynchronous extraction started; results are available later through pipeline status.",
         args: {},
-        async execute(_args: any, context: { worktree: string }) {
-          await assertExtensionToolEnabled("auto_observe_now", context.worktree)
-          const { failure: _failure, ...result } = await triggerExtraction(context.worktree)
+        async execute(_args: any, context: { worktree: string; directory?: string }) {
+          const worktree = context.directory ?? context.worktree
+          await assertExtensionToolEnabled("auto_observe_now", worktree)
+          const { failure: _failure, ...result } = await triggerExtraction(worktree)
           return JSON.stringify(result, null, 2)
         },
       }),

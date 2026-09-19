@@ -113,9 +113,10 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
       synthesize_observations: tool({
         description: "Process all pending observations through the synthesis pipeline. Reads unprocessed observations, classifies them, generates/updates personality traits and skills, and marks them as processed in the DB. Returns a JSON summary of what was done.",
         args: {},
-        async execute(_args: any, context: { worktree: string }) {
-          await assertExtensionToolEnabled("synthesize_observations", context.worktree)
-          const result = await triggerSynthesis(context.worktree)
+        async execute(_args: any, context: { worktree: string; directory?: string }) {
+          const worktree = context.directory ?? context.worktree
+          await assertExtensionToolEnabled("synthesize_observations", worktree)
+          const result = await triggerSynthesis(worktree)
           return JSON.stringify(result, null, 2)
         },
       }),

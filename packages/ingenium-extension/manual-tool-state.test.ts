@@ -63,6 +63,18 @@ describe("manual extension MCP tool state enforcement", () => {
     expect(mockAssertExtensionToolEnabled).toHaveBeenNthCalledWith(2, "synthesize_observations", worktree);
   });
 
+  it("uses the session directory when OpenCode's project worktree is global", async () => {
+    const auto = await AutoObserverPlugin({ worktree: "/global", client: { app: { log: vi.fn() } } });
+    const observer = await ObserverPlugin({ worktree: "/global", client: { app: { log: vi.fn() } } });
+
+    await (auto.tool.auto_observe_now as any).execute({}, { worktree: "/global", directory: worktree });
+    await (observer.tool.synthesize_observations as any).execute({}, { worktree: "/global", directory: worktree });
+
+    expect(mockAssertExtensionToolEnabled).toHaveBeenNthCalledWith(1, "auto_observe_now", worktree);
+    expect(mockAssertExtensionToolEnabled).toHaveBeenNthCalledWith(2, "synthesize_observations", worktree);
+    expect(mockTriggerSynthesis).toHaveBeenCalledWith(worktree);
+  });
+
   it("propagates only the fixed state code for a disabled manual tool", async () => {
     mockAssertExtensionToolEnabled.mockRejectedValue(new Error("TOOL_DISABLED"));
     const auto = await AutoObserverPlugin({ worktree, client: { app: { log: vi.fn() } } });
