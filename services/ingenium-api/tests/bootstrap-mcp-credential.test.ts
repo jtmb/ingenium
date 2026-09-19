@@ -267,6 +267,23 @@ describe("compatibility MCP bootstrap", () => {
     expect(mcpCredentials.resolveMcpCredential(data.token, "mcp")?.id).toBe(data.id);
   });
 
+  it("rotates past a retained v1 receipt after the v2 scope contract", async () => {
+    const project = projects.getProject("ingenium")!;
+    const oldScopes = ["coordination:read", "coordination:write", "documentation:read", "memory:read", "memory:write", "projects:read", "rag:read", "repository:sync"];
+    mcpCredentials.createMcpCredential({
+      servicePrincipalName: "Compatibility OpenCode", kind: "service", audience: "mcp", name: "Compatibility OpenCode",
+      scopes: oldScopes, organizationId: project.organization_id, projectId: project.id,
+      workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
+      expiresAt: new Date(Date.now() + 30 * 86_400_000), createdByUserId: ownerId,
+    }, "compatibility-opencode-v1");
+
+    const response = await issue();
+    expect(response.status).toBe(201);
+    const { data } = await response.json();
+    expect(data.scopes).toEqual(scopes);
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+  });
+
   it("rejects browser users and scoped service credentials with 403", async () => {
     const { data } = await (await issue()).json();
     const service = await issue({}, { authorization: `Bearer ${data.token}`, "x-ingenium-internal-service": "", "x-ingenium-audience": "mcp", "x-ingenium-workspace": data.workspaceId, "x-ingenium-launcher-worktree": data.launcherWorktree });
@@ -301,7 +318,7 @@ describe("compatibility MCP bootstrap", () => {
     expect(replacement.token).not.toBe(original.token);
     expect(replacement.expiresAt).toBe(original.expiresAt);
     expect(database.prepare("SELECT credential_id FROM mcp_credential_receipts WHERE idempotency_key = ?")
-      .get("compatibility-opencode-v1")).toEqual({ credential_id: replacement.id });
+      .get("compatibility-opencode-v2")).toEqual({ credential_id: replacement.id });
     expect(database.prepare("SELECT revoked_at FROM mcp_credentials WHERE id = ?").get(original.id))
       .toMatchObject({ revoked_at: expect.any(String) });
     expect(mcpCredentials.resolveMcpCredential(original.token, "mcp")).toBeUndefined();
