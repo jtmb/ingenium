@@ -33,6 +33,12 @@ export function requireProject(req: Request, res: Response): string | null {
     res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
     return null;
   }
+  if (req.authorizationPolicy.action === "projects.read"
+    && req.authorizationPolicy.resource === "projects"
+    && req.authorizationPolicy.permission === "read"
+    && principal.type === "service"
+    && principal.audience === "mcp-report"
+    && principal.projectId === project.id) return project.id;
   const permission = req.authorizationPolicy?.permission ?? "read";
   const resource = req.authorizationPolicy?.resource ?? "projects";
   const decision = authorization.requireProjectPermission(

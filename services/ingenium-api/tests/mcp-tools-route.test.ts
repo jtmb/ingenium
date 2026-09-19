@@ -150,6 +150,40 @@ describe("MCP tool state API", () => {
     expect(JSON.stringify(report.data.catalog)).not.toMatch(/canonical|hidden|private/i);
   });
 
+  it("allows a report principal to read only its bound project catalog", async () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-report-principal-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    resetDbForTest();
+    const project = projects.createProject("mcp-report-bound");
+    const otherProject = projects.createProject("mcp-report-other");
+    const principal = {
+      type: "service" as const,
+      id: "mcp-report:test",
+      tokenId: "test",
+      scopes: ["mcp-report:inspect"],
+      organizationId: null,
+      projectId: project.id,
+      projectIds: [project.id],
+      audience: "mcp-report" as const,
+      workspaceId: project.id,
+      launcherWorktree: "/app",
+      reportToolNames: ["ingenium_health_check"],
+    };
+    const baseUrl = await startRouter(principal);
+
+    const allowed = await fetch(`${baseUrl}/mcp-tools?project=${project.name}`);
+    await expect(allowed.json()).resolves.toMatchObject({
+      project: project.name,
+      project_id: project.id,
+      total: 1,
+      data: [{ tool_name: "ingenium_health_check" }],
+    });
+    expect(allowed.status).toBe(200);
+
+    const crossProject = await fetch(`${baseUrl}/mcp-tools?project=${otherProject.name}`);
+    expect(crossProject.status).toBe(404);
+  });
+
   it("returns the resolved project ID and preserves isolation with idempotent category updates", async () => {
     directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-tools-route-"));
     process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
