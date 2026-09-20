@@ -2546,7 +2546,14 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   const health = await preparationAsyncProbe("apiHealth", () => collectApiHealth(environment, options.request ?? fetch));
   if (health?.status !== "healthy") throw preparationFailure("apiHealth");
   const index = resolve(worktree, ".opencode/protected-runtime-index");
-  const freeze = preparationProbe("freeze", () => planPreparationFreeze(index, options));
+  const freeze = preparationProbe("freeze", () => {
+    const directory = preparationDirectory(worktree);
+    if (options.preflight === true && recoveryAdmissionExists(directory) && readdirSync(directory).length > 0) {
+      const retained = inspectRetainedPreparationForReconciliation(worktree, source, options.run ?? execFileSync);
+      return { evidence: retained.freeze, retained: true };
+    }
+    return planPreparationFreeze(index, options);
+  });
   const quarantine = preparationProbe("quarantine", () => planPreparationQuarantine(index));
   preparationSource(sourceHandle);
   const contract = preparationProbe("binding", () => prepareRecoveryOwnerContract(binding, source.head));
@@ -2574,7 +2581,8 @@ export async function runRecoveryPreflight(argv = process.argv, dependencies = {
     if (!installed || installed.status !== "attested" || inputs.deployment?.status !== "attested"
       || inputs.deployment.revision !== source.head) throw new Error("Recovery preflight attestation is incomplete");
     const freeze = inputs.freeze?.evidence ?? freezeEvidence("clear");
-    const admissible = validPreparationFreezeEvidence(freeze, ["clear", "planned"]);
+    const admissible = validPreparationFreezeEvidence(freeze, ["clear", "planned"])
+      || inputs.freeze?.retained === true && validPreparationFreezeEvidence(freeze, ["adopted"]);
     const output = {
       schemaVersion: 1,
       action: "recovery-preflight",
@@ -2706,7 +2714,7 @@ function retainedFreezeMatches(file, expected) {
     && (observed === null || Number.isSafeInteger(observed) && observed >= 1);
 }
 
-function restoreRetainedPreparationFreeze(worktree, directory, expected) {
+function inspectRetainedPreparationFreeze(worktree, directory, expected) {
   const index = resolve(worktree, ".opencode/protected-runtime-index");
   const sourcePath = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
   const archivePath = preparationFreezeArchivePath(directory);
@@ -2714,7 +2722,7 @@ function restoreRetainedPreparationFreeze(worktree, directory, expected) {
     if (!preparationFreezeSourceAbsent(sourcePath) || preparationFreezePathExists(archivePath)) {
       throw new Error("Recovery preparation retained freeze changed");
     }
-    return;
+    return { state: "clear", sourcePath, archivePath };
   }
   if (!validPreparationFreezeEvidence(expected, ["adopted"])) {
     throw new Error("Recovery preparation retained freeze is invalid");
@@ -2724,8 +2732,7 @@ function restoreRetainedPreparationFreeze(worktree, directory, expected) {
   if (!sourcePresent && archivePresent) {
     const archived = readPreparationFreezeFile(archivePath);
     if (!retainedFreezeMatches(archived, expected)) throw new Error("Recovery preparation retained freeze changed");
-    restorePreparationFreeze({ archivePath, plan: { sourcePath, archiveName: RECOVERY_PREPARATION_FREEZE_ARCHIVE,
-      bytes: archived.bytes, sha256: archived.sha256, identity: archived.identity, owner: expected.owner } });
+    return { state: "adopted", sourcePath, archivePath, archived };
   } else if (sourcePresent && archivePresent) {
     const source = readPreparationFreezeFile(sourcePath, 2);
     const archive = readPreparationFreezeFile(archivePath, 2);
@@ -2733,12 +2740,28 @@ function restoreRetainedPreparationFreeze(worktree, directory, expected) {
       || source.identity.dev !== archive.identity.dev || source.identity.ino !== archive.identity.ino) {
       throw new Error("Recovery preparation retained freeze changed");
     }
-    anchoredPreparationPath(archivePath, (anchored) => unlinkSync(anchored));
+    return { state: "linked", sourcePath, archivePath };
   } else if (!sourcePresent || archivePresent || !retainedFreezeMatches(readPreparationFreezeFile(sourcePath), expected)) {
     throw new Error("Recovery preparation retained freeze changed");
   }
-  if (!retainedFreezeMatches(readPreparationFreezeFile(sourcePath), expected)
-    || preparationFreezePathExists(archivePath)) throw new Error("Recovery preparation retained freeze changed");
+  return { state: "restored", sourcePath, archivePath };
+}
+
+function restoreRetainedPreparationFreeze(worktree, directory, expected) {
+  const retained = inspectRetainedPreparationFreeze(worktree, directory, expected);
+  if (retained.state === "adopted") {
+    restorePreparationFreeze({ archivePath: retained.archivePath, plan: {
+      sourcePath: retained.sourcePath, archiveName: RECOVERY_PREPARATION_FREEZE_ARCHIVE,
+      bytes: retained.archived.bytes, sha256: retained.archived.sha256,
+      identity: retained.archived.identity, owner: expected.owner,
+    } });
+  } else if (retained.state === "linked") {
+    anchoredPreparationPath(retained.archivePath, (anchored) => unlinkSync(anchored));
+  }
+  const restored = inspectRetainedPreparationFreeze(worktree, directory, expected);
+  if (restored.state !== (expected === null ? "clear" : "restored")) {
+    throw new Error("Recovery preparation retained freeze changed");
+  }
 }
 
 function retainedReconciliationRecord(path, source) {
@@ -2764,6 +2787,44 @@ function removeEmptyPreparationDirectory(directory) {
     }
     rmdirSync(anchored);
   });
+}
+
+function inspectRetainedPreparationForReconciliation(worktree, source, run) {
+  const directory = preparationDirectory(worktree);
+  privatePreparationDirectory(directory);
+  const actualNames = readdirSync(directory).sort();
+  if (actualNames.length === 0) return { kind: "empty", directory, freeze: null };
+  for (const [kind, name] of [["marker", "reconciliation.json"], ["next", "reconciliation.next"]]) {
+    const path = resolve(directory, name);
+    if (!recoveryAdmissionExists(path)) continue;
+    const marker = retainedReconciliationRecord(path, source);
+    const allowed = new Set(["handoff.json", "owner.mjs", "request.json", "rollback.json", name]);
+    if (actualNames.some((entry) => !allowed.has(entry))) throw new Error("Recovery preparation retained files are ambiguous");
+    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+    inspectRetainedPreparationFreeze(worktree, directory, marker.value.freeze);
+    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+    return { kind, directory, freeze: marker.value.freeze, marker };
+  }
+  const retained = readPreparationRequest(worktree);
+  const request = retained.value;
+  if (recoveryAdmissionExists(resolve(directory, "owner-status.json"))
+    || recoveryAdmissionExists(resolve(directory, "owner-status.next"))
+    || !validPreparationRollback(resolve(directory, "rollback.json"), request)) {
+    throw new Error("Recovery preparation retained evidence is invalid");
+  }
+  const names = ["handoff.json", "owner.mjs", "request.json", "rollback.json"].sort();
+  const namesWithArchive = [...names, RECOVERY_PREPARATION_FREEZE_ARCHIVE].sort();
+  if (!(canonicalJson(actualNames) === canonicalJson(names)
+      || request.freeze && canonicalJson(actualNames) === canonicalJson(namesWithArchive))
+    || !absentPreparationJob(inspectPreparationJob(run))) {
+    throw new Error("Recovery preparation retained files are ambiguous");
+  }
+  const owner = readTrustedRegularFile(resolve(directory, "owner.mjs"), "Recovery preparation retained owner", { expectedMode: 0o400 });
+  const rollback = readOnlyRegularFile(resolve(directory, "rollback.json"), 16 * 1024, false, 0o600);
+  if (owner.sha256 !== request.sourceSha256) throw new Error("Recovery preparation retained owner changed");
+  inspectRetainedPreparationFreeze(worktree, directory, request.freeze);
+  if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+  return { kind: "request", directory, freeze: request.freeze, retained, request, owner, rollback };
 }
 
 function finishRetainedPreparationReconciliation(worktree, directory, source, run) {
@@ -2794,52 +2855,31 @@ function finishRetainedPreparationReconciliation(worktree, directory, source, ru
 function reconcileRetainedPreparation(worktree, sourceHandle, run) {
   const directory = preparationDirectory(worktree);
   if (!recoveryAdmissionExists(directory)) return false;
-  privatePreparationDirectory(directory);
-  if (readdirSync(directory).length === 0) {
+  const source = sourceHandle.revalidate();
+  const retained = inspectRetainedPreparationForReconciliation(worktree, source, run);
+  if (retained.kind === "empty") {
     if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
     removeEmptyPreparationDirectory(directory);
     return true;
   }
-  const source = sourceHandle.revalidate();
-  if (recoveryAdmissionExists(resolve(directory, "reconciliation.json"))) {
+  if (retained.kind === "marker") {
     finishRetainedPreparationReconciliation(worktree, directory, source, run);
     return true;
   }
   const nextMarkerPath = resolve(directory, "reconciliation.next");
-  if (recoveryAdmissionExists(nextMarkerPath)) {
-    const nextMarker = retainedReconciliationRecord(nextMarkerPath, source);
-    const allowed = new Set(["handoff.json", "owner.mjs", "request.json", "rollback.json", "reconciliation.next"]);
-    if (readdirSync(directory).some((name) => !allowed.has(name))) throw new Error("Recovery preparation retained files are ambiguous");
-    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
-    restoreRetainedPreparationFreeze(worktree, directory, nextMarker.value.freeze);
+  if (retained.kind === "next") {
+    restoreRetainedPreparationFreeze(worktree, directory, retained.freeze);
     anchoredPreparationPath(nextMarkerPath, (anchored) => renameSync(anchored, resolve(dirname(anchored), "reconciliation.json")));
     finishRetainedPreparationReconciliation(worktree, directory, source, run);
     return true;
   }
-  const retained = readPreparationRequest(worktree);
-  const request = retained.value;
-  if (recoveryAdmissionExists(resolve(directory, "owner-status.json"))
-    || recoveryAdmissionExists(resolve(directory, "owner-status.next"))
-    || !validPreparationRollback(resolve(directory, "rollback.json"), request)) {
-    throw new Error("Recovery preparation retained evidence is invalid");
-  }
-  const names = ["handoff.json", "owner.mjs", "request.json", "rollback.json"].sort();
-  const namesWithArchive = [...names, RECOVERY_PREPARATION_FREEZE_ARCHIVE].sort();
-  const actualNames = readdirSync(directory).sort();
-  if (!(canonicalJson(actualNames) === canonicalJson(names)
-      || request.freeze && canonicalJson(actualNames) === canonicalJson(namesWithArchive))
-    || !absentPreparationJob(inspectPreparationJob(run))) {
-    throw new Error("Recovery preparation retained files are ambiguous");
-  }
-  const owner = readTrustedRegularFile(resolve(directory, "owner.mjs"), "Recovery preparation retained owner", { expectedMode: 0o400 });
-  const rollback = readOnlyRegularFile(resolve(directory, "rollback.json"), 16 * 1024, false, 0o600);
-  if (owner.sha256 !== request.sourceSha256) throw new Error("Recovery preparation retained owner changed");
-  restoreRetainedPreparationFreeze(worktree, directory, request.freeze);
+  const request = retained.request;
+  restoreRetainedPreparationFreeze(worktree, directory, retained.freeze);
   if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
   const marker = Buffer.from(canonicalJson({ schemaVersion: 1, kind: "recovery-preparation-reconciliation",
     reconcilerSourceSha256: source.sha256, retainedSourceSha256: request.sourceSha256, freeze: request.freeze, files: {
-      "handoff.json": request.handoffSha256, "owner.mjs": owner.sha256,
-      "request.json": sha256(retained.bytes), "rollback.json": sha256(rollback),
+      "handoff.json": request.handoffSha256, "owner.mjs": retained.owner.sha256,
+      "request.json": sha256(retained.retained.bytes), "rollback.json": sha256(retained.rollback),
     }, authorizesRestart: false }));
   writePreparationFile(nextMarkerPath, marker);
   retainedReconciliationRecord(nextMarkerPath, source);

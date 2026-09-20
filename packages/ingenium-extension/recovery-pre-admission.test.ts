@@ -1724,6 +1724,28 @@ describe("fixed recovery preparation transaction", () => {
     await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" });
     expect(existsSync(lockPath)).toBe(false);
     expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
+    const retainedNames = readdirSync(f.directory).sort();
+    const retainedBytes = Object.fromEntries(retainedNames.map((name) => [name, readFileSync(join(f.directory, name))]));
+    const authority = authorityRequest();
+    const preflight = await shim.runRecoveryPreflight(["node", f.source.path], {
+      openSource: () => f.sourceHandle,
+      inputOptions: {
+        run: f.run,
+        request: async (url: string, init: RequestInit) => url.endsWith("/health")
+          ? new Response(JSON.stringify({ status: "ok" })) : authority(url, init),
+        gitSummary: () => ({ status: "validated", head, clean: true, dirtyPaths: [], indexFlagsNormal: true, sourceMatchesHead: true }),
+        inspectInstalledBuild: () => ({ status: "attested", release: { sha256: hash("release") },
+          launchers: { "ingenium-build": { sha256: hash("build") }, "ingenium-opencode": { sha256: hash("opencode") } } }),
+        inspectDeployment: () => ({ status: "attested", provider: "docker-local", revision: head }),
+        ancestry: () => ({ status: "exact", parent: f.parent }),
+        captureLegacy: () => f.capture(),
+      },
+    });
+    expect(preflight).toMatchObject({ status: "admitted", admissible: true, mutationFree: true, authorizesRestart: false,
+      freeze: { status: "adopted", sha256: hash(lockBytes) },
+      admission: { decision: "admit", nextOperation: "recovery-prepare" } });
+    expect(readdirSync(f.directory).sort()).toEqual(retainedNames);
+    for (const [name, bytes] of Object.entries(retainedBytes)) expect(readFileSync(join(f.directory, name))).toEqual(bytes);
     renameSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"), lockPath);
 
     await expect(f.prepare()).resolves.toMatchObject({ status: "prepared", authorizesRestart: false });
