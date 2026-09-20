@@ -3079,7 +3079,6 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     const index = resolve(worktree, ".opencode/protected-runtime-index");
     directory = preparationDirectory(worktree);
     preparationProbe("prepareDirectory", () => {
-      canonicalOwnedDirectory(resolve(worktree, ".opencode"), "Recovery preparation project directory");
       if (recoveryAdmissionExists(directory)) throw new Error("Recovery preparation requires reconciliation of retained state");
       for (const path of [index, dirname(directory)]) ownedDirectory(path);
       ownedDirectory(directory, true);

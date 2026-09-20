@@ -1606,6 +1606,21 @@ describe("fixed recovery preparation transaction", () => {
     expect(existsSync(join(index, "tui-recovery/preparation/coordination-outbox-mutation.lock.adopted"))).toBe(false);
   });
 
+  it("uses an existing private runtime index under group-writable project metadata", async () => {
+    const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    const recovery = join(index, "tui-recovery");
+    mkdirSync(recovery, { recursive: true, mode: 0o700 });
+    chmodSync(index, 0o700);
+    chmodSync(recovery, 0o700);
+    chmodSync(join(root, ".opencode"), 0o770);
+
+    await expect(f.prepare()).resolves.toMatchObject({ status: "prepared", authorizesRestart: false });
+    expect(lstatSync(index).mode & 0o777).toBe(0o700);
+    expect(lstatSync(recovery).mode & 0o777).toBe(0o700);
+    expect(lstatSync(f.directory).mode & 0o777).toBe(0o700);
+  });
+
   it("reconciles an absent unit exit only with complete unambiguous systemd properties", () => {
     const stdout = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nJob=\n";
     expect(shim.inspectPreparationJob(() => { throw Object.assign(new Error("not found"), { status: 1, stdout }); }))
