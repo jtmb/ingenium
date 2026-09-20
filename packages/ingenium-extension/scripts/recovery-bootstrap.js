@@ -1647,33 +1647,55 @@ function legacyRecoveryProjection(captured, assistant) {
   return Object.freeze({ operational, handoff: Object.freeze({ ...handoff, sha256: sha256(canonicalJson(handoff)) }) });
 }
 
-export function discoverLegacyRecoverySession(parent, binding, source, execute = spawnSync) {
+function legacyCaptureSuccess(value) {
+  return { value, failureKey: null };
+}
+
+function legacyCaptureFailure(failureKey) {
+  return { value: null, failureKey };
+}
+
+function discoverLegacyRecoverySessionDetailed(parent, binding, source, execute = spawnSync) {
   let stdout;
   let stderr;
   try {
-    prepareRecoveryOwnerContract(binding, source?.head);
+    if (!isRecord(parent) || !isRecord(binding) || !isRecord(source) || typeof binding.worktree !== "string"
+      || !Array.isArray(source.dirtyPaths)) return legacyCaptureFailure("legacyInput");
+    try { prepareRecoveryOwnerContract(binding, source?.head); }
+    catch { return legacyCaptureFailure("legacyOwnerContract"); }
     const home = parent?.environment?.HOME;
     if (!parent || parent.port !== null || parent.cwd !== binding.worktree || !safeRecoveryIdentity(parent)
       || parent.nonceSha256 !== "0".repeat(64) || parent.sessionId !== null && !SAFE_SESSION.test(parent.sessionId)
       || source.status !== "validated" || source.dirtyPaths.length !== 0 || !source.sourceMatchesHead
       || !/^[0-9a-f]{40}$/.test(source.head) || typeof home !== "string" || resolve(home) !== home
-      || typeof parent.dataHome !== "string" || resolve(parent.dataHome) !== parent.dataHome) return null;
-    const result = execute(`/proc/${parent.pid}/exe`, ["db", LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"], {
-      cwd: binding.worktree,
-      encoding: null,
-      timeout: 10_000,
-      maxBuffer: LEGACY_SESSION_DISCOVERY_MAX_BYTES,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
-    });
+      || typeof parent.dataHome !== "string" || resolve(parent.dataHome) !== parent.dataHome) return legacyCaptureFailure("legacyInput");
+    let result;
+    try {
+      result = execute(`/proc/${parent.pid}/exe`, ["db", LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"], {
+        cwd: binding.worktree,
+        encoding: null,
+        timeout: 10_000,
+        maxBuffer: LEGACY_SESSION_DISCOVERY_MAX_BYTES,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
+      });
+    } catch (error) {
+      stdout = Buffer.isBuffer(error?.stdout) ? error.stdout : undefined;
+      stderr = Buffer.isBuffer(error?.stderr) ? error.stderr : undefined;
+      return legacyCaptureFailure("legacyQuery");
+    }
     stdout = Buffer.isBuffer(result.stdout) ? result.stdout : undefined;
     stderr = Buffer.isBuffer(result.stderr) ? result.stderr : undefined;
     if (result.error || result.signal || result.status !== 0 || !stdout || stdout.length < 2
-      || stdout.length > LEGACY_SESSION_DISCOVERY_MAX_BYTES) return null;
-    const text = stdout.toString("utf8");
-    if (!Buffer.from(text).equals(stdout)) return null;
-    const rows = JSON.parse(text);
-    if (!Array.isArray(rows) || rows.length > 2) return null;
+      || stdout.length > LEGACY_SESSION_DISCOVERY_MAX_BYTES) return legacyCaptureFailure("legacyQuery");
+    let text;
+    try { text = stdout.toString("utf8"); }
+    catch { return legacyCaptureFailure("legacyQuery"); }
+    if (!Buffer.from(text).equals(stdout)) return legacyCaptureFailure("legacyQuery");
+    let rows;
+    try { rows = JSON.parse(text); }
+    catch { return legacyCaptureFailure("legacyRows"); }
+    if (!Array.isArray(rows) || rows.length > 2) return legacyCaptureFailure("legacyRows");
     const seen = new Set();
     const matches = [];
     for (const row of rows) {
@@ -1688,11 +1710,15 @@ export function discoverLegacyRecoverySession(parent, binding, source, execute =
         || row.assistantSessionId !== row.sessionId || row.assistantRole !== "assistant"
         || !SAFE_ID.test(row.assistantAgent ?? "") || !SAFE_MODEL_METADATA.test(row.assistantProviderId ?? "")
         || !SAFE_MODEL_METADATA.test(row.assistantModelId ?? "") || row.assistantStatus !== "working"
-        || seen.has(row.sessionId)) return null;
+        || seen.has(row.sessionId)) return legacyCaptureFailure("legacyRows");
       seen.add(row.sessionId);
       if (row.directory !== binding.worktree) continue;
-      const input = JSON.parse(row.todoInput);
-      const captured = parseLegacyRecoveryTodoInput(input, parent, binding, source.head, row.sessionId);
+      let input;
+      try { input = JSON.parse(row.todoInput); }
+      catch { return legacyCaptureFailure("legacyTodo"); }
+      let captured;
+      try { captured = parseLegacyRecoveryTodoInput(input, parent, binding, source.head, row.sessionId); }
+      catch { return legacyCaptureFailure("legacyTodo"); }
       if (captured) matches.push(Object.freeze({
         sessionId: row.sessionId,
         ...captured,
@@ -1705,80 +1731,121 @@ export function discoverLegacyRecoverySession(parent, binding, source, execute =
         querySha256: sha256(canonicalJson(row)),
       }));
     }
-    if (matches.length !== 1 || parent.sessionId !== null && parent.sessionId !== matches[0].sessionId) return null;
-    return matches[0];
+    if (matches.length !== 1) return legacyCaptureFailure("legacyRows");
+    if (parent.sessionId !== null && parent.sessionId !== matches[0].sessionId) return legacyCaptureFailure("legacyProcess");
+    return legacyCaptureSuccess(matches[0]);
   } catch {
-    return null;
+    return legacyCaptureFailure("legacyCapture");
   } finally {
     stdout?.fill(0);
     stderr?.fill(0);
   }
 }
 
-export async function captureLegacyRecoveryPreAdmission(parent, binding, source, request = fetch,
+export function discoverLegacyRecoverySession(parent, binding, source, execute = spawnSync) {
+  return discoverLegacyRecoverySessionDetailed(parent, binding, source, execute).value;
+}
+
+async function captureLegacyRecoveryPreAdmissionDetailed(parent, binding, source, request = fetch,
   inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) }),
   executeParent = spawnSync) {
-  try { prepareRecoveryOwnerContract(binding, source?.head); } catch { return null; }
-  if (!parent || !binding || !source || source.status !== "validated" || source.dirtyPaths.length !== 0
-    || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree
-    || !safeRecoveryIdentity(parent) || parent.nonceSha256 !== "0".repeat(64)
-    || parent.port === null && parent.sessionId !== null && !SAFE_SESSION.test(parent.sessionId)) return null;
+  if (!isRecord(parent) || !isRecord(binding) || !isRecord(source) || typeof binding.worktree !== "string"
+    || !Array.isArray(source.dirtyPaths)) return legacyCaptureFailure("legacyInput");
+  try { prepareRecoveryOwnerContract(binding, source?.head); }
+  catch { return legacyCaptureFailure("legacyOwnerContract"); }
+  if (source.status !== "validated" || source.dirtyPaths.length !== 0
+    || !source.sourceMatchesHead || !GIT_OID.test(source.head ?? "") || parent.cwd !== binding.worktree) {
+    return legacyCaptureFailure("legacyInput");
+  }
+  if (!safeRecoveryIdentity(parent) || parent.nonceSha256 !== "0".repeat(64)
+    || parent.port === null && parent.sessionId !== null && !SAFE_SESSION.test(parent.sessionId)) {
+    return legacyCaptureFailure("legacyProcess");
+  }
   const sameProcess = () => {
-    const actual = inspect(parent.pid);
-    return actual && actual.commandName === "opencode" && actual.pid === parent.pid
-      && actual.startTimeTicks === parent.startTimeTicks && actual.executableSha256 === parent.executableSha256
-      && actual.cwd === binding.worktree && actual.cmdlineSha256 === parent.cmdlineSha256
-      && actual.nonce === undefined && (parent.port === null
-        ? actual.ports?.length === 0 : actual.ports?.length === 1 && actual.ports[0] === parent.port);
+    try {
+      const actual = inspect(parent.pid);
+      return actual && actual.commandName === "opencode" && actual.pid === parent.pid
+        && actual.startTimeTicks === parent.startTimeTicks && actual.executableSha256 === parent.executableSha256
+        && actual.cwd === binding.worktree && actual.cmdlineSha256 === parent.cmdlineSha256
+        && actual.nonce === undefined && (parent.port === null
+          ? actual.ports?.length === 0 : actual.ports?.length === 1 && actual.ports[0] === parent.port);
+    } catch {
+      return false;
+    }
   };
-  if (!sameProcess()) return null;
+  if (!sameProcess()) return legacyCaptureFailure("legacyProcess");
   try {
     if (parent.port === null) {
-      const discovered = discoverLegacyRecoverySession(parent, binding, source, executeParent);
-      if (!discovered || !sameProcess()) return null;
-      const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
+      const discoveredResult = discoverLegacyRecoverySessionDetailed(parent, binding, source, executeParent);
+      if (discoveredResult.failureKey !== null) return legacyCaptureFailure(discoveredResult.failureKey);
+      const discovered = discoveredResult.value;
+      if (!discovered || !sameProcess()) return legacyCaptureFailure("legacyProcess");
+      let config;
+      try { config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head)); }
+      catch { return legacyCaptureFailure("legacyRole"); }
       if (!isRecord(config.agent) || !Object.hasOwn(config.agent, discovered.operational.role)
-        || config.agent[discovered.operational.role]?.disable === true) return null;
-      const confirmed = discoverLegacyRecoverySession(parent, binding, source, executeParent);
-      if (!confirmed || canonicalJson(confirmed) !== canonicalJson(discovered) || !sameProcess()) return null;
+        || config.agent[discovered.operational.role]?.disable === true) return legacyCaptureFailure("legacyRole");
+      const confirmedResult = discoverLegacyRecoverySessionDetailed(parent, binding, source, executeParent);
+      if (confirmedResult.failureKey !== null) return legacyCaptureFailure(confirmedResult.failureKey);
+      const confirmed = confirmedResult.value;
+      if (!confirmed) return legacyCaptureFailure("legacyConsistency");
+      if (canonicalJson(confirmed) !== canonicalJson(discovered)) return legacyCaptureFailure("legacyConsistency");
+      if (!sameProcess()) return legacyCaptureFailure("legacyProcess");
       const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
       const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
         nonceProvenance: "absent_process_environment", sessionId: discovered.sessionId, binding, sourceHead: source.head,
         marker: discovered.marker, todos: discovered.todos, declaredOperational: discovered.declaredOperational,
         operational: discovered.operational };
-      return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: discovered.handoff };
+      return legacyCaptureSuccess({ snapshot, sha256: sha256(canonicalJson(snapshot)), summary: discovered.handoff });
     }
     const password = parent.environment?.OPENCODE_SERVER_PASSWORD;
     const username = parent.environment?.OPENCODE_SERVER_USERNAME ?? "opencode";
-    if (!OPAQUE_TOKEN.test(password ?? "") || !/^[A-Za-z0-9._-]{1,64}$/.test(username)) return null;
+    if (!OPAQUE_TOKEN.test(password ?? "") || !/^[A-Za-z0-9._-]{1,64}$/.test(username)) return legacyCaptureFailure("legacyInput");
     const headers = { authorization: `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}` };
     const get = async (path) => {
-      const response = await request(`http://127.0.0.1:${parent.port}${path}`, {
-        method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(5_000),
-      });
-      if (response.status !== 200) throw new Error("Legacy capture unavailable");
-      return responseValue(await response.json());
+      try {
+        const response = await request(`http://127.0.0.1:${parent.port}${path}`, {
+          method: "GET", headers, redirect: "error", signal: AbortSignal.timeout(5_000),
+        });
+        if (response.status !== 200) return legacyCaptureFailure("legacyQuery");
+        try { return legacyCaptureSuccess(responseValue(await response.json())); }
+        catch { return legacyCaptureFailure("legacyRows"); }
+      } catch { return legacyCaptureFailure("legacyQuery"); }
     };
-    const [sessions, statuses] = await Promise.all([get("/session"), get("/session/status")]);
-    if (!Array.isArray(sessions) || !isRecord(statuses)) return null;
+    const [sessionsResult, statusesResult] = await Promise.all([get("/session"), get("/session/status")]);
+    if (sessionsResult.failureKey !== null) return legacyCaptureFailure(sessionsResult.failureKey);
+    if (statusesResult.failureKey !== null) return legacyCaptureFailure(statusesResult.failureKey);
+    const sessions = sessionsResult.value;
+    const statuses = statusesResult.value;
+    if (!Array.isArray(sessions) || !isRecord(statuses)) return legacyCaptureFailure("legacyRows");
     const matches = sessions.filter((session) => session?.directory === binding.worktree && !session.parentID
       && ["busy", "retry", "working"].includes(statuses[session.id]?.type));
-    if (matches.length !== 1 || !SAFE_SESSION.test(matches[0].id ?? "")
-      || parent.sessionId !== null && parent.sessionId !== matches[0].id) return null;
+    if (matches.length !== 1 || !SAFE_SESSION.test(matches[0].id ?? "")) return legacyCaptureFailure("legacyRows");
+    if (parent.sessionId !== null && parent.sessionId !== matches[0].id) return legacyCaptureFailure("legacyProcess");
     const sessionId = matches[0].id;
     const live = await readLiveRecoverySummary({ ...parent, sessionId }, binding.worktree, request);
-    if (!live?.operational || !sameProcess()) return null;
-    const config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head));
+    if (!sameProcess()) return legacyCaptureFailure("legacyProcess");
+    if (!live?.operational) return legacyCaptureFailure("legacyRows");
+    let config;
+    try { config = JSON.parse(readRecoveryRepositoryData(binding.worktree, source.head)); }
+    catch { return legacyCaptureFailure("legacyRole"); }
     if (!isRecord(config.agent) || !Object.hasOwn(config.agent, live.operational.role)
-      || config.agent[live.operational.role]?.disable === true) return null;
-    const confirmed = await get("/session/status");
-    if (canonicalJson(confirmed) !== canonicalJson(statuses)) return null;
+      || config.agent[live.operational.role]?.disable === true) return legacyCaptureFailure("legacyRole");
+    const confirmedResult = await get("/session/status");
+    if (confirmedResult.failureKey !== null) return legacyCaptureFailure(confirmedResult.failureKey);
+    if (canonicalJson(confirmedResult.value) !== canonicalJson(statuses)) return legacyCaptureFailure("legacyConsistency");
     const identity = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"].map((key) => [key, parent[key]]));
     const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", parent: identity,
       nonceProvenance: "absent_process_environment", sessionId, binding, sourceHead: source.head,
       operational: live.operational };
-    return { snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff };
-  } catch { return null; }
+    return legacyCaptureSuccess({ snapshot, sha256: sha256(canonicalJson(snapshot)), summary: live.handoff });
+  } catch { return legacyCaptureFailure("legacyCapture"); }
+}
+
+export async function captureLegacyRecoveryPreAdmission(parent, binding, source, request = fetch,
+  inspect = (pid) => ({ ...inspectAncestor(pid), nonce: processEnvironment(pid)?.INGENIUM_RESTART_NONCE, ports: processListeningPorts(pid) }),
+  executeParent = spawnSync) {
+  return (await captureLegacyRecoveryPreAdmissionDetailed(parent, binding, source, request, inspect, executeParent)).value;
 }
 
 export async function captureCurrentRecoveryPreAdmission(parent, binding, source, request = fetch,
@@ -1912,6 +1979,14 @@ export const RECOVERY_PREPARATION_FAILURES = Object.freeze({
   parentIdentity: Object.freeze({ code: "RECOVERY_PREPARATION_PARENT_IDENTITY_UNAVAILABLE", path: "inspect.parent_identity" }),
   binding: Object.freeze({ code: "RECOVERY_PREPARATION_BINDING_UNAVAILABLE", path: "inspect.binding" }),
   legacyCapture: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_CAPTURE_UNAVAILABLE", path: "inspect.legacy_capture" }),
+  legacyOwnerContract: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_OWNER_CONTRACT_UNAVAILABLE", path: "inspect.legacy_capture.owner_contract" }),
+  legacyInput: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_INPUT_UNAVAILABLE", path: "inspect.legacy_capture.input" }),
+  legacyProcess: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_PROCESS_UNAVAILABLE", path: "inspect.legacy_capture.process" }),
+  legacyQuery: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_QUERY_UNAVAILABLE", path: "inspect.legacy_capture.query" }),
+  legacyRows: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_ROWS_UNAVAILABLE", path: "inspect.legacy_capture.rows" }),
+  legacyTodo: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_TODO_UNAVAILABLE", path: "inspect.legacy_capture.todo" }),
+  legacyRole: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_ROLE_UNAVAILABLE", path: "inspect.legacy_capture.role" }),
+  legacyConsistency: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_CONSISTENCY_UNAVAILABLE", path: "inspect.legacy_capture.consistency" }),
   currentCapture: Object.freeze({ code: "RECOVERY_PREPARATION_CURRENT_CAPTURE_UNAVAILABLE", path: "inspect.current_capture" }),
   apiHealth: Object.freeze({ code: "RECOVERY_PREPARATION_API_HEALTH_UNAVAILABLE", path: "inspect.api_health" }),
   freeze: Object.freeze({ code: "RECOVERY_PREPARATION_FREEZE_UNAVAILABLE", path: "inspect.freeze" }),
@@ -2438,8 +2513,15 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   }
   const captureKey = ancestry.parent.nonceSha256 === "0".repeat(64) ? "legacyCapture" : "currentCapture";
   const capture = captureKey === "legacyCapture"
-    ? await preparationAsyncProbe(captureKey, () => (options.captureLegacy ?? captureLegacyRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
-      options.request ?? fetch, options.inspectParent, options.exportSession))
+    ? await preparationAsyncProbe(captureKey, async () => {
+      if (options.captureLegacy) {
+        return options.captureLegacy(ancestry.parent, binding, gitSummary, options.request ?? fetch, options.inspectParent, options.exportSession);
+      }
+      const result = await captureLegacyRecoveryPreAdmissionDetailed(ancestry.parent, binding, gitSummary,
+        options.request ?? fetch, options.inspectParent, options.exportSession);
+      if (result.failureKey !== null) throw preparationFailure(result.failureKey);
+      return result.value;
+    })
     : await preparationAsyncProbe(captureKey, () => (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
       options.request ?? fetch, options.inspectParent));
   if (!capture) throw preparationFailure(captureKey);

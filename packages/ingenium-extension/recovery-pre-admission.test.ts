@@ -696,6 +696,30 @@ function legacyQueryRow(parent: { pid: number; startTimeTicks: number }, todos =
   };
 }
 
+function legacyCaptureParent(f: ReturnType<typeof legacyFixture>) {
+  Object.assign(f.parent, { port: null, sessionId: null, dataHome: join(root, ".local/share/opencode"),
+    environment: { HOME: root } });
+  f.inspect.mockReturnValue({ ...f.parent, commandName: "opencode", ports: [], nonce: undefined });
+}
+
+function legacySourceHandle(f: ReturnType<typeof legacyFixture>) {
+  const script = join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+  mkdirSync(join(root, "packages/ingenium-extension/scripts"), { recursive: true });
+  const source = { head: f.source.head, path: script, bytes: Buffer.from("fixture"), sha256: hash("fixture") };
+  writeFileSync(script, source.bytes, { mode: 0o644 });
+  return { revalidate: vi.fn(() => source) };
+}
+
+async function collectLegacyFailure(f: ReturnType<typeof legacyFixture>, execute: any) {
+  const request = authorityRequest();
+  const error = await shim.collectPreparationInputs(legacySourceHandle(f), {
+    environment: {}, request, ancestry: () => ({ status: "exact", parent: f.parent }),
+    gitSummary: () => ({ status: "validated", head: f.source.head, sourceMatchesHead: true, dirtyPaths: [] }),
+    inspectDeployment: () => ({ status: "attested", revision: f.source.head }), inspectParent: f.inspect, exportSession: execute,
+  }).then(() => null, (failure: unknown) => failure);
+  return { error, request };
+}
+
 function markedLegacyCapture(capture: any, parent: any) {
   const parsed = shim.parseLegacyRecoveryTodoInput({ todos: strictLegacyTodos(parent) }, parent, binding, head, "ses_exact");
   return { ...capture, snapshot: { ...capture.snapshot, ...parsed } };
@@ -772,6 +796,133 @@ describe("legacy pre-admission capture", () => {
     expect(JSON.stringify(result)).not.toContain("root-a");
     expect(JSON.stringify(result)).not.toContain("legacy-admission");
     expect(f.request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["throws", () => { const stdout = Buffer.from("private stdout"); const stderr = Buffer.from("private stderr");
+      const error = Object.assign(new Error("private error"), { stdout, stderr }); return { result: () => { throw error; }, buffers: [stdout, stderr] }; }],
+    ["nonzero", () => { const stdout = Buffer.from("private stdout"); const stderr = Buffer.from("private stderr");
+      return { result: () => ({ status: 1, signal: null, error: new Error("private error"), stdout, stderr }), buffers: [stdout, stderr] }; }],
+    ["signal", () => { const stdout = Buffer.from("private stdout"); const stderr = Buffer.from("private stderr");
+      return { result: () => ({ status: null, signal: "SIGTERM", error: new Error("private error"), stdout, stderr }), buffers: [stdout, stderr] }; }],
+  ] as const)("maps a legacy spawn %s to the query stage and clears captured buffers", async (_label, create) => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    const { result, buffers } = create();
+    const { error } = await collectLegacyFailure(f, result);
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_QUERY_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.query" });
+    expect(buffers.every((buffer) => buffer.every((byte) => byte === 0))).toBe(true);
+    expect(JSON.stringify(shim.recoveryPreparationFailureOutput(error))).not.toContain("private");
+  });
+
+  it("maps malformed legacy rows to the rows stage without retaining output", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    const stdout = Buffer.from(JSON.stringify([{}]));
+    const stderr = Buffer.from("private diagnostic");
+    const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_ROWS_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.rows" });
+    expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
+    expect(JSON.stringify(shim.recoveryPreparationFailureOutput(error))).not.toContain("private");
+  });
+
+  it("maps invalid legacy Todo markers to the Todo stage without retaining marker text", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    const todos: any[] = strictLegacyTodos(f.parent);
+    todos[2] = { ...todos[2], secret: "private Todo text" };
+    const stdout = Buffer.from(JSON.stringify([legacyQueryRow(f.parent, todos)]));
+    const stderr = Buffer.from("private diagnostic");
+    const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_TODO_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.todo" });
+    expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
+    expect(JSON.stringify(shim.recoveryPreparationFailureOutput(error))).not.toContain("private");
+  });
+
+  it.each(["missing", "disabled"])("maps a %s legacy role to the role stage", async (roleState) => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    json(join(root, "opencode.json"), { mcp: { ingenium: { type: "local", environment } },
+      agent: roleState === "missing" ? {} : { "ingenium-orchestrator": { disable: true } } });
+    const stdout = Buffer.from(JSON.stringify([legacyQueryRow(f.parent)]));
+    const stderr = Buffer.from("private diagnostic");
+    const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_ROLE_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.role" });
+    expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("maps changed parent identity on legacy revalidation to the process stage", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    let inspections = 0;
+    f.inspect.mockImplementation(() => inspections++ === 0
+      ? { ...f.parent, commandName: "opencode", ports: [], nonce: undefined }
+      : { ...f.parent, commandName: "opencode", ports: [], nonce: undefined, startTimeTicks: 11 });
+    const stdout = Buffer.from(JSON.stringify([legacyQueryRow(f.parent)]));
+    const stderr = Buffer.from("private diagnostic");
+    const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_PROCESS_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.process" });
+    expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
+  });
+
+  it("maps changed metadata from the second bounded legacy query to the consistency stage", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    const initial = legacyQueryRow(f.parent);
+    const changed = legacyQueryRow(f.parent, strictLegacyTodos(f.parent, { nextWork: "changed" }));
+    const buffers: Buffer[] = [];
+    let calls = 0;
+    const { error } = await collectLegacyFailure(f, () => {
+      const stdout = Buffer.from(JSON.stringify([calls++ === 0 ? initial : changed]));
+      const stderr = Buffer.from("private diagnostic");
+      buffers.push(stdout, stderr);
+      return { status: 0, signal: null, stdout, stderr };
+    });
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_CONSISTENCY_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.consistency" });
+    expect(calls).toBe(2);
+    expect(buffers.every((buffer) => buffer.every((byte) => byte === 0))).toBe(true);
+  });
+
+  it("keeps successful legacy capture unchanged for more than 64 and at most 128 Todo items", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    f.todos.splice(0, f.todos.length, ...strictLegacyTodos(f.parent), ...Array.from({ length: 62 }, (_, index) => ({
+      content: `private continuation ${index}`, status: "pending", priority: "low",
+    })));
+    const row = legacyQueryRow(f.parent, f.todos);
+    const buffers: Buffer[] = [];
+    const execute = vi.fn(() => {
+      const stdout = Buffer.from(JSON.stringify([row]));
+      const stderr = Buffer.from("private diagnostic");
+      buffers.push(stdout, stderr);
+      return { status: 0, signal: null, stdout, stderr };
+    });
+    const auth = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" }), { status: 200 }) : auth(url, init);
+    const inputs = await shim.collectPreparationInputs(legacySourceHandle(f), {
+      environment: {}, request, ancestry: () => ({ status: "exact", parent: f.parent }),
+      gitSummary: () => ({ status: "validated", head: f.source.head, sourceMatchesHead: true, dirtyPaths: [] }),
+      inspectDeployment: () => ({ status: "attested", revision: f.source.head }), inspectParent: f.inspect,
+      inspectLauncher: () => ({ status: "attested" }), exportSession: execute,
+    });
+
+    expect(inputs.capture.snapshot.todos).toHaveLength(65);
+    expect(JSON.stringify(inputs.capture)).not.toContain("private continuation");
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(buffers.every((buffer) => buffer.every((byte) => byte === 0))).toBe(true);
   });
 
   it("accepts the exact marker project and rejects a wrong project", () => {
