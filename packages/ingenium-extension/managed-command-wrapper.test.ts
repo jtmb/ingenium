@@ -29,7 +29,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 // @ts-expect-error The source-only build entrypoint runs directly in Node without declarations.
 import { buildDistributions } from "./scripts/build-distributions.mjs";
 // @ts-expect-error The existing build-time parity checker is a JavaScript module.
@@ -1739,6 +1739,15 @@ describe("managed command wrappers", () => {
         closeSync(verified.descriptor);
       }
 
+      const expanded = Buffer.concat([Buffer.from("/*\n"), Buffer.alloc(300 * 1024, "x"), Buffer.from("\n*/\n")]);
+      writeFileSync(source, expanded, { mode: 0o644 });
+      execFileSync("/usr/bin/git", ["-C", root, "add", "packages/ingenium-extension/scripts/recovery-bootstrap.js"]);
+      execFileSync("/usr/bin/git", ["-C", root, "-c", "user.name=Ingenium Test", "-c", "user.email=test@invalid",
+        "commit", "--quiet", "-m", "large recovery fixture"]);
+      const expandedVerified = openVerifiedRecoveryBootstrap(source, root);
+      expect(expandedVerified.bytes).toEqual(expanded);
+      closeSync(expandedVerified.descriptor);
+
       chmodSync(source, 0o4644);
       expect(() => openVerifiedRecoveryBootstrap(source, root)).toThrow("not trusted");
       chmodSync(source, 0o644);
@@ -2045,7 +2054,9 @@ describe("managed command wrappers", () => {
 
   it("consumes once after exact revalidation and propagates one immutable context without local fallback", async () => {
     const shim = await importModule(`${pathToFileURL(recoveryBootstrapShim).href}?test=${Date.now()}`);
-    const preflight = twoPassRecoveryPreflight(repositoryRoot);
+    const worktree = mkdtempSync(join(tmpdir(), "ingenium-two-pass-admission-"));
+    onTestFinished(() => rmSync(worktree, { recursive: true, force: true }));
+    const preflight = twoPassRecoveryPreflight(worktree);
     const digest = sha256(shim.canonicalJson(preflight));
     const admission = twoPassRecoveryAdmission(preflight, digest, Date.now());
     const consumedContext = admittedRecoveryContext(

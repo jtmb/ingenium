@@ -295,6 +295,22 @@ describe("recovery preflight repository-data trust", () => {
     expect(readFileSync(join(root, ".git/index"))).toEqual(index);
   });
 
+  it("attests a reviewed recovery bootstrap above the former 256 KiB bound", () => {
+    const f = fixture();
+    const sourcePath = join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+    const bytes = Buffer.concat([Buffer.from("/*\n"), Buffer.alloc(300 * 1024, "x"), Buffer.from("\n*/\n")]);
+    mkdirSync(join(root, "packages/ingenium-extension/scripts"), { recursive: true });
+    writeFileSync(sourcePath, bytes, { mode: 0o644 });
+    f.git("add", "--", "packages/ingenium-extension/scripts/recovery-bootstrap.js");
+    f.git("commit", "--quiet", "-m", "large recovery fixture");
+    const head = f.git("rev-parse", "HEAD").trim();
+
+    const verified = shim.openVerifiedRecoverySource({ schemaVersion: 1, kind: "source-bootstrap",
+      repositoryRoot: root, sourcePath, head, sourceSha256: hash(bytes) });
+    expect(verified.source.bytes).toEqual(bytes);
+    verified.close();
+  });
+
   it("runs exact attested preflight with bounded content-free output and byte-identical protected state", async () => {
     const f = fixture();
     const source = { head: f.head, path: join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
