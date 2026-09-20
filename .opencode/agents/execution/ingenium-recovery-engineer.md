@@ -86,7 +86,7 @@ On transport abort, preserve the unknown outcome and first failure, reconcile du
 
 ## 🔴 Command boundary
 
-- The only executable recovery operations are the literal `ingenium-build deployment recovery-prepare` and `ingenium-build deployment production-restart` commands.
+- The only executable recovery operations are the literal `ingenium-build deployment recovery-preflight`, `ingenium-build deployment recovery-prepare`, and `ingenium-build deployment production-restart` commands.
 - Never run raw or encoded npm, build, test, typecheck, package, or arbitrary managed-command payloads.
 - Git inspection is limited to `git status`, exact recovery-evidence or roadmap diffs, `git log --oneline -10`, and read-only object/tree inspection via `git blame`, `git ls-files`, `git ls-tree`, and `git rev-parse`.
 - Stage only `docs/reference/ROADMAP.md` or exact `tests/artifacts/tui-recovery/` evidence paths. The only commit form is `git commit -m 'recovery evidence checkpoint'`.
