@@ -1621,7 +1621,9 @@ describe("fixed recovery preparation transaction", () => {
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
     f.parent.environment.INGENIUM_PROJECT = "foreign";
     await expect(shim.collectPreparationInputs(f.sourceHandle, { environment: {}, request,
-      ancestry: () => ({ status: "exact", parent: f.parent }) })).rejects.toThrow("binding conflicts");
+      ancestry: () => ({ status: "exact", parent: f.parent }) })).rejects.toMatchObject({
+      code: "RECOVERY_PREPARATION_BINDING_UNAVAILABLE", failurePath: "inspect.binding",
+    });
   });
 
   it("routes a fresh-nonce managed parent through current evidence and never legacy capture", async () => {
@@ -1698,6 +1700,20 @@ describe("fixed recovery preparation transaction", () => {
     expect(JSON.stringify(shim.recoveryPreparationFailureOutput(Object.assign(new Error("private failure"), { phase: "inspect" }))))
       .not.toContain("private failure");
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
+  });
+
+  it("preserves only allowlisted inspect failures and never serializes private causes", () => {
+    for (const failure of Object.values(shim.RECOVERY_PREPARATION_FAILURES)) {
+      expect(shim.recoveryPreparationFailureOutput({ phase: "inspect", failure })).toMatchObject({ failure });
+    }
+
+    const secret = "Bearer recovery-secret https://private.invalid/session";
+    const output = shim.recoveryPreparationFailureOutput({ phase: "inspect", failure: {
+      code: "RECOVERY_PREPARATION_PRIVATE_FAILURE", path: "inspect.secret", message: secret,
+    } });
+    expect(output.failure).toEqual({ code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: "inspect" });
+    expect(JSON.stringify(output)).not.toContain(secret);
+    expect(JSON.stringify(output)).not.toContain("inspect.secret");
   });
 });
 

@@ -1904,10 +1904,83 @@ const PREPARATION_OWNER_ARGUMENT = "--recovery-preparation-owner";
 const PREPARATION_LIFETIME_MS = 15 * 60 * 1_000;
 const QUARANTINED_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
 const QUARANTINED_OVERFLOW_COUNT = 11_617;
-const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = Object.freeze({
-  code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
-  path: "inspect.parent_control_plane",
+export const RECOVERY_PREPARATION_FAILURES = Object.freeze({
+  repository: Object.freeze({ code: "RECOVERY_PREPARATION_REPOSITORY_UNAVAILABLE", path: "inspect.repository" }),
+  source: Object.freeze({ code: "RECOVERY_PREPARATION_SOURCE_UNAVAILABLE", path: "inspect.source" }),
+  deployment: Object.freeze({ code: "RECOVERY_PREPARATION_DEPLOYMENT_UNAVAILABLE", path: "inspect.deployment" }),
+  parentIdentity: Object.freeze({ code: "RECOVERY_PREPARATION_PARENT_IDENTITY_UNAVAILABLE", path: "inspect.parent_identity" }),
+  binding: Object.freeze({ code: "RECOVERY_PREPARATION_BINDING_UNAVAILABLE", path: "inspect.binding" }),
+  legacyCapture: Object.freeze({ code: "RECOVERY_PREPARATION_LEGACY_CAPTURE_UNAVAILABLE", path: "inspect.legacy_capture" }),
+  currentCapture: Object.freeze({ code: "RECOVERY_PREPARATION_CURRENT_CAPTURE_UNAVAILABLE", path: "inspect.current_capture" }),
+  apiHealth: Object.freeze({ code: "RECOVERY_PREPARATION_API_HEALTH_UNAVAILABLE", path: "inspect.api_health" }),
+  freeze: Object.freeze({ code: "RECOVERY_PREPARATION_FREEZE_UNAVAILABLE", path: "inspect.freeze" }),
+  quarantine: Object.freeze({ code: "RECOVERY_PREPARATION_QUARANTINE_UNAVAILABLE", path: "inspect.quarantine" }),
+  installedLauncher: Object.freeze({ code: "RECOVERY_PREPARATION_INSTALLED_LAUNCHER_UNAVAILABLE", path: "inspect.installed_launcher" }),
+  parentControlPlane: Object.freeze({
+    code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
+    path: "inspect.parent_control_plane",
+  }),
 });
+const PREPARATION_FAILURE_VALUES = Object.freeze(Object.values(RECOVERY_PREPARATION_FAILURES));
+const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = RECOVERY_PREPARATION_FAILURES.parentControlPlane;
+
+function knownPreparationFailure(error) {
+  for (const candidate of [error, error?.failure]) {
+    const failure = PREPARATION_FAILURE_VALUES.find((entry) => entry.code === candidate?.code
+      && entry.path === (candidate?.failurePath ?? candidate?.path));
+    if (failure) return failure;
+  }
+  return null;
+}
+
+function preparationFailure(key) {
+  const failure = RECOVERY_PREPARATION_FAILURES[key];
+  const error = new Error("Recovery preflight inspect failed");
+  error.code = failure.code;
+  error.failurePath = failure.path;
+  return error;
+}
+
+function preparationProbe(key, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    if (knownPreparationFailure(error)) throw error;
+    throw preparationFailure(key);
+  }
+}
+
+async function preparationAsyncProbe(key, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (knownPreparationFailure(error)) throw error;
+    throw preparationFailure(key);
+  }
+}
+
+function validPreparationSource(source) {
+  return isRecord(source) && typeof source.path === "string" && Buffer.isBuffer(source.bytes)
+    && GIT_OID.test(source.head ?? "") && HASH.test(source.sha256 ?? "");
+}
+
+function validPreparationGitSummary(summary) {
+  return isRecord(summary) && typeof summary.status === "string" && Array.isArray(summary.dirtyPaths);
+}
+
+function validPreparationBinding(binding) {
+  return isRecord(binding) && SAFE_PROJECT.test(binding.project ?? "") && UUID.test(binding.projectId ?? "")
+    && SAFE_ID.test(binding.workspaceId ?? "") && HASH.test(binding.storageMappingHash ?? "")
+    && typeof binding.worktree === "string" && resolve(binding.worktree) === binding.worktree;
+}
+
+function preparationSource(sourceHandle) {
+  return preparationProbe("source", () => {
+    const source = sourceHandle.revalidate();
+    if (!validPreparationSource(source)) throw new Error("Recovery preparation source is invalid");
+    return source;
+  });
+}
 
 export function inspectInstalledRecoveryBuild(worktree, source, inherited = process.env) {
   const home = inherited.HOME;
@@ -1982,18 +2055,14 @@ function inspectInstalledManagedLauncher(parent, binding, source, environment) {
 }
 
 function recoveryPreparationFailureDetail(error, phase) {
-  return error?.code === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code
-    && error.failurePath === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path
-    ? PREPARATION_PARENT_CONTROL_PLANE_FAILURE
-    : { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
+  return knownPreparationFailure(error)
+    ?? { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
 }
 
 export function recoveryPreparationFailureOutput(error) {
   const phase = ["inspect", "prepare", "start", "attest", "confirm"].includes(error?.phase) ? error.phase : "source";
-  const failure = error?.failure?.code === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.code
-    && error.failure.path === PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path
-    ? PREPARATION_PARENT_CONTROL_PLANE_FAILURE
-    : { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
+  const failure = knownPreparationFailure(error)
+    ?? { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
   return { action: "recovery-prepare", authorizesRestart: false,
     code: error?.code === "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" ? error.code : "RECOVERY_PREPARATION_FAILED",
     phase, failure };
@@ -2298,58 +2367,65 @@ function preparationQuarantineMatches(outbox, plan) {
 }
 
 export async function collectPreparationInputs(sourceHandle, options = {}) {
-  const source = sourceHandle.revalidate();
+  const source = preparationSource(sourceHandle);
   const worktree = dirname(dirname(dirname(dirname(source.path))));
   const collectGit = options.gitSummary ?? collectGitSummary;
-  let gitSummary = collectGit(worktree, source.path, source.bytes);
+  let gitSummary = preparationProbe("repository", () => collectGit(worktree, source.path, source.bytes));
+  if (!validPreparationGitSummary(gitSummary)) throw preparationFailure("repository");
   let installedBuild = null;
   let deployment = null;
   if (options.preflight === true) {
-    if (gitSummary.status !== "validated" || gitSummary.head !== source.head || gitSummary.clean !== true
-      || gitSummary.dirtyPaths.length !== 0 || gitSummary.indexFlagsNormal !== true || !gitSummary.sourceMatchesHead) {
-      throw new Error("Recovery preflight repository source is unavailable");
+    if (gitSummary?.status !== "validated" || gitSummary.head !== source.head || gitSummary.clean !== true
+      || !Array.isArray(gitSummary.dirtyPaths) || gitSummary.dirtyPaths.length !== 0
+      || gitSummary.indexFlagsNormal !== true || !gitSummary.sourceMatchesHead) {
+      throw preparationFailure("repository");
     }
-    installedBuild = (options.inspectInstalledBuild ?? inspectInstalledRecoveryBuild)(worktree, source,
-      options.environment ?? process.env);
-    deployment = (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, source.head,
-      options.inspectDeploymentCommand);
-    if (deployment.status !== "attested" || deployment.revision !== source.head) {
-      throw new Error("Recovery preflight deployed source is unavailable");
+    installedBuild = preparationProbe("installedLauncher", () => (options.inspectInstalledBuild ?? inspectInstalledRecoveryBuild)(worktree, source,
+      options.environment ?? process.env));
+    if (installedBuild?.status !== "attested") throw preparationFailure("installedLauncher");
+    deployment = preparationProbe("deployment", () => (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, source.head,
+      options.inspectDeploymentCommand));
+    if (deployment?.status !== "attested" || deployment.revision !== source.head) {
+      throw preparationFailure("deployment");
     }
-    const confirmedSource = sourceHandle.revalidate();
-    const confirmedGit = collectGit(worktree, confirmedSource.path, confirmedSource.bytes);
+    const confirmedSource = preparationSource(sourceHandle);
+    const confirmedGit = preparationProbe("repository", () => collectGit(worktree, confirmedSource.path, confirmedSource.bytes));
+    if (!validPreparationGitSummary(confirmedGit)) throw preparationFailure("repository");
     if (confirmedSource.head !== source.head || confirmedSource.sha256 !== source.sha256
       || canonicalJson(confirmedGit) !== canonicalJson(gitSummary)) {
-      throw new Error("Recovery preflight source changed before configuration");
+      throw preparationFailure("source");
     }
     gitSummary = confirmedGit;
   }
-  const environment = (options.configuredEnvironment ?? recoveryConfiguredEnvironment)(
+  const environment = preparationProbe("binding", () => (options.configuredEnvironment ?? recoveryConfiguredEnvironment)(
     worktree,
     options.environment ?? process.env,
     source.head,
-  );
-  const binding = await (options.corroborateBinding ?? corroborateRecoveryBinding)(
+  ));
+  const binding = await preparationAsyncProbe("binding", () => (options.corroborateBinding ?? corroborateRecoveryBinding)(
     worktree,
     environment,
     options.request ?? fetch,
-  );
-  const ancestry = (options.ancestry ?? inspectAncestry)(worktree);
-  if (ancestry.status !== "exact" || !ancestry.parent) throw new Error("Recovery preparation parent is ambiguous");
-  for (const [key, expected] of Object.entries({ INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
-    INGENIUM_WORKSPACE_ID: binding.workspaceId, INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
-    INGENIUM_WORKTREE: worktree, INGENIUM_API_URL: environment.INGENIUM_API_URL })) {
-    const inherited = ancestry.parent.environment?.[key];
-    if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
-  }
+  ));
+  if (!validPreparationBinding(binding)) throw preparationFailure("binding");
+  const ancestry = preparationProbe("parentIdentity", () => (options.ancestry ?? inspectAncestry)(worktree));
+  if (ancestry?.status !== "exact" || !safeRecoveryIdentity(ancestry.parent)) throw preparationFailure("parentIdentity");
+  preparationProbe("binding", () => {
+    for (const [key, expected] of Object.entries({ INGENIUM_PROJECT: binding.project, INGENIUM_PROJECT_ID: binding.projectId,
+      INGENIUM_WORKSPACE_ID: binding.workspaceId, INGENIUM_STORAGE_MAPPING_HASH: binding.storageMappingHash,
+      INGENIUM_WORKTREE: worktree, INGENIUM_API_URL: environment.INGENIUM_API_URL })) {
+      const inherited = ancestry.parent.environment?.[key];
+      if (inherited !== undefined && inherited !== expected) throw new Error("Recovery preparation parent binding conflicts");
+    }
+  });
   let launch = null;
   let legacyDeploymentAttested = false;
   if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
     && ancestry.parent.port === null && ancestry.parent.nonceSha256 === "0".repeat(64)) {
-    deployment ??= (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
-      options.inspectDeploymentCommand);
-    if (deployment.status !== "attested" || deployment.revision !== gitSummary.head) {
-      throw new Error("Recovery preparation deployed source is unavailable");
+    deployment ??= preparationProbe("deployment", () => (options.inspectDeployment ?? inspectRecoveryDeployment)(worktree, gitSummary.head,
+      options.inspectDeploymentCommand));
+    if (deployment?.status !== "attested" || deployment.revision !== gitSummary.head) {
+      throw preparationFailure("deployment");
     }
     legacyDeploymentAttested = true;
   } else if (gitSummary.status === "validated" && gitSummary.dirtyPaths.length === 0 && gitSummary.sourceMatchesHead
@@ -2359,26 +2435,27 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     error.failurePath = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path;
     throw error;
   }
-  const capture = ancestry.parent.nonceSha256 === "0".repeat(64)
-    ? await (options.captureLegacy ?? captureLegacyRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
-      options.request ?? fetch, options.inspectParent, options.exportSession)
-    : await (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
-      options.request ?? fetch, options.inspectParent);
-  if (!capture) throw new Error("Recovery preparation capture is unavailable");
+  const captureKey = ancestry.parent.nonceSha256 === "0".repeat(64) ? "legacyCapture" : "currentCapture";
+  const capture = captureKey === "legacyCapture"
+    ? await preparationAsyncProbe(captureKey, () => (options.captureLegacy ?? captureLegacyRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
+      options.request ?? fetch, options.inspectParent, options.exportSession))
+    : await preparationAsyncProbe(captureKey, () => (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
+      options.request ?? fetch, options.inspectParent));
+  if (!capture) throw preparationFailure(captureKey);
   if (legacyDeploymentAttested) {
-    launch = (options.inspectLauncher ?? inspectInstalledManagedLauncher)({
+    launch = preparationProbe("installedLauncher", () => (options.inspectLauncher ?? inspectInstalledManagedLauncher)({
       ...ancestry.parent,
       sessionId: capture.snapshot.sessionId,
-    }, binding, { ...source, ...gitSummary, sha256: source.sha256 }, environment);
+    }, binding, { ...source, ...gitSummary, sha256: source.sha256 }, environment));
   }
-  const health = await collectApiHealth(environment, options.request ?? fetch);
-  if (health.status !== "healthy") throw new Error("Recovery preparation API health is unavailable");
+  const health = await preparationAsyncProbe("apiHealth", () => collectApiHealth(environment, options.request ?? fetch));
+  if (health?.status !== "healthy") throw preparationFailure("apiHealth");
   const index = resolve(worktree, ".opencode/protected-runtime-index");
-  const freeze = planPreparationFreeze(index, options);
-  const quarantine = planPreparationQuarantine(index);
-  sourceHandle.revalidate();
-  return { binding, capture, freeze, quarantine, source, git: gitSummary, deployment, installedBuild, launch,
-    contract: prepareRecoveryOwnerContract(binding, source.head) };
+  const freeze = preparationProbe("freeze", () => planPreparationFreeze(index, options));
+  const quarantine = preparationProbe("quarantine", () => planPreparationQuarantine(index));
+  preparationSource(sourceHandle);
+  const contract = preparationProbe("binding", () => prepareRecoveryOwnerContract(binding, source.head));
+  return { binding, capture, freeze, quarantine, source, git: gitSummary, deployment, installedBuild, launch, contract };
 }
 
 export function recoveryPreflightFailureOutput() {

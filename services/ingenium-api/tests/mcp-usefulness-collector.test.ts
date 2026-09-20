@@ -121,22 +121,32 @@ describe("MCP usefulness collector", () => {
       }),
     });
 
-    await expect(collector.collect(PROJECT_A)).rejects.toMatchObject({ code: "MCP_REPORT_UNAVAILABLE" });
+    await expect(collector.collect(PROJECT_A)).rejects.toMatchObject({ code: "MCP_REPORT_UNAVAILABLE", stage: "connect" });
     expect(closed).toBe(1);
   });
 
-  it("treats cleanup uncertainty as fixed unavailable without retaining diagnostics", async () => {
-    const secret = "Bearer fixture-secret https://private.invalid/cleanup";
-    const collector = createFixtureMcpUsefulnessCollector({
-      clock: CLOCK,
-      launch: () => connection({ close: async () => { throw new Error(secret); } }),
-    });
+  it.each([
+    ["launcher", () => { throw new Error("Bearer fixture-secret https://private.invalid/launch"); }],
+    ["connect", () => connection({ connect: async () => { throw new Error("Bearer fixture-secret https://private.invalid/connect"); } })],
+    ["close", () => connection({ close: async () => { throw new Error("Bearer fixture-secret https://private.invalid/close"); } })],
+  ] as const)("reports a fixed %s stage without retaining diagnostics", async (stage, launch) => {
+    const collector = createFixtureMcpUsefulnessCollector({ clock: CLOCK, launch });
+    const failure = await collector.collect(PROJECT_A).then(() => null, (error: unknown) => error);
 
-    await expect(collector.collect(PROJECT_A)).rejects.toEqual(expect.objectContaining({
+    expect(failure).toEqual(expect.objectContaining({
       name: McpUsefulnessCollectionError.name,
       code: "MCP_REPORT_UNAVAILABLE",
+      stage,
       message: "MCP_REPORT_UNAVAILABLE",
     }));
+    expect(JSON.stringify(failure)).not.toContain("fixture-secret");
+    expect(JSON.stringify(failure)).not.toContain("private.invalid");
+  });
+
+  it("normalizes caller-supplied stage values to the fixed report enum", () => {
+    const failure = new McpUsefulnessCollectionError("MCP_REPORT_UNAVAILABLE", "private" as never);
+    expect(failure).toMatchObject({ code: "MCP_REPORT_UNAVAILABLE", stage: "report", message: "MCP_REPORT_UNAVAILABLE" });
+    expect(JSON.stringify(failure)).not.toContain("private");
   });
 
   it("keeps invalid and opaque health results out of the core report", async () => {

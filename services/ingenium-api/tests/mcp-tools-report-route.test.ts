@@ -12,6 +12,7 @@ import {
   type McpUsefulnessLaunchRequest,
 } from "../lib/mcp-usefulness-collector.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { createMcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { compatibilityAuthHeaders } from "./http-fixtures.js";
@@ -38,10 +39,14 @@ function fixtureConnection(overrides: Partial<McpUsefulnessConnection> = {}): Mc
   };
 }
 
-async function start(launch: (request: McpUsefulnessLaunchRequest) => McpUsefulnessConnection = fixtureConnection): Promise<void> {
+async function start(
+  launch: (request: McpUsefulnessLaunchRequest) => McpUsefulnessConnection = fixtureConnection,
+  configure?: (app: express.Application) => void,
+): Promise<void> {
   const app = express();
   app.use(express.json());
   app.use(authMiddleware);
+  configure?.(app);
   app.use("/mcp-tools", createMcpToolsRouter({
     usefulnessCollector: createFixtureMcpUsefulnessCollector({
       clock: { now: () => new Date("2026-07-31T12:00:00.000Z") },
@@ -240,8 +245,32 @@ describe("MCP usefulness report route", () => {
     const response = await report("");
     expect(response.status).toBe(503);
     const body = await response.json();
-    expect(body).toEqual({ error: { code: "MCP_REPORT_UNAVAILABLE", message: "The MCP report is unavailable." } });
+    expect(body).toEqual({ error: {
+      code: "MCP_REPORT_UNAVAILABLE", message: "The MCP report is unavailable.", stage: "close",
+    } });
     expect(JSON.stringify(body)).not.toContain("fixture-secret");
     expect(JSON.stringify(body)).not.toContain("private.invalid");
+  });
+
+  it("keeps general authorization denials at 403 without invoking the collector", async () => {
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    let launches = 0;
+    await start(() => {
+      launches += 1;
+      return fixtureConnection();
+    }, (app) => {
+      app.use((req, _res, next) => {
+        req.principal = {
+          type: "service", id: "general-denied", audience: "mcp", scopes: ["mcp:read"],
+          projectId: projectAId, projectIds: [projectAId], organizationId: null,
+        };
+        next();
+      });
+      app.use(authorizationMiddleware);
+    });
+
+    const response = await report("");
+    expect(response.status).toBe(403);
+    expect(launches).toBe(0);
   });
 });

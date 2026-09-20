@@ -4,8 +4,9 @@ import {
   buildMcpUsefulnessReport,
   createMcpUsefulnessCollector,
   enrichMcpUsefulnessReport,
+  McpUsefulnessCollectionError,
+  MCP_USEFULNESS_STAGES,
   type McpUsefulnessCatalogEntry,
-  type McpUsefulnessCollectionError,
   type McpUsefulnessReportCollector,
 } from "../mcp-usefulness-collector.js";
 import { requireProject } from "../helpers.js";
@@ -134,13 +135,19 @@ function isBusy(error: unknown): error is McpUsefulnessCollectionError {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "MCP_REPORT_BUSY";
 }
 
-function reportUnavailable(res: Response, busy = false): void {
-  res.status(503).json({
-    error: {
-      code: busy ? "MCP_REPORT_BUSY" : "MCP_REPORT_UNAVAILABLE",
-      message: busy ? "The MCP report is busy." : "The MCP report is unavailable.",
-    },
-  });
+function reportStage(error: unknown): typeof MCP_USEFULNESS_STAGES[number] {
+  return error instanceof McpUsefulnessCollectionError && error.stage !== undefined
+    && MCP_USEFULNESS_STAGES.includes(error.stage) ? error.stage : "report";
+}
+
+function reportUnavailable(res: Response, error?: unknown): void {
+  const busy = isBusy(error);
+  const responseError = {
+    code: busy ? "MCP_REPORT_BUSY" : "MCP_REPORT_UNAVAILABLE",
+    message: busy ? "The MCP report is busy." : "The MCP report is unavailable.",
+    ...(!busy ? { stage: reportStage(error) } : {}),
+  };
+  res.status(503).json({ error: responseError });
 }
 
 function filterReportTools<T extends {
@@ -223,7 +230,7 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
       }
       res.json(body);
     } catch (error) {
-      reportUnavailable(res, isBusy(error));
+      reportUnavailable(res, error);
     }
   });
 

@@ -14,6 +14,10 @@ export const MCP_USEFULNESS_TIMEOUT_MS = 5_000;
 export const MCP_USEFULNESS_CACHE_TTL_MS = 30_000;
 export const MCP_USEFULNESS_MAX_CACHED_PROJECTS = 64;
 export const MCP_USEFULNESS_MAX_CONCURRENT = 2;
+export const MCP_USEFULNESS_STAGES = Object.freeze([
+  "request", "clock", "launcher", "credential", "transport", "connect", "list", "health", "close", "report",
+] as const);
+export type McpUsefulnessCollectionStage = typeof MCP_USEFULNESS_STAGES[number];
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_PROJECT_NAME = /^(?!\.{1,2}$)[^\s/\\\u0000-\u001f\u007f][^/\\\u0000-\u001f\u007f]{0,63}$/;
@@ -76,9 +80,14 @@ export interface McpUsefulnessFixtureCollectorOptions {
 }
 
 export class McpUsefulnessCollectionError extends Error {
-  constructor(readonly code: "MCP_REPORT_UNAVAILABLE" | "MCP_REPORT_BUSY") {
+  readonly stage?: McpUsefulnessCollectionStage;
+
+  constructor(readonly code: "MCP_REPORT_UNAVAILABLE" | "MCP_REPORT_BUSY", stage?: McpUsefulnessCollectionStage) {
     super(code);
     this.name = "McpUsefulnessCollectionError";
+    if (code === "MCP_REPORT_UNAVAILABLE") {
+      this.stage = MCP_USEFULNESS_STAGES.includes(stage as McpUsefulnessCollectionStage) ? stage : "report";
+    }
   }
 }
 
@@ -97,17 +106,22 @@ interface CacheEntry {
   observation: McpUsefulnessObservation;
 }
 
-function unavailable(): McpUsefulnessCollectionError {
-  return new McpUsefulnessCollectionError("MCP_REPORT_UNAVAILABLE");
+function unavailable(stage: McpUsefulnessCollectionStage = "report"): McpUsefulnessCollectionError {
+  return new McpUsefulnessCollectionError("MCP_REPORT_UNAVAILABLE", stage);
+}
+
+function stageFrom(error: unknown, fallback: McpUsefulnessCollectionStage): McpUsefulnessCollectionStage {
+  return error instanceof McpUsefulnessCollectionError && error.code === "MCP_REPORT_UNAVAILABLE"
+    && error.stage !== undefined ? error.stage : fallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
+function bounded<T>(stage: McpUsefulnessCollectionStage, operation: () => Promise<T>, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(unavailable()), timeoutMs);
+    const timer = setTimeout(() => reject(unavailable(stage)), timeoutMs);
     Promise.resolve().then(operation).then(
       (value) => {
         clearTimeout(timer);
@@ -115,7 +129,7 @@ function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> 
       },
       () => {
         clearTimeout(timer);
-        reject(unavailable());
+        reject(unavailable(stage));
       },
     );
   });
@@ -162,7 +176,7 @@ function timestamp(clock: { now(): Date }): string {
   try {
     return clock.now().toISOString();
   } catch {
-    throw unavailable();
+    throw unavailable("clock");
   }
 }
 
@@ -213,11 +227,16 @@ export function serverOwnedLaunchOptions(
  * instead of inheriting a caller command, environment, working directory, or path.
  */
 function createServerOwnedConnection(request: McpUsefulnessLaunchRequest): McpUsefulnessConnection {
-  if (!validRequest(request)) throw unavailable();
+  if (!validRequest(request)) throw unavailable("request");
 
-  const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
-  const transportPath = resolve(dirname(launcherPath), "mcp-transport.js");
-  if (!isPackagedMcpLauncher(launcherPath) || !isPackagedMcpLauncher(transportPath)) throw unavailable();
+  let transportPath: string;
+  try {
+    const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
+    transportPath = resolve(dirname(launcherPath), "mcp-transport.js");
+    if (!isPackagedMcpLauncher(launcherPath) || !isPackagedMcpLauncher(transportPath)) throw new Error();
+  } catch {
+    throw unavailable("launcher");
+  }
 
   let credential: ReturnType<typeof issueMcpReportCredential>;
   try {
@@ -229,7 +248,7 @@ function createServerOwnedConnection(request: McpUsefulnessLaunchRequest): McpUs
       toolNames: request.toolNames,
     });
   } catch {
-    throw unavailable();
+    throw unavailable("credential");
   }
 
   const options = serverOwnedLaunchOptions(transportPath, credential.tokenFile, request);
@@ -240,7 +259,7 @@ function createServerOwnedConnection(request: McpUsefulnessLaunchRequest): McpUs
     );
   } catch {
     disposeMcpReportCredential(credential.id);
-    throw unavailable();
+    throw unavailable("transport");
   }
   // Do not buffer, log, or expose child diagnostics.
   (transport as unknown as { stderr?: NodeJS.ReadableStream }).stderr?.resume();
@@ -268,15 +287,15 @@ class Collector implements McpUsefulnessReportCollector {
   }
 
   collect(request: McpUsefulnessLaunchRequest): Promise<McpUsefulnessObservation> {
-    if (!validRequest(request)) return Promise.reject(unavailable());
+    if (!validRequest(request)) return Promise.reject(unavailable("request"));
 
     let now: number;
     try {
       now = this.options.clock.now().getTime();
     } catch {
-      return Promise.reject(unavailable());
+      return Promise.reject(unavailable("clock"));
     }
-    if (!Number.isFinite(now)) return Promise.reject(unavailable());
+    if (!Number.isFinite(now)) return Promise.reject(unavailable("clock"));
 
     const requestKey = `${request.projectId}\0${[...request.toolNames].sort().join("\0")}`;
     const cached = this.cache.get(requestKey);
@@ -319,49 +338,58 @@ class Collector implements McpUsefulnessReportCollector {
     let transport: McpUsefulnessTransportSnapshot = { state: "list-unavailable" };
     let observedAt: string | null = null;
     let failed = false;
+    let failureStage: McpUsefulnessCollectionStage = "launcher";
 
     try {
       connection = this.options.launch(request);
-      await bounded(() => connection!.connect(), this.options.timeoutMs);
+      await bounded("connect", () => connection!.connect(), this.options.timeoutMs);
+      let names: string[] | undefined;
       try {
-        const names = toolNamesFromList(await bounded(() => connection!.listTools(), this.options.timeoutMs));
-        if (names === undefined) {
-          transport = { state: "list-unavailable" };
-        } else {
-          observedAt = timestamp(this.options.clock);
-          let healthCheck: "success" | "failed" | "invalid" | "not-run" = "not-run";
-          if (names.includes("health_check")) {
-            try {
-              healthCheck = healthCheckOutcome(await bounded(
-                () => connection!.callHealthCheck(),
-                this.options.timeoutMs,
-              ));
-            } catch {
-              healthCheck = "failed";
-            }
-          }
-          transport = { state: "listed", transportNames: names, healthCheck };
-        }
+        names = toolNamesFromList(await bounded("list", () => connection!.listTools(), this.options.timeoutMs));
       } catch {
-        transport = { state: "list-unavailable" };
+        names = undefined;
       }
-    } catch {
+      if (names === undefined) {
+        transport = { state: "list-unavailable" };
+      } else {
+        observedAt = timestamp(this.options.clock);
+        let healthCheck: "success" | "failed" | "invalid" | "not-run" = "not-run";
+        if (names.includes("health_check")) {
+          try {
+            healthCheck = healthCheckOutcome(await bounded("health",
+              () => connection!.callHealthCheck(),
+              this.options.timeoutMs,
+            ));
+          } catch {
+            healthCheck = "failed";
+          }
+        }
+        transport = { state: "listed", transportNames: names, healthCheck };
+      }
+    } catch (error) {
       failed = true;
+      failureStage = stageFrom(error, connection ? "connect" : "launcher");
     }
 
     if (connection) {
       try {
-        await bounded(() => connection!.close(), this.options.timeoutMs);
-      } catch {
+        await bounded("close", () => connection!.close(), this.options.timeoutMs);
+      } catch (error) {
         // A child that may still be alive is unavailable, never a partial report.
         failed = true;
+        failureStage = stageFrom(error, "close");
       }
-      connection.dispose?.();
+      try {
+        connection.dispose?.();
+      } catch {
+        failed = true;
+        failureStage = "close";
+      }
     }
-    if (failed) throw unavailable();
+    if (failed) throw unavailable(failureStage);
 
     const generatedAt = timestamp(this.options.clock);
-    if (observedAt !== null && new Date(observedAt).getTime() > new Date(generatedAt).getTime()) throw unavailable();
+    if (observedAt !== null && new Date(observedAt).getTime() > new Date(generatedAt).getTime()) throw unavailable("report");
     return { generatedAt, observedAt, transport };
   }
 }
@@ -403,9 +431,9 @@ export function buildMcpUsefulnessReport(
 ): McpToolUsefulnessReport {
   try {
     const names = new Set<string>();
-    if (tools.length > 1_000) throw unavailable();
+    if (tools.length > 1_000) throw unavailable("report");
     for (const tool of tools) {
-      if (!SAFE_TOOL_NAME.test(tool.name) || names.has(tool.name) || typeof tool.enabled !== "boolean") throw unavailable();
+      if (!SAFE_TOOL_NAME.test(tool.name) || names.has(tool.name) || typeof tool.enabled !== "boolean") throw unavailable("report");
       names.add(tool.name);
     }
     return mcpUsefulnessEvidence.buildMcpToolUsefulnessEvidenceReport({
@@ -422,7 +450,7 @@ export function buildMcpUsefulnessReport(
       transport: observation.transport,
     });
   } catch {
-    throw unavailable();
+    throw unavailable("report");
   }
 }
 
@@ -437,11 +465,11 @@ export function enrichMcpUsefulnessReport(
   tools: Array<McpToolUsefulnessReport["tools"][number] & { category: string; enabled: boolean }>;
 } {
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  if (byName.size !== tools.length || report.tools.length !== byName.size) throw unavailable();
+  if (byName.size !== tools.length || report.tools.length !== byName.size) throw unavailable("report");
 
   const enriched = report.tools.map((tool) => {
     const current = byName.get(tool.name);
-    if (!current) throw unavailable();
+    if (!current) throw unavailable("report");
     return { ...tool, category: current.category, enabled: current.enabled };
   });
   return {
