@@ -369,7 +369,7 @@ describe("recovery preflight repository-data trust", () => {
     }
   });
 
-  it("reports stale freeze adoption as planned without mutating protected state or admitting restart", async () => {
+  it("admits a validated stale freeze plan for preparation without mutating protected state or authorizing restart", async () => {
     const f = fixture();
     const index = join(root, ".opencode/protected-runtime-index");
     mkdirSync(index, { mode: 0o700 });
@@ -399,9 +399,9 @@ describe("recovery preflight repository-data trust", () => {
       },
     });
 
-    expect(result).toMatchObject({ status: "rejected", admissible: false, mutationFree: true,
+    expect(result).toMatchObject({ status: "admitted", admissible: true, mutationFree: true, authorizesRestart: false,
       freeze: { status: "planned", sha256: hash(lockBytes), owner: { pid: lock.pid, startTimeTicks: lock.startTimeTicks } },
-      admission: { decision: "reject", nextOperation: null } });
+      admission: { decision: "admit", nextOperation: "recovery-prepare" } });
     expect(readFileSync(lockPath)).toEqual(lockBytes);
     expect(lstatSync(lockPath)).toMatchObject({ dev: before.dev, ino: before.ino, mode: before.mode, size: before.size, mtimeMs: before.mtimeMs });
     expect(existsSync(join(root, ".opencode/protected-runtime-index/tui-recovery/preparation"))).toBe(false);

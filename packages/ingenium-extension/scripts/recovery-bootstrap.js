@@ -2571,7 +2571,7 @@ export async function runRecoveryPreflight(argv = process.argv, dependencies = {
     if (!installed || installed.status !== "attested" || inputs.deployment?.status !== "attested"
       || inputs.deployment.revision !== source.head) throw new Error("Recovery preflight attestation is incomplete");
     const freeze = inputs.freeze?.evidence ?? freezeEvidence("clear");
-    const admissible = freeze.status !== "planned";
+    const admissible = validPreparationFreezeEvidence(freeze, ["clear", "planned"]);
     const output = {
       schemaVersion: 1,
       action: "recovery-preflight",
