@@ -824,6 +824,7 @@ function readBaselinePermission(relativePath) {
 
 const orchestratorName = "ingenium-orchestrator";
 const directFilesystemKeys = new Set(["edit", "write", "glob", "grep"]);
+const recoveryPreflightCommand = "ingenium-build deployment recovery-preflight";
 for (const profile of profiles) {
   const relativePath = path.relative(repoRoot, profile.filePath);
   const baselinePermission = Object.fromEntries(
@@ -834,7 +835,15 @@ for (const profile of profiles) {
   if (!isRecord(baselinePermission) || !isRecord(currentPermission)) continue;
 
   if (profile.name !== orchestratorName) {
-    if (!same(currentPermission, baselinePermission)) {
+    const baselineComparablePermission = profile.name === "ingenium-recovery-engineer"
+      && isRecord(currentPermission.bash)
+      ? {
+          ...currentPermission,
+          bash: Object.fromEntries(Object.entries(currentPermission.bash)
+            .filter(([key]) => key !== recoveryPreflightCommand)),
+        }
+      : currentPermission;
+    if (!same(baselineComparablePermission, baselinePermission)) {
       errors.push(`${profile.name} permission map must remain unchanged from ${baselineCommit}`);
     }
     continue;
@@ -872,6 +881,7 @@ const expectedRecoveryBash = {
   "*": "deny",
   "ingenium-build deployment production-restart": "allow",
   "ingenium-build deployment recovery-prepare": "allow",
+  "ingenium-build deployment recovery-preflight": "allow",
   "git status": "allow",
   "git diff -- docs/reference/ROADMAP.md": "allow",
   "git diff -- tests/artifacts/tui-recovery/*": "allow",
@@ -890,6 +900,53 @@ if (!same(permissions.get("ingenium-recovery-engineer")?.bash, expectedRecoveryB
   errors.push("Recovery Bash must retain exactly its fixed recovery commands and read-only Git inspection rules, denying unlisted commands");
 } else {
   console.log("PASS: Recovery exact Bash map allows read-only Git inspection and denies unlisted mutation/config/network commands");
+}
+const recoveryPermission = permissions.get("ingenium-recovery-engineer");
+const recoveryBoundaryErrorCount = errors.length;
+for (const command of [
+  recoveryPreflightCommand,
+  "ingenium-build deployment recovery-prepare",
+  "ingenium-build deployment production-restart",
+]) {
+  if (recoveryPermission?.bash?.[command] !== "allow") {
+    errors.push(`Recovery must allow the exact deployment command: ${command}`);
+  }
+}
+if (recoveryPermission?.bash?.["*"] !== "deny") {
+  errors.push("Recovery Bash must retain wildcard deny for unlisted commands");
+}
+const deniedRecoveryCommands = [
+  "ingenium-build",
+  "ingenium-build deployment",
+  "ingenium-build deployment recovery-preflight --force",
+  "ingenium-build deployment recovery-preflight && ingenium-build deployment production-restart",
+  "ingenium-build deployment recovery-preflight > /tmp/recovery-preflight.log",
+  "npm run build --workspace=packages/ingenium-extension",
+  "node packages/ingenium-extension/scripts/build-distributions.mjs",
+];
+for (const command of deniedRecoveryCommands) {
+  if (recoveryPermission?.bash?.[command] === "allow") {
+    errors.push(`Recovery must deny unlisted or compound command: ${command}`);
+  }
+}
+for (const tool of ["edit", "write"]) {
+  for (const pathName of [
+    "packages/ingenium-extension/package.json",
+    "services/ingenium-api/src/index.ts",
+    "opencode.json",
+    "package.json",
+    "Dockerfile",
+  ]) {
+    if (recoveryPermission?.[tool]?.[pathName] === "allow") {
+      errors.push(`Recovery ${tool} must deny source/package/config path: ${pathName}`);
+    }
+  }
+}
+if (!same(recoveryPermission?.task, { "*": "deny" })) {
+  errors.push("Recovery task permission must deny delegation");
+}
+if (errors.length === recoveryBoundaryErrorCount) {
+  console.log("PASS: Recovery preflight, prepare, and restart exact grants and requested deny boundaries hold");
 }
 const orchestratorPermission = permissions.get("ingenium-orchestrator");
 if (orchestratorPermission?.bash?.["git show *"] === "allow") {

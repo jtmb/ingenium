@@ -20,6 +20,7 @@ permission:
     "*": deny
     "ingenium-build deployment production-restart": allow
     "ingenium-build deployment recovery-prepare": allow
+    "ingenium-build deployment recovery-preflight": allow
     "git status": allow
     "git diff -- docs/reference/ROADMAP.md": allow
     "git diff -- tests/artifacts/tui-recovery/*": allow
