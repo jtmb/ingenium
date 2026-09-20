@@ -1768,12 +1768,15 @@ describe("fixed recovery preparation transaction", () => {
     const lockPath = join(index, "coordination-outbox-mutation.lock");
     writeFileSync(lockPath, lockBytes, { mode: 0o600 });
     const plan = shim.planPreparationFreeze(index, { processStartTimeTicks: () => null });
+    const launch = managedPreparationLaunch();
+    launch.executable.sha256 = f.parent.executableSha256;
+    const retainedCapture = markedLegacyCapture(await f.capture(), f.parent);
     let captures = 0;
     f.collectInputs.mockImplementation(async () => {
       captures += 1;
       if (captures === 2) expect(readFileSync(lockPath)).toEqual(lockBytes);
-      return { binding, capture: await f.capture(), source: f.source, freeze: plan, quarantine: null,
-        contract: shim.prepareRecoveryOwnerContract(binding, head) };
+      return { binding, capture: captures === 1 ? retainedCapture : await f.capture(), source: f.source, freeze: plan, quarantine: null,
+        ...(captures === 1 ? { launch } : {}), contract: shim.prepareRecoveryOwnerContract(binding, head) };
     });
     const normal = f.run.getMockImplementation()!;
     let starts = 0;
@@ -1785,9 +1788,14 @@ describe("fixed recovery preparation transaction", () => {
     await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" });
     expect(existsSync(lockPath)).toBe(false);
     expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8")).launch)
+      .toMatchObject({ kind: "legacy-managed-parent", sessionId: "ses_exact" });
+    expect(JSON.parse(readFileSync(join(f.directory, "handoff.json"), "utf8")))
+      .toMatchObject({ kind: "legacy-pre-admission", sessionId: "ses_exact" });
     const retainedNames = readdirSync(f.directory).sort();
     const retainedBytes = Object.fromEntries(retainedNames.map((name) => [name, readFileSync(join(f.directory, name))]));
     const authority = authorityRequest();
+    const captureLegacy = vi.fn(() => { throw new Error("retained preflight must not repeat legacy capture"); });
     const preflight = await shim.runRecoveryPreflight(["node", f.source.path], {
       openSource: () => f.sourceHandle,
       inputOptions: {
@@ -1799,12 +1807,13 @@ describe("fixed recovery preparation transaction", () => {
           launchers: { "ingenium-build": { sha256: hash("build") }, "ingenium-opencode": { sha256: hash("opencode") } } }),
         inspectDeployment: () => ({ status: "attested", provider: "docker-local", revision: head }),
         ancestry: () => ({ status: "exact", parent: f.parent }),
-        captureLegacy: () => f.capture(),
+        captureLegacy,
       },
     });
     expect(preflight).toMatchObject({ status: "admitted", admissible: true, mutationFree: true, authorizesRestart: false,
       freeze: { status: "adopted", sha256: hash(lockBytes) },
       admission: { decision: "admit", nextOperation: "recovery-prepare" } });
+    expect(captureLegacy).not.toHaveBeenCalled();
     expect(readdirSync(f.directory).sort()).toEqual(retainedNames);
     for (const [name, bytes] of Object.entries(retainedBytes)) expect(readFileSync(join(f.directory, name))).toEqual(bytes);
     renameSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"), lockPath);

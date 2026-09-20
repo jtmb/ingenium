@@ -2549,8 +2549,25 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
     error.failurePath = PREPARATION_PARENT_CONTROL_PLANE_FAILURE.path;
     throw error;
   }
+  let retainedPreparation = null;
+  let retainedCapture = null;
+  const retainedDirectory = preparationDirectory(worktree);
+  if (options.preflight === true && recoveryAdmissionExists(retainedDirectory) && readdirSync(retainedDirectory).length > 0) {
+    retainedPreparation = preparationProbe("reconcileRetained", () =>
+      inspectRetainedPreparationForReconciliation(worktree, source, options.run ?? execFileSync));
+    if (retainedPreparation.kind === "request" && retainedPreparation.retained.capture) {
+      const expectedParent = Object.fromEntries(["pid", "startTimeTicks", "executableSha256", "nonceSha256"]
+        .map((key) => [key, ancestry.parent[key]]));
+      if (canonicalJson(retainedPreparation.request.contract.binding) !== canonicalJson(binding)
+        || canonicalJson(retainedPreparation.request.parent) !== canonicalJson(expectedParent)) {
+        throw preparationFailure("reconcileRetained");
+      }
+      retainedCapture = retainedPreparation.retained.capture;
+    }
+  }
   const captureKey = ancestry.parent.nonceSha256 === "0".repeat(64) ? "legacyCapture" : "currentCapture";
-  const capture = captureKey === "legacyCapture"
+  let capture = retainedCapture;
+  if (!capture) capture = captureKey === "legacyCapture"
     ? await preparationAsyncProbe(captureKey, async () => {
       if (options.captureLegacy) {
         return options.captureLegacy(ancestry.parent, binding, gitSummary, options.request ?? fetch, options.inspectParent, options.exportSession);
@@ -2573,11 +2590,7 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   if (health?.status !== "healthy") throw preparationFailure("apiHealth");
   const index = resolve(worktree, ".opencode/protected-runtime-index");
   const freeze = preparationProbe("freeze", () => {
-    const directory = preparationDirectory(worktree);
-    if (options.preflight === true && recoveryAdmissionExists(directory) && readdirSync(directory).length > 0) {
-      const retained = inspectRetainedPreparationForReconciliation(worktree, source, options.run ?? execFileSync);
-      return { evidence: retained.freeze, retained: true };
-    }
+    if (retainedPreparation) return { evidence: retainedPreparation.freeze, retained: true };
     return planPreparationFreeze(index, options);
   });
   const quarantine = preparationProbe("quarantine", () => planPreparationQuarantine(index));
@@ -2709,6 +2722,7 @@ function readPreparationRequest(worktree) {
       || !validPreparationLaunch(value.launch, value))) throw new Error("Recovery preparation request is invalid");
   const handoff = readOnlyRegularFile(resolve(directory, "handoff.json"), 64 * 1024, false, 0o600);
   if (sha256(handoff) !== value.handoffSha256) throw new Error("Recovery preparation handoff changed");
+  let capture = null;
   if (value.launch !== undefined) {
     const captured = JSON.parse(handoff);
     if (!hasExactKeys(captured, ["schemaVersion", "kind", "parent", "nonceProvenance", "sessionId", "binding", "sourceHead",
@@ -2723,8 +2737,9 @@ function readPreparationRequest(worktree) {
       declaredOperational: captured.declaredOperational }, captured.sessionId)) {
       throw new Error("Recovery preparation handoff changed");
     }
+    capture = { snapshot: captured, sha256: value.handoffSha256 };
   }
-  return { value, bytes, directory };
+  return { value, bytes, directory, capture };
 }
 
 function validPreparationRollback(path, request) {
