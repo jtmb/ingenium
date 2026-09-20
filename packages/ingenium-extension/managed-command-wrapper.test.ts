@@ -367,7 +367,7 @@ function twoPassRecoveryPreflight(worktree: string): Record<string, unknown> {
     },
     outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: sha256(""), quarantine: null },
     disposition: { status: "missing", count: 0, ambiguousCount: 0, sha256: null },
-    freeze: { status: "clear", sha256: null },
+    freeze: { status: "clear", source: "coordination-outbox-mutation.lock", archive: "coordination-outbox-mutation.lock.adopted", sha256: null, owner: null },
     deployed: {
       ociRevision: { status: "attested", revision: "b".repeat(40) },
       apiHealth: { status: "healthy", httpStatus: 200 },
@@ -430,6 +430,7 @@ function expectedAdmittedRecoveryContext(preflight: Record<string, any>, digest:
       sessionId: preflight.parent.sessionId,
     }),
     binding: Object.freeze({ ...preflight.binding }),
+    freeze: Object.freeze({ ...preflight.freeze, owner: preflight.freeze.owner ? Object.freeze({ ...preflight.freeze.owner }) : null }),
     outboxQuarantine: preflight.outbox?.quarantine ?? null,
   });
 }
@@ -3141,6 +3142,7 @@ describe("managed command wrappers", () => {
     }) })).toThrow("unavailable");
     await expect(runProductionRestartAdapter({
       canonicalWorktree: vi.fn(),
+      revalidatePreparationFreeze: vi.fn(() => true),
       revalidateOutboxQuarantine: vi.fn(() => false),
       resolveBinding,
       readParentCandidates,

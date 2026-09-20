@@ -77,6 +77,9 @@ const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const REPLACEMENT_SERVER_USERNAME = "opencode";
 const LEGACY_HANDOFF_PATH = ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json";
+const RECOVERY_PREPARATION_FREEZE_MAX_BYTES = 4 * 1024;
+const RECOVERY_PREPARATION_FREEZE_SOURCE = "coordination-outbox-mutation.lock";
+const RECOVERY_PREPARATION_FREEZE_ARCHIVE = `${RECOVERY_PREPARATION_FREEZE_SOURCE}.adopted`;
 export const PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
@@ -109,6 +112,13 @@ export interface AdmittedRecoveryContext {
     workspaceId: string;
     storageMappingHash: string;
     worktree: string;
+  }>;
+  readonly freeze: Readonly<{
+    status: "clear" | "adopted";
+    source: typeof RECOVERY_PREPARATION_FREEZE_SOURCE;
+    archive: typeof RECOVERY_PREPARATION_FREEZE_ARCHIVE;
+    sha256: string | null;
+    owner: Readonly<{ pid: number; startTimeTicks: number }> | null;
   }>;
   readonly outboxQuarantine: Readonly<CoordinationOutboxQuarantine> | null;
   readonly receipt: Readonly<{
@@ -165,6 +175,10 @@ export interface ProductionRestartAdapterDependencies<Session> {
   revalidateOutboxQuarantine?(
     worktree: string,
     expected: Readonly<CoordinationOutboxQuarantine> | null,
+  ): Promise<boolean> | boolean;
+  revalidatePreparationFreeze?(
+    worktree: string,
+    expected: AdmittedRecoveryContext["freeze"],
   ): Promise<boolean> | boolean;
 }
 
@@ -238,11 +252,27 @@ function isOutboxQuarantine(value: unknown): value is CoordinationOutboxQuaranti
     && value.recordCount === COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT;
 }
 
+function isPreparationFreezeEvidence(value: unknown): value is AdmittedRecoveryContext["freeze"] {
+  const owner = isRecord(value) && isRecord(value.owner) ? value.owner : undefined;
+  const pid = typeof owner?.pid === "number" ? owner.pid : undefined;
+  const startTimeTicks = typeof owner?.startTimeTicks === "number" ? owner.startTimeTicks : undefined;
+  return hasExactKeys(value, ["status", "source", "archive", "sha256", "owner"])
+    && (value.status === "clear" || value.status === "adopted")
+    && value.source === RECOVERY_PREPARATION_FREEZE_SOURCE
+    && value.archive === RECOVERY_PREPARATION_FREEZE_ARCHIVE
+    && (value.status === "clear"
+      ? value.sha256 === null && value.owner === null
+      : typeof value.sha256 === "string" && SHA256.test(value.sha256)
+        && hasExactKeys(owner, ["pid", "startTimeTicks"])
+        && typeof pid === "number" && Number.isSafeInteger(pid) && pid >= 2
+        && typeof startTimeTicks === "number" && Number.isSafeInteger(startTimeTicks) && startTimeTicks >= 1);
+}
+
 export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process.env): AdmittedRecoveryContext {
   const serialized = source[ADMITTED_RECOVERY_CONTEXT];
   let value: unknown;
   try { value = serialized ? JSON.parse(serialized) : undefined; } catch { value = undefined; }
-  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "outboxQuarantine", "receipt"])
+  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "freeze", "outboxQuarantine", "receipt"])
     || value.schemaVersion !== 1 || value.action !== "production-restart"
     || typeof value.preflightDigest !== "string" || !SHA256.test(value.preflightDigest)
     || typeof value.head !== "string" || !/^[0-9a-f]{40,64}$/.test(value.head)
@@ -252,15 +282,16 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     || typeof value.parent.executableSha256 !== "string" || !SHA256.test(value.parent.executableSha256)
     || typeof value.parent.nonceSha256 !== "string" || !SHA256.test(value.parent.nonceSha256)
     || typeof value.parent.sessionId !== "string" || !SAFE_SESSION_ID.test(value.parent.sessionId)
-    || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
+     || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
     || typeof value.binding.project !== "string" || value.binding.project.length < 1 || value.binding.project.length > 64
     || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
     || typeof value.binding.workspaceId !== "string"
     || value.binding.workspaceId.length < 1 || value.binding.workspaceId.length > 128
     || typeof value.binding.storageMappingHash !== "string" || !SHA256.test(value.binding.storageMappingHash)
     || typeof value.binding.worktree !== "string" || !isAbsolute(value.binding.worktree)
-    || resolve(value.binding.worktree) !== value.binding.worktree
-    || !isOutboxQuarantine(value.outboxQuarantine)
+     || resolve(value.binding.worktree) !== value.binding.worktree
+     || !isPreparationFreezeEvidence(value.freeze)
+     || !isOutboxQuarantine(value.outboxQuarantine)
     || !hasExactKeys(value.receipt, ["id", "schema", "version", "action", "admissionDigest", "consumedAt"])
     || typeof value.receipt.id !== "string" || !UUID.test(value.receipt.id)
     || value.receipt.schema !== "ingenium.recovery-admission-receipt"
@@ -274,6 +305,7 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     ...context,
     parent: Object.freeze({ ...context.parent }),
     binding: Object.freeze({ ...context.binding }),
+    freeze: Object.freeze({ ...context.freeze, owner: context.freeze.owner ? Object.freeze({ ...context.freeze.owner }) : null }),
     outboxQuarantine: context.outboxQuarantine ? Object.freeze({ ...context.outboxQuarantine }) : null,
     receipt: Object.freeze({ ...context.receipt }),
   });
@@ -494,6 +526,104 @@ export function readPrivateProductionRestartFile(
   }
 }
 
+function absentPrivateProductionRestartFile(path: string): boolean {
+  const parentPath = dirname(path);
+  try {
+    lstatSync(parentPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+  assertPrivateDirectory(parentPath);
+  const descriptor = openSync(parentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const uid = processOwner();
+    if (!opened.isDirectory() || !exactMode(opened.mode, 0o700) || uid !== undefined && opened.uid !== uid) {
+      throw new Error("Production restart state is unavailable");
+    }
+    const anchored = `/proc/self/fd/${descriptor}/${basename(path)}`;
+    let absent;
+    try {
+      lstatSync(anchored);
+      absent = false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      absent = true;
+    }
+    const after = fstatSync(descriptor);
+    const current = lstatSync(parentPath);
+    if (after.dev !== opened.dev || after.ino !== opened.ino || after.mode !== opened.mode || after.uid !== opened.uid
+      || current.dev !== opened.dev || current.ino !== opened.ino || current.mode !== opened.mode || current.uid !== opened.uid) {
+      throw new Error("Production restart state changed");
+    }
+    return absent;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function preparationFreezeOwnerState(pid: number, startTimeTicks: number): "dead" | "live" | "ambiguous" {
+  let directory: Stats;
+  try {
+    directory = lstatSync(`/proc/${pid}`);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "dead" : "ambiguous";
+  }
+  if (!directory.isDirectory() || directory.isSymbolicLink()) return "ambiguous";
+  try {
+    const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closeParen = source.lastIndexOf(")");
+    const fields = closeParen > 0 ? source.slice(closeParen + 1).trim().split(/\s+/) : [];
+    const observed = Number(fields[19]);
+    if (!Number.isSafeInteger(observed) || observed < 1) return "ambiguous";
+    return observed === startTimeTicks ? "live" : "dead";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "dead" : "ambiguous";
+  }
+}
+
+export function revalidatePreparationFreeze(
+  worktree: string,
+  evidence: AdmittedRecoveryContext["freeze"],
+): boolean {
+  try {
+    if (!isPreparationFreezeEvidence(evidence)) return false;
+    const root = resolve(worktree);
+    if (realpathSync(root) !== root) return false;
+    const index = resolve(root, ".opencode/protected-runtime-index");
+    const source = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+    const archiveDirectory = resolve(index, "tui-recovery/preparation");
+    const archive = resolve(archiveDirectory, RECOVERY_PREPARATION_FREEZE_ARCHIVE);
+    if (evidence.status === "clear") {
+      const clear = absentPrivateProductionRestartFile(source) && absentPrivateProductionRestartFile(archive);
+      return clear && absentPrivateProductionRestartFile(source) && absentPrivateProductionRestartFile(archive);
+    }
+    for (const path of [resolve(root, ".opencode"), index, resolve(index, "tui-recovery"), archiveDirectory]) {
+      assertPrivateDirectory(path);
+    }
+    if (!absentPrivateProductionRestartFile(source)) return false;
+    const bytes = readPrivateProductionRestartFile(archive, RECOVERY_PREPARATION_FREEZE_MAX_BYTES);
+    if (hash(bytes) !== evidence.sha256) return false;
+    const text = bytes.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(bytes)) return false;
+    const lock: unknown = JSON.parse(text);
+    const pid = isRecord(lock) && typeof lock.pid === "number" ? lock.pid : undefined;
+    const startTimeTicks = isRecord(lock) && typeof lock.startTimeTicks === "number" ? lock.startTimeTicks : undefined;
+    const nonce = isRecord(lock) && typeof lock.nonce === "string" ? lock.nonce : undefined;
+    if (!hasExactKeys(lock, ["schemaVersion", "pid", "startTimeTicks", "nonce"])
+      || lock.schemaVersion !== 1 || typeof pid !== "number" || !Number.isSafeInteger(pid) || pid < 2
+      || typeof startTimeTicks !== "number" || !Number.isSafeInteger(startTimeTicks) || startTimeTicks < 1
+      || !UUID.test(nonce ?? "")) return false;
+    if (pid !== evidence.owner?.pid || startTimeTicks !== evidence.owner?.startTimeTicks) return false;
+    if (preparationFreezeOwnerState(pid, startTimeTicks) !== "dead") return false;
+    const confirmed = readPrivateProductionRestartFile(archive, RECOVERY_PREPARATION_FREEZE_MAX_BYTES);
+    return confirmed.equals(bytes) && absentPrivateProductionRestartFile(source);
+  } catch {
+    return false;
+  }
+}
+
 function writePrivateFile(path: string, value: string): void {
   const temporary = `${path}.${randomUUID()}.tmp`;
   let descriptor: number | undefined;
@@ -709,6 +839,11 @@ export async function runProductionRestartAdapter<Session>(
   admittedContext?: AdmittedRecoveryContext,
 ): Promise<ReplacementFirstRestartResult> {
   const worktree = admittedContext?.binding.worktree ?? dependencies.canonicalWorktree();
+  const revalidateFreeze = async () => admittedContext === undefined
+    || await (dependencies.revalidatePreparationFreeze ?? revalidatePreparationFreeze)(worktree, admittedContext.freeze);
+  if (!await revalidateFreeze()) {
+    throw new Error("Production restart preparation freeze changed after admission");
+  }
   if (admittedContext && (!dependencies.revalidateOutboxQuarantine
     || !await dependencies.revalidateOutboxQuarantine(worktree, admittedContext.outboxQuarantine))) {
     throw new Error("Production restart outbox quarantine changed after admission");
@@ -766,6 +901,7 @@ export async function runProductionRestartAdapter<Session>(
     if (enrolled) parent = await admit(enrolled, false);
   }
   if (!parent) throw new Error("Production restart parent identity is absent or ambiguous");
+  if (!await revalidateFreeze()) throw new Error("Production restart preparation freeze changed before use");
   const prepared = await dependencies.prepareReplacement({
     worktree,
     binding,
@@ -773,6 +909,7 @@ export async function runProductionRestartAdapter<Session>(
     ...(admittedContext ? { outboxQuarantine: admittedContext.outboxQuarantine } : {}),
   });
   try {
+    if (!await revalidateFreeze()) throw new Error("Production restart preparation freeze changed before authorization");
     const request = decodeReplacementFirstRestartRequest(encodeRequest({
       schemaVersion: 1,
       worktree,

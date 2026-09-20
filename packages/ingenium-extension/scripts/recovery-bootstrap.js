@@ -7,6 +7,7 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -89,6 +90,9 @@ const API_TOKEN = /^[A-Za-z0-9_-]{32,128}$/;
 const RECOVERY_SOURCE_MAX_BYTES = 256 * 1024;
 const RECOVERY_ADMISSION_MAX_BYTES = 16 * 1024;
 const RECOVERY_ADMISSION_LIFETIME_MS = 15 * 60 * 1_000;
+const RECOVERY_PREPARATION_FREEZE_MAX_BYTES = 4 * 1024;
+export const RECOVERY_PREPARATION_FREEZE_SOURCE = "coordination-outbox-mutation.lock";
+export const RECOVERY_PREPARATION_FREEZE_ARCHIVE = `${RECOVERY_PREPARATION_FREEZE_SOURCE}.adopted`;
 const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 256 * 1024;
 const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
 const SERVER_ADMISSION_KEYS = [
@@ -482,6 +486,139 @@ function sourceIdentityMatches(left, right) {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size
     && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs
     && left.uid === right.uid && left.nlink === right.nlink;
+}
+
+function preparationFreezeIdentity(stat) {
+  return {
+    dev: stat.dev,
+    ino: stat.ino,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs,
+    uid: stat.uid,
+    nlink: stat.nlink,
+    mode: stat.mode,
+  };
+}
+
+function readPreparationFreezeFile(path, expectedLinks = 1) {
+  const requested = resolve(path);
+  const owner = ownerUid();
+  let descriptor;
+  try {
+    const before = lstatSync(requested);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== expectedLinks || before.uid !== owner
+      || (before.mode & 0o7777) !== 0o600 || before.size < 1 || before.size > RECOVERY_PREPARATION_FREEZE_MAX_BYTES
+      || realpathSync(requested) !== requested) throw new Error("Recovery preparation freeze is unavailable");
+    descriptor = openSync(requested, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || opened.isSymbolicLink() || opened.nlink !== expectedLinks || opened.uid !== owner
+      || (opened.mode & 0o7777) !== 0o600 || opened.size !== before.size
+      || !sourceIdentityMatches(before, opened)) throw new Error("Recovery preparation freeze changed");
+    const bytes = readBoundedDescriptor(descriptor, RECOVERY_PREPARATION_FREEZE_MAX_BYTES);
+    const afterDescriptor = fstatSync(descriptor);
+    const afterPath = lstatSync(requested);
+    if (bytes.length !== opened.size || !sourceIdentityMatches(opened, afterDescriptor)
+      || !afterPath.isFile() || afterPath.isSymbolicLink() || afterPath.nlink !== expectedLinks || afterPath.uid !== owner
+      || (afterPath.mode & 0o7777) !== 0o600 || !sourceIdentityMatches(opened, afterPath)
+      || realpathSync(requested) !== requested) throw new Error("Recovery preparation freeze changed");
+    return { path: requested, bytes, sha256: sha256(bytes), identity: preparationFreezeIdentity(opened) };
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function parsePreparationFreezeLock(bytes) {
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) throw new Error("Recovery preparation freeze is invalid");
+  let value;
+  try { value = JSON.parse(text); } catch { throw new Error("Recovery preparation freeze is invalid"); }
+  if (!hasExactKeys(value, ["schemaVersion", "pid", "startTimeTicks", "nonce"])
+    || value.schemaVersion !== 1 || !Number.isSafeInteger(value.pid) || value.pid < 2
+    || !Number.isSafeInteger(value.startTimeTicks) || value.startTimeTicks < 1 || !UUID.test(value.nonce ?? "")) {
+    throw new Error("Recovery preparation freeze is invalid");
+  }
+  return value;
+}
+
+function processStartTimeTicks(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 2) throw new Error("Recovery preparation freeze identity is ambiguous");
+  let directory;
+  try {
+    directory = lstatSync(`/proc/${pid}`);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw new Error("Recovery preparation freeze identity is ambiguous");
+  }
+  if (!directory.isDirectory() || directory.isSymbolicLink()) {
+    throw new Error("Recovery preparation freeze identity is ambiguous");
+  }
+  try {
+    const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closeParen = source.lastIndexOf(")");
+    const fields = closeParen > 0 ? source.slice(closeParen + 1).trim().split(/\s+/) : [];
+    const value = Number(fields[19]);
+    if (!Number.isSafeInteger(value) || value < 1) throw new Error("invalid");
+    return value;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw new Error("Recovery preparation freeze identity is ambiguous");
+  }
+}
+
+function freezeEvidence(status, sha256Value = null, owner = null) {
+  return {
+    status,
+    source: RECOVERY_PREPARATION_FREEZE_SOURCE,
+    archive: RECOVERY_PREPARATION_FREEZE_ARCHIVE,
+    sha256: sha256Value,
+    owner,
+  };
+}
+
+function validPreparationFreezeEvidence(value, statuses = ["clear", "planned", "adopted"]) {
+  if (value === null) return true;
+  return hasExactKeys(value, ["status", "source", "archive", "sha256", "owner"])
+    && statuses.includes(value.status) && value.source === RECOVERY_PREPARATION_FREEZE_SOURCE
+    && value.archive === RECOVERY_PREPARATION_FREEZE_ARCHIVE
+    && (value.status === "clear"
+      ? value.sha256 === null && value.owner === null
+      : HASH.test(value.sha256 ?? "") && hasExactKeys(value.owner, ["pid", "startTimeTicks"])
+        && Number.isSafeInteger(value.owner.pid) && value.owner.pid >= 2
+        && Number.isSafeInteger(value.owner.startTimeTicks) && value.owner.startTimeTicks >= 1);
+}
+
+export function planPreparationFreeze(index, options = {}) {
+  const sourcePath = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+  const archivePath = resolve(index, "tui-recovery/preparation", RECOVERY_PREPARATION_FREEZE_ARCHIVE);
+  const sourcePresent = !preparationFreezeSourceAbsent(sourcePath);
+  const archivePresent = preparationFreezePathExists(archivePath);
+  if (!sourcePresent) {
+    if (archivePresent) throw new Error("Recovery preparation freeze archive exists without its source");
+    return null;
+  }
+  if (archivePresent) throw new Error("Recovery preparation freeze has both source and archive");
+  const file = readPreparationFreezeFile(sourcePath);
+  const lock = parsePreparationFreezeLock(file.bytes);
+  const observedStartTimeTicks = (options.processStartTimeTicks ?? processStartTimeTicks)(lock.pid);
+  if (observedStartTimeTicks === lock.startTimeTicks) {
+    throw new Error("Recovery preparation freeze has a live owner");
+  }
+  if (observedStartTimeTicks !== null && observedStartTimeTicks !== undefined) {
+    if (!Number.isSafeInteger(observedStartTimeTicks) || observedStartTimeTicks < 1) {
+      throw new Error("Recovery preparation freeze identity is ambiguous");
+    }
+  }
+  const owner = { pid: lock.pid, startTimeTicks: lock.startTimeTicks };
+  return {
+    sourcePath,
+    archiveName: RECOVERY_PREPARATION_FREEZE_ARCHIVE,
+    bytes: file.bytes,
+    sha256: file.sha256,
+    identity: file.identity,
+    owner,
+    evidence: freezeEvidence("planned", file.sha256, owner),
+  };
 }
 
 export function openVerifiedRecoverySource(context = MODULE_ATTESTATION, options = {}) {
@@ -1086,13 +1223,6 @@ export function summarizeCoordinationOutboxState(protectedIndex) {
     outbox: { ...inspectedOutbox.summary, ambiguousCount: unresolvedAmbiguous.length, quarantine },
     disposition: inspectedDisposition.summary,
   };
-}
-
-function summarizeFreeze(path) {
-  const file = optionalReadOnlyRegularFile(path, 4 * 1024, true);
-  return file.bytes !== undefined
-    ? { status: "present", sha256: sha256(file.bytes) }
-    : { status: file.status === "missing" ? "clear" : "invalid", sha256: null };
 }
 
 function collectGitSummary(root, sourcePath, sourceBytes) {
@@ -1942,6 +2072,194 @@ function writePreparationFile(path, bytes, retainOwnership, mode = 0o600) {
   });
 }
 
+function preparationFreezeArchivePath(directory) {
+  return resolve(directory, RECOVERY_PREPARATION_FREEZE_ARCHIVE);
+}
+
+function preparationFreezePlanMatches(file, plan) {
+  return file.sha256 === plan.sha256 && file.bytes.equals(plan.bytes)
+    && plan.identity.dev === file.identity.dev && plan.identity.ino === file.identity.ino
+    && plan.identity.size === file.identity.size && plan.identity.uid === file.identity.uid
+    && (file.identity.mode & 0o7777) === 0o600;
+}
+
+function preparationFreezeSourceAbsent(path) {
+  try { lstatSync(dirname(path)); } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    throw error;
+  }
+  return anchoredPreparationPath(path, (anchored) => {
+    try {
+      lstatSync(anchored);
+      return false;
+    } catch (error) {
+      if (error?.code === "ENOENT") return true;
+      throw error;
+    }
+  });
+}
+
+function preparationFreezePathExists(path) {
+  try {
+    lstatSync(path);
+    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function preparationFreezeLinksMatch(source, archive, plan) {
+  return preparationFreezePlanMatches({ ...source, identity: { ...source.identity, nlink: 1 } }, plan)
+    && source.sha256 === archive.sha256 && source.bytes.equals(archive.bytes)
+    && source.identity.dev === archive.identity.dev && source.identity.ino === archive.identity.ino
+    && source.identity.nlink === 2 && archive.identity.nlink === 2;
+}
+
+function restorePreparationFreeze(adoption) {
+  const sourcePath = adoption.plan.sourcePath;
+  const archivePath = adoption.archivePath;
+  if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source is not clear");
+  const archived = readPreparationFreezeFile(archivePath);
+  if (!preparationFreezePlanMatches(archived, adoption.plan)) {
+    throw new Error("Recovery preparation freeze archive changed");
+  }
+  anchoredPreparationPath(archivePath, (archiveAnchored) => {
+    anchoredPreparationPath(sourcePath, (sourceAnchored) => {
+      if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source is not clear");
+      try { linkSync(archiveAnchored, sourceAnchored); } catch (error) {
+        if (error?.code === "EEXIST") throw new Error("Recovery preparation freeze source is not clear");
+        throw error;
+      }
+      const linkedArchive = readPreparationFreezeFile(archivePath, 2);
+      const linkedSource = readPreparationFreezeFile(sourcePath, 2);
+      if (!preparationFreezeLinksMatch(linkedSource, linkedArchive, adoption.plan)) {
+        throw new Error("Recovery preparation freeze restore changed");
+      }
+      unlinkSync(archiveAnchored);
+    });
+  });
+  if (!preparationFreezeSourceAbsent(archivePath)) throw new Error("Recovery preparation freeze archive was not restored");
+  const restored = readPreparationFreezeFile(sourcePath);
+  if (!preparationFreezePlanMatches(restored, adoption.plan)) throw new Error("Recovery preparation freeze restore changed");
+}
+
+export function adoptPreparationFreeze(index, directory, plan) {
+  if (!plan) return null;
+  const sourcePath = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+  const archivePath = preparationFreezeArchivePath(directory);
+  if (plan.sourcePath !== sourcePath || plan.archiveName !== RECOVERY_PREPARATION_FREEZE_ARCHIVE
+    || !validPreparationFreezeEvidence(plan.evidence, ["planned"])) {
+    throw new Error("Recovery preparation freeze plan is invalid");
+  }
+  try {
+    lstatSync(archivePath);
+    throw new Error("Recovery preparation freeze archive already exists");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  let linked = false;
+  try {
+    anchoredPreparationPath(sourcePath, (sourceAnchored) => {
+      anchoredPreparationPath(archivePath, (archiveAnchored) => {
+        try {
+          lstatSync(archiveAnchored);
+          throw new Error("Recovery preparation freeze archive already exists");
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        const source = readPreparationFreezeFile(sourcePath);
+        if (!preparationFreezePlanMatches(source, plan)) throw new Error("Recovery preparation freeze source changed");
+        try { linkSync(sourceAnchored, archiveAnchored); } catch (error) {
+          if (error?.code === "EEXIST") throw new Error("Recovery preparation freeze archive already exists");
+          throw error;
+        }
+        linked = true;
+        const linkedSource = readPreparationFreezeFile(sourcePath, 2);
+        const linkedArchive = readPreparationFreezeFile(archivePath, 2);
+        if (!preparationFreezeLinksMatch(linkedSource, linkedArchive, plan)) {
+          throw new Error("Recovery preparation freeze transition changed");
+        }
+        unlinkSync(sourceAnchored);
+        if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source was retained");
+        const archived = readPreparationFreezeFile(archivePath);
+        if (!preparationFreezePlanMatches(archived, plan)) throw new Error("Recovery preparation freeze archive changed");
+      });
+    });
+  } catch (error) {
+    if (linked) {
+      try { restorePreparationFreeze({ plan, archivePath }); } catch (restoreError) {
+        throw new AggregateError([error, restoreError], "Recovery preparation freeze adoption requires reconciliation");
+      }
+    }
+    throw error;
+  }
+  return {
+    plan,
+    archivePath,
+    evidence: freezeEvidence("adopted", plan.sha256, plan.owner),
+    rollback: () => restorePreparationFreeze({ plan, archivePath }),
+  };
+}
+
+function inspectPreparationFreezeArchive(worktree) {
+  const directory = preparationDirectory(worktree);
+  const archivePath = preparationFreezeArchivePath(directory);
+  try {
+    lstatSync(archivePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+  for (const path of [resolve(worktree, ".opencode/protected-runtime-index"), dirname(directory), directory]) {
+    privatePreparationDirectory(path);
+  }
+  const archive = readPreparationFreezeFile(archivePath);
+  const lock = parsePreparationFreezeLock(archive.bytes);
+  const observedStartTimeTicks = processStartTimeTicks(lock.pid);
+  if (observedStartTimeTicks === lock.startTimeTicks) throw new Error("Recovery preparation freeze owner is live");
+  if (observedStartTimeTicks !== null && observedStartTimeTicks !== undefined
+    && (!Number.isSafeInteger(observedStartTimeTicks) || observedStartTimeTicks < 1)) {
+    throw new Error("Recovery preparation freeze identity is ambiguous");
+  }
+  return freezeEvidence("adopted", archive.sha256, { pid: lock.pid, startTimeTicks: lock.startTimeTicks });
+}
+
+function validatePreparationFreezeArchive(worktree, directory, expected) {
+  const index = resolve(worktree, ".opencode/protected-runtime-index");
+  const sourcePath = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+  const archivePath = preparationFreezeArchivePath(directory);
+  if (expected === null || expected?.status === "clear") {
+    if (!preparationFreezeSourceAbsent(sourcePath) || preparationFreezePathExists(archivePath)) {
+      throw new Error("Recovery preparation freeze evidence is unexpected");
+    }
+    if (!preparationFreezeSourceAbsent(sourcePath) || preparationFreezePathExists(archivePath)) {
+      throw new Error("Recovery preparation freeze evidence changed");
+    }
+    return null;
+  }
+  if (!validPreparationFreezeEvidence(expected, ["adopted"])) {
+    throw new Error("Recovery preparation freeze evidence is invalid");
+  }
+  if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source was not cleared");
+  const archive = readPreparationFreezeFile(archivePath);
+  const lock = parsePreparationFreezeLock(archive.bytes);
+  if (archive.sha256 !== expected.sha256 || lock.pid !== expected.owner.pid
+    || lock.startTimeTicks !== expected.owner.startTimeTicks) {
+    throw new Error("Recovery preparation freeze archive changed");
+  }
+  const observedStartTimeTicks = processStartTimeTicks(lock.pid);
+  if (observedStartTimeTicks === lock.startTimeTicks) throw new Error("Recovery preparation freeze owner is live");
+  if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source was recreated");
+  const confirmedArchive = readPreparationFreezeFile(archivePath);
+  if (confirmedArchive.sha256 !== expected.sha256 || !confirmedArchive.bytes.equals(archive.bytes)
+    || confirmedArchive.identity.dev !== archive.identity.dev || confirmedArchive.identity.ino !== archive.identity.ino) {
+    throw new Error("Recovery preparation freeze archive changed");
+  }
+  if (!preparationFreezeSourceAbsent(sourcePath)) throw new Error("Recovery preparation freeze source was recreated");
+  return expected;
+}
+
 export function planPreparationQuarantine(index) {
   const state = summarizeCoordinationOutboxState(index);
   if (state.outbox.status === "invalid" || state.disposition.status === "invalid") throw new Error("Recovery preparation outbox is invalid");
@@ -2056,19 +2374,17 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   const health = await collectApiHealth(environment, options.request ?? fetch);
   if (health.status !== "healthy") throw new Error("Recovery preparation API health is unavailable");
   const index = resolve(worktree, ".opencode/protected-runtime-index");
-  if (summarizeFreeze(resolve(index, "coordination-outbox-mutation.lock")).status !== "clear") {
-    throw new Error("Recovery preparation outbox is frozen");
-  }
+  const freeze = planPreparationFreeze(index, options);
   const quarantine = planPreparationQuarantine(index);
   sourceHandle.revalidate();
-  return { binding, capture, quarantine, source, git: gitSummary, deployment, installedBuild, launch,
+  return { binding, capture, freeze, quarantine, source, git: gitSummary, deployment, installedBuild, launch,
     contract: prepareRecoveryOwnerContract(binding, source.head) };
 }
 
 export function recoveryPreflightFailureOutput() {
   return { schemaVersion: 1, action: "recovery-preflight", status: "rejected", admissible: false,
     mutationFree: true, authorizesRestart: false, session: null, binding: null, source: null, deployment: null,
-    launcher: null, quarantine: null, admission: { decision: "reject", nextOperation: null } };
+    launcher: null, freeze: freezeEvidence("clear"), quarantine: null, admission: { decision: "reject", nextOperation: null } };
 }
 
 export async function runRecoveryPreflight(argv = process.argv, dependencies = {}) {
@@ -2085,11 +2401,13 @@ export async function runRecoveryPreflight(argv = process.argv, dependencies = {
     const installed = inputs.installedBuild;
     if (!installed || installed.status !== "attested" || inputs.deployment?.status !== "attested"
       || inputs.deployment.revision !== source.head) throw new Error("Recovery preflight attestation is incomplete");
+    const freeze = inputs.freeze?.evidence ?? freezeEvidence("clear");
+    const admissible = freeze.status !== "planned";
     const output = {
       schemaVersion: 1,
       action: "recovery-preflight",
-      status: "admitted",
-      admissible: true,
+      status: admissible ? "admitted" : "rejected",
+      admissible,
       mutationFree: true,
       authorizesRestart: false,
       session: {
@@ -2108,8 +2426,9 @@ export async function runRecoveryPreflight(argv = process.argv, dependencies = {
         buildSha256: installed.launchers["ingenium-build"].sha256,
         opencodeSha256: installed.launchers["ingenium-opencode"].sha256,
       },
+      freeze,
       quarantine: inputs.quarantine?.quarantine ?? null,
-      admission: { decision: "admit", nextOperation: "recovery-prepare" },
+      admission: { decision: admissible ? "admit" : "reject", nextOperation: admissible ? "recovery-prepare" : null },
     };
     if (Buffer.byteLength(canonicalJson(output)) > RECOVERY_ADMISSION_MAX_BYTES) {
       throw new Error("Recovery preflight output exceeds its bound");
@@ -2149,14 +2468,15 @@ function readPreparationRequest(worktree) {
   for (const path of [resolve(worktree, ".opencode/protected-runtime-index"), dirname(directory), directory]) privatePreparationDirectory(path);
   const bytes = readOnlyRegularFile(resolve(directory, "request.json"), 64 * 1024, false, 0o600);
   const value = JSON.parse(bytes);
-  const keys = ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "quarantine", "issuedAt", "expiresAt"];
+  const keys = ["schemaVersion", "kind", "authorizesRestart", "contract", "sourceSha256", "nonce", "handoffSha256", "parent", "freeze", "quarantine", "issuedAt", "expiresAt"];
   if (!(hasExactKeys(value, keys) || hasExactKeys(value, [...keys, "launch"]))
     || value.schemaVersion !== 1 || value.kind !== "recovery-preparation" || value.authorizesRestart !== false
     || canonicalJson(value.contract) !== canonicalJson(prepareRecoveryOwnerContract(value.contract?.binding, value.contract?.sourceHead))
     || value.contract.binding.worktree !== worktree || !HASH.test(value.sourceSha256 ?? "") || !OPAQUE_TOKEN.test(value.nonce ?? "")
-    || !HASH.test(value.handoffSha256 ?? "") || !safeRecoveryIdentity(value.parent)
-    || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
-    || !validOutboxQuarantine(value.quarantine)
+     || !HASH.test(value.handoffSha256 ?? "") || !safeRecoveryIdentity(value.parent)
+     || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+     || !validPreparationFreezeEvidence(value.freeze, ["adopted"])
+     || !validOutboxQuarantine(value.quarantine)
     || !Number.isSafeInteger(value.issuedAt) || !Number.isSafeInteger(value.expiresAt)
     || value.expiresAt - value.issuedAt !== PREPARATION_LIFETIME_MS
     || value.launch !== undefined && (value.parent.nonceSha256 !== "0".repeat(64)
@@ -2179,6 +2499,18 @@ function readPreparationRequest(worktree) {
     }
   }
   return { value, bytes, directory };
+}
+
+function validPreparationRollback(path, request) {
+  try {
+    const bytes = readOnlyRegularFile(path, 16 * 1024, false, 0o600);
+    const value = JSON.parse(bytes);
+    return hasExactKeys(value, ["schemaVersion", "kind", "requestSha256", "sourceSha256", "freeze", "nonceSha256", "authorizesRestart"])
+      && value.schemaVersion === 1 && value.kind === "recovery-preparation-rollback"
+      && value.requestSha256 === sha256(canonicalJson(request)) && value.sourceSha256 === request.sourceSha256
+      && canonicalJson(value.freeze) === canonicalJson(request.freeze)
+      && value.nonceSha256 === sha256(request.nonce) && value.authorizesRestart === false;
+  } catch { return false; }
 }
 
 function directProcessChildren(pid) {
@@ -2394,6 +2726,12 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
   try {
     const retained = readPreparationRequest(request.contract.binding.worktree);
     if (canonicalJson(retained.value) !== canonicalJson(request)) return null;
+    validatePreparationFreezeArchive(request.contract.binding.worktree, retained.directory, request.freeze);
+    const rollbackPath = resolve(retained.directory, "rollback.json");
+    if (recoveryAdmissionExists(rollbackPath)) {
+      if (!validPreparationRollback(rollbackPath, request)) return null;
+      return null;
+    }
     const statusBytes = readOnlyRegularFile(resolve(retained.directory, "owner-status.json"), 16 * 1024, false, 0o600);
     const status = JSON.parse(statusBytes);
     const now = options.now ?? Date.now();
@@ -2407,8 +2745,7 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
       || !Number.isSafeInteger(status.lease.expiresAt) || status.lease.issuedAt > now || status.lease.expiresAt <= now
       || status.lease.expiresAt > request.expiresAt || status.lease.expiresAt - status.lease.issuedAt > request.contract.maximumLeaseMs
       || now < request.issuedAt || now >= request.expiresAt
-      || request.launch !== undefined && !validManagedPreparationStatus(status.managed, request, now)
-      || recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) return null;
+      || request.launch !== undefined && !validManagedPreparationStatus(status.managed, request, now)) return null;
     const job = inspectPreparationJob(options.run);
     if (job.LoadState !== "loaded" || job.ActiveState !== "active" || job.SubState !== "running" || job.Job !== ""
       || job.MainPID !== String(status.owner.pid) || job.InvocationID !== status.invocationId) return null;
@@ -2438,14 +2775,16 @@ export function inspectPreparedRecoveryOwner(request, options = {}) {
         || replacement.startTimeTicks !== status.managed.replacement.startTimeTicks
         || replacement.executableSha256 !== status.managed.replacement.executableSha256
         || replacement.cwd !== request.contract.binding.worktree
-        || sha256(replacementEnvironment?.INGENIUM_RESTART_NONCE ?? "") !== status.managed.replacement.nonceSha256
-        || Number(replacementEnvironment?.INGENIUM_OPENCODE_PORT) !== status.managed.replacement.port) return null;
+       || sha256(replacementEnvironment?.INGENIUM_RESTART_NONCE ?? "") !== status.managed.replacement.nonceSha256
+       || Number(replacementEnvironment?.INGENIUM_OPENCODE_PORT) !== status.managed.replacement.port) return null;
     }
+    validatePreparationFreezeArchive(request.contract.binding.worktree, retained.directory, request.freeze);
     return { status: "attested", authorizesRestart: false, job: status.job, invocationId: status.invocationId,
       owner: status.owner, fence: status.fence, fenceState: status.fenceState, lease: status.lease, health: status.health,
       ...(status.managed ? { managed: status.managed } : {}),
       sourceHead: request.contract.sourceHead, sourceSha256: request.sourceSha256,
       bindingSha256: sha256(canonicalJson(request.contract.binding)), handoffSha256: request.handoffSha256,
+      freeze: request.freeze,
       evidenceSha256: sha256(statusBytes) };
   } catch { return null; }
 }
@@ -2461,6 +2800,7 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
     || (dependencies.cwd ?? process.cwd()) !== worktree) throw new Error("Recovery preparation owner source is invalid");
   const retained = readPreparationRequest(worktree);
   const request = retained.value;
+  validatePreparationFreezeArchive(worktree, retained.directory, request.freeze);
   if (readTrustedRegularFile(path, "Recovery preparation staged source", { expectedMode: 0o400 }).sha256 !== request.sourceSha256) {
     throw new Error("Recovery preparation staged source changed");
   }
@@ -2476,7 +2816,13 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
   try {
     if (request.launch) managedControl = await (dependencies.startManagedParent ?? startPreparedManagedParent)(request, dependencies);
     while (Date.now() < request.expiresAt) {
-      if (recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) break;
+      if (recoveryAdmissionExists(resolve(retained.directory, "rollback.json"))) {
+        if (!validPreparationRollback(resolve(retained.directory, "rollback.json"), request)) {
+          throw new Error("Recovery preparation rollback evidence changed");
+        }
+        break;
+      }
+      validatePreparationFreezeArchive(worktree, retained.directory, request.freeze);
       source.revalidate();
       if (!retained.bytes.equals(readPreparationRequest(worktree).bytes)) throw new Error("Recovery preparation request changed");
       const job = inspectPreparationJob(dependencies.run);
@@ -2491,8 +2837,9 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
         invocationId,
         owner: { pid: self.pid, startTimeTicks: self.startTimeTicks, executableSha256: self.executableSha256, nonceSha256: sha256(request.nonce) },
         fence: 1, fenceState: "reserved", lease: { issuedAt: now, expiresAt: Math.min(now + request.contract.maximumLeaseMs, request.expiresAt) },
-        health: "ready", authorizesRestart: false, ...(managedControl ? { managed: managedControl.evidence } : {}) };
+         health: "ready", authorizesRestart: false, ...(managedControl ? { managed: managedControl.evidence } : {}) };
       const bytes = Buffer.from(canonicalJson(status));
+      validatePreparationFreezeArchive(worktree, retained.directory, request.freeze);
       if (previous) {
         if (!previous.equals(readOnlyRegularFile(statusPath, 16 * 1024, false, 0o600))) throw new Error("Recovery preparation status changed");
         writePreparationFile(resolve(retained.directory, "owner-status.next"), bytes);
@@ -2508,6 +2855,11 @@ export async function runPreparedRecoveryOwner(argv = process.argv, dependencies
   }
 }
 
+function deterministicPreparationStartFailure(error) {
+  return error?.code === "ENOENT" || error?.code === "EACCES"
+    || Number.isSafeInteger(error?.status) && error.status !== 0 && !error.signal;
+}
+
 export async function runRecoveryPreparation(argv = process.argv, dependencies = {}) {
   if (argv.length !== 2) throw new Error("Recovery preparation accepts no arguments");
   const sourceHandle = (dependencies.openSource ?? openVerifiedRecoverySource)(dependencies.attestation ?? MODULE_ATTESTATION);
@@ -2516,6 +2868,8 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
   let request;
   let startAttempted = false;
   let startConfirmed = false;
+  let startUncertain = false;
+  let freezeAdoption;
   let phase = "inspect";
   const run = dependencies.run ?? execFileSync;
   const wait = dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 100)));
@@ -2559,16 +2913,20 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     if (recoveryAdmissionExists(directory)) throw new Error("Recovery preparation requires reconciliation of retained state");
     for (const path of [index, dirname(directory)]) ownedDirectory(path);
     ownedDirectory(directory, true);
+    freezeAdoption = adoptPreparationFreeze(index, directory, inputs.freeze);
+    if (freezeAdoption) undo.push({ requiresStoppedOwner: true, rollback: freezeAdoption.rollback });
     const handoffBytes = Buffer.from(canonicalJson(inputs.capture.snapshot));
     ownedFile(resolve(directory, "handoff.json"), handoffBytes);
     const now = Date.now();
     request = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
       sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
       parent: inputs.capture.snapshot.parent, ...(inputs.launch ? { launch: inputs.launch } : {}),
-      quarantine: inputs.quarantine?.quarantine ?? null, issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
+      freeze: freezeAdoption?.evidence ?? null, quarantine: inputs.quarantine?.quarantine ?? null,
+      issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
     ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(request)));
     const stagedSource = resolve(directory, "owner.mjs");
     ownedFile(stagedSource, inputs.source.bytes, true, 0o400);
+    validatePreparationFreezeArchive(worktree, directory, request.freeze);
     validatePreparationQuarantine(inputs.quarantine);
     const preparedCoordination = summarizeCoordinationOutboxState(index);
     if (!preparationQuarantineMatches(preparedCoordination.outbox, inputs.quarantine)) {
@@ -2581,11 +2939,18 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     const runtime = readTrustedRegularFile(runtimePath, "Recovery preparation runtime", { expectedOwner: runtimeOwner, executable: true });
     phase = "start";
     startAttempted = true;
-    preparationSystemd("systemd-run", ["--unit", PREPARATION_JOB, "--collect", "--no-block",
-      "--property=Type=exec", "--property=Restart=no", "--property=UMask=0077",
-      `--property=WorkingDirectory=${worktree}`, "--property=StandardOutput=null", "--property=StandardError=null",
-      "--property=UnsetEnvironment=NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG_OUTPUT LD_PROFILE LD_PROFILE_OUTPUT GLIBC_TUNABLES OPENSSL_CONF OPENSSL_MODULES INGENIUM_RECOVERY_ATTESTED_CONTEXT INGENIUM_RECOVERY_PREPARATION",
-      "--", runtime.path, stagedSource, PREPARATION_OWNER_ARGUMENT], run);
+    startUncertain = true;
+    try {
+      preparationSystemd("systemd-run", ["--unit", PREPARATION_JOB, "--collect", "--no-block",
+        "--property=Type=exec", "--property=Restart=no", "--property=UMask=0077",
+        `--property=WorkingDirectory=${worktree}`, "--property=StandardOutput=null", "--property=StandardError=null",
+        "--property=UnsetEnvironment=NODE_OPTIONS NODE_PATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT LD_DEBUG_OUTPUT LD_PROFILE LD_PROFILE_OUTPUT GLIBC_TUNABLES OPENSSL_CONF OPENSSL_MODULES INGENIUM_RECOVERY_ATTESTED_CONTEXT INGENIUM_RECOVERY_PREPARATION",
+        "--", runtime.path, stagedSource, PREPARATION_OWNER_ARGUMENT], run);
+      startUncertain = false;
+    } catch (error) {
+      startUncertain = !deterministicPreparationStartFailure(error);
+      throw error;
+    }
     startConfirmed = true;
     phase = "attest";
     let evidence;
@@ -2602,6 +2967,7 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
       || canonicalJson(confirmed.launch ?? null) !== canonicalJson(inputs.launch ?? null)) {
       throw new Error("Recovery preparation capture changed");
     }
+    validatePreparationFreezeArchive(worktree, directory, request.freeze);
     sourceHandle.revalidate();
     evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
     if (!evidence) throw new Error("Recovery preparation owner changed");
@@ -2614,13 +2980,16 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
       throw new Error("Recovery preparation final quarantine changed");
     }
     return { schemaVersion: 1, action: "recovery-prepare", authorizesRestart: false, status: "prepared", owner: evidence,
-      quarantine: inputs.quarantine?.quarantine ?? null };
+      freeze: request.freeze, quarantine: inputs.quarantine?.quarantine ?? null };
   } catch (cause) {
     let reconciled = true;
-    if (startAttempted) {
+    if (startAttempted && (startConfirmed || startUncertain)) {
       // The manager may have accepted a timed-out start. A durable stop request also covers a late owner.
       try {
-        ownedFile(resolve(directory, "rollback.json"), Buffer.from(canonicalJson({ nonceSha256: sha256(request.nonce), authorizesRestart: false })));
+        ownedFile(resolve(directory, "rollback.json"), Buffer.from(canonicalJson({ schemaVersion: 1,
+          kind: "recovery-preparation-rollback", requestSha256: sha256(canonicalJson(request)),
+          sourceSha256: request.sourceSha256, freeze: request.freeze, nonceSha256: sha256(request.nonce),
+          authorizesRestart: false })));
         reconciled = false;
         for (let attempt = 0; attempt < 50; attempt += 1) {
           if (absentPreparationJob(inspectPreparationJob(run)) && startConfirmed) { reconciled = true; break; }
@@ -2848,9 +3217,12 @@ export async function collectRecoveryPreflight(options = {}) {
     disposition: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null },
   };
   const { outbox, disposition } = coordination;
-  const freeze = protectedIndex
-    ? summarizeFreeze(resolve(protectedIndex, "coordination-outbox-mutation.lock"))
-    : { status: "invalid", sha256: null };
+  let freeze;
+  if (!protectedIndex) freeze = freezeEvidence("invalid");
+  else try {
+    freeze = planPreparationFreeze(protectedIndex)?.evidence ?? inspectPreparationFreezeArchive(worktree) ?? freezeEvidence("clear");
+  }
+  catch { freeze = freezeEvidence("invalid"); }
   const classification = enrollmentClassification(parentInternal, binding, recovery);
   const apiHealth = await collectApiHealth(configuredEnvironment ?? {}, options.request ?? fetch);
   const ociRevision = binding && gitSummary.status === "validated"
@@ -2858,6 +3230,7 @@ export async function collectRecoveryPreflight(options = {}) {
     : { status: "unavailable", provider: "docker-local", revision: null };
   const ownerPreparation = binding && gitSummary.status === "validated" ? prepareRecoveryOwnerContract(binding, gitSummary.head) : null;
   const recoveryOwner = ownerPreparation ? inspectRecoveryOwnerStatus(ownerPreparation) : { status: "unavailable", authorizesRestart: false };
+  if (recoveryOwner.status === "attested" && recoveryOwner.freeze) freeze = recoveryOwner.freeze;
   const failures = [];
   if (!worktree) failures.push("worktree");
   if (!source) failures.push("source");
@@ -2871,7 +3244,7 @@ export async function collectRecoveryPreflight(options = {}) {
   if (recoveryOwner.status !== "attested") failures.push("recovery_owner");
   if (outbox.status === "invalid" || !validRecoveryOutboxQuarantineState(outbox)) failures.push("outbox");
   if (disposition.status === "invalid") failures.push("disposition");
-  if (freeze.status === "invalid" || freeze.status === "present") failures.push("freeze");
+  if (freeze.status === "invalid" || freeze.status === "planned") failures.push("freeze");
   if (apiHealth.status !== "healthy") failures.push("api_health");
   if (ociRevision.status !== "attested") failures.push("oci_revision");
   return {
@@ -2935,7 +3308,9 @@ function recoveryAdmissionExists(path) {
 function expectedRecoveryAdmission(preflight, preflightDigest) {
   if (!preflight.admissible || !HASH.test(preflightDigest) || preflightDigest !== sha256(canonicalJson(preflight))
     || !GIT_OID.test(preflight.git?.head ?? "") || !preflight.parent || !preflight.binding
-    || !validRecoveryOutboxQuarantineState(preflight.outbox)) {
+    || !validRecoveryOutboxQuarantineState(preflight.outbox)
+    || !validPreparationFreezeEvidence(preflight.freeze, ["clear", "adopted"])
+    || !revalidateRecoveryAdmissionFreeze(preflight)) {
     throw new Error("Recovery admission preflight is not admissible");
   }
   return {
@@ -2958,8 +3333,18 @@ function expectedRecoveryAdmission(preflight, preflightDigest) {
       storageMappingHash: preflight.binding.storageMappingHash,
       worktree: preflight.binding.worktree,
     },
+    freeze: preflight.freeze ?? freezeEvidence("clear"),
     outboxQuarantine: preflight.outbox?.quarantine ?? null,
   };
+}
+
+function revalidateRecoveryAdmissionFreeze(preflight) {
+  const freeze = preflight.freeze ?? freezeEvidence("clear");
+  if (!preflight.binding?.worktree || !validPreparationFreezeEvidence(freeze, ["clear", "adopted"])) return false;
+  try {
+    validatePreparationFreezeArchive(preflight.binding.worktree, preparationDirectory(preflight.binding.worktree), freeze);
+    return true;
+  } catch { return false; }
 }
 
 export function readRecoveryAdmission(path, preflight, preflightDigest, now = Date.now()) {
@@ -3254,7 +3639,7 @@ export async function consumeRecoveryAdmission(admission, context, options = {})
     }
     const receipt = validatedRecoveryAdmissionReceipt(payload.data.receipt, admission.admission);
     return validatedAdmittedRecoveryContext(
-      admittedRecoveryContext(admission.admission, receipt, context.outboxQuarantine),
+      admittedRecoveryContext(admission.admission, receipt, context.freeze, context.outboxQuarantine),
       context,
       admission.admission,
     );
@@ -3276,7 +3661,7 @@ function validatedRecoveryAdmissionReceipt(receipt, admission) {
   return Object.freeze({ ...receipt });
 }
 
-function admittedRecoveryContext(admission, receipt, outboxQuarantine) {
+function admittedRecoveryContext(admission, receipt, freeze, outboxQuarantine) {
   const startTimeTicks = Number(admission.parent.start);
   let executableSha256;
   try { executableSha256 = sha256(readFileSync(realpathSync(admission.parent.executable))); } catch {}
@@ -3302,6 +3687,7 @@ function admittedRecoveryContext(admission, receipt, outboxQuarantine) {
       storageMappingHash: admission.storage,
       worktree: admission.worktree,
     }),
+    freeze: Object.freeze({ ...freeze, owner: freeze.owner ? Object.freeze({ ...freeze.owner }) : null }),
     outboxQuarantine: outboxQuarantine ? Object.freeze({ ...outboxQuarantine }) : null,
     receipt,
   });
@@ -3316,13 +3702,15 @@ function expectedAdmittedRecoveryContext(preflight, preflightDigest) {
     head: expected.head,
     parent: Object.freeze({ ...expected.parent }),
     binding: Object.freeze({ ...expected.binding }),
+    freeze: Object.freeze({ ...expected.freeze, owner: expected.freeze.owner ? Object.freeze({ ...expected.freeze.owner }) : null }),
     outboxQuarantine: expected.outboxQuarantine ? Object.freeze({ ...expected.outboxQuarantine }) : null,
   });
 }
 
 function validatedAdmittedRecoveryContext(context, expected, admission) {
-  if (!hasExactKeys(context, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "outboxQuarantine", "receipt"])
+  if (!hasExactKeys(context, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "freeze", "outboxQuarantine", "receipt"])
     || !Object.isFrozen(context) || !Object.isFrozen(context.parent) || !Object.isFrozen(context.binding)
+    || !Object.isFrozen(context.freeze) || context.freeze.owner !== null && !Object.isFrozen(context.freeze.owner)
     || !Object.isFrozen(context.receipt) || context.outboxQuarantine !== null && !Object.isFrozen(context.outboxQuarantine)
     || canonicalJson({
       schemaVersion: context.schemaVersion,
@@ -3331,6 +3719,7 @@ function validatedAdmittedRecoveryContext(context, expected, admission) {
       head: context.head,
       parent: context.parent,
       binding: context.binding,
+      freeze: context.freeze,
       outboxQuarantine: context.outboxQuarantine,
     }) !== canonicalJson(expected)
     || canonicalJson(validatedRecoveryAdmissionReceipt(context.receipt, admission)) !== canonicalJson(context.receipt)) {

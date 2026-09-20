@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY, COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256 } from "./coordination-outbox.js";
 import { runReplacementFirstRestart, stableRestartTodos } from "./replacement-first-restart.js";
-import { inspectProductionRestartBinding, redactedHandoffFromExport } from "./scripts/production-restart.js";
+import { inspectProductionRestartBinding, redactedHandoffFromExport, revalidatePreparationFreeze, runProductionRestartAdapter } from "./scripts/production-restart.js";
 import { managedRecoveryEnvironment } from "./scripts/managed-command-wrapper.js";
 
 const shim = await import(/* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href);
@@ -369,6 +369,44 @@ describe("recovery preflight repository-data trust", () => {
     }
   });
 
+  it("reports stale freeze adoption as planned without mutating protected state or admitting restart", async () => {
+    const f = fixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    mkdirSync(index, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "55555555-5555-4555-8555-555555555555" };
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const lockPath = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+    const before = lstatSync(lockPath);
+    const source = { head: f.head, path: join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
+      bytes: Buffer.from("attested source"), sha256: hash("attested source") };
+    const sourceHandle = { source, revalidate: vi.fn(() => source), close: vi.fn() };
+    const authority = authorityRequest();
+    const request = async (url: string, init: RequestInit) => url.endsWith("/health")
+      ? new Response(JSON.stringify({ status: "ok" })) : authority(url, init);
+    const result = await shim.runRecoveryPreflight(["node", source.path], {
+      openSource: () => sourceHandle,
+      inputOptions: {
+        request,
+        processStartTimeTicks: () => null,
+        gitSummary: () => ({ status: "validated", head: f.head, clean: true, dirtyPaths: [], indexFlagsNormal: true, sourceMatchesHead: true }),
+        inspectInstalledBuild: () => ({ status: "attested", release: { sha256: hash("release") },
+          launchers: { "ingenium-build": { sha256: hash("build") }, "ingenium-opencode": { sha256: hash("opencode") } } }),
+        inspectDeployment: () => ({ status: "attested", provider: "docker-local", revision: f.head }),
+        ancestry: () => ({ status: "exact", parent: { pid: 100, startTimeTicks: 10, executableSha256: hash("exe"), nonceSha256: "0".repeat(64),
+          cwd: root, cmdlineSha256: hash("argv"), port: 4098, sessionId: null, environment: {} } }),
+        captureLegacy: async () => ({ snapshot: { kind: "legacy-pre-admission", sessionId: "ses_exact", parent: {}, operational: { status: "working" } }, summary: { status: "working" } }),
+      },
+    });
+
+    expect(result).toMatchObject({ status: "rejected", admissible: false, mutationFree: true,
+      freeze: { status: "planned", sha256: hash(lockBytes), owner: { pid: lock.pid, startTimeTicks: lock.startTimeTicks } },
+      admission: { decision: "reject", nextOperation: null } });
+    expect(readFileSync(lockPath)).toEqual(lockBytes);
+    expect(lstatSync(lockPath)).toMatchObject({ dev: before.dev, ino: before.ino, mode: before.mode, size: before.size, mtimeMs: before.mtimeMs });
+    expect(existsSync(join(root, ".opencode/protected-runtime-index/tui-recovery/preparation"))).toBe(false);
+  });
+
   it.each(["dirty", "source tamper", "deployment mismatch", "hidden index flag"])(
     "rejects %s before configured ACL access",
     async (failure) => {
@@ -569,6 +607,7 @@ describe("recovery preflight repository-data trust", () => {
     sharedAcl(artifact);
     const preflight = { admissible: true, git: { head: f.head }, source: { sha256: hash("source") }, binding,
       outbox: { status: "validated", count: 0, ambiguousCount: 0, sha256: null, quarantine: null },
+      freeze: { status: "clear", source: "coordination-outbox-mutation.lock", archive: "coordination-outbox-mutation.lock.adopted", sha256: null, owner: null },
       parent: { pid: 100, startTimeTicks: 10, executableSha256: hash("exe"), nonceSha256: hash("nonce"), sessionId: "ses_exact" } };
     expect(() => shim.readRecoveryAdmission(artifact, preflight, hash(shim.canonicalJson(preflight))))
       .toThrow("Recovery preflight file is unavailable");
@@ -994,6 +1033,162 @@ describe("immutable schema-v2 outbox disposition", () => {
   });
 });
 
+describe("recovery preparation coordination freeze", () => {
+  function fixture() {
+    const index = join(root, ".opencode/protected-runtime-index");
+    const directory = join(index, "tui-recovery/preparation");
+    mkdirSync(join(index, "tui-recovery"), { recursive: true, mode: 0o700 });
+    mkdirSync(directory, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "33333333-3333-4333-8333-333333333333" };
+    const bytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const source = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(source, bytes, { mode: 0o600 });
+    return { index, directory, source, bytes, lock };
+  }
+
+  it("plans without mutation, adopts exact bytes, and restores the original lock", () => {
+    const f = fixture();
+    const before = lstatSync(f.source);
+    const plan = shim.planPreparationFreeze(f.index, { processStartTimeTicks: () => null });
+    expect(plan).toMatchObject({ evidence: { status: "planned", sha256: hash(f.bytes), owner: { pid: f.lock.pid, startTimeTicks: f.lock.startTimeTicks } } });
+    expect(readFileSync(f.source)).toEqual(f.bytes);
+
+    const adoption = shim.adoptPreparationFreeze(f.index, f.directory, plan);
+    expect(existsSync(f.source)).toBe(false);
+    expect(readFileSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"))).toEqual(f.bytes);
+    expect(adoption.evidence).toEqual({ status: "adopted", source: "coordination-outbox-mutation.lock",
+      archive: "coordination-outbox-mutation.lock.adopted", sha256: hash(f.bytes), owner: { pid: f.lock.pid, startTimeTicks: f.lock.startTimeTicks } });
+    expect(JSON.stringify(adoption.evidence)).not.toContain(f.lock.nonce);
+
+    adoption.rollback();
+    expect(readFileSync(f.source)).toEqual(f.bytes);
+    expect(lstatSync(f.source)).toMatchObject({ dev: before.dev, ino: before.ino, mode: before.mode, size: before.size });
+    expect(existsSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"))).toBe(false);
+  });
+
+  it.each(["live owner", "malformed schema", "malformed nonce", "wrong mode", "symlinked lock"])("rejects %s without mutation", (failure) => {
+    const f = fixture();
+    if (failure === "malformed schema") writeFileSync(f.source, Buffer.from(`${JSON.stringify({ schemaVersion: 2 })}\n`));
+    if (failure === "malformed nonce") writeFileSync(f.source, Buffer.from(`${JSON.stringify({ ...f.lock, nonce: "not-a-uuid" })}\n`));
+    if (failure === "wrong mode") chmodSync(f.source, 0o640);
+    if (failure === "symlinked lock") {
+      const target = join(root, "foreign-lock");
+      renameSync(f.source, target);
+      symlinkSync(target, f.source);
+    }
+    const processStartTimeTicks = failure === "live owner" ? () => f.lock.startTimeTicks : () => null;
+    expect(() => shim.planPreparationFreeze(f.index, { processStartTimeTicks })).toThrow();
+  });
+
+  it("does not overwrite a raced pre-existing archive destination and retains the source", () => {
+    const f = fixture();
+    const plan = shim.planPreparationFreeze(f.index, { processStartTimeTicks: () => null });
+    const foreign = Buffer.from("foreign\n");
+    const archive = join(f.directory, "coordination-outbox-mutation.lock.adopted");
+    writeFileSync(archive, foreign, { mode: 0o600 });
+    expect(() => shim.adoptPreparationFreeze(f.index, f.directory, plan)).toThrow("archive already exists");
+    expect(readFileSync(f.source)).toEqual(f.bytes);
+    expect(readFileSync(archive)).toEqual(foreign);
+  });
+
+  it("rejects archive-only and both-path freeze states without mutating preflight inputs", () => {
+    const f = fixture();
+    const archive = join(f.directory, "coordination-outbox-mutation.lock.adopted");
+    renameSync(f.source, archive);
+    expect(() => shim.planPreparationFreeze(f.index, { processStartTimeTicks: () => null }))
+      .toThrow("archive exists without its source");
+    expect(readFileSync(archive)).toEqual(f.bytes);
+
+    writeFileSync(f.source, f.bytes, { mode: 0o600 });
+    expect(() => shim.planPreparationFreeze(f.index, { processStartTimeTicks: () => null }))
+      .toThrow("both source and archive");
+    expect(readFileSync(f.source)).toEqual(f.bytes);
+    expect(readFileSync(archive)).toEqual(f.bytes);
+  });
+
+  it("requires a matching dead-owner archive during production restart revalidation", () => {
+    const f = fixture();
+    const archive = join(f.directory, "coordination-outbox-mutation.lock.adopted");
+    renameSync(f.source, archive);
+    const evidence = { status: "adopted", source: "coordination-outbox-mutation.lock",
+      archive: "coordination-outbox-mutation.lock.adopted", sha256: hash(f.bytes), owner: { pid: f.lock.pid, startTimeTicks: f.lock.startTimeTicks } } as const;
+    expect(revalidatePreparationFreeze(root, evidence)).toBe(true);
+    writeFileSync(f.source, f.bytes, { mode: 0o600 });
+    expect(revalidatePreparationFreeze(root, evidence)).toBe(false);
+  });
+
+  it("rejects a recreated source lock from owner status and production restart before authorization or signal", async () => {
+    const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    mkdirSync(index, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "55555555-5555-4555-8555-555555555555" };
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const lockPath = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+    const plan = shim.planPreparationFreeze(index, { processStartTimeTicks: () => null });
+    f.collectInputs.mockResolvedValue({ binding, capture: await f.capture(), source: f.source, freeze: plan, quarantine: null,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
+    await f.prepare();
+
+    const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
+    const inspect = f.ownerOptions.inspect as (pid: number) => any;
+    let recreated = false;
+    f.ownerOptions.inspect = (pid: number) => {
+      const value = inspect(pid);
+      if (!recreated && pid === 101) {
+        writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+        recreated = true;
+      }
+      return value;
+    };
+    expect(shim.inspectPreparedRecoveryOwner(request, f.ownerOptions)).toBeNull();
+    expect(readFileSync(lockPath)).toEqual(lockBytes);
+    rmSync(lockPath);
+
+    const executable = realpathSync(process.execPath);
+    const nonce = "n".repeat(43);
+    const oldDataHome = join(root, "old-data");
+    mkdirSync(oldDataHome, { mode: 0o700 });
+    const oldProcess = { pid: process.pid, startTimeTicks: 42, executableSha256: hash(readFileSync(executable)), nonceSha256: hash(nonce) };
+    const parent = { ...oldProcess, sessionId: "ses_exact" };
+    const candidate = {
+      binding: { projectId: binding.projectId, workspaceId: binding.workspaceId, launcherWorktree: root,
+        storageMappingHash: binding.storageMappingHash, audience: "mcp" },
+      oldProcess, oldPort: 4098, oldDataHome, handoff: legacyFixture().project(),
+      timeouts: Object.fromEntries(["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "terminalIdleMs", "retirementMs"]
+        .map((key) => [key, 1_000])),
+    };
+    const context = { schemaVersion: 1, action: "production-restart", preflightDigest: hash("preflight"), head, parent,
+      binding: { project: binding.project, projectId: binding.projectId, workspaceId: binding.workspaceId,
+        storageMappingHash: binding.storageMappingHash, worktree: root }, freeze: request.freeze, outboxQuarantine: null,
+      receipt: { id: "22222222-2222-4222-8222-222222222222", schema: "ingenium.recovery-admission-receipt", version: 1,
+        action: "production-restart", admissionDigest: hash("admission"), consumedAt: new Date().toISOString() } } as any;
+    let freezeChecks = 0;
+    const revalidateFreeze = vi.fn(() => {
+      freezeChecks += 1;
+      if (freezeChecks === 1) {
+        writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+        return true;
+      }
+      return revalidatePreparationFreeze(root, request.freeze);
+    });
+    const prepareReplacement = vi.fn();
+    await expect(runProductionRestartAdapter({
+      canonicalWorktree: () => root,
+      resolveBinding: async () => ({ ...binding, launcherWorktree: root, audience: "mcp", apiUrl: environment.INGENIUM_API_URL,
+        credentialFile: environment.INGENIUM_MCP_CREDENTIAL_FILE }),
+      readParentCandidates: () => [candidate],
+      retainCandidateRejection: vi.fn(),
+      attestParentProcess: () => true,
+      prepareReplacement,
+      revalidatePreparationFreeze: revalidateFreeze,
+      revalidateOutboxQuarantine: () => true,
+    }, context)).rejects.toThrow("changed before use");
+    expect(prepareReplacement).not.toHaveBeenCalled();
+    expect(freezeChecks).toBe(2);
+  });
+});
+
 describe("independent recovery owner contract", () => {
   it("reads the exact prepared-owner path and schema used by the writer; preparation is not authorization", async () => {
     const f = preparationFixture();
@@ -1212,6 +1407,24 @@ describe("fixed recovery preparation transaction", () => {
     expect(new Set(f.run.mock.calls.map(([command]) => command))).toEqual(new Set(["/usr/bin/systemctl", "/usr/bin/systemd-run"]));
   });
 
+  it("adopts a stale coordination freeze before owner start and restores it after deterministic failure", async () => {
+    const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    mkdirSync(index, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "66666666-6666-4666-8666-666666666666" };
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const lockPath = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+    const plan = shim.planPreparationFreeze(index, { processStartTimeTicks: () => null });
+    f.collectInputs.mockResolvedValue({ binding, capture: await f.capture(), source: f.source, freeze: plan, quarantine: null,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
+    f.inspectOwner.mockReturnValue(null);
+
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "attest" });
+    expect(readFileSync(lockPath)).toEqual(lockBytes);
+    expect(existsSync(join(index, "tui-recovery/preparation/coordination-outbox-mutation.lock.adopted"))).toBe(false);
+  });
+
   it("reconciles an absent unit exit only with complete unambiguous systemd properties", () => {
     const stdout = "LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nJob=\n";
     expect(shim.inspectPreparationJob(() => { throw Object.assign(new Error("not found"), { status: 1, stdout }); }))
@@ -1260,6 +1473,15 @@ describe("fixed recovery preparation transaction", () => {
 
   it("preserves uncertain systemd start evidence and a durable rollback request without repeating or signaling", async () => {
     const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    mkdirSync(index, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "77777777-7777-4777-8777-777777777777" };
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const lockPath = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+    const plan = shim.planPreparationFreeze(index, { processStartTimeTicks: () => null });
+    f.collectInputs.mockResolvedValue({ binding, capture: await f.capture(), source: f.source, freeze: plan, quarantine: null,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
     const normal = f.run.getMockImplementation()!;
     f.run.mockImplementation((command, args, options) => {
       const result = normal(command, args, options);
@@ -1269,6 +1491,11 @@ describe("fixed recovery preparation transaction", () => {
     await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED", phase: "start", authorizesRestart: false });
     expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
     expect(existsSync(join(f.directory, "request.json"))).toBe(true);
+    expect(existsSync(lockPath)).toBe(false);
+    expect(readFileSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"))).toEqual(lockBytes);
+    expect(JSON.parse(readFileSync(join(f.directory, "rollback.json"), "utf8"))).toMatchObject({
+      kind: "recovery-preparation-rollback", freeze: { status: "adopted", sha256: hash(lockBytes), owner: { pid: lock.pid, startTimeTicks: lock.startTimeTicks } },
+    });
     expect(f.run.mock.calls.filter(([command]) => command === "/usr/bin/systemd-run")).toHaveLength(1);
     expect(new Set(f.run.mock.calls.map(([command]) => command))).toEqual(new Set(["/usr/bin/systemctl", "/usr/bin/systemd-run"]));
   });
@@ -1291,7 +1518,13 @@ describe("fixed recovery preparation transaction", () => {
     let ticks = 0;
     const wait = vi.fn(async () => {
       ticks += 1;
-      if (ticks === 2) json(join(f.directory, "rollback.json"), { authorizesRestart: false });
+      if (ticks === 2) {
+        const requestPath = join(f.directory, "request.json");
+        const request = JSON.parse(readFileSync(requestPath, "utf8"));
+        json(join(f.directory, "rollback.json"), { schemaVersion: 1, kind: "recovery-preparation-rollback",
+          requestSha256: hash(readFileSync(requestPath)), sourceSha256: request.sourceSha256, freeze: request.freeze,
+          nonceSha256: hash(request.nonce), authorizesRestart: false });
+      }
     });
     const stagedSource = join(f.directory, "owner.mjs");
     await shim.runPreparedRecoveryOwner(["node", stagedSource, "--recovery-preparation-owner"], {
@@ -1333,7 +1566,15 @@ describe("fixed recovery preparation transaction", () => {
     const control = { refresh: vi.fn(async () => ({ ...managed, health: { ...managed.health, checkedAt: Date.now() } })) };
     const stopManagedParent = vi.fn();
     let ticks = 0;
-    const wait = vi.fn(async () => { if (++ticks === 2) json(join(f.directory, "rollback.json"), { authorizesRestart: false }); });
+    const wait = vi.fn(async () => {
+      if (++ticks === 2) {
+        const requestPath = join(f.directory, "request.json");
+        const request = JSON.parse(readFileSync(requestPath, "utf8"));
+        json(join(f.directory, "rollback.json"), { schemaVersion: 1, kind: "recovery-preparation-rollback",
+          requestSha256: hash(readFileSync(requestPath)), sourceSha256: request.sourceSha256, freeze: request.freeze,
+          nonceSha256: hash(request.nonce), authorizesRestart: false });
+      }
+    });
     const stagedSource = join(f.directory, "owner.mjs");
 
     await shim.runPreparedRecoveryOwner(["node", stagedSource, "--recovery-preparation-owner"], {
@@ -1468,6 +1709,7 @@ function recoveryAdmissionFixture(outboxQuarantine: any = null) {
   const preflight = { admissible: true, git: { head }, source: { sha256: hash("source") }, parent, binding,
     outbox: { status: "validated", count: outboxQuarantine ? 1 : 0, ambiguousCount: outboxQuarantine ? 1 : 0,
       sha256: outboxQuarantine?.recordSha256 ?? null, quarantine: outboxQuarantine },
+    freeze: { status: "clear", source: "coordination-outbox-mutation.lock", archive: "coordination-outbox-mutation.lock.adopted", sha256: null, owner: null },
     currentParent: { status: "validated", session: { incarnation: 2, revision: 4, fence: 3 } } };
   const digest = hash(shim.canonicalJson(preflight));
   const worktreeId = `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`;
