@@ -141,3 +141,21 @@ export function legacySessionMessage(message: SessionMessage, sessionID: string)
   }
   return { info: { ...base, role: "system" }, parts: [] };
 }
+
+export function recoverySessionMessage(message: SessionMessage, sessionID: string): LegacySessionMessage {
+  const projected = legacySessionMessage(message, sessionID);
+  if (message.type !== "assistant") return projected;
+  return {
+    ...projected,
+    parts: [
+      ...projected.parts,
+      ...message.content.filter((part) => part.type === "tool").map((part) => ({
+        type: "tool",
+        tool: part.name,
+        state: part.state.status === "pending"
+          ? { status: part.state.status }
+          : { status: part.state.status, input: part.state.input, metadata: part.state.structured },
+      })),
+    ],
+  };
+}

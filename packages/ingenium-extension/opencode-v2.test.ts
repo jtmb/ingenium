@@ -3,6 +3,7 @@ import {
   eventSessionId,
   getV2SessionInfo,
   legacySessionMessage,
+  recoverySessionMessage,
   readV2Messages,
   type OpenCodeV2Client,
 } from "./opencode-v2.js";
@@ -36,6 +37,22 @@ describe("OpenCode v2 adapter", () => {
       info: { role: "assistant", sessionID: "ses-1", modelID: "model", providerID: "provider" },
       parts: [{ type: "text", text: "answer" }],
     });
+  });
+
+  it("retains only typed tool state for recovery projection", () => {
+    const projected = recoverySessionMessage({
+      id: "assistant-1",
+      type: "assistant",
+      agent: "engineer",
+      model: { id: "model", providerID: "provider" },
+      time: { created: 1, completed: 2 },
+      content: [{ type: "tool", id: "part-1", name: "shell", state: {
+        status: "completed", input: { command: "npm test" }, structured: { exitCode: 0 }, content: [],
+      }, time: { created: 1, completed: 2 } }],
+    }, "ses-1");
+    expect(projected.parts).toEqual([{ type: "tool", tool: "shell", state: {
+      status: "completed", input: { command: "npm test" }, metadata: { exitCode: 0 },
+    } }]);
   });
 
   it("unwraps the v2 session detail response envelope", async () => {

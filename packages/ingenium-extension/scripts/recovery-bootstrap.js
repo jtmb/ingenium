@@ -2757,6 +2757,19 @@ export function readCurrentParentSummary(worktree, parent, binding, head, now = 
   return currentParentEvidence(worktree, parent, binding, head, now, handoff).summary;
 }
 
+export function promoteLegacyRecoveryPreAdmission(capture, binding) {
+  const snapshot = capture?.snapshot;
+  const operational = snapshot?.operational;
+  if (!isRecord(capture) || !isRecord(snapshot) || snapshot.kind !== "legacy-pre-admission"
+    || snapshot.nonceProvenance !== "absent_process_environment" || !isRecord(snapshot.binding)
+    || !isRecord(binding) || canonicalJson(snapshot.binding) !== canonicalJson(binding)
+    || !SAFE_SESSION.test(snapshot.sessionId ?? "") || !HASH.test(capture.sha256 ?? "")
+    || sha256(canonicalJson(snapshot)) !== capture.sha256 || !isRecord(operational)
+    || !SAFE_ID.test(operational.role ?? "") || !isRecord(capture.summary)) return null;
+  return { status: "validated", role: operational.role, project: binding.project,
+    enrollmentSha256: capture.sha256, session: { incarnation: 1, revision: 0, fence: 1 } };
+}
+
 export async function collectRecoveryPreflight(options = {}) {
   const environment = options.environment ?? process.env;
   const sourcePath = resolve(options.sourcePath ?? MODULE_ATTESTATION?.sourcePath ?? fileURLToPath(import.meta.url));
@@ -2817,16 +2830,18 @@ export async function collectRecoveryPreflight(options = {}) {
     gitSummary.dirtyPaths.length === 0 ? gitSummary.head : null, Date.now(), recovery.summary.handoff)
     : { summary: { status: "invalid", role: null, project: null, enrollmentSha256: null }, record: null };
   const currentSession = confirmedCurrentParent.record?.sessions[0];
-  const currentParent = { ...confirmedCurrentParent.summary, session: currentSession ? {
+  let currentParent = { ...confirmedCurrentParent.summary, session: currentSession ? {
     incarnation: currentSession.incarnation,
     revision: currentSession.revision,
     fence: currentSession.fence,
   } : null };
   const preAdmissionCapture = currentParent.status === "missing"
     ? await captureLegacyRecoveryPreAdmission(parentInternal, binding, gitSummary, options.request ?? fetch) : null;
-  if (preAdmissionCapture) {
+  const promotedCurrentParent = promoteLegacyRecoveryPreAdmission(preAdmissionCapture, binding);
+  if (promotedCurrentParent) {
     parent.sessionId = preAdmissionCapture.snapshot.sessionId;
     recovery.summary = { status: "validated", state: recovery.summary.state, handoff: preAdmissionCapture.summary };
+    currentParent = promotedCurrentParent;
   }
   const coordination = protectedIndex ? summarizeCoordinationOutboxState(protectedIndex) : {
     outbox: { status: "invalid", count: 0, ambiguousCount: 0, sha256: null, quarantine: null },
@@ -2848,7 +2863,7 @@ export async function collectRecoveryPreflight(options = {}) {
   if (!source) failures.push("source");
   if (ancestry.status !== "exact" || !parent) failures.push("parent_identity");
   if (!binding) failures.push("binding");
-  if (currentParent.status !== "validated" && !preAdmissionCapture) failures.push("current_parent");
+  if (currentParent.status !== "validated") failures.push("current_parent");
   if (gitSummary.status !== "validated") failures.push("git");
   if (recovery.summary.status !== "validated") failures.push("recovery_handoff");
   if (recovery.summary.state && recovery.summary.state.phase !== "enrolled") failures.push("recovery_phase");

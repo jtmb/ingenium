@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, linkSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-const { captureCurrentRecoveryPreAdmission, readCurrentParentSummary, collectRecoveryPreflight } = await import(
+const { canonicalJson, captureCurrentRecoveryPreAdmission, promoteLegacyRecoveryPreAdmission,
+  readCurrentParentSummary, collectRecoveryPreflight } = await import(
   /* @vite-ignore */ new URL("./scripts/recovery-bootstrap.js", import.meta.url).href
 );
 import {
@@ -133,6 +134,20 @@ describe("current parent recovery discovery", () => {
     for (const forbidden of [input.nonce, "p".repeat(43), "private transcript", "private replay content"]) {
       expect(serialized).not.toContain(forbidden);
     }
+  });
+
+  it("promotes only fresh bound legacy pre-admission evidence into currentParent", () => {
+    const legacyBinding = { project: binding.project, projectId: binding.projectId, workspaceId: binding.workspaceId,
+      storageMappingHash: binding.storageMappingHash, worktree: root };
+    const snapshot = { schemaVersion: 1, kind: "legacy-pre-admission", nonceProvenance: "absent_process_environment",
+      sessionId: "ses_exact", binding: legacyBinding, sourceHead: input.source.head,
+      operational: { role: "ingenium-orchestrator", status: "working" } };
+    const capture = { snapshot, sha256: digest(canonicalJson(snapshot)), summary: { status: "working" } };
+    expect(promoteLegacyRecoveryPreAdmission(capture, legacyBinding)).toEqual({ status: "validated",
+      role: "ingenium-orchestrator", project: "ingenium", enrollmentSha256: capture.sha256,
+      session: { incarnation: 1, revision: 0, fence: 1 } });
+    expect(promoteLegacyRecoveryPreAdmission({ ...capture, sha256: digest("stale") }, legacyBinding)).toBeNull();
+    expect(promoteLegacyRecoveryPreAdmission(capture, { ...legacyBinding, workspaceId: "foreign" })).toBeNull();
   });
 
   it.each([

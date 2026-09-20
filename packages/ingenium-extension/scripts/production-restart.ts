@@ -1184,7 +1184,7 @@ function restartInputChanges(
   return changes;
 }
 
-function redactedHandoffFromSession(
+export function redactedHandoffFromSession(
   messages: unknown,
   status: unknown,
   session: unknown,
