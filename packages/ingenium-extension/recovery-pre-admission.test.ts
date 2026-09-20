@@ -772,7 +772,7 @@ describe("legacy pre-admission capture", () => {
     expect(execute.mock.calls.map(([, args]) => args[0])).toEqual(["db", "db"]);
     expect(execute.mock.calls.every(([command, args, options]) => command === "/proc/100/exe"
       && args[0] === "db" && args[1] === shim.LEGACY_RECOVERY_SESSION_QUERY && args[2] === "--format"
-      && args[3] === "json" && options.encoding === null && options.timeout === 10_000
+       && args[3] === "json" && options.encoding === null && options.timeout === 30_000
       && options.maxBuffer === 256 * 1024 && JSON.stringify(options.stdio) === JSON.stringify(["ignore", "pipe", "pipe"]))).toBe(true);
     expect(queryOutputBytes).toHaveLength(2);
     expect(queryOutputBytes.every((bytes) => bytes < 256 * 1024)).toBe(true);

@@ -94,6 +94,7 @@ const RECOVERY_PREPARATION_FREEZE_MAX_BYTES = 4 * 1024;
 export const RECOVERY_PREPARATION_FREEZE_SOURCE = "coordination-outbox-mutation.lock";
 export const RECOVERY_PREPARATION_FREEZE_ARCHIVE = `${RECOVERY_PREPARATION_FREEZE_SOURCE}.adopted`;
 const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 256 * 1024;
+const LEGACY_SESSION_DISCOVERY_TIMEOUT_MS = 30_000;
 const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
 const LEGACY_TODO_MAX_ITEMS = 128;
 const SERVER_ADMISSION_KEYS = [
@@ -1674,7 +1675,7 @@ function discoverLegacyRecoverySessionDetailed(parent, binding, source, execute 
       result = execute(`/proc/${parent.pid}/exe`, ["db", LEGACY_RECOVERY_SESSION_QUERY, "--format", "json"], {
         cwd: binding.worktree,
         encoding: null,
-        timeout: 10_000,
+        timeout: LEGACY_SESSION_DISCOVERY_TIMEOUT_MS,
         maxBuffer: LEGACY_SESSION_DISCOVERY_MAX_BYTES,
         stdio: ["ignore", "pipe", "pipe"],
         env: { HOME: home, XDG_DATA_HOME: parent.dataHome, PATH: "/usr/local/bin:/usr/bin:/bin" },
