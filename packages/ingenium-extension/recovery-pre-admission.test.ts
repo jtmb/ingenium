@@ -869,9 +869,26 @@ describe("legacy pre-admission capture", () => {
     const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
 
     expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_ROWS_UNAVAILABLE",
-      failurePath: "inspect.legacy_capture.rows" });
+      failurePath: "inspect.legacy_capture.rows", failureDetail: "row_keys" });
     expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
+    expect(shim.recoveryPreflightFailureOutput(error)).toMatchObject({
+      failures: ["inspect.legacy_capture.rows"],
+      failure: { code: "RECOVERY_PREPARATION_LEGACY_ROWS_UNAVAILABLE", path: "inspect.legacy_capture.rows", detail: "row_keys" },
+    });
     expect(JSON.stringify(shim.recoveryPreparationFailureOutput(error))).not.toContain("private");
+  });
+
+  it("reports a content-free zero-match detail for legacy row discovery", async () => {
+    const f = legacyFixture();
+    legacyCaptureParent(f);
+    const stdout = Buffer.from("[]");
+    const stderr = Buffer.from("private diagnostic");
+    const { error } = await collectLegacyFailure(f, () => ({ status: 0, signal: null, stdout, stderr }));
+
+    expect(error).toMatchObject({ code: "RECOVERY_PREPARATION_LEGACY_ROWS_UNAVAILABLE",
+      failurePath: "inspect.legacy_capture.rows", failureDetail: "match_count_zero" });
+    expect(shim.recoveryPreflightFailureOutput(error)).toMatchObject({ failure: { detail: "match_count_zero" } });
+    expect([...stdout, ...stderr].every((byte) => byte === 0)).toBe(true);
   });
 
   it("maps invalid legacy Todo markers to the Todo stage without retaining marker text", async () => {

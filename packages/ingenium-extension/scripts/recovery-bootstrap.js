@@ -97,6 +97,12 @@ const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 256 * 1024;
 const LEGACY_SESSION_DISCOVERY_TIMEOUT_MS = 30_000;
 const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
 const LEGACY_TODO_MAX_ITEMS = 128;
+const LEGACY_ROW_FAILURE_DETAILS = new Set([
+  "not_array", "candidate_overflow", "row_keys", "session_id", "directory", "parent_id", "todo_part_id",
+  "todo_completed_at", "todo_input", "todo_owner_message_id", "todo_owner_session", "todo_owner_role",
+  "assistant_message_id", "assistant_session", "assistant_role", "assistant_agent", "assistant_provider",
+  "assistant_model", "assistant_status", "duplicate_session", "match_count_zero", "match_count_multiple",
+]);
 const SERVER_ADMISSION_KEYS = [
   "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
   "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
@@ -1652,8 +1658,8 @@ function legacyCaptureSuccess(value) {
   return { value, failureKey: null };
 }
 
-function legacyCaptureFailure(failureKey) {
-  return { value: null, failureKey };
+function legacyCaptureFailure(failureKey, failureDetail = null) {
+  return { value: null, failureKey, failureDetail };
 }
 
 function discoverLegacyRecoverySessionDetailed(parent, binding, source, execute = spawnSync) {
@@ -1696,22 +1702,34 @@ function discoverLegacyRecoverySessionDetailed(parent, binding, source, execute 
     let rows;
     try { rows = JSON.parse(text); }
     catch { return legacyCaptureFailure("legacyRows"); }
-    if (!Array.isArray(rows) || rows.length > 2) return legacyCaptureFailure("legacyRows");
+    if (!Array.isArray(rows)) return legacyCaptureFailure("legacyRows", "not_array");
+    if (rows.length > 2) return legacyCaptureFailure("legacyRows", "candidate_overflow");
     const seen = new Set();
     const matches = [];
     for (const row of rows) {
-      if (!hasExactKeys(row, ["sessionId", "directory", "parentId", "todoPartId", "todoCompletedAt", "todoInput",
+      const keys = ["sessionId", "directory", "parentId", "todoPartId", "todoCompletedAt", "todoInput",
         "todoAssistantMessageId", "todoAssistantSessionId", "todoAssistantRole", "assistantMessageId",
-        "assistantSessionId", "assistantRole", "assistantAgent", "assistantProviderId", "assistantModelId", "assistantStatus"])
-        || !SAFE_SESSION.test(row.sessionId ?? "") || typeof row.directory !== "string" || row.parentId !== null
-        || !SAFE_ID.test(row.todoPartId ?? "") || !Number.isSafeInteger(row.todoCompletedAt) || row.todoCompletedAt < 1
-        || typeof row.todoInput !== "string" || Buffer.byteLength(row.todoInput, "utf8") > LEGACY_TODO_INPUT_MAX_BYTES
-        || !SAFE_ID.test(row.todoAssistantMessageId ?? "") || row.todoAssistantSessionId !== row.sessionId
-        || row.todoAssistantRole !== "assistant" || !SAFE_ID.test(row.assistantMessageId ?? "")
-        || row.assistantSessionId !== row.sessionId || row.assistantRole !== "assistant"
-        || !SAFE_ID.test(row.assistantAgent ?? "") || !SAFE_MODEL_METADATA.test(row.assistantProviderId ?? "")
-        || !SAFE_MODEL_METADATA.test(row.assistantModelId ?? "") || row.assistantStatus !== "working"
-        || seen.has(row.sessionId)) return legacyCaptureFailure("legacyRows");
+        "assistantSessionId", "assistantRole", "assistantAgent", "assistantProviderId", "assistantModelId", "assistantStatus"];
+      let detail = null;
+      if (!hasExactKeys(row, keys)) detail = "row_keys";
+      else if (!SAFE_SESSION.test(row.sessionId ?? "")) detail = "session_id";
+      else if (typeof row.directory !== "string") detail = "directory";
+      else if (row.parentId !== null) detail = "parent_id";
+      else if (!SAFE_ID.test(row.todoPartId ?? "")) detail = "todo_part_id";
+      else if (!Number.isSafeInteger(row.todoCompletedAt) || row.todoCompletedAt < 1) detail = "todo_completed_at";
+      else if (typeof row.todoInput !== "string" || Buffer.byteLength(row.todoInput, "utf8") > LEGACY_TODO_INPUT_MAX_BYTES) detail = "todo_input";
+      else if (!SAFE_ID.test(row.todoAssistantMessageId ?? "")) detail = "todo_owner_message_id";
+      else if (row.todoAssistantSessionId !== row.sessionId) detail = "todo_owner_session";
+      else if (row.todoAssistantRole !== "assistant") detail = "todo_owner_role";
+      else if (!SAFE_ID.test(row.assistantMessageId ?? "")) detail = "assistant_message_id";
+      else if (row.assistantSessionId !== row.sessionId) detail = "assistant_session";
+      else if (row.assistantRole !== "assistant") detail = "assistant_role";
+      else if (!SAFE_ID.test(row.assistantAgent ?? "")) detail = "assistant_agent";
+      else if (!SAFE_MODEL_METADATA.test(row.assistantProviderId ?? "")) detail = "assistant_provider";
+      else if (!SAFE_MODEL_METADATA.test(row.assistantModelId ?? "")) detail = "assistant_model";
+      else if (row.assistantStatus !== "working") detail = "assistant_status";
+      else if (seen.has(row.sessionId)) detail = "duplicate_session";
+      if (detail) return legacyCaptureFailure("legacyRows", detail);
       seen.add(row.sessionId);
       if (row.directory !== binding.worktree) continue;
       let input;
@@ -1732,7 +1750,8 @@ function discoverLegacyRecoverySessionDetailed(parent, binding, source, execute 
         querySha256: sha256(canonicalJson(row)),
       }));
     }
-    if (matches.length !== 1) return legacyCaptureFailure("legacyRows");
+    if (matches.length !== 1) return legacyCaptureFailure("legacyRows",
+      matches.length === 0 ? "match_count_zero" : "match_count_multiple");
     if (parent.sessionId !== null && parent.sessionId !== matches[0].sessionId) return legacyCaptureFailure("legacyProcess");
     return legacyCaptureSuccess(matches[0]);
   } catch {
@@ -1778,7 +1797,9 @@ async function captureLegacyRecoveryPreAdmissionDetailed(parent, binding, source
   try {
     if (parent.port === null) {
       const discoveredResult = discoverLegacyRecoverySessionDetailed(parent, binding, source, executeParent);
-      if (discoveredResult.failureKey !== null) return legacyCaptureFailure(discoveredResult.failureKey);
+      if (discoveredResult.failureKey !== null) {
+        return legacyCaptureFailure(discoveredResult.failureKey, discoveredResult.failureDetail);
+      }
       const discovered = discoveredResult.value;
       if (!discovered || !sameProcess()) return legacyCaptureFailure("legacyProcess");
       let config;
@@ -1787,7 +1808,9 @@ async function captureLegacyRecoveryPreAdmissionDetailed(parent, binding, source
       if (!isRecord(config.agent) || !Object.hasOwn(config.agent, discovered.operational.role)
         || config.agent[discovered.operational.role]?.disable === true) return legacyCaptureFailure("legacyRole");
       const confirmedResult = discoverLegacyRecoverySessionDetailed(parent, binding, source, executeParent);
-      if (confirmedResult.failureKey !== null) return legacyCaptureFailure(confirmedResult.failureKey);
+      if (confirmedResult.failureKey !== null) {
+        return legacyCaptureFailure(confirmedResult.failureKey, confirmedResult.failureDetail);
+      }
       const confirmed = confirmedResult.value;
       if (!confirmed) return legacyCaptureFailure("legacyConsistency");
       if (canonicalJson(confirmed) !== canonicalJson(discovered)) return legacyCaptureFailure("legacyConsistency");
@@ -2021,11 +2044,14 @@ function knownPreparationFailure(error) {
   return null;
 }
 
-function preparationFailure(key) {
+function preparationFailure(key, failureDetail = null) {
   const failure = RECOVERY_PREPARATION_FAILURES[key];
   const error = new Error("Recovery preflight inspect failed");
   error.code = failure.code;
   error.failurePath = failure.path;
+  if (failure.code === RECOVERY_PREPARATION_FAILURES.legacyRows.code && LEGACY_ROW_FAILURE_DETAILS.has(failureDetail)) {
+    error.failureDetail = failureDetail;
+  }
   return error;
 }
 
@@ -2531,7 +2557,7 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
       }
       const result = await captureLegacyRecoveryPreAdmissionDetailed(ancestry.parent, binding, gitSummary,
         options.request ?? fetch, options.inspectParent, options.exportSession);
-      if (result.failureKey !== null) throw preparationFailure(result.failureKey);
+      if (result.failureKey !== null) throw preparationFailure(result.failureKey, result.failureDetail);
       return result.value;
     })
     : await preparationAsyncProbe(captureKey, () => (options.captureCurrent ?? captureCurrentRecoveryPreAdmission)(ancestry.parent, binding, gitSummary,
@@ -2561,7 +2587,10 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
 }
 
 export function recoveryPreflightFailureOutput(error) {
-  const failure = recoveryPreparationFailureDetail(error, "source");
+  const known = recoveryPreparationFailureDetail(error, "source");
+  const failure = known.code === RECOVERY_PREPARATION_FAILURES.legacyRows.code
+    && LEGACY_ROW_FAILURE_DETAILS.has(error?.failureDetail)
+    ? { ...known, detail: error.failureDetail } : known;
   return { schemaVersion: 1, action: "recovery-preflight", status: "rejected", admissible: false,
     failures: [failure.path], failure,
     mutationFree: true, authorizesRestart: false, session: null, binding: null, source: null, deployment: null,
