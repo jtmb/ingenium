@@ -1997,6 +1997,14 @@ export const RECOVERY_PREPARATION_FAILURES = Object.freeze({
     code: "RECOVERY_PREPARATION_PARENT_CONTROL_PLANE_UNAVAILABLE",
     path: "inspect.parent_control_plane",
   }),
+  prepareDirectory: Object.freeze({ code: "RECOVERY_PREPARATION_DIRECTORY_UNAVAILABLE", path: "prepare.directory" }),
+  prepareFreeze: Object.freeze({ code: "RECOVERY_PREPARATION_FREEZE_ADOPTION_UNAVAILABLE", path: "prepare.freeze" }),
+  prepareHandoff: Object.freeze({ code: "RECOVERY_PREPARATION_HANDOFF_UNAVAILABLE", path: "prepare.handoff" }),
+  prepareRequest: Object.freeze({ code: "RECOVERY_PREPARATION_REQUEST_UNAVAILABLE", path: "prepare.request" }),
+  prepareOwnerSource: Object.freeze({ code: "RECOVERY_PREPARATION_OWNER_SOURCE_UNAVAILABLE", path: "prepare.owner_source" }),
+  prepareQuarantine: Object.freeze({ code: "RECOVERY_PREPARATION_QUARANTINE_STATE_UNAVAILABLE", path: "prepare.quarantine" }),
+  prepareSource: Object.freeze({ code: "RECOVERY_PREPARATION_SOURCE_REVALIDATION_UNAVAILABLE", path: "prepare.source" }),
+  prepareRuntime: Object.freeze({ code: "RECOVERY_PREPARATION_RUNTIME_UNAVAILABLE", path: "prepare.runtime" }),
 });
 const PREPARATION_FAILURE_VALUES = Object.freeze(Object.values(RECOVERY_PREPARATION_FAILURES));
 const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = RECOVERY_PREPARATION_FAILURES.parentControlPlane;
@@ -3068,36 +3076,49 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner already exists");
     phase = "prepare";
     const worktree = inputs.binding.worktree;
-    canonicalOwnedDirectory(resolve(worktree, ".opencode"), "Recovery preparation project directory");
     const index = resolve(worktree, ".opencode/protected-runtime-index");
     directory = preparationDirectory(worktree);
-    if (recoveryAdmissionExists(directory)) throw new Error("Recovery preparation requires reconciliation of retained state");
-    for (const path of [index, dirname(directory)]) ownedDirectory(path);
-    ownedDirectory(directory, true);
-    freezeAdoption = adoptPreparationFreeze(index, directory, inputs.freeze);
+    preparationProbe("prepareDirectory", () => {
+      canonicalOwnedDirectory(resolve(worktree, ".opencode"), "Recovery preparation project directory");
+      if (recoveryAdmissionExists(directory)) throw new Error("Recovery preparation requires reconciliation of retained state");
+      for (const path of [index, dirname(directory)]) ownedDirectory(path);
+      ownedDirectory(directory, true);
+    });
+    freezeAdoption = preparationProbe("prepareFreeze", () => adoptPreparationFreeze(index, directory, inputs.freeze));
     if (freezeAdoption) undo.push({ requiresStoppedOwner: true, rollback: freezeAdoption.rollback });
-    const handoffBytes = Buffer.from(canonicalJson(inputs.capture.snapshot));
-    ownedFile(resolve(directory, "handoff.json"), handoffBytes);
-    const now = Date.now();
-    request = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
-      sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
-      parent: inputs.capture.snapshot.parent, ...(inputs.launch ? { launch: inputs.launch } : {}),
-      freeze: freezeAdoption?.evidence ?? null, quarantine: inputs.quarantine?.quarantine ?? null,
-      issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
-    ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(request)));
+    const handoffBytes = preparationProbe("prepareHandoff", () => {
+      const bytes = Buffer.from(canonicalJson(inputs.capture.snapshot));
+      ownedFile(resolve(directory, "handoff.json"), bytes);
+      return bytes;
+    });
+    request = preparationProbe("prepareRequest", () => {
+      const now = Date.now();
+      const value = { schemaVersion: 1, kind: "recovery-preparation", authorizesRestart: false, contract: inputs.contract,
+        sourceSha256: inputs.source.sha256, nonce: randomBytes(32).toString("base64url"), handoffSha256: sha256(handoffBytes),
+        parent: inputs.capture.snapshot.parent, ...(inputs.launch ? { launch: inputs.launch } : {}),
+        freeze: freezeAdoption?.evidence ?? null, quarantine: inputs.quarantine?.quarantine ?? null,
+        issuedAt: now, expiresAt: now + PREPARATION_LIFETIME_MS };
+      ownedFile(resolve(directory, "request.json"), Buffer.from(canonicalJson(value)));
+      return value;
+    });
     const stagedSource = resolve(directory, "owner.mjs");
-    ownedFile(stagedSource, inputs.source.bytes, true, 0o400);
-    validatePreparationFreezeArchive(worktree, directory, request.freeze);
-    validatePreparationQuarantine(inputs.quarantine);
-    const preparedCoordination = summarizeCoordinationOutboxState(index);
-    if (!preparationQuarantineMatches(preparedCoordination.outbox, inputs.quarantine)) {
-      throw new Error("Recovery preparation quarantine changed");
-    }
-    sourceHandle.revalidate();
-    const runtimePath = realpathSync(process.execPath);
-    const runtimeOwner = lstatSync(runtimePath).uid;
-    if (runtimeOwner !== 0 && runtimeOwner !== ownerUid()) throw new Error("Recovery preparation runtime owner is invalid");
-    const runtime = readTrustedRegularFile(runtimePath, "Recovery preparation runtime", { expectedOwner: runtimeOwner, executable: true });
+    preparationProbe("prepareOwnerSource", () => ownedFile(stagedSource, inputs.source.bytes, true, 0o400));
+    preparationProbe("prepareFreeze", () => validatePreparationFreezeArchive(worktree, directory, request.freeze));
+    const preparedCoordination = preparationProbe("prepareQuarantine", () => {
+      validatePreparationQuarantine(inputs.quarantine);
+      const coordination = summarizeCoordinationOutboxState(index);
+      if (!preparationQuarantineMatches(coordination.outbox, inputs.quarantine)) {
+        throw new Error("Recovery preparation quarantine changed");
+      }
+      return coordination;
+    });
+    preparationProbe("prepareSource", () => sourceHandle.revalidate());
+    const runtime = preparationProbe("prepareRuntime", () => {
+      const runtimePath = realpathSync(process.execPath);
+      const runtimeOwner = lstatSync(runtimePath).uid;
+      if (runtimeOwner !== 0 && runtimeOwner !== ownerUid()) throw new Error("Recovery preparation runtime owner is invalid");
+      return readTrustedRegularFile(runtimePath, "Recovery preparation runtime", { expectedOwner: runtimeOwner, executable: true });
+    });
     phase = "start";
     startAttempted = true;
     startUncertain = true;

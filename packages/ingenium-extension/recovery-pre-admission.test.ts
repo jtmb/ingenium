@@ -1685,10 +1685,31 @@ describe("fixed recovery preparation transaction", () => {
     const f = preparationFixture();
     mkdirSync(f.directory, { recursive: true, mode: 0o700 });
     json(join(f.directory, "foreign.json"), { preserve: true });
-    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK" });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK",
+      failure: shim.RECOVERY_PREPARATION_FAILURES.prepareDirectory });
     expect(readdirSync(f.directory)).toEqual(["foreign.json"]);
     expect(f.run.mock.calls.every(([command]) => command === "/usr/bin/systemctl")).toBe(true);
     await expect(shim.runRecoveryPreparation(["node", "script", "payload"], f.dependencies)).rejects.toThrow("no arguments");
+  });
+
+  it("reports fixed content-free preparation substages and rolls back owned evidence", async () => {
+    const handoff = preparationFixture();
+    const capture = await handoff.capture();
+    capture.snapshot.loop = capture.snapshot;
+    handoff.collectInputs.mockResolvedValue({ binding, capture, source: handoff.source, quarantine: null,
+      contract: shim.prepareRecoveryOwnerContract(binding, head) });
+    const handoffFailure = await handoff.prepare().then(() => null, (error: unknown) => error);
+    expect(handoffFailure).toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK",
+      failure: shim.RECOVERY_PREPARATION_FAILURES.prepareHandoff });
+    expect(existsSync(handoff.directory)).toBe(false);
+
+    const source = preparationFixture();
+    source.sourceHandle.revalidate.mockImplementation(() => { throw new Error("private source path"); });
+    const sourceFailure = await source.prepare().then(() => null, (error: unknown) => error);
+    expect(sourceFailure).toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK",
+      failure: shim.RECOVERY_PREPARATION_FAILURES.prepareSource });
+    expect(JSON.stringify(shim.recoveryPreparationFailureOutput(sourceFailure))).not.toContain("private source path");
+    expect(existsSync(source.directory)).toBe(false);
   });
 
   it("runs the passive owner loop with a reserved fence and exits cooperatively on rollback without touching restart state", async () => {
@@ -1883,7 +1904,7 @@ describe("fixed recovery preparation transaction", () => {
     expect(existsSync(join(root, ".opencode/protected-runtime-index"))).toBe(false);
   });
 
-  it("preserves only allowlisted inspect failures and never serializes private causes", () => {
+  it("preserves only allowlisted failures and never serializes private causes", () => {
     for (const failure of Object.values(shim.RECOVERY_PREPARATION_FAILURES)) {
       expect(shim.recoveryPreparationFailureOutput({ phase: "inspect", failure })).toMatchObject({ failure });
     }
@@ -2224,7 +2245,8 @@ describe("preparation overflow quarantine", () => {
 
     const result = f.preparation.prepare();
     if (state === "exact") await expect(result).resolves.toMatchObject({ status: "prepared" });
-    else await expect(result).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "prepare" });
+    else await expect(result).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK", phase: "prepare",
+      failure: shim.RECOVERY_PREPARATION_FAILURES.prepareQuarantine });
   });
 
   it.each(["count", "hash", "key"])("rejects %s drift and rolls back only owned preparation", async (drift) => {
