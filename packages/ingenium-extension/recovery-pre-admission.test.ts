@@ -1131,9 +1131,9 @@ describe("recovery preparation coordination freeze", () => {
     await f.prepare();
 
     const request = JSON.parse(readFileSync(join(f.directory, "request.json"), "utf8"));
-    const inspect = f.ownerOptions.inspect as (pid: number) => any;
+    const inspect = f.ownerOptions.inspect as (pid?: number) => any;
     let recreated = false;
-    f.ownerOptions.inspect = (pid: number) => {
+    f.ownerOptions.inspect = (pid?: number) => {
       const value = inspect(pid);
       if (!recreated && pid === 101) {
         writeFileSync(lockPath, lockBytes, { mode: 0o600 });
