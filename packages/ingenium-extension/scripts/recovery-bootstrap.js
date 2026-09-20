@@ -2560,10 +2560,26 @@ export async function collectPreparationInputs(sourceHandle, options = {}) {
   return { binding, capture, freeze, quarantine, source, git: gitSummary, deployment, installedBuild, launch, contract };
 }
 
-export function recoveryPreflightFailureOutput() {
+export function recoveryPreflightFailureOutput(error) {
+  const failure = recoveryPreparationFailureDetail(error, "source");
   return { schemaVersion: 1, action: "recovery-preflight", status: "rejected", admissible: false,
+    failures: [failure.path], failure,
     mutationFree: true, authorizesRestart: false, session: null, binding: null, source: null, deployment: null,
     launcher: null, freeze: freezeEvidence("clear"), quarantine: null, admission: { decision: "reject", nextOperation: null } };
+}
+
+export async function runRecoveryPreflightCli(sourcePath, dependencies = {}) {
+  const writeOutput = dependencies.writeOutput ?? ((value) => process.stdout.write(value));
+  const writeError = dependencies.writeError ?? ((value) => process.stderr.write(value));
+  try {
+    writeOutput(`${canonicalJson(await (dependencies.run ?? runRecoveryPreflight)([process.execPath, sourcePath]))}\n`);
+    return 0;
+  } catch (error) {
+    const output = `${canonicalJson(recoveryPreflightFailureOutput(error))}\n`;
+    writeOutput(output);
+    writeError(output);
+    return 1;
+  }
 }
 
 export async function runRecoveryPreflight(argv = process.argv, dependencies = {}) {
@@ -2588,6 +2604,7 @@ export async function runRecoveryPreflight(argv = process.argv, dependencies = {
       action: "recovery-preflight",
       status: admissible ? "admitted" : "rejected",
       admissible,
+      failures: [],
       mutationFree: true,
       authorizesRestart: false,
       session: {
@@ -4915,12 +4932,7 @@ if (PREFLIGHT_REQUESTED !== undefined) {
   if (!MODULE_ATTESTATION || invokedPath !== undefined || PREFLIGHT_REQUESTED !== "1" || PREPARATION_REQUESTED !== undefined) {
     throw new Error("Recovery preflight invocation is invalid");
   }
-  try {
-    console.log(canonicalJson(await runRecoveryPreflight([process.execPath, MODULE_ATTESTATION.sourcePath])));
-  } catch {
-    console.error(canonicalJson(recoveryPreflightFailureOutput()));
-    process.exitCode = 1;
-  }
+  process.exitCode = await runRecoveryPreflightCli(MODULE_ATTESTATION.sourcePath);
 } else if (MODULE_ATTESTATION && PREPARATION_REQUESTED !== undefined) {
   if (PREPARATION_REQUESTED !== "1") throw new Error("Recovery preparation invocation is invalid");
   try {

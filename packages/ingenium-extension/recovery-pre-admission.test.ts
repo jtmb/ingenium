@@ -311,6 +311,34 @@ describe("recovery preflight repository-data trust", () => {
     verified.close();
   });
 
+  it("emits a bounded structured preflight failure on stdout without exposing the underlying error", async () => {
+    const failure = Object.assign(new Error("private failure detail"), {
+      code: "RECOVERY_PREPARATION_API_HEALTH_UNAVAILABLE",
+      failurePath: "inspect.api_health",
+    });
+    let stdout = "";
+    let stderr = "";
+
+    expect(await shim.runRecoveryPreflightCli("/reviewed/recovery-bootstrap.js", {
+      run: async () => { throw failure; },
+      writeOutput: (value: string) => { stdout += value; },
+      writeError: (value: string) => { stderr += value; },
+    })).toBe(1);
+
+    expect(JSON.parse(stdout)).toMatchObject({
+      action: "recovery-preflight",
+      status: "rejected",
+      admissible: false,
+      failures: ["inspect.api_health"],
+      failure: { code: failure.code, path: failure.failurePath },
+      mutationFree: true,
+      authorizesRestart: false,
+    });
+    expect(stderr).toBe(stdout);
+    expect(stdout).not.toContain(failure.message);
+    expect(Buffer.byteLength(stdout)).toBeLessThan(4096);
+  });
+
   it("runs exact attested preflight with bounded content-free output and byte-identical protected state", async () => {
     const f = fixture();
     const source = { head: f.head, path: join(root, "packages/ingenium-extension/scripts/recovery-bootstrap.js"),
