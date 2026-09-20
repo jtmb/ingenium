@@ -1971,6 +1971,8 @@ export function recoveryEnvironmentForBinding(binding, inherited = process.env) 
 const PREPARATION_JOB = "ingenium-recovery-owner.service";
 const PREPARATION_OWNER_ARGUMENT = "--recovery-preparation-owner";
 const PREPARATION_LIFETIME_MS = 15 * 60 * 1_000;
+const PREPARATION_MANAGED_PARENT_ATTEMPTS = 600;
+const PREPARATION_OWNER_ATTEST_ATTEMPTS = 650;
 const QUARANTINED_OVERFLOW_KEY = "098781a9c6484288bd5f9d9a0cba6b049d3c8a2f15b023b56d5ccc08237bafd0";
 const QUARANTINED_OVERFLOW_COUNT = 11_617;
 export const RECOVERY_PREPARATION_FAILURES = Object.freeze({
@@ -2005,6 +2007,7 @@ export const RECOVERY_PREPARATION_FAILURES = Object.freeze({
   prepareQuarantine: Object.freeze({ code: "RECOVERY_PREPARATION_QUARANTINE_STATE_UNAVAILABLE", path: "prepare.quarantine" }),
   prepareSource: Object.freeze({ code: "RECOVERY_PREPARATION_SOURCE_REVALIDATION_UNAVAILABLE", path: "prepare.source" }),
   prepareRuntime: Object.freeze({ code: "RECOVERY_PREPARATION_RUNTIME_UNAVAILABLE", path: "prepare.runtime" }),
+  reconcileRetained: Object.freeze({ code: "RECOVERY_PREPARATION_RETAINED_RECONCILIATION_UNAVAILABLE", path: "reconcile.retained" }),
 });
 const PREPARATION_FAILURE_VALUES = Object.freeze(Object.values(RECOVERY_PREPARATION_FAILURES));
 const PREPARATION_PARENT_CONTROL_PLANE_FAILURE = RECOVERY_PREPARATION_FAILURES.parentControlPlane;
@@ -2145,7 +2148,7 @@ function recoveryPreparationFailureDetail(error, phase) {
 }
 
 export function recoveryPreparationFailureOutput(error) {
-  const phase = ["inspect", "prepare", "start", "attest", "confirm"].includes(error?.phase) ? error.phase : "source";
+  const phase = ["inspect", "reconcile", "prepare", "start", "attest", "confirm"].includes(error?.phase) ? error.phase : "source";
   const failure = knownPreparationFailure(error)
     ?? { code: "RECOVERY_PREPARATION_INTERNAL_FAILURE", path: phase };
   return { action: "recovery-prepare", authorizesRestart: false,
@@ -2682,6 +2685,169 @@ function validPreparationRollback(path, request) {
   } catch { return false; }
 }
 
+function removeExactPreparationFile(path, expected, mode = 0o600) {
+  const before = lstatSync(path);
+  const bytes = readOnlyRegularFile(path, RECOVERY_SOURCE_MAX_BYTES, false, mode);
+  if (!bytes.equals(expected)) throw new Error("Recovery preparation retained file changed");
+  anchoredPreparationPath(path, (anchored) => {
+    const current = lstatSync(anchored);
+    if (!sourceIdentityMatches(before, current) || !bytes.equals(readFileSync(anchored))) {
+      throw new Error("Recovery preparation retained file changed");
+    }
+    unlinkSync(anchored);
+  });
+}
+
+function retainedFreezeMatches(file, expected) {
+  const lock = parsePreparationFreezeLock(file.bytes);
+  const observed = processStartTimeTicks(lock.pid);
+  return file.sha256 === expected.sha256 && lock.pid === expected.owner.pid
+    && lock.startTimeTicks === expected.owner.startTimeTicks && observed !== lock.startTimeTicks
+    && (observed === null || Number.isSafeInteger(observed) && observed >= 1);
+}
+
+function restoreRetainedPreparationFreeze(worktree, directory, expected) {
+  const index = resolve(worktree, ".opencode/protected-runtime-index");
+  const sourcePath = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+  const archivePath = preparationFreezeArchivePath(directory);
+  if (expected === null) {
+    if (!preparationFreezeSourceAbsent(sourcePath) || preparationFreezePathExists(archivePath)) {
+      throw new Error("Recovery preparation retained freeze changed");
+    }
+    return;
+  }
+  if (!validPreparationFreezeEvidence(expected, ["adopted"])) {
+    throw new Error("Recovery preparation retained freeze is invalid");
+  }
+  const sourcePresent = !preparationFreezeSourceAbsent(sourcePath);
+  const archivePresent = preparationFreezePathExists(archivePath);
+  if (!sourcePresent && archivePresent) {
+    const archived = readPreparationFreezeFile(archivePath);
+    if (!retainedFreezeMatches(archived, expected)) throw new Error("Recovery preparation retained freeze changed");
+    restorePreparationFreeze({ archivePath, plan: { sourcePath, archiveName: RECOVERY_PREPARATION_FREEZE_ARCHIVE,
+      bytes: archived.bytes, sha256: archived.sha256, identity: archived.identity, owner: expected.owner } });
+  } else if (sourcePresent && archivePresent) {
+    const source = readPreparationFreezeFile(sourcePath, 2);
+    const archive = readPreparationFreezeFile(archivePath, 2);
+    if (!retainedFreezeMatches(source, expected) || source.sha256 !== archive.sha256
+      || source.identity.dev !== archive.identity.dev || source.identity.ino !== archive.identity.ino) {
+      throw new Error("Recovery preparation retained freeze changed");
+    }
+    anchoredPreparationPath(archivePath, (anchored) => unlinkSync(anchored));
+  } else if (!sourcePresent || archivePresent || !retainedFreezeMatches(readPreparationFreezeFile(sourcePath), expected)) {
+    throw new Error("Recovery preparation retained freeze changed");
+  }
+  if (!retainedFreezeMatches(readPreparationFreezeFile(sourcePath), expected)
+    || preparationFreezePathExists(archivePath)) throw new Error("Recovery preparation retained freeze changed");
+}
+
+function retainedReconciliationRecord(path, source) {
+  const bytes = readOnlyRegularFile(path, 16 * 1024, false, 0o600);
+  const value = JSON.parse(bytes);
+  if (!hasExactKeys(value, ["schemaVersion", "kind", "reconcilerSourceSha256", "retainedSourceSha256", "freeze", "files", "authorizesRestart"])
+    || value.schemaVersion !== 1 || value.kind !== "recovery-preparation-reconciliation"
+    || !HASH.test(value.reconcilerSourceSha256 ?? "") || !HASH.test(value.retainedSourceSha256 ?? "")
+    || !validPreparationSource(source) || !validPreparationFreezeEvidence(value.freeze, ["adopted"])
+    || !hasExactKeys(value.files, ["handoff.json", "owner.mjs", "request.json", "rollback.json"])
+    || !Object.values(value.files).every((hash) => HASH.test(hash ?? ""))
+    || value.retainedSourceSha256 !== value.files["owner.mjs"] || value.authorizesRestart !== false) {
+    throw new Error("Recovery preparation reconciliation record is invalid");
+  }
+  return { bytes, value };
+}
+
+function removeEmptyPreparationDirectory(directory) {
+  const identity = lstatSync(directory);
+  anchoredPreparationPath(directory, (anchored) => {
+    if (!directoryIdentityMatches(identity, lstatSync(anchored)) || readdirSync(anchored).length !== 0) {
+      throw new Error("Recovery preparation retained directory changed");
+    }
+    rmdirSync(anchored);
+  });
+}
+
+function finishRetainedPreparationReconciliation(worktree, directory, source, run) {
+  const markerPath = resolve(directory, "reconciliation.json");
+  const marker = retainedReconciliationRecord(markerPath, source);
+  const allowed = new Set(["handoff.json", "owner.mjs", "request.json", "rollback.json", "reconciliation.json"]);
+  if (readdirSync(directory).some((name) => !allowed.has(name))) throw new Error("Recovery preparation retained files are ambiguous");
+  if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+  restoreRetainedPreparationFreeze(worktree, directory, marker.value.freeze);
+  for (const [name, hash] of Object.entries(marker.value.files)) {
+    const path = resolve(directory, name);
+    if (!recoveryAdmissionExists(path)) continue;
+    const mode = name === "owner.mjs" ? 0o400 : 0o600;
+    const bytes = readOnlyRegularFile(path, RECOVERY_SOURCE_MAX_BYTES, false, mode);
+    if (sha256(bytes) !== hash) throw new Error("Recovery preparation retained file changed");
+  }
+  if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+  for (const name of ["owner.mjs", "handoff.json", "request.json", "rollback.json"]) {
+    const path = resolve(directory, name);
+    if (!recoveryAdmissionExists(path)) continue;
+    const mode = name === "owner.mjs" ? 0o400 : 0o600;
+    removeExactPreparationFile(path, readOnlyRegularFile(path, RECOVERY_SOURCE_MAX_BYTES, false, mode), mode);
+  }
+  removeExactPreparationFile(markerPath, marker.bytes);
+  removeEmptyPreparationDirectory(directory);
+}
+
+function reconcileRetainedPreparation(worktree, sourceHandle, run) {
+  const directory = preparationDirectory(worktree);
+  if (!recoveryAdmissionExists(directory)) return false;
+  privatePreparationDirectory(directory);
+  if (readdirSync(directory).length === 0) {
+    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+    removeEmptyPreparationDirectory(directory);
+    return true;
+  }
+  const source = sourceHandle.revalidate();
+  if (recoveryAdmissionExists(resolve(directory, "reconciliation.json"))) {
+    finishRetainedPreparationReconciliation(worktree, directory, source, run);
+    return true;
+  }
+  const nextMarkerPath = resolve(directory, "reconciliation.next");
+  if (recoveryAdmissionExists(nextMarkerPath)) {
+    const nextMarker = retainedReconciliationRecord(nextMarkerPath, source);
+    const allowed = new Set(["handoff.json", "owner.mjs", "request.json", "rollback.json", "reconciliation.next"]);
+    if (readdirSync(directory).some((name) => !allowed.has(name))) throw new Error("Recovery preparation retained files are ambiguous");
+    if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+    restoreRetainedPreparationFreeze(worktree, directory, nextMarker.value.freeze);
+    anchoredPreparationPath(nextMarkerPath, (anchored) => renameSync(anchored, resolve(dirname(anchored), "reconciliation.json")));
+    finishRetainedPreparationReconciliation(worktree, directory, source, run);
+    return true;
+  }
+  const retained = readPreparationRequest(worktree);
+  const request = retained.value;
+  if (recoveryAdmissionExists(resolve(directory, "owner-status.json"))
+    || recoveryAdmissionExists(resolve(directory, "owner-status.next"))
+    || !validPreparationRollback(resolve(directory, "rollback.json"), request)) {
+    throw new Error("Recovery preparation retained evidence is invalid");
+  }
+  const names = ["handoff.json", "owner.mjs", "request.json", "rollback.json"].sort();
+  const namesWithArchive = [...names, RECOVERY_PREPARATION_FREEZE_ARCHIVE].sort();
+  const actualNames = readdirSync(directory).sort();
+  if (!(canonicalJson(actualNames) === canonicalJson(names)
+      || request.freeze && canonicalJson(actualNames) === canonicalJson(namesWithArchive))
+    || !absentPreparationJob(inspectPreparationJob(run))) {
+    throw new Error("Recovery preparation retained files are ambiguous");
+  }
+  const owner = readTrustedRegularFile(resolve(directory, "owner.mjs"), "Recovery preparation retained owner", { expectedMode: 0o400 });
+  const rollback = readOnlyRegularFile(resolve(directory, "rollback.json"), 16 * 1024, false, 0o600);
+  if (owner.sha256 !== request.sourceSha256) throw new Error("Recovery preparation retained owner changed");
+  restoreRetainedPreparationFreeze(worktree, directory, request.freeze);
+  if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner still exists");
+  const marker = Buffer.from(canonicalJson({ schemaVersion: 1, kind: "recovery-preparation-reconciliation",
+    reconcilerSourceSha256: source.sha256, retainedSourceSha256: request.sourceSha256, freeze: request.freeze, files: {
+      "handoff.json": request.handoffSha256, "owner.mjs": owner.sha256,
+      "request.json": sha256(retained.bytes), "rollback.json": sha256(rollback),
+    }, authorizesRestart: false }));
+  writePreparationFile(nextMarkerPath, marker);
+  retainedReconciliationRecord(nextMarkerPath, source);
+  anchoredPreparationPath(nextMarkerPath, (anchored) => renameSync(anchored, resolve(dirname(anchored), "reconciliation.json")));
+  finishRetainedPreparationReconciliation(worktree, directory, source, run);
+  return true;
+}
+
 function directProcessChildren(pid) {
   try {
     const value = readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim();
@@ -2822,7 +2988,7 @@ export async function startPreparedManagedParent(request, dependencies = {}) {
   child.once?.("error", (error) => { spawnError = error; });
   const wait = dependencies.wait ?? (() => new Promise((done) => setTimeout(done, 100)));
   let managed;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  for (let attempt = 0; attempt < PREPARATION_MANAGED_PARENT_ATTEMPTS; attempt += 1) {
     if (spawnError) break;
     managed = inspectManagedParent(request, launch, child, authentication, dependencies);
     if (managed) {
@@ -3072,6 +3238,12 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     });
   };
   try {
+    const sourceWorktree = resolve(dirname(sourceHandle.source.path), "../../..");
+    if (recoveryAdmissionExists(preparationDirectory(sourceWorktree))) {
+      phase = "reconcile";
+      preparationProbe("reconcileRetained", () => reconcileRetainedPreparation(sourceWorktree, sourceHandle, run));
+      phase = "inspect";
+    }
     const inputs = await (dependencies.collectInputs ?? collectPreparationInputs)(sourceHandle);
     if (!absentPreparationJob(inspectPreparationJob(run))) throw new Error("Recovery preparation owner already exists");
     phase = "prepare";
@@ -3135,7 +3307,7 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     startConfirmed = true;
     phase = "attest";
     let evidence;
-    for (let attempt = 0; attempt < 50; attempt += 1) {
+    for (let attempt = 0; attempt < PREPARATION_OWNER_ATTEST_ATTEMPTS; attempt += 1) {
       evidence = (dependencies.inspectOwner ?? inspectPreparedRecoveryOwner)(request, { run });
       if (evidence) break;
       await wait();
@@ -3163,7 +3335,7 @@ export async function runRecoveryPreparation(argv = process.argv, dependencies =
     return { schemaVersion: 1, action: "recovery-prepare", authorizesRestart: false, status: "prepared", owner: evidence,
       freeze: request.freeze, quarantine: inputs.quarantine?.quarantine ?? null };
   } catch (cause) {
-    let reconciled = true;
+    let reconciled = phase !== "reconcile";
     if (startAttempted && (startConfirmed || startUncertain)) {
       // The manager may have accepted a timed-out start. A durable stop request also covers a late owner.
       try {

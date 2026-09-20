@@ -1519,10 +1519,12 @@ describe("fixed recovery preparation transaction", () => {
         INGENIUM_RECOVERY_PREPARATION_NONCE: request.nonce,
         INGENIUM_RECOVERY_OWNER_PID: "202", INGENIUM_RECOVERY_OWNER_START_TICKS: "22" };
     const health = vi.fn(async () => new Response(JSON.stringify({ healthy: true, version: "1.0.0" })));
+    const wait = vi.fn(async () => {});
     const dependencies = { spawn, inspect, environment: processEnvironment, children: () => [203],
-      listeningPorts: () => ownsListener ? [4099] : [], request: health, wait: async () => {} };
+      listeningPorts: () => ownsListener ? [4099] : [], request: health, wait };
 
     await expect(shim.startPreparedManagedParent(request, dependencies)).rejects.toThrow("did not become healthy");
+    expect(wait).toHaveBeenCalledTimes(600);
     expect(health).not.toHaveBeenCalled();
     expect(existsSync(join(launch.dataHome, ".ingenium-recovery-server-auth.json"))).toBe(false);
 
@@ -1696,12 +1698,57 @@ describe("fixed recovery preparation transaction", () => {
     expect(new Set(f.run.mock.calls.map(([command]) => command))).toEqual(new Set(["/usr/bin/systemctl", "/usr/bin/systemd-run"]));
   });
 
+  it("reconciles an absent retained owner exactly once before a fresh preparation", async () => {
+    const f = preparationFixture();
+    const index = join(root, ".opencode/protected-runtime-index");
+    mkdirSync(index, { mode: 0o700 });
+    const lock = { schemaVersion: 1, pid: 99999999, startTimeTicks: 7, nonce: "88888888-8888-4888-8888-888888888888" };
+    const lockBytes = Buffer.from(`${JSON.stringify(lock)}\n`);
+    const lockPath = join(index, "coordination-outbox-mutation.lock");
+    writeFileSync(lockPath, lockBytes, { mode: 0o600 });
+    const plan = shim.planPreparationFreeze(index, { processStartTimeTicks: () => null });
+    let captures = 0;
+    f.collectInputs.mockImplementation(async () => {
+      captures += 1;
+      if (captures === 2) expect(readFileSync(lockPath)).toEqual(lockBytes);
+      return { binding, capture: await f.capture(), source: f.source, freeze: plan, quarantine: null,
+        contract: shim.prepareRecoveryOwnerContract(binding, head) };
+    });
+    const normal = f.run.getMockImplementation()!;
+    let starts = 0;
+    f.run.mockImplementation((command, args, options) => {
+      if (command === "/usr/bin/systemd-run" && starts++ === 0) throw new Error("uncertain manager transport");
+      return normal(command, args, options);
+    });
+
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED" });
+    expect(existsSync(lockPath)).toBe(false);
+    expect(existsSync(join(f.directory, "rollback.json"))).toBe(true);
+    renameSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"), lockPath);
+
+    await expect(f.prepare()).resolves.toMatchObject({ status: "prepared", authorizesRestart: false });
+    expect(starts).toBe(2);
+    expect(captures).toBe(3);
+    expect(existsSync(join(f.directory, "rollback.json"))).toBe(false);
+    expect(readFileSync(join(f.directory, "coordination-outbox-mutation.lock.adopted"))).toEqual(lockBytes);
+  });
+
+  it("waits beyond the managed-parent startup window for first owner attestation", async () => {
+    const f = preparationFixture();
+    const inspect = f.inspectOwner.getMockImplementation()!;
+    let attempts = 0;
+    f.inspectOwner.mockImplementation((request) => ++attempts <= 50 ? null : inspect(request));
+
+    await expect(f.prepare()).resolves.toMatchObject({ status: "prepared", authorizesRestart: false });
+    expect(attempts).toBe(52);
+  });
+
   it("rejects retained preparation and existing jobs without adopting or deleting them", async () => {
     const f = preparationFixture();
     mkdirSync(f.directory, { recursive: true, mode: 0o700 });
     json(join(f.directory, "foreign.json"), { preserve: true });
-    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_ROLLED_BACK",
-      failure: shim.RECOVERY_PREPARATION_FAILURES.prepareDirectory });
+    await expect(f.prepare()).rejects.toMatchObject({ code: "RECOVERY_PREPARATION_RECONCILIATION_REQUIRED",
+      failure: shim.RECOVERY_PREPARATION_FAILURES.reconcileRetained });
     expect(readdirSync(f.directory)).toEqual(["foreign.json"]);
     expect(f.run.mock.calls.every(([command]) => command === "/usr/bin/systemctl")).toBe(true);
     await expect(shim.runRecoveryPreparation(["node", "script", "payload"], f.dependencies)).rejects.toThrow("no arguments");
