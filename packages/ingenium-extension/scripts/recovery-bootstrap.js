@@ -95,6 +95,7 @@ export const RECOVERY_PREPARATION_FREEZE_SOURCE = "coordination-outbox-mutation.
 export const RECOVERY_PREPARATION_FREEZE_ARCHIVE = `${RECOVERY_PREPARATION_FREEZE_SOURCE}.adopted`;
 const LEGACY_SESSION_DISCOVERY_MAX_BYTES = 256 * 1024;
 const LEGACY_TODO_INPUT_MAX_BYTES = 48 * 1024;
+const LEGACY_TODO_MAX_ITEMS = 128;
 const SERVER_ADMISSION_KEYS = [
   "schema", "version", "action", "preflightDigest", "head", "parent", "project", "projectId",
   "worktreeId", "workspace", "storage", "worktree", "issuedAt", "expiresAt", "revision", "fence",
@@ -1530,7 +1531,7 @@ function parseOperationalList(value, maximum) {
 }
 
 export function parseLegacyRecoveryTodoInput(input, parent, binding, sourceHead, sessionId) {
-  if (!hasExactKeys(input, ["todos"]) || !Array.isArray(input.todos) || input.todos.length < 2 || input.todos.length > 64
+  if (!hasExactKeys(input, ["todos"]) || !Array.isArray(input.todos) || input.todos.length < 2 || input.todos.length > LEGACY_TODO_MAX_ITEMS
     || Buffer.byteLength(canonicalJson(input), "utf8") > LEGACY_TODO_INPUT_MAX_BYTES) {
     throw new Error("Recovery legacy Todo input is invalid");
   }
@@ -1600,7 +1601,7 @@ function validLegacyRecoveryTodoHandoff(value, sessionId) {
     && value.marker.sessionIdSha256 === sha256(sessionId)
     && typeof value.marker.bindingSha256 === "string" && HASH.test(value.marker.bindingSha256)
     && typeof value.marker.handoffSha256 === "string" && HASH.test(value.marker.handoffSha256)
-    && Array.isArray(value.todos) && value.todos.length >= 2 && value.todos.length <= 64
+    && Array.isArray(value.todos) && value.todos.length >= 2 && value.todos.length <= LEGACY_TODO_MAX_ITEMS
     && value.todos.every((todo) => hasExactKeys(todo, ["idSha256", "status"])
       && HASH.test(todo.idSha256 ?? "") && ["pending", "in_progress", "completed", "cancelled"].includes(todo.status))
     && new Set(value.todos.map((todo) => todo.idSha256)).size === value.todos.length

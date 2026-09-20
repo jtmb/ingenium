@@ -1,5 +1,5 @@
 import { Router, type Response } from "express";
-import { authorization, mcpToolStates } from "ingenium-core";
+import { authorization, mcpToolStates, mcpUsefulnessReport } from "ingenium-core";
 import {
   buildMcpUsefulnessReport,
   createMcpUsefulnessCollector,
@@ -17,7 +17,7 @@ export interface McpToolsRouterOptions {
   usefulnessCollector?: McpUsefulnessReportCollector;
 }
 
-const REPORT_MAX_BYTES = 64 * 1024;
+const REPORT_MAX_BYTES = 2 * mcpUsefulnessReport.MCP_TOOL_USEFULNESS_MAX_JSON_BYTES;
 const REPORT_QUERY_KEYS = new Set(["project", "q", "category", "enabled", "boundary", "visibility", "invocation"]);
 interface ReportFilters {
   q?: string;

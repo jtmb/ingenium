@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpToolStates, projects, resetDbForTest } from "ingenium-core";
+import { childMcpServers, mcpToolStates, projects, resetDbForTest } from "ingenium-core";
 import {
   createFixtureMcpUsefulnessCollector,
   type McpUsefulnessConnection,
@@ -221,6 +221,30 @@ describe("MCP usefulness report route", () => {
     const empty = await report("&category=NoSuchCategory");
     const emptyBody = await empty.json();
     expect(emptyBody).toMatchObject({ project: projectAName, project_id: projectAId, total: 0, data: { tools: [] } });
+  });
+
+  it("returns a persisted Playwright-sized dynamic catalog between the core and route bounds", async () => {
+    childMcpServers.createPlaywrightChildMcpServer(projectAId);
+    childMcpServers.recordChildMcpDiscovery(projectAId, "playwright", {
+      status: "ready",
+      tools: Array.from({ length: 30 }, (_, index) => ({
+        name: `browser_action_${String(index).padStart(2, "0")}_${"x".repeat(44)}`,
+        description: `Playwright browser action ${index}`,
+        input_schema: { type: "object", properties: {} },
+      })),
+    });
+    resetDbForTest();
+
+    const response = await report("");
+    const body = await response.json();
+    const serializedBytes = Buffer.byteLength(JSON.stringify(body), "utf8");
+    const dynamicTools = body.data.tools.filter((entry: { category: string }) => entry.category === "Child MCP / playwright");
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(body.data.tools.length);
+    expect(dynamicTools).toHaveLength(30);
+    expect(serializedBytes).toBeGreaterThan(64 * 1024);
+    expect(serializedBytes).toBeLessThanOrEqual(128 * 1024);
   });
 
   it("rejects unknown, invalid, and oversized report queries with fixed statuses", async () => {

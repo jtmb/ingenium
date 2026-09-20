@@ -783,6 +783,36 @@ describe("legacy pre-admission capture", () => {
       .toThrow("Recovery legacy binding marker does not match");
   });
 
+  it("accepts unique exact-marker payloads through 128 items without retaining Todo content", () => {
+    const f = legacyFixture();
+    const todos = strictLegacyTodos(f.parent);
+    todos.push(...Array.from({ length: 125 }, (_, index) => ({
+      content: `legacy continuation ${index}`,
+      status: "pending",
+      priority: "low",
+    })));
+
+    const captured = shim.parseLegacyRecoveryTodoInput({ todos }, f.parent, binding, head, "ses_exact");
+
+    expect(captured?.todos).toHaveLength(128);
+    expect(JSON.stringify(captured)).not.toContain("legacy continuation");
+    expect(JSON.stringify(captured)).not.toContain('"content"');
+    expect(new Set(captured?.todos.map((todo: { idSha256: string }) => todo.idSha256)).size).toBe(128);
+  });
+
+  it("rejects a 129-item exact-marker payload before parsing or retaining it", () => {
+    const f = legacyFixture();
+    const todos = strictLegacyTodos(f.parent);
+    todos.push(...Array.from({ length: 126 }, (_, index) => ({
+      content: `legacy overflow ${index}`,
+      status: "pending",
+      priority: "low",
+    })));
+
+    expect(() => shim.parseLegacyRecoveryTodoInput({ todos }, f.parent, binding, head, "ses_exact"))
+      .toThrow("Recovery legacy Todo input is invalid");
+  });
+
   it.each(["wrong pid", "wrong start", "wrong source", "wrong project ID", "wrong workspace", "wrong worktree", "wrong storage",
     "unsafe path", "missing marker", "session mismatch", "known parent mismatch", "duplicate marker", "unexpected marker field",
     "unexpected Todo field", "zero matches", "child", "foreign directory", "multiple matches", "candidate overflow",
