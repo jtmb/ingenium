@@ -12,3 +12,11 @@ export { OnboardingSyncPlugin } from "./onboarding-sync.js";
 
 /** Unified bidirectional sync engine for skills, agents, plugins, commands, and config between API and disk. */
 export { ResourceSyncPlugin } from "./resource-sync.js";
+
+/** Uploads visible context and metadata-only usage for external OpenCode sessions. */
+export { LifecyclePlugin } from "./lifecycle.js";
+
+export { readCurrentParentRecoveryCandidate, type CurrentParentRecoveryRecord } from "./tui-recovery.js";
+
+/** Builds bounded, untrusted explicit-memory context for fresh authorized turns. */
+export { buildExplicitMemoryContext, ExplicitMemoryContextReader } from "./explicit-memory.js";

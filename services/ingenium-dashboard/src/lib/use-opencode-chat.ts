@@ -1,8 +1,18 @@
 "use client";
 
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
-import { opencode, type OpenCodePart, type FilePart, type ToolPart, type OpenCodePromptParams } from "./opencode";
-import { getApiBase } from "./api";
+import {
+  normalizeOpenCodePermissionRequests,
+  normalizeOpenCodeQuestions,
+  type OpenCodePart,
+  type FilePart,
+  type ToolPart,
+  type OpenCodePromptParams,
+  type OpenCodeQuestion,
+} from "./opencode";
+import { api, ApiError } from "./api";
+import { useOpenCodeClient } from "./RuntimeContext";
+import type { ChatGrounding } from "./chat-grounding";
 import type {
   QuestionItem as ChatQuestionItem,
   QuestionOption,
@@ -15,11 +25,24 @@ export interface SendOptions {
   variant?: string;
   system?: string;
   tools?: Record<string, boolean>;
+  /** Local-only display/retry metadata; never forwarded to OpenCode. */
+  grounding?: ChatGrounding;
 }
 
-/* ------------------------------------------------------------------ */
-/*  State & types                                                     */
-/* ------------------------------------------------------------------ */
+export interface ChatPersistenceScope {
+  project: string;
+  runtimeId: string | null;
+  title: string;
+}
+
+function chatScopeKey(
+  sessionId: string | null,
+  project: string | undefined,
+  runtimeId: string | null | undefined,
+): string | null {
+  if (!sessionId) return null;
+  return `${project ?? "unscoped"}\0${runtimeId === undefined ? "unbound" : runtimeId ?? "compatibility"}\0${sessionId}`;
+}
 
 export interface ChatMessage {
   id: string;
@@ -28,6 +51,8 @@ export interface ChatMessage {
   parts: OpenCodePart[];
   reasoning?: string;  // separate reasoning content from thinking parts
   model?: { providerID: string; modelID: string };  // from message.updated info
+  /** Per-send project context metadata, retained only in the active UI state. */
+  grounding?: ChatGrounding;
   timestamp: number;
   isStreaming?: boolean;
 }
@@ -41,6 +66,7 @@ interface OpenCodeApiMessage {
     time: { created: number; completed?: number };
     modelID?: string;
     providerID?: string;
+    model?: { providerID?: string; modelID?: string };
     finish?: string;
     parentID?: string;
     mode?: string;
@@ -67,6 +93,16 @@ interface OpenCodeApiMessage {
     reason?: string;
     tokens?: unknown;
     cost?: number;
+    tool?: string;
+    callID?: string;
+    state?: unknown;
+    mime?: string;
+    url?: string;
+    filename?: string;
+    size?: number;
+    data?: string;
+    dataUrl?: string;
+    content?: string;
   }>;
 }
 
@@ -112,11 +148,9 @@ interface ChatState {
   partTypes: Record<string, StreamTextPartType>;
   /** The assistant message currently owned by the active SSE turn. */
   activeAssistantMessageId?: string;
+  /** Proven optimistic-to-authoritative user ID aliases for delayed events. */
+  userMessageAliases: Record<string, string>;
 }
-
-/* ------------------------------------------------------------------ */
-/*  Permission types                                                  */
-/* ------------------------------------------------------------------ */
 
 /** A pending permission request from the OpenCode API. */
 export interface PermissionRequest {
@@ -128,17 +162,18 @@ export interface PermissionRequest {
 
 /** Permission polling result stored alongside chat state. */
 interface PermissionState {
+  scopeKey: string | null;
   requests: PermissionRequest[];
   replied: Set<string>;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Reducer actions                                                   */
-/* ------------------------------------------------------------------ */
-
 type ChatAction =
   | { type: "LOAD_MESSAGES"; messages: ChatMessage[] }
-  | { type: "RECONCILE_MESSAGES"; messages: ChatMessage[] }
+  | {
+      type: "RECONCILE_MESSAGES";
+      messages: ChatMessage[];
+    }
+  | { type: "CORRELATE_USER_MESSAGE"; optimisticId: string; authoritativeId: string }
   | { type: "ADD_USER_MESSAGE"; message: ChatMessage }
   | {
       type: "ACCUMULATE_DELTA";
@@ -163,13 +198,25 @@ type ChatAction =
   | { type: "FINALIZE_STREAMING" }
   | { type: "CLEAR" };
 
-/* ------------------------------------------------------------------ */
-/*  Reducer                                                           */
-/* ------------------------------------------------------------------ */
-
 /** Build a stable key for accumulator lookups. */
 function partKey(messageID: string, partID: string): string {
   return `${messageID}::${partID}`;
+}
+
+let lastMessageTimestamp = 0;
+let messageCounter = 0;
+
+function createMessageId(): string {
+  const timestamp = Date.now();
+  messageCounter = timestamp === lastMessageTimestamp ? messageCounter + 1 : 0;
+  lastMessageTimestamp = timestamp;
+  const encodedTime = (BigInt(timestamp) * 0x1000n + BigInt(messageCounter))
+    .toString(16)
+    .padStart(12, "0")
+    .slice(-12);
+  const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const random = crypto.getRandomValues(new Uint8Array(14));
+  return `msg_${encodedTime}${Array.from(random, (value) => alphabet[value % alphabet.length]).join("")}`;
 }
 
 function streamTextPartType(part: OpenCodePart): StreamTextPartType | undefined {
@@ -214,6 +261,20 @@ function extractReasoning(parts: OpenCodePart[]): string | undefined {
   return texts.length > 0 ? texts.join("\n\n") : undefined;
 }
 
+function isSuccessfulAssistantFinish(finish: string | undefined): boolean {
+  return finish === "stop";
+}
+
+function aliasedMessage(message: ChatMessage, aliases: Record<string, string>): ChatMessage {
+  const id = aliases[message.id] ?? message.id;
+  if (id === message.id) return message;
+  return {
+    ...message,
+    id,
+    parts: message.parts.map((part) => ({ ...part, messageID: id })),
+  };
+}
+
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "LOAD_MESSAGES":
@@ -227,10 +288,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       };
 
     case "RECONCILE_MESSAGES": {
+      const incoming = action.messages.map((message) => aliasedMessage(message, state.userMessageAliases));
       const refreshedById = new Map(
-        action.messages.map((message) => [message.id, message]),
+        incoming.map((message) => [message.id, message]),
       );
-      const reconciled = state.messages.map((message) => {
+      const reconciled = state.messages.map((message) => aliasedMessage(message, state.userMessageAliases)).map((message) => {
         const refreshed = refreshedById.get(message.id);
         // A completed fetch snapshot is not a terminal SSE signal. Preserve
         // event-backed parts for the active assistant turn until terminal.
@@ -240,29 +302,18 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ) {
           return message;
         }
-        return refreshed ?? message;
+        return refreshed
+          ? { ...refreshed, ...(message.grounding ? { grounding: message.grounding } : {}) }
+          : message;
       });
       const existingIds = new Set(reconciled.map((message) => message.id));
 
-      for (const message of action.messages) {
+      for (const message of incoming) {
         if (existingIds.has(message.id)) {
           continue;
         }
 
-        const matchingUserIndex =
-          message.role === "user"
-            ? reconciled.findIndex(
-                (existing) =>
-                  existing.role === "user" && existing.content === message.content,
-              )
-            : -1;
-
-        if (matchingUserIndex >= 0) {
-          // Replace the optimistic timestamp ID with authoritative metadata.
-          reconciled[matchingUserIndex] = message;
-        } else {
-          reconciled.push(message);
-        }
+        reconciled.push(message);
         existingIds.add(message.id);
       }
 
@@ -272,6 +323,29 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         partTypes: collectPartTypes(reconciled),
         isLoading: false,
       };
+    }
+
+    case "CORRELATE_USER_MESSAGE": {
+      if (action.optimisticId === action.authoritativeId) return state;
+      const userMessageAliases = {
+        ...state.userMessageAliases,
+        [action.optimisticId]: action.authoritativeId,
+      };
+      const optimisticIndex = state.messages.findIndex(({ id }) => id === action.optimisticId);
+      if (optimisticIndex < 0) return { ...state, userMessageAliases };
+      const optimistic = state.messages[optimisticIndex]!;
+      const authoritative = state.messages.find(({ id }) => id === action.authoritativeId);
+      const replacement = authoritative
+        ? { ...authoritative, ...(optimistic.grounding ? { grounding: optimistic.grounding } : {}) }
+        : {
+            ...optimistic,
+            id: action.authoritativeId,
+            parts: optimistic.parts.map((part) => ({ ...part, messageID: action.authoritativeId })),
+          };
+      const messages = state.messages.filter(({ id }) =>
+        id !== action.optimisticId && id !== action.authoritativeId);
+      messages.splice(optimisticIndex, 0, replacement);
+      return { ...state, messages, partTypes: collectPartTypes(messages), userMessageAliases };
     }
 
     case "ADD_USER_MESSAGE": {
@@ -288,7 +362,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const mappedType = state.partTypes[key];
       const target = msgs.find((m) => m.id === action.messageID);
 
-      // v1.18.3 deltas use field: "text" for both answer and reasoning.
+      // v1.18.9 deltas use field: "text" for both answer and reasoning.
       // Only a preceding part.updated record is authoritative about which one
       // the part is, so an unmapped delta must never fabricate reasoning.
       if (!target || mappedType !== action.partType) {
@@ -332,12 +406,16 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     }
 
     case "UPSERT_PART": {
+      const messageID = state.userMessageAliases[action.messageID] ?? action.messageID;
+      const incomingPart = messageID === action.messageID
+        ? action.part
+        : { ...action.part, messageID } as OpenCodePart;
       const msgs = [...state.messages];
-      let target = msgs.find((m) => m.id === action.messageID);
+      let target = msgs.find((m) => m.id === messageID);
 
       if (!target) {
         target = {
-          id: action.messageID,
+          id: messageID,
           role: "assistant" as const,
           content: "",
           parts: [],
@@ -348,17 +426,17 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       }
 
       const idx = target.parts.findIndex(
-        (p) => "id" in p && p.id === action.part.id,
+        (p) => "id" in p && p.id === incomingPart.id,
       );
       const newParts = [...target.parts];
       if (idx >= 0) {
-        newParts[idx] = action.part;
+        newParts[idx] = incomingPart;
       } else {
-        newParts.push(action.part);
+        newParts.push(incomingPart);
       }
-      const partType = streamTextPartType(action.part);
+      const partType = streamTextPartType(incomingPart);
       const partTypes = { ...state.partTypes };
-      const key = partKey(action.messageID, action.part.id);
+      const key = partKey(messageID, incomingPart.id);
       if (partType) {
         partTypes[key] = partType;
       } else {
@@ -375,45 +453,46 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: msgs,
         partTypes,
-        activeAssistantMessageId: action.messageID,
+        activeAssistantMessageId: messageID,
       };
     }
 
     case "UPSERT_MESSAGE": {
+      const message = aliasedMessage(action.message, state.userMessageAliases);
       const msgs = [...state.messages];
-      const idx = msgs.findIndex((m) => m.id === action.message.id);
+      const idx = msgs.findIndex((m) => m.id === message.id);
       // message.updated can report completion before session.idle arrives.
       // The SSE lifecycle, not this intermediate snapshot, closes the turn.
       const isActiveAssistantMessage =
-        action.message.role === "assistant" &&
+        message.role === "assistant" &&
         (state.isStreaming ||
-          state.activeAssistantMessageId === action.message.id ||
+          state.activeAssistantMessageId === message.id ||
           msgs[idx]?.isStreaming === true);
       if (idx >= 0) {
         // 🔴 Merge metadata WITHOUT replacing accumulated parts
         const existing = msgs[idx]!;
         msgs[idx] = {
           ...existing,
-          model: action.message.model ?? existing.model,
+          model: message.model ?? existing.model,
           isStreaming: isActiveAssistantMessage
             ? true
-            : action.message.isStreaming ?? existing.isStreaming,
+            : message.isStreaming ?? existing.isStreaming,
           // Only update timestamp if the incoming one is more recent
-          timestamp: Math.max(existing.timestamp, action.message.timestamp),
+          timestamp: Math.max(existing.timestamp, message.timestamp),
         };
       } else {
         msgs.push({
-          ...action.message,
+          ...message,
           isStreaming: isActiveAssistantMessage
             ? true
-            : action.message.isStreaming,
+            : message.isStreaming,
         });
       }
       return {
         ...state,
         messages: msgs,
         activeAssistantMessageId: isActiveAssistantMessage
-          ? action.message.id
+          ? message.id
           : state.activeAssistantMessageId,
       };
     }
@@ -507,6 +586,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         streamActivity: "idle" as StreamActivity,
         partTypes: {},
         activeAssistantMessageId: undefined,
+        userMessageAliases: {},
       };
 
     default:
@@ -514,28 +594,23 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/*  SSE event types (verified v1.18.3 contract)                       */
-/* ------------------------------------------------------------------ */
-
 interface SSEEnvelope {
   id?: string;
   type: string;
   properties: Record<string, unknown>;
 }
 
-/* ------------------------------------------------------------------ */
-/*  ChatMessage normalization helpers                                 */
-/* ------------------------------------------------------------------ */
-
 function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
+  const rawRecord = raw as unknown as Record<string, unknown>;
   const base: Partial<OpenCodePart> = {
     id: raw.id,
     sessionID: raw.sessionID,
     messageID: raw.messageID,
     type: raw.type as OpenCodePart["type"],
     text: raw.text,
-    ...(raw.time?.start ? { time: { start: raw.time.start, end: raw.time.end } } : {}),
+    ...(raw.time?.start !== undefined || raw.time?.end !== undefined
+      ? { time: { start: raw.time.start, end: raw.time.end } }
+      : {}),
     ...(raw.snapshot ? { snapshot: raw.snapshot } : {}),
     ...(raw.reason ? { reason: raw.reason } : {}),
     ...(raw.tokens !== undefined ? { tokens: raw.tokens } : {}),
@@ -544,25 +619,51 @@ function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
 
   // 🔴 Preserve tool-specific fields
   if (raw.type === "tool") {
-    const toolRaw = raw as unknown as Record<string, unknown>;
     return {
       ...base,
-      tool: toolRaw.tool,
-      callID: toolRaw.callID,
-      state: toolRaw.state,
+      tool: rawRecord.tool,
+      callID: rawRecord.callID,
+      state: rawRecord.state,
     } as ToolPart;
   }
 
+  if (raw.type === "file") {
+    return {
+      ...base,
+      mime: typeof rawRecord.mime === "string" ? rawRecord.mime : "",
+      ...(typeof rawRecord.url === "string" ? { url: rawRecord.url } : {}),
+      ...(typeof rawRecord.filename === "string" ? { filename: rawRecord.filename } : {}),
+      ...(typeof rawRecord.size === "number" ? { size: rawRecord.size } : {}),
+      ...(typeof rawRecord.data === "string" ? { data: rawRecord.data } : {}),
+      ...(typeof rawRecord.dataUrl === "string" ? { dataUrl: rawRecord.dataUrl } : {}),
+      ...(typeof rawRecord.content === "string" ? { content: rawRecord.content } : {}),
+    } as FilePart;
+  }
+
   return base as OpenCodePart;
+}
+
+function normalizeModelInfo(info: {
+  providerID?: unknown;
+  modelID?: unknown;
+  model?: unknown;
+}): { providerID: string; modelID: string } | undefined {
+  if (typeof info.providerID === "string" && typeof info.modelID === "string") {
+    return { providerID: info.providerID, modelID: info.modelID };
+  }
+  const model = info.model;
+  if (typeof model !== "object" || model === null || Array.isArray(model)) return undefined;
+  const nested = model as { providerID?: unknown; modelID?: unknown };
+  return typeof nested.providerID === "string" && typeof nested.modelID === "string"
+    ? { providerID: nested.providerID, modelID: nested.modelID }
+    : undefined;
 }
 
 function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
   // Convert OpenCode parts to our part format
   const parts: OpenCodePart[] = raw.parts.map(normalizePart);
 
-  const model = raw.info.providerID && raw.info.modelID
-    ? { providerID: raw.info.providerID, modelID: raw.info.modelID }
-    : undefined;
+  const model = normalizeModelInfo(raw.info);
 
   return {
     id: raw.info.id,
@@ -581,11 +682,15 @@ function normalizeMessages(rawMessages: OpenCodeApiMessage[]): ChatMessage[] {
   return rawMessages.map(normalizeMessage);
 }
 
-/* ------------------------------------------------------------------ */
-/*  SSE connection state machine (fetch + ReadableStream)             */
-/* ------------------------------------------------------------------ */
-
-const API_URL = getApiBase();
+function toChatQuestion(question: OpenCodeQuestion): ChatQuestionItem {
+  return {
+    id: question.id,
+    question: question.question,
+    ...(question.header ? { header: question.header } : {}),
+    ...(question.options ? { options: question.options } : {}),
+    ...(question.multiple !== undefined ? { multiple: question.multiple } : {}),
+  };
+}
 
 interface SSEConnection {
   abortController: AbortController;
@@ -682,22 +787,23 @@ function yieldSSEEventRender(): Promise<void> {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/*  Hook                                                              */
-/* ------------------------------------------------------------------ */
-
 /**
  * React hook managing chat state with SSE streaming via fetch + ReadableStream.
  *
  * - Loads historical messages on sessionId change
  * - Opens SSE stream for real-time events after sending a prompt
- * - Parses v1.18.3 contract events: message.part.delta, message.part.updated,
+ * - Parses v1.18.9 contract events: message.part.delta, message.part.updated,
  *   message.updated, session.status, session.idle, session.diff, session.error
  * - Idempotent reducer using messageID + partID as stable keys
  * - Exponential backoff reconnection (1s, 2s, 4s, max 30s, 3 attempts)
  * - AbortController for cancellation on unmount
  */
-export function useOpenCodeChat(sessionId: string | null) {
+export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPersistenceScope) {
+  const opencode = useOpenCodeClient();
+  const persistenceProject = persistence?.project;
+  const persistenceRuntimeId = persistence?.runtimeId;
+  const persistenceTitle = persistence?.title;
+  const scopeKey = chatScopeKey(sessionId, persistenceProject, persistenceRuntimeId);
   const [state, dispatch] = useReducer(chatReducer, {
     messages: [],
     isStreaming: false,
@@ -707,15 +813,20 @@ export function useOpenCodeChat(sessionId: string | null) {
     questions: [],
     streamActivity: "idle" as StreamActivity,
     partTypes: {},
+    userMessageAliases: {},
   });
 
-  /* ---- Refs for SSE lifecycle ---- */
   const sseAbortRef = useRef<AbortController | null>(null);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const parserRef = useRef<SSEParser>(new SSEParser());
   const activeSessionRef = useRef<string | null>(null);
+  const activeScopeRef = useRef<string | null>(null);
+  const [loadedScopeKey, markLoadedScope] = useReducer(
+    (_current: string | null, next: string | null) => next,
+    null,
+  );
   // Deltas expose only a field name, not a semantic part type. This map is
   // populated exclusively from OpenCode's preceding message.part.updated.
   const streamPartTypesRef = useRef<Map<string, StreamTextPartType>>(new Map());
@@ -725,25 +836,48 @@ export function useOpenCodeChat(sessionId: string | null) {
   );
   // Store last send options for retry
   const lastSendOptionsRef = useRef<SendOptions | undefined>(undefined);
+  const pendingUserTurnsRef = useRef(new Map<string, {
+    scopeKey: string;
+    messageID: string;
+    authoritativeId?: string;
+    terminal: boolean;
+  }>());
+  const correlatedUserIdsRef = useRef(new Set<string>());
 
-  /* ---- Question polling state ---- */
   const questionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const contextLinkRef = useRef<{
+    key: string;
+    promise: Promise<{ id: string; revision: number }>;
+    current: { id: string; revision: number } | null;
+  } | null>(null);
+  const persistedTurnsRef = useRef(new Set<string>());
+  const persistingTurnsRef = useRef(new Map<string, Promise<void>>());
+  const persistenceQueuesRef = useRef(new Map<string, Promise<void>>());
 
-  /* ---- Permission state ---- */
   const [permissionState, setPermissionState] = useState<PermissionState>({
+    scopeKey: null,
     requests: [],
     replied: new Set(),
   });
   const permissionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* ---- Load messages on sessionId change ---- */
   useEffect(() => {
+    const pendingUserTurns = pendingUserTurnsRef.current;
+    const correlatedUserIds = correlatedUserIdsRef.current;
     // Track the active session for SSE filter
     activeSessionRef.current = sessionId;
+    activeScopeRef.current = scopeKey;
+    markLoadedScope(null);
+    seenEventIdsRef.current.clear();
+    parserRef.current = new SSEParser();
     streamPartTypesRef.current.clear();
+    lastSendPartsRef.current = null;
+    lastSendOptionsRef.current = undefined;
+    pendingUserTurnsRef.current.clear();
+    correlatedUserIdsRef.current.clear();
+    dispatch({ type: "CLEAR" });
 
-    if (!sessionId) {
-      dispatch({ type: "CLEAR" });
+    if (!sessionId || !scopeKey) {
       return;
     }
 
@@ -755,14 +889,16 @@ export function useOpenCodeChat(sessionId: string | null) {
         const rawMessages = (await opencode.sessions.messages(
           sessionId,
         )) as unknown as OpenCodeApiMessage[];
-        if (!cancelled) {
+        if (!cancelled && activeScopeRef.current === scopeKey) {
+          markLoadedScope(scopeKey);
           dispatch({
             type: "LOAD_MESSAGES",
             messages: normalizeMessages(rawMessages),
           });
         }
       } catch (err: unknown) {
-        if (!cancelled) {
+        if (!cancelled && activeScopeRef.current === scopeKey) {
+          markLoadedScope(scopeKey);
           dispatch({
             type: "SET_ERROR",
             error: err instanceof Error ? err.message : "Failed to load messages",
@@ -773,11 +909,162 @@ export function useOpenCodeChat(sessionId: string | null) {
 
     return () => {
       cancelled = true;
+      pendingUserTurns.clear();
+      correlatedUserIds.clear();
     };
-  }, [sessionId]);
+  }, [opencode, scopeKey, sessionId]);
 
-  /* ---- SSE connect with fetch + ReadableStream ---- */
+  const ensureContextLink = useCallback(async (refresh = false) => {
+    if (!sessionId || !persistenceProject || persistenceRuntimeId === undefined) return null;
+    const key = `${persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sessionId}`;
+    if (!refresh && contextLinkRef.current?.key === key) {
+      return contextLinkRef.current.current ?? contextLinkRef.current.promise;
+    }
+    const promise = api.context.chat.link({
+      runtimeId: persistenceRuntimeId,
+      sessionId,
+      title: persistenceTitle || "New conversation",
+    }, persistenceProject).then(({ data }) => ({ id: data.id, revision: data.revision }));
+    contextLinkRef.current = { key, promise, current: null };
+    try {
+      const linked = await promise;
+      if (contextLinkRef.current?.key === key) contextLinkRef.current.current = linked;
+      return linked;
+    } catch (error) {
+      if (contextLinkRef.current?.key === key) contextLinkRef.current = null;
+      throw error;
+    }
+  }, [persistenceProject, persistenceRuntimeId, persistenceTitle, sessionId]);
+
+  useEffect(() => {
+    if (!sessionId || !persistenceProject || persistenceRuntimeId === undefined) return;
+    const requestScope = scopeKey;
+    void ensureContextLink().catch(() => {
+      if (activeScopeRef.current !== requestScope) return;
+      dispatch({ type: "SET_TRANSIENT_ERROR", error: "Context checkpointing is unavailable for this conversation." });
+    });
+  }, [ensureContextLink, persistenceProject, persistenceRuntimeId, scopeKey, sessionId]);
+
+  const persistCompletedTurn = useCallback(async (sid: string): Promise<void> => {
+    if (!persistenceProject || persistenceRuntimeId === undefined || sid !== sessionId) return Promise.resolve();
+    try {
+      const rawMessages = await opencode.sessions.messages(sid) as unknown as OpenCodeApiMessage[];
+      let assistantIndex = -1;
+      for (let index = rawMessages.length - 1; index >= 0; index -= 1) {
+        const message = rawMessages[index]!;
+        if (message.info.role === "assistant") {
+          assistantIndex = index;
+          break;
+        }
+      }
+      if (assistantIndex < 1) return;
+      const assistant = rawMessages[assistantIndex]!;
+      if (!isSuccessfulAssistantFinish(assistant.info.finish)) return;
+      let user: OpenCodeApiMessage | undefined;
+      for (let index = assistantIndex - 1; index >= 0; index -= 1) {
+        if (rawMessages[index]!.info.role === "user") {
+          user = rawMessages[index];
+          break;
+        }
+      }
+      const content = (message: OpenCodeApiMessage) => message.parts
+        .filter((part) => part.type === "text" && typeof part.text === "string")
+        .map((part) => part.text!)
+        .join("\n\n")
+        .trim();
+      const userContent = user ? content(user) : "";
+      const assistantContent = content(assistant);
+      if (!user || !userContent || !assistantContent) return;
+      const sessionKey = `${persistenceProject}\0${persistenceRuntimeId ?? "compatibility"}\0${sid}`;
+      const turnKey = `${sessionKey}\0${assistant.info.id}`;
+      if (persistedTurnsRef.current.has(turnKey)) return;
+      const existing = persistingTurnsRef.current.get(turnKey);
+      if (existing) return existing;
+
+      const prior = persistenceQueuesRef.current.get(sessionKey) ?? Promise.resolve();
+      const operation = prior.then(async () => {
+        const persist = async (refresh: boolean) => {
+          const linked = await ensureContextLink(refresh);
+          if (!linked) return;
+          const response = await api.context.chat.persistTurn(linked.id, {
+            runtimeId: persistenceRuntimeId,
+            sessionId: sid,
+            userMessageId: user!.info.id,
+            assistantMessageId: assistant.info.id,
+            userContent,
+            assistantContent,
+            expectedRevision: linked.revision,
+          }, persistenceProject);
+          if (contextLinkRef.current?.current?.id === linked.id) {
+            contextLinkRef.current.current.revision = response.data.revision;
+          }
+        };
+        try {
+          await persist(false);
+        } catch (error) {
+          await persist(error instanceof ApiError && error.code === "REVISION_CONFLICT");
+        }
+        persistedTurnsRef.current.add(turnKey);
+      }).catch(() => {
+        if (activeScopeRef.current !== scopeKey) return;
+        dispatch({ type: "SET_TRANSIENT_ERROR", error: "The response completed, but its context checkpoint could not be saved." });
+      });
+      persistingTurnsRef.current.set(turnKey, operation);
+      persistenceQueuesRef.current.set(sessionKey, operation);
+      void operation.finally(() => {
+        if (persistingTurnsRef.current.get(turnKey) === operation) persistingTurnsRef.current.delete(turnKey);
+        if (persistenceQueuesRef.current.get(sessionKey) === operation) persistenceQueuesRef.current.delete(sessionKey);
+      });
+      return operation;
+    } catch {
+      if (activeScopeRef.current !== scopeKey) return;
+      dispatch({ type: "SET_TRANSIENT_ERROR", error: "The response completed, but its context checkpoint could not be saved." });
+    }
+  }, [ensureContextLink, opencode, persistenceProject, persistenceRuntimeId, scopeKey, sessionId]);
+
+  const correlatePendingUser = useCallback((authoritativeId: string, correlationScope: string): void => {
+    const correlationKey = `${correlationScope}\0${authoritativeId}`;
+    if (correlatedUserIdsRef.current.has(correlationKey)) return;
+    const turns = [...pendingUserTurnsRef.current.values()];
+    if (turns.some((turn) =>
+      turn.scopeKey === correlationScope && turn.authoritativeId === authoritativeId)) return;
+    const pending = pendingUserTurnsRef.current.get(authoritativeId)
+      ?? turns.reverse().find((turn) => turn.scopeKey === correlationScope && !turn.authoritativeId);
+    if (!pending || pending.scopeKey !== correlationScope) return;
+    pending.authoritativeId = authoritativeId;
+    dispatch({
+      type: "CORRELATE_USER_MESSAGE",
+      optimisticId: pending.messageID,
+      authoritativeId,
+    });
+    if (pending.terminal) {
+      correlatedUserIdsRef.current.add(correlationKey);
+      pendingUserTurnsRef.current.delete(pending.messageID);
+    }
+  }, []);
+
+  const correlateSnapshotUsers = useCallback((messages: OpenCodeApiMessage[], correlationScope: string): void => {
+    for (const message of messages) {
+      if (message.info.role === "assistant" && message.info.parentID) {
+        correlatePendingUser(message.info.parentID, correlationScope);
+      }
+    }
+  }, [correlatePendingUser]);
+
+  const markPendingTurnsTerminal = useCallback((correlationScope: string): void => {
+    for (const pending of pendingUserTurnsRef.current.values()) {
+      if (pending.scopeKey !== correlationScope) continue;
+      pending.terminal = true;
+      if (pending.authoritativeId) {
+        correlatedUserIdsRef.current.add(`${correlationScope}\0${pending.authoritativeId}`);
+        pendingUserTurnsRef.current.delete(pending.messageID);
+      }
+    }
+  }, []);
+
   const connectSSE = useCallback((sid: string) => {
+    if (!scopeKey) return () => undefined;
+    const connectionScope = scopeKey;
     // Abort any existing connection
     if (sseAbortRef.current) {
       sseAbortRef.current.abort();
@@ -791,7 +1078,7 @@ export function useOpenCodeChat(sessionId: string | null) {
     const abortController = new AbortController();
     sseAbortRef.current = abortController;
 
-    const streamUrl = `${API_URL}/opencode/sessions/${encodeURIComponent(sid)}/events`;
+    const streamUrl = opencode.events.url(sid);
     // Reset parser for fresh connection (preserves lastEventId for reconnect)
     parserRef.current.reset();
 
@@ -804,6 +1091,7 @@ export function useOpenCodeChat(sessionId: string | null) {
 
     fetch(streamUrl, { headers, signal: abortController.signal })
       .then(async (response) => {
+        if (activeScopeRef.current !== connectionScope) return;
         if (!response.ok) {
           const text = await response.text().catch(() => "");
           throw new Error(
@@ -830,13 +1118,13 @@ export function useOpenCodeChat(sessionId: string | null) {
 
             // Aborting a prior stream does not guarantee that an already
             // buffered read cannot resolve. Keep session filtering strict.
-            if (activeSessionRef.current !== sid) return;
+            if (activeScopeRef.current !== connectionScope) return;
 
             const chunk = decoder.decode(value, { stream: true });
             const events = parser.append(chunk);
 
             for (const evt of events) {
-              if (activeSessionRef.current !== sid) return;
+              if (activeScopeRef.current !== connectionScope) return;
 
               // Idempotency: skip already-seen events
               if (evt.id && seenEventIdsRef.current.has(evt.id)) {
@@ -860,7 +1148,7 @@ export function useOpenCodeChat(sessionId: string | null) {
               if (evt.type === "session.idle" || evt.type === "session.error") {
                 receivedTerminalEvent = true;
               }
-              dispatchSSEEvent(evt, sid);
+              dispatchSSEEvent(evt, sid, connectionScope);
 
               // Fetch streams are allowed to coalesce several provider events
               // into one read. Yielding between events lets incremental
@@ -870,7 +1158,8 @@ export function useOpenCodeChat(sessionId: string | null) {
             }
           }
 
-          if (!receivedTerminalEvent && activeSessionRef.current === sid) {
+          if (!receivedTerminalEvent && activeScopeRef.current === connectionScope) {
+            markPendingTurnsTerminal(connectionScope);
             dispatch({ type: "FINALIZE_STREAMING" });
             dispatch({
               type: "SET_ERROR",
@@ -882,7 +1171,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         await readStream();
       })
       .catch((err: unknown) => {
-        if (activeSessionRef.current !== sid) return;
+        if (activeScopeRef.current !== connectionScope) return;
         if (
           abortController.signal.aborted ||
           (err instanceof DOMException && err.name === "AbortError")
@@ -905,6 +1194,7 @@ export function useOpenCodeChat(sessionId: string | null) {
             connectSSE(sid);
           }, delay);
         } else {
+          markPendingTurnsTerminal(connectionScope);
           dispatch({ type: "FINALIZE_STREAMING" });
           dispatch({
             type: "SET_ERROR",
@@ -917,11 +1207,10 @@ export function useOpenCodeChat(sessionId: string | null) {
     return () => {
       abortController.abort();
     };
-  }, []);
+  }, [markPendingTurnsTerminal, opencode, persistCompletedTurn, scopeKey]);
 
-  /* ---- Dispatch SSE events to reducer ---- */
-  function dispatchSSEEvent(evt: SSEEnvelope, sid: string): void {
-    if (activeSessionRef.current !== sid) return;
+  function dispatchSSEEvent(evt: SSEEnvelope, sid: string, connectionScope: string): void {
+    if (activeScopeRef.current !== connectionScope || activeSessionRef.current !== sid) return;
 
     const props = evt.properties as Record<string, unknown>;
 
@@ -948,13 +1237,16 @@ export function useOpenCodeChat(sessionId: string | null) {
       }
 
       case "session.idle": {
+        markPendingTurnsTerminal(connectionScope);
         dispatch({ type: "SET_STATUS", status: "idle" });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "complete" });
         dispatch({ type: "FINALIZE_STREAMING" });
+        void persistCompletedTurn(sid);
         break;
       }
 
       case "session.error": {
+        markPendingTurnsTerminal(connectionScope);
         const err = props.error as
           | { message?: string }
           | string
@@ -996,7 +1288,7 @@ export function useOpenCodeChat(sessionId: string | null) {
             delta,
             partType,
           });
-          // field is always "text" in v1.18.3. The prior part.updated type,
+          // field is always "text" in v1.18.9. The prior part.updated type,
           // not the delta field, determines whether this is live reasoning.
           dispatch({
             type: "SET_STREAM_ACTIVITY",
@@ -1019,22 +1311,13 @@ export function useOpenCodeChat(sessionId: string | null) {
         } else {
           streamPartTypesRef.current.delete(mapKey);
         }
-        const normalizedPart: OpenCodePart = {
+        const normalizedPart = normalizePart({
+          ...part,
           id: part.id as string,
           sessionID,
           messageID,
           type: (part.type as OpenCodePart["type"]) ?? "text",
-          text: part.text as string | undefined,
-          ...(part.time
-            ? { time: part.time as { start?: number; end?: number } }
-            : {}),
-          ...(part.snapshot ? { snapshot: part.snapshot } : {}),
-          ...(part.reason ? { reason: part.reason } : {}),
-          ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
-          ...(part.tool ? { tool: part.tool } : {}),
-          ...(part.callID ? { callID: part.callID } : {}),
-          ...(part.state ? { state: part.state } : {}),
-        } as unknown as OpenCodePart;
+        } as unknown as OpenCodeApiMessage["parts"][number]);
 
         dispatch({
           type: "UPSERT_PART",
@@ -1074,10 +1357,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         const info = props.info as Record<string, unknown>;
         if (!info || !info.id) break;
         if (typeof info.sessionID === "string" && info.sessionID !== sid) break;
-        const modelInfo =
-          info.providerID && info.modelID
-            ? { providerID: info.providerID as string, modelID: info.modelID as string }
-            : undefined;
+        const modelInfo = normalizeModelInfo(info);
         const msg: ChatMessage = {
           id: info.id as string,
           role: (info.role as ChatMessage["role"]) ?? "assistant",
@@ -1091,32 +1371,59 @@ export function useOpenCodeChat(sessionId: string | null) {
             info.completed !== true &&
             (info.time as { completed?: number } | undefined)?.completed === undefined,
         };
+        if (msg.role === "assistant"
+          && typeof info.parentID === "string") {
+          correlatePendingUser(info.parentID, connectionScope);
+        }
         dispatch({ type: "UPSERT_MESSAGE", message: msg });
         break;
       }
 
+      case "question.asked":
+      case "question.v2.asked":
       case "session.question":
       case "message.question": {
-        // Dedicated question SSE event — extract question data
-        const qText =
-          (props.question as string) ||
-          (props.text as string) ||
-          "";
-        const qId =
-          (props.id as string) ||
-          (props.questionID as string) ||
-          `q-${Date.now()}`;
-        if (qText) {
-          dispatch({
-            type: "ADD_QUESTION",
-            question: {
-              id: qId,
-              question: qText,
-              options: (props.options as Array<{ label: string; description?: string }>) ?? undefined,
-              multiple: props.multiple as boolean | undefined,
-            },
-          });
-        }
+        const questions = normalizeOpenCodeQuestions([props]).map(toChatQuestion);
+        if (questions.length > 0) dispatch({ type: "ADD_QUESTIONS", questions });
+        break;
+      }
+
+      case "question.replied":
+      case "question.v2.replied":
+      case "question.rejected":
+      case "question.v2.rejected": {
+        dispatch({ type: "REMOVE_QUESTIONS" });
+        break;
+      }
+
+      case "permission.asked":
+      case "permission.v2.asked": {
+        const request = normalizeOpenCodePermissionRequests([props])[0];
+        if (!request) break;
+        setPermissionState((previous) => ({
+          scopeKey: connectionScope,
+          requests: [
+            ...(previous.scopeKey === connectionScope
+              ? previous.requests.filter(({ id }) => id !== request.id)
+              : []),
+            request,
+          ],
+          replied: previous.scopeKey === connectionScope ? previous.replied : new Set(),
+        }));
+        break;
+      }
+
+      case "permission.replied":
+      case "permission.v2.replied": {
+        const requestId = typeof props.requestID === "string"
+          ? props.requestID
+          : typeof props.id === "string" ? props.id : null;
+        if (!requestId) break;
+        setPermissionState((previous) => {
+          const replied = new Set(previous.scopeKey === connectionScope ? previous.replied : []);
+          replied.add(requestId);
+          return { ...previous, scopeKey: connectionScope, replied };
+        });
         break;
       }
 
@@ -1129,7 +1436,11 @@ export function useOpenCodeChat(sessionId: string | null) {
               cost: typeof info.cost === "number" ? info.cost : undefined,
               tokens: info.tokens as SessionInfo["tokens"],
               summary: info.summary as SessionInfo["summary"],
-              shareUrl: typeof info.shareUrl === "string" ? info.shareUrl : undefined,
+              shareUrl: typeof info.shareUrl === "string"
+                ? info.shareUrl
+                : typeof (info.share as { url?: unknown } | undefined)?.url === "string"
+                  ? (info.share as { url: string }).url
+                  : undefined,
             },
           });
         }
@@ -1142,7 +1453,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     }
   }
 
-  /* ---- Connect SSE when streaming starts ---- */
   useEffect(() => {
     if (!state.isStreaming || !sessionId) {
       return undefined;
@@ -1161,7 +1471,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, [state.isStreaming, sessionId, connectSSE]);
 
-  /* ---- Cleanup on unmount ---- */
   useEffect(() => {
     return () => {
       if (sseAbortRef.current) {
@@ -1183,31 +1492,30 @@ export function useOpenCodeChat(sessionId: string | null) {
     };
   }, []);
 
-  /* ---- Permission polling ---- */
   const refreshPermissions = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !scopeKey) return;
+    const requestScope = scopeKey;
     try {
-      const all = (await opencode.permissions.list()) as unknown as Array<{
-        id: string;
-        permission: string;
-        pattern: string;
-        action: string;
-      }>;
-      // Permissions are scoped globally or by SSE stream — no sessionID field
-      const relevant = all.map((p) => ({
-        id: p.id,
-        permission: p.permission,
-        pattern: p.pattern,
-        action: p.action,
-      }));
+      const all = normalizeOpenCodePermissionRequests(await opencode.permissions.list());
+      if (activeScopeRef.current !== requestScope) return;
+      // Legacy requests omit sessionID; v2 requests must stay on their session.
+      const relevant = all
+        .filter((p) => !p.sessionID || p.sessionID === sessionId)
+        .map((p) => ({
+          id: p.id,
+          permission: p.permission,
+          pattern: p.pattern,
+          action: p.action,
+        }));
       setPermissionState((prev) => ({
+        scopeKey: requestScope,
         requests: relevant,
-        replied: prev.replied,
+        replied: prev.scopeKey === requestScope ? prev.replied : new Set(),
       }));
     } catch {
       // Permission endpoint may not be available — silently ignore
     }
-  }, [sessionId]);
+  }, [opencode, scopeKey, sessionId]);
 
   // Poll permissions when session is active and streaming
   useEffect(() => {
@@ -1236,23 +1544,20 @@ export function useOpenCodeChat(sessionId: string | null) {
    * Only adds text-only questions (from the API) — does NOT clear existing
    * questions that may have arrived via SSE with structured options. */
   const refreshQuestions = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !scopeKey) return;
+    const requestScope = scopeKey;
     try {
       const raw = await opencode.questions.list();
-      if (raw && raw.length > 0) {
-        const items: ChatQuestionItem[] = raw.map(
-          (q: { id: string; text?: string }) => ({
-            id: q.id,
-            question: q.text ?? "Continue?",
-          }),
-        );
+      if (activeScopeRef.current !== requestScope) return;
+      const items = normalizeOpenCodeQuestions(raw).map(toChatQuestion);
+      if (items.length > 0) {
         dispatch({ type: "ADD_QUESTIONS", questions: items });
       }
       // Don't clear on empty — SSE-delivered questions are authoritative
     } catch {
       // Questions endpoint may not be available — silently ignore
     }
-  }, [sessionId]);
+  }, [opencode, scopeKey, sessionId]);
 
   // Poll questions when session is idle (agent may be waiting for answer)
   useEffect(() => {
@@ -1274,17 +1579,20 @@ export function useOpenCodeChat(sessionId: string | null) {
   const replyPermission = useCallback(
     async (requestId: string, response: "once" | "always" | "reject") => {
       if (!sessionId) return;
+      const requestScope = scopeKey;
       try {
         await opencode.permissions.reply(sessionId, requestId, response);
+        if (activeScopeRef.current !== requestScope) return;
         // Mark as replied
         setPermissionState((prev) => {
-          const next = new Set(prev.replied);
+          const next = new Set(prev.scopeKey === requestScope ? prev.replied : []);
           next.add(requestId);
-          return { ...prev, replied: next };
+          return { ...prev, scopeKey: requestScope, replied: next };
         });
         // Refresh to remove the granted request
         await refreshPermissions();
       } catch (err: unknown) {
+        if (activeScopeRef.current !== requestScope) return;
         dispatch({
           type: "SET_ERROR",
           error:
@@ -1294,21 +1602,20 @@ export function useOpenCodeChat(sessionId: string | null) {
         });
       }
     },
-    [sessionId, refreshPermissions],
+    [opencode, scopeKey, sessionId, refreshPermissions],
   );
 
   /** Active permissions (not yet replied). */
-  const activePermissions = permissionState.requests.filter(
-    (p) => !permissionState.replied.has(p.id),
-  );
+  const activePermissions = permissionState.scopeKey === scopeKey
+    ? permissionState.requests.filter((p) => !permissionState.replied.has(p.id))
+    : [];
 
-  /* ---- Actions ---- */
 
   /** Send a message with optional model/agent/variant/system/tools overrides. */
   const send = useCallback(
     async (
       parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }>,
-      options?: { model?: { providerID: string; modelID: string }; agent?: string; variant?: string; system?: string; tools?: Record<string, boolean> },
+      options?: SendOptions,
     ): Promise<boolean> => {
       if (!sessionId) {
         dispatch({
@@ -1317,6 +1624,8 @@ export function useOpenCodeChat(sessionId: string | null) {
         });
         return false;
       }
+      if (!scopeKey || loadedScopeKey !== scopeKey) return false;
+      const sendScope = scopeKey;
       dispatch({ type: "SET_ERROR", error: null });
 
       // Store for retry
@@ -1324,6 +1633,7 @@ export function useOpenCodeChat(sessionId: string | null) {
       lastSendOptionsRef.current = options;
 
       // Build user message from parts
+      const messageID = createMessageId();
       const content = parts
         .filter((p) => p.type === "text")
         .map((p) => (p as { type: "text"; text: string }).text)
@@ -1333,7 +1643,7 @@ export function useOpenCodeChat(sessionId: string | null) {
           return {
             id: `user-part-${Date.now()}-${i}`,
             sessionID: sessionId,
-            messageID: `user-${Date.now()}`,
+            messageID,
             type: "file" as const,
             mime: p.mime,
             url: p.url,
@@ -1343,25 +1653,32 @@ export function useOpenCodeChat(sessionId: string | null) {
         return {
           id: `user-part-${Date.now()}-${i}`,
           sessionID: sessionId,
-          messageID: `user-${Date.now()}`,
+          messageID,
           type: p.type,
           text: p.text,
         } as OpenCodePart;
       });
 
       const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
+        id: messageID,
         role: "user",
         content,
         parts: userParts,
         timestamp: Date.now(),
+        ...(options?.grounding ? { grounding: options.grounding } : {}),
       };
+      pendingUserTurnsRef.current.set(messageID, {
+        scopeKey: sendScope,
+        messageID,
+        terminal: false,
+      });
       dispatch({ type: "ADD_USER_MESSAGE", message: userMsg });
       // Clear any pending questions — the user is sending a new prompt
       dispatch({ type: "REMOVE_QUESTIONS" });
 
       try {
         const promptBody: OpenCodePromptParams = {
+          messageID,
           parts,
           model: options?.model,
           agent: options?.agent,
@@ -1376,6 +1693,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         // until a render effect risks receiving only a terminal snapshot.
         connectSSE(sessionId);
         await opencode.sessions.prompt(sessionId, promptBody);
+        if (activeScopeRef.current !== sendScope) return true;
 
         // The prompt endpoint can finish before the SSE subscription is
         // established. Reconcile its authoritative snapshot without treating
@@ -1385,12 +1703,15 @@ export function useOpenCodeChat(sessionId: string | null) {
           const rawMessages = (await opencode.sessions.messages(
             sessionId,
           )) as unknown as OpenCodeApiMessage[];
+          if (activeScopeRef.current !== sendScope) return true;
+          correlateSnapshotUsers(rawMessages, sendScope);
           const normalized = normalizeMessages(rawMessages);
           dispatch({
             type: "RECONCILE_MESSAGES",
             messages: normalized,
           });
         } catch (err: unknown) {
+          if (activeScopeRef.current !== sendScope) return true;
           // Reconciliation is a best-effort snapshot. An event-backed turn
           // remains authoritative until it reaches an SSE terminal state.
           const message = err instanceof Error ? err.message : "Failed to refresh messages";
@@ -1401,6 +1722,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         }
         return true;
       } catch (err: unknown) {
+        if (activeScopeRef.current !== sendScope) return false;
         dispatch({ type: "FINALIZE_STREAMING" });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "error" });
         dispatch({
@@ -1410,12 +1732,14 @@ export function useOpenCodeChat(sessionId: string | null) {
         return false;
       }
     },
-    [sessionId, connectSSE],
+    [opencode, scopeKey, sessionId, loadedScopeKey, connectSSE, correlateSnapshotUsers],
   );
 
   /** Stop generation. */
   const stop = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !scopeKey) return;
+    const requestScope = scopeKey;
+    markPendingTurnsTerminal(requestScope);
 
     // Close SSE
     if (sseAbortRef.current) {
@@ -1437,6 +1761,8 @@ export function useOpenCodeChat(sessionId: string | null) {
       const rawMessages = (await opencode.sessions.messages(
         sessionId,
       )) as unknown as OpenCodeApiMessage[];
+      if (activeScopeRef.current !== requestScope) return;
+      correlateSnapshotUsers(rawMessages, requestScope);
       dispatch({
         type: "LOAD_MESSAGES",
         messages: normalizeMessages(rawMessages),
@@ -1444,7 +1770,7 @@ export function useOpenCodeChat(sessionId: string | null) {
     } catch {
       // Silent
     }
-  }, [sessionId]);
+  }, [correlateSnapshotUsers, markPendingTurnsTerminal, opencode, scopeKey, sessionId]);
 
   /** Retry the last user message. */
   const retry = useCallback(async () => {
@@ -1468,18 +1794,21 @@ export function useOpenCodeChat(sessionId: string | null) {
   /** Revert to a specific message/part checkpoint. */
   const revert = useCallback(
     async (messageId: string, partId?: string) => {
-      if (!sessionId) return;
+      if (!sessionId || !scopeKey) return;
+      const requestScope = scopeKey;
       try {
         await opencode.sessions.revert(sessionId, messageId, partId);
         // Refetch messages after revert
         const rawMessages = (await opencode.sessions.messages(
           sessionId,
         )) as unknown as OpenCodeApiMessage[];
+        if (activeScopeRef.current !== requestScope) return;
         dispatch({
           type: "LOAD_MESSAGES",
           messages: normalizeMessages(rawMessages),
         });
       } catch (err: unknown) {
+        if (activeScopeRef.current !== requestScope) return;
         dispatch({
           type: "SET_ERROR",
           error:
@@ -1487,7 +1816,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         });
       }
     },
-    [sessionId],
+    [opencode, scopeKey, sessionId],
   );
 
   /** Clear all messages locally. */
@@ -1499,13 +1828,15 @@ export function useOpenCodeChat(sessionId: string | null) {
 
   /** Resume — reconnect SSE after interruption. */
   const resume = useCallback(async () => {
-    if (!sessionId) return;
+    if (!sessionId || !scopeKey) return;
+    const requestScope = scopeKey;
 
     // Refetch messages to get current state
     try {
       const rawMessages = (await opencode.sessions.messages(
         sessionId,
       )) as unknown as OpenCodeApiMessage[];
+      if (activeScopeRef.current !== requestScope) return;
       dispatch({
         type: "LOAD_MESSAGES",
         messages: normalizeMessages(rawMessages),
@@ -1519,19 +1850,20 @@ export function useOpenCodeChat(sessionId: string | null) {
     if (lastMsg?.role === "assistant" && lastMsg.isStreaming) {
       connectSSE(sessionId);
     }
-  }, [sessionId, state.messages, connectSSE]);
+  }, [opencode, scopeKey, sessionId, state.messages, connectSSE]);
 
+  const sessionReady = scopeKey !== null && loadedScopeKey === scopeKey;
   return {
-    messages: state.messages,
-    isStreaming: state.isStreaming,
-    isLoading: state.isLoading,
-    error: state.error,
-    sessionStatus: state.sessionStatus,
-    sessionInfo: state.sessionInfo,
-    questions: state.questions,
-    permissions: activePermissions,
+    messages: sessionReady ? state.messages : [],
+    isStreaming: sessionReady && state.isStreaming,
+    isLoading: scopeKey !== null && (state.isLoading || !sessionReady),
+    error: scopeKey === null || sessionReady ? state.error : null,
+    sessionStatus: sessionReady ? state.sessionStatus : null,
+    sessionInfo: sessionReady ? state.sessionInfo : undefined,
+    questions: sessionReady ? state.questions : [],
+    permissions: sessionReady ? activePermissions : [],
     replyPermission,
-    streamActivity: state.streamActivity,
+    streamActivity: sessionReady ? state.streamActivity : "idle",
     send,
     stop,
     retry,
@@ -1540,10 +1872,6 @@ export function useOpenCodeChat(sessionId: string | null) {
     resume,
   };
 }
-
-/* ------------------------------------------------------------------ */
-/*  Test exports                                                      */
-/* ------------------------------------------------------------------ */
 
 /**
  * Runtime test export — the internal chatReducer is only exposed when

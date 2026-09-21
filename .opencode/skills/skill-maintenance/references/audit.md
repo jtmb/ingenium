@@ -13,7 +13,7 @@ The audit checks 8 integration points. Every skill should appear in all of them 
 |-------|---------|---------------------------|
 | **1. Directory exists** | `.opencode/skills/{name}/SKILL.md` | Frontmatter present, `name` matches folder |
 | **2. SKILL-INDEX.md** | `SKILL-INDEX.md` | Entry exists, description matches, total count correct |
-| **3. AGENTS.md** | `AGENTS.md` | Skill listed in directory index and/or skill index table |
+| **3. Agent grants** | `.opencode/agents/**` | Active skills have explicit role-appropriate grants and local preflight instructions |
 | **4. README.md** | `README.md` | Skill listed in appropriate table or referenced |
 | **5. Cross-references** | Other SKILL.md files | Any skill that references this skill uses correct path |
 | **6. Agent files** | `.opencode/agents/*.md` | If skill is listed in Required Skills, description matches |
@@ -44,15 +44,15 @@ For each SKILL.md: opening `---` on line 1, `name:` matches folder, `description
 - Every entry corresponds to an actual skill
 - Total count matches directory count
 
-#### Step 4 — Check AGENTS.md
-- Directory index lists the skill directory
-- Skill index table (if applicable) has correct path
+#### Step 4 — Check Agent Profiles
+- Active skill grants resolve to existing skills
+- Role-specific preflight instructions use correct paths
 
 #### Step 5 — Check for Stale References
 - Any reference to a skill that no longer exists?
 - Any stale paths in docs?
 - Any SKILL-INDEX.md entries pointing to deleted skills?
-- Any AGENTS.md cross-references to removed skills?
+- Any active agent cross-references to removed skills?
 
 #### Step 6 — Auto-Fix, Commit, and Log
 

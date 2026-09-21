@@ -220,15 +220,50 @@ export function getAllowedLegacyChatSelection(
   return provider ? { providerId, modelId } : null;
 }
 
+/**
+ * Preserve managed-provider ordering while retaining valid legacy entries for
+ * the default-selection fallback. A managed provider and legacy setting can
+ * share an ID during migration, so merge their models instead of emitting
+ * duplicate provider records. The managed entry retains its ordering and
+ * configured default model.
+ */
+function mergeConfiguredChatProviders(
+  managedProviders: ExpandedChatProviderInfo[],
+  legacyProviders: ExpandedChatProviderInfo[],
+): ExpandedChatProviderInfo[] {
+  const providers = new Map<string, ExpandedChatProviderInfo>();
+
+  for (const provider of [...managedProviders, ...legacyProviders]) {
+    const existing = providers.get(provider.providerId);
+    if (!existing) {
+      providers.set(provider.providerId, { ...provider, models: [...provider.models] });
+      continue;
+    }
+
+    for (const model of provider.models) {
+      if (!existing.models.some((candidate) => candidate.id === model.id)) {
+        existing.models.push(model);
+      }
+    }
+  }
+
+  return [...providers.values()];
+}
+
 export async function getChatProviderCatalog(projectId: string): Promise<{
   providers: ExpandedChatProviderInfo[];
   /** A client-normalized OpenCode failure; details remain server-only. */
   unavailable: "network" | "catalog" | null;
 }> {
   const managedProviders = getManagedChatProviders(projectId);
-  const configuredProviders = managedProviders.length > 0
-    ? managedProviders
-    : getValidatedLegacyLlmConfigProviders(projectId);
+  // A managed provider may be available without being the managed primary. In
+  // that state, a valid legacy primary must remain eligible before the Zen
+  // fallback; dropping legacy entries whenever any managed block exists skips
+  // the documented Chat default precedence.
+  const configuredProviders = mergeConfiguredChatProviders(
+    managedProviders,
+    getValidatedLegacyLlmConfigProviders(projectId),
+  );
   const builtinResult = await opencodeClient.listProviders();
   if (isOpenCodeError(builtinResult)) {
     // The client error shape may contain provider diagnostics. Convert every

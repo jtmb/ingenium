@@ -1,55 +1,131 @@
- **🔴HARD RULES:**
- - Your job is to be the brain of the operation.
- - Map Out documentation and testing at every phase and agent orchestration.
- - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium if you require a better model with deeper reasoning and you use @ingenium-docs for documentations and finally @ingenium-qa.
- - When building a plan for the Orchestrator to execute you will build it with agent paralyzation in mind. 
- You are allowed to plan for spawning 4 subagents at once.
-- You will view screenshots yourself during plan phase.
- - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. 
- Example:
+# Next-Steps Orchestration Plan
 
- ```    
- "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works.
+Use this template to turn a request into a bounded handoff for the
+Orchestrator. Keep the plan reusable: name only the files, agents, checks, and
+decisions required by the request.
 
-## DIRECTIVE:
-One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
+## Plan-mode boundary
 
+- Plan is read-only. Do not edit, write, run Bash, mutate Docs Workspace, or
+  claim implementation evidence from Plan.
+- In Plan, delegate research only to `@ingenium-explore`, and only for
+  read-only repository exploration. No other research or implementation
+  delegation is permitted from Plan.
+- Record the user's explicit maximum concurrency as
+  `{{USER_REQUESTED_MAX_CONCURRENCY}}`. Do not invent a default or imply a
+  universal agent ceiling.
+- The Orchestrator dispatches one distinct subagent per dependency-ready Todo,
+  never more than the recorded user maximum. Give each writer an exclusive,
+  non-overlapping territory. Subagents do not delegate, spawn, reassign, or
+  request follow-up work.
 
-### THE REQUESTS:
+## Request and contract
 
-ROAD MAP, @docs/reference/roadmap.md Lets make a feature roadmap.
+**Request:** `{{REQUEST}}`
 
-Requested Fetaures:
+**IN_SCOPE**
 
+- `{{FILES, ROUTES, OR BEHAVIORS}}`
 
+**OUT_OF_SCOPE**
 
+- `{{EXCLUDED_FILES, SYSTEMS, AND FOLLOW-UP WORK}}`
 
+**Acceptance criteria**
 
----
+- `{{TESTABLE OUTCOME 1}}`
+- `{{TESTABLE OUTCOME 2}}`
 
-### Documentation References
+**STOP_CONDITION**
 
-| Resource | Path |
-|----------|------|
-| docs | [`docs`](docs)
+- `{{PASS CONDITION, EXPLICIT STOP/CANCEL CONDITION, OR PERMITTED ESCALATION}}`
 
+**Deployment owner:** `{{OWNER OR N/A}}`
 
-7. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
+**Verification plan**
 
+- `{{TARGETED CHECK, EXECUTION COUNT, AND DEPLOYED CHECK IF APPLICABLE}}`
 
+**Escalation rule**
 
-<!-- 
-1. /settings > pipeline. Should be emptied. Contents should be moved to "Providers" (inside the config tab). Make it share the providers config that opencode uses. So when i set my Providers in opencode it's already set in ingenium provider settings and vice versa.
+- Escalate only for the contract's permitted credential/access,
+  authorization, product-decision, ambiguity, or unreproduced-cause condition:
+  `{{PERMITTED CONDITIONS}}`
+- A failed check is evidence to classify and repair, not automatic escalation.
 
-2. /backups new backup endpoint. Full mcp support. This new page will allows us to export a zip file with our :
+**Changed files:** `{{EXACT PATHS}}`
 
- - Ingenium DB export
- - Opencode DB Export
+**Directly affected canonical documentation:** `{{EXACT DOC PATHS OR NONE}}`
 
- It should have the ability to import/export backups from this one zip file and restore either one or both services. It should also have automatic revisioned backups every hours, days (configurable via settings).
+## Design admission
 
- 3. http://localhost:3000/docs already acts like a RAG. I would like to enhance it with full RAG capabilities so we can get rid of thread. Thead is another application i made that stores conversation context in a rag, you can bulk upload documentation for you agents to search from offline etc. please see: /home/brajam/repos/thread
+Complete one row before each dependent mutation. If a required field is
+missing or unverified, reject and replan instead of guessing.
 
-    Then present me a solid plan. If you think it could be done better or improved or done differently feel free to ask questions using the question tool.
+| Executor | Exact action | Safe probe | Prerequisites | Verifier | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|---|
+| `{{AGENT}}` | `{{MUTATION}}` | `{{READ-ONLY PROBE}}` | `{{PREREQUISITES}}` | `{{CHECK}}` | `{{OWNER}}` | `{{EVIDENCE}}` |
 
-5. /secrets I want a Hashicorp Vault like secrets manager that i can use in the UI to make secrets that my agents can call and use. All through MCP. On the UI side, it should act as a password manager i can use to retrieve my passwords (like vault warden) -->
+## Phased execution plan
+
+### Phase `{{ID}}` — `{{NAME}}`
+
+- **Goal:** `{{DELIVERABLE}}`
+- **Dependencies:** `{{TODO IDS OR NONE}}`
+- **Assigned subagent:** `{{ONE DISTINCT AGENT}}`
+- **Exclusive writer territory:** `{{NON-OVERLAPPING PATHS OR READ-ONLY}}`
+- **Docs:** `{{DIRECTLY AFFECTED DOCS OR N/A}}`
+- **Tests/checks:** `{{TARGETED CHECKS}}`
+- **Deployment/restart:** `{{OWNER, FULL PARENT RESTART BOUNDARY, OR N/A}}`
+- **Exit evidence:** `{{REQUIRED EVIDENCE AND ACCEPTANCE MAPPING}}`
+
+Map documentation and tests for every phase. When a profile, plugin, command,
+instruction, or OpenCode configuration changes, restart the full parent
+OpenCode process/session; restarting only a child MCP process is insufficient.
+For runtime-impacting work, the authorized deployment owner rebuilds the
+current merged source, restarts it, and checks actual routes.
+
+## Evidence and failure discipline
+
+Keep these evidence classes separate and label each as pass, fail, unknown, or
+not applicable:
+
+| Evidence class | What it proves | What it does not prove |
+|---|---|---|
+| Source | Focused tests, lint, typecheck, or build on the current checkout | A deployed service, visual route, or real model/session |
+| Deployed | Rebuilt current source, restart, and actual-route health check | Source correctness, visual behavior, or model/session proof |
+| Visual | Declared changed-route gate and required passive sweep for UI work | Source tests, deployment health, or model/session proof |
+| Model/session | Actual provider, model, and session/TUI evidence | Source, deployment, or visual acceptance |
+
+On failure, retain the first failure and its stable signature (code, tool
+family, session, failing path, attempted paths, new evidence, owner, and
+`nextWork`). Repair the named root cause, then rerun only the affected check.
+Never retry an unchanged action with no new evidence.
+
+Preserve stable roadmap and Todo IDs and their history. Append linked work
+instead of rewriting historical entries. Update TodoWrite after each
+implementation or evidence transition, then reconcile every Todo and roadmap
+marker against retained evidence before the terminal response. Preserve
+unknown and failed outcomes; do not convert them to success by omission.
+
+## Copy-paste Orchestrator handoff
+
+```text
+Orchestrator, execute the approved plan below.
+
+Maximum concurrency: {{USER_REQUESTED_MAX_CONCURRENCY}} (the user's explicit maximum; do not invent another limit).
+Start only dependency-ready Todos, dispatching one distinct subagent per Todo with exclusive writer territory.
+Subagents must not delegate, spawn, reassign, or request follow-up work.
+
+Honor IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, deployment owner,
+verification plan, and escalation rule exactly. Complete the design-admission probe
+before every dependent mutation. On failure, repair the named root cause and do not
+repeat an unchanged action. Keep source, deployed, visual, and model/session evidence
+separate. Map docs and tests per phase. Apply the full parent OpenCode restart boundary
+when profile, plugin, command, instruction, or configuration changes require it.
+
+Update TodoWrite and preserve stable roadmap IDs after every evidence transition.
+Before reporting completion, reconcile all Todo and roadmap markers against retained
+evidence and report changed files, checks with execution counts, unresolved findings,
+and any permitted escalation.
+```

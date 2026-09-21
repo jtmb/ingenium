@@ -1,17 +1,25 @@
 import { Router, type Request, type Response } from "express";
-import multer from "multer";
+import formidable from "formidable";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { logger, projects, settings } from "ingenium-core";
+import { logger, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
+  buildAuthHeader,
   isOpenCodeError,
+  readRecentOpenCodeUserMessages,
+  type OpenCodeResult,
   type SendPromptBody,
 } from "../opencode-client.js";
-import { requireProject } from "../helpers.js";
+import { requireActiveGlobalProject } from "../helpers.js";
+import {
+  callOpenCodeWithProviderDeadline,
+  connectNativeProviderCredential,
+  disconnectNativeProviderCredential,
+  type NativeProviderCredentialPersistenceStatus,
+} from "../server-global-provider-persistence.js";
 import {
   CHAT_SELECTION_SETTING,
   getBuiltinChatProvider,
@@ -24,6 +32,7 @@ import {
 } from "../chat-provider-catalog.js";
 import { normalizeMcpStatusResponse } from "../mcp-status.js";
 import { isSafeBrowserIdentifier, isSafeBrowserLabel, isSafeMcpServerName } from "../browser-safe-scalars.js";
+import { currentOpenCodeRuntimeTarget } from "../runtime-opencode-context.js";
 
 /* ── File upload configuration ── */
 
@@ -45,18 +54,8 @@ try {
   }
 } catch { /* non-critical */ }
 
-const uploadStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const safeName = path
-      .basename(file.originalname || "file")
-      .replace(/[^a-zA-Z0-9._-]/g, "_");
-    cb(null, `${randomUUID()}-${safeName}`);
-  },
-});
-
 /** MIME allowlist — only safe types for chat file uploads. */
-const ALLOWED_MIMES = [
+const ALLOWED_MIMES = new Set([
   "image/png",
   "image/jpeg",
   "image/gif",
@@ -69,29 +68,23 @@ const ALLOWED_MIMES = [
   "application/pdf",
   "text/typescript",
   "text/javascript",
-];
+]);
 
-const upload = multer({
-  storage: uploadStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIMES.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error(`Unsupported file type: ${file.mimetype}`));
-    }
-  },
-});
+const MAX_UPLOAD_SIZE = 5 * 1024 * 1024;
+
+function removeUploads(paths: Iterable<string>): void {
+  for (const filepath of paths) {
+    try {
+      if (existsSync(filepath)) unlinkSync(filepath);
+    } catch { /* non-critical — file may already be removed */ }
+  }
+}
 
 /**
- * Handles /api/v1/opencode — reads recent user messages from the OpenCode SQLite DB,
- * AND proxies the full OpenCode REST API surface through the OpenCode HTTP server.
+ * Handles /api/v1/opencode — reads recent user messages through the authenticated
+ * OpenCode v2 API and proxies the retained OpenCode REST surface.
  *
- * The DB-based /messages route is the ONLY route file that directly accesses a
- * SQLite database outside the API authority pattern, because the OpenCode DB is a
- * separate process's database mounted via docker-compose volume.
- *
- * Proxy routes validated against the v1.18.3 contract at /tmp/opencode-contract.md.
+ * Proxy routes are covered by the retained OpenCode REST contract tests.
  */
 export const opencodeRouter = Router();
 
@@ -101,7 +94,18 @@ const SOURCE = "opencode-routes";
 const OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OAUTH_ATTEMPTS = 100;
 const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://localhost:1455/auth/callback";
-const pendingOAuthAttempts = new Map<string, { attemptID: string; mode: "auto" | "code"; expiresAt: number }>();
+const pendingOAuthAttempts = new Map<string, {
+  attemptID: string;
+  mode: "auto" | "code";
+  expiresAt: number;
+  actorType: "compatibility" | "user" | "service" | "system";
+  actorId: string;
+  organizationId: string | null;
+  ownerKind: "installation" | "user" | "organization";
+  ownerUserId: string | null;
+  providerId: string;
+  runtimeIntent: "shared" | "private";
+}>();
 
 /**
  * The callback is intentionally unauthenticated because OAuth providers redirect
@@ -116,6 +120,18 @@ function pruneOAuthAttempts(): void {
   for (const [state, attempt] of pendingOAuthAttempts) {
     if (attempt.expiresAt <= now) pendingOAuthAttempts.delete(state);
   }
+}
+
+/**
+ * OpenCode v2 nests OAuth attempts under their integration. The pending map is
+ * the only owner record inside this process, so recover the integration ID from
+ * it before asking the client for an attempt-scoped operation.
+ */
+function resolveAttemptIntegrationID(attemptID: string): string | undefined {
+  for (const attempt of pendingOAuthAttempts.values()) {
+    if (attempt.attemptID === attemptID) return attempt.providerId;
+  }
+  return undefined;
 }
 
 function oauthCallbackPage(res: Response, status: number, title: string, message: string): void {
@@ -194,7 +210,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
       const params = new URLSearchParams({ state, ...(providerError ? { error: providerError } : {}) });
       forwardAutoOAuthCallback(params, "Auto OAuth cancellation forward failed");
     } else {
-      await opencodeClient.cancelIntegrationAttempt(attempt.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(attempt.attemptID, attempt.providerId);
     }
     oauthCallbackPage(res, 400, "Authorization was cancelled", "Return to Ingenium to try again.");
     return;
@@ -205,18 +221,20 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
     // connection without a response after resolving the callback, which is expected.
     const params = new URLSearchParams({ code, state });
     forwardAutoOAuthCallback(params, "Auto OAuth callback forward failed");
+    logger.info(SOURCE, "Native OAuth provider connections cannot be rehydrated after OpenCode auth storage loss without a separately stored provider credential");
     oauthCallbackPage(res, 200, "Authorization received", "You can close this window and return to Ingenium while the connection completes.");
     return;
   }
 
   try {
-    const result = await opencodeClient.completeIntegrationAttempt(attempt.attemptID, code);
+    const result = await opencodeClient.completeIntegrationAttempt(attempt.attemptID, code, attempt.providerId);
     if (isOpenCodeError(result)) {
       logger.warn(SOURCE, `OAuth callback completion failed: ${result.error.code}`);
       oauthCallbackPage(res, 502, "Authorization could not be completed", "Return to Ingenium and try again.");
       return;
     }
 
+    logger.info(SOURCE, "Native OAuth provider connections cannot be rehydrated after OpenCode auth storage loss without a separately stored provider credential");
     oauthCallbackPage(res, 200, "Authorization complete", "You can close this window and return to Ingenium.");
   } catch (error) {
     logger.warn(SOURCE, "OAuth callback completion threw unexpectedly", {
@@ -231,7 +249,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
  * Returns 503 if missing so the caller gets a clear signal.
  */
 function guardPassword(req: any, res: any): boolean {
-  if (!process.env.OPENCODE_SERVER_PASSWORD) {
+  if (!buildAuthHeader() && !currentOpenCodeRuntimeTarget()) {
     logger.warn(SOURCE, `Route blocked: OPENCODE_SERVER_PASSWORD not configured`, {
       method: req.method,
       path: req.originalUrl,
@@ -274,13 +292,13 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
     let status: number;
     if (code === "AUTH_NOT_CONFIGURED") {
       status = 503;
-    } else if (code === "NETWORK_ERROR") {
+    } else if (code === "NETWORK_ERROR" || code === "OPENCODE_OPERATION_TIMEOUT") {
       status = 503;
       result.error.code = "OPENCODE_UNAVAILABLE";
       result.error.message = "OpenCode is starting up. Please wait a moment and try again.";
       // Set Retry-After header so clients can back off gracefully
       res.setHeader("Retry-After", "5");
-    } else if (code === "NOT_FOUND" || code === "NotFoundError") {
+    } else if (result.error.status === 404 || code === "NOT_FOUND" || code === "NotFoundError") {
       status = 404;
     } else if (code === "BadRequest" || code.startsWith("HTTP_4")) {
       status = 400;
@@ -412,125 +430,104 @@ function sendBrowserProviderCatalogError(res: Response, result: unknown): void {
    File upload endpoint — POST /upload (multipart)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-opencodeRouter.post("/upload", (req, res) => {
+opencodeRouter.post("/upload", async (req, res) => {
   if (!guardPassword(req, res)) return;
 
-  upload.single("file")(req, res, (err) => {
-    if (err) {
-      if (err instanceof multer.MulterError) {
-        // Multer-specific errors (file too large, wrong field name, etc.)
-        const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-        logger.warn(SOURCE, `Upload multer error: ${err.code}`, {
-          code: err.code,
-          field: err.field,
-        });
-        res.status(status).json({
-          error: { code: err.code, message: err.message },
-        });
-        return;
-      }
-      // Custom file-filter error or other errors
-      logger.warn(SOURCE, `Upload error: ${err.message}`);
-      res.status(400).json({
-        error: { code: "UPLOAD_REJECTED", message: err.message },
-      });
-      return;
-    }
+  const createdPaths = new Set<string>();
+  let receivedFileCount = 0;
+  let unexpectedFile = false;
+  const form = formidable({
+    uploadDir: UPLOAD_DIR,
+    maxFiles: 1,
+    maxFileSize: MAX_UPLOAD_SIZE,
+    maxTotalFileSize: MAX_UPLOAD_SIZE,
+    allowEmptyFiles: true,
+    minFileSize: 0,
+    filter: (part) => {
+      receivedFileCount += 1;
+      if (part.name === "file" && receivedFileCount === 1) return true;
+      unexpectedFile = true;
+      return false;
+    },
+    filename: (_name, _extension, part) => {
+      const safeName = path.basename(part.originalFilename || "file").replace(/[^a-zA-Z0-9._-]/g, "_");
+      return `${randomUUID()}-${safeName}`;
+    },
+  });
+  form.on("fileBegin", (_name, file) => createdPaths.add(file.filepath));
 
-    if (!req.file) {
+  try {
+    const [, files] = await form.parse(req);
+    const fileEntries = Object.values(files).flatMap((value) => value ?? []);
+    const uploadedFile = files.file?.[0];
+
+    if (!uploadedFile && fileEntries.length === 0 && receivedFileCount === 0) {
       res.status(400).json({
         error: { code: "NO_FILE", message: "No file uploaded" },
       });
       return;
     }
 
-    res.json({
-      data: {
-        url: `file:///tmp/ingenium-chat-uploads/${path.basename(req.file.filename)}`,
-        filename: req.file.originalname,
-        mime: req.file.mimetype,
-        size: req.file.size,
-      },
-    });
-
-    // Deferred cleanup: remove file after 1 hour
-    setTimeout(() => {
-      try {
-        if (existsSync(req.file!.path)) {
-          unlinkSync(req.file!.path);
-        }
-      } catch { /* non-critical — file may already be removed */ }
-    }, 60 * 60 * 1000);
-  });
-});
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   Existing: DB-based OpenCode message reader
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-opencodeRouter.get("/messages", (req, res) => {
-  const since = parseInt(req.query.since as string || "0", 10);
-  const limit = Math.min(parseInt(req.query.limit as string || "500", 10), 2000);
-  const project = (req.query.project as string) || "";
-
-  try {
-    // Host OpenCode DB mounted at /var/opencode/ via docker-compose
-    const dbPath = process.env.INGENIUM_OPENCODE_DB_PATH || "/var/opencode/opencode.db";
-
-    if (!existsSync(dbPath)) {
-      logger.warn("opencode", "OpenCode DB not found", { path: dbPath });
-      res.json({ data: { messages: [], total: 0 } });
+    if (unexpectedFile || !uploadedFile || fileEntries.length !== 1) {
+      removeUploads(fileEntries.map((file) => file.filepath));
+      res.status(400).json({
+        error: { code: "LIMIT_UNEXPECTED_FILE", message: "Unexpected field" },
+      });
       return;
     }
 
-    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const mime = uploadedFile.mimetype || "application/octet-stream";
+    if (!ALLOWED_MIMES.has(mime)) {
+      removeUploads([uploadedFile.filepath]);
+      const message = `Unsupported file type: ${mime}`;
+      logger.warn(SOURCE, `Upload error: ${message}`);
+      res.status(400).json({
+        error: { code: "UPLOAD_REJECTED", message },
+      });
+      return;
+    }
 
-    // Build query with optional project (worktree directory) filter
-    const projectClause = project
-      ? "AND (s.directory LIKE ('%/' || ?) OR s.directory LIKE ('%\\' || ?))"
-      : "";
+    res.json({
+      data: {
+        url: `file:///tmp/ingenium-chat-uploads/${path.basename(uploadedFile.filepath)}`,
+        filename: uploadedFile.originalFilename,
+        mime,
+        size: uploadedFile.size,
+      },
+    });
 
-    const sql = `
-      SELECT
-        m.id as message_id,
-        m.session_id as session_id,
-        json_extract(p.data, '$.text') as text,
-        p.time_created
-      FROM part p
-      JOIN message m ON p.message_id = m.id
-      JOIN session s ON m.session_id = s.id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
-        AND length(json_extract(p.data, '$.text')) > 10
-        AND p.time_created > ?
-        AND s.parent_id IS NULL
-        ${projectClause}
-      ORDER BY p.time_created DESC
-      LIMIT ?
-    `;
-
-    const params: any[] = [since];
-    if (project) params.push(project, project);
-    params.push(limit);
-
-    const rows = db.prepare(sql).all(...params);
-
-    db.close();
-
-    const messages = rows.map((r: any) => ({
-      text: String(r.text || ""),
-      time_created: r.time_created,
-      messageId: r.message_id ? String(r.message_id) : undefined,
-      sessionId: r.session_id ? String(r.session_id) : undefined,
-    }));
-
-    logger.info("opencode", `Returned ${messages.length} user messages from OpenCode DB (since=${since}, limit=${limit}, project=${project || "any"})`);
-
-    res.json({ data: { messages, total: messages.length } });
-  } catch (err: any) {
-    logger.error("opencode", `Failed to read OpenCode DB: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.json({ data: { messages: [], total: 0, error: err.message } });
+    setTimeout(() => removeUploads([uploadedFile.filepath]), 60 * 60 * 1000).unref();
+  } catch (error) {
+    removeUploads(createdPaths);
+    const message = error instanceof Error ? error.message : "Upload failed";
+    if (/max(?:Total)?FileSize/.test(message)) {
+      logger.warn(SOURCE, "Upload error: LIMIT_FILE_SIZE", { code: "LIMIT_FILE_SIZE" });
+      res.status(413).json({ error: { code: "LIMIT_FILE_SIZE", message: "File too large" } });
+      return;
+    }
+    if (/maxFiles/.test(message)) {
+      res.status(400).json({ error: { code: "LIMIT_UNEXPECTED_FILE", message: "Unexpected field" } });
+      return;
+    }
+    logger.warn(SOURCE, `Upload error: ${message}`);
+    res.status(400).json({ error: { code: "UPLOAD_REJECTED", message } });
   }
+});
+
+opencodeRouter.get("/messages", async (req, res) => {
+  const sinceValue = Number.parseInt(typeof req.query.since === "string" ? req.query.since : "0", 10);
+  const limitValue = Number.parseInt(typeof req.query.limit === "string" ? req.query.limit : "500", 10);
+  const since = Number.isFinite(sinceValue) && sinceValue >= 0 ? sinceValue : 0;
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 0), 2000) : 500;
+  const project = typeof req.query.project === "string" ? req.query.project : "";
+
+  const result = await readRecentOpenCodeUserMessages({ since, limit, project });
+  if (isOpenCodeError(result)) {
+    logger.warn(SOURCE, "OpenCode v2 message read unavailable", { code: result.error.code });
+    res.status(503).json({ error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode messages are temporarily unavailable" } });
+    return;
+  }
+  res.json({ data: { messages: result, total: result.length } });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -548,6 +545,7 @@ interface ChatProviderInfo {
 }
 
 interface ChatConfigResponse {
+  project: string;
   configured: boolean;
   primary: ChatProviderInfo | null;
   backup: ChatProviderInfo | null;
@@ -574,9 +572,11 @@ function legacyChatDto(
   };
 }
 
+// Chat configuration is instance-owned; any caller project query is ignored.
 opencodeRouter.get("/chat-config", async (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
+  const globalProject = requireActiveGlobalProject(req, res);
+  if (!globalProject) return;
+  const projectId = globalProject.id;
 
   let providers: ExpandedChatProviderInfo[];
   try {
@@ -620,6 +620,7 @@ opencodeRouter.get("/chat-config", async (req, res) => {
   const backup = primary ? legacyChatDto(projectId, providers, "backup") : null;
 
   const response: ChatConfigResponse = {
+    project: globalProject.name,
     configured: primary !== null,
     primary,
     backup,
@@ -630,19 +631,6 @@ opencodeRouter.get("/chat-config", async (req, res) => {
 
   res.json({ data: response });
 });
-
-function resolveGlobalChatProject(res: Response): string | null {
-  try {
-    const globalProject = projects.getGlobalProject();
-    if (globalProject) return globalProject.id;
-  } catch {
-    logger.warn(SOURCE, "Chat selection rejected because global project resolution failed");
-    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection is unavailable until the global project is repaired." } });
-    return null;
-  }
-  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection requires an active global project." } });
-  return null;
-}
 
 /**
  * Persist the one global, non-secret Chat selection. This route is mounted
@@ -661,8 +649,9 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
     return;
   }
 
-  const projectId = resolveGlobalChatProject(res);
-  if (!projectId) return;
+  const globalProject = requireActiveGlobalProject(req, res);
+  if (!globalProject) return;
+  const projectId = globalProject.id;
   try {
     const catalog = await getChatProviderCatalog(projectId);
     if (catalog.unavailable) {
@@ -675,7 +664,7 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
       return;
     }
     settings.setSetting(projectId, CHAT_SELECTION_SETTING, JSON.stringify(selection));
-    res.json({ data: selection });
+    res.json({ data: { project: globalProject.name, ...selection } });
   } catch {
     logger.warn(SOURCE, "Chat selection validation failed while loading the global catalog");
     res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
@@ -683,7 +672,7 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   OpenCode HTTP API proxy routes (v1.18.3 contract)
+   OpenCode HTTP API proxy routes (retained compatibility surface)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Health ── */
@@ -781,7 +770,7 @@ opencodeRouter.delete("/sessions/:id/messages/:msgId", async (req, res) => {
   sendResult(req, res, result);
 });
 
-/* ── Prompt (POST /sessions/:id/message — uses parts array per v1.18.3) ── */
+/* ── Prompt (POST /sessions/:id/message — uses the parts array) ── */
 
 function isPromptPart(part: unknown): boolean {
   if (part === null || typeof part !== "object") return false;
@@ -1173,19 +1162,81 @@ function isSafeOAuthUrl(value: string): boolean {
   }
 }
 
+function respondNativeProviderPersistenceFailure(
+  res: Response,
+  persistence: NativeProviderCredentialPersistenceStatus,
+  action: "connect" | "disconnect",
+): void {
+  logger.warn(SOURCE, "Native provider credential saga could not access the vault", { action, status: persistence });
+  if (persistence === "global_unavailable") {
+    res.status(503).json({
+      error: {
+        code: "GLOBAL_PROJECT_UNAVAILABLE",
+        message: "Provider credential storage requires the canonical global project.",
+      },
+    });
+    return;
+  }
+  if (persistence === "conflict") {
+    res.status(409).json({
+      error: {
+        code: "PROVIDER_CREDENTIAL_CONFLICT",
+        message: `A saved provider credential needs operator review before it can be ${action === "connect" ? "changed" : "removed"}.`,
+      },
+    });
+    return;
+  }
+  res.status(409).json({
+    error: {
+      code: "VAULT_REQUIRED",
+      message: action === "connect"
+        ? "Unseal and initialize the vault before connecting a provider with an API key."
+        : "Unseal the vault before disconnecting a provider with a saved API key.",
+    },
+  });
+}
+
+function respondNativeProviderQueueRejected(res: Response): void {
+  res.setHeader("Retry-After", "2");
+  res.status(503).json({
+    error: {
+      code: "PROVIDER_OPERATION_RETRY",
+      message: "Provider operation is busy. Try again shortly.",
+      retryable: true,
+    },
+  });
+}
+
 opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res) => {
   if (!guardPassword(req, res)) return;
   if (!isSafeIdentifier(req.params.integrationID) || !isValidProviderKey(req.body?.key)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "API key is required" } });
     return;
   }
-  const result = await opencodeClient.connectIntegrationKey(req.params.integrationID!, req.body.key);
-  if (isOpenCodeError(result)) {
-    logger.warn(SOURCE, `Native provider key connection failed: ${result.error.code}`);
-    res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
+  const providerId = req.params.integrationID!;
+  if (req.body?.owner_kind && req.body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
     return;
   }
-  sendResult(req, res, result);
+  const saga = await connectNativeProviderCredential(providerId, req.body.key, {
+    apply: (key, signal) => opencodeClient.connectIntegrationKey(providerId, key, signal),
+    remove: (signal) => opencodeClient.deleteAuth(providerId, undefined, signal),
+    status: (signal) => opencodeClient.getAuthStatus(undefined, signal),
+  });
+  if (saga.outcome === "queue_rejected") {
+    respondNativeProviderQueueRejected(res);
+    return;
+  }
+  if (saga.outcome === "persistence_failed") {
+    respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
+    return;
+  }
+  if (saga.outcome === "connected") {
+    res.status(200).json({ data: { connected: true } });
+    return;
+  }
+  logger.warn(SOURCE, "Native provider key connection failed", { compensation: saga.compensation });
+  res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
 });
 
 opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, res) => {
@@ -1195,9 +1246,13 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth methodID is required" } });
     return;
   }
+  if (req.body?.owner_kind && req.body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
+    return;
+  }
   const result = await opencodeClient.beginIntegrationOAuth(req.params.integrationID!, req.body.methodID, inputs);
   if (!isOpenCodeError(result) && !isSafeOAuthUrl(result.data.url)) {
-    await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+    await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
     res.status(502).json({ error: { code: "UNSAFE_OAUTH_URL", message: "Provider returned an unsafe authorization URL" } });
     return;
   }
@@ -1205,13 +1260,22 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     const callbackUrl = new URL(result.data.url);
     const state = callbackUrl.searchParams.get("state");
     if (!state || state.length > 1024 || /[\r\n\0]/.test(state)) {
-      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
       return;
     }
+    const principal = req.principal;
+    if (!principal) {
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
+      res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
+      return;
+    }
+    const ownerKind = "installation" as const;
+    const organizationId = "organizationId" in principal ? principal.organizationId ?? null : null;
+    const ownerUserId = null;
     pruneOAuthAttempts();
     if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
-      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(503).json({ error: { code: "OAUTH_CAPACITY_REACHED", message: "Too many pending authorization requests. Try again shortly." } });
       return;
     }
@@ -1219,6 +1283,13 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
       attemptID: result.data.attemptID,
       mode: result.data.mode,
       expiresAt: Math.min(Date.now() + OAUTH_ATTEMPT_TTL_MS, result.data.time.expires),
+      actorType: principal.type === "runtime-service" ? "system" : principal.type,
+      actorId: principal.id,
+      organizationId,
+      ownerKind,
+      ownerUserId,
+      providerId: req.params.integrationID!,
+      runtimeIntent: ownerKind === "installation" ? "shared" : "private",
     });
   }
   sendResult(req, res, result);
@@ -1230,7 +1301,9 @@ opencodeRouter.get("/integration-attempts/:attemptID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
     return;
   }
-  const result = await opencodeClient.getIntegrationAttempt(req.params.attemptID!);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.getIntegrationAttempt(req.params.attemptID!, integrationID);
   sendResult(req, res, result);
 });
 
@@ -1241,7 +1314,9 @@ opencodeRouter.post("/integration-attempts/:attemptID/complete", async (req, res
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth completion request" } });
     return;
   }
-  const result = await opencodeClient.completeIntegrationAttempt(req.params.attemptID!, code);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.completeIntegrationAttempt(req.params.attemptID!, code, integrationID);
   sendResult(req, res, result);
 });
 
@@ -1251,11 +1326,36 @@ opencodeRouter.delete("/integration-attempts/:attemptID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
     return;
   }
-  const result = await opencodeClient.cancelIntegrationAttempt(req.params.attemptID!);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.cancelIntegrationAttempt(req.params.attemptID!, integrationID);
   sendResult(req, res, result);
 });
 
 /* ── Auth ── */
+
+async function mutateRuntimeProviderAuth<T>(
+  directory: string | undefined,
+  mutation: (signal: AbortSignal) => Promise<OpenCodeResult<T>>,
+): Promise<OpenCodeResult<T>> {
+  const disposedBeforeMutation = await callOpenCodeWithProviderDeadline((signal) =>
+    opencodeClient.disposeInstance(directory, signal),
+  );
+  if (isOpenCodeError(disposedBeforeMutation)) return disposedBeforeMutation;
+
+  let mutationResult: OpenCodeResult<T>;
+  let disposedAfterMutation: OpenCodeResult<boolean>;
+  try {
+    mutationResult = await callOpenCodeWithProviderDeadline(mutation);
+  } finally {
+    disposedAfterMutation = await callOpenCodeWithProviderDeadline((signal) =>
+      opencodeClient.disposeInstance(directory, signal),
+    );
+  }
+
+  // Cache cleanup takes precedence because mutation outcome cannot make a surviving stale client safe.
+  return isOpenCodeError(disposedAfterMutation!) ? disposedAfterMutation! : mutationResult!;
+}
 
 opencodeRouter.post("/auth/:providerID", async (req, res) => {
   if (!guardPassword(req, res)) return;
@@ -1266,27 +1366,97 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid API key is required" } });
     return;
   }
+  if (currentOpenCodeRuntimeTarget()) {
+    const result = await mutateRuntimeProviderAuth(directory, (signal) =>
+      opencodeClient.addAuth(req.params.providerID!, body, directory, signal),
+    );
+    if (isOpenCodeError(result)) sendResult(req, res, result);
+    else res.json({ data: { connected: true } });
+    return;
+  }
+  if (body.owner_kind && body.owner_kind !== "installation") {
+    res.status(422).json({ error: { code: "PRIVATE_PROVIDER_RUNTIME_UNAVAILABLE", message: "Private provider credentials cannot be loaded into shared OpenCode." } });
+    return;
+  }
+  if (typeof body.key === "string") {
+    const providerId = req.params.providerID!;
+    const saga = await connectNativeProviderCredential(providerId, body.key, {
+      apply: (key, signal) => opencodeClient.addAuth(providerId, { ...body, key }, directory, signal),
+      remove: (signal) => opencodeClient.deleteAuth(providerId, directory, signal),
+      status: (signal) => opencodeClient.getAuthStatus(directory, signal),
+    });
+    if (saga.outcome === "queue_rejected") {
+      respondNativeProviderQueueRejected(res);
+      return;
+    }
+    if (saga.outcome === "persistence_failed") {
+      respondNativeProviderPersistenceFailure(res, saga.persistence, "connect");
+      return;
+    }
+    if (saga.outcome === "connected") {
+      res.status(200).json({ data: { connected: true } });
+      return;
+    }
+    logger.warn(SOURCE, "Native provider key connection failed", { compensation: saga.compensation });
+    res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
+    return;
+  }
 
   // Redact key from logging
   const bodyForLog = { ...body };
   if (bodyForLog.key) bodyForLog.key = "***REDACTED***";
   logger.debug(SOURCE, `POST /auth/${req.params.providerID}`, { body: bodyForLog });
 
-  const result = await opencodeClient.addAuth(req.params.providerID!, body, directory);
+  const result = await callOpenCodeWithProviderDeadline((signal) =>
+    opencodeClient.addAuth(req.params.providerID!, body, directory, signal),
+  );
   sendResult(req, res, result);
 });
 
 opencodeRouter.delete("/auth/:providerID", async (req, res) => {
   if (!guardPassword(req, res)) return;
+  if (!isSafeIdentifier(req.params.providerID)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid provider ID is required" } });
+    return;
+  }
   const directory = req.query.directory as string | undefined;
-  const result = await opencodeClient.deleteAuth(req.params.providerID!, directory);
-  sendResult(req, res, result);
+  const providerId = req.params.providerID!;
+  if (currentOpenCodeRuntimeTarget()) {
+    const result = await mutateRuntimeProviderAuth(directory, (signal) =>
+      opencodeClient.deleteAuth(providerId, directory, signal),
+    );
+    if (isOpenCodeError(result) && result.error.status !== 404) sendResult(req, res, result);
+    else res.json({ data: { disconnected: true } });
+    return;
+  }
+  const saga = await disconnectNativeProviderCredential(providerId, {
+    apply: (key, signal) => opencodeClient.addAuth(providerId, { type: "api", key }, directory, signal),
+    remove: (signal) => opencodeClient.deleteAuth(providerId, directory, signal),
+    status: (signal) => opencodeClient.getAuthStatus(directory, signal),
+  });
+  if (saga.outcome === "queue_rejected") {
+    respondNativeProviderQueueRejected(res);
+    return;
+  }
+  if (saga.outcome === "persistence_failed") {
+    respondNativeProviderPersistenceFailure(res, saga.persistence, "disconnect");
+    return;
+  }
+  if (saga.outcome === "disconnected") {
+    res.status(200).json({ data: { disconnected: true } });
+    return;
+  }
+  logger.warn(SOURCE, "Native provider disconnect failed", {
+    outcome: saga.outcome,
+    ...("compensation" in saga ? { compensation: saga.compensation } : {}),
+  });
+  res.status(502).json({ error: { code: "PROVIDER_DISCONNECT_FAILED", message: "Provider disconnect failed" } });
 });
 
 opencodeRouter.get("/auth/status", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
-  const result = await opencodeClient.getAuthStatus(directory);
+  const result = await callOpenCodeWithProviderDeadline((signal) => opencodeClient.getAuthStatus(directory, signal));
   sendResult(req, res, result);
 });
 

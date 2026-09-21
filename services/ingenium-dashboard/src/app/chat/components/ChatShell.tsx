@@ -5,16 +5,49 @@ import Link from "next/link";
 import ChatSessionSidebar from "./ChatSessionSidebar";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
-import ChatInput, { type Attachment } from "./ChatInput";
+import ChatInput, { type Attachment, type SendOptions } from "./ChatInput";
+import ActivityDrawer from "./ActivityDrawer";
+import EdgeDrawer from "../../components/EdgeDrawer";
+import type { ActivitySelection } from "./chat-activity";
 import MCPDrawer from "./MCPDrawer";
 import {
+  isSafeProjectName,
   normalizeMcpServers,
   type McpServerView,
 } from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
-import { opencode } from "../../../lib/opencode";
-import { api, ApiError, type ChatConfigResponse } from "../../../lib/api";
+import { api, ApiError, type ChatConfigResponse, type ExplicitMemoryReceipt, type TaskCaptureResult } from "../../../lib/api";
+import { useProject } from "../../../lib/ProjectContext";
+import { useOpenCodeClient, useRuntime } from "../../../lib/RuntimeContext";
+import TaskCaptureModal from "../../tasks/components/TaskCaptureModal";
+import {
+  CHAT_CONTEXT_MAX_SOURCES,
+  CHAT_CONTEXT_QUERY_MAX_CHARS,
+  buildProjectContext,
+  combineSystemInstructions,
+  unrequestedGrounding,
+} from "../../../lib/chat-grounding";
+import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
+import { useMemoryCapabilities } from "./use-memory-capabilities";
+
+type MemorySaveInput = {
+  operationId: string;
+  workspaceId: string;
+  content: string;
+  tags: string[];
+};
+
+type MemoryNotice = {
+  status: "saving" | "saved" | "failed";
+  message: string;
+} | {
+  status: "queued";
+  message: string;
+  checkedUnknown: boolean;
+  project: string;
+  input: MemorySaveInput;
+};
 
 /* ------------------------------------------------------------------ */
 /*  ChatShell — main layout orchestrator for the Chat mode            */
@@ -30,15 +63,25 @@ import { api, ApiError, type ChatConfigResponse } from "../../../lib/api";
  * Responsive: on mobile (<768px) the sidebar becomes an overlay drawer.
  */
 export default function ChatShell() {
+  const opencode = useOpenCodeClient();
+  const runtime = useRuntime();
+  const selectedProject = useProject();
   /* ---- Layout state ---- */
   const [collapsed, setCollapsed] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const mobileDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
+  const [contextSearchError, setContextSearchError] = useState<string | null>(null);
+  const [memoryNotice, setMemoryNotice] = useState<MemoryNotice | null>(null);
+  const [memoryStatusPending, setMemoryStatusPending] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
   const [compactState, setCompactState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [compactError, setCompactError] = useState<string | null>(null);
+  const [taskCaptureOpen, setTaskCaptureOpen] = useState(false);
+  const [taskCaptureSessionId, setTaskCaptureSessionId] = useState<string | null>(null);
+  const [taskCaptureNotice, setTaskCaptureNotice] = useState<{ title: string } | null>(null);
 
   /* ---- Auto-collapse sidebar on smaller screens ---- */
   useEffect(() => {
@@ -58,7 +101,32 @@ export default function ChatShell() {
   const [mcpServers, setMcpServers] = useState<McpServerView[]>([]);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpRefreshing, setMcpRefreshing] = useState(false);
+  const [mcpLastRefreshedAt, setMcpLastRefreshedAt] = useState<number | null>(null);
   const [mcpActionPending, setMcpActionPending] = useState<string | null>(null);
+
+  /* ---- Activity drawer state ---- */
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activitySelection, setActivitySelection] = useState<ActivitySelection | null>(null);
+
+  const handleMobileMenuOpen = useCallback((trigger: HTMLButtonElement) => {
+    mobileDrawerTriggerRef.current = trigger;
+    setMobileDrawerOpen(true);
+  }, []);
+
+  const handleMobileDrawerClosed = useCallback(() => {
+    const trigger = mobileDrawerTriggerRef.current;
+    mobileDrawerTriggerRef.current = null;
+    if (!trigger?.isConnected) return;
+
+    const activeElement = document.activeElement;
+    const drawer = drawerRef.current;
+    const focusMovedOutside = activeElement
+      && activeElement !== document.body
+      && !drawer?.contains(activeElement);
+    if (focusMovedOutside) return;
+
+    trigger.focus();
+  }, []);
 
   /* ---- OpenCode hooks ---- */
   const {
@@ -73,9 +141,40 @@ export default function ChatShell() {
     isLoading: sessionsLoading,
     error: sessionsError,
     autoCreated = false,
+    isCreating = false,
   } = useOpenCodeSessions();
 
-  const chat = useOpenCodeChat(activeId);
+  const activeSession = sessions.find((session) => session.id === activeId);
+  const memoryProject = selectedProject;
+  const savedMemoryWorkspaceId = memoryWorkspaceId(
+    selectedProject,
+    runtime.workspace.confirmedProjectName,
+    runtime.workspace.confirmedWorkspaceId,
+  );
+  const memoryCapabilities = useMemoryCapabilities(memoryProject, savedMemoryWorkspaceId, mcpLastRefreshedAt);
+  const chat = useOpenCodeChat(activeId, activeId ? {
+    project: runtime.projectName ?? selectedProject,
+    runtimeId: runtime.runtimeId,
+    title: activeSession?.title ?? "New conversation",
+  } : undefined);
+
+  const openActivity = useCallback((messageId: string, partId: string) => {
+    setActivitySelection({ messageId, partId });
+    setActivityOpen(true);
+  }, []);
+
+  const closeActivity = useCallback(() => {
+    setActivityOpen(false);
+    setActivitySelection(null);
+  }, []);
+
+  // A selection belongs to one session and one turn. Do not let an old
+  // selected tool remain visible while a new session is loading.
+  useEffect(() => {
+    closeActivity();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMemoryNotice((current) => current?.status === "queued" ? current : null);
+  }, [activeId, closeActivity, memoryProject, savedMemoryWorkspaceId]);
 
   /** Reset dismissed error when error changes to something new. */
   const displayError =
@@ -90,8 +189,13 @@ export default function ChatShell() {
 
   /* ---- Chat config — Settings-backed provider/agent selection ---- */
   const [chatConfig, setChatConfig] = useState<ChatConfigResponse | null>(null);
+  const chatConfigProject = isSafeProjectName(chatConfig?.project) ? chatConfig.project : null;
   const [chatConfigLoading, setChatConfigLoading] = useState(true);
   const [chatConfigError, setChatConfigError] = useState<string | null>(null);
+  // The catalog is not ready until the selection-recovery effect has resolved
+  // the current provider/model pair. This prevents a valid delayed catalog
+  // from briefly looking like an empty one between renders.
+  const [chatConfigReady, setChatConfigReady] = useState(false);
 
   /* ---- Rate-limit recovery ---- */
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null);
@@ -121,12 +225,13 @@ export default function ChatShell() {
   const fetchChatConfig = useCallback(async (isRetry = false) => {
     try {
       setChatConfigLoading(true);
+      setChatConfigReady(false);
       if (!isRetry) setChatConfigError(null);
-      const result = await api.settings.chatConfig();
-      setChatConfig(result.data);
+      const result = await opencode.chat.config();
+      setChatConfig(result);
       // Success clears any active rate-limit state
       clearRateLimit();
-      return result.data;
+      return result;
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) {
         const retryAfter = err.retryAfterSeconds ?? 5;
@@ -142,7 +247,7 @@ export default function ChatShell() {
     } finally {
       setChatConfigLoading(false);
     }
-  }, [clearRateLimit]);
+  }, [clearRateLimit, opencode]);
 
   // Countdown effect — decrement rateLimitSeconds every second
   useEffect(() => {
@@ -181,18 +286,19 @@ export default function ChatShell() {
   }, [clearRateLimit, fetchChatConfig]);
 
   useEffect(() => {
-    fetchChatConfig();
-    // Only on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void fetchChatConfig();
+  }, [fetchChatConfig]);
 
   // Recover a usable pair whenever a refreshed catalog invalidates the current
   // selection. Provider and model share one state update so a provider switch
   // cannot render or persist a transient cross-provider model pairing.
   useEffect(() => {
-    if (!chatConfig || chatConfigLoading) return;
+    if (!chatConfig || chatConfigLoading || chatConfigError || rateLimitSeconds !== null) return;
     const currentProvider = chatConfig.providers.find((candidate) => candidate.providerId === providerId);
-    if (currentProvider?.models.some((model) => model.id === modelId)) return;
+    if (currentProvider?.models.some((model) => model.id === modelId)) {
+      setChatConfigReady(true);
+      return;
+    }
     const preferred = chatConfig.defaultSelection
       ?? (chatConfig.configured && chatConfig.primary
         ? { providerId: chatConfig.primary.providerId, modelId: chatConfig.primary.modelId }
@@ -201,6 +307,7 @@ export default function ChatShell() {
       ?? chatConfig.providers.find((candidate) => candidate.models.length > 0);
     if (!provider) {
       if (providerId || modelId) setSelection({ providerId: "", modelId: "" });
+      setChatConfigReady(true);
       return;
     }
     const preferredModelId = provider.providerId === preferred?.providerId ? preferred.modelId : undefined;
@@ -212,7 +319,8 @@ export default function ChatShell() {
     if (providerId !== provider.providerId || modelId !== nextModelId) {
       setSelection({ providerId: provider.providerId, modelId: nextModelId });
     }
-  }, [chatConfig, chatConfigLoading, modelId, providerId]);
+    setChatConfigReady(true);
+  }, [chatConfig, chatConfigError, chatConfigLoading, modelId, providerId, rateLimitSeconds]);
 
   /* ---- Attachment state ---- */
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -247,7 +355,7 @@ export default function ChatShell() {
     if (!provider?.models.some((model) => model.id === nextModelId)) return;
     const persist = async () => {
       try {
-        await api.settings.saveChatSelection({ providerId: nextProviderId, modelId: nextModelId });
+        await opencode.chat.saveSelection({ providerId: nextProviderId, modelId: nextModelId });
       } catch {
         // The local Chat turn remains usable. Docs AI will use the last
         // validated server selection or server-derived default until a later
@@ -255,12 +363,12 @@ export default function ChatShell() {
       }
     };
     selectionSaveQueueRef.current = selectionSaveQueueRef.current.then(persist, persist);
-  }, [chatConfig]);
+  }, [chatConfig, opencode]);
 
   /** Provider recovery remains available when only the selected model is stale. */
   // A missing default must not disable recovery when the catalog still offers
   // providers. Only an empty catalog disables the provider and agent selectors.
-  const selectorsDisabled = chatConfigLoading || !!chatConfigError
+  const selectorsDisabled = !chatConfigReady || chatConfigLoading || !!chatConfigError
     || rateLimitSeconds !== null || availableProviders.length === 0;
 
   const handleProviderChange = useCallback((nextProviderId: string) => {
@@ -281,15 +389,24 @@ export default function ChatShell() {
     saveChatSelection(providerId, nextModelId);
   }, [providerId, saveChatSelection]);
 
-  /* ---- Derived session data ---- */
-  const activeSession = sessions.find((s) => s.id === activeId);
+  /** Task capture is identity-only and waits for the hook's session validation. */
+  const taskCaptureDisabled = !activeId || !activeSession || sessionsLoading || chat.isLoading || chat.isStreaming;
 
-  /** Sessions in the sidebar-compatible shape. */
-  const sidebarSessions = sessions.map((s) => ({
-    id: s.id,
-    title: s.title,
-    updatedAt: s.time.updated,
-  }));
+  const handleCreateTask = useCallback(() => {
+    if (taskCaptureDisabled) return;
+    setTaskCaptureNotice(null);
+    setTaskCaptureSessionId(activeId);
+    setTaskCaptureOpen(true);
+  }, [activeId, taskCaptureDisabled]);
+
+  const handleTaskCaptureClose = useCallback(() => {
+    setTaskCaptureOpen(false);
+    setTaskCaptureSessionId(null);
+  }, []);
+
+  const handleTaskCaptured = useCallback((result: TaskCaptureResult) => {
+    setTaskCaptureNotice({ title: result.task.title });
+  }, []);
 
   /** Track whether this was the first message (for title rename). */
   const wasFirstMessage = useRef(chat.messages.length === 0);
@@ -312,19 +429,20 @@ export default function ChatShell() {
       const servers = normalizeMcpServers(raw);
       if (!servers) throw new Error("invalid MCP status response");
       setMcpServers(servers);
+      setMcpLastRefreshedAt(Date.now());
       return true;
     } catch {
-      setMcpError("Unable to refresh MCP server status. Try again.");
+      setMcpError("MCP status is unavailable. Verify OpenCode is running, then retry.");
       return false;
     } finally {
       setMcpRefreshing(false);
     }
   }, []);
 
-  // Refresh on mount and after drawer closes (covers connect/disconnect)
-  useEffect(() => {
-    void refreshMcpStatus();
-  }, [refreshMcpStatus]);
+  const handleMcpRefresh = useCallback(
+    () => refreshMcpStatus(),
+    [refreshMcpStatus],
+  );
 
   const changeMcpConnection = useCallback(async (name: string, action: "connect" | "disconnect") => {
     setMcpActionPending(name);
@@ -346,40 +464,48 @@ export default function ChatShell() {
     }
   }, [refreshMcpStatus]);
 
+  const handleMcpOpen = useCallback(() => {
+    setMcpDrawerOpen(true);
+  }, []);
+
   /** Auto-focus the first focusable element in the mobile drawer when it opens. */
   useEffect(() => {
     if (!mobileDrawerOpen) return;
-    const timer = setTimeout(() => {
+    const frame = window.requestAnimationFrame(() => {
       const drawer = drawerRef.current;
       if (!drawer) return;
       const firstFocusable = drawer.querySelector<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
       );
       firstFocusable?.focus();
-    }, 0);
-    return () => clearTimeout(timer);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [mobileDrawerOpen]);
 
   /* ---- Session handlers ---- */
 
   const handleNew = useCallback(async () => {
+    if (isCreating) return;
+    closeActivity();
     await create("New conversation");
     setMobileDrawerOpen(false);
-  }, [create]);
+  }, [closeActivity, create, isCreating]);
 
   const handleSelect = useCallback(
     (id: string) => {
+      closeActivity();
       select(id);
       setMobileDrawerOpen(false);
     },
-    [select],
+    [closeActivity, select],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
+      if (id === activeId) closeActivity();
       await removeSession(id);
     },
-    [removeSession],
+    [activeId, closeActivity, removeSession],
   );
 
   const handleRename = useCallback(
@@ -393,13 +519,48 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, _systemPrompt: string): Promise<boolean> => {
+    async (text: string, systemPrompt: string, options?: SendOptions): Promise<boolean> => {
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
 
+      setContextSearchError(null);
       const shouldRename =
         wasFirstMessage.current &&
         activeSession?.title === "New conversation";
+
+      let grounding = unrequestedGrounding();
+      const systemContexts: string[] = [];
+      if ((options?.useSavedMemory && !memoryCapabilities.canRead) || (options?.saveToMemory && !memoryCapabilities.canSave)) {
+        setMemoryNotice({ status: "failed", message: memoryCapabilities.reason ?? "Memory capability is unavailable." });
+        return false;
+      }
+      if (options?.useSavedMemory && savedMemoryWorkspaceId) {
+        try {
+          const result = await api.memory.list(memoryProject, savedMemoryWorkspaceId);
+          const memoryContext = buildExplicitMemoryContext(result.data, memoryProject, savedMemoryWorkspaceId);
+          if (result.data.items.length > 0 && !memoryContext) throw new Error("invalid saved-memory context");
+          if (memoryContext) systemContexts.push(memoryContext);
+        } catch {
+          setMemoryNotice({ status: "failed", message: "Saved memory is unavailable. Try sending again." });
+          return false;
+        }
+      }
+      if (options?.useProjectContext) {
+        try {
+          const result = await api.context.rag.search(
+            text.slice(0, CHAT_CONTEXT_QUERY_MAX_CHARS),
+            selectedProject,
+            CHAT_CONTEXT_MAX_SOURCES,
+          );
+          const context = buildProjectContext(selectedProject, result.data);
+          grounding = context.grounding;
+          if (context.systemContext) systemContexts.push(context.systemContext);
+        } catch {
+          setContextSearchError("Project context search is unavailable. Try sending again.");
+          return false;
+        }
+      }
+      const system = combineSystemInstructions(systemPrompt, systemContexts.join("\n\n"));
 
       // Build parts array: text part + file parts from attachments
       const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }> = [
@@ -416,15 +577,46 @@ export default function ChatShell() {
       }
 
       try {
-        await chat.send(parts, {
+        const accepted = await chat.send(parts, {
           model: { providerID: providerId, modelID: modelId },
           agent: agentName,
+          system,
+          tools: options?.automaticLearning === false
+            ? { auto_observe_now: false, synthesize_observations: false }
+            : undefined,
+          grounding,
         });
+        if (!accepted) return false;
       } catch {
         // send() handles its own error dispatch
+        return false;
       }
 
-      // Clear attachments after successful send
+      if (options?.saveToMemory && savedMemoryWorkspaceId) {
+        setMemoryNotice({ status: "saving", message: "Saving this message to memory…" });
+        try {
+          const input: MemorySaveInput = {
+            operationId: newExplicitMemoryOperationId(),
+            workspaceId: savedMemoryWorkspaceId,
+            content: text,
+            tags: ["chat"],
+          };
+          const result = await api.memory.save(memoryProject, input);
+          setMemoryNotice("status" in result.data
+            ? {
+              status: "queued",
+              message: `Memory save outcome is pending (${input.operationId}). Check its status before retrying.`,
+              checkedUnknown: false,
+              project: memoryProject,
+              input,
+            }
+            : { status: "saved", message: `Saved to memory as version ${result.data.receipt.version}. Receipt ${result.data.receipt.receiptId}.` });
+        } catch {
+          setMemoryNotice({ status: "failed", message: "This message was not saved to memory. Try again." });
+        }
+      }
+
+      // The prompt contract accepted this send; only now may local composer state change.
       setAttachments([]);
 
       // Update session title from first message (best-effort - do not block)
@@ -436,8 +628,50 @@ export default function ChatShell() {
 
       return true;
     },
-    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel],
+    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel,
+      memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities],
   );
+
+  const memorySavedNotice = useCallback((receipt: ExplicitMemoryReceipt): MemoryNotice => ({
+    status: "saved",
+    message: `Saved to memory as version ${receipt.version}. Receipt ${receipt.receiptId}.`,
+  }), []);
+
+  const handleMemoryStatus = useCallback(async () => {
+    if (memoryNotice?.status !== "queued" || memoryStatusPending) return;
+    const queued = memoryNotice;
+    setMemoryStatusPending(true);
+    try {
+      const result = await api.memory.operationStatus(queued.project, queued.input.workspaceId, queued.input.operationId);
+      setMemoryNotice(result.data.status === "committed"
+        ? memorySavedNotice(result.data.receipt)
+        : {
+          ...queued,
+          checkedUnknown: true,
+          message: `Memory save outcome is still unknown (${queued.input.operationId}). It has not been reported as committed.`,
+        });
+    } catch {
+      setMemoryNotice({ ...queued, message: `Unable to check memory save status. The original outcome remains unknown (${queued.input.operationId}).` });
+    } finally {
+      setMemoryStatusPending(false);
+    }
+  }, [memoryNotice, memorySavedNotice, memoryStatusPending]);
+
+  const handleMemoryReplay = useCallback(async () => {
+    if (memoryNotice?.status !== "queued" || !memoryNotice.checkedUnknown || memoryStatusPending) return;
+    const queued = memoryNotice;
+    setMemoryStatusPending(true);
+    try {
+      const result = await api.memory.save(queued.project, queued.input);
+      setMemoryNotice("status" in result.data
+        ? { ...queued, checkedUnknown: false, message: `Memory save outcome is pending (${queued.input.operationId}). Check its status before retrying.` }
+        : memorySavedNotice(result.data.receipt));
+    } catch {
+      setMemoryNotice({ ...queued, message: `The identical save could not be replayed. The original outcome remains unknown (${queued.input.operationId}).` });
+    } finally {
+      setMemoryStatusPending(false);
+    }
+  }, [memoryNotice, memorySavedNotice, memoryStatusPending]);
 
   const handleStop = useCallback(async () => {
     await chat.stop();
@@ -507,8 +741,9 @@ export default function ChatShell() {
   }, [activeId, providerId, modelId]);
 
   const handleRetry = useCallback(async () => {
+    closeActivity();
     await chat.retry();
-  }, [chat]);
+  }, [chat, closeActivity]);
 
   /** Send a reply to the agent's structured question as a regular prompt. */
   const handleSendReply = useCallback(
@@ -539,11 +774,12 @@ export default function ChatShell() {
       {/* Sidebar — hidden on mobile, visible as drawer overlay instead */}
       <div className="hidden md:flex">
         <ChatSessionSidebar
-          sessions={sidebarSessions}
+          sessions={sessions}
           activeId={activeId}
           onSelect={handleSelect}
           onDelete={handleDelete}
           onNew={handleNew}
+          newDisabled={isCreating}
           collapsed={collapsed}
           onToggle={() => setCollapsed((c) => !c)}
           isLoading={sessionsLoading}
@@ -552,35 +788,35 @@ export default function ChatShell() {
       </div>
 
       {/* Mobile drawer overlay */}
-      {mobileDrawerOpen && (
-        <div
-          ref={drawerRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Chat sessions"
-          className="md:hidden fixed inset-0 z-40 flex"
-        >
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setMobileDrawerOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="relative z-50 w-[280px] h-full bg-[var(--color-nav-bg)] shadow-xl">
-            <ChatSessionSidebar
-              sessions={sidebarSessions}
-              activeId={activeId}
-              onSelect={handleSelect}
-              onDelete={handleDelete}
-              onNew={handleNew}
-              collapsed={false}
-              onToggle={() => setMobileDrawerOpen(false)}
-              isDrawer
-              isLoading={sessionsLoading}
-              sessionsError={sessionsError}
-            />
-          </div>
-        </div>
-      )}
+      <EdgeDrawer
+        open={mobileDrawerOpen}
+        side="left"
+        className="md:hidden fixed inset-0 z-40 flex"
+        panelRef={drawerRef}
+        panelClassName="relative z-50 w-[280px] h-full bg-[var(--color-nav-bg)] shadow-xl"
+        panelProps={{
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "Chat sessions",
+        }}
+        backdropProps={{ "data-testid": "chat-session-drawer-backdrop" }}
+        onBackdropClick={() => setMobileDrawerOpen(false)}
+        onClosed={handleMobileDrawerClosed}
+      >
+        <ChatSessionSidebar
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={handleSelect}
+          onDelete={handleDelete}
+          onNew={handleNew}
+          newDisabled={isCreating}
+          collapsed={false}
+          onToggle={() => setMobileDrawerOpen(false)}
+          isDrawer={mobileDrawerOpen}
+          isLoading={sessionsLoading}
+          sessionsError={sessionsError}
+        />
+      </EdgeDrawer>
 
       {/* Main chat area */}
       <div className="flex-1 flex-col min-w-0 min-h-0 flex">
@@ -604,12 +840,66 @@ export default function ChatShell() {
           isBusy={chat.isStreaming || chat.isLoading}
           disabled={selectorsDisabled}
           modelDisabled={!hasSelectableModel}
-          onMobileMenuOpen={() => setMobileDrawerOpen(true)}
-          onMcpOpen={() => setMcpDrawerOpen(true)}
+          onMobileMenuOpen={handleMobileMenuOpen}
+          onMcpOpen={handleMcpOpen}
           permissionCount={chat.permissions.length}
+          onCreateTask={handleCreateTask}
+          createTaskDisabled={taskCaptureDisabled}
         />
+        {chatConfigProject && (
+          <div
+            className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]"
+            data-testid="chat-global-project"
+          >
+            <span>Chat tools run through global project:</span>
+            <code className="truncate font-mono text-[var(--color-text-secondary)]">{chatConfigProject}</code>
+          </div>
+        )}
+        {contextSearchError && (
+          <div
+            className="flex shrink-0 items-center gap-2 px-4 py-2 text-sm text-[var(--color-error-text)]"
+            role="alert"
+            data-testid="chat-project-context-error"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              className="shrink-0"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6" />
+              <path strokeLinecap="round" d="M8 5v3M8 10.5v.5" />
+            </svg>
+            <span>{contextSearchError}</span>
+          </div>
+        )}
+        {memoryNotice && (
+          <div
+            className={`flex shrink-0 flex-wrap items-center gap-2 px-4 py-2 text-sm ${memoryNotice.status === "failed" ? "text-[var(--color-error-text)]" : "text-[var(--color-text-secondary)]"}`}
+            role={memoryNotice.status === "failed" ? "alert" : "status"}
+            data-testid="chat-memory-notice"
+          >
+            <span className="min-w-0 flex-1">{memoryNotice.message}</span>
+            {memoryNotice.status === "queued" && (
+              <>
+                <button type="button" onClick={() => void handleMemoryStatus()} disabled={memoryStatusPending} className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50">
+                  {memoryStatusPending ? "Checking…" : "Check status"}
+                </button>
+                {memoryNotice.checkedUnknown && (
+                  <button type="button" onClick={() => void handleMemoryReplay()} disabled={memoryStatusPending} className="shrink-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1 text-xs font-medium text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] disabled:cursor-not-allowed disabled:opacity-50">
+                    Retry identical save
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        )}
         {/* No-LLM-configured warning */}
-        {!hasSelectableModel && !chatConfigLoading && !chatConfigError && (
+        {chatConfigReady && !hasSelectableModel && !chatConfigLoading && !chatConfigError && (
           <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300 flex items-center gap-2 shrink-0">
             <svg
               width="14"
@@ -706,6 +996,19 @@ export default function ChatShell() {
             </span>
           </div>
         )}
+        {taskCaptureNotice && (
+          <div
+            data-testid="chat-task-capture-status"
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded border border-[var(--color-success-border)] bg-[var(--color-success-bg)] px-4 py-2 text-sm text-[var(--color-success-text)] shadow-lg"
+          >
+            Task created: {" "}
+            <Link href="/tasks" className="font-medium underline hover:no-underline">
+              {taskCaptureNotice.title}
+            </Link>
+          </div>
+        )}
         {autoCreated ? (
           <>
             <ChatMessages
@@ -721,9 +1024,12 @@ export default function ChatShell() {
               replyPermission={chat.replyPermission}
               questions={chat.questions}
               onSendReply={handleSendReply}
+              onActivityOpen={openActivity}
+              activitySelection={activitySelection}
+              mcpProject={chatConfigProject}
             />
             {/* Disabled composer — waiting for auto-created session */}
-            <div className="shrink-0 px-4 pb-4 pt-2 w-full">
+            <div className="shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2">
               <div className="max-w-3xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] shadow-sm px-4 py-3">
                 <p className="text-sm text-[var(--color-text-muted)] text-center">
                   Starting conversation...
@@ -766,7 +1072,8 @@ export default function ChatShell() {
               <button
                 type="button"
                 onClick={handleNew}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
                   width="14"
@@ -813,7 +1120,8 @@ export default function ChatShell() {
               <button
                 type="button"
                 onClick={handleNew}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
                   width="14"
@@ -849,14 +1157,24 @@ export default function ChatShell() {
               replyPermission={chat.replyPermission}
               questions={chat.questions}
               onSendReply={handleSendReply}
+              onActivityOpen={openActivity}
+              activitySelection={activitySelection}
+              mcpProject={chatConfigProject}
             />
             <ChatInput
+              key={activeId}
               onSend={handleSend}
               onStop={handleStop}
               isLoading={chat.isStreaming || chat.isLoading}
               attachments={attachments}
               onAttachmentsChange={setAttachments}
               hasSelectableModel={hasSelectableModel}
+              projectContextProject={selectedProject}
+              memoryWorkspaceId={savedMemoryWorkspaceId}
+              memoryCanRead={memoryCapabilities.canRead}
+              memoryCanSave={memoryCapabilities.canSave}
+              memoryUnavailableReason={memoryCapabilities.reason}
+              memorySavePending={memoryNotice?.status === "queued"}
             />
           </>
         )}
@@ -869,11 +1187,27 @@ export default function ChatShell() {
         servers={mcpServers}
         error={mcpError}
         isRefreshing={mcpRefreshing}
+        lastRefreshedAt={mcpLastRefreshedAt}
+        project={chatConfigProject}
         pendingServerName={mcpActionPending}
-        onRefresh={() => refreshMcpStatus()}
+        onRefresh={handleMcpRefresh}
         onConnect={(name) => changeMcpConnection(name, "connect")}
         onDisconnect={(name) => changeMcpConnection(name, "disconnect")}
       />
+      <ActivityDrawer
+        isOpen={activityOpen}
+        selection={activitySelection}
+        messages={chat.messages}
+        onClose={closeActivity}
+      />
+      {activeId && (
+        <TaskCaptureModal
+          isOpen={taskCaptureOpen && taskCaptureSessionId === activeId}
+          source={{ source_type: "chat", session_id: activeId }}
+          onClose={handleTaskCaptureClose}
+          onCaptured={handleTaskCaptured}
+        />
+      )}
     </div>
   );
 }

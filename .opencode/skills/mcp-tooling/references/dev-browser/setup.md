@@ -56,13 +56,17 @@ chrome.exe --remote-debugging-port=9222
 
 **Then from WSL/Linux:**
 ```bash
-dev-browser --connect <<'EOF'
+.opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh --json <<'EOF'
 const tabs = await browser.listPages();
 console.log(JSON.stringify(tabs, null, 2));
 EOF
 ```
 
-> **WSL note:** Chrome runs on the Windows host. Chrome 150+ binds only to `127.0.0.1` — `--remote-debugging-address=0.0.0.0` is ignored. WSL2 cannot reach Windows `127.0.0.1:9222` directly. To drive Chrome from WSL, run `dev-browser` directly on Windows via `cmd.exe` pipe (see Pattern 5 in patterns.md). If you're inside Docker, use `host.docker.internal` as the Chrome host.
+Use `--json` for evidence-producing helper calls and emit one JSON value with
+`JSON.stringify(...)`. Non-evidence helper calls may omit the flag and print
+plain text; empty stdout does not authenticate a page.
+
+> **WSL note:** Chrome runs on the Windows host. Chrome 150+ binds only to `127.0.0.1` — `--remote-debugging-address=0.0.0.0` is ignored. WSL2 cannot reach Windows `127.0.0.1:9222` directly. To drive Chrome from WSL, use `wsl-chrome-connect.sh`; it runs `dev-browser` directly on Windows via `cmd.exe`. If you're inside Docker, use `host.docker.internal` as the Chrome host.
 
 ### Troubleshooting
 
@@ -88,7 +92,7 @@ If empty, restart Chrome with:
   --new-window about:blank &
 ```
 
-To drive Chrome from WSL, install and run `dev-browser` on Windows (see Pattern 5 in patterns.md).
+To drive Chrome from WSL, use `wsl-chrome-connect.sh` after installing `dev-browser` on Windows (see Pattern 5 in patterns.md).
 
 #### "Cannot find browser" error
 Run `dev-browser install` to download Chromium.

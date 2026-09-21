@@ -143,5 +143,3 @@ docker compose ps
 ## Cross-References
 
 - **`@development-conventions`** — Python/Next.js conventions that pair with Docker/K8s deployments
-- **`@local-models`** — Command safety rules for CLI and dev server usage
-- **`@engineering-workflow`** — Agent configuration, orchestrator pipeline

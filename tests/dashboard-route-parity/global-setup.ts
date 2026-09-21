@@ -1,29 +1,26 @@
-import { loadProductionArtifactRoutes } from "./route-inventory";
+import fixtureGlobalSetup from "../playwright-global-setup";
+import { getDefaultSuiteRuntime } from "../ingenium-dashboard/default-suite-runtime";
+import { provisionTestRunBrowserSession, stopRunFromManifest } from "../test-server-lifecycle";
 import { productionDashboardUrl, requireRouteParityOptIn } from "./runtime";
 
-/**
- * Read-only preflight for the production artifact/gateway route suite.
- * No API bearer, provider credential, mail account, or mutation request is
- * created here; the only network operation is a GET of the gateway root.
- */
+/** Start the isolated production-mode fixture before route inspection. */
 export default async function routeParityGlobalSetup(): Promise<void> {
   requireRouteParityOptIn();
-  const artifact = loadProductionArtifactRoutes();
-  const target = productionDashboardUrl(true);
-
-  let response: Response;
+  await fixtureGlobalSetup();
+  const context = getDefaultSuiteRuntime().context;
   try {
-    response = await fetch(target, { method: "GET", redirect: "follow" });
+    const dashboardHost = new URL(productionDashboardUrl()).hostname;
+    if (dashboardHost !== "127.0.0.1" && dashboardHost !== "localhost") {
+      throw new Error("Route parity dashboard host escaped the isolated loopback fixture");
+    }
+    await provisionTestRunBrowserSession(context, dashboardHost);
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`Production dashboard gateway is unreachable at ${target}: ${reason}`);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Production dashboard gateway preflight returned HTTP ${response.status}: ${target}`);
-  }
-
-  if (artifact.routes.size === 0 || !artifact.buildId) {
-    throw new Error(`Production dashboard artifact is incomplete: ${artifact.directory}`);
+    try {
+      await stopRunFromManifest(context.manifestPath, { cleanup: false });
+    } catch (cleanupError) {
+      // eslint-disable-next-line no-console
+      console.error(`[route-parity] setup cleanup diagnostics: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+    }
+    throw error;
   }
 }

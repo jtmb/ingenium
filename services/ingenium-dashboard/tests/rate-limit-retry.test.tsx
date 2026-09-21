@@ -46,6 +46,27 @@ vi.mock("../src/lib/opencode", () => ({
   },
 }));
 
+vi.mock("../src/lib/RuntimeContext", () => {
+  const client = {
+    chat: { config: async () => (await mockChatConfig()).data, saveSelection: vi.fn() },
+    mcp: { status: vi.fn().mockResolvedValue({}), connect: vi.fn(), disconnect: vi.fn() },
+    sessions: { compact: vi.fn() },
+  };
+  return {
+    useOpenCodeClient: () => client,
+    useRuntime: () => ({
+      runtimeId: null,
+      projectName: "selected-project",
+      workspace: { mode: "compatibility", confirmedWorkspaceId: null },
+    }),
+  };
+});
+
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: "global-default", loading: false, error: null }),
+  useProject: () => "selected-project",
+}));
+
 vi.mock("../src/lib/use-opencode-sessions", () => ({
   useOpenCodeSessions: () => ({
     sessions: [{ id: "sess-1", title: "Test Session", time: { created: Date.now(), updated: Date.now() } }],
@@ -157,6 +178,7 @@ describe("REL-001: Chat rate-limit recovery", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -200,36 +222,28 @@ describe("REL-001: Chat rate-limit recovery", () => {
   // ── Auto-retry on countdown expiry ────────────────────────────────
 
   it("countdown disappears and auto-retry fires when timer expires", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.useFakeTimers();
 
     mockChatConfig.mockRejectedValue(new ApiError(429, "Rate limited", 2));
 
-    render(<ChatShell />);
-
-    // Flush initial async work
-    await act(() => vi.runAllTimersAsync());
-
-    await waitFor(() => {
-      expect(screen.getByText(/retrying in 2s/)).not.toBeNull();
+    await act(async () => {
+      render(<ChatShell />);
     });
 
+    expect(screen.getByText(/retrying in 2s/)).not.toBeNull();
     expect(mockChatConfig).toHaveBeenCalledTimes(1);
 
     // Set up success for retry
     mockChatConfig.mockResolvedValue({ data: validConfig });
 
-    // Advance past the 2-second countdown (two 1-second intervals)
-    // Use runAllTimersAsync which flushes all pending timers AND microtasks
-    await act(() => vi.advanceTimersByTimeAsync(2500));
-
-    // Now the countdown should have triggered the auto-retry useEffect
-    // which calls fetchChatConfig(true)
-    await waitFor(
-      () => {
-        expect(mockChatConfig).toHaveBeenCalledTimes(2);
-      },
-      { timeout: 2000 },
-    );
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(screen.getByText(/retrying in 1s/)).not.toBeNull();
+    expect(mockChatConfig).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1000));
+    expect(mockChatConfig).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("button", { name: "Retry Now" })).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(mockChatConfig).toHaveBeenCalledTimes(2);
   });
 
   // ── Manual "Retry Now" triggers refetch ───────────────────────────

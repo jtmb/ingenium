@@ -3,7 +3,7 @@
  *
  * These are contract-level tests that verify the proxy route handlers at
  * `routes/opencode.ts` correctly forward fields, construct bodies, and handle
- * edge cases according to the OpenCode v1.18.3 contract. The opencode client
+ * edge cases according to the retained OpenCode REST contract. The opencode client
  * is mocked so no real OpenCode server is needed.
  *
  * Each test maps to a verified defect from the audit:
@@ -20,7 +20,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 
 /* ── Module-level mock of opencode-client ────────────────────────────────── */
 
@@ -34,6 +33,7 @@ const mockRevertSession = vi.fn();
 const mockSendCommand = vi.fn();
 const mockGetSession = vi.fn();
 const mockShareSession = vi.fn();
+const mockReadRecentOpenCodeUserMessages = vi.fn();
 
 vi.mock("../lib/opencode-client.js", () => ({
   opencodeClient: {
@@ -48,6 +48,7 @@ vi.mock("../lib/opencode-client.js", () => ({
     getSession: (...args: unknown[]) => mockGetSession(...args),
     shareSession: (...args: unknown[]) => mockShareSession(...args),
   },
+  readRecentOpenCodeUserMessages: (...args: unknown[]) => mockReadRecentOpenCodeUserMessages(...args),
   isOpenCodeError: (result: unknown) =>
     typeof result === "object" && result !== null && "error" in result,
   buildAuthHeader: () => "Basic dGVzdDpwYXNz",
@@ -57,6 +58,7 @@ vi.mock("../lib/opencode-client.js", () => ({
 
 // eslint-disable-next-line import/first
 import { opencodeRouter } from "../lib/routes/opencode.js";
+import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 /* ── Types under test (re-imported for verification) ──────────────────────── */
 
@@ -95,18 +97,12 @@ afterEach(() => {
 beforeAll(async () => {
   const app = buildApp();
   server = createServer(app);
-  await new Promise<void>((resolve) => {
-    server!.listen(0, "127.0.0.1", () => {
-      const addr = server!.address() as AddressInfo;
-      baseUrl = `http://127.0.0.1:${addr.port}`;
-      resolve();
-    });
-  });
+  baseUrl = await listenOnLoopback(server);
 });
 
 afterAll(async () => {
   if (server) {
-    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    await closeHttpServer(server);
   }
   // Restore password
   if (SAVED_PASSWORD) {
@@ -119,6 +115,21 @@ afterAll(async () => {
 function api(path: string): string {
   return `${baseUrl}/api/v1/opencode${path}`;
 }
+
+describe("v2 message read availability", () => {
+  it("returns 503 instead of an empty successful result when OpenCode is unavailable", async () => {
+    mockReadRecentOpenCodeUserMessages.mockResolvedValue({
+      error: { code: "NETWORK_ERROR", message: "Network error contacting OpenCode server" },
+    });
+
+    const res = await fetch(api("/messages?since=0&limit=10&project=ingenium"));
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode messages are temporarily unavailable" },
+    });
+  });
+});
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Defect 1: Prompt should forward model/agent/system/variant/tools
@@ -582,7 +593,7 @@ describe("Defect 4: Permissions response shape", () => {
     // the frontend cannot display which session is requesting permission.
     //
     // To fix: Add `sessionID: string` to PermissionRequest interface and
-    // verify the OpenCode v1.18.3 /permission endpoint returns it.
+    // Verify the retained OpenCode /permission endpoint returns it.
     const perm: PermissionRequest = {
       id: "test",
       permission: "read",

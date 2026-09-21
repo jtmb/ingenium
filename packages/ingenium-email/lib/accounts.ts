@@ -8,8 +8,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import * as core from "ingenium-core";
-import type { EmailAccount, OAuthToken, EmailFolder } from "./types.js";
+import type { EmailAccount, EmailOwner, OAuthToken, EmailFolder } from "./types.js";
 import { connectAccount, listFolders } from "./imap.js";
 import {
   decryptCredentialValue,
@@ -18,6 +17,8 @@ import {
 } from "./credential-crypto.js";
 import { resetAuthCircuit } from "./circuit-breaker.js";
 import { providerErrorResponse } from "./provider-errors.js";
+import { getEmailRuntime, type EmailSettingsTransaction } from "./runtime.js";
+import { isEmailProvider, isFixedProvider } from "./providers.js";
 
 const SETTINGS_PREFIX = "email_account_";
 const OAUTH_SETTINGS_PREFIX = "email_oauth_";
@@ -67,29 +68,80 @@ export class EmailEncryptionContinuityError extends Error {
   }
 }
 
-type Db = ReturnType<typeof core.getDb>;
-
-function isTransactionalDb(db: Db): db is Db & { transaction: <T>(fn: () => T) => () => T } {
-  return typeof (db as unknown as { transaction?: unknown }).transaction === "function";
+export class EmailAccountEndpointValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EmailAccountEndpointValidationError";
+  }
 }
 
-function optionalCoreExport<T>(name: string): T | undefined {
-  // Vitest's strict module mocks throw when an absent named export is read.
-  // Check ownership first so legacy focused tests can exercise the fallback.
-  if (!Object.prototype.hasOwnProperty.call(core, name)) return undefined;
-  return Reflect.get(core, name) as T | undefined;
+type EndpointInput = {
+  imapHost?: unknown;
+  imapPort?: unknown;
+  smtpHost?: unknown;
+  smtpPort?: unknown;
+};
+
+type AccountEndpoints = Pick<EmailAccount, "imapHost" | "imapPort" | "smtpHost" | "smtpPort">;
+
+function hasEndpointOverride(endpoints: EndpointInput): boolean {
+  return endpoints.imapHost !== undefined
+    || endpoints.imapPort !== undefined
+    || endpoints.smtpHost !== undefined
+    || endpoints.smtpPort !== undefined;
 }
 
-/** Compatibility fallback keeps isolated legacy mocks functional; production uses execTransaction. */
-function runTransaction<T>(fn: () => T): T {
-  const execute = optionalCoreExport<<R>(operation: () => R) => R>("execTransaction");
-  if (execute) return execute(fn);
-  const db = core.getDb();
-  return isTransactionalDb(db) ? db.transaction(fn)() : fn();
+function normalizeCustomHost(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    throw new EmailAccountEndpointValidationError(`${field} must be a string`);
+  }
+  const host = value.trim();
+  if (!host) return undefined;
+  if (/\s/.test(host)) {
+    throw new EmailAccountEndpointValidationError(`${field} must not contain whitespace`);
+  }
+  return host;
 }
 
-function checkpointAfterCommit(): void {
-  optionalCoreExport<() => void>("checkpointAfterWrite")?.();
+function normalizeCustomPort(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0 || value > 65_535) {
+    throw new EmailAccountEndpointValidationError(`${field} must be an integer between 1 and 65535`);
+  }
+  return value;
+}
+
+/** Validate caller-supplied endpoints before any credential or settings access. */
+export function normalizeEmailAccountEndpoints(
+  provider: unknown,
+  endpoints: EndpointInput,
+  requireCompleteCustomEndpoints = false,
+): AccountEndpoints {
+  if (!isEmailProvider(provider)) {
+    throw new EmailAccountEndpointValidationError("provider is not supported");
+  }
+  if (isFixedProvider(provider)) {
+    if (hasEndpointOverride(endpoints)) {
+      throw new EmailAccountEndpointValidationError("Endpoint overrides are only supported for custom providers");
+    }
+    return {};
+  }
+
+  const normalized = {
+    imapHost: normalizeCustomHost(endpoints.imapHost, "imapHost"),
+    imapPort: normalizeCustomPort(endpoints.imapPort, "imapPort"),
+    smtpHost: normalizeCustomHost(endpoints.smtpHost, "smtpHost"),
+    smtpPort: normalizeCustomPort(endpoints.smtpPort, "smtpPort"),
+  };
+  if (requireCompleteCustomEndpoints
+    && (normalized.imapHost === undefined
+      || normalized.imapPort === undefined
+      || normalized.smtpHost === undefined
+      || normalized.smtpPort === undefined)) {
+    throw new EmailAccountEndpointValidationError("Custom provider changes require IMAP and SMTP hosts and ports");
+  }
+  return normalized;
 }
 
 function settingsKey(accountId: string): string {
@@ -100,40 +152,19 @@ function oauthKey(accountId: string): string {
   return `${OAUTH_SETTINGS_PREFIX}${accountId}`;
 }
 
-function readSetting(db: Db, projectId: string, key: string): string | undefined {
-  if (!isTransactionalDb(db)) {
-    return core.settings.getSetting(projectId, key) ?? undefined;
-  }
-  return (db.prepare("SELECT value FROM settings WHERE project_id = ? AND key = ?")
-    .get(projectId, key) as { value: string } | undefined)?.value;
-}
-
-function writeSetting(db: Db, projectId: string, key: string, value: string): void {
-  if (!isTransactionalDb(db)) {
-    core.settings.setSetting(projectId, key, value);
-    return;
-  }
-  db.prepare(
-    `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
-     ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
-  ).run(projectId, key, value);
-}
-
-function deleteSetting(db: Db, projectId: string, key: string): void {
-  db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(projectId, key);
-}
-
-function resolveGlobalProjectId(db: Db): string {
-  const row = db.prepare(
-    "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL ORDER BY updated_at DESC, id ASC LIMIT 1",
-  ).get() as { id: string } | undefined;
-  if (!row) throw new Error("No global project found. Create one via /init-project or the Settings page.");
-  return row.id;
-}
-
 /** Resolve the active global project on every operation. */
 export function getGlobalProjectId(): string {
-  return resolveGlobalProjectId(core.getDb());
+  return getEmailRuntime().accounts.getGlobalProjectId();
+}
+
+function getNormalizedAccount(
+  accounts: ReturnType<typeof getEmailRuntime>["accounts"],
+  accountId: string,
+  organizationId?: string,
+): EmailAccount | undefined {
+  return organizationId
+    ? accounts.getAccount?.(organizationId, accountId)
+    : accounts.listAccounts?.().find((account) => account.id === accountId);
 }
 
 function parseStoredAccount(raw: string): StoredAccount {
@@ -260,7 +291,7 @@ function hasStoredSecret(account: StoredAccount | undefined, oauthRaw?: string):
   return Boolean(account?.imapPass || account?.smtpPass || account?.tokens || oauthRaw);
 }
 
-function currentEncryptionStatus(db: Db, projectId: string): EmailEncryptionDiagnostics {
+function currentEncryptionStatus(settings: Pick<EmailSettingsTransaction, "get">, projectId: string): EmailEncryptionDiagnostics {
   let fingerprint: string;
   try {
     fingerprint = getEmailEncryptionKeyFingerprint();
@@ -268,7 +299,7 @@ function currentEncryptionStatus(db: Db, projectId: string): EmailEncryptionDiag
     return { status: "unavailable", globalProjectId: projectId };
   }
 
-  const storedFingerprint = readSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING);
+  const storedFingerprint = settings.get(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING);
   if (!storedFingerprint) return { status: "uninitialized", globalProjectId: projectId };
   return {
     status: storedFingerprint === fingerprint ? "ready" : "mismatch",
@@ -279,8 +310,9 @@ function currentEncryptionStatus(db: Db, projectId: string): EmailEncryptionDiag
 /** Non-secret runtime diagnostic for mail startup and health reporting. */
 export function getEmailEncryptionDiagnostics(): EmailEncryptionDiagnostics {
   try {
-    const db = core.getDb();
-    return currentEncryptionStatus(db, resolveGlobalProjectId(db));
+    const runtime = getEmailRuntime();
+    const projectId = runtime.accounts.getGlobalProjectId();
+    return currentEncryptionStatus({ get: runtime.accounts.getGlobalSetting }, projectId);
   } catch {
     return { status: "global-unavailable" };
   }
@@ -292,8 +324,7 @@ export function getEmailEncryptionDiagnostics(): EmailEncryptionDiagnostics {
  * accepting a replacement key in that state could overwrite recoverable data.
  */
 function assertWritableEncryption(
-  db: Db,
-  projectId: string,
+  settings: Pick<EmailSettingsTransaction, "get">,
   existingSecret: boolean,
 ): { fingerprint: string; initializeFingerprint: boolean } {
   let fingerprint: string;
@@ -303,7 +334,7 @@ function assertWritableEncryption(
     throw new EmailEncryptionContinuityError("Email encryption is unavailable; credentials were not changed");
   }
 
-  const storedFingerprint = readSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING);
+  const storedFingerprint = settings.get(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING);
   if (storedFingerprint && storedFingerprint !== fingerprint) {
     throw new EmailEncryptionContinuityError("Email encryption key changed; credentials were not changed");
   }
@@ -313,9 +344,9 @@ function assertWritableEncryption(
   return { fingerprint, initializeFingerprint: !storedFingerprint };
 }
 
-function assertSafeMetadataMutation(db: Db, projectId: string, stored: StoredAccount, oauthRaw?: string): void {
+function assertSafeMetadataMutation(settings: Pick<EmailSettingsTransaction, "get">, projectId: string, stored: StoredAccount, oauthRaw?: string): void {
   if (!hasStoredSecret(stored, oauthRaw)) return;
-  const status = currentEncryptionStatus(db, projectId).status;
+  const status = currentEncryptionStatus(settings, projectId).status;
   if (status !== "ready") {
     throw new EmailEncryptionContinuityError("Email encryption is not ready; account data was not changed");
   }
@@ -342,46 +373,45 @@ function decryptedTokens(tokens: OAuthToken): OAuthToken {
 }
 
 function storedToAccount(stored: StoredAccount): EmailAccount {
+  if (!isEmailProvider(stored.provider)) {
+    throw new Error("Stored email account provider is unsupported");
+  }
+  const endpoints = isFixedProvider(stored.provider)
+    ? {}
+    : normalizeEmailAccountEndpoints(stored.provider, stored);
   return {
     id: stored.id,
     email: stored.email,
     name: stored.name,
-    provider: stored.provider as EmailAccount["provider"],
+    provider: stored.provider,
     authType: stored.authType as EmailAccount["authType"],
-    imapHost: stored.imapHost,
-    imapPort: stored.imapPort,
-    smtpHost: stored.smtpHost,
-    smtpPort: stored.smtpPort,
+    ...endpoints,
     connected: stored.connected,
     lastSync: stored.lastSync,
     hidden: stored.hidden,
   };
 }
 
-function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id = randomUUID()): StoredAccount {
+function buildStoredAccount(account: Omit<EmailAccount, "id" | "connected">, id: string = randomUUID()): StoredAccount {
+  const endpoints = normalizeEmailAccountEndpoints(account.provider, account);
   return {
     id,
     email: account.email,
     name: account.name,
     provider: account.provider,
     authType: account.authType,
-    imapHost: account.imapHost,
-    imapPort: account.imapPort,
-    smtpHost: account.smtpHost,
-    smtpPort: account.smtpPort,
+    ...endpoints,
     connected: false,
     hidden: account.hidden,
   };
 }
 
 /** List all global email accounts, ignoring malformed rows rather than crashing mail startup. */
-export function listAccounts(_projectId: string): EmailAccount[] {
-  const db = core.getDb();
-  const projectId = resolveGlobalProjectId(db);
-  const rows = db.prepare(
-    "SELECT value FROM settings WHERE project_id = ? AND key LIKE ?",
-  ).all(projectId, `${SETTINGS_PREFIX}%`) as Array<{ value: string }>;
-  return rows.flatMap(({ value }) => {
+export function listAccounts(): EmailAccount[] {
+  const normalized = getEmailRuntime().accounts.listAccounts?.() ?? [];
+  if (normalized.length > 0) return normalized;
+  const rows = getEmailRuntime().accounts.listGlobalSettings(SETTINGS_PREFIX);
+  return rows.flatMap((value) => {
     try {
       return [storedToAccount(parseStoredAccount(value))];
     } catch {
@@ -390,10 +420,11 @@ export function listAccounts(_projectId: string): EmailAccount[] {
   });
 }
 
-export function getAccount(_projectId: string, accountId: string): EmailAccount | undefined {
-  const db = core.getDb();
-  const projectId = resolveGlobalProjectId(db);
-  const raw = readSetting(db, projectId, settingsKey(accountId));
+export function getAccount(accountId: string, organizationId?: string): EmailAccount | undefined {
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalized) return normalized;
+  const raw = runtime.accounts.getGlobalSetting(settingsKey(accountId));
   if (!raw) return undefined;
   try {
     return storedToAccount(parseStoredAccount(raw));
@@ -403,147 +434,218 @@ export function getAccount(_projectId: string, accountId: string): EmailAccount 
 }
 
 /** Persist non-secret account metadata atomically. */
-export function addAccount(
-  _projectId: string,
-  account: Omit<EmailAccount, "id" | "connected">,
-): EmailAccount {
+export function addAccount(account: Omit<EmailAccount, "id" | "connected">, owner?: EmailOwner): EmailAccount {
   const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    writeSetting(db, projectId, settingsKey(stored.id), JSON.stringify(stored));
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const createAccount = getEmailRuntime().accounts.createAccount;
+    if (!createAccount) throw new Error("Normalized mail account persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => createAccount(normalized));
+    return normalized;
+  }
+  return getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+    settings.set(settingsKey(stored.id), JSON.stringify(stored));
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
-  return result;
 }
 
 /** Create manual account metadata and encrypted credentials in one transaction. */
 export function createAccountWithCredentials(
-  _projectId: string,
   account: Omit<EmailAccount, "id" | "connected">,
   credentials: { imapPass?: string; smtpPass?: string },
+  owner?: EmailOwner,
 ): EmailAccount {
   const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const guard = assertWritableEncryption(db, projectId, false);
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const { createAccount, setCredential } = getEmailRuntime().accounts;
+    if (!createAccount || !setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => {
+      createAccount(normalized);
+      if (credentials.imapPass !== undefined) setCredential(owner.organizationId, stored.id, "imap_password", encryptCredentialValue(credentials.imapPass));
+      if (credentials.smtpPass !== undefined) setCredential(owner.organizationId, stored.id, "smtp_password", encryptCredentialValue(credentials.smtpPass));
+    });
+    resetAuthCircuit(stored.email);
+    return normalized;
+  }
+  const result = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+    const guard = assertWritableEncryption(settings, false);
     if (credentials.imapPass !== undefined) stored.imapPass = encryptCredentialValue(credentials.imapPass);
     if (credentials.smtpPass !== undefined) stored.smtpPass = encryptCredentialValue(credentials.smtpPass);
-    writeSetting(db, projectId, settingsKey(stored.id), JSON.stringify(stored));
+    settings.set(settingsKey(stored.id), JSON.stringify(stored));
     if (guard.initializeFingerprint) {
-      writeSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
+      settings.set(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
     }
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
   resetAuthCircuit(stored.email);
   return result;
 }
 
 /** Create an OAuth account and encrypted token record in one transaction. */
 export function createOAuthAccountWithTokens(
-  _projectId: string,
-  account: Omit<EmailAccount, "id" | "connected">,
+  account: Omit<EmailAccount, "connected"> | Omit<EmailAccount, "id" | "connected">,
   tokens: OAuthToken,
+  owner?: EmailOwner,
 ): EmailAccount {
-  const stored = buildStoredAccount(account);
-  const result = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const guard = assertWritableEncryption(db, projectId, false);
-    writeSetting(db, projectId, settingsKey(stored.id), JSON.stringify(stored));
-    writeSetting(db, projectId, oauthKey(stored.id), JSON.stringify(encryptedTokens(tokens)));
+  const stored = buildStoredAccount(account, "id" in account ? account.id : undefined);
+  if (owner) {
+    const normalized = { ...storedToAccount(stored), ...owner };
+    const { createAccount, setCredential } = getEmailRuntime().accounts;
+    if (!createAccount || !setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    getEmailRuntime().accounts.mutateGlobalSettings(() => {
+      createAccount(normalized);
+      setCredential(owner.organizationId, stored.id, "oauth_access_token", encryptCredentialValue(tokens.accessToken), JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope }));
+      setCredential(owner.organizationId, stored.id, "oauth_refresh_token", encryptCredentialValue(tokens.refreshToken), JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope }));
+    });
+    resetAuthCircuit(stored.email);
+    return normalized;
+  }
+  const result = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+    const guard = assertWritableEncryption(settings, false);
+    settings.set(settingsKey(stored.id), JSON.stringify(stored));
+    settings.set(oauthKey(stored.id), JSON.stringify(encryptedTokens(tokens)));
     if (guard.initializeFingerprint) {
-      writeSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
+      settings.set(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
     }
     return storedToAccount(stored);
   });
-  checkpointAfterCommit();
   resetAuthCircuit(stored.email);
   return result;
 }
 
-export function removeAccount(_projectId: string, accountId: string): void {
-  const removedEmail = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const raw = readSetting(db, projectId, settingsKey(accountId));
+export function removeAccount(accountId: string, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalized?.organizationId) {
+    const { deleteAccount, deleteCredentials } = runtime.accounts;
+    if (!deleteAccount || !deleteCredentials) throw new Error("Normalized mail account deletion is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => {
+      deleteCredentials(normalized.organizationId!, accountId);
+      deleteAccount(normalized.organizationId!, accountId);
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
+  const removedEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
+    const raw = settings.get(settingsKey(accountId));
     if (!raw) return undefined;
     const stored = parseStoredAccount(raw);
-    assertSafeMetadataMutation(db, projectId, stored, readSetting(db, projectId, oauthKey(accountId)));
-    deleteSetting(db, projectId, settingsKey(accountId));
-    deleteSetting(db, projectId, oauthKey(accountId));
+    assertSafeMetadataMutation(settings, projectId, stored, settings.get(oauthKey(accountId)));
+    settings.delete(settingsKey(accountId));
+    settings.delete(oauthKey(accountId));
     return stored.email;
   });
   if (removedEmail) {
-    checkpointAfterCommit();
     resetAuthCircuit(removedEmail);
   }
 }
 
 /** Replace encrypted manual credentials atomically without touching account metadata. */
 export function storeCredentials(
-  _projectId: string,
   accountId: string,
   credentials: { imapPass?: string; smtpPass?: string; tokens?: OAuthToken },
+  organizationId?: string,
 ): void {
-  const accountEmail = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const raw = readSetting(db, projectId, settingsKey(accountId));
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalized?.organizationId) {
+    const setCredential = runtime.accounts.setCredential;
+    if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => {
+      if (credentials.imapPass !== undefined) setCredential(normalized.organizationId!, accountId, "imap_password", encryptCredentialValue(credentials.imapPass));
+      if (credentials.smtpPass !== undefined) setCredential(normalized.organizationId!, accountId, "smtp_password", encryptCredentialValue(credentials.smtpPass));
+      if (credentials.tokens) {
+        const metadata = JSON.stringify({ expiryDate: credentials.tokens.expiryDate, scope: credentials.tokens.scope });
+        setCredential(normalized.organizationId!, accountId, "oauth_access_token", encryptCredentialValue(credentials.tokens.accessToken), metadata);
+        setCredential(normalized.organizationId!, accountId, "oauth_refresh_token", encryptCredentialValue(credentials.tokens.refreshToken), metadata);
+      }
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
+  const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+    const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
     const stored = parseStoredAccount(raw);
     const guard = assertWritableEncryption(
-      db,
-      projectId,
-      hasStoredSecret(stored, readSetting(db, projectId, oauthKey(accountId))),
+      settings,
+      hasStoredSecret(stored, settings.get(oauthKey(accountId))),
     );
     if (credentials.imapPass !== undefined) stored.imapPass = encryptCredentialValue(credentials.imapPass);
     if (credentials.smtpPass !== undefined) stored.smtpPass = encryptCredentialValue(credentials.smtpPass);
     if (credentials.tokens) stored.tokens = encryptedTokens(credentials.tokens);
-    writeSetting(db, projectId, settingsKey(accountId), JSON.stringify(stored));
+    settings.set(settingsKey(accountId), JSON.stringify(stored));
     if (guard.initializeFingerprint) {
-      writeSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
+      settings.set(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
     }
     return stored.email;
   });
-  checkpointAfterCommit();
   resetAuthCircuit(accountEmail);
 }
 
 /** Store encrypted OAuth tokens atomically after checking the account still exists. */
-export function storeOAuthTokens(_projectId: string, accountId: string, tokens: OAuthToken): void {
-  const accountEmail = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const raw = readSetting(db, projectId, settingsKey(accountId));
+export function storeOAuthTokens(accountId: string, tokens: OAuthToken, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalized?.organizationId) {
+    const setCredential = runtime.accounts.setCredential;
+    if (!setCredential) throw new Error("Normalized mail credential persistence is unavailable");
+    const metadata = JSON.stringify({ expiryDate: tokens.expiryDate, scope: tokens.scope });
+    runtime.accounts.mutateGlobalSettings(() => {
+      setCredential(normalized.organizationId!, accountId, "oauth_access_token", encryptCredentialValue(tokens.accessToken), metadata);
+      setCredential(normalized.organizationId!, accountId, "oauth_refresh_token", encryptCredentialValue(tokens.refreshToken), metadata);
+    });
+    resetAuthCircuit(normalized.email);
+    return;
+  }
+  const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings) => {
+    const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
     const stored = parseStoredAccount(raw);
     const guard = assertWritableEncryption(
-      db,
-      projectId,
-      hasStoredSecret(stored, readSetting(db, projectId, oauthKey(accountId))),
+      settings,
+      hasStoredSecret(stored, settings.get(oauthKey(accountId))),
     );
-    writeSetting(db, projectId, oauthKey(accountId), JSON.stringify(encryptedTokens(tokens)));
+    settings.set(oauthKey(accountId), JSON.stringify(encryptedTokens(tokens)));
     if (guard.initializeFingerprint) {
-      writeSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
+      settings.set(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, guard.fingerprint);
     }
     return stored.email;
   });
-  checkpointAfterCommit();
   resetAuthCircuit(accountEmail);
 }
 
 /** Retrieve credentials only when the persisted key-continuity guard is ready. */
 export function getCredentials(
-  _projectId: string,
   accountId: string,
+  organizationId?: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
-  const db = core.getDb();
-  const projectId = resolveGlobalProjectId(db);
-  const raw = readSetting(db, projectId, settingsKey(accountId));
+  const runtime = getEmailRuntime();
+  const normalizedAccount = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalizedAccount?.organizationId) {
+    const getCredential = runtime.accounts.getCredential;
+    if (!getCredential) return undefined;
+    const password = getCredential(normalizedAccount.organizationId, accountId, "imap_password");
+    const access = getCredential(normalizedAccount.organizationId, accountId, "oauth_access_token");
+    const refresh = getCredential(normalizedAccount.organizationId, accountId, "oauth_refresh_token");
+    try {
+      const metadata = access ? JSON.parse(access.tokenMetadata) as { expiryDate?: number; scope?: string } : {};
+      return {
+        password: password ? decryptCredentialValue(password.encryptedValue) : undefined,
+        tokens: access && refresh ? {
+          accessToken: decryptCredentialValue(access.encryptedValue),
+          refreshToken: decryptCredentialValue(refresh.encryptedValue),
+          expiryDate: metadata.expiryDate ?? 0,
+          scope: metadata.scope ?? "",
+        } : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  }
+  const projectId = runtime.accounts.getGlobalProjectId();
+  const raw = runtime.accounts.getGlobalSetting(settingsKey(accountId));
   if (!raw) return undefined;
 
   let stored: StoredAccount;
@@ -552,8 +654,8 @@ export function getCredentials(
   } catch {
     return undefined;
   }
-  const oauthRaw = readSetting(db, projectId, oauthKey(accountId));
-  if (!hasStoredSecret(stored, oauthRaw) || currentEncryptionStatus(db, projectId).status !== "ready") {
+  const oauthRaw = runtime.accounts.getGlobalSetting(oauthKey(accountId));
+  if (!hasStoredSecret(stored, oauthRaw) || currentEncryptionStatus({ get: runtime.accounts.getGlobalSetting }, projectId).status !== "ready") {
     return undefined;
   }
 
@@ -582,39 +684,71 @@ export async function testConnection(
   }
 }
 
-export function setAccountConnected(_projectId: string, accountId: string, connected: boolean): void {
-  const accountEmail = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const raw = readSetting(db, projectId, settingsKey(accountId));
+export function setAccountConnected(accountId: string, connected: boolean, organizationId?: string): void {
+  const runtime = getEmailRuntime();
+  const normalized = getNormalizedAccount(runtime.accounts, accountId, organizationId);
+  if (normalized?.organizationId) {
+    const updateAccount = runtime.accounts.updateAccount;
+    if (!updateAccount) throw new Error("Normalized mail account persistence is unavailable");
+    runtime.accounts.mutateGlobalSettings(() => updateAccount({
+      ...normalized,
+      connected,
+      lastSync: connected ? new Date().toISOString() : normalized.lastSync,
+    }));
+    if (connected) resetAuthCircuit(normalized.email);
+    return;
+  }
+  const accountEmail = getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
+    const raw = settings.get(settingsKey(accountId));
     if (!raw) throw new Error(`Account ${accountId} not found`);
     const stored = parseStoredAccount(raw);
-    assertSafeMetadataMutation(db, projectId, stored, readSetting(db, projectId, oauthKey(accountId)));
+    assertSafeMetadataMutation(settings, projectId, stored, settings.get(oauthKey(accountId)));
     stored.connected = connected;
     stored.lastSync = connected ? new Date().toISOString() : stored.lastSync;
-    writeSetting(db, projectId, settingsKey(accountId), JSON.stringify(stored));
+    settings.set(settingsKey(accountId), JSON.stringify(stored));
     return stored.email;
   });
-  checkpointAfterCommit();
   if (connected) resetAuthCircuit(accountEmail);
 }
 
 /** Update non-secret metadata while preserving encrypted fields byte-for-byte. */
-export function storeAccount(_projectId: string, account: EmailAccount): void {
-  runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const raw = readSetting(db, projectId, settingsKey(account.id));
+export function storeAccount(account: EmailAccount): void {
+  if (account.organizationId) {
+    const updateAccount = getEmailRuntime().accounts.updateAccount;
+    if (!updateAccount) throw new Error("Normalized mail account persistence is unavailable");
+    normalizeEmailAccountEndpoints(account.provider, account);
+    getEmailRuntime().accounts.mutateGlobalSettings(() => updateAccount(account));
+    return;
+  }
+  getEmailRuntime().accounts.mutateGlobalSettings((settings, projectId) => {
+    const raw = settings.get(settingsKey(account.id));
     if (!raw) throw new Error(`Account ${account.id} not found`);
     const stored = parseStoredAccount(raw);
-    assertSafeMetadataMutation(db, projectId, stored, readSetting(db, projectId, oauthKey(account.id)));
+    if (!isEmailProvider(stored.provider)) {
+      throw new Error("Stored email account provider is unsupported");
+    }
+    const providerChanged = stored.provider !== account.provider;
+    const endpoints = providerChanged && isEmailProvider(account.provider) && isFixedProvider(account.provider)
+      ? normalizeEmailAccountEndpoints(account.provider, {})
+      : normalizeEmailAccountEndpoints(
+        account.provider,
+        account,
+        providerChanged && account.provider === "custom",
+      );
+    assertSafeMetadataMutation(settings, projectId, stored, settings.get(oauthKey(account.id)));
+    stored.email = account.email;
+    stored.name = account.name;
+    stored.provider = account.provider;
+    stored.authType = account.authType;
+    stored.imapHost = endpoints.imapHost;
+    stored.imapPort = endpoints.imapPort;
+    stored.smtpHost = endpoints.smtpHost;
+    stored.smtpPort = endpoints.smtpPort;
     stored.hidden = account.hidden;
     stored.connected = account.connected;
     stored.lastSync = account.lastSync;
-    stored.name = account.name;
-    writeSetting(db, projectId, settingsKey(account.id), JSON.stringify(stored));
+    settings.set(settingsKey(account.id), JSON.stringify(stored));
   });
-  checkpointAfterCommit();
 }
 
 /**
@@ -623,28 +757,20 @@ export function storeAccount(_projectId: string, account: EmailAccount): void {
  * plaintext records remain untouched and mail degrades safely.
  */
 export function establishEmailEncryptionKeyContinuity(): EmailEncryptionDiagnostics {
-  let didPersist = false;
-  const diagnostics = runTransaction(() => {
-    const db = core.getDb();
-    const projectId = resolveGlobalProjectId(db);
-    const status = currentEncryptionStatus(db, projectId);
+  const runtime = getEmailRuntime();
+  const diagnostics = runtime.accounts.mutateGlobalSettings((settings, projectId) => {
+    const status = currentEncryptionStatus(settings, projectId);
     if (status.status !== "uninitialized") return status;
 
-    const rows = db.prepare(
-      `SELECT s.project_id, s.key, s.value
-       FROM settings s
-       JOIN projects p ON p.id = s.project_id
-       WHERE p.archived_at IS NULL
-         AND (s.key LIKE ? OR s.key LIKE ?)`,
-    ).all(`${SETTINGS_PREFIX}%`, `${OAUTH_SETTINGS_PREFIX}%`) as Array<MailSettingRow>;
+    const rows = runtime.accounts.listActiveSettings([SETTINGS_PREFIX, OAUTH_SETTINGS_PREFIX]);
     const accounts = new Map<string, MailSettingRow>();
     const oauth = new Map<string, MailSettingRow>();
     try {
       for (const row of rows) {
         if (row.key.startsWith(SETTINGS_PREFIX)) {
-          accounts.set(`${row.project_id}\u0000${row.key.slice(SETTINGS_PREFIX.length)}`, row);
+          accounts.set(`${row.projectId}\u0000${row.key.slice(SETTINGS_PREFIX.length)}`, row);
         } else {
-          oauth.set(`${row.project_id}\u0000${row.key.slice(OAUTH_SETTINGS_PREFIX.length)}`, row);
+          oauth.set(`${row.projectId}\u0000${row.key.slice(OAUTH_SETTINGS_PREFIX.length)}`, row);
         }
       }
       for (const [key, account] of accounts) {
@@ -659,16 +785,14 @@ export function establishEmailEncryptionKeyContinuity(): EmailEncryptionDiagnost
       return { status: "unverified" as const, globalProjectId: projectId };
     }
 
-    writeSetting(db, projectId, EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, getEmailEncryptionKeyFingerprint());
-    didPersist = true;
+    settings.set(EMAIL_ENCRYPTION_KEY_FINGERPRINT_SETTING, getEmailEncryptionKeyFingerprint());
     return { status: "ready" as const, globalProjectId: projectId };
   });
-  if (didPersist) checkpointAfterCommit();
   return diagnostics;
 }
 
 interface MailSettingRow {
-  project_id: string;
+  projectId: string;
   key: string;
   value: string;
 }

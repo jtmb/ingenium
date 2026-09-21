@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NextRequest } from "next/server";
 import {
+  AUTH_SESSION_COOKIE,
   buildDashboardApiProxyHeaders,
   config,
-  DASHBOARD_API_PROXY_ERROR_CODE,
   DASHBOARD_API_PROXY_ERROR_STATUS,
   DASHBOARD_CSRF_ERROR_CODE,
   DASHBOARD_CSRF_ERROR_STATUS,
@@ -16,6 +16,7 @@ import {
   externalOriginFromForwardedHeaders,
   getDashboardApiToken,
   hasValidDashboardMutationContract,
+  isRuntimeGatewayPrivatePath,
   proxy,
 } from "@/proxy";
 
@@ -24,7 +25,7 @@ const BROWSER_ORIGIN = "http://localhost:3000";
 const INTERNAL_NEXT_ORIGIN = "http://localhost:3001";
 const DIRECT_FIXTURE_ORIGIN = "http://127.0.0.1:50664";
 const initialEnvironment = {
-  tokenFile: process.env.INGENIUM_API_TOKEN_FILE,
+  tokenFile: process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE,
   nodeEnv: process.env.NODE_ENV,
   dashboardAllowedOrigins: process.env.DASHBOARD_ALLOWED_ORIGINS,
 };
@@ -35,7 +36,7 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
   }
   for (const [name, value] of Object.entries({
-    INGENIUM_API_TOKEN_FILE: initialEnvironment.tokenFile,
+    INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: initialEnvironment.tokenFile,
     NODE_ENV: initialEnvironment.nodeEnv,
     DASHBOARD_ALLOWED_ORIGINS: initialEnvironment.dashboardAllowedOrigins,
   })) {
@@ -54,7 +55,7 @@ function configureProtectedToken(
   writeFileSync(tokenFile, `${TEST_TOKEN}\n`, { mode: 0o600 });
   chmodSync(tokenFile, 0o600);
   process.env.NODE_ENV = "production";
-  process.env.INGENIUM_API_TOKEN_FILE = tokenFile;
+  process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE = tokenFile;
   process.env.DASHBOARD_ALLOWED_ORIGINS = allowedOrigins;
   delete process.env.INGENIUM_API_TOKEN;
 }
@@ -67,6 +68,7 @@ type BrowserHeaders = Record<string, string | undefined>;
  */
 function gatewayHeaders(overrides: BrowserHeaders = {}): Headers {
   const headers = new Headers({
+    Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
     Origin: BROWSER_ORIGIN,
     [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE,
     "X-Forwarded-Proto": "http",
@@ -98,6 +100,7 @@ function directFixtureRequest(
   path = "/opencode/sessions",
 ): NextRequest {
   const requestHeaders = new Headers({
+    Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
     Origin: DIRECT_FIXTURE_ORIGIN,
     [DASHBOARD_MARKER_HEADER]: DASHBOARD_MARKER_VALUE,
     ...Object.fromEntries(Object.entries(headers).filter(([, value]) => value !== undefined)),
@@ -126,7 +129,7 @@ function directFixtureRequestWithNextDefaults(
 }
 
 describe("dashboard authenticated API proxy", () => {
-  it("injects the dashboard server token and strips browser Authorization", () => {
+  it("injects the scoped bootstrap token and strips browser Authorization", () => {
     const headers = buildDashboardApiProxyHeaders(
       new Headers({
         Authorization: "Bearer browser-controlled-token",
@@ -142,10 +145,65 @@ describe("dashboard authenticated API proxy", () => {
     expect(headers.get("Authorization")).toBe("Bearer server-token");
     expect(headers.get("proxy-authorization")).toBeNull();
     expect(headers.get(DASHBOARD_MARKER_HEADER)).toBe(DASHBOARD_MARKER_VALUE);
+    expect(headers.get("x-ingenium-dashboard-service")).toBe("bootstrap");
+    expect(headers.get("x-ingenium-internal-service")).toBeNull();
     expect(headers.get("x-request-id")).toBe("request-123");
     expect(headers.get("x-forwarded-host")).toBeNull();
     expect(headers.get("x-forwarded-proto")).toBeNull();
     expect(headers.get("x-forwarded-port")).toBeNull();
+  });
+
+  it("strips the child-MCP server-only handoff assertion from dashboard traffic", () => {
+    const secretCanary = "child-mcp-secret-canary";
+    const headers = buildDashboardApiProxyHeaders(
+      new Headers({
+        "x-ingenium-child-mcp-runtime": secretCanary,
+      }),
+      "server-token",
+    );
+
+    expect(headers.get("x-ingenium-child-mcp-runtime")).toBeNull();
+    expect(JSON.stringify(Array.from(headers.entries()))).not.toContain(secretCanary);
+  });
+
+  it("strips every runtime-gateway service assertion from dashboard traffic", () => {
+    const secretCanary = "runtime-gateway-secret-canary";
+    const headers = buildDashboardApiProxyHeaders(new Headers({
+      "x-ingenium-audience": "runtime-gateway",
+      "x-ingenium-private-network": secretCanary,
+      "x-ingenium-runtime-gateway": secretCanary,
+      "x-ingenium-workspace": secretCanary,
+      "x-ingenium-launcher-worktree": secretCanary,
+    }), "server-token");
+
+    for (const name of ["x-ingenium-audience", "x-ingenium-private-network", "x-ingenium-runtime-gateway", "x-ingenium-workspace", "x-ingenium-launcher-worktree"]) {
+      expect(headers.get(name)).toBeNull();
+    }
+    expect(JSON.stringify(Array.from(headers.entries()))).not.toContain(secretCanary);
+  });
+
+  it.each(["exchange", "validate"])("denies the gateway-private %s route before Dashboard authentication or rewriting", async (operation) => {
+    const secretCanary = "private-backend-token-canary";
+    const path = `/api/v1/runtimes/gateway/${operation}`;
+    expect(isRuntimeGatewayPrivatePath(path)).toBe(true);
+    const response = proxy(new NextRequest(`http://dashboard.test${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secretCanary}`,
+        Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
+        Origin: BROWSER_ORIGIN,
+        "x-ingenium-ui": DASHBOARD_MARKER_VALUE,
+        "x-ingenium-audience": "runtime-gateway",
+        "x-ingenium-private-network": "runtime-gateway",
+      },
+    }));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("x-middleware-next")).toBeNull();
+    expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+    const body = await response.text();
+    expect(body).toContain("NOT_FOUND");
+    expect(body).not.toMatch(/backendName|sessionToken|private-backend-token-canary/);
   });
 
   it.each(["development", "test", "production"])(
@@ -162,7 +220,7 @@ describe("dashboard authenticated API proxy", () => {
 
       expect(getDashboardApiToken({
         NODE_ENV: nodeEnv,
-        INGENIUM_API_TOKEN_FILE: process.env.INGENIUM_API_TOKEN_FILE,
+        INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE,
       })).toBe(TEST_TOKEN);
     },
   );
@@ -176,9 +234,22 @@ describe("dashboard authenticated API proxy", () => {
     }
   });
 
+  it("fails closed for unsafe and symlinked protected token files", () => {
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-dashboard-api-token-"));
+    temporaryDirectories.push(directory);
+    const tokenFile = join(directory, "api-token");
+    const linkedTokenFile = join(directory, "linked-token");
+    writeFileSync(tokenFile, `${TEST_TOKEN}\n`, { mode: 0o644 });
+    symlinkSync(tokenFile, linkedTokenFile);
+
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: tokenFile })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: `${tokenFile}\u0000secret` })).toBeNull();
+    expect(getDashboardApiToken({ INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE: linkedTokenFile })).toBeNull();
+  });
+
   it("fails closed when the dashboard server token is missing", async () => {
     delete process.env.INGENIUM_API_TOKEN;
-    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
     process.env.NODE_ENV = "production";
 
     const response = proxy(
@@ -187,12 +258,12 @@ describe("dashboard authenticated API proxy", () => {
       }),
     );
 
-    expect(response.status).toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.status).toBe(401);
     expect(response.headers.get("authorization")).toBeNull();
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: DASHBOARD_API_PROXY_ERROR_CODE,
-        message: "Dashboard API proxy is not configured",
+        code: "UNAUTHORIZED",
+        message: "Authentication is required",
       },
     });
   });
@@ -202,14 +273,23 @@ describe("dashboard authenticated API proxy", () => {
 
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects?project=global-default", {
-        headers: { Authorization: "Bearer browser-controlled-token" },
+        headers: { Authorization: "Bearer browser-controlled-token", Cookie: `${AUTH_SESSION_COOKIE}=fixture-session` },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(`Bearer ${TEST_TOKEN}`);
-    expect(response.headers.get("x-middleware-request-authorization")).not.toContain("browser-controlled-token");
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
     expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+  });
+
+  it("does not expose the protected token in the proxy response", async () => {
+    configureProtectedToken();
+
+    const response = proxy(new NextRequest("http://dashboard.test/api/v1/health"));
+
+    expect(response.status).not.toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.headers.get("authorization")).toBeNull();
+    await expect(response.text()).resolves.not.toContain(TEST_TOKEN);
   });
 
   it.each([
@@ -230,12 +310,7 @@ describe("dashboard authenticated API proxy", () => {
       );
 
       expect(response.headers.get("x-middleware-next")).toBe("1");
-      expect(response.headers.get("x-middleware-request-authorization")).toBe(
-        `Bearer ${TEST_TOKEN}`,
-      );
-      expect(response.headers.get("x-middleware-request-authorization")).not.toContain(
-        "attacker-controlled-token",
-      );
+      expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
       expect(response.headers.get(`x-middleware-request-${DASHBOARD_MARKER_HEADER}`)).toBe(
         DASHBOARD_MARKER_VALUE,
       );
@@ -272,9 +347,7 @@ describe("dashboard authenticated API proxy", () => {
 
     const response = proxy(request);
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
   });
 
   it("accepts the Next-generated forwarding defaults for a direct isolated fixture", () => {
@@ -419,14 +492,13 @@ describe("dashboard authenticated API proxy", () => {
         headers: {
           Authorization: "Bearer browser-controlled-token",
           [DASHBOARD_MARKER_HEADER]: "spoofed-marker",
+          Cookie: `${AUTH_SESSION_COOKIE}=fixture-session`,
         },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
     expect(response.headers.get(`x-middleware-request-${DASHBOARD_MARKER_HEADER}`)).toBe(
       DASHBOARD_MARKER_VALUE,
     );
@@ -434,13 +506,13 @@ describe("dashboard authenticated API proxy", () => {
 
   it("rejects a production request without a protected token file", () => {
     process.env.NODE_ENV = "production";
-    delete process.env.INGENIUM_API_TOKEN_FILE;
+    delete process.env.INGENIUM_DASHBOARD_BOOTSTRAP_TOKEN_FILE;
 
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects"),
     );
 
-    expect(response.status).toBe(DASHBOARD_API_PROXY_ERROR_STATUS);
+    expect(response.status).toBe(401);
   });
 
   it("loads a file-only production credential at the proxy boundary", () => {
@@ -449,22 +521,18 @@ describe("dashboard authenticated API proxy", () => {
     expect(process.env.INGENIUM_API_TOKEN).toBeUndefined();
     const response = proxy(
       new NextRequest("http://dashboard.test/api/v1/projects", {
-        headers: { Authorization: "Bearer browser-controlled-token" },
+        headers: { Authorization: "Bearer browser-controlled-token", Cookie: `${AUTH_SESSION_COOKIE}=fixture-session` },
       }),
     );
 
     expect(response.headers.get("x-middleware-next")).toBe("1");
-    expect(response.headers.get("x-middleware-request-authorization")).toBe(
-      `Bearer ${TEST_TOKEN}`,
-    );
-    expect(response.headers.get("x-middleware-request-authorization")).not.toContain(
-      "browser-controlled-token",
-    );
+    expect(response.headers.get("x-middleware-request-authorization")).toBeNull();
   });
 
   it("matches only API traffic, leaving OAuth callbacks and gateway routes untouched", () => {
-    expect(config.matcher).toEqual(["/api/v1", "/api/v1/:path*"]);
+    expect(config.matcher).toEqual(["/((?!_next/static|_next/image|favicon.ico|navigation-prepaint.js).*)"]);
     expect(config.matcher).not.toContain("/auth/callback");
     expect(config.matcher).not.toContain("/_ingenium/health");
+    expect(config.matcher).not.toContain("/_ingenium/child-mcp-runtime");
   });
 });

@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
+import Link from "next/link";
+import EdgeDrawer from "../../components/EdgeDrawer";
 import {
+  getMcpServersHref,
   getMcpStatusLabel,
   type McpServerView,
 } from "./mcp-status";
@@ -12,6 +15,8 @@ interface MCPDrawerProps {
   servers: McpServerView[];
   error?: string | null;
   isRefreshing?: boolean;
+  lastRefreshedAt?: number | null;
+  project?: string | null;
   pendingServerName?: string | null;
   onRefresh: () => Promise<boolean> | void;
   onConnect: (name: string) => Promise<void> | void;
@@ -38,6 +43,14 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+function freshnessLabel(timestamp: number | null | undefined): string {
+  if (timestamp == null) return "Not refreshed yet";
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (ageSeconds < 60) return "Just now";
+  if (ageSeconds < 3_600) return `${Math.floor(ageSeconds / 60)}m ago`;
+  return new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
 /**
  * MCPDrawer — slide-out panel from the right showing MCP server status.
  *
@@ -55,6 +68,8 @@ export default function MCPDrawer({
   servers,
   error,
   isRefreshing = false,
+  lastRefreshedAt = null,
+  project,
   pendingServerName,
   onRefresh,
   onConnect,
@@ -65,10 +80,19 @@ export default function MCPDrawer({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
+  const onRefreshRef = useRef(onRefresh);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useEffect(() => {
+    onRefreshRef.current = onRefresh;
+  }, [onRefresh]);
+
+  useEffect(() => {
+    if (isOpen) void onRefreshRef.current();
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -76,6 +100,7 @@ export default function MCPDrawer({
       ? document.activeElement
       : null;
     closeButtonRef.current?.focus();
+    const focusFrame = window.requestAnimationFrame(() => closeButtonRef.current?.focus());
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -105,32 +130,30 @@ export default function MCPDrawer({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown);
       const trigger = previouslyFocusedElementRef.current;
       if (trigger?.isConnected) trigger.focus();
     };
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  const mcpServersHref = getMcpServersHref(project);
 
   return (
-    <div className="fixed inset-0 z-40">
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={onClose}
-        aria-hidden="true"
-        data-testid="mcp-drawer-backdrop"
-      />
-
-      {/* Panel */}
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={dialogId}
-        className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[360px] sm:w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col"
-      >
+    <EdgeDrawer
+      open={isOpen}
+      side="right"
+      className="fixed inset-0 z-40"
+      panelRef={dialogRef}
+      panelClassName="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[360px] sm:w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col"
+      panelProps={{
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-labelledby": dialogId,
+      }}
+      backdropProps={{ "data-testid": "mcp-drawer-backdrop" }}
+      onBackdropClick={onClose}
+    >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--color-border)] shrink-0">
           <div className="flex items-center gap-2.5">
@@ -204,15 +227,25 @@ export default function MCPDrawer({
         {error && (
           <div className="mx-3 mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300" role="alert">
             <div className="flex items-center justify-between gap-2">
-              <span>{error}</span>
-              <button
-                type="button"
-                onClick={() => { void onRefresh(); }}
-                disabled={isRefreshing}
-                className="shrink-0 min-h-11 rounded border border-red-300 px-3 py-1 font-medium hover:bg-red-100 disabled:opacity-50 dark:border-red-800 dark:hover:bg-red-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
-              >
-                Retry
-              </button>
+              <span className="min-w-0 flex-1">{error}</span>
+              <div className="flex shrink-0 items-center gap-2">
+                {mcpServersHref && (
+                  <Link
+                    href={mcpServersHref}
+                    className="min-h-11 inline-flex items-center rounded px-2 font-medium underline hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                  >
+                    MCP Servers
+                  </Link>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { void onRefresh(); }}
+                  disabled={isRefreshing}
+                  className="shrink-0 min-h-11 rounded border border-red-300 px-3 py-1 font-medium hover:bg-red-100 disabled:opacity-50 dark:border-red-800 dark:hover:bg-red-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+                >
+                  Retry
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -321,16 +354,30 @@ export default function MCPDrawer({
         </div>
 
         {/* Footer summary */}
-        <div className="px-4 py-2.5 border-t border-[var(--color-border)] shrink-0">
-          <p className="text-xs text-[var(--color-text-muted)]">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-t border-[var(--color-border)] shrink-0">
+          <p className="min-w-0 text-xs text-[var(--color-text-muted)]">
             {servers.length}{" "}
             {servers.length === 1 ? "server" : "servers"} configured
             {servers.length > 0
               ? ` — ${servers.filter((s) => s.connected).length} connected`
               : ""}
+            <span
+              className="block truncate"
+              data-testid="mcp-last-refresh"
+              title={lastRefreshedAt == null ? undefined : new Date(lastRefreshedAt).toLocaleString()}
+            >
+              Last refreshed: {freshnessLabel(lastRefreshedAt)}
+            </span>
           </p>
+          <button
+            type="button"
+            onClick={() => { void onRefresh(); }}
+            disabled={isRefreshing}
+            className="inline-flex min-h-11 shrink-0 items-center rounded-md border border-[var(--color-border)] px-3 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+          >
+            {isRefreshing ? "Refreshing…" : "Refresh"}
+          </button>
         </div>
-      </div>
-    </div>
+    </EdgeDrawer>
   );
 }

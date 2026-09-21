@@ -234,7 +234,7 @@ test_no_loose_artifacts() {
         fi
     done < <(
         find "$REPO_ROOT" \
-            \( -path "$REPO_ROOT/.git" -o -path "$REPO_ROOT/node_modules" -o -path '*/node_modules' \
+            \( -path "$REPO_ROOT/.git" -o -path "$REPO_ROOT/.agents" -o -path "$REPO_ROOT/node_modules" -o -path '*/node_modules' \
                 -o -path '*/.next' -o -path '*/dist' -o -path '*/build' \) -prune -o \
             -type f -print0
     )

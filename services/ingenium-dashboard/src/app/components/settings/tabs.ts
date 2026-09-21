@@ -1,6 +1,11 @@
 /** Every supported Settings deep-link ID. */
 export type SettingsTabId =
   | "general"
+  | "account"
+  | "security"
+  | "sessions"
+  | "api-tokens"
+  | "organizations"
   | "projects"
   | "skills"
   | "tasks"
@@ -13,18 +18,24 @@ export type SettingsTabId =
   | "observations"
   | "personality"
   | "providers"
+  | "cloudflare"
   | "logs";
 
 /** A settings sidebar tab definition. Icon names map to SVG paths in SettingsSidebar. */
 export interface SettingsTab {
   id: SettingsTabId;
   label: string;
-  icon: "settings" | "folder" | "sparkle" | "check" | "clock" | "puzzle" | "mail" | "bot" | "server" | "file" | "eye" | "user" | "activity" | "terminal";
+  icon: "settings" | "folder" | "sparkle" | "check" | "clock" | "puzzle" | "mail" | "bot" | "server" | "file" | "eye" | "user" | "activity" | "terminal" | "key";
 }
 
 /** Ordered list of all settings tabs — drives both the sidebar and the overlay's tab-panel routing. */
 export const ALL_TABS: SettingsTab[] = [
   { id: "general", label: "General", icon: "settings" },
+  { id: "account", label: "Account", icon: "user" },
+  { id: "security", label: "Security", icon: "key" },
+  { id: "sessions", label: "Sessions", icon: "activity" },
+  { id: "api-tokens", label: "API tokens", icon: "key" },
+  { id: "organizations", label: "Organizations", icon: "folder" },
   { id: "projects", label: "Projects", icon: "folder" },
   { id: "skills", label: "Skills", icon: "sparkle" },
   { id: "tasks", label: "Tasks", icon: "check" },
@@ -37,6 +48,7 @@ export const ALL_TABS: SettingsTab[] = [
   { id: "observations", label: "Observations", icon: "eye" },
   { id: "personality", label: "Personality", icon: "user" },
   { id: "providers", label: "Providers", icon: "sparkle" },
+  { id: "cloudflare", label: "Cloudflare", icon: "server" },
   { id: "logs", label: "Logs", icon: "terminal" },
 ];
 
@@ -52,6 +64,8 @@ export function tabForPathname(pathname: string): string {
   const segment = pathname.split("/")[1] || "";
   const MAP: Record<string, SettingsTabId> = {
     "": "general",
+    account: "account",
+    organizations: "organizations",
     projects: "projects",
     skills: "skills",
     tasks: "tasks",

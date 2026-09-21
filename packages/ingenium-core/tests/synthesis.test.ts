@@ -5,16 +5,18 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { storeObservation } from "../lib/tools/observations.js";
-import { runSynthesis, getSynthesisStatus } from "../lib/tools/synthesis.js";
+import { getObservations, storeObservation } from "../lib/tools/observations.js";
+import { runCrossProjectSynthesis, runSynthesis, getSynthesisStatus } from "../lib/tools/synthesis.js";
 import { getTraits, upsertTrait } from "../lib/tools/personality.js";
 import { setSetting } from "../lib/tools/settings.js";
 import { listSkills, createSkill } from "../lib/tools/skills.js";
 import { listProposals } from "../lib/tools/skill-governance.js";
+import { getEvents } from "../lib/tools/pipeline-events.js";
 
 let tempDir: string;
 let projectId: string;
 let globalProjectId: string;
+let externalProjectId: string;
 let mockServer: Server;
 let mockPort: number;
 let mockResponsePayload: any;
@@ -70,6 +72,7 @@ beforeAll(async () => {
   projectId = project.id;
   const globalProject = createProject("global-default", true);
   globalProjectId = globalProject.id;
+  externalProjectId = createProject("external-worktree").id;
 
   // Configure LLM synthesis on global project
   setSetting(globalProjectId, "synthesis_model", "test-model");
@@ -117,6 +120,43 @@ beforeEach(() => {
 });
 
 describe("synthesis pipeline", () => {
+  it("leaves pending observations untouched when automatic learning is disabled", async () => {
+    const disabledProject = createProject("disabled-synthesis-project");
+    setSetting(disabledProject.id, "automatic_learning_enabled", "false");
+    const observation = storeObservation(
+      disabledProject.id,
+      "preference",
+      "User prefers this synthetic observation to remain pending while learning is disabled",
+      8,
+    );
+    let llmCalled = false;
+
+    const result = await runSynthesis(disabledProject.id, undefined, {
+      llmExecutor: async () => {
+        llmCalled = true;
+        return { ok: true, content: "{}" };
+      },
+    });
+
+    expect(result).toMatchObject({ observations_processed: 0, summary: "Automatic learning is disabled." });
+    expect(llmCalled).toBe(false);
+    expect(getObservations(disabledProject.id).find(({ id }) => id === observation.id)?.status).toBe("pending");
+  });
+
+  it("does not start cross-project synthesis when global automatic learning is disabled", async () => {
+    const startedBefore = getEvents(globalProjectId, { type: "synthesis_started" }).length;
+    setSetting(globalProjectId, "automatic_learning_enabled", "false");
+    try {
+      expect(await runCrossProjectSynthesis()).toMatchObject({
+        observations_processed: 0,
+        summary: "Automatic learning is disabled for the global project.",
+      });
+      expect(getEvents(globalProjectId, { type: "synthesis_started" })).toHaveLength(startedBefore);
+    } finally {
+      setSetting(globalProjectId, "automatic_learning_enabled", "true");
+    }
+  });
+
   it("returns empty result when no observations exist", async () => {
     const result = await runSynthesis(projectId);
     expect(result.observations_processed).toBe(0);
@@ -160,6 +200,51 @@ describe("synthesis pipeline", () => {
     expect(status.processed_count).toBeGreaterThanOrEqual(3);
     expect(status.trait_count).toBeGreaterThanOrEqual(1);
     expect(status.last_synthesis_at).toBeTruthy();
+  });
+
+  it("creates traits only in the external project's namespace", async () => {
+    const startedAt = Date.now();
+    const externalObservation = storeObservation(
+      externalProjectId,
+      "preference",
+      "User prefers external project-specific review summaries",
+      8,
+      "auto-observer",
+    );
+
+    setMockResponse(mockContent(JSON.stringify({
+      create: [{
+        trait_type: "feedback_style",
+        trait_value: "User prefers external project-specific review summaries",
+        confidence_hint: 0.12,
+        observation_ids: [externalObservation.id],
+      }],
+      confirm: [],
+      ignore_count: 0,
+    })));
+
+    const result = await runSynthesis(externalProjectId);
+    const externalObservationAfter = getObservations(externalProjectId).find(
+      (observation) => observation.id === externalObservation.id,
+    );
+    const externalTrait = getTraits(externalProjectId).find(
+      (trait) => trait.trait_value === "User prefers external project-specific review summaries",
+    );
+
+    expect(result.observations_processed).toBe(1);
+    expect(externalObservationAfter).toMatchObject({
+      project_id: externalProjectId,
+      status: "processed",
+    });
+    expect(new Date(externalObservationAfter!.created_at).getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(externalTrait).toMatchObject({ project_id: externalProjectId });
+    expect(new Date(externalTrait!.created_at).getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(getObservations(globalProjectId).some(
+      (observation) => observation.content === externalObservation.content,
+    )).toBe(false);
+    expect(getTraits(globalProjectId).some(
+      (trait) => trait.trait_value === externalTrait!.trait_value,
+    )).toBe(false);
   });
 
   it("handles terminology observations via consolidation", async () => {

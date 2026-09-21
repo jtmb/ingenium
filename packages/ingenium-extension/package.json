@@ -6,6 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./context-upload-codec": "./context-upload-codec.mjs",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
@@ -14,14 +15,56 @@
       "types": "./dist/auto-observer.d.ts",
       "import": "./dist/auto-observer.js"
     },
+    "./plugins/auto-observer": {
+      "types": "./dist/plugins/auto-observer.d.ts",
+      "import": "./dist/plugins/auto-observer.js"
+    },
     "./observer": {
       "types": "./dist/observer.d.ts",
       "import": "./dist/observer.js"
+    },
+    "./plugins/observer": {
+      "types": "./dist/plugins/observer.d.ts",
+      "import": "./dist/plugins/observer.js"
     },
     "./resource-sync": {
       "types": "./dist/resource-sync.d.ts",
       "import": "./dist/resource-sync.js"
     },
+    "./plugins/resource-sync": {
+      "types": "./dist/plugins/resource-sync.d.ts",
+      "import": "./dist/plugins/resource-sync.js"
+    },
+    "./lifecycle": {
+      "types": "./dist/lifecycle.d.ts",
+      "import": "./dist/lifecycle.js"
+    },
+    "./plugins/lifecycle": {
+      "types": "./dist/plugins/lifecycle.d.ts",
+      "import": "./dist/plugins/lifecycle.js"
+    },
+    "./plugins/v2/auto-observer": {
+      "types": "./dist/plugins/v2/auto-observer/index.d.ts",
+      "import": "./dist/plugins/v2/auto-observer/index.js"
+    },
+    "./plugins/v2/observer": {
+      "types": "./dist/plugins/v2/observer/index.d.ts",
+      "import": "./dist/plugins/v2/observer/index.js"
+    },
+    "./plugins/v2/resource-sync": {
+      "types": "./dist/plugins/v2/resource-sync/index.d.ts",
+      "import": "./dist/plugins/v2/resource-sync/index.js"
+    },
+    "./plugins/v2/lifecycle": {
+      "types": "./dist/plugins/v2/lifecycle/index.d.ts",
+      "import": "./dist/plugins/v2/lifecycle/index.js"
+    },
+    "./plugins/v2/ponytail": {
+      "types": "./dist/plugins/v2/ponytail/index.d.ts",
+      "import": "./dist/plugins/v2/ponytail/index.js"
+    },
+    "./plugins/ponytail": "./ponytail/.opencode/plugins/ponytail.mjs",
+    "./plugin-specs": "./plugin-specs.mjs",
     "./onboarding-sync": {
       "types": "./dist/onboarding-sync.d.ts",
       "import": "./dist/onboarding-sync.js"
@@ -32,19 +75,38 @@
     }
   },
   "bin": {
-    "@ingenium/extension": "dist/scripts/mcp-server.js"
+    "@ingenium/extension": "./dist/scripts/mcp-server.js",
+    "ingenium-init-project": "./dist/scripts/init-project.js",
+    "ingenium-repository": "./dist/scripts/repository-command.js",
+    "ingenium-build": "./dist/scripts/build-command.js",
+    "ingenium-coordination-reset": "./dist/scripts/coordination-reset.js",
+    "ingenium-opencode": "./dist/scripts/opencode.js"
   },
-  "files": ["dist/", "README.md"],
+  "files": [
+    "dist/",
+    "context-upload-codec.mjs",
+    "context-upload-codec.d.mts",
+    "scripts/recovery-bootstrap.js",
+    "README.md",
+    "plugin-specs.mjs",
+    "ponytail/"
+  ],
   "scripts": {
-    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp -r ../../services/ingenium-server/dist/scripts dist/scripts && test -f dist/config/index.js",
+    "build": "node scripts/build-distributions.mjs",
+    "install:host-build": "node scripts/install-host-build.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "esbuild": "0.28.1",
     "typescript": "^5.6.0",
     "vitest": "^2.0.0"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "*"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@opencode-ai/plugin": "1.18.31",
+    "@opencode-ai/sdk": "1.18.31",
+    "@opencode/plugin": "2.0.11",
+    "pino": "^9.0.0"
   }
 }

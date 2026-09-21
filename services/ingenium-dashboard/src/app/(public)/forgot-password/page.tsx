@@ -1,0 +1,5 @@
+"use client";
+import { useEffect, useState } from "react";
+import AuthCard, { authInput } from "@/app/components/auth/AuthCard";
+import { api } from "@/lib/api";
+export default function ForgotPasswordPage() { const [email, setEmail] = useState(""); const [csrf, setCsrf] = useState(""); const [sent, setSent] = useState(false); useEffect(() => { void api.auth.csrf().then((r) => setCsrf(r.data.csrfToken)); }, []); return <AuthCard title="Reset your password" description="If the account exists, reset instructions will be sent.">{sent ? <p role="status">Check your email for the next step.</p> : <form className="space-y-4" onSubmit={async (e) => { e.preventDefault(); await api.auth.forgotPassword(email, csrf); setEmail(""); setSent(true); }}><label className="block text-sm font-medium" htmlFor="reset-email">Email</label><input id="reset-email" className={authInput} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required /><button className="w-full rounded bg-blue-600 px-4 py-2 text-white">Send reset instructions</button></form>}</AuthCard>; }

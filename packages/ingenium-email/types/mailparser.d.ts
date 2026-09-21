@@ -5,7 +5,7 @@
  * If additional mailparser features are needed, extend these declarations
  * rather than casting to `any`.
  *
- * 🔴 Per AGENTS.md HARD RULE #12: Never hand-write RFC 2822 address-parsing
+ * 🔴 Per docs/concepts/conventions.md: Never hand-write RFC 2822 address-parsing
  *    regexes — always use mailparser's simpleParser instead.
  */
 

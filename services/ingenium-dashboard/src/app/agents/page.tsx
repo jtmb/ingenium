@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
+import Select from "../components/Select";
 import { api, type Agent } from "@/lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
@@ -120,12 +121,12 @@ export default function AgentsPage() {
     .filter(g => g.items.length > 0);
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Agents</h1>
+    <div className="space-y-8 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Agents</h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          className="w-full rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 sm:w-auto"
         >
           {showCreate ? "Cancel" : "Add Agent"}
         </button>
@@ -153,17 +154,17 @@ export default function AgentsPage() {
             value={newDesc}
             onChange={e => setNewDesc(e.target.value)}
           />
-          <div className="flex gap-4">
-            <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
+          <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
+            <Select wrapperClassName="w-full sm:flex-1" aria-label="New agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newCat} onChange={e => setNewCat(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="execution">Execution</option>
               <option value="research">Research</option>
               <option value="security">Security</option>
-            </select>
-            <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
+            </Select>
+            <Select wrapperClassName="w-full sm:flex-1" aria-label="New agent mode" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={newMode} onChange={e => setNewMode(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="subagent">Subagent</option>
-            </select>
+            </Select>
           </div>
           <input
             className="border p-2 rounded w-full"
@@ -180,7 +181,7 @@ export default function AgentsPage() {
           />
           <button
             onClick={handleCreate}
-            className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+            className="w-full rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700 sm:w-auto"
           >
             Create Agent
           </button>
@@ -201,7 +202,7 @@ export default function AgentsPage() {
           <h2 className="text-2xl font-semibold capitalize mb-4">{group.category}</h2>
           <div className="space-y-4">
             {group.items.map(agent => (
-              <div key={agent.id} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedAgent(agent)}>
+              <div key={agent.id} className="min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
                 {editingId === agent.id ? (
                   <div className="space-y-4">
                     <input
@@ -210,15 +211,15 @@ export default function AgentsPage() {
                       value={editDesc}
                       onChange={e => setEditDesc(e.target.value)}
                     />
-                    <div className="flex gap-4">
-                      <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:gap-4">
+                      <Select wrapperClassName="w-full sm:flex-1" aria-label="Agent category" className="w-full cursor-pointer rounded border p-2 hover:bg-[var(--color-surface-hover)] sm:flex-1" value={editCat} onChange={e => setEditCat(e.target.value)}>
                         <option value="primary">Primary</option>
                         <option value="execution">Execution</option>
                         <option value="research">Research</option>
                         <option value="security">Security</option>
-                      </select>
+                      </Select>
                       <input
-                        className="border p-2 rounded flex-1"
+                        className="w-full rounded border p-2 sm:flex-1"
                         placeholder="Runtime model (opencode.json)"
                         value={editModel}
                         onChange={e => setEditModel(e.target.value)}
@@ -230,16 +231,16 @@ export default function AgentsPage() {
                       value={editContent}
                       onChange={e => setEditContent(e.target.value)}
                     />
-                    <div className="flex gap-2">
+                    <div className="flex flex-col gap-2 sm:flex-row">
                       <button
                         onClick={() => handleUpdate(agent.name)}
-                        className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                        className="w-full rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 sm:w-auto"
                       >
                         Save
                       </button>
                       <button
                         onClick={() => setEditingId(null)}
-                        className="bg-gray-500 text-white px-3 py-1 rounded text-sm hover:bg-gray-600"
+                        className="w-full rounded bg-gray-500 px-3 py-1 text-sm text-white hover:bg-gray-600 sm:w-auto"
                       >
                         Cancel
                       </button>
@@ -247,42 +248,46 @@ export default function AgentsPage() {
                   </div>
                 ) : (
                   <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <span className="font-semibold text-lg">{agent.name}</span>
-                        <span className={`ml-2 ${BADGE_BASE} ${agent.mode === 'primary' ? badgeTones('purple') : badgeTones('blue')}`}>
-                          {agent.mode}
-                        </span>
-                        <span className={`ml-2 ${BADGE_BASE} ${agent.enabled ? badgeTones('success') : badgeTones('muted')}`}>
-                          {agent.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                      </div>
-                      <div className="flex gap-2">
+                    <div className="mb-2 flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                        onClick={() => setSelectedAgent(agent)}
+                        aria-label={`View agent ${agent.name}`}
+                      >
+                        <span className="break-all text-lg font-semibold">{agent.name}</span>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.mode === "primary" ? badgeTones("purple") : badgeTones("blue")}`}>{agent.mode}</span>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.enabled ? badgeTones("success") : badgeTones("muted")}`}>{agent.enabled ? "Enabled" : "Disabled"}</span>
+                        {agent.description && <span className="mt-2 block break-words text-sm text-[var(--color-text-secondary)]">{agent.description}</span>}
+                        {agent.model && <span className="mt-1 block break-all text-xs text-[var(--color-text-muted)]">Runtime model: {agent.model}</span>}
+                      </button>
+                      <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleToggle(agent); }}
-                          className={`px-3 py-1 rounded text-sm text-white ${agent.enabled ? 'bg-gray-500 hover:bg-gray-600' : 'bg-green-500 hover:bg-green-600'}`}
+                          type="button"
+                          onClick={() => void handleToggle(agent)}
+                          className={`flex-1 rounded px-3 py-1 text-sm text-white sm:flex-none ${agent.enabled ? 'bg-gray-500 hover:bg-gray-600' : 'bg-green-500 hover:bg-green-600'}`}
                         >
                           {agent.enabled ? 'Disable' : 'Enable'}
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); startEdit(agent); }}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
+                          type="button"
+                          onClick={() => startEdit(agent)}
+                          className="flex-1 rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 sm:flex-none"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleDelete(agent.name); }}
-                          className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                          type="button"
+                          onClick={() => void handleDelete(agent.name)}
+                          className="flex-1 rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700 sm:flex-none"
                         >
                           Delete
                         </button>
                       </div>
                     </div>
-                    {agent.description && <p className="text-sm text-[var(--color-text-secondary)] mb-2">{agent.description}</p>}
-                    {agent.model && <p className="text-xs text-[var(--color-text-muted)]">Runtime model: {agent.model}</p>}
                     <details className="mt-2">
                       <summary className="text-xs text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-primary)]">Preview content</summary>
-                      <pre className="mt-2 text-xs bg-[var(--color-surface-muted)] p-2 rounded overflow-x-auto max-h-32 overflow-y-auto">
+                       <pre className="mt-2 max-h-32 overflow-x-auto overflow-y-auto break-all rounded bg-[var(--color-surface-muted)] p-2 text-xs whitespace-pre-wrap">
                         {agent.content.substring(0, 500)}{agent.content.length > 500 ? '...' : ''}
                       </pre>
                     </details>
@@ -302,11 +307,11 @@ export default function AgentsPage() {
       >
         {selectedAgent && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Category:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.category}</span></div>
-              <div><span className="font-semibold">Mode:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.mode}</span></div>
-               {selectedAgent.model && <div><span className="font-semibold">Runtime model (opencode.json):</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.model}</span></div>}
-              <div><span className="font-semibold">Enabled:</span> <span className={selectedAgent.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>{selectedAgent.enabled ? "Yes" : "No"}</span></div>
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div className="break-words"><span className="font-semibold">Category:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.category}</span></div>
+              <div className="break-words"><span className="font-semibold">Mode:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.mode}</span></div>
+               {selectedAgent.model && <div className="break-all"><span className="font-semibold">Runtime model (opencode.json):</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.model}</span></div>}
+              <div className="break-words"><span className="font-semibold">Enabled:</span> <span className={selectedAgent.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>{selectedAgent.enabled ? "Yes" : "No"}</span></div>
             </div>
             <MarkdownViewer content={selectedAgent.content} isMarkdown={true} />
           </div>

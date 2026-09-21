@@ -38,10 +38,35 @@ describe("ChatHeader mobile selectors", () => {
   it("keeps provider and model selectors available in a horizontally scrollable mobile row", () => {
     render(<ChatHeader {...baseProps} />);
 
+    expect(screen.getByRole("banner").className).toContain("min-w-0");
+    const createTask = screen.getByRole("button", { name: "Create task from conversation" });
+    expect(createTask.className).toContain("min-h-11");
+    expect(createTask.className).toContain("min-w-11");
+
     const mobileRow = screen.getByTestId("chat-header-mobile-selectors");
     expect(mobileRow.className).toContain("overflow-x-auto");
     expect(screen.getByTestId("chat-header-mobile-provider").className).toContain("shrink-0");
     expect(screen.getByTestId("chat-header-mobile-model").className).toContain("shrink-0");
+
+    for (const testId of [
+      "chat-header-provider",
+      "chat-header-model",
+      "chat-header-agent",
+      "chat-header-mobile-provider",
+      "chat-header-mobile-model",
+      "chat-header-mobile-agent",
+    ]) {
+      const select = screen.getByTestId(testId);
+      expect(select.tagName).toBe("SELECT");
+      expect(select.className).toContain("appearance-none");
+      expect(select.className).toContain("rounded-md");
+      expect(select.className).toContain("pr-7");
+      expect(select.parentElement?.className).toContain("relative");
+      expect(select.parentElement?.className).toContain("shrink-0");
+      expect(select.parentElement?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    }
+
+    expect(mobileRow.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(3);
 
     fireEvent.change(screen.getByTestId("chat-header-mobile-provider"), {
       target: { value: "provider-b" },
@@ -52,6 +77,32 @@ describe("ChatHeader mobile selectors", () => {
 
     expect(baseProps.onProviderChange).toHaveBeenCalledWith("provider-b");
     expect(baseProps.onModelChange).toHaveBeenCalledWith("model-b");
+  });
+
+  it("keeps variant selectors native with the shared Select treatment on desktop and mobile", () => {
+    render(
+      <ChatHeader
+        {...baseProps}
+        variant="balanced"
+        onVariantChange={vi.fn()}
+        availableModels={[{
+          id: "model-a",
+          label: "Model A",
+          variants: { balanced: {}, fast: {} },
+        }]}
+      />,
+    );
+
+    for (const testId of ["chat-header-variant", "chat-header-mobile-variant"]) {
+      const select = screen.getByTestId(testId);
+      expect(select.tagName).toBe("SELECT");
+      expect(select.className).toContain("appearance-none");
+      expect(select.className).toContain("rounded-md");
+      expect(select.className).toContain("pr-7");
+      expect(select.parentElement?.className).toContain("relative");
+      expect(select.parentElement?.className).toContain("shrink-0");
+      expect(select.parentElement?.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+    }
   });
 
   it("disables both mobile selectors while the catalog is unavailable", () => {

@@ -10,14 +10,18 @@ import {
   decryptItem,
   deleteItem,
   generatePassword,
+  getEmptyVaultResetEligibility,
   getItemMetadata,
   initializeVault,
   initVault,
   isSealed,
   listItems,
+  logAudit,
+  resetEmptyVaultInitialization,
   sealVault,
   unsealVault,
   updateItem,
+  validateVaultPassphrase,
 } from "../lib/tools/vault.js";
 
 const passphrase = "correct horse battery staple";
@@ -111,6 +115,27 @@ describe("vault", () => {
     expect(events.some((event) => event.event_type === "secret_created")).toBe(true);
   });
 
+  it("stores no plaintext or user-controlled metadata in audit details", () => {
+    const secret = "core-audit-secret-value";
+    createItem(projectId, "name-with-sensitive-context", "note", secret);
+    logAudit(projectId, "access_denied", null, "system", { secret });
+    const details = getDb().prepare("SELECT details FROM vault_audit_log WHERE project_id = ? ORDER BY id DESC LIMIT 1").get(projectId) as { details: string };
+    expect(details.details).toBe("{}");
+    expect(details.details).not.toContain(secret);
+  });
+
+  it("shares the master-key configuration while keeping items project-isolated", () => {
+    const otherProjectId = createProject("vault-other-project").id;
+    const itemId = createItem(projectId, "project-one-only", "note", "project-one-secret");
+
+    expect(listItems(otherProjectId)).toEqual([]);
+    expect(getItemMetadata(otherProjectId, itemId)).toBeNull();
+
+    sealVault();
+    expect(unsealVault(otherProjectId, passphrase).ok).toBe(true);
+    expect(decryptItem(projectId, itemId)).toBe("project-one-secret");
+  });
+
   it("generates strong passwords", () => {
     const password = generatePassword();
     expect(password).toHaveLength(24);
@@ -166,11 +191,144 @@ describe("initializeVault", () => {
     });
   });
 
+  it("uses one passphrase policy for direct initialization", () => {
+    expect(validateVaultPassphrase("            ")).toEqual({ ok: false, error: "Passphrase must not be blank" });
+    expect(validateVaultPassphrase("too-short")).toEqual({
+      ok: false,
+      error: "Passphrase must be at least 12 characters",
+    });
+    expect(() => initVault(testProject, "too-short")).toThrow("Passphrase must be at least 12 characters");
+    expect(getDb(initializationDbPath).prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 0 });
+  });
+
   it("rejects when already initialized", () => {
     expect(initializeVault(testProject, "test-passphrase-12chars", "test-passphrase-12chars")).toEqual({ ok: true });
     expect(initializeVault(testProject, "test-passphrase-12chars", "test-passphrase-12chars")).toEqual({
       ok: false,
       error: "Vault is already initialized",
     });
+  });
+});
+
+describe("empty vault initialization reset", () => {
+  let directory: string;
+  let resetProject: ReturnType<typeof createProject>;
+
+  beforeEach(() => {
+    core.resetDbForTest();
+    directory = mkdtempSync(join(tmpdir(), "ingenium-vault-empty-reset-"));
+    vi.stubEnv("INGENIUM_CORE_DB_PATH", join(directory, "data.db"));
+    resetProject = createProject(`empty-reset-${crypto.randomUUID()}`);
+    initVault(resetProject.id, passphrase);
+  });
+
+  afterEach(() => {
+    sealVault();
+    core.resetDbForTest();
+    vi.unstubAllEnvs();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("transactionally resets an initialized sealed vault with no key-dependent rows and records metadata-only audit evidence", () => {
+    expect(getEmptyVaultResetEligibility()).toEqual({
+      initialized: true,
+      eligible: true,
+      dependentRows: 0,
+      blockers: [],
+    });
+
+    const result = resetEmptyVaultInitialization(resetProject.id, {
+      type: "user",
+      id: "installation-admin",
+      requestId: "empty-reset-request",
+    });
+
+    expect(result).toEqual({ status: "reset" });
+    expect(getDb().prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 0 });
+    const audit = getDb().prepare(
+      "SELECT action, actor_type, actor_id, request_id FROM resource_audit_events WHERE action = 'vault.empty_reset'",
+    ).get();
+    expect(audit).toEqual({
+      action: "vault.empty_reset",
+      actor_type: "user",
+      actor_id: "installation-admin",
+      request_id: "empty-reset-request",
+    });
+    expect(JSON.stringify({ result, audit })).not.toContain(passphrase);
+  });
+
+  it("blocks active and soft-deleted encrypted items across the service", () => {
+    expect(unsealVault(resetProject.id, passphrase).ok).toBe(true);
+    createItem(resetProject.id, "active", "note", "active-value");
+    sealVault();
+    expect(resetEmptyVaultInitialization(resetProject.id, { type: "user", id: "admin" })).toMatchObject({
+      status: "blocked",
+      eligibility: { blockers: ["encrypted_items"] },
+    });
+
+    expect(unsealVault(resetProject.id, passphrase).ok).toBe(true);
+    const deleted = createItem(resetProject.id, "deleted", "note", "deleted-value");
+    deleteItem(resetProject.id, deleted);
+    getDb().prepare("DELETE FROM vault_items WHERE name = 'active'").run();
+    sealVault();
+    expect(resetEmptyVaultInitialization(resetProject.id, { type: "user", id: "admin" })).toMatchObject({
+      status: "blocked",
+      eligibility: { blockers: ["encrypted_items"] },
+    });
+  });
+
+  it("blocks a provider credential reference even when its vault item is missing", () => {
+    expect(unsealVault(resetProject.id, passphrase).ok).toBe(true);
+    const itemId = createItem(resetProject.id, "provider", "api_key", "provider-value");
+    const now = new Date().toISOString();
+    getDb().prepare(`INSERT INTO provider_connections
+      (id, provider_key, owner_kind, organization_id, credential_item_id, display_name, provider_type,
+       config_json, enabled, created_by_actor_type, created_at, updated_at)
+      VALUES (?, 'provider', 'organization', ?, ?, 'Provider', 'managed', '{}', 1, 'system', ?, ?)`)
+      .run(crypto.randomUUID(), resetProject.organization_id, itemId, now, now);
+    getDb().prepare("DELETE FROM vault_items WHERE id = ?").run(itemId);
+    sealVault();
+
+    expect(getEmptyVaultResetEligibility()).toMatchObject({
+      eligible: false,
+      blockers: ["credential_references"],
+    });
+    expect(resetEmptyVaultInitialization(resetProject.id, { type: "user", id: "admin" }).status).toBe("blocked");
+  });
+
+  it("blocks provider references retained only in configuration metadata", () => {
+    getDb().prepare("INSERT INTO settings (project_id, key, value) VALUES (?, 'llm_provider_configs', ?)")
+      .run(resetProject.id, JSON.stringify([{ id: "configured", credentialItemId: 42 }]));
+    expect(getEmptyVaultResetEligibility()).toMatchObject({
+      eligible: false,
+      blockers: ["credential_references"],
+    });
+
+    getDb().prepare("DELETE FROM settings WHERE project_id = ? AND key = 'llm_provider_configs'").run(resetProject.id);
+    const now = new Date().toISOString();
+    getDb().prepare(`INSERT INTO provider_connections
+      (id, provider_key, owner_kind, organization_id, display_name, provider_type,
+       config_json, enabled, created_by_actor_type, created_at, updated_at)
+      VALUES (?, 'configured', 'organization', ?, 'Configured', 'managed', ?, 1, 'system', ?, ?)`)
+      .run(crypto.randomUUID(), resetProject.organization_id, JSON.stringify({ credentialItemId: "orphan" }), now, now);
+    expect(getEmptyVaultResetEligibility()).toMatchObject({
+      eligible: false,
+      blockers: ["credential_references"],
+    });
+  });
+
+  it("rolls back when a dependent row appears during the guarded delete", () => {
+    getDb().exec(`CREATE TRIGGER inject_vault_item_before_empty_reset
+      BEFORE DELETE ON vault_config BEGIN
+        INSERT INTO vault_items (id, project_id, organization_id, name, type, encrypted, wrapped_kek)
+        SELECT '00000000-0000-4000-8000-000000000001', id, organization_id, 'concurrent', 'note', X'01', X'02'
+        FROM projects WHERE id = '${resetProject.id}';
+      END`);
+
+    expect(resetEmptyVaultInitialization(resetProject.id, { type: "user", id: "admin" })).toEqual({
+      status: "concurrent_change",
+    });
+    expect(getDb().prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 1 });
+    expect(getDb().prepare("SELECT count(*) AS count FROM vault_items").get()).toEqual({ count: 0 });
   });
 });

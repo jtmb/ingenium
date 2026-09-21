@@ -1,18 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ManagedProviderConfig } from "../../../../lib/api";
+import { useGlobalProject } from "../../../../lib/ProjectContext";
 import {
-  opencode,
   type OpenCodeIntegration,
   type OpenCodeIntegrationAttempt,
   type OpenCodeIntegrationMethod,
   type OpenCodeProvider,
 } from "../../../../lib/opencode";
+import { useRuntime } from "../../../../lib/RuntimeContext";
+import RuntimeWorkspacePicker from "../../RuntimeWorkspacePicker";
 import SettingRow from "../SettingRow";
+import Select from "../../Select";
+import Overlay from "../../Overlay";
 
 /** Internal type that adds a stable draft ID for React keys and collapse/key-visibility state. */
 type DraftProvider = ManagedProviderConfig & { _draftId?: string };
+
+function hasProviderRole(provider: ManagedProviderConfig, role: "primary" | "backup"): boolean {
+  return Array.isArray(provider.roles) && provider.roles.includes(role);
+}
 
 const PACKAGE_OPTIONS = [
   ["@ai-sdk/openai-compatible", "OpenAI compatible"],
@@ -51,6 +59,7 @@ function newProvider(index: number): DraftProvider {
     enabled: true,
     allowPrivateNetwork: false,
     apiKeySet: false,
+    ownerKind: "installation",
   };
 }
 
@@ -61,10 +70,14 @@ function draftKey(provider: DraftProvider): string {
 }
 
 export default function PipelinePanel() {
+  const runtime = useRuntime();
+  const opencode = runtime.client;
+  const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [providers, setProviders] = useState<DraftProvider[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [intervalMin, setIntervalMin] = useState(15);
@@ -74,6 +87,8 @@ export default function PipelinePanel() {
   const [backupModelId, setBackupModelId] = useState("");
   const [nativeProviders, setNativeProviders] = useState<OpenCodeProvider[]>([]);
   const [integrations, setIntegrations] = useState<OpenCodeIntegration[]>([]);
+  const [nativeLoading, setNativeLoading] = useState(true);
+  const [nativeError, setNativeError] = useState<string | null>(null);
   const [connectProviderId, setConnectProviderId] = useState<string | null>(null);
   const [connectMethod, setConnectMethod] = useState<OpenCodeIntegrationMethod | null>(null);
   const [connectInputs, setConnectInputs] = useState<Record<string, string>>({});
@@ -82,39 +97,76 @@ export default function PipelinePanel() {
   const [oauthCode, setOauthCode] = useState("");
   const [connecting, setConnecting] = useState(false);
   const activeAttemptRef = useRef<string | null>(null);
+  const connectionSessionRef = useRef(0);
 
-  const refreshNativeProviders = async () => {
-    const [runtime, integrationResponse] = await Promise.all([
-      opencode.providers.list("/workspace"),
-      opencode.integrations.list("/workspace"),
-    ]);
-    setNativeProviders(runtime.all);
-    setIntegrations(integrationResponse.data);
-  };
+  const refreshNativeProviders = useCallback(async () => {
+    setNativeLoading(true);
+    setNativeError(null);
+    if (!opencode) {
+      setNativeProviders([]);
+      setIntegrations([]);
+      setNativeError("Select and start an authorized workspace to discover native providers.");
+      setNativeLoading(false);
+      return;
+    }
+    try {
+      const [runtime, integrationResponse] = await Promise.all([
+        opencode.providers.list("/workspace"),
+        opencode.integrations.list("/workspace"),
+      ]);
+      setNativeProviders(Array.isArray(runtime.providers) ? runtime.providers : []);
+      setIntegrations(Array.isArray(integrationResponse.data) ? integrationResponse.data : []);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to load native providers";
+      setNativeProviders([]);
+      setIntegrations([]);
+      setNativeError(message);
+      throw error;
+    } finally {
+      setNativeLoading(false);
+    }
+  }, [opencode]);
 
   useEffect(() => {
+    if (globalProjectLoading) return;
+    if (!globalProject) {
+      setStatus(globalProjectError?.message ?? "Provider settings are unavailable until the global project is resolved");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setConfigError(null);
+    void refreshNativeProviders().catch((error: unknown) => {
+      setStatus(error instanceof Error ? error.message : "Unable to load native providers");
+    });
+
     Promise.all([
-      api.settings.getProviderConfigs("global-default"),
-      api.settings.get("synthesis_interval_ms", "global-default"),
-      opencode.providers.list("/workspace"),
-      opencode.integrations.list("/workspace"),
+      api.settings.getProviderConfigs(globalProject),
+      api.settings.get("synthesis_interval_ms", globalProject),
     ])
-      .then(([providerResponse, intervalResponse, runtime, integrationResponse]) => {
-        setProviders(providerResponse.data.providers);
-        setPrimaryProviderId(providerResponse.data.synthesis?.primary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
-        setPrimaryModelId(providerResponse.data.synthesis?.primary.modelId ?? "");
-        setBackupProviderId(providerResponse.data.synthesis?.secondary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
-        setBackupModelId(providerResponse.data.synthesis?.secondary.modelId ?? "");
+      .then(([providerResponse, intervalResponse]) => {
+        const managedProviders = Array.isArray(providerResponse.data.providers)
+          ? providerResponse.data.providers
+          : [];
+        const primary = providerResponse.data.synthesis?.primary;
+        const secondary = providerResponse.data.synthesis?.secondary;
+        setProviders(managedProviders);
+        setPrimaryProviderId(primary?.providerId || managedProviders.find((provider) => hasProviderRole(provider, "primary"))?.id || "");
+        setPrimaryModelId(primary?.modelId || "");
+        setBackupProviderId(secondary?.providerId || managedProviders.find((provider) => hasProviderRole(provider, "backup"))?.id || "");
+        setBackupModelId(secondary?.modelId || "");
         const ms = Number(intervalResponse.data.value);
         if (Number.isFinite(ms) && ms >= 0) setIntervalMin(ms / 60000);
-        setNativeProviders(runtime.all);
-        setIntegrations(integrationResponse.data);
+        setConfigError(null);
       })
       .catch((error: unknown) => {
-        setStatus(error instanceof Error ? error.message : "Unable to load provider configuration");
+        const message = error instanceof Error ? error.message : "Unable to load provider configuration";
+        setConfigError(message);
+        setStatus(message);
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [globalProject, globalProjectLoading, globalProjectError, refreshNativeProviders]);
 
   const updateProvider = (index: number, patch: Partial<ManagedProviderConfig>) => {
     setProviders((current) => current.map((provider, providerIndex) => (
@@ -158,25 +210,34 @@ export default function PipelinePanel() {
   };
 
   const save = async () => {
+    if (!globalProject) {
+      setStatus("Provider settings are unavailable until the global project is resolved");
+      return;
+    }
     setSaving(true);
     setStatus("");
     try {
       const providersToSave: ManagedProviderConfig[] = providers.map(
         (p) => {
-          const { _draftId: _unused, ...rest } = p;
+          const rest = { ...p };
+          delete rest._draftId;
           const roles = ["available", ...(p.id === primaryProviderId ? ["primary"] : []), ...(p.id === backupProviderId ? ["backup"] : [])];
           return { ...rest, roles } as ManagedProviderConfig;
         },
       );
-      const response = await api.settings.saveProviderConfigs(providersToSave, "global-default", {
+      const response = await api.settings.saveProviderConfigs(providersToSave, globalProject, {
         primary: { providerId: primaryProviderId, modelId: primaryModelId || providers.find((p) => p.id === primaryProviderId)?.defaultModel || "" },
         secondary: { providerId: backupProviderId, modelId: backupModelId || providers.find((p) => p.id === backupProviderId)?.defaultModel || "" },
       });
-      const refreshed = await api.settings.getProviderConfigs("global-default");
-        setProviders(refreshed.data.providers);
-        setPrimaryProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
-        setBackupProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
-        setStatus(response.data.warnings.length > 0
+      const refreshed = await api.settings.getProviderConfigs(globalProject);
+      const refreshedProviders = Array.isArray(refreshed.data.providers) ? refreshed.data.providers : [];
+      setProviders(refreshedProviders);
+      setPrimaryProviderId(refreshed.data.synthesis?.primary.providerId || refreshedProviders.find((provider) => hasProviderRole(provider, "primary"))?.id || "");
+      setPrimaryModelId(refreshed.data.synthesis?.primary.modelId || "");
+      setBackupProviderId(refreshed.data.synthesis?.secondary.providerId || refreshedProviders.find((provider) => hasProviderRole(provider, "backup"))?.id || "");
+      setBackupModelId(refreshed.data.synthesis?.secondary.modelId || "");
+      setConfigError(null);
+      setStatus(response.data.warnings.length > 0
           ? `Saved. ${response.data.warnings.join(" ")}`
           : "Saved. OpenCode provider configuration reloaded.");
     } catch (error: unknown) {
@@ -187,22 +248,29 @@ export default function PipelinePanel() {
   };
 
   const saveInterval = async (minutes: number) => {
+    if (!globalProject) {
+      setStatus("Synthesis settings are unavailable until the global project is resolved");
+      return;
+    }
     setIntervalMin(minutes);
     try {
-      await api.settings.set("synthesis_interval_ms", String(minutes * 60000), "global-default");
+      await api.settings.set("synthesis_interval_ms", String(minutes * 60000), globalProject);
     } catch (error: unknown) {
       setStatus(error instanceof Error ? error.message : "Synthesis interval could not be saved");
     }
   };
 
-  const isNativeConnected = (providerId: string) => (
-    Boolean(integrations.find((integration) => integration.id === providerId)?.connections.length)
-  );
+  const isNativeConnected = (providerId: string) => {
+    const integration = integrations.find((candidate) => candidate.id === providerId);
+    return Boolean(integration && Array.isArray(integration.connections) && integration.connections.length > 0);
+  };
 
   const openConnect = (providerId: string) => {
+    connectionSessionRef.current += 1;
     const integration = integrations.find((candidate) => candidate.id === providerId);
-    const method = integration?.methods.find((candidate) => candidate.type === "oauth")
-      ?? integration?.methods.find((candidate) => candidate.type === "key")
+    const methods = integration?.methods ?? [];
+    const method = methods.find((candidate) => candidate.type === "oauth")
+      ?? methods.find((candidate) => candidate.type === "key")
       ?? null;
     setConnectProviderId(providerId);
     setConnectMethod(method);
@@ -213,18 +281,28 @@ export default function PipelinePanel() {
     setStatus("");
   };
 
-  const closeConnect = async () => {
+  const closeConnect = () => {
+    connectionSessionRef.current += 1;
     const attemptID = activeAttemptRef.current;
     activeAttemptRef.current = null;
-    if (attemptID) await opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
     setConnectProviderId(null);
     setConnectMethod(null);
     setOauthAttempt(null);
     setConnectKey("");
     setOauthCode("");
+    setConnecting(false);
+    if (attemptID && opencode) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
   };
 
+  useEffect(() => () => {
+    const attemptID = activeAttemptRef.current;
+    activeAttemptRef.current = null;
+    connectionSessionRef.current += 1;
+    if (attemptID && opencode) void opencode.integrations.cancelAttempt(attemptID).catch(() => undefined);
+  }, [opencode]);
+
   const waitForOAuth = async (attempt: OpenCodeIntegrationAttempt) => {
+    if (!opencode) throw new Error("Select and start an authorized workspace first");
     for (let count = 0; count < 60 && activeAttemptRef.current === attempt.attemptID; count += 1) {
       const response = await opencode.integrations.attemptStatus(attempt.attemptID);
       if (response.data.status === "complete") return true;
@@ -237,13 +315,15 @@ export default function PipelinePanel() {
   };
 
   const connectNativeProvider = async () => {
-    if (!connectProviderId || !connectMethod) return;
+    if (!opencode || !connectProviderId || !connectMethod) return;
+    const session = connectionSessionRef.current;
     setConnecting(true);
     setStatus("");
     try {
       if (connectMethod.type === "key") {
         await opencode.integrations.connectKey(connectProviderId, connectKey);
         await refreshNativeProviders();
+        if (connectionSessionRef.current !== session) return;
         setConnectProviderId(null);
         setConnectMethod(null);
         setConnectKey("");
@@ -252,32 +332,40 @@ export default function PipelinePanel() {
       }
       if (!connectMethod.id) throw new Error("This OAuth method is unavailable");
       const response = await opencode.integrations.beginOAuth(connectProviderId, connectMethod.id, connectInputs);
+      if (connectionSessionRef.current !== session) {
+        void opencode.integrations.cancelAttempt(response.data.attemptID).catch(() => undefined);
+        return;
+      }
       setOauthAttempt(response.data);
       activeAttemptRef.current = response.data.attemptID;
       window.open(response.data.url, "_blank", "noopener,noreferrer");
       setStatus("Complete authorization in the opened page. A direct link is available in this dialog.");
       if (response.data.mode === "auto") {
         void waitForOAuth(response.data).then(async (connected) => {
-          if (!connected) return;
+          if (!connected || connectionSessionRef.current !== session || activeAttemptRef.current !== response.data.attemptID) return;
           activeAttemptRef.current = null;
           await refreshNativeProviders();
+          if (connectionSessionRef.current !== session) return;
           setConnectProviderId(null);
           setConnectMethod(null);
           setOauthAttempt(null);
           setStatus("Provider connected. Models were discovered automatically.");
         }).catch((error: unknown) => {
+          if (connectionSessionRef.current !== session) return;
           setStatus(error instanceof Error ? error.message : "Provider connection failed");
         });
       }
     } catch (error: unknown) {
+      if (connectionSessionRef.current !== session) return;
       setStatus(error instanceof Error ? error.message : "Provider connection failed");
     } finally {
-      setConnecting(false);
+      if (connectionSessionRef.current === session) setConnecting(false);
     }
   };
 
   const finishOAuth = async () => {
-    if (!oauthAttempt) return;
+    if (!opencode || !oauthAttempt) return;
+    const session = connectionSessionRef.current;
     setConnecting(true);
     try {
       if (oauthAttempt.mode === "code") {
@@ -290,6 +378,7 @@ export default function PipelinePanel() {
         }
       }
       await refreshNativeProviders();
+      if (connectionSessionRef.current !== session) return;
       activeAttemptRef.current = null;
       setConnectProviderId(null);
       setConnectMethod(null);
@@ -297,13 +386,15 @@ export default function PipelinePanel() {
       setOauthCode("");
       setStatus("Provider connected. Models were discovered automatically.");
     } catch (error: unknown) {
+      if (connectionSessionRef.current !== session) return;
       setStatus(error instanceof Error ? error.message : "OAuth connection failed");
     } finally {
-      setConnecting(false);
+      if (connectionSessionRef.current === session) setConnecting(false);
     }
   };
 
   const disconnectNativeProvider = async (providerId: string) => {
+    if (!opencode) return;
     if (!window.confirm("Disconnect this provider? Its OpenCode credential will be removed.")) return;
     setStatus("");
     try {
@@ -323,8 +414,25 @@ export default function PipelinePanel() {
     isNativeConnected(provider.id) && !managedIds.has(provider.id)
   ));
   const selectedIntegration = integrations.find((integration) => integration.id === connectProviderId);
-  const actionableMethods = selectedIntegration?.methods.filter((method) => method.type === "key" || method.type === "oauth") ?? [];
+  const actionableMethods = (selectedIntegration?.methods ?? []).filter((method) => method.type === "key" || method.type === "oauth");
   const selectedNativeProvider = nativeProviders.find((provider) => provider.id === connectProviderId);
+
+  const selectedPrimaryProvider = providers.find((provider) => provider.id === primaryProviderId);
+  const selectedBackupProvider = providers.find((provider) => provider.id === backupProviderId);
+
+  if (globalProjectLoading) {
+    return <div className="px-6 py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Resolving global provider project...</div>;
+  }
+
+  if (!globalProject) {
+    return (
+      <div className="m-6 rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4" role="alert">
+        <p className="text-sm text-[var(--color-error-text)]">
+          {globalProjectError?.message ?? "Provider settings are unavailable until an active global project is configured."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-5">
@@ -344,16 +452,22 @@ export default function PipelinePanel() {
         </button>
       </div>
 
+      {!opencode && <RuntimeWorkspacePicker controller={runtime.workspace} product="provider discovery" />}
+
       <section className="mb-6">
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Connected providers</h4>
         <div className="mt-3 space-y-2">
-          {connectedNativeProviders.length === 0 ? (
+          {nativeLoading ? (
+            <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-text-muted)] animate-pulse">Loading native providers...</p>
+          ) : nativeError ? (
+            <p className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] px-4 py-5 text-sm text-[var(--color-error-text)]" role="alert">Native provider catalog unavailable: {nativeError}</p>
+          ) : connectedNativeProviders.length === 0 ? (
             <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-text-muted)]">No native providers connected.</p>
           ) : connectedNativeProviders.map((provider) => (
             <div key={provider.id} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
               <div className="min-w-0">
-                <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.name}</div>
-                <div className="text-xs text-[var(--color-text-muted)]">{Object.keys(provider.models).length} models available automatically</div>
+                <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.label}</div>
+                <div className="text-xs text-[var(--color-text-muted)]">{provider.models.length} models available automatically</div>
               </div>
               <button type="button" onClick={() => disconnectNativeProvider(provider.id)} className="text-xs font-medium text-red-500 hover:underline cursor-pointer">Disconnect</button>
             </div>
@@ -365,13 +479,17 @@ export default function PipelinePanel() {
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Native providers</h4>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">Authentication and model catalogs are managed by OpenCode.</p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {popularProviders.map((provider) => {
+          {nativeLoading ? (
+            <p className="text-sm text-[var(--color-text-muted)] animate-pulse">Loading native provider catalog...</p>
+          ) : nativeError ? null : popularProviders.length === 0 ? (
+            <p className="text-sm text-[var(--color-text-muted)]">No native providers are available.</p>
+          ) : popularProviders.map((provider) => {
             const connected = isNativeConnected(provider.id);
             return (
               <div key={provider.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
                 <div className="min-w-0">
-                  <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.name}</div>
-                  <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{Object.keys(provider.models).length} models</div>
+                  <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.label}</div>
+                  <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{provider.models.length} models</div>
                 </div>
                 {connected ? (
                   <span className="rounded-full bg-green-500/15 px-2 py-1 text-[11px] font-medium text-green-600 dark:text-green-400">Connected</span>
@@ -391,6 +509,10 @@ export default function PipelinePanel() {
 
       {loading ? (
         <div className="py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Loading providers...</div>
+      ) : configError ? (
+        <div className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4" role="alert">
+          <p className="text-sm text-[var(--color-error-text)]">Provider configuration unavailable: {configError}</p>
+        </div>
       ) : providers.length === 0 ? (
         <button
           type="button"
@@ -440,6 +562,12 @@ export default function PipelinePanel() {
                   <div className="p-4 space-y-4">
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Owner
+                        <Select value={provider.ownerKind ?? "installation"} onChange={(event) => updateProvider(index, { ownerKind: event.target.value as "installation" })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                          <option value="installation">Installation runtime</option>
+                        </Select>
+                      </label>
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
                         Display name
                         <input value={provider.name} onChange={(event) => updateProvider(index, { name: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />
                       </label>
@@ -454,9 +582,9 @@ export default function PipelinePanel() {
                       </label>
                       <label className="text-xs font-medium text-[var(--color-text-secondary)]">
                         Provider package
-                        <select value={provider.npm} onChange={(event) => updateProvider(index, { npm: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
-                          {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label} ({value})</option>)}
-                        </select>
+                         <Select value={provider.npm} onChange={(event) => updateProvider(index, { npm: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                           {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label} ({value})</option>)}
+                         </Select>
                       </label>
                     </div>
 
@@ -533,7 +661,7 @@ export default function PipelinePanel() {
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Primary
-              <select value={primaryProviderId} onChange={(event) => {
+              <Select value={primaryProviderId} onChange={(event) => {
                 setPrimaryProviderId(event.target.value);
                 const model = providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? "";
                 setPrimaryModelId(model);
@@ -544,34 +672,34 @@ export default function PipelinePanel() {
               }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
                 {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
-              </select>
-              <select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
+              </Select>
+              <Select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
                 <option value="">Select model</option>
-                {providers.find((provider) => provider.id === primaryProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
+                {(selectedPrimaryProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
+              </Select>
             </label>
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Secondary
-              <select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <Select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
                 {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
-              </select>
-              <select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
+              </Select>
+              <Select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
                 <option value="">Select model</option>
-                {providers.find((provider) => provider.id === backupProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
-              </select>
+                {(selectedBackupProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
+              </Select>
             </label>
           </div>
         </div>
-        <SettingRow label="Synthesis schedule" description="How often Ingenium processes observations">
-          <select value={String(intervalMin)} onChange={(event) => saveInterval(Number(event.target.value))} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+        <SettingRow label="Synthesis schedule" description="How often Ingenium processes observations" controlId="pipeline-schedule">
+          <Select id="pipeline-schedule" value={String(intervalMin)} onChange={(event) => saveInterval(Number(event.target.value))} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="5">5 minutes</option>
             <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
             <option value="60">1 hour</option>
             <option value="240">4 hours</option>
             <option value="0">Disabled</option>
-          </select>
+          </Select>
         </SettingRow>
       </div>
 
@@ -583,38 +711,36 @@ export default function PipelinePanel() {
       </div>
 
       {connectProviderId && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Connect ${selectedNativeProvider?.name ?? connectProviderId}`}>
-          <div className="w-full max-w-lg rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h4 className="text-base font-semibold text-[var(--color-text-primary)]">Connect {selectedNativeProvider?.name ?? connectProviderId}</h4>
-                <p className="mt-1 text-xs text-[var(--color-text-muted)]">Models will be loaded automatically from OpenCode.</p>
-              </div>
-              <button type="button" onClick={closeConnect} aria-label="Close provider connection" className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">×</button>
-            </div>
-
+        <Overlay
+          isOpen
+          onClose={closeConnect}
+          title={`Connect ${selectedNativeProvider?.label ?? connectProviderId}`}
+          subtitle="Models will be loaded automatically from OpenCode."
+          panelClassName="mt-8 mb-8 w-11/12 max-w-lg max-h-[90vh]"
+          bodyClassName="flex-1 overflow-y-auto px-5 py-5"
+        >
             {!oauthAttempt && (
               <div className="mt-5 space-y-4">
                 {actionableMethods.length > 1 && (
                   <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
                     Login method
-                    <select value={connectMethod?.id ?? connectMethod?.type ?? ""} onChange={(event) => {
+                    <Select value={connectMethod?.id ?? connectMethod?.type ?? ""} onChange={(event) => {
                       const method = actionableMethods.find((candidate) => (candidate.id ?? candidate.type) === event.target.value) ?? null;
                       setConnectMethod(method);
                       setConnectInputs({});
                     }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                       {actionableMethods.map((method, index) => <option key={`${method.id ?? method.type}-${index}`} value={method.id ?? method.type}>{method.label ?? (method.type === "key" ? "API key" : "OAuth")}</option>)}
-                    </select>
+                    </Select>
                   </label>
                 )}
                 {connectMethod?.prompts?.map((prompt) => (
                   <label key={prompt.key} className="block text-xs font-medium text-[var(--color-text-secondary)]">
                     {prompt.message}
                     {prompt.type === "select" ? (
-                      <select value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                      <Select value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                         <option value="">Select...</option>
                         {prompt.options?.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                      </select>
+                      </Select>
                     ) : (
                       <input value={connectInputs[prompt.key] ?? ""} onChange={(event) => setConnectInputs((current) => ({ ...current, [prompt.key]: event.target.value }))} placeholder={prompt.placeholder} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />
                     )}
@@ -652,8 +778,7 @@ export default function PipelinePanel() {
                 )}
               </div>
             )}
-          </div>
-        </div>
+        </Overlay>
       )}
     </div>
   );

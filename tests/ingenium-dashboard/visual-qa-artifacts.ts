@@ -118,29 +118,35 @@ export function resolvePlaywrightRepoRoot(input = process.env.INGENIUM_PLAYWRIGH
 /**
  * Allocate an isolated visual-QA directory for one spec process.
  *
- * The optional run ID is useful in CI when a runner already has one. The UUID
- * fallback prevents screenshots from separate mail/manual processes from
- * overwriting one another.
+ * The runner must provide an explicit identity so repeated calls resolve to
+ * one deterministic evidence directory.
  */
 export function visualQaArtifactDirectory(scope: string): string {
   const configuredRunId = (
     process.env.INGENIUM_VISUAL_QA_RUN_ID
     ?? process.env.INGENIUM_TEST_RUN_NONCE
   )?.trim();
-  const runId = configuredRunId === undefined || configuredRunId === ""
-    ? `run-${randomUUID()}`
-    : safeComponent(configuredRunId, "run id");
+  if (configuredRunId === undefined || configuredRunId === "") {
+    throw new Error("Visual-QA artifacts require a deterministic run id");
+  }
+  const runId = safeComponent(configuredRunId, "run id");
   const safeScope = safeComponent(scope, "scope");
-  const repoRoot = resolvePlaywrightRepoRoot();
-  const visualQaRoot = join(repoRoot, "tests", "artifacts", "visual-qa");
-  ensureCanonicalArtifactDirectory(visualQaRoot, repoRoot, "visual-QA root");
-
-  const runDirectory = join(visualQaRoot, runId);
-  ensureCanonicalArtifactDirectory(runDirectory, visualQaRoot, "run directory");
+  const runDirectory = visualQaRunDirectory(runId);
 
   const directory = join(runDirectory, safeScope);
   ensureCanonicalArtifactDirectory(directory, runDirectory, "scope directory");
   return directory;
+}
+
+export function visualQaRunDirectory(runId: string): string {
+  const safeRunId = safeComponent(runId, "run id");
+  const repoRoot = resolvePlaywrightRepoRoot();
+  const visualQaRoot = join(repoRoot, "tests", "artifacts", "visual-qa");
+  ensureCanonicalArtifactDirectory(visualQaRoot, repoRoot, "visual-QA root");
+
+  const runDirectory = join(visualQaRoot, safeRunId);
+  ensureCanonicalArtifactDirectory(runDirectory, visualQaRoot, "run directory");
+  return runDirectory;
 }
 
 /**

@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProject } from "../lib/tools/projects.js";
+import { BOOTSTRAP_ORGANIZATION_ID } from "../lib/tools/organizations.js";
 import { getDb } from "../lib/db.js";
 import {
   upsertEmailCache,
@@ -38,6 +39,27 @@ beforeAll(() => {
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
   // createProject triggers DB init → migrations → creates email_* tables
   createProject("test-project");
+  const db = getDb(dbPath());
+  const now = new Date().toISOString();
+  const accountIds = [
+    "test-account",
+    "string-uid-account",
+    "stress-account",
+    "upsert-body-account",
+    "upsert-suggest-account",
+    "upsert-summary-account",
+    "folder-preserve-account",
+    "noreply-gate-account",
+  ];
+  const insert = db.prepare(
+    `INSERT INTO mail_accounts
+     (id, organization_id, owner_kind, email, name, provider, auth_type, config_json,
+      created_by_actor_type, created_at, updated_at)
+     VALUES (?, ?, 'organization', ?, ?, 'custom', 'app_password', '{}', 'system', ?, ?)`,
+  );
+  for (const accountId of accountIds) {
+    insert.run(accountId, BOOTSTRAP_ORGANIZATION_ID, `${accountId}@example.test`, accountId, now, now);
+  }
 });
 
 afterAll(() => {
@@ -76,8 +98,8 @@ function insertTestSuggestion(
 ): void {
   const db = getDb(dbPath());
   db.prepare(
-    "INSERT OR REPLACE INTO email_suggestions (account_id, folder, uid, suggestions_json) VALUES (?, ?, ?, ?)",
-  ).run(accountId, folder, uid, '[]');
+    "INSERT INTO email_suggestions (organization_id, account_id, folder, uid, suggestions_json) VALUES (?, ?, ?, ?, ?)",
+  ).run(BOOTSTRAP_ORGANIZATION_ID, accountId, folder, uid, '[]');
 }
 
 function insertTestBody(
@@ -85,8 +107,8 @@ function insertTestBody(
 ): void {
   const db = getDb(dbPath());
   db.prepare(
-    "INSERT OR REPLACE INTO email_bodies (account_id, folder, uid) VALUES (?, ?, ?)",
-  ).run(accountId, folder, uid);
+    "INSERT INTO email_bodies (organization_id, account_id, folder, uid) VALUES (?, ?, ?, ?)",
+  ).run(BOOTSTRAP_ORGANIZATION_ID, accountId, folder, uid);
 }
 
 function insertTestSummary(
@@ -94,8 +116,8 @@ function insertTestSummary(
 ): void {
   const db = getDb(dbPath());
   db.prepare(
-    "INSERT OR REPLACE INTO email_summaries (account_id, folder, uid, summary_text) VALUES (?, ?, ?, ?)",
-  ).run(accountId, folder, uid, "Test summary");
+    "INSERT INTO email_summaries (organization_id, account_id, folder, uid, summary_text) VALUES (?, ?, ?, ?, ?)",
+  ).run(BOOTSTRAP_ORGANIZATION_ID, accountId, folder, uid, "Test summary");
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
   "name": "documentation",
-  "description": "Documentation workspace, architecture conventions, and audit workflow — creating, editing, organizing, and auditing documentation.",
+  "description": "Documentation workspace, architecture conventions, and audit workflow. Use when creating, editing, organizing, searching, or auditing documentation; managing docs spaces, backlinks, tags, templates, and import/export.",
   "tags": ["documentation", "docs", "workspace", "audit", "architecture"],
   "alwaysApply": true
 }

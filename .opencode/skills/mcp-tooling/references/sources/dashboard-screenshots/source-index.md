@@ -211,8 +211,7 @@ await playwright_browser_take_screenshot({
 ## Related Skills
 
 - `@mcp-tooling` — MCP tools for Playwright browser automation
-- `@useful-tests` — Testing utilities and patterns
-- `@development-conventions` — Codebase conventions including UI testing standards
+- `@development-conventions` — Codebase conventions, including UI and testing references
 
 ## Notes
 

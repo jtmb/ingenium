@@ -12,7 +12,6 @@ interface ResumeWorkProps {
  * Displays last visited pages and active session with resume links.
  */
 export default function ResumeWork({ data, loading }: ResumeWorkProps) {
-  // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md transition-shadow">
@@ -28,7 +27,6 @@ export default function ResumeWork({ data, loading }: ResumeWorkProps) {
     );
   }
 
-  // ── Empty state ────────────────────────────────────────────────────────────
   if (!data) {
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md transition-shadow">

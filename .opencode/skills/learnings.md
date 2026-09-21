@@ -21,3 +21,9 @@ Use separate `--color-selection-bg/text` tokens for selected items (navigation, 
 ### codemirror-destroy-on-host-change
 
 When React remounts a CodeMirror host div due to a mode switch (e.g., source→split in a docs editor), always destroy the existing EditorView and create a new one. The old view stays attached to the destroyed DOM node, producing a blank editor in the new host element.
+
+## 2026-09-04 (pre-change checkpoints aafafee, d6a9145)
+
+### retire-local-models
+
+Retired the repository-owned `local-models` skill and its active loading, catalog, validation, and documentation references. No after-commit hash exists because the user explicitly prohibited committing this retirement boundary.

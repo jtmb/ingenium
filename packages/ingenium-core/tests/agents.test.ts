@@ -1,48 +1,142 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import { getDb } from "../lib/db.js";
 import { saveConfig } from "../lib/tools/configs.js";
-import { bootstrapReservedBroker, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent } from "../lib/tools/agents.js";
+import { bootstrapReservedBroker as bootstrapReservedBrokerRuntime, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent, validateProtectedOpenCodeDeployment } from "../lib/tools/agents.js";
 import { deleteProject } from "../lib/tools/projects.js";
 
 let root = "";
 let projectId = "";
+const canonicalBrokerProfile = readFileSync(
+  resolve(__dirname, "../../../.opencode/agents/execution/ingenium-llm-broker.md"),
+  "utf-8",
+);
+const canonicalProtectedConfig = readFileSync(resolve(__dirname, "../../../config/opencode-managed/opencode.json"), "utf-8");
+const canonicalBrokerEnforcer = readFileSync(resolve(__dirname, "../../../config/opencode-managed/plugins/enforce-reserved-broker/index.mjs"), "utf-8");
+
+function brokerPath(): string {
+  return join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
+}
+
+function replaceBrokerProfile(content = canonicalBrokerProfile, mode = 0o444): void {
+  const path = brokerPath();
+  for (const directory of [root, join(root, ".opencode"), join(root, ".opencode", "agents"), resolve(path, "..")]) {
+    if (existsSync(directory)) chmodSync(directory, directory === root ? 0o700 : 0o755);
+    else mkdirSync(directory, { mode: 0o755 });
+  }
+  rmSync(path, { force: true });
+  writeFileSync(path, content, { mode });
+  chmodSync(path, mode);
+}
+
+function withTrustedBrokerChain<T>(operation: () => T): T {
+  const directories = [root, join(root, ".opencode"), join(root, ".opencode", "agents"), resolve(brokerPath(), "..")];
+  for (const directory of directories) chmodSync(directory, 0o555);
+  try {
+    return operation();
+  } finally {
+    for (const directory of directories.slice(1).reverse()) chmodSync(directory, 0o755);
+    chmodSync(root, 0o700);
+  }
+}
+
+function protectedConfigPath(): string {
+  return join(root, ".opencode", "protected", "opencode.json");
+}
+
+function installProtectedOpenCodeFiles(): void {
+  const protectedRoot = resolve(protectedConfigPath(), "..");
+  const plugins = join(protectedRoot, "plugins");
+  const enforcer = join(plugins, "enforce-reserved-broker");
+  mkdirSync(enforcer, { recursive: true });
+  writeFileSync(protectedConfigPath(), canonicalProtectedConfig, { mode: 0o444 });
+  writeFileSync(join(enforcer, "index.mjs"), canonicalBrokerEnforcer, { mode: 0o444 });
+  chmodSync(protectedConfigPath(), 0o444);
+  chmodSync(join(enforcer, "index.mjs"), 0o444);
+}
+
+function withTrustedOpenCodeChain<T>(operation: () => T): T {
+  const directories = [
+    root,
+    join(root, ".opencode"),
+    join(root, ".opencode", "agents"),
+    resolve(brokerPath(), ".."),
+    resolve(protectedConfigPath(), ".."),
+    join(resolve(protectedConfigPath(), ".."), "plugins"),
+    join(resolve(protectedConfigPath(), ".."), "plugins", "enforce-reserved-broker"),
+  ];
+  for (const directory of directories) chmodSync(directory, 0o555);
+  try {
+    return operation();
+  } finally {
+    for (const directory of directories.slice(1).reverse()) chmodSync(directory, 0o755);
+    chmodSync(root, 0o700);
+  }
+}
+
+function bootstrapReservedBroker(id = projectId) {
+  return withTrustedBrokerChain(() => bootstrapReservedBrokerRuntime(id));
+}
 
 beforeEach(() => {
+  const ownerUid = process.getuid();
+  vi.spyOn(process, "getuid").mockReturnValue(ownerUid + 1);
   root = mkdtempSync(join(tmpdir(), "ingenium-agents-"));
   mkdirSync(join(root, ".ingenium"));
   process.env.INGENIUM_CORE_DB_PATH = join(root, ".ingenium", "data.db");
   resetDbForTest();
   projectId = createProject("agent-config-project").id;
+  replaceBrokerProfile();
+  installProtectedOpenCodeFiles();
 });
 
 afterEach(() => {
+  if (root && existsSync(root)) chmodSync(root, 0o700);
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
+  delete process.env.INGENIUM_GLOBAL_CONFIG_PATH;
   rmSync(root, { recursive: true, force: true });
+  vi.restoreAllMocks();
 });
 
 describe("centralized agent runtime configuration", () => {
-  it("keeps model and disable state in opencode.json, never agent markdown", () => {
+  it("keeps models in opencode.json and disable state in retained agent markdown", () => {
     const agent = createAgent(projectId, "runtime-agent", "# Runtime agent", "test", "execution", "subagent", "deepseek/test-model");
     const configPath = join(root, "opencode.json");
     const agentPath = join(root, ".opencode", "agents", "execution", "runtime-agent.md");
 
+    expect(agent.permissions).toBe('{"*":"deny"}');
     expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model" });
     expect(readFileSync(agentPath, "utf-8")).not.toMatch(/^model:/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: false$/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^permission:\n  "\*": deny$/m);
 
+    saveConfig(projectId, "project", JSON.stringify({
+      agent: {
+        [agent.name]: {
+          model: "deepseek/test-model",
+          variant: "max",
+          permission: { "*": "allow" },
+          prompt: "legacy",
+          disable: true,
+          hidden: true,
+        },
+      },
+    }));
     disableAgent(projectId, agent.name);
-    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model", disable: true });
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/test-model", variant: "max" });
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: true$/m);
 
     updateAgent(projectId, agent.name, { model: "deepseek/updated-model" });
     enableAgent(projectId, agent.name);
-    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/updated-model" });
+    expect(JSON.parse(readFileSync(configPath, "utf-8")).agent[agent.name]).toEqual({ model: "deepseek/updated-model", variant: "max" });
     expect(readFileSync(agentPath, "utf-8")).not.toMatch(/^model:/m);
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^disable: false$/m);
 
     expect(deleteAgent(projectId, agent.name)).toBe(true);
     expect(JSON.parse(readFileSync(configPath, "utf-8")).agent).toBeUndefined();
@@ -52,17 +146,88 @@ describe("centralized agent runtime configuration", () => {
     const agentsDir = join(root, ".opencode", "agents", "execution");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(join(root, "opencode.json"), JSON.stringify({ agent: { "disk-agent": { model: "deepseek/runtime" } } }));
-    writeFileSync(join(agentsDir, "disk-agent.md"), "---\nname: disk-agent\ndescription: \"disk\"\nmode: subagent\nmodel: legacy/markdown\npermission:\n  read: allow\n---\n\n# Disk agent\n");
+    writeFileSync(join(agentsDir, "disk-agent.md"), "---\nname: disk-agent\ndescription: \"disk\"\nmode: subagent\nmodel: legacy/markdown\ndisable: false\nhidden: false\npermission:\n  \"*\": deny\n  read: allow\n---\n\n# Disk agent\n");
 
     const agent = syncAgentFromDisk(projectId, "disk-agent");
     expect(agent?.model).toBe("deepseek/runtime");
   });
 
-  it("preserves a centralized model when enabling an agent whose DB model is null", () => {
+  it("repairs an existing profile to explicit default deny without dropping specific grants", () => {
+    const agent = createAgent(
+      projectId,
+      "legacy-permission-agent",
+      "# Original",
+      "",
+      "execution",
+      "subagent",
+      undefined,
+      true,
+      JSON.stringify({ read: "allow" }),
+    );
+    const agentPath = join(root, ".opencode", "agents", "execution", "legacy-permission-agent.md");
+    writeFileSync(agentPath, readFileSync(agentPath, "utf-8").replace('  "*": deny\n', "  write: allow\n").replace("# Original", "# Local"));
+
+    updateAgent(projectId, agent.name, { content: "# Updated" });
+
+    expect(readFileSync(agentPath, "utf-8")).toMatch(/^permission:\n  "\*": deny\n  write: allow\n  read: allow$/m);
+  });
+
+  it("keeps an explicitly revoked grant removed through lifecycle and disk import", () => {
+    const agent = createAgent(
+      projectId,
+      "revoked-permission-agent",
+      "# Original body",
+      "",
+      "execution",
+      "subagent",
+      undefined,
+      true,
+      JSON.stringify({ read: "allow", write: "allow", skill: { "*": "allow" } }),
+    );
+    const agentPath = join(root, ".opencode", "agents", "execution", "revoked-permission-agent.md");
+    const handwrittenProfile = readFileSync(agentPath, "utf-8")
+      .replace("hidden: false\n", "hidden: false\nfuture-option:\n  nested: keep\n")
+      .replace("# Original body", "# Handwritten body");
+    writeFileSync(agentPath, handwrittenProfile);
+    const revokedPermissionMap = {
+      read: "allow",
+      bash: { "*": "deny", "npm run typecheck*": "allow" },
+      skill: { "*": "allow" },
+    };
+    const revokedPermissions = JSON.stringify(revokedPermissionMap);
+    const canonicalRevokedPermissions = JSON.stringify({ "*": "deny", ...revokedPermissionMap });
+
+    expect(updateAgent(projectId, agent.name, { permissions: revokedPermissions })?.permissions)
+      .toBe(canonicalRevokedPermissions);
+    disableAgent(projectId, agent.name);
+    enableAgent(projectId, agent.name);
+
+    const profile = readFileSync(agentPath, "utf-8");
+    expect(profile).toContain([
+      "permission:",
+      '  "*": deny',
+      "  read: allow",
+      "  bash:",
+      '    "*": deny',
+      '    "npm run typecheck*": allow',
+      "  skill:",
+      '    "*": allow',
+    ].join("\n"));
+    expect(profile).not.toMatch(/^  write:/m);
+    expect(profile).toContain("future-option:\n  nested: keep");
+    expect(profile).toContain("# Handwritten body");
+
+    const imported = syncAgentFromDisk(projectId, agent.name);
+    expect(imported?.permissions).toBe(canonicalRevokedPermissions);
+    expect(imported?.content).toBe("# Handwritten body");
+    expect(readFileSync(agentPath, "utf-8")).toContain("future-option:\n  nested: keep");
+  });
+
+  it.each([enableAgent, disableAgent])("preserves a centralized model during lifecycle changes when the DB model is null (%#)", (transition) => {
     const agent = createAgent(projectId, "config-agent", "# Agent", "test");
     saveConfig(projectId, "project", JSON.stringify({ untouched: { keep: true }, agent: { "config-agent": { model: "central/model" }, sibling: { model: "sibling/model" } } }));
 
-    enableAgent(projectId, agent.name);
+    transition(projectId, agent.name);
 
     expect(JSON.parse(readFileSync(join(root, "opencode.json"), "utf-8"))).toEqual({
       untouched: { keep: true },
@@ -72,6 +237,32 @@ describe("centralized agent runtime configuration", () => {
 });
 
 describe("agent path and category integrity", () => {
+  it("writes public profiles as 0644 and repairs a legacy restrictive mode", () => {
+    const agent = createAgent(projectId, "public-profile", "# Original");
+    const agentPath = join(root, ".opencode", "agents", "execution", "public-profile.md");
+
+    expect(statSync(agentPath).mode & 0o777).toBe(0o644);
+    chmodSync(agentPath, 0o600);
+    updateAgent(projectId, agent.name, { content: "# Updated" });
+
+    expect(statSync(agentPath).mode & 0o777).toBe(0o644);
+    expect(readFileSync(agentPath, "utf-8")).toContain("# Updated");
+  });
+
+  it("refuses a symlinked profile target without modifying its target", () => {
+    const agent = createAgent(projectId, "symlinked-profile", "# Original");
+    const agentPath = join(root, ".opencode", "agents", "execution", "symlinked-profile.md");
+    const outsidePath = join(root, "outside-agent.md");
+    writeFileSync(outsidePath, "# Outside", "utf-8");
+    unlinkSync(agentPath);
+    symlinkSync(outsidePath, agentPath);
+
+    expect(() => updateAgent(projectId, agent.name, { content: "# Replacement" }))
+      .toThrow("Unsafe agent profile path");
+    expect(lstatSync(agentPath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(outsidePath, "utf-8")).toBe("# Outside");
+  });
+
   it("rejects traversal names and invalid categories before disk operations", () => {
     expect(isSafeAgentName("../escape")).toBe(false);
     expect(isSafeAgentName("agent/name")).toBe(false);
@@ -108,34 +299,67 @@ describe("agent path and category integrity", () => {
     legacy.close();
   });
 
-  it("does not reactivate a disabled agent from a stale disk file", () => {
+  it("uses explicit profile disable state during disk sync", () => {
     const agent = createAgent(projectId, "disabled-agent", "# Original");
     disableAgent(projectId, agent.name);
     const diskPath = join(root, ".opencode", "agents", "execution", "disabled-agent.md");
     mkdirSync(join(root, ".opencode", "agents", "execution"), { recursive: true });
-    writeFileSync(diskPath, "---\nname: disabled-agent\nmode: subagent\n---\n\n# Stale\n");
+    writeFileSync(diskPath, "---\nname: disabled-agent\nmode: subagent\ndisable: true\nhidden: false\npermission:\n  \"*\": deny\n---\n\n# Updated\n");
 
     const synced = syncAgentFromDisk(projectId, agent.name);
     expect(Boolean(synced?.enabled)).toBe(false);
-    expect(synced?.content).toBe("# Original");
+    expect(synced?.content).toBe("# Updated");
+
+    writeFileSync(diskPath, readFileSync(diskPath, "utf-8").replace("disable: true", "disable: false"));
+    expect(Boolean(syncAgentFromDisk(projectId, agent.name)?.enabled)).toBe(true);
   });
 
-  it("rejects the broker disable lifecycle and restores its trusted disk profile", () => {
+  it.each([
+    ['  "*": deny\n', '  "*": allow\n'],
+    ['  "*": deny\n', ''],
+    ['disable: false\n', ''],
+    ['hidden: false\n', ''],
+  ])("rejects unsafe disk authority or lifecycle metadata without importing or rewriting it (%#)", (original, replacement) => {
+    const agent = createAgent(projectId, "permissive-disk-agent", "# Original");
+    const diskPath = join(root, ".opencode", "agents", "execution", "permissive-disk-agent.md");
+    const permissive = readFileSync(diskPath, "utf-8").replace(original, replacement);
+    writeFileSync(diskPath, permissive);
+
+    expect(syncAgentFromDisk(projectId, agent.name)).toBeUndefined();
+    expect(getAgent(projectId, agent.name)?.content).toBe("# Original");
+    expect(readFileSync(diskPath, "utf-8")).toBe(permissive);
+  });
+
+  it("rejects broker lifecycle changes and fails closed on a changed deployment profile", () => {
     const broker = bootstrapReservedBroker(projectId);
     const disabled = disableAgent(projectId, broker.name);
-    const brokerPath = join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
+    const untrustedProfile = "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Stale broker";
 
     expect(disabled).toBeUndefined();
     expect(getAgent(projectId, broker.name)?.enabled).toBe(1);
-    mkdirSync(join(root, ".opencode", "agents", "execution"), { recursive: true });
-    writeFileSync(brokerPath, "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Stale broker");
+    replaceBrokerProfile(untrustedProfile);
 
-    const synced = syncAgentFromDisk(projectId, broker.name);
-
-    expect(synced?.id).toBe(broker.id);
-    expect(synced?.enabled).toBe(1);
+    expect(() => withTrustedBrokerChain(() => syncAgentFromDisk(projectId, broker.name)))
+      .toThrow(/content or descriptor identity is not canonical/);
     expect(getAgent(projectId, broker.name)?.enabled).toBe(1);
-    expect(readFileSync(brokerPath, "utf-8")).toContain(LLM_BROKER_CONTENT);
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(untrustedProfile);
+  });
+
+  it("validates the complete protected OpenCode deployment", () => {
+    expect(() => withTrustedOpenCodeChain(validateProtectedOpenCodeDeployment)).not.toThrow();
+  });
+
+  it("fails closed when the protected OpenCode config is malformed or missing", () => {
+    chmodSync(protectedConfigPath(), 0o644);
+    writeFileSync(protectedConfigPath(), "{}\n");
+    chmodSync(protectedConfigPath(), 0o444);
+    expect(() => withTrustedOpenCodeChain(validateProtectedOpenCodeDeployment))
+      .toThrow(/Protected OpenCode config content or descriptor identity is not canonical/);
+
+    chmodSync(resolve(protectedConfigPath(), ".."), 0o755);
+    unlinkSync(protectedConfigPath());
+    expect(() => withTrustedOpenCodeChain(validateProtectedOpenCodeDeployment))
+      .toThrow(/Protected OpenCode config could not be opened safely \(ENOENT\)/);
   });
 
   it("rejects public core broker creation and provisions only the canonical internal template", () => {
@@ -147,7 +371,150 @@ describe("agent path and category integrity", () => {
     expect(broker.permissions).toBe(LLM_BROKER_PERMISSIONS);
     expect(broker.metadata).toBe(LLM_BROKER_METADATA);
     expect(broker.skills).toBe(LLM_BROKER_SKILLS);
+    const before = statSync(brokerPath());
     expect(bootstrapReservedBroker(projectId).id).toBe(broker.id);
+    const after = statSync(brokerPath());
+    expect({ ino: after.ino, mode: after.mode, mtimeMs: after.mtimeMs }).toEqual({
+      ino: before.ino,
+      mode: before.mode,
+      mtimeMs: before.mtimeMs,
+    });
+  });
+
+  it("bootstraps broker metadata without rewriting an exact read-only profile", () => {
+    const path = brokerPath();
+    const before = statSync(path);
+
+    const broker = bootstrapReservedBroker(projectId);
+    const after = statSync(path);
+
+    expect(broker).toMatchObject({
+      model: null,
+      permissions: LLM_BROKER_PERMISSIONS,
+      metadata: LLM_BROKER_METADATA,
+      skills: LLM_BROKER_SKILLS,
+      enabled: 1,
+    });
+    expect(readFileSync(path, "utf-8")).toBe(canonicalBrokerProfile);
+    expect(withTrustedBrokerChain(() => syncAgentFromDisk(projectId, broker.name))?.id).toBe(broker.id);
+    const afterSync = statSync(path);
+    expect({ ino: after.ino, mode: after.mode, mtimeMs: after.mtimeMs }).toEqual({
+      ino: before.ino,
+      mode: before.mode,
+      mtimeMs: before.mtimeMs,
+    });
+    expect({ ino: afterSync.ino, mode: afterSync.mode, mtimeMs: afterSync.mtimeMs }).toEqual({
+      ino: before.ino,
+      mode: before.mode,
+      mtimeMs: before.mtimeMs,
+    });
+  });
+
+  it("fails closed on a symlinked broker profile before creating broker metadata", () => {
+    const path = brokerPath();
+    const outsidePath = join(root, "outside-broker.md");
+    unlinkSync(path);
+    writeFileSync(outsidePath, "# Outside broker", "utf-8");
+    symlinkSync(outsidePath, path);
+
+    expect(() => bootstrapReservedBroker(projectId)).toThrow(/could not be opened safely \(ELOOP\)/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    expect(readFileSync(outsidePath, "utf-8")).toBe("# Outside broker");
+  });
+
+  it("rejects a read-only mismatched broker profile without repairing it", () => {
+    const mismatchedProfile = "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Untrusted\n";
+    replaceBrokerProfile(mismatchedProfile);
+
+    expect(() => bootstrapReservedBroker(projectId))
+      .toThrow(/content or descriptor identity is not canonical/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(mismatchedProfile);
+  });
+
+  it("rejects insecure broker profile permissions without changing them", () => {
+    replaceBrokerProfile(canonicalBrokerProfile, 0o666);
+
+    expect(() => bootstrapReservedBroker(projectId)).toThrow(/exclusive read-only deployment file/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+    expect(statSync(brokerPath()).mode & 0o777).toBe(0o666);
+  });
+
+  it("removes stale broker runtime overrides while preserving sibling config", () => {
+    const globalConfigPath = join(root, "global-config");
+    mkdirSync(globalConfigPath);
+    process.env.INGENIUM_GLOBAL_CONFIG_PATH = globalConfigPath;
+    const globalProjectId = createProject("global-default", true).id;
+    saveConfig(globalProjectId, "project", JSON.stringify({
+      untouched: true,
+      agent: {
+        "ingenium-llm-broker": { model: "untrusted/model", disable: true },
+        sibling: { model: "trusted/model" },
+      },
+    }));
+
+    bootstrapReservedBroker(globalProjectId);
+
+    expect(JSON.parse(readFileSync(join(globalConfigPath, "opencode.jsonc"), "utf-8"))).toEqual({
+      untouched: true,
+      agent: { sibling: { model: "trusted/model" } },
+    });
+  });
+
+  it("leaves stale config and broker metadata untouched when reconciliation cannot commit", () => {
+    const globalConfigPath = join(root, "global-config");
+    mkdirSync(globalConfigPath);
+    process.env.INGENIUM_GLOBAL_CONFIG_PATH = globalConfigPath;
+    const globalProjectId = createProject("global-default", true).id;
+    const staleConfig = JSON.stringify({ agent: { "ingenium-llm-broker": { model: "untrusted/model" } } });
+    saveConfig(globalProjectId, "project", staleConfig);
+    chmodSync(globalConfigPath, 0o555);
+
+    try {
+      expect(() => bootstrapReservedBroker(globalProjectId))
+        .toThrow(/runtime config reconciliation failed \(EACCES\)/);
+      expect(getAgent(globalProjectId, "ingenium-llm-broker")).toBeUndefined();
+      expect(readFileSync(join(globalConfigPath, "opencode.jsonc"), "utf-8")).toBe(staleConfig);
+      const stored = getDb(process.env.INGENIUM_CORE_DB_PATH!).prepare(
+        "SELECT content FROM configs WHERE project_id = ? AND type = 'project'",
+      ).get(globalProjectId) as { content: string };
+      expect(stored.content).toBe(staleConfig);
+    } finally {
+      chmodSync(globalConfigPath, 0o755);
+    }
+  });
+
+  it("fails before activation when the deployment trust root is writable", () => {
+    expect(() => bootstrapReservedBrokerRuntime(projectId)).toThrow(/trust root must be deployment-owned mode 0555/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+  });
+
+  it("fails before activation when the deployment trust root is runtime-owned", () => {
+    vi.mocked(process.getuid).mockReturnValue(statSync(root).uid);
+
+    expect(() => withTrustedBrokerChain(() => bootstrapReservedBrokerRuntime(projectId)))
+      .toThrow(/trust root is owned by the runtime/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+  });
+
+  it("fails before activation when the canonical profile is missing", () => {
+    unlinkSync(brokerPath());
+
+    expect(() => bootstrapReservedBroker(projectId)).toThrow(/could not be opened safely \(ENOENT\)/);
+    expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+  });
+
+  it("does not fall back to the repository profile when a production deployment profile is missing", () => {
+    const previousVitest = process.env.VITEST;
+    delete process.env.VITEST;
+    try {
+      expect(() => bootstrapReservedBrokerRuntime(projectId)).toThrow(/could not be opened safely \(ENOENT\)/);
+      expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
+    } finally {
+      if (previousVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = previousVitest;
+    }
   });
 
   it.each([
@@ -192,11 +559,9 @@ describe("agent path and category integrity", () => {
     ["omitted", "", ""],
     ["malformed", "permission: [not-a-mapping", "hidden: perhaps"],
     ["permissive", "permission:\n  \"*\": allow\n  read: allow", "hidden: false"],
-  ])("normalizes %s broker disk frontmatter during sync", (_case, permission, hidden) => {
+  ])("rejects %s broker disk frontmatter during sync without normalization", (_case, permission, hidden) => {
     bootstrapReservedBroker(projectId);
-    const brokerPath = join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
-    mkdirSync(join(root, ".opencode", "agents", "execution"), { recursive: true });
-    writeFileSync(brokerPath, [
+    const untrustedProfile = [
       "---",
       "name: ingenium-llm-broker",
       "description: \"Internal broker\"",
@@ -207,15 +572,12 @@ describe("agent path and category integrity", () => {
       "",
       LLM_BROKER_CONTENT,
       "",
-    ].join("\n"));
+    ].join("\n");
+    replaceBrokerProfile(untrustedProfile);
 
-    const synced = syncAgentFromDisk(projectId, "ingenium-llm-broker");
-    expect(synced?.permissions).toBe(LLM_BROKER_PERMISSIONS);
-    expect(synced?.metadata).toBe(LLM_BROKER_METADATA);
-    const normalizedDisk = readFileSync(brokerPath, "utf-8");
-    expect(normalizedDisk).toContain("hidden: true");
-    expect(normalizedDisk).toContain('"*": deny');
-    expect(normalizedDisk).not.toMatch(/^\s+(?:read|write|bash):\s+allow$/m);
+    expect(() => withTrustedBrokerChain(() => syncAgentFromDisk(projectId, "ingenium-llm-broker")))
+      .toThrow(/content or descriptor identity is not canonical/);
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(untrustedProfile);
   });
 
   it.each([
@@ -224,26 +586,25 @@ describe("agent path and category integrity", () => {
     ["permissive fields", "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n  read: allow\n---\n\n# Untrusted disk broker"],
   ])("fails closed for broker disk sync with %s", (_case, untrustedContent) => {
     const broker = bootstrapReservedBroker(projectId);
-    const brokerPath = join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
-    writeFileSync(brokerPath, untrustedContent);
+    replaceBrokerProfile(untrustedContent);
 
-    const synced = syncAgentFromDisk(projectId, broker.name);
-
-    expect(synced?.id).toBe(broker.id);
-    expect(synced?.content).toBe(LLM_BROKER_CONTENT);
-    expect(synced?.permissions).toBe(LLM_BROKER_PERMISSIONS);
-    expect(synced?.metadata).toBe(LLM_BROKER_METADATA);
-    expect(readFileSync(brokerPath, "utf-8")).toContain(LLM_BROKER_CONTENT);
-    expect(readFileSync(brokerPath, "utf-8")).toMatch(/^permission:\n  "\*": deny$/m);
+    expect(() => withTrustedBrokerChain(() => syncAgentFromDisk(projectId, broker.name)))
+      .toThrow(/content or descriptor identity is not canonical/);
+    expect(getAgent(projectId, broker.name)?.id).toBe(broker.id);
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(untrustedContent);
   });
 
-  it("quarantines an orphan broker profile instead of importing it from disk", () => {
-    const brokerPath = join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
-    mkdirSync(join(root, ".opencode", "agents", "execution"), { recursive: true });
-    writeFileSync(brokerPath, "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Untrusted");
+  it("does not import or mutate an orphan canonical broker profile", () => {
+    const before = statSync(brokerPath());
 
-    expect(syncAgentFromDisk(projectId, "ingenium-llm-broker")).toBeUndefined();
-    expect(existsSync(brokerPath)).toBe(false);
+    expect(withTrustedBrokerChain(() => syncAgentFromDisk(projectId, "ingenium-llm-broker"))).toBeUndefined();
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(canonicalBrokerProfile);
+    const after = statSync(brokerPath());
+    expect({ ino: after.ino, mode: after.mode, mtimeMs: after.mtimeMs }).toEqual({
+      ino: before.ino,
+      mode: before.mode,
+      mtimeMs: before.mtimeMs,
+    });
     expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
   });
 
@@ -251,8 +612,6 @@ describe("agent path and category integrity", () => {
     const broker = bootstrapReservedBroker(projectId);
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH!);
     const raw = new Database(process.env.INGENIUM_CORE_DB_PATH!);
-    const brokerPath = join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
-
     const assertOriginalBroker = () => {
       expect(db.prepare(
         "SELECT id, name, content, enabled, permissions, metadata FROM agents WHERE project_id = ? AND name = ?",
@@ -313,22 +672,12 @@ describe("agent path and category integrity", () => {
       .toThrow(/reserved LLM broker identity cannot be claimed/);
 
     assertOriginalBroker();
-    writeFileSync(brokerPath, "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Reappeared broker");
-    const synced = syncAgentFromDisk(projectId, broker.name);
-
-    expect(synced).toMatchObject({
-      id: broker.id,
-      content: LLM_BROKER_CONTENT,
-      enabled: 1,
-      permissions: LLM_BROKER_PERMISSIONS,
-      metadata: LLM_BROKER_METADATA,
-    });
+    const untrustedProfile = "---\nname: ingenium-llm-broker\nhidden: false\npermission:\n  \"*\": allow\n---\n\n# Reappeared broker";
+    replaceBrokerProfile(untrustedProfile);
+    expect(() => withTrustedBrokerChain(() => syncAgentFromDisk(projectId, broker.name)))
+      .toThrow(/content or descriptor identity is not canonical/);
     assertOriginalBroker();
-    const restored = readFileSync(brokerPath, "utf-8");
-    expect(restored).toContain(LLM_BROKER_CONTENT);
-    expect(restored).toContain("hidden: true");
-    expect(restored).toContain('"*": deny');
-    expect(restored).not.toContain("# Reappeared broker");
+    expect(readFileSync(brokerPath(), "utf-8")).toBe(untrustedProfile);
     raw.close();
   });
 

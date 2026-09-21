@@ -1,3 +1,9 @@
+import { expect } from "vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
+
+// The hoisted jest-dom/vitest entry resolves the root Vitest, not this workspace's version.
+expect.extend(matchers);
+
 /**
  * Vitest setup file — runs before each test file.
  *

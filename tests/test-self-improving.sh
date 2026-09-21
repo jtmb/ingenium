@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
-# ───────────────────────────────────────────────────────────
-# test-self-improving.sh — Validate the update-skills
-# detection pipeline.
-#
-# Tests the four detection signals from update-skills:
-#   1. New framework/dependency (package manifest gaps)
-#   2. Repeated conventions (3+ files with same pattern)
-#   3. Missing coverage (file types not covered by any skill)
-#   4. Stale content (skill references wrong version)
-#
-# Usage:
-#   tests/test-self-improving.sh           # run all tests
-#   tests/test-self-improving.sh --verbose  # detailed output
-# ───────────────────────────────────────────────────────────
+# Validate skill self-improvement detection signals: dependency gaps, missing
+# file-type coverage, and invalid skill metadata.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -22,14 +10,12 @@ VERBOSE=false
 PASSED=0
 FAILED=0
 
-# ── Parse args ────────────────────────────────────────────
 for arg in "$@"; do
     case "$arg" in
         --verbose|-v) VERBOSE=true ;;
     esac
 done
 
-# ── Helpers ───────────────────────────────────────────────
 green()  { echo -e "\033[32m$*\033[0m"; }
 red()    { echo -e "\033[31m$*\033[0m"; }
 yellow() { echo -e "\033[33m$*\033[0m"; }
@@ -54,7 +40,6 @@ section() {
     echo "━━━ $1 ━━━"
 }
 
-# ── Extract skill coverage from SKILL.md descriptions ─────
 # Returns: skill_name|description
 extract_skill_coverage() {
     local dir="$1"
@@ -69,11 +54,6 @@ extract_skill_coverage() {
     done
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 1 — Dependency Gap Detection
-# Simulates Signal 1: scanning a package.json for deps not
-# covered by any skill description.
-# ═══════════════════════════════════════════════════════════
 test_dependency_gaps() {
     section "TEST 1 — Dependency Gap Detection (Signal 1)"
 
@@ -81,7 +61,6 @@ test_dependency_gaps() {
     tmpdir=$(mktemp -d)
     trap "rm -rf '$tmpdir'" RETURN
 
-    # Create a fake project with deps NOT covered by any skill
     cat > "$tmpdir/package.json" <<'JSON'
 {
   "name": "test-project",
@@ -100,7 +79,6 @@ test_dependency_gaps() {
 }
 JSON
 
-    # Known mappings: dep → skill that covers it
     declare -A DEP_COVERAGE=(
         ["next"]="nextjs-conventions"
         ["react"]="nextjs-conventions"
@@ -137,7 +115,6 @@ print('\n'.join(deps))
             fi
         done
         if ! $covered; then
-            # Check if any skill description mentions this dep
             local mentioned
             mentioned=$( { grep -rli "$dep" "$SKILLS_DIR"/*/SKILL.md 2>/dev/null || true; } | wc -l)
             if [[ "$mentioned" -gt 0 ]]; then
@@ -151,14 +128,12 @@ print('\n'.join(deps))
         fi
     done
 
-    # Assertions
     if [[ "$gaps_found" -ge 1 ]]; then
         pass "Found $gaps_found dependency gap(s) — detection Signal 1 works"
     else
         fail "No dependency gaps found" "expected at least 1 uncovered dep (solidjs, astro, pino, bullmq)"
     fi
 
-    # Verify specific expected gaps
     for expected_gap in "solidjs" "astro" "bullmq"; do
         local mentions
         mentions=$( { grep -rli "$expected_gap" "$SKILLS_DIR"/*/SKILL.md 2>/dev/null || true; } | wc -l)
@@ -170,14 +145,9 @@ print('\n'.join(deps))
     done
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 2 — Missing Coverage Detection
-# Simulates Signal 3: file types/dirs with no applicable skill
-# ═══════════════════════════════════════════════════════════
 test_missing_coverage() {
     section "TEST 2 — Missing Coverage Detection (Signal 3)"
 
-    # Build a map of what file types are covered
     declare -A COVERED_EXTENSIONS=(
         ["go"]="go-conventions"
         ["rs"]="rust-conventions"
@@ -208,11 +178,6 @@ test_missing_coverage() {
     done
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 3 — Skill Count Consistency
-# Ensures skills are countable and the detection can enumerate
-# them (prerequisite for all detection signals).
-# ═══════════════════════════════════════════════════════════
 test_skill_count() {
     section "TEST 3 — Skill Enumeration"
 
@@ -228,11 +193,6 @@ test_skill_count() {
     fi
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 4 — Frontmatter Validity
-# Every skill must have valid frontmatter with name matching
-# folder.
-# ═══════════════════════════════════════════════════════════
 test_frontmatter() {
     section "TEST 4 — Frontmatter Validity"
 
@@ -243,7 +203,6 @@ test_frontmatter() {
         local folder_name
         folder_name=$(basename "$(dirname "$skill_file")")
 
-        # Check opening fence
         if [[ "$(head -1 "$skill_file")" == "---" ]]; then
             :
         else
@@ -251,7 +210,6 @@ test_frontmatter() {
             continue
         fi
 
-        # Check name field
         local fm_name
         fm_name=$(grep "^name:" "$skill_file" | head -1 | sed 's/^name: *//')
         if [[ "$fm_name" == "$folder_name" ]]; then
@@ -263,10 +221,6 @@ test_frontmatter() {
     pass "Frontmatter valid in all skills"
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 5 — Manual Verification Guide
-# Prints instructions for testing the AI agent itself.
-# ═══════════════════════════════════════════════════════════
 test_manual_guide() {
     section "TEST 5 — Manual AI Agent Verification Guide"
 
@@ -300,9 +254,6 @@ test_manual_guide() {
     echo ""
 }
 
-# ═══════════════════════════════════════════════════════════
-# Main
-# ═══════════════════════════════════════════════════════════
 main() {
     echo "═══════════════════════════════════════════════════════"
     echo "  Self-Improving AI — Detection Pipeline Tests"

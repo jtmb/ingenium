@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Route } from "@playwright/test";
+import { test, expect, type Page, type Route } from "./fixture";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 /**
@@ -17,6 +17,7 @@ import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const runtime = getDefaultSuiteRuntime();
 const API_BASE = runtime.apiBase;
+const dashboardRoute = runtime.dashboardRoute;
 
 /** Keep iframe rendering deterministic without contacting OpenCode. */
 async function mockOpenCodeHealth(page: Page) {
@@ -36,11 +37,7 @@ test.beforeEach(async ({ page }) => {
 test.describe("Same-origin dashboard API requests", () => {
   test.describe.configure({ mode: "serial" });
 
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: All API requests go to the /api/v1 base path                 */
-  /* ------------------------------------------------------------------------ */
-
-  test("homepage fetches /api/v1/dashboard/summary with project param", async ({ page }) => {
+  test("homepage fetches /api/v1/dashboard/summary with the manifest project", async ({ page }) => {
     const apiCalls: string[] = [];
 
     await page.route("**/api/v1/**", (route: Route) => {
@@ -48,161 +45,96 @@ test.describe("Same-origin dashboard API requests", () => {
       route.fallback();
     });
 
-    const summaryResponse = page.waitForResponse((response) => response.url().includes("/dashboard/summary"));
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const summaryResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/dashboard/summary"
+        && url.searchParams.get("project") === runtime.project;
+    });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
     await summaryResponse;
 
     expect(apiCalls.length).toBeGreaterThanOrEqual(1);
 
-    // Every intercepted call must contain /api/v1/ (not a raw port-only URL)
     for (const url of apiCalls) {
       expect(new URL(url).pathname).toMatch(/^\/api\/v1\//);
     }
 
-    // At least one call must be to the dashboard summary endpoint with a project parameter
     const summaryCalls = apiCalls.filter((u) => u.includes("/dashboard/summary"));
-    if (summaryCalls.length > 0) {
-      const params = new URL(summaryCalls[0]).searchParams;
-      expect(params.has("project")).toBe(true);
+    expect(summaryCalls).not.toHaveLength(0);
+    for (const url of summaryCalls) {
+      expect(new URL(url).searchParams.get("project")).toBe(runtime.project);
     }
   });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: x-ingenium-ui header is present                              */
-  /* ------------------------------------------------------------------------ */
 
   test("API requests include x-ingenium-ui: dashboard header", async ({ page }) => {
     const headerRequest = page.waitForRequest((request) =>
       request.url().includes("/api/v1/") && request.headers()["x-ingenium-ui"] === "dashboard",
     );
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
     const request = await headerRequest;
 
     expect(request.headers()["x-ingenium-ui"]).toBe("dashboard");
   });
 
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: Content-Type is application/json on request body calls       */
-  /* ------------------------------------------------------------------------ */
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: project query param on skill/observation/resource calls      */
-  /* ------------------------------------------------------------------------ */
-
   test("resource list endpoints pass project query parameter", async ({ page }) => {
     const projectParamUrls: string[] = [];
 
-    await page.route("**/api/v1/(skills|observations|tasks|projects|plugins|agents|jobs)**", (route: Route) => {
+    await page.route("**/api/v1/(skills|observations|tasks|plugins|agents|jobs)**", (route: Route) => {
       const url = route.request().url();
       const parsed = new URL(url);
-      // Only GET requests retrieving resource lists
       if (route.request().method() === "GET") {
         projectParamUrls.push(url);
       }
       route.fallback();
     });
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
 
-    // Navigate to skills and wait for the page's list request instead of
-    // sleeping for an arbitrary amount of time.
-    const skillsResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/v1/skills") && response.request().method() === "GET",
-    );
-    await page.goto("/skills", { waitUntil: "domcontentloaded" });
+    const skillsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/skills"
+        && url.searchParams.get("project") === runtime.project
+        && response.request().method() === "GET";
+    });
+    await page.goto(dashboardRoute("/skills"), { waitUntil: "domcontentloaded" });
     await skillsResponse;
 
-    // All captured GET resource URLs must include project parameter
     for (const url of projectParamUrls) {
       const params = new URL(url).searchParams;
-      expect(params.has("project")).toBe(true);
-      expect(params.get("project")).not.toBe("");
+      expect(params.get("project")).toBe(runtime.project);
     }
   });
 });
 
-/* -------------------------------------------------------------------------- */
-/*  Assertion plan: direct local-development iframe URLs                      */
-/* -------------------------------------------------------------------------- */
-
-test.describe("Direct local iframe URL assertions", () => {
+test.describe("Isolated workspace availability", () => {
   test.describe.configure({ mode: "serial" });
 
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: /opencode page iframe src points to the trusted root origin  */
-  /* ------------------------------------------------------------------------ */
+  test("/opencode reports that no isolated workspace is ready", async ({ page }) => {
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-  test("/opencode page renders Web iframe on the trusted root origin", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
-    await expect(webIframe).toHaveAttribute(
-      "src",
-      /^(?:https?):\/\/[^/]+\/$/,
-    );
+    await expect(page.getByRole("heading", { name: "Workspace is unavailable" })).toBeVisible();
+    await expect(page.locator('iframe[title="OpenCode Web"]')).toHaveCount(0);
   });
 
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: trusted first-party iframe security attributes               */
-  /* ------------------------------------------------------------------------ */
+  test("does not render workspace iframes without a ready runtime", async ({ page }) => {
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-  test("Web iframe is trusted first-party content without a sandbox attribute", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
-
-    // OpenCode v1.18.3+ needs its root-relative assets and is a trusted
-    // first-party origin, so it must not be mounted under the old sandbox
-    // contract.
-    await expect(webIframe).not.toHaveAttribute("sandbox");
-
-    // Allow attribute must include clipboard-write
-    const allow = await webIframe.getAttribute("allow");
-    expect(allow).toContain("clipboard-write");
+    await expect(page.locator('iframe[title="OpenCode Web"]')).toHaveCount(0);
+    await expect(page.locator('iframe[title="OpenCode Terminal"]')).toHaveCount(0);
   });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: only one Web iframe, zero or one CLI iframe                  */
-  /* ------------------------------------------------------------------------ */
-
-  test("exactly one Web iframe, at most one CLI iframe", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
-
-    const webIframes = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframes).toHaveCount(1);
-
-    const cliIframes = page.locator('iframe[title="OpenCode Terminal"]');
-    const cliCount = await cliIframes.count();
-    expect(cliCount).toBeLessThanOrEqual(1);
-  });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: no obsolete sub-path proxy request                           */
-  /* ------------------------------------------------------------------------ */
 
   test("does not request the removed OpenCode sub-path proxies", async ({ page }) => {
     const requestedUrls: string[] = [];
     page.on("request", (request) => requestedUrls.push(request.url()));
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeAttached({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "Workspace is unavailable" })).toBeVisible();
     expect(requestedUrls.some((url) => /\/opencode-(web|cli)(?:\/|$)/.test(new URL(url).pathname))).toBe(false);
   });
 });
 
-/* -------------------------------------------------------------------------- */
-/*  Assertion plan: project identity in API contract                          */
-/* -------------------------------------------------------------------------- */
-
 test.describe("Project identity in API contract", () => {
   test.describe.configure({ mode: "serial" });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: health endpoint does not require project                     */
-  /* ------------------------------------------------------------------------ */
 
   test("health endpoint works without project query param", async ({ request }) => {
     const resp = await request.get(`${API_BASE}/health`, { headers: runtime.apiHeaders });
@@ -211,31 +143,21 @@ test.describe("Project identity in API contract", () => {
     expect(body).toHaveProperty("status");
   });
 
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: resource endpoints expect project param to resolve            */
-  /* ------------------------------------------------------------------------ */
-
   test("skills list with explicit project resolves successfully", async ({ request }) => {
     const resp = await request.get(`${API_BASE}/skills?project=${encodeURIComponent(runtime.project)}`, {
       headers: runtime.apiHeaders,
     });
-    // The API may return 200 with data array or 400 if project not found.
-    // Either way, the endpoint accepts the project parameter.
+    // Unknown projects are an API-level validation result, not a transport failure.
     expect(resp.status()).toBeGreaterThanOrEqual(200);
     expect(resp.status()).toBeLessThan(500);
   });
 
   test("skills list without project returns 4xx (project required)", async ({ request }) => {
     const resp = await request.get(`${API_BASE}/skills`, { headers: runtime.apiHeaders });
-    // The API requires a project parameter — expect 400 or 422
     expect(resp.status()).toBe(400);
     const body = await resp.json();
     expect(body).toHaveProperty("error");
   });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: project parameter is validated — rejects empty               */
-  /* ------------------------------------------------------------------------ */
 
   test("skills list with empty project returns 4xx", async ({ request }) => {
     const resp = await request.get(`${API_BASE}/skills?project=`, { headers: runtime.apiHeaders });

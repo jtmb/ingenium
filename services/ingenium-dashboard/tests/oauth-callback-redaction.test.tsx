@@ -18,6 +18,7 @@ vi.mock("next/link", () => ({
 }));
 
 import OAuthCallbackPage from "../src/app/mail/oauth/callback/page";
+import { resetAuthClientForTest } from "../src/lib/api";
 import {
   DEFAULT_OAUTH_CALLBACK_ERROR_MESSAGE,
   getOAuthCallbackErrorMessage,
@@ -27,6 +28,7 @@ const PROVIDER_ERROR_CANARY = "provider-error-description-canary";
 const LEAKED_URL = "https://provider.example.test/internal?secret=should-not-render";
 
 beforeEach(() => {
+  resetAuthClientForTest();
   navigation.params = new URLSearchParams();
   vi.stubGlobal("fetch", vi.fn());
   localStorage.clear();
@@ -56,7 +58,9 @@ describe("OAuth callback error redaction", () => {
     navigation.params = new URLSearchParams("code=one-time-code&state=state");
     localStorage.setItem("oauth_provider", "gmail");
     localStorage.setItem("oauth_project", "global-default");
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      data: { csrfToken: "test-csrf-token" },
+    }))).mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
         code: "OAUTH_STATE_INVALID",
         message: `${PROVIDER_ERROR_CANARY}: ${LEAKED_URL}`,
@@ -66,6 +70,11 @@ describe("OAuth callback error redaction", () => {
     render(<OAuthCallbackPage />);
 
     expect(await screen.findByText("The authorization session expired or was invalid. Start the connection again.")).toBeTruthy();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("/emails/accounts/oauth?"), expect.objectContaining({
+      method: "POST",
+      headers: expect.objectContaining({ "X-CSRF-Token": "test-csrf-token" }),
+    }));
     expect(screen.queryByText(PROVIDER_ERROR_CANARY)).toBeNull();
     expect(screen.queryByText(LEAKED_URL)).toBeNull();
   });

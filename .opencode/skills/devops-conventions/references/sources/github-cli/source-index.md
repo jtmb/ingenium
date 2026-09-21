@@ -34,4 +34,3 @@ If you file a bug report or feature request, you MUST include complete details: 
 ## Cross-References
 
 - **`development-conventions`** — README documentation, API design, Python/Next.js conventions
-- **`local-models`** — Command safety rules for running CLI commands

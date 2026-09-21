@@ -26,19 +26,15 @@ The helper script handles Chrome launch, dev-browser installation, and stdin pip
 
 ### 🔴 Check Site Recipes Before Any Site-Specific Task
 
-Before interacting with a site, glob `.opencode/skills/browsing-the-web/references/site-recipes/` for a recipe matching the target domain. Site recipes contain proven selectors, anti-patterns, and navigation flows that eliminate trial-and-error retries.
+Before interacting with a site, glob `.opencode/skills/mcp-tooling/references/sources/browsing-the-web/references/site-recipes/` for a recipe matching the target domain. Site recipes contain proven selectors, anti-patterns, and navigation flows that eliminate trial-and-error retries.
 
-### 🔴 Log Every Error to browser-agent-errors.md as It Happens
 
-Write each error to `.opencode/agents/browser-agent-errors.md` immediately — do NOT batch errors at the end. Include timestamp, site domain, step description, error message, and attempt number.
 
 ### 🔴 On Task Success: Update Site Recipe, Then Delete Errors File
 
-After a fully successful task where all errors were resolved, update the domain's site recipe with what worked, then DELETE `browser-agent-errors.md`. The errors file is a working scratchpad — not a log archive.
 
 ### 🔴 On Task Failure: Keep Errors File — Do NOT Delete
 
-If you gave up or the task partially failed, keep `browser-agent-errors.md`. It is your failure record for the next attempt. Recipe updates only happen on success.
 
 ### 🔴 Screenshots Must Include Site Name + Date
 
@@ -46,7 +42,7 @@ Use the format: `&lt;site&gt;-&lt;page-type&gt;-&lt;ISO-date&gt;.png`. Examples:
 
 ### 🔴 Max 3 Retry Attempts Per Step
 
-If a selector or action fails, adjust and retry up to 3 times. After the 3rd failure, escalate to the orchestrator with what blocked you.
+If a selector or action fails, adjust and retry up to 3 times. After the 3rd failure, report the blocker with what blocked you through the applicable escalation path.
 
 ## Reference Files
 
@@ -61,4 +57,3 @@ If a selector or action fails, adjust and retry up to 3 times. After the 3rd fai
 
 - **`@mcp-tooling`** — Dev Browser setup, tools catalog, patterns, and wsl-chrome-connect.sh helper script (`.opencode/skills/mcp-tooling/references/dev-browser/`)
 - **`@skill-maintenance`** — How to create additional site recipes following the same split-skill format
-- **`@debugging-patterns`** — Systematic error investigation when site selectors or patterns fail

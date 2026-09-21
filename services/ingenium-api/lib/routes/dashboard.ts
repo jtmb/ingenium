@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { synthesis, personality, tasks, jobs, settings, pipelineEvents, observations, getDb, logger } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requestContentActor, requireProject } from "../helpers.js";
 import type { EngineStatus } from "ingenium-email";
 import { getEmailClientStatus, getSynthesisStatus } from "../application-health.js";
+import { isControlPlaneMode } from "../runtime-mode.js";
+import { GET_ALL_PROCESS_INFO_XML, parseSupervisorProcesses, supervisorRpc } from "../supervisor-client.js";
 
 export const dashboardRouter = Router();
 
@@ -114,7 +116,7 @@ function dbPath(): string {
 
 // ── Existing module helpers ────────────────────────────────────────────────────
 
-function fetchLearning(projectId: string, globalProjectId: string): {
+function fetchLearning(projectId: string, globalProjectId: string, ownerUserId: string | null): {
   learning: LearningSummary | null;
   unavailable: string[];
 } {
@@ -133,7 +135,7 @@ function fetchLearning(projectId: string, globalProjectId: string): {
 
   // Personality traits (display gate ≥0.30 is handled by getProfile)
   try {
-    const profile = personality.getProfile(projectId);
+    const profile = personality.getProfile(projectId, { ownerUserId });
     learning.displayTraitsCount = profile.length;
   } catch (err: any) {
     logger.error("dashboard", `Failed to fetch personality profile: ${err.message}`);
@@ -221,7 +223,7 @@ function fetchJobs(projectId: string): {
 
     for (const job of enabledJobs) {
       try {
-        const runs = jobs.listJobRuns(job.id, 1);
+        const runs = jobs.listJobRuns(projectId, job.id, 1);
         if (runs.length > 0 && runs[0]!.status === "failed") {
           failedRecently.push({
             id: job.id,
@@ -256,7 +258,7 @@ async function fetchMail(): Promise<{
 
     let accountCount = 0;
     try {
-      accountCount = engineModule.listAccounts(engineModule.getGlobalProjectId()).length;
+      accountCount = engineModule.listAccounts().length;
     } catch (err: any) {
       logger.error("dashboard", `Failed to list email accounts: ${err.message}`);
       unavailable.push("mail.accounts");
@@ -272,7 +274,7 @@ async function fetchMail(): Promise<{
       mail: {
         accountCount,
         engineRunning: engine.running,
-        engineHealthy: engine.running && heartbeatAge !== null && heartbeatAge < 120_000,
+        engineHealthy: accountCount === 0 || (engine.running && heartbeatAge !== null && heartbeatAge < 120_000),
       },
       unavailable,
     };
@@ -548,14 +550,14 @@ function fetchResume(projectId: string): {
 /**
  * Activity timeline — recent pipeline events mapped to user-facing activity types.
  */
-function fetchActivity(projectId: string): {
+function fetchActivity(projectId: string, ownerUserId: string | null): {
   activity: ActivityItem[] | null;
   unavailable: string[];
 } {
   const unavailable: string[] = [];
 
   try {
-    const events = pipelineEvents.getEvents(projectId, { limit: 50 });
+    const events = pipelineEvents.getEvents(projectId, { limit: 50, ownerUserId });
     const activity: ActivityItem[] = [];
 
     for (const evt of events) {
@@ -641,77 +643,59 @@ async function fetchHealth(): Promise<{
   // ── Supervisord process check via XML-RPC (Docker internal only) ─────────
   // 3s timeout avoids hanging the dashboard if supervisord is unresponsive
   try {
-    const response = await fetch("http://127.0.0.1:9001/RPC2", {
-      method: "POST",
-      headers: { "Content-Type": "text/xml" },
-      body: `<?xml version="1.0"?>
-<methodCall>
-  <methodName>supervisor.getAllProcessInfo</methodName>
-</methodCall>`,
-      signal: AbortSignal.timeout(3000),
-    });
-
-    if (response.ok) {
-      health.docker = { status: "healthy" };
-      const xml = await response.text();
-
-      // Parse individual process structs
-      const structRegex = /<struct>(.*?)<\/struct>/gs;
-      const processNames = ["ingenium-api", "ingenium-dashboard", "opencode-web", "ttyd-opencode"];
-      const foundProcesses: Map<string, { statename: string; startSecs: number }> = new Map();
-
-      let match: RegExpExecArray | null;
-      while ((match = structRegex.exec(xml)) !== null) {
-        const struct = match[1];
-        if (!struct) continue;
-        const name = extractXmlMember(struct, "name");
-        if (!processNames.includes(name)) continue;
-        const statename = extractXmlMember(struct, "statename") || "UNKNOWN";
-        const startStr = extractXmlMember(struct, "start") || "0";
-        foundProcesses.set(name, {
-          statename,
-          startSecs: parseInt(startStr, 10) || 0,
-        });
-      }
-
-      const now = Math.floor(Date.now() / 1000);
-      const displayNames: Record<string, string> = {
-        "ingenium-api": "API",
-        "ingenium-dashboard": "Dashboard",
-        "opencode-web": "OpenCode",
-        "ttyd-opencode": "OpenCode CLI",
-      };
-
-      for (const name of processNames) {
-        const proc = foundProcesses.get(name);
-        if (!proc) {
-          health.services.push({ name: displayNames[name] ?? name, status: "stopped" });
-          continue;
-        }
-
-        const status: HealthService["status"] =
-          proc.statename === "RUNNING" ? "running" :
-          proc.statename === "STARTING" ? "running" :
-          proc.statename === "BACKOFF" || proc.statename === "FATAL" ? "error" :
-          "stopped";
-
-        const uptime = proc.startSecs > 0 ? now - proc.startSecs : undefined;
-
-        health.services.push({
-          name: displayNames[name] ?? name,
-          status,
-          uptime,
-        });
-
-        // Set OpenCode status based on web process
-        if (name === "opencode-web") {
-          health.opencode = { status: proc.statename === "RUNNING" ? "ok" : "down" };
-        }
-      }
-    } else {
-      health.docker = { status: "unhealthy" };
+    const processes = parseSupervisorProcesses(await supervisorRpc(GET_ALL_PROCESS_INFO_XML, 3_000));
+    health.docker = { status: "healthy" };
+    const processNames = isControlPlaneMode()
+      ? ["restore-handoff", "ingenium-api", "ingenium-api-boundary", "ingenium-dashboard", "ingenium-gateway"]
+      : ["ingenium-api", "ingenium-api-boundary", "ingenium-dashboard", "ingenium-gateway", "opencode-web", "ttyd-opencode", "vscode"];
+    const foundProcesses: Map<string, { statename: string; startSecs: number }> = new Map();
+    for (const process of processes) {
+      if (!processNames.includes(process.name)) continue;
+      foundProcesses.set(process.name, {
+        statename: process.statename,
+        startSecs: process.start,
+      });
     }
-  } catch (err: any) {
+
+    const now = Math.floor(Date.now() / 1000);
+    const displayNames: Record<string, string> = {
+      "ingenium-api": "API",
+      "ingenium-api-boundary": "API Boundary",
+      "ingenium-dashboard": "Dashboard",
+      "ingenium-gateway": "Gateway",
+      "restore-handoff": "Restore Handoff",
+      "opencode-web": "OpenCode",
+      "ttyd-opencode": "OpenCode CLI",
+      vscode: "VS Code",
+    };
+
+    for (const name of processNames) {
+      const proc = foundProcesses.get(name);
+      if (!proc) {
+        health.services.push({ name: displayNames[name] ?? name, status: "stopped" });
+        continue;
+      }
+
+      const status: HealthService["status"] =
+        proc.statename === "RUNNING" ? "running" :
+        proc.statename === "STARTING" ? "running" :
+        proc.statename === "BACKOFF" || proc.statename === "FATAL" ? "error" :
+        "stopped";
+
+      const uptime = proc.startSecs > 0 ? now - proc.startSecs : undefined;
+
+      health.services.push({
+        name: displayNames[name] ?? name,
+        status,
+        uptime,
+      });
+
+      // Set OpenCode status based on web process
+      if (name === "opencode-web") {
+        health.opencode = { status: proc.statename === "RUNNING" ? "ok" : "down" };
+      }
+    }
+  } catch {
     health.docker = { status: "unhealthy" };
     unavailable.push("health.docker");
   }
@@ -742,19 +726,6 @@ async function fetchHealth(): Promise<{
   return { health, unavailable };
 }
 
-/**
- * Extract a member value from a supervisord XML-RPC struct snippet.
- * Handles <string> and <int>/<i4> value types.
- */
-function extractXmlMember(struct: string, memberName: string): string {
-  const regex = new RegExp(
-    `<member>\\s*<name>${memberName}</name>\\s*<value>\\s*(<string>(.*?)</string>|<int>(.*?)</int>|<i4>(.*?)</i4>)\\s*</value>\\s*</member>`,
-    "s",
-  );
-  const match = struct.match(regex);
-  return match?.[2] ?? match?.[3] ?? match?.[4] ?? "";
-}
-
 // ── Route ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -772,9 +743,10 @@ dashboardRouter.get("/summary", async (req, res) => {
 
   const allUnavailable: string[] = [];
   const data: Partial<DashboardData> = {};
+  const ownerUserId = requestContentActor(req, projectId)?.ownerUserId ?? null;
 
   // Existing modules (synchronous)
-  const learningResult = fetchLearning(projectId, "global-default");
+  const learningResult = fetchLearning(projectId, "global-default", ownerUserId);
   data.learning = learningResult.learning;
   allUnavailable.push(...learningResult.unavailable);
 
@@ -804,7 +776,7 @@ dashboardRouter.get("/summary", async (req, res) => {
   allUnavailable.push(...resumeResult.unavailable);
 
   // Activity timeline (synchronous — uses pipelineEvents)
-  const activityResult = fetchActivity(projectId);
+  const activityResult = fetchActivity(projectId, ownerUserId);
   data.activity = activityResult.activity;
   allUnavailable.push(...activityResult.unavailable);
 
