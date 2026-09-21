@@ -1,5 +1,4 @@
 import { logger, runtimes } from "ingenium-core";
-import { createOpencodeClient as createV2OpenCodeClient, type SessionMessage, type SessionV2Info } from "@opencode-ai/sdk/v2";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -7,9 +6,14 @@ import { config } from "../config/index.js";
 import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
 
 /**
- * Server-side typed HTTP client for OpenCode. Session and message reads use the
- * official v2 SDK; the remaining methods retain the established compatibility
- * surface until their v2 request/response mappings are complete.
+ * Server-side typed HTTP client for the OpenCode v2.0.11 `/api/**` surface.
+ *
+ * Every method maps to an operation in the authoritative v2 OpenAPI document
+ * (`/tmp/opencode/oc-v2-openapi.json`, 113 paths). The v1 REST surface that this
+ * client used previously (`/session`, `/event`, `/global/config`, `/auth`,
+ * `/permission`, `/question`, ...) no longer serves JSON on v2 servers, so the
+ * client talks to `/api/**` with `fetch` instead of the v1-era
+ * `@opencode-ai/sdk` package (whose `/v2` preview paths do not match 2.0.11).
  *
  * Routes all requests through `fetch` with HTTP Basic auth, normalizing errors
  * into a consistent `{ error: { message, code } }` shape. The SSE streaming
@@ -20,8 +24,13 @@ import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runti
  * - The Authorization header value is never serialized to error messages.
  * - Runtime checks prevent `undefined` passwords from reaching the wire.
  *
- * 🔴 v2 session/message reads are bound to the native session location before
- * their data is returned to API consumers.
+ * 🔴 v2 session reads are bound to the native session location before their
+ * data is returned to API consumers.
+ *
+ * 🔴 Unmappable v1 behavior: v2 removed the per-request `system` prompt, share
+ * toggles, per-message deletion, session init, and part-level revert. Those
+ * methods keep their signatures but fail closed with typed errors; see the
+ * individual method comments for the missing spec surface.
  */
 
 /* ── Types ── */
@@ -41,7 +50,7 @@ export interface OpenCodeErrorShape {
  */
 export type OpenCodeResult<T> = T | OpenCodeErrorShape;
 
-/** Shape returned by GET /global/health */
+/** Shape returned by GET /api/info (v2 server identity) */
 export interface OpenCodeHealth {
   healthy: boolean;
   version?: string;
@@ -275,18 +284,117 @@ export interface SessionInfo {
   revert?: SessionRevert;
 }
 
-interface V2SessionListResponse {
-  data: SessionV2Info[];
-  cursor?: { next?: string | null };
+/**
+ * Wire shapes for the v2.0.11 endpoints this client consumes. Field names and
+ * optionality mirror the OpenAPI document rather than the retained API DTOs.
+ */
+interface V2LocationRef {
+  directory: string;
 }
 
-interface V2SessionMessagesResponse {
-  data: SessionMessage[];
-  cursor?: { next?: string | null };
+interface V2ModelRef {
+  id: string;
+  providerID: string;
+  variant?: string;
 }
 
-interface V2SessionResponse {
-  data: SessionV2Info;
+interface V2SessionInfo {
+  id: string;
+  projectID: string;
+  parentID?: string;
+  agent?: string;
+  model?: V2ModelRef;
+  cost: number;
+  tokens: SessionTokens;
+  time: SessionTime;
+  title?: string;
+  revert?: { messageID: string; partID?: string; snapshot?: string };
+  location: V2LocationRef;
+}
+
+interface V2ContentPart {
+  type: string;
+  text?: string;
+  id?: string;
+}
+
+interface V2ConversationMessage {
+  id: string;
+  type: string;
+  time: { created: number; completed?: number };
+  text?: string;
+  output?: string;
+  agent?: string;
+  model?: V2ModelRef;
+  content?: V2ContentPart[];
+  finish?: string;
+  tokens?: MessageInfo["tokens"];
+  cost?: number;
+  error?: unknown;
+}
+
+interface V2Page<T> {
+  data: T[];
+  cursor?: { next?: string | null; previous?: string | null };
+}
+
+interface V2ProviderInfo {
+  id: string;
+  name: string;
+  activation: string;
+  package?: string;
+  settings?: Record<string, unknown>;
+}
+
+interface V2ModelCostTier {
+  input?: number;
+  output?: number;
+  cache?: { read?: number; write?: number };
+}
+
+interface V2ModelInfo {
+  id: string;
+  modelID: string;
+  providerID: string;
+  name: string;
+  status: string;
+  cost?: V2ModelCostTier[];
+  limit?: { context?: number; output?: number };
+  capabilities?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  time?: { released?: number };
+}
+
+interface V2McpServer {
+  name: string;
+  status?: { status?: string; error?: string };
+}
+
+interface V2IntegrationConnection {
+  type: string;
+  id?: string;
+  label?: string;
+  name?: string;
+}
+
+interface V2IntegrationInfo {
+  id: string;
+  name: string;
+  connections?: V2IntegrationConnection[];
+}
+
+interface V2PermissionRequest {
+  id: string;
+  sessionID: string;
+  action: string;
+  resources?: string[];
+}
+
+interface V2FormInfo {
+  id: string;
+  sessionID: string;
+  title: string;
 }
 
 /* ── Provider shape on the retained OpenCode REST surface ── */
@@ -374,13 +482,16 @@ interface V2Response<T> {
   data: T;
 }
 
-/* ── Agent shape on the retained OpenCode REST surface ── */
+/* ── Agent shape ── */
 
 export interface AgentInfo {
+  id?: string;
   name: string;
   description: string;
-  mode: "primary" | "subagent";
-  native: boolean;
+  mode: "primary" | "subagent" | "all";
+  /** v1-only flag; v2 marks agents as `hidden` instead. */
+  native?: boolean;
+  hidden?: boolean;
   permission: Array<{
     permission: string;
     pattern: string;
@@ -389,7 +500,16 @@ export interface AgentInfo {
   options: Record<string, unknown>;
 }
 
-/* ── Skill shape on the retained OpenCode REST surface ── */
+interface V2AgentInfo {
+  id: string;
+  name: string;
+  description?: string;
+  mode: "primary" | "subagent" | "all";
+  hidden?: boolean;
+  permissions?: Array<{ action: string; resource: string; effect: string }>;
+}
+
+/* ── Skill shape ── */
 
 export interface SkillInfo {
   name: string;
@@ -398,14 +518,41 @@ export interface SkillInfo {
   content: string;
 }
 
+interface V2SkillInfo {
+  id: string;
+  name: string;
+  description?: string;
+  path: string;
+  content: string;
+}
+
 /* ── MCP Server shape ── */
+
+export const MCP_CONNECTION_STATUSES = [
+  "connected",
+  "pending",
+  "disabled",
+  "failed",
+  "needs_auth",
+  "needs_client_registration",
+] as const;
+
+export type McpConnectionStatus = (typeof MCP_CONNECTION_STATUSES)[number];
+
+function normalizeMcpConnectionStatus(value: unknown): McpConnectionStatus | undefined {
+  return typeof value === "string" && (MCP_CONNECTION_STATUSES as readonly string[]).includes(value)
+    ? (value as McpConnectionStatus)
+    : undefined;
+}
 
 export interface McpServerInfo {
   name: string;
   /** Current OpenCode connection state. */
-  status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
+  status?: McpConnectionStatus;
   /** Legacy compatibility for older servers. */
   connected?: boolean;
+  /** Upstream diagnostic text; route projection replaces it with a fixed message. */
+  error?: string;
   toolCount?: number;
   tools?: number | unknown[];
 }
@@ -417,19 +564,22 @@ export interface PermissionRequest {
   permission: string;
   pattern: string;
   action: string;
+  sessionID?: string;
 }
 
-/* ── Question shape (still in API — GET /question returns array) ── */
+/* ── Question shape (projected from v2 forms) ── */
 
 export interface QuestionInfo {
   id: string;
   text?: string;
+  sessionID?: string;
 }
 
 /* ── Session status shape ── */
 
 export interface SessionStatus {
   type: "busy" | "idle";
+  sessionID?: string;
 }
 
 /* ── Constants ── */
@@ -439,9 +589,9 @@ const PROVIDER_CATALOG_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_CATALOG_FAILED",
   message: "OpenCode provider catalog is unavailable",
 };
-const PROVIDER_CONFIG_RELOAD_ERROR: OpenCodeErrorShape["error"] = {
-  code: "PROVIDER_CONFIG_RELOAD_FAILED",
-  message: "OpenCode provider configuration reload failed",
+const INTEGRATION_ID_REQUIRED_ERROR: OpenCodeErrorShape["error"] = {
+  code: "OPENCODE_V2_INTEGRATION_ID_REQUIRED",
+  message: "OpenCode v2 requires the integration ID for OAuth attempt operations",
 };
 const PROVIDER_INSTANCE_DISPOSE_ERROR: OpenCodeErrorShape["error"] = {
   code: "PROVIDER_INSTANCE_DISPOSE_FAILED",
@@ -531,8 +681,6 @@ function pathSegment(value: string): string {
   return encodeURIComponent(value);
 }
 
-type V2OpenCodeClient = ReturnType<typeof createV2OpenCodeClient>["v2"];
-
 interface OpenCodeMessagePage {
   messages: MessageEnvelope[];
   nextCursor?: string;
@@ -560,27 +708,10 @@ const V2_BINDING_ERROR: OpenCodeErrorShape["error"] = {
   message: "OpenCode session binding rejected",
 };
 
-function v2Client(directory?: string): V2OpenCodeClient | OpenCodeErrorShape {
-  const target = currentOpenCodeRuntimeTarget();
-  const requestedDirectory = directory ?? target?.directory;
-  const auth = target
-    ? target.password
-      ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}`
-      : undefined
-    : buildAuthHeader();
-  if (!target && !auth) {
-    return { error: { code: "AUTH_NOT_CONFIGURED", message: "OPENCODE_SERVER_PASSWORD is not configured" } };
-  }
-
-  return createV2OpenCodeClient({
-    baseUrl: target?.baseUrl ?? config.opencodeUrl,
-    ...(auth ? { headers: { Authorization: auth } } : {}),
-    ...(requestedDirectory ? { directory: requestedDirectory } : {}),
-  }).v2;
-}
-
 function statusOf(value: unknown): number | undefined {
   if (!value || typeof value !== "object") return undefined;
+  const direct = (value as Record<string, unknown>).status;
+  if (typeof direct === "number") return direct;
   const response = (value as Record<string, unknown>).response;
   if (!response || typeof response !== "object") return undefined;
   const status = (response as Record<string, unknown>).status;
@@ -608,18 +739,20 @@ function v2Error(value: unknown, fallback = "OPENCODE_V2_UNAVAILABLE"): OpenCode
   return { error };
 }
 
-async function v2Call<T>(call: (client: V2OpenCodeClient) => Promise<unknown>, directory?: string): Promise<OpenCodeResult<T>> {
-  const client = v2Client(directory);
-  if (isOpenCodeError(client)) return client;
-  try {
-    const result = await call(client);
-    if (!result || typeof result !== "object" || !("data" in result) || (result as { data?: unknown }).data === undefined) {
-      return v2Error(result);
-    }
-    return (result as { data: T }).data;
-  } catch {
-    return { error: { code: "NETWORK_ERROR", message: "Network error contacting OpenCode server" } };
+type OpenCodeRequestOptions = NonNullable<Parameters<typeof request>[1]>;
+
+/**
+ * Send a v2 request and unwrap its `{ data }` envelope. Reads with additional
+ * envelope fields (`location`, `cursor`) keep those fields on the raw response
+ * and are handled by callers that need them.
+ */
+async function v2Data<T>(path: string, options: OpenCodeRequestOptions = {}): Promise<OpenCodeResult<T>> {
+  const result = await request<{ data: T }>(path, options);
+  if (isOpenCodeError(result)) return result;
+  if (!result || typeof result !== "object" || !("data" in result) || (result as { data?: unknown }).data === undefined) {
+    return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   }
+  return (result as { data: T }).data;
 }
 
 function expectedOpenCodeDirectory(directory?: string): string | undefined {
@@ -630,9 +763,9 @@ function validNativeSessionId(value: string): boolean {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
 }
 
-function validateV2Session(info: unknown, directory?: string): info is SessionV2Info {
+function validateV2Session(info: unknown, directory?: string): info is V2SessionInfo {
   if (!info || typeof info !== "object") return false;
-  const value = info as Partial<SessionV2Info> & { location?: { directory?: unknown } };
+  const value = info as Partial<V2SessionInfo> & { location?: { directory?: unknown } };
   return typeof value.id === "string"
     && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value.id)
     && typeof value.projectID === "string"
@@ -646,7 +779,7 @@ function bindingError(): OpenCodeErrorShape {
   return { error };
 }
 
-function mapV2Session(info: SessionV2Info): SessionInfo {
+function mapV2Session(info: V2SessionInfo): SessionInfo {
   return {
     id: info.id,
     slug: info.id,
@@ -654,7 +787,7 @@ function mapV2Session(info: SessionV2Info): SessionInfo {
     parentID: info.parentID,
     directory: info.location.directory,
     path: info.location.directory,
-    title: info.title,
+    title: info.title ?? "",
     version: "v2",
     time: info.time,
     cost: info.cost,
@@ -662,7 +795,7 @@ function mapV2Session(info: SessionV2Info): SessionInfo {
     agent: info.agent,
     model: info.model,
     revert: info.revert
-      ? { messageID: info.revert.messageID, snapshot: info.revert.snapshot ?? "", diff: info.revert.diff ?? "" }
+      ? { messageID: info.revert.messageID, snapshot: info.revert.snapshot ?? "", diff: "" }
       : undefined,
   };
 }
@@ -671,23 +804,28 @@ function messagePartId(messageId: string, suffix: string): string {
   return `${messageId}:${suffix}`;
 }
 
-function mapV2Message(message: SessionMessage, sessionId: string): MessageEnvelope | null {
+function mapV2Message(message: V2ConversationMessage, sessionId: string): MessageEnvelope | null {
   const base = { id: message.id, sessionID: sessionId };
   if (message.type === "user") {
     return {
       info: { ...base, role: "user", time: message.time },
-      parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text: message.text }],
+      parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text: message.text ?? "" }],
     };
   }
   if (message.type === "assistant") {
-    const parts: MessagePart[] = message.content.flatMap((part): MessagePart[] => {
+    const content = Array.isArray(message.content) ? message.content : [];
+    const parts: MessagePart[] = [];
+    content.forEach((part, index) => {
+      // v2 text/reasoning content carries no id, so a stable per-message id is
+      // derived; tool content keeps its upstream id.
+      const partId = typeof part.id === "string" && part.id.length > 0
+        ? part.id
+        : messagePartId(message.id, `content-${index}`);
       if (part.type === "text" || part.type === "reasoning") {
-        return [{ id: part.id, sessionID: sessionId, messageID: message.id, type: part.type, text: part.text }];
+        parts.push({ id: partId, sessionID: sessionId, messageID: message.id, type: part.type, text: part.text ?? "" });
+      } else if (part.type === "tool") {
+        parts.push({ id: partId, sessionID: sessionId, messageID: message.id, type: "tool" });
       }
-      if (part.type === "tool") {
-        return [{ id: part.id, sessionID: sessionId, messageID: message.id, type: "tool" }];
-      }
-      return [];
     });
     const finishTime = message.time.completed ?? message.time.created;
     parts.push({
@@ -706,9 +844,9 @@ function mapV2Message(message: SessionMessage, sessionId: string): MessageEnvelo
         role: "assistant",
         time: message.time,
         agent: message.agent,
-        model: { providerID: message.model.providerID, modelID: message.model.id },
-        modelID: message.model.id,
-        providerID: message.model.providerID,
+        model: message.model ? { providerID: message.model.providerID, modelID: message.model.id } : undefined,
+        modelID: message.model?.id,
+        providerID: message.model?.providerID,
         tokens: message.tokens,
         cost: message.cost,
         finish: message.finish,
@@ -718,7 +856,7 @@ function mapV2Message(message: SessionMessage, sessionId: string): MessageEnvelo
     };
   }
   if (message.type === "system" || message.type === "synthetic" || message.type === "shell") {
-    const text = message.type === "shell" ? message.output : message.text;
+    const text = message.type === "shell" ? message.output ?? "" : message.text ?? "";
     return {
       info: { ...base, role: "system", time: message.time },
       parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text }],
@@ -727,14 +865,14 @@ function mapV2Message(message: SessionMessage, sessionId: string): MessageEnvelo
   return null;
 }
 
-async function getV2Session(sessionId: string, directory?: string): Promise<OpenCodeResult<SessionV2Info>> {
+async function getV2Session(sessionId: string, directory?: string): Promise<OpenCodeResult<V2SessionInfo>> {
   if (!validNativeSessionId(sessionId)) {
     return { error: { code: "INVALID_SESSION_ID", message: "Invalid OpenCode session identifier" } };
   }
   const expectedDirectory = expectedOpenCodeDirectory(directory);
-  const result = await v2Call<V2SessionResponse>((client) => client.session.get({ sessionID: sessionId }), expectedDirectory);
+  const result = await v2Data<V2SessionInfo>(`/api/session/${pathSegment(sessionId)}`);
   if (isOpenCodeError(result)) return result;
-  return validateV2Session(result.data, expectedDirectory) ? result.data : bindingError();
+  return validateV2Session(result, expectedDirectory) ? result : bindingError();
 }
 
 async function getV2MessagePage(
@@ -746,12 +884,12 @@ async function getV2MessagePage(
   const session = await getV2Session(sessionId, directory);
   if (isOpenCodeError(session)) return session;
   const pageLimit = limit === undefined ? V2_PAGE_SIZE : Math.min(Math.max(limit, 1), V2_PAGE_SIZE);
-  const request = cursor === undefined
-    ? { sessionID: sessionId, limit: pageLimit, order: "asc" as const }
-    : { sessionID: sessionId, limit: pageLimit, cursor };
-  const result = await v2Call<V2SessionMessagesResponse>(
-    (client) => client.session.messages(request),
-    directory ?? session.location.directory,
+  const query: Record<string, string | number> = { limit: pageLimit };
+  if (cursor === undefined) query.order = "asc";
+  else query.cursor = cursor;
+  const result = await request<V2Page<V2ConversationMessage>>(
+    `/api/session/${pathSegment(session.id)}/message`,
+    { query },
   );
   if (isOpenCodeError(result) || !Array.isArray(result.data)) return isOpenCodeError(result) ? result : v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   if (result.data.length > V2_PAGE_SIZE) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
@@ -765,6 +903,29 @@ async function getV2MessagePage(
     return mapped ? [mapped] : [];
   });
   return { messages, ...(typeof nextCursor === "string" ? { nextCursor } : {}) };
+}
+
+/**
+ * Project the retained prompt-parts body onto the v2 prompt input. Multiple
+ * text parts are joined with newlines because v2 admits a single text field;
+ * file parts become `uri` attachments.
+ */
+function promptInputFromParts(body: SendPromptBody): OpenCodeResult<Record<string, unknown>> {
+  const text = body.parts
+    .filter((part): part is TextPartInput => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+  const files = body.parts
+    .filter((part): part is FilePartInput => part.type === "file")
+    .map((part) => ({ uri: part.url, ...(part.filename ? { name: part.filename } : {}) }));
+  if (text.length === 0 && files.length === 0) {
+    return { error: { code: "INVALID_PROMPT", message: "Prompt requests require at least one text or file part" } };
+  }
+  return {
+    ...(body.messageID && /^msg_/.test(body.messageID) ? { id: body.messageID } : {}),
+    text,
+    ...(files.length > 0 ? { files } : {}),
+  };
 }
 
 function projectDirectoryMatches(directory: string, project: string): boolean {
@@ -973,8 +1134,10 @@ export async function request<T>(
       return text as unknown as T;
     }
 
-    const data: T = await response.json();
-    return data;
+    // v2 void operations can answer 2xx with an empty body; treat that as a
+    // successful no-payload result instead of a parse failure.
+    const raw = await response.text();
+    return (raw.length === 0 ? undefined : JSON.parse(raw)) as T;
   } catch (err: unknown) {
     const e = err as Error & { name?: string };
 
@@ -1080,57 +1243,68 @@ export function isOpenCodeError<T>(result: OpenCodeResult<T>): result is OpenCod
 /* ── Client ── */
 
 /**
- * Singleton OpenCode API client. Session reads use the official v2 SDK;
- * remaining methods retain the compatibility REST surface.
+ * Singleton OpenCode client for the v2 `/api/**` surface.
  *
  * Every method returns a `OpenCodeResult<T>` — callers should check
  * `isOpenCodeError(result)` before accessing the payload.
  *
- * Endpoints are covered by the retained OpenCode REST contract tests.
+ * Endpoints are covered by the OpenCode v2 contract tests.
  */
 export const opencodeClient = {
   /* ── Health ── */
 
-  health: (): Promise<OpenCodeResult<OpenCodeHealth>> =>
-    request<OpenCodeHealth>("/global/health"),
+  /** GET /api/info [server.info] — v2 identity and readiness document. */
+  health: async (): Promise<OpenCodeResult<OpenCodeHealth>> => {
+    const result = await request<{ version?: string }>("/api/info");
+    if (isOpenCodeError(result)) return result;
+    return { healthy: true, version: result?.version };
+  },
 
-  /** Apply a partial global config without interrupting active sessions. */
+  /**
+   * v2 has no arbitrary global-config patch: PATCH /api/experimental/config
+   * [experimental.config.update] accepts `{ shell }` only. Provider
+   * configuration is owned by integrations and credentials on v2, so this
+   * fails closed instead of pretending a projection was applied.
+   */
   updateGlobalConfig: (
-    config: Record<string, unknown>,
-    signal?: AbortSignal,
+    _config: Record<string, unknown>,
+    _signal?: AbortSignal,
   ): Promise<OpenCodeResult<Record<string, unknown>>> =>
-    request<Record<string, unknown>>("/global/config", {
-      method: "PATCH",
-      body: { config },
-      signal,
-      sanitizedUpstreamError: PROVIDER_CONFIG_RELOAD_ERROR,
-      safeProviderOperation: "provider_config_reload",
+    Promise.resolve({
+      error: {
+        code: "OPENCODE_V2_CONFIG_PATCH_UNAVAILABLE",
+        message: "OpenCode v2 does not accept an arbitrary global configuration patch",
+      },
     }),
 
-  disposeInstance: (
-    directory?: string,
+  /** POST /api/location/reload [location.reload] — rebuilds every loaded location. */
+  disposeInstance: async (
+    _directory?: string,
     signal?: AbortSignal,
-  ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>("/instance/dispose", {
+  ): Promise<OpenCodeResult<boolean>> => {
+    const result = await request<unknown>("/api/location/reload", {
       method: "POST",
-      query: { directory },
       signal,
       sanitizedUpstreamError: PROVIDER_INSTANCE_DISPOSE_ERROR,
       safeProviderOperation: "provider_instance_dispose",
-    }),
+    });
+    return isOpenCodeError(result) ? result : true;
+  },
 
   /* ── Sessions ── */
 
+  /** GET /api/session [session.list] — cursor-paginated, location-scoped listing. */
   listSessions: async (directory?: string): Promise<OpenCodeResult<SessionInfo[]>> => {
     const expectedDirectory = expectedOpenCodeDirectory(directory);
     const sessions: SessionInfo[] = [];
     const cursors = new Set<string>();
     let cursor: string | undefined;
     for (let page = 0; page < MAX_V2_LIST_PAGES; page += 1) {
-      const request = cursor === undefined
-        ? { directory: expectedDirectory, limit: V2_PAGE_SIZE, order: "desc" as const }
-        : { directory: expectedDirectory, limit: V2_PAGE_SIZE, cursor };
-      const result = await v2Call<V2SessionListResponse>((client) => client.session.list(request), expectedDirectory);
+      const query: Record<string, string | number> = { limit: V2_PAGE_SIZE };
+      if (expectedDirectory !== undefined) query.directory = expectedDirectory;
+      if (cursor === undefined) query.order = "desc";
+      else query.cursor = cursor;
+      const result = await request<V2Page<V2SessionInfo>>("/api/session", { query });
       if (isOpenCodeError(result)) return result;
       if (!Array.isArray(result.data)) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
       for (const session of result.data) {
@@ -1146,16 +1320,24 @@ export const opencodeClient = {
     return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination exceeded its safety limit" } };
   },
 
-  createSession: (
+  /** POST /api/session [session.create] — the directory travels as `location`. */
+  createSession: async (
     body: CreateSessionBody,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>("/session", {
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    const location = directory ?? body.directory;
+    const result = await v2Data<V2SessionInfo>("/api/session", {
       method: "POST",
-      body,
-      query: { directory },
-    }),
+      body: {
+        ...(body.title === undefined ? {} : { title: body.title }),
+        ...(location ? { location: { directory: location } } : {}),
+      },
+    });
+    if (isOpenCodeError(result)) return result;
+    return validateV2Session(result, expectedOpenCodeDirectory(directory)) ? mapV2Session(result) : bindingError();
+  },
 
+  /** GET /api/session/{sessionID} [session.get]. */
   getSession: async (
     id: string,
     directory?: string,
@@ -1164,30 +1346,44 @@ export const opencodeClient = {
     return isOpenCodeError(result) ? result : mapV2Session(result);
   },
 
-  updateSession: (
+  /** PATCH /api/session/{sessionID} [session.update] — v2 returns no payload. */
+  updateSession: async (
     id: string,
     body: UpdateSessionBody,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(id)}`, {
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    const patched = await request<unknown>(`/api/session/${pathSegment(id)}`, {
       method: "PATCH",
-      body,
-      query: { directory },
-    }),
+      body: body.title === undefined ? {} : { title: body.title },
+    });
+    if (isOpenCodeError(patched)) return patched;
+    const result = await getV2Session(id, directory);
+    return isOpenCodeError(result) ? result : mapV2Session(result);
+  },
 
-  deleteSession: (
+  /** DELETE /api/session/{sessionID} [session.remove]. */
+  deleteSession: async (
     id: string,
-    directory?: string,
-  ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${pathSegment(id)}`, {
-      method: "DELETE",
-      query: { directory },
-    }),
+    _directory?: string,
+  ): Promise<OpenCodeResult<boolean>> => {
+    const result = await request<unknown>(`/api/session/${pathSegment(id)}`, { method: "DELETE" });
+    return isOpenCodeError(result) ? result : true;
+  },
 
   /* ── Session status ── */
 
-  getSessionStatus: (directory?: string): Promise<OpenCodeResult<SessionStatus[]>> =>
-    request<SessionStatus[]>("/session/status", { query: { directory } }),
+  /**
+   * GET /api/session/active [session.active] — v2 reports only the sessions
+   * currently owned by this process, so every entry is busy and idle sessions
+   * are simply absent.
+   */
+  getSessionStatus: async (_directory?: string): Promise<OpenCodeResult<SessionStatus[]>> => {
+    const result = await v2Data<Record<string, { type?: string }>>("/api/session/active");
+    if (isOpenCodeError(result)) return result;
+    return Object.entries(result)
+      .filter(([, status]) => status?.type === "running")
+      .map(([sessionID]) => ({ type: "busy" as const, sessionID }));
+  },
 
   /* ── Messages ── */
 
@@ -1209,161 +1405,373 @@ export const opencodeClient = {
     return isOpenCodeError(result) ? result : result.messages;
   },
 
-  getSessionMessage: (
+  /** GET /api/session/{sessionID}/message/{messageID} [session.message.get]. */
+  getSessionMessage: async (
     sessionId: string,
     messageId: string,
     directory?: string,
-  ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
-      query: { directory },
-    }),
+  ): Promise<OpenCodeResult<MessageEnvelope>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const result = await v2Data<V2ConversationMessage>(
+      `/api/session/${pathSegment(session.id)}/message/${pathSegment(messageId)}`,
+    );
+    if (isOpenCodeError(result)) return result;
+    return mapV2Message(result, sessionId) ?? {
+      error: { code: "OPENCODE_V2_MESSAGE_TYPE_UNSUPPORTED", message: "OpenCode message type is not representable" },
+    };
+  },
 
-  sendPrompt: (
+  /**
+   * POST /api/session/{sessionID}/prompt [session.prompt] — durable admission.
+   *
+   * The v2 body is `{ id?, text, files, agents, skills, metadata, delivery,
+   * resume }`; it has no per-prompt model, agent, system, tools, or variant
+   * fields. Model/agent/variant selections are applied to the session first
+   * through the v2 switch endpoints, tool selections are owned by the selected
+   * agent's permission rules, and a `system` instruction fails closed because
+   * v2 session system prompts belong to agents.
+   */
+  sendPrompt: async (
     sessionId: string,
     body: SendPromptBody,
     directory?: string,
-  ): Promise<OpenCodeResult<MessageEnvelope>> =>
-    request<MessageEnvelope>(`/session/${pathSegment(sessionId)}/message`, {
-      method: "POST",
-      body,
-      query: { directory },
-    }),
+  ): Promise<OpenCodeResult<MessageEnvelope>> => {
+    if (body.system !== undefined) {
+      return {
+        error: {
+          code: "OPENCODE_V2_SYSTEM_PROMPT_UNAVAILABLE",
+          message: "OpenCode v2 does not accept a per-prompt system instruction",
+        },
+      };
+    }
+    if (body.tools !== undefined && Object.keys(body.tools).length > 0) {
+      return {
+        error: {
+          code: "OPENCODE_V2_TOOLS_UNAVAILABLE",
+          message: "OpenCode v2 does not accept per-prompt tool selections",
+        },
+      };
+    }
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
 
+    if (body.model) {
+      const switched = await request<unknown>(`/api/session/${pathSegment(session.id)}/model`, {
+        method: "POST",
+        body: {
+          model: {
+            id: body.model.modelID,
+            providerID: body.model.providerID,
+            ...(body.variant ? { variant: body.variant } : {}),
+          },
+        },
+      });
+      if (isOpenCodeError(switched)) return switched;
+    }
+    if (body.agent) {
+      const switched = await request<unknown>(`/api/session/${pathSegment(session.id)}/agent`, {
+        method: "POST",
+        body: { agent: body.agent },
+      });
+      if (isOpenCodeError(switched)) return switched;
+    }
+
+    const prompt = promptInputFromParts(body);
+    if (isOpenCodeError(prompt)) return prompt;
+    const admitted = await v2Data<{ id?: string; time?: { created?: number } }>(
+      `/api/session/${pathSegment(session.id)}/prompt`,
+      { method: "POST", body: prompt },
+    );
+    if (isOpenCodeError(admitted)) return admitted;
+    return {
+      info: {
+        id: admitted.id ?? "",
+        sessionID: sessionId,
+        role: "user",
+        time: { created: admitted.time?.created ?? Date.now() },
+      },
+      parts: [],
+    };
+  },
+
+  /**
+   * v2 has no message-delete route. The closest v2 operation is a revert
+   * boundary [session.revert.stage/commit], which is a caller-level decision,
+   * so this fails closed rather than deleting a neighbouring message.
+   */
   deleteMessage: (
-    sessionId: string,
-    messageId: string,
-    directory?: string,
+    _sessionId: string,
+    _messageId: string,
+    _directory?: string,
   ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${pathSegment(sessionId)}/message/${pathSegment(messageId)}`, {
-      method: "DELETE",
-      query: { directory },
+    Promise.resolve({
+      error: {
+        code: "OPENCODE_V2_MESSAGE_DELETE_UNAVAILABLE",
+        message: "OpenCode v2 does not expose per-message deletion",
+      },
     }),
 
   /* ── Session actions ── */
 
-  abortSession: (
+  /** POST /api/session/{sessionID}/interrupt [session.interrupt]. */
+  abortSession: async (
     sessionId: string,
     directory?: string,
-  ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${pathSegment(sessionId)}/abort`, {
-      method: "POST",
-      query: { directory },
-    }),
+  ): Promise<OpenCodeResult<boolean>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const result = await request<{ interrupted?: boolean }>(
+      `/api/session/${pathSegment(session.id)}/interrupt`,
+      { method: "POST" },
+    );
+    if (isOpenCodeError(result)) return result;
+    return result.interrupted === true;
+  },
 
-  forkSession: (
+  /** POST /api/session/{sessionID}/fork [session.fork] — v1 `messageID` is v2 `before`. */
+  forkSession: async (
     sessionId: string,
     messageId?: string,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/fork`, {
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const result = await v2Data<V2SessionInfo>(`/api/session/${pathSegment(session.id)}/fork`, {
       method: "POST",
-      body: messageId ? ({ messageID: messageId } satisfies ForkBody) : undefined,
-      query: { directory },
-    }),
+      body: messageId === undefined ? {} : { before: messageId },
+    });
+    if (isOpenCodeError(result)) return result;
+    return validateV2Session(result, expectedOpenCodeDirectory(directory)) ? mapV2Session(result) : bindingError();
+  },
 
-  shareSession: (
-    sessionId: string,
-    directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
-      method: "POST",
-      query: { directory },
-    }),
+  /** v2 has no session share surface; the v1 POST/DELETE /session/{id}/share paths were removed. */
+  shareSession: async (
+    _sessionId: string,
+    _directory?: string,
+  ): Promise<OpenCodeResult<SessionInfo>> => ({
+    error: {
+      code: "OPENCODE_V2_SHARE_UNAVAILABLE",
+      message: "OpenCode v2 has no session share endpoint",
+    },
+  }),
 
-  unshareSession: (
-    sessionId: string,
-    directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/share`, {
-      method: "DELETE",
-      query: { directory },
-    }),
+  unshareSession: async (
+    _sessionId: string,
+    _directory?: string,
+  ): Promise<OpenCodeResult<SessionInfo>> => ({
+    error: {
+      code: "OPENCODE_V2_SHARE_UNAVAILABLE",
+      message: "OpenCode v2 has no session share endpoint",
+    },
+  }),
 
-  compactSession: (
+  /**
+   * POST /api/session/{sessionID}/compact [session.compact]. v2 compaction has
+   * no model field, so a requested provider/model pair is applied to the
+   * session first; unlike v1 it then remains the session model.
+   */
+  compactSession: async (
     sessionId: string,
     body?: SummarizeBody,
     directory?: string,
-  ): Promise<OpenCodeResult<boolean>> =>
-    request<boolean>(`/session/${pathSegment(sessionId)}/summarize`, {
+  ): Promise<OpenCodeResult<boolean>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    if (body?.providerID && body.modelID) {
+      const switched = await request<unknown>(`/api/session/${pathSegment(session.id)}/model`, {
+        method: "POST",
+        body: { model: { id: body.modelID, providerID: body.providerID } },
+      });
+      if (isOpenCodeError(switched)) return switched;
+    }
+    const result = await request<unknown>(`/api/session/${pathSegment(session.id)}/compact`, {
       method: "POST",
-      body,
-      query: { directory },
-    }),
+      body: {},
+    });
+    return isOpenCodeError(result) ? result : true;
+  },
 
-  revertSession: (
+  /**
+   * v1 revert maps to the v2 stage/commit pair [session.revert.stage,
+   * session.revert.commit]: files are applied as v1 did, then the boundary is
+   * committed. v2 stages at message granularity only, so `partID` fails closed.
+   */
+  revertSession: async (
     sessionId: string,
     body: RevertBody,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/revert`, {
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    if (body.partID !== undefined) {
+      return {
+        error: {
+          code: "OPENCODE_V2_PART_REVERT_UNAVAILABLE",
+          message: "OpenCode v2 does not support part-level revert",
+        },
+      };
+    }
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const staged = await request<unknown>(`/api/session/${pathSegment(session.id)}/revert/stage`, {
       method: "POST",
-      body,
-      query: { directory },
-    }),
+      body: { messageID: body.messageID, files: true },
+    });
+    if (isOpenCodeError(staged)) return staged;
+    const committed = await request<unknown>(`/api/session/${pathSegment(session.id)}/revert/commit`, {
+      method: "POST",
+    });
+    if (isOpenCodeError(committed)) return committed;
+    const result = await getV2Session(session.id, directory);
+    return isOpenCodeError(result) ? result : mapV2Session(result);
+  },
 
-  unrevertSession: (
+  /** DELETE /api/session/{sessionID}/revert [session.revert.clear]. */
+  unrevertSession: async (
     sessionId: string,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/unrevert`, {
-      method: "POST",
-      body: {},
-      query: { directory },
-    }),
+  ): Promise<OpenCodeResult<SessionInfo>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const cleared = await request<unknown>(`/api/session/${pathSegment(session.id)}/revert`, {
+      method: "DELETE",
+    });
+    if (isOpenCodeError(cleared)) return cleared;
+    const result = await getV2Session(session.id, directory);
+    return isOpenCodeError(result) ? result : mapV2Session(result);
+  },
 
-  getSessionChildren: (
+  /** GET /api/session?parentID=... [session.list] — the v1 /children path is gone. */
+  getSessionChildren: async (
     sessionId: string,
     directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo[]>> =>
-    request<SessionInfo[]>(`/session/${pathSegment(sessionId)}/children`, {
-      query: { directory },
-    }),
+  ): Promise<OpenCodeResult<SessionInfo[]>> => {
+    const expectedDirectory = expectedOpenCodeDirectory(directory);
+    const query: Record<string, string | number> = { parentID: sessionId };
+    if (expectedDirectory !== undefined) query.directory = expectedDirectory;
+    const result = await request<V2Page<V2SessionInfo>>("/api/session", { query });
+    if (isOpenCodeError(result)) return result;
+    if (!Array.isArray(result.data)) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+    const children: SessionInfo[] = [];
+    for (const child of result.data) {
+      if (child.parentID !== sessionId) continue;
+      if (!validateV2Session(child, expectedDirectory)) return bindingError();
+      children.push(mapV2Session(child));
+    }
+    return children;
+  },
 
-  getSessionDiff: (
+  /** GET /api/session/{sessionID}/diff [session.diff] — v1 `messageID` is v2 `from`. */
+  getSessionDiff: async (
     sessionId: string,
     messageId?: string,
     directory?: string,
-  ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${pathSegment(sessionId)}/diff`, {
-      query: { messageID: messageId, directory },
-    }),
+  ): Promise<OpenCodeResult<unknown>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const query: Record<string, string | number> = {};
+    if (messageId !== undefined) query.from = messageId;
+    return v2Data<unknown>(`/api/session/${pathSegment(session.id)}/diff`, { query });
+  },
 
-  sendCommand: (
+  /** POST /api/session/{sessionID}/command [session.command]. */
+  sendCommand: async (
     sessionId: string,
     body: CommandBody,
     directory?: string,
-  ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${pathSegment(sessionId)}/command`, {
+  ): Promise<OpenCodeResult<unknown>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const args = body.args ?? body.arguments ?? [];
+    const result = await request<unknown>(`/api/session/${pathSegment(session.id)}/command`, {
       method: "POST",
-      body,
-      query: { directory },
-    }),
+      body: { name: body.command, text: args.join(" ") },
+    });
+    return isOpenCodeError(result) ? result : true;
+  },
 
-  initSession: (
-    sessionId: string,
-    directory?: string,
-  ): Promise<OpenCodeResult<SessionInfo>> =>
-    request<SessionInfo>(`/session/${pathSegment(sessionId)}/init`, {
-      method: "POST",
-      body: {},
-      query: { directory },
-    }),
+  /** v2 has no session init route; the v1 POST /session/{id}/init path was removed. */
+  initSession: async (
+    _sessionId: string,
+    _directory?: string,
+  ): Promise<OpenCodeResult<SessionInfo>> => ({
+    error: {
+      code: "OPENCODE_V2_SESSION_INIT_UNAVAILABLE",
+      message: "OpenCode v2 has no session init endpoint",
+    },
+  }),
 
   /* ── Providers ── */
 
-  listProviders: (directory?: string): Promise<OpenCodeResult<ProvidersResponse>> =>
-    request<ProvidersResponse>("/provider", {
-      query: { directory },
+  /**
+   * The v2 catalog is split: GET /api/provider [provider.list] returns provider
+   * metadata without models, and GET /api/model [model.list] carries the model
+   * snapshot. This method recomposes the retained `ProvidersResponse` DTO for
+   * existing callers; `connected` reflects each provider's activation state
+   * because v2 no longer reports an auth-derived connection list here.
+   */
+  listProviders: async (_directory?: string): Promise<OpenCodeResult<ProvidersResponse>> => {
+    const providersResult = await v2Data<V2ProviderInfo[]>("/api/provider", {
       // Provider errors commonly contain opaque vendor diagnostics. This
       // catalog is browser-facing, so no upstream code or message may escape.
       sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
-    }),
+    });
+    if (isOpenCodeError(providersResult)) return providersResult;
+    const modelsResult = await v2Data<V2ModelInfo[]>("/api/model", {
+      sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
+    });
+    if (isOpenCodeError(modelsResult)) return modelsResult;
+    const defaultResult = await v2Data<V2ModelInfo | null>("/api/model/default", {
+      sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
+    });
+    if (isOpenCodeError(defaultResult)) return defaultResult;
 
-  listIntegrations: (directory?: string): Promise<OpenCodeResult<V2Response<IntegrationInfo[]>>> =>
-    request<V2Response<IntegrationInfo[]>>("/api/integration", {
-      query: { "location.directory": directory },
-    }),
+    const modelsByProvider = new Map<string, Record<string, ProviderModel>>();
+    for (const model of modelsResult) {
+      if (typeof model?.providerID !== "string" || typeof model.modelID !== "string") continue;
+      const cost = Array.isArray(model.cost) ? model.cost[0] : undefined;
+      const providerModels = modelsByProvider.get(model.providerID) ?? {};
+      providerModels[model.modelID] = {
+        id: model.modelID,
+        providerID: model.providerID,
+        api: { id: model.providerID, url: "", npm: "" },
+        name: model.name,
+        capabilities: model.capabilities ?? {},
+        cost: {
+          input: cost?.input ?? 0,
+          output: cost?.output ?? 0,
+          cache: { read: cost?.cache?.read ?? 0, write: cost?.cache?.write ?? 0 },
+        },
+        limit: { context: model.limit?.context ?? 0, output: model.limit?.output ?? 0 },
+        status: model.status,
+        options: model.settings ?? {},
+        headers: model.headers ?? {},
+        release_date: model.time?.released === undefined ? "" : String(model.time.released),
+        variants: {},
+      };
+      modelsByProvider.set(model.providerID, providerModels);
+    }
 
+    return {
+      all: providersResult.map((provider) => ({
+        id: provider.id,
+        name: provider.name,
+        source: provider.package ?? "",
+        env: [],
+        options: provider.settings ?? {},
+        models: modelsByProvider.get(provider.id) ?? {},
+      })),
+      default: defaultResult ? { [defaultResult.providerID]: defaultResult.modelID } : {},
+      connected: providersResult
+        .filter((provider) => provider.activation !== "disabled")
+        .map((provider) => provider.id),
+    };
+  },
+
+  /** GET /api/integration [integration.list]. */
+  listIntegrations: (_directory?: string): Promise<OpenCodeResult<V2Response<IntegrationInfo[]>>> =>
+    request<V2Response<IntegrationInfo[]>>("/api/integration"),
+
+  /** POST /api/integration/{integrationID}/connect/key [integration.connect.key]. */
   connectIntegrationKey: (
     integrationID: string,
     key: string,
@@ -1377,6 +1785,10 @@ export const opencodeClient = {
       safeProviderOperation: "integration_key_connect",
     }),
 
+  /**
+   * POST /api/integration/{integrationID}/connect/oauth [integration.oauth.connect].
+   * The v1 `inputs` map is submitted as the v2 form `answer`.
+   */
   beginIntegrationOAuth: (
     integrationID: string,
     methodID: string,
@@ -1384,158 +1796,264 @@ export const opencodeClient = {
   ): Promise<OpenCodeResult<V2Response<IntegrationAttempt>>> =>
     request<V2Response<IntegrationAttempt>>(`/api/integration/${pathSegment(integrationID)}/connect/oauth`, {
       method: "POST",
-      body: { methodID, inputs },
+      body: { methodID, answer: inputs },
     }),
 
-  getIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<V2Response<{ status: string; message?: string }>>> =>
-    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${pathSegment(attemptID)}`),
+  /**
+   * OAuth attempts are nested under their integration on v2, so the owning
+   * integration ID is required. Callers that predate that nesting receive a
+   * typed error rather than a path that cannot resolve.
+   */
+  getIntegrationAttempt: (
+    attemptID: string,
+    integrationID?: string,
+  ): Promise<OpenCodeResult<V2Response<{ status: string; message?: string }>>> =>
+    integrationID
+      ? request<V2Response<{ status: string; message?: string }>>(
+        `/api/integration/${pathSegment(integrationID)}/connect/oauth/${pathSegment(attemptID)}`,
+      )
+      : Promise.resolve({ error: { ...INTEGRATION_ID_REQUIRED_ERROR } }),
 
-  completeIntegrationAttempt: (attemptID: string, code?: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}/complete`, {
-      method: "POST",
-      body: code ? { code } : {},
-    }),
+  completeIntegrationAttempt: async (
+    attemptID: string,
+    code?: string,
+    integrationID?: string,
+  ): Promise<OpenCodeResult<string>> => {
+    if (!integrationID) return { error: { ...INTEGRATION_ID_REQUIRED_ERROR } };
+    const result = await request<unknown>(
+      `/api/integration/${pathSegment(integrationID)}/connect/oauth/${pathSegment(attemptID)}/complete`,
+      { method: "POST", body: { code: code ?? null } },
+    );
+    return isOpenCodeError(result) ? result : "complete";
+  },
 
-  cancelIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<string>> =>
-    request<string>(`/api/integration/attempt/${pathSegment(attemptID)}`, { method: "DELETE" }),
+  cancelIntegrationAttempt: async (
+    attemptID: string,
+    integrationID?: string,
+  ): Promise<OpenCodeResult<string>> => {
+    if (!integrationID) return { error: { ...INTEGRATION_ID_REQUIRED_ERROR } };
+    const result = await request<unknown>(
+      `/api/integration/${pathSegment(integrationID)}/connect/oauth/${pathSegment(attemptID)}`,
+      { method: "DELETE" },
+    );
+    return isOpenCodeError(result) ? result : "cancelled";
+  },
 
   /* ── Auth ── */
 
+  /**
+   * v2 stores provider credentials as integration connections, so an API-key
+   * apply maps to POST /api/integration/{providerID}/connect/key. Other v1
+   * auth types (well-known, OAuth) are separate v2 flows and fail closed here.
+   */
   addAuth: (
     providerID: string,
     body: AuthRequestBody,
-    directory?: string,
+    _directory?: string,
     signal?: AbortSignal,
-  ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${pathSegment(providerID)}`, {
-      method: "PUT",
-      body,
-      query: { directory },
+  ): Promise<OpenCodeResult<unknown>> => {
+    if (body.type !== "api" || typeof body.key !== "string" || body.key.length === 0) {
+      return Promise.resolve({
+        error: {
+          code: "OPENCODE_V2_AUTH_TYPE_UNAVAILABLE",
+          message: "OpenCode v2 stores API-key credentials through integration key connections",
+        },
+      });
+    }
+    return request<unknown>(`/api/integration/${pathSegment(providerID)}/connect/key`, {
+      method: "POST",
+      body: { key: body.key },
       signal,
       sanitizedUpstreamError: PROVIDER_AUTH_APPLY_ERROR,
       safeProviderOperation: "provider_auth_apply",
-    }),
+    });
+  },
 
-  deleteAuth: (
+  /**
+   * v2 removes stored credentials by credential ID, so this resolves the
+   * provider's credential connections first. A provider with no credential
+   * connection is already disconnected and resolves successfully.
+   */
+  deleteAuth: async (
     providerID: string,
-    directory?: string,
+    _directory?: string,
     signal?: AbortSignal,
-  ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/auth/${pathSegment(providerID)}`, {
-      method: "DELETE",
-      query: { directory },
+  ): Promise<OpenCodeResult<unknown>> => {
+    const integrations = await v2Data<V2IntegrationInfo[]>("/api/integration", {
       signal,
       sanitizedUpstreamError: PROVIDER_AUTH_REMOVE_ERROR,
       safeProviderOperation: "provider_auth_remove",
-    }),
+    });
+    if (isOpenCodeError(integrations)) return integrations;
+    const integration = integrations.find((candidate) => candidate.id === providerID);
+    const credentials = (integration?.connections ?? []).filter(
+      (connection): connection is { type: string; id: string } =>
+        connection.type === "credential" && typeof connection.id === "string",
+    );
+    if (credentials.length === 0) return true;
+    for (const credential of credentials) {
+      const removed = await request<unknown>(`/api/credential/${pathSegment(credential.id)}`, {
+        method: "DELETE",
+        signal,
+        sanitizedUpstreamError: PROVIDER_AUTH_REMOVE_ERROR,
+        safeProviderOperation: "provider_auth_remove",
+      });
+      if (isOpenCodeError(removed)) return removed;
+    }
+    return true;
+  },
 
   getAuthStatus: async (
-    directory?: string,
+    _directory?: string,
     signal?: AbortSignal,
   ): Promise<OpenCodeResult<AuthStatusResponse>> => {
     const result = await request<V2Response<IntegrationInfo[]>>("/api/integration", {
-      query: { "location.directory": directory },
       signal,
       sanitizedUpstreamError: PROVIDER_AUTH_STATUS_ERROR,
       safeProviderOperation: "provider_auth_status",
     });
     if (isOpenCodeError(result)) return result;
     return {
-      providers: result.data.map((integration) => ({
-        providerId: integration.id,
-        name: integration.name,
-        connected: integration.connections.length > 0,
-        keySet: integration.connections.some((connection) => connection.type === "credential"),
-      })),
+      providers: result.data.map((integration) => {
+        const connections = Array.isArray(integration.connections) ? integration.connections : [];
+        return {
+          providerId: integration.id,
+          name: integration.name,
+          connected: connections.length > 0,
+          keySet: connections.some((connection) => connection.type === "credential"),
+        };
+      }),
     };
   },
 
   /* ── Agents ── */
 
-  listAgents: (): Promise<OpenCodeResult<AgentInfo[]>> =>
-    request<AgentInfo[]>("/agent"),
+  /** GET /api/agent [agent.list] — v2 agents expose `permissions`, not `permission`. */
+  listAgents: async (): Promise<OpenCodeResult<AgentInfo[]>> => {
+    const result = await v2Data<V2AgentInfo[]>("/api/agent");
+    if (isOpenCodeError(result)) return result;
+    return result.map((agent) => ({
+      id: agent.id,
+      name: agent.name,
+      description: agent.description ?? "",
+      mode: agent.mode,
+      hidden: agent.hidden === true,
+      permission: Array.isArray(agent.permissions)
+        ? agent.permissions.map((rule) => ({ permission: rule.action, pattern: rule.resource, action: rule.effect }))
+        : [],
+      options: {},
+    }));
+  },
 
-   /* ── Skills (GET /skill works, but we DO NOT proxy it — skills are
+   /* ── Skills (GET /api/skill works, but we DO NOT proxy it — skills are
          managed by the Ingenium skill system, not OpenCode) ── */
 
-  listSkills: (): Promise<OpenCodeResult<SkillInfo[]>> =>
-    request<SkillInfo[]>("/skill"),
+  listSkills: async (): Promise<OpenCodeResult<SkillInfo[]>> => {
+    const result = await v2Data<V2SkillInfo[]>("/api/skill");
+    if (isOpenCodeError(result)) return result;
+    return result.map((skill) => ({
+      name: skill.name,
+      description: skill.description ?? "",
+      location: skill.path,
+      content: skill.content,
+    }));
+  },
 
   /* ── MCP ── */
 
-  getMCPStatus: (directory?: string): Promise<OpenCodeResult<Record<string, McpServerInfo>>> =>
-    request<Record<string, McpServerInfo>>("/mcp", {
-      query: { directory },
+  /** GET /api/mcp [mcp.list] — v2 returns a server array; the route contract is keyed by name. */
+  getMCPStatus: async (_directory?: string): Promise<OpenCodeResult<Record<string, McpServerInfo>>> => {
+    const result = await v2Data<V2McpServer[]>("/api/mcp", {
       sanitizedUpstreamError: { code: "MCP_STATUS_FAILED", message: "OpenCode request failed" },
-    }),
+    });
+    if (isOpenCodeError(result)) return result;
+    const servers: Record<string, McpServerInfo> = {};
+    for (const server of result) {
+      if (typeof server?.name !== "string" || server.name.length === 0) continue;
+      const status = normalizeMcpConnectionStatus(server.status?.status);
+      servers[server.name] = {
+        name: server.name,
+        ...(status === undefined ? {} : { status }),
+        ...(typeof server.status?.error === "string" ? { error: server.status.error } : {}),
+      };
+    }
+    return servers;
+  },
 
+  /** POST /api/experimental/mcp/{server}/connect [experimental.mcp.connect]. */
   connectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${pathSegment(name)}/connect`, {
+    request<unknown>(`/api/experimental/mcp/${pathSegment(name)}/connect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
+  /** POST /api/experimental/mcp/{server}/disconnect [experimental.mcp.disconnect]. */
   disconnectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/mcp/${pathSegment(name)}/disconnect`, {
+    request<unknown>(`/api/experimental/mcp/${pathSegment(name)}/disconnect`, {
       method: "POST",
       sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
   /* ── Permissions ── */
 
-  /**
-   * Get pending permission requests (global).
-    * Retained contract: GET /permission returns an array of PermissionRequest objects.
-   */
-  getPermissions: (directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> =>
-    request<PermissionRequest[]>("/permission", { query: { directory } }),
+  /** GET /api/permission/request [permission.request.list]. */
+  getPermissions: async (_directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> => {
+    const result = await v2Data<V2PermissionRequest[]>("/api/permission/request");
+    if (isOpenCodeError(result)) return result;
+    return result.map((request) => ({
+      id: request.id,
+      permission: request.action,
+      pattern: Array.isArray(request.resources) ? request.resources.join("\n") : "",
+      action: request.action,
+      sessionID: request.sessionID,
+    }));
+  },
 
   /**
    * Reply to a session-scoped permission request.
-    * Retained contract: POST /session/{sessionId}/permissions/{permissionId}
-   *   body: { "response": "once" | "always" | "reject" }
+   * POST /api/session/{sessionID}/permission/{requestID}/reply
+   * [session.permission.reply]; v2 names the decision field `decision`.
    */
   replyPermission: (
     sessionId: string,
     permissionId: string,
     body: PermissionReplyBody,
-    directory?: string,
+    _directory?: string,
   ): Promise<OpenCodeResult<unknown>> =>
-    request<unknown>(`/session/${pathSegment(sessionId)}/permissions/${pathSegment(permissionId)}`, {
+    request<unknown>(`/api/session/${pathSegment(sessionId)}/permission/${pathSegment(permissionId)}/reply`, {
       method: "POST",
-      body,
-      query: { directory },
+      body: { decision: body.response },
     }),
 
   /* ── Questions ── */
 
   /**
-   * Get pending questions (global).
-    * Retained contract: GET /question returns an array of QuestionInfo objects.
-   * Note: Questions also arrive via SSE events and message parts.
+   * v2 replaced the v1 question queue with forms. GET /api/form [form.list]
+   * returns pending forms for the location; the retained question contract is
+   * projected from each form's id and title.
    */
-  getQuestions: (directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> =>
-    request<QuestionInfo[]>("/question", { query: { directory } }),
+  getQuestions: async (_directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> => {
+    const result = await v2Data<V2FormInfo[]>("/api/form");
+    if (isOpenCodeError(result)) return result;
+    return result.map((form) => ({ id: form.id, text: form.title, sessionID: form.sessionID }));
+  },
 
   /* ── SSE ── */
 
   /**
-   * Returns a ReadableStream piping SSE events from the OpenCode /event endpoint.
-    * Retained contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
-   * When `sessionId` is provided, events are filtered to that session.
-   * When `directory` is provided, events are filtered to that directory.
+   * GET /api/event [event.subscribe]. v2 streams native events across every
+   * location and accepts no `session`/`directory` query filters, so subscribers
+   * receive the full stream and filter by `properties.sessionID` themselves
+   * (the dashboard already does this).
    */
   streamEvents: (
-    sessionId?: string,
-    directory?: string,
+    _sessionId?: string,
+    _directory?: string,
     lastEventId?: string,
   ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> =>
     streamRequest(
-      "/event",
-      {
-        session: sessionId,
-        directory,
-      },
+      "/api/event",
+      undefined,
       lastEventId ? { "Last-Event-ID": lastEventId } : undefined,
     ),
 };

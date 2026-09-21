@@ -275,9 +275,9 @@ require_literal "$dockerfile" 'chmod 0755 /app /app/packages /app/services /app/
 require_literal "$dockerfile" 'chmod 0555 /app/scripts /app/entrypoint.sh /app/scripts/*.sh'
 require_literal "$dockerfile" 'chmod 0444 /app/control-plane-supervisord.conf /app/runtime-supervisord.conf /app/supervisord.conf /app/scripts/*.mjs'
 require_literal "$dockerfile" 'node /app/scripts/validate-root-entrypoint-chain.mjs'
-require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /etc/opencode'
+require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode'
 require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json'
-require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/enforce-reserved-broker.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs'
+require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs'
 require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md'
 require_literal "$dockerfile" 'ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json'
 require_literal "$dockerfile" 'import("file:///app/packages/ingenium-core/dist/lib/index.js")'
@@ -402,9 +402,9 @@ for binding in 'INGENIUM_PROJECT ingenium' 'INGENIUM_WORKSPACE_ID shared-memory-
   require_literal "$entrypoint" "\"$name\": \"$value\""
   require_literal "${repo_root}/scripts/project-opencode-global-config.mjs" "environment.$name = \"$value\";"
 done
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts"'
-  require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts"'
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
+require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync"'
+  require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle"'
+require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"'
 require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups'
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'

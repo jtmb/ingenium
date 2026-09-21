@@ -32,17 +32,17 @@ async function write(value) {
   if (!process.stdout.write(value)) await once(process.stdout, "drain");
 }
 
-async function writeExport(megabytes) {
-  await write(JSON.stringify({ info: { id: process.argv[3], directory: process.cwd() } }).slice(0, -1)
-    + ',"messages":[{"info":' + JSON.stringify({ id: "message", sessionID: process.argv[3], role: "user" })
+async function writeExport(megabytes, session) {
+  await write(JSON.stringify({ info: { id: session, directory: process.cwd() } }).slice(0, -1)
+    + ',"messages":[{"info":' + JSON.stringify({ id: "message", sessionID: session, role: "user" })
     + ',"parts":[{"type":"text","text":"');
   const chunk = "x".repeat(1024 * 1024);
   for (let index = 0; index < megabytes; index += 1) await write(chunk);
   await write('"}]}]}');
 }
 
-async function writeNormalizedExport(megabytes) {
-  const info = { id: process.argv[3], directory: process.cwd(), projectID: "project-frozen", time: { created: 1, updated: 100 } };
+async function writeNormalizedExport(megabytes, session) {
+  const info = { id: session, directory: process.cwd(), projectID: "project-frozen", time: { created: 1, updated: 100 } };
   const user = { info: { id: "m1", sessionID: info.id, role: "user", time: { created: 10 } }, parts: [{ type: "text", text: "first visible" }] };
   const assistant = { id: "m2", sessionID: info.id, role: "assistant", time: { created: 20, completed: 100 } };
   await write('{"info":' + JSON.stringify(info) + ',"messages":[' + JSON.stringify(user)
@@ -53,38 +53,41 @@ async function writeNormalizedExport(megabytes) {
 }
 
 async function main() {
-  if (process.argv[2] !== "export" || !process.argv[3]) process.exit(97);
+  // v2 CLI: opencode session export <session> --standalone.
+  if (process.argv[2] !== "session" || process.argv[3] !== "export" || !process.argv[4]
+    || process.argv[5] !== "--standalone") process.exit(97);
+  const session = process.argv[4];
   switch (process.env.FAKE_EXPORT_MODE) {
     case "redaction":
-      await write(JSON.stringify({ info: { id: process.argv[3], directory: process.cwd() }, messages: [
-        { info: { id: "m1", sessionID: process.argv[3], role: "user" }, parts: [
+      await write(JSON.stringify({ info: { id: session, directory: process.cwd() }, messages: [
+        { info: { id: "m1", sessionID: session, role: "user" }, parts: [
           { type: "text", text: "token=" + process.env.FAKE_VALUE },
           { type: "reasoning", text: "not retained" },
         ] },
-        { info: { id: "m2", sessionID: process.argv[3], role: "assistant" }, parts: [{ type: "text", text: "unfinished" }] },
+        { info: { id: "m2", sessionID: session, role: "assistant" }, parts: [{ type: "text", text: "unfinished" }] },
       ] }));
       return;
     case "large":
-      await writeExport(51);
+      await writeExport(51, session);
       return;
     case "normalized-large":
-      await writeNormalizedExport(98);
+      await writeNormalizedExport(98, session);
       return;
     case "oversize":
-      await writeExport(65);
+      await writeExport(65, session);
       return;
     case "source-oversize":
-      await writeNormalizedExport(129);
+      await writeNormalizedExport(129, session);
       return;
     case "partial":
       await write('{"info":{"id":"fake-export"},"messages":[');
       return;
     case "nonzero":
-      await writeExport(1);
+      await writeExport(1, session);
       process.exitCode = 9;
       return;
     case "eof-without-exit":
-      await writeExport(1);
+      await writeExport(1, session);
       process.stdout.end();
       setInterval(() => {}, 1_000);
       return;
@@ -104,7 +107,7 @@ async function main() {
       process.exitCode = 9;
       return;
     default:
-      await writeExport(1);
+      await writeExport(1, session);
   }
 }
 

@@ -2,10 +2,10 @@
 import { closeSync, constants, fchmodSync, fchownSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, resolve } from "node:path";
-import { CANONICAL_PLUGIN_SPECS } from "../packages/ingenium-extension/plugin-specs.mjs";
+import { CANONICAL_PLUGIN_SPECS_V2 } from "../packages/ingenium-extension/plugin-specs.mjs";
 
 const DEFAULT_CONFIG = "opencode.jsonc";
-const REQUIRED_PLUGINS = CANONICAL_PLUGIN_SPECS;
+const REQUIRED_PLUGINS = CANONICAL_PLUGIN_SPECS_V2;
 const MANAGED_AGENT_NAMES = new Set([
   "plan", "build", "general", "explore",
   "ingenium-docs", "ingenium-qa",
@@ -21,7 +21,12 @@ function isRecord(value) {
 }
 
 function hasDefaultDeny(value) {
-  return value === "deny" || (isRecord(value) && value["*"] === "deny");
+  if (value === "deny" || (isRecord(value) && value["*"] === "deny")) return true;
+  // V2 agent permissions are an ordered rule array; a terminal wildcard deny
+  // is the equivalent guarantee.
+  return isRecord(value) && Array.isArray(value.permissions)
+    && value.permissions.some((rule) => isRecord(rule)
+      && rule.action === "*" && rule.resource === "*" && rule.effect === "deny");
 }
 
 /** Remove JSONC comments without changing string literal contents. */
@@ -124,7 +129,10 @@ function readConfig(configPath) {
 
 function isManagedPlugin(value) {
   return typeof value === "string" && (
-    /(?:^|\/)(?:auto-observer|observer|resource-sync|lifecycle)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
+    // V2 adapter directories.
+    /(?:^|\/)plugins\/v2\/(?:auto-observer|observer|resource-sync|lifecycle|ponytail)(?:\/|$)/.test(value)
+    // Legacy V1 file entries retained in persistent configs.
+    || /(?:^|\/)(?:auto-observer|observer|resource-sync|lifecycle)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
     || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)
     || /(?:^|\/)\.opencode\/plugins\/ponytail\.mjs$/.test(value)
   );
@@ -177,7 +185,8 @@ function writeAtomically(configPath, value) {
  */
 export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   const config = readConfig(configPath);
-  const agent = isRecord(config.agent) ? { ...config.agent } : {};
+  const agentsSource = isRecord(config.agents) ? config.agents : (isRecord(config.agent) ? config.agent : {});
+  const agent = { ...agentsSource };
   for (const [name, value] of Object.entries(agent)) {
     if (RETIRED_AGENT_NAMES.has(name)) {
       delete agent[name];
@@ -200,8 +209,9 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
     if (Object.keys(projection).length > 0) agent[name] = projection;
     else delete agent[name];
   }
-  if (Object.keys(agent).length > 0) config.agent = agent;
-  else delete config.agent;
+  if (Object.keys(agent).length > 0) config.agents = agent;
+  else delete config.agents;
+  delete config.agent;
 
   const mcp = isRecord(config.mcp) ? config.mcp : {};
   delete mcp.ponytail;
@@ -229,12 +239,19 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   };
   config.mcp = mcp;
 
-  const existingPlugins = Array.isArray(config.plugin) ? config.plugin : [];
+  const existingPlugins = Array.isArray(config.plugins) ? config.plugins : [];
   const retainedPlugins = existingPlugins.filter((entry) => !isManagedPlugin(entry));
-  config.plugin = [
+  config.plugins = [
     ...retainedPlugins,
     ...REQUIRED_PLUGINS.filter((entry) => !retainedPlugins.includes(entry)),
   ];
+  // Legacy V1 entries cannot load under V2. Drop the container-owned ones while
+  // preserving operator entries that are not part of the bootstrap contract.
+  if (Array.isArray(config.plugin)) {
+    const retainedLegacy = config.plugin.filter((entry) => !isManagedPlugin(entry));
+    if (retainedLegacy.length > 0) config.plugin = retainedLegacy;
+    else delete config.plugin;
+  }
 
   mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
   writeAtomically(configPath, config);

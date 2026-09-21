@@ -61,6 +61,23 @@ require_http_ok() {
   fi
 }
 
+# OpenCode V2 requires HTTP basic auth. Use the provisioned secret without
+# exposing it on the process command line.
+require_authenticated_http_ok() {
+  name="$1"
+  url="$2"
+  password_file="$3"
+  if [ ! -r "$password_file" ]; then
+    echo "ERROR: OpenCode readiness secret is unavailable: $name ($password_file)"
+    exit 1
+  fi
+  if ! printf 'user = "opencode:%s"\n' "$(cat "$password_file")" \
+    | curl --fail --silent --max-time 5 --config - --output /dev/null "$url"; then
+    echo "ERROR: HTTP readiness check failed: $name ($url)"
+    exit 1
+  fi
+}
+
 require_gateway_status() {
   name="$1"
   host="$2"
@@ -142,7 +159,8 @@ require_gateway_status "dashboard gateway" "localhost" "/login" "200"
 require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/login" "200"
 require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/bootstrap/status" "200"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
-  require_http_ok "OpenCode Web" "http://127.0.0.1:4098/"
+  require_authenticated_http_ok "OpenCode Web" "http://127.0.0.1:4098/api/info" "${OPENCODE_SERVER_PASSWORD_FILE:-/run/ingenium-secrets/opencode/opencode-server-password}"
+
   require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
   require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
   require_gateway_status "VS Code gateway root" "vscode.localhost" "/" "302"

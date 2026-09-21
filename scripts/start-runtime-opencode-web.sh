@@ -9,6 +9,13 @@ for name in INGENIUM_API_URL INGENIUM_PROJECT INGENIUM_PROJECT_ID INGENIUM_ORGAN
   fi
 done
 
+password_file="${OPENCODE_SERVER_PASSWORD_FILE:-/run/ingenium-runtime/opencode-server-password}"
+if [ ! -r "$password_file" ]; then
+  echo "ERROR: runtime OpenCode server secret is unavailable: $password_file"
+  exit 1
+fi
+opencode_server_password="$(cat "$password_file")"
+
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   PWD="/app" \
@@ -17,7 +24,7 @@ exec env -i \
   XDG_DATA_HOME="/home/appuser/.local/share" \
   XDG_STATE_HOME="/home/appuser/.local/state" \
   OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime" \
-  OPENCODE_SERVER_PASSWORD="" \
+  OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
   INGENIUM_API_URL="$INGENIUM_API_URL" \
   INGENIUM_PROJECT="$INGENIUM_PROJECT" \
   INGENIUM_PROJECT_ID="$INGENIUM_PROJECT_ID" \

@@ -141,7 +141,7 @@ docker run --rm --user "$user" --entrypoint sh "$IMAGE" -ec '
     /app/services/ingenium-api/dist/scripts/restore-maintenance.js \
     /app/packages/ingenium-core/dist/lib/index.js \
     /usr/local/share/ingenium/opencode-managed/opencode.json \
-    /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs \
+    /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs \
     /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md \
     /etc/opencode/opencode.json; do
     if { printf tamper >> "$artifact"; } 2>/dev/null; then exit 1; fi
@@ -149,7 +149,7 @@ docker run --rm --user "$user" --entrypoint sh "$IMAGE" -ec '
     printf replacement > "$replacement"
     if mv -f "$replacement" "$artifact" 2>/dev/null; then exit 1; fi
   done
-  for directory in /app/scripts /app/node_modules /app/packages/ingenium-core /app/services/ingenium-api/dist /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /etc/opencode; do
+  for directory in /app/scripts /app/node_modules /app/packages/ingenium-core /app/services/ingenium-api/dist /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode; do
     if mv "$directory" "$directory.replaced" 2>/dev/null; then exit 1; fi
   done
   broker=/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md

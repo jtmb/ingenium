@@ -43,6 +43,26 @@
       "types": "./dist/plugins/lifecycle.d.ts",
       "import": "./dist/plugins/lifecycle.js"
     },
+    "./plugins/v2/auto-observer": {
+      "types": "./dist/plugins/v2/auto-observer/index.d.ts",
+      "import": "./dist/plugins/v2/auto-observer/index.js"
+    },
+    "./plugins/v2/observer": {
+      "types": "./dist/plugins/v2/observer/index.d.ts",
+      "import": "./dist/plugins/v2/observer/index.js"
+    },
+    "./plugins/v2/resource-sync": {
+      "types": "./dist/plugins/v2/resource-sync/index.d.ts",
+      "import": "./dist/plugins/v2/resource-sync/index.js"
+    },
+    "./plugins/v2/lifecycle": {
+      "types": "./dist/plugins/v2/lifecycle/index.d.ts",
+      "import": "./dist/plugins/v2/lifecycle/index.js"
+    },
+    "./plugins/v2/ponytail": {
+      "types": "./dist/plugins/v2/ponytail/index.d.ts",
+      "import": "./dist/plugins/v2/ponytail/index.js"
+    },
     "./plugins/ponytail": "./ponytail/.opencode/plugins/ponytail.mjs",
     "./plugin-specs": "./plugin-specs.mjs",
     "./onboarding-sync": {
@@ -62,7 +82,15 @@
     "ingenium-coordination-reset": "./dist/scripts/coordination-reset.js",
     "ingenium-opencode": "./dist/scripts/opencode.js"
   },
-  "files": ["dist/", "context-upload-codec.mjs", "context-upload-codec.d.mts", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/"],
+  "files": [
+    "dist/",
+    "context-upload-codec.mjs",
+    "context-upload-codec.d.mts",
+    "scripts/recovery-bootstrap.js",
+    "README.md",
+    "plugin-specs.mjs",
+    "ponytail/"
+  ],
   "scripts": {
     "build": "node scripts/build-distributions.mjs",
     "install:host-build": "node scripts/install-host-build.mjs",
@@ -78,6 +106,7 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "@opencode-ai/plugin": "1.18.31",
     "@opencode-ai/sdk": "1.18.31",
+    "@opencode/plugin": "2.0.11",
     "pino": "^9.0.0"
   }
 }

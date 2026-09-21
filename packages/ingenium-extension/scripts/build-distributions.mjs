@@ -11,7 +11,12 @@ const EXTENSION_EXECUTABLES = [
 ].map((name) => `scripts/${name}.js`);
 const EXTENSION_REQUIRED = [
   "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", ...EXTENSION_EXECUTABLES,
-  ...["auto-observer", "observer", "resource-sync", "lifecycle"].map((name) => `plugins/${name}.js`),
+  ...[
+    "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
+  ].flatMap((name) => [
+    ...(name === "ponytail" ? [] : [`plugins/${name}.js`]),
+    `plugins/v2/${name}/index.js`,
+  ]),
 ];
 const SERVER_REQUIRED = ["config/index.js", "lib/client.js", "scripts/mcp-server.js"];
 

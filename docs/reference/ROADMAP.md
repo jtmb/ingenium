@@ -10743,3 +10743,66 @@ follow-up task is requested by this record.
   historical roadmap evidence, and perform only separately authorized deployment,
   live-session, or restart acceptance. This marker does not claim overall rollout
   completion or `PASS`.
+
+## OpenCode v2 redundancy-removal boundary — 2026-09-20
+
+- **Scope/status:** **COMPLETE for this source, deployment, and acceptance
+  boundary.** Orchestration migration and recovery repair were explicitly out of
+  scope. The extension no longer publishes custom current-parent recovery state
+  from the idle hook or maintains the redundant `recoverySessionMessage`
+  projection. Native OpenCode v2 session/message reads, context upload, and
+  external-usage collection remain.
+- **Changed paths:**
+  `packages/ingenium-extension/lifecycle.ts`,
+  `packages/ingenium-extension/lifecycle.test.ts`,
+  `packages/ingenium-extension/opencode-v2.ts`,
+  `packages/ingenium-extension/opencode-v2.test.ts`, and
+  `packages/ingenium-extension/scripts/production-restart.ts`.
+- **Source/test evidence:** Focused Vitest run passed `2` files and `6` tests;
+  extension typecheck passed; `git diff --check` passed. Repository search found
+  no remaining caller of the removed projection or lifecycle publication. The
+  retained v2 helpers remain used by context upload, external usage, observer,
+  and focused tests.
+- **Deployment evidence:** Premium rebuilt the current worktree source at HEAD
+  `be080e2d73822bf67d068a9874c8d29887e1ced9` with worktree diff SHA-256
+  `40336d65729781e1db621131c0ab32735cec888b7a6aee150f071591b74872d3`.
+  Compatibility container `6c4faf2446ad16dc750d67bf31a8dde935b8f7f3b9da0997137d8a04615e4e36`
+  and image `sha256:609659532d7ee24631d373ca31228ca4a275a33f351628be90c82ad8154de981`
+  were healthy; API health, dashboard, OpenCode Web, CLI, and VS Code returned
+  HTTP `200`. The host parent/predecessor was not signalled, stopped, or
+  restarted.
+- **Review evidence:** The delegated QA child failed before review with the
+  internal signature `QA_CONTRACT_INTAKE_INCOMPLETE` because its prompt omitted
+  the explicit stop-condition and escalation fields. No QA code review ran and
+  no source finding resulted. One direct bounded review then completed with no
+  `BLOCKING` findings; no QA replay was performed.
+- **Tool-policy evidence:** One optional diff-hash command was denied by the
+  repository Bash policy with signature `BASH_PERMISSION_DENIED`; it was not
+  retried. The deployment manifest's unchanged diff hash and the exact five-path
+  source diff remain the accepted evidence.
+- **Recovery boundary:** The earlier mutation-free preflight rejection at
+  `reconcile.retained` (`RECOVERY_PREPARATION_RETAINED_RECONCILIATION_UNAVAILABLE`)
+  remains preserved historical evidence. No recovery retry, parent restart,
+  protected-state mutation, or orchestration migration occurred in this
+  boundary.
+- **Evidence classes:** Source tests/typecheck prove checked source behavior;
+  the deployment record proves the rebuilt runtime route health; the direct
+  review proves only the changed-file acceptance boundary. No model/session proof
+  or recovery acceptance is claimed.
+- **Next work:** None for this boundary. The five extension source changes and
+  this append-only roadmap marker remain unstaged; no commit was requested.
+
+## OpenCode v2 descending-cursor continuation — 2026-09-21
+
+- **Scope/status:** **COMPLETE for source and focused-test evidence.** The V2
+  plugin session adapter now carries descending order in its synthetic cursor,
+  so cursor follow-ups cannot silently revert to ascending order.
+- **Changed paths:** `packages/ingenium-extension/plugin-v2.ts` and
+  `packages/ingenium-extension/plugin-v2.test.ts` within the existing unstaged
+  V2 plugin-port wave.
+- **Evidence:** Focused Vitest passed `2` files and `9` tests; extension
+  typecheck and focused `git diff --check` passed. The first npm-tool attempts
+  did not execute because its shared command lock rejected the descriptor;
+  sequential shell verification was the distinct successful path.
+- **Boundary:** No deployment, parent restart, MCP repair, commit, or model/session
+  acceptance was performed. The broader shared migration diff was preserved.

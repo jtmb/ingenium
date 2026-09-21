@@ -122,6 +122,18 @@ function pruneOAuthAttempts(): void {
   }
 }
 
+/**
+ * OpenCode v2 nests OAuth attempts under their integration. The pending map is
+ * the only owner record inside this process, so recover the integration ID from
+ * it before asking the client for an attempt-scoped operation.
+ */
+function resolveAttemptIntegrationID(attemptID: string): string | undefined {
+  for (const attempt of pendingOAuthAttempts.values()) {
+    if (attempt.attemptID === attemptID) return attempt.providerId;
+  }
+  return undefined;
+}
+
 function oauthCallbackPage(res: Response, status: number, title: string, message: string): void {
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character]!);
   const nonce = randomBytes(16).toString("base64");
@@ -198,7 +210,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
       const params = new URLSearchParams({ state, ...(providerError ? { error: providerError } : {}) });
       forwardAutoOAuthCallback(params, "Auto OAuth cancellation forward failed");
     } else {
-      await opencodeClient.cancelIntegrationAttempt(attempt.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(attempt.attemptID, attempt.providerId);
     }
     oauthCallbackPage(res, 400, "Authorization was cancelled", "Return to Ingenium to try again.");
     return;
@@ -215,7 +227,7 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
   }
 
   try {
-    const result = await opencodeClient.completeIntegrationAttempt(attempt.attemptID, code);
+    const result = await opencodeClient.completeIntegrationAttempt(attempt.attemptID, code, attempt.providerId);
     if (isOpenCodeError(result)) {
       logger.warn(SOURCE, `OAuth callback completion failed: ${result.error.code}`);
       oauthCallbackPage(res, 502, "Authorization could not be completed", "Return to Ingenium and try again.");
@@ -1240,7 +1252,7 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
   }
   const result = await opencodeClient.beginIntegrationOAuth(req.params.integrationID!, req.body.methodID, inputs);
   if (!isOpenCodeError(result) && !isSafeOAuthUrl(result.data.url)) {
-    await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+    await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
     res.status(502).json({ error: { code: "UNSAFE_OAUTH_URL", message: "Provider returned an unsafe authorization URL" } });
     return;
   }
@@ -1248,13 +1260,13 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     const callbackUrl = new URL(result.data.url);
     const state = callbackUrl.searchParams.get("state");
     if (!state || state.length > 1024 || /[\r\n\0]/.test(state)) {
-      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
       return;
     }
     const principal = req.principal;
     if (!principal) {
-      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(401).json({ error: { code: "UNAUTHORIZED", message: "Authentication is required" } });
       return;
     }
@@ -1263,7 +1275,7 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     const ownerUserId = null;
     pruneOAuthAttempts();
     if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
-      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(503).json({ error: { code: "OAUTH_CAPACITY_REACHED", message: "Too many pending authorization requests. Try again shortly." } });
       return;
     }
@@ -1289,7 +1301,9 @@ opencodeRouter.get("/integration-attempts/:attemptID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
     return;
   }
-  const result = await opencodeClient.getIntegrationAttempt(req.params.attemptID!);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.getIntegrationAttempt(req.params.attemptID!, integrationID);
   sendResult(req, res, result);
 });
 
@@ -1300,7 +1314,9 @@ opencodeRouter.post("/integration-attempts/:attemptID/complete", async (req, res
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth completion request" } });
     return;
   }
-  const result = await opencodeClient.completeIntegrationAttempt(req.params.attemptID!, code);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.completeIntegrationAttempt(req.params.attemptID!, code, integrationID);
   sendResult(req, res, result);
 });
 
@@ -1310,7 +1326,9 @@ opencodeRouter.delete("/integration-attempts/:attemptID", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
     return;
   }
-  const result = await opencodeClient.cancelIntegrationAttempt(req.params.attemptID!);
+  const integrationID = resolveAttemptIntegrationID(req.params.attemptID!)
+    ?? (typeof req.query.integrationID === "string" ? req.query.integrationID : undefined);
+  const result = await opencodeClient.cancelIntegrationAttempt(req.params.attemptID!, integrationID);
   sendResult(req, res, result);
 });
 

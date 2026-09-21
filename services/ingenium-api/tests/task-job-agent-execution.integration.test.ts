@@ -107,7 +107,7 @@ describe("caller-orchestrated task job execution", () => {
       mkdirSync(fakeBin, { recursive: true });
       writeFileSync(fakeOpenCode, `#!/bin/sh
 set -eu
-if [ "$#" -ne 8 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ] || [ "$6" != "--pure" ] || [ "$7" != "--dir" ] || [ "$8" != "/workspace" ]; then
+if [ "$#" -ne 6 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ] || [ "$6" != "--standalone" ]; then
   printf '%s\\n' 'fixture-argv-mismatch' >&2
   exit 64
 fi

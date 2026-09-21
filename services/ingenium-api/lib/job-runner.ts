@@ -1546,11 +1546,13 @@ function completeJobSpawnFailure(
 }
 
 /**
- * Execute a job run by spawning the opencode CLI.
+ * Execute a job run by spawning the opencode v2 CLI.
  *
- * Feasibility gate: OpenCode 1.18.31 supports `opencode run "<prompt>" --agent <name>`
- * The message is a positional argument, not a flag. The `--auto` flag enables
- * non-interactive auto-approval of permissions.
+ * v2 feasibility gate: `opencode run "<prompt>" --agent <name> --auto` is
+ * supported, and the working directory is the process cwd (v1's `--pure` and
+ * `--dir` flags were removed). `--standalone` keeps the run on a private server
+ * instead of attaching to the shared background service, which preserves v1's
+ * no-shared-plugin-state isolation for vault runs.
  */
 export async function executeJobRun(
   runId: string,
@@ -1661,19 +1663,20 @@ export async function executeJobRun(
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  const args = ["run", prompt, "--agent", job.agent, "--auto", "--pure", "--dir", "/workspace"];
+  const args = ["run", prompt, "--agent", job.agent, "--auto", "--standalone"];
 
   // Prompts are user-authored and can contain credentials. Do not log the CLI
   // arguments or rendered template, even at debug level.
   logger.info("job-runner", `Starting OpenCode process for run ${runId} (agent: ${safeJobLogText(job.agent, 128)})`);
 
-  // Job runs start from their tmpfs home and use the supported --dir option for
-  // workspace access. --pure prevents project/global plugins from sending a
-  // vault session to persistent OpenCode, API, or MCP state.
+  // v2 resolves the workspace from the process cwd; the vault runtime still
+  // supplies the private HOME/XDG directories through the environment.
+  // OPENCODE_DISABLE_PROJECT_CONFIG is deliberately not set: job agents are
+  // project-scoped, so the workspace project config is the agent authority.
   let proc: ChildProcess;
   try {
     proc = spawn("opencode", args, {
-      cwd: vaultRunFiles?.runtime.home ?? jobRunnerRuntime.workingDirectory,
+      cwd: jobRunnerRuntime.workingDirectory,
       env: buildJobProcessEnvironment(
         job.project_id,
         runNonce,

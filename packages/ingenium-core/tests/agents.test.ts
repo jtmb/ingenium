@@ -17,7 +17,7 @@ const canonicalBrokerProfile = readFileSync(
   "utf-8",
 );
 const canonicalProtectedConfig = readFileSync(resolve(__dirname, "../../../config/opencode-managed/opencode.json"), "utf-8");
-const canonicalBrokerEnforcer = readFileSync(resolve(__dirname, "../../../config/opencode-managed/enforce-reserved-broker.mjs"), "utf-8");
+const canonicalBrokerEnforcer = readFileSync(resolve(__dirname, "../../../config/opencode-managed/plugins/enforce-reserved-broker/index.mjs"), "utf-8");
 
 function brokerPath(): string {
   return join(root, ".opencode", "agents", "execution", "ingenium-llm-broker.md");
@@ -52,11 +52,12 @@ function protectedConfigPath(): string {
 function installProtectedOpenCodeFiles(): void {
   const protectedRoot = resolve(protectedConfigPath(), "..");
   const plugins = join(protectedRoot, "plugins");
-  mkdirSync(plugins, { recursive: true });
+  const enforcer = join(plugins, "enforce-reserved-broker");
+  mkdirSync(enforcer, { recursive: true });
   writeFileSync(protectedConfigPath(), canonicalProtectedConfig, { mode: 0o444 });
-  writeFileSync(join(plugins, "enforce-reserved-broker.mjs"), canonicalBrokerEnforcer, { mode: 0o444 });
+  writeFileSync(join(enforcer, "index.mjs"), canonicalBrokerEnforcer, { mode: 0o444 });
   chmodSync(protectedConfigPath(), 0o444);
-  chmodSync(join(plugins, "enforce-reserved-broker.mjs"), 0o444);
+  chmodSync(join(enforcer, "index.mjs"), 0o444);
 }
 
 function withTrustedOpenCodeChain<T>(operation: () => T): T {
@@ -67,6 +68,7 @@ function withTrustedOpenCodeChain<T>(operation: () => T): T {
     resolve(brokerPath(), ".."),
     resolve(protectedConfigPath(), ".."),
     join(resolve(protectedConfigPath(), ".."), "plugins"),
+    join(resolve(protectedConfigPath(), ".."), "plugins", "enforce-reserved-broker"),
   ];
   for (const directory of directories) chmodSync(directory, 0o555);
   try {

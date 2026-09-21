@@ -18,6 +18,7 @@ const launcher = readFileSync(`${process.argv[2]}/scripts/start-opencode-web.sh`
   .replaceAll('[ -s /run/ingenium-runtime/capability ]', '[ "${TEST_RUNTIME_CAPABILITY:-}" = present ]')
   .replace('. /run/ingenium-runtime/environment', 'eval "$TEST_RUNTIME_CONTENT"')
   .replace('[ ! -s /run/ingenium-opencode/.ingenium-mcp-credential ]', '[ 1 = 0 ]')
+  .replace('cat /run/ingenium-secrets/opencode/opencode-server-password', 'printf test-opencode-secret')
   .replace('node /app/scripts/probe-api.mjs', 'true')
   .replace('opencode serve --port 4098 --hostname 127.0.0.1', '/usr/bin/env');
 const launch = (env) => spawnSync('/bin/sh', ['-c', launcher], { env, encoding: 'utf8' });

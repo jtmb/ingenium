@@ -283,7 +283,7 @@ function runExport(worktree, session, timeoutMs, input) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      if (input !== "-") child = spawn("opencode", ["export", session, "--pure"], {
+      if (input !== "-") child = spawn("opencode", ["session", "export", session, "--standalone"], {
         cwd: worktree,
         // POSIX descendants share a group so timeout cleanup reaches helpers;
         // Windows falls back to terminating the direct child.

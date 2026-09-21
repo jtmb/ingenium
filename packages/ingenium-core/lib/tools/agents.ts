@@ -17,9 +17,9 @@ export const LLM_BROKER_METADATA = '{"hidden":true}';
 export const LLM_BROKER_SKILLS = "[]";
 export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-managed";
 export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
-export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker.mjs`;
-const LLM_BROKER_CONFIG_SHA256 = "956b2d514cbcb1478a21084292035fc0b6e7d05262c63c5867bb653e08e5662f";
-const LLM_BROKER_ENFORCER_SHA256 = "aae2499e9c1fa92e236d7f406df29720d2160447665f8fe792d24251543b84e1";
+export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker/index.mjs`;
+const LLM_BROKER_CONFIG_SHA256 = "75baf71481b764db9c8629fcea954660fd4db9a5ecfb268d85159b27b9782725";
+const LLM_BROKER_ENFORCER_SHA256 = "add90b77c093e3f59f4ab226bbbd989f5de8dc08c95b96996a8a85b4bbd316fc";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
 Its wildcard-deny permission boundary intentionally has no exceptions: it has no
@@ -293,14 +293,14 @@ function protectedArtifactLocation(file: "config" | "enforcer"): ProtectedArtifa
       root: deploymentRoot(),
       components: file === "config"
         ? [".opencode", "protected", "opencode.json"]
-        : [".opencode", "protected", "plugins", "enforce-reserved-broker.mjs"],
+        : [".opencode", "protected", "plugins", "enforce-reserved-broker", "index.mjs"],
     };
   }
   return {
     root: deploymentRoot(),
     components: file === "config"
       ? ["opencode.json"]
-      : ["plugins", "enforce-reserved-broker.mjs"],
+      : ["plugins", "enforce-reserved-broker", "index.mjs"],
   };
 }
 

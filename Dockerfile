@@ -59,18 +59,18 @@ RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
 LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}"
 
-ARG OPENCODE_VERSION=1.18.31
-ARG OPENCODE_SHA256=e9312be75ed803b7415fc2aeabda1f4fe938912a39673762dc0c38c0e11ebde4
+ARG OPENCODE_VERSION=2.0.11
+ARG OPENCODE_SHA256=59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13
 ARG CLOUDFLARED_VERSION=2026.8.3
 ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor nginx curl ca-certificates tzdata git acl libcap2-bin && \
     rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
+RUN curl -fsSL -o /tmp/opencode.tar.gz "https://opencode.ai/files/bin/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
     chmod +x /usr/local/bin/opencode && \
-    test "$(opencode --version)" = "${OPENCODE_VERSION}" && \
+    test "$(opencode --version)" = "opencode v${OPENCODE_VERSION}" && \
     opencode --version && \
     rm /tmp/opencode.tar.gz
 RUN curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-amd64" && \
@@ -252,9 +252,9 @@ COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/mi
 RUN chown -R root:root /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx && \
     chmod -R go-w /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx && \
     chmod 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md && \
-    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /etc/opencode && \
+    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode && \
     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
-    install -o root -g root -m 0444 /app/config/opencode-managed/enforce-reserved-broker.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs && \
+    install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs && \
     install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md && \
     ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json && \
     chown root:root /app /app/packages /app/services /app/services/ingenium-api /app/entrypoint.sh /app/control-plane-supervisord.conf /app/runtime-supervisord.conf /app/supervisord.conf && \
@@ -278,7 +278,7 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts","file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts","file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts","file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json

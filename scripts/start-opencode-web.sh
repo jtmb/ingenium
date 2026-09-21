@@ -67,6 +67,10 @@ attempt=1
 while [ "$attempt" -le "$attempts" ]; do
   if node /app/scripts/probe-api.mjs; then
     echo "Authenticated API readiness passed before OpenCode start after ${attempt} attempt(s)"
+    # OpenCode V2 always requires HTTP basic auth. Use the provisioned server
+    # secret so the internal auth proxy can forward the browser's validated
+    # credentials unchanged.
+    opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"
     exec env -i \
       PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       PWD="/app" \
@@ -74,7 +78,7 @@ while [ "$attempt" -le "$attempts" ]; do
       XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
       XDG_DATA_HOME="/home/ingenium-opencode/.local/share" \
       OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime" \
-      OPENCODE_SERVER_PASSWORD="" \
+      OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
       INGENIUM_API_URL="http://localhost:4097/api/v1" \
       INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential" \
       INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential" \

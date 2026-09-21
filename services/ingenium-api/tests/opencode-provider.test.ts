@@ -518,7 +518,7 @@ describe("Native provider integrations", () => {
     const callback = await fetch(`${baseUrl}/auth/callback?state=state-1&code=oauth-code`);
     expect(callback.status).toBe(200);
     expect(await callback.text()).toContain("Authorization complete");
-    expect(complete).toHaveBeenCalledWith("attempt-1", "oauth-code");
+    expect(complete).toHaveBeenCalledWith("attempt-1", "oauth-code", "openai");
   });
 
   it("forwards auto OAuth callbacks to OpenCode's local listener", async () => {
@@ -594,7 +594,7 @@ describe("Native provider integrations", () => {
 
     expect(callback.status).toBe(400);
     expect(await callback.text()).toContain("Authorization was cancelled");
-    expect(cancel).toHaveBeenCalledWith("attempt-3");
+    expect(cancel).toHaveBeenCalledWith("attempt-3", "openai");
   });
 
   it("returns a safe error page when OAuth completion throws", async () => {
@@ -666,7 +666,7 @@ describe("Encoded dot segment proxy integration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("forwards an encoded dot segment to the sentinel and returns a fixed error promptly", async () => {
+  it("rejects an encoded dot segment before transport instead of forwarding it", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(404, {
       name: "NotFoundError",
@@ -701,16 +701,13 @@ describe("Encoded dot segment proxy integration", () => {
       request.end();
     });
 
-    expect(response.status).toBe(404);
+    // v2 session reads validate the identifier before any transport call, so a
+    // dot segment can never reach an upstream path.
+    expect(response.status).toBe(502);
     expect(JSON.parse(response.body)).toEqual({
-      error: { code: "NotFoundError", message: "OpenCode request failed." },
+      error: { code: "INVALID_SESSION_ID", message: "OpenCode request failed." },
     });
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const upstreamPath = new URL(fetchSpy.mock.calls[0]![0] as string).pathname;
-    expect(upstreamPath).toBe("/session/__invalid_opencode_path_segment__");
-    expect(upstreamPath).not.toBe("/");
-    expect(upstreamPath).not.toBe("/session/");
-    expect(upstreamPath).not.toContain("/global/config");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

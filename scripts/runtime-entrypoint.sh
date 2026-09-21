@@ -88,12 +88,12 @@ cat > "$config_file" <<EOF
       }
     }
   },
-  "plugin": [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
-    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+  "plugins": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
   ]
 }
 EOF

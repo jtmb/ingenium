@@ -179,7 +179,7 @@ try {
         report(file, lineAt(text, findingIndex), expected, actual.length > 500 ? `${actual.slice(0, 500)}…` : actual);
       }
     }
-    for (const match of text.matchAll(/"plugin"\s*:\s*\[([^\]]*)\]/g)) {
+    for (const match of text.matchAll(/"plugins?"\s*:\s*\[([^\]]*)\]/g)) {
       const list = match[1];
       if (!list.includes('lifecycle') || !list.includes('ponytail') || list.includes('session-id-tui.ts')) {
         report(file, lineAt(text, match.index), 'plugin array includes lifecycle and ponytail, excludes session-id-tui.ts', plain(list));

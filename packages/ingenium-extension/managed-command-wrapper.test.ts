@@ -897,6 +897,7 @@ describe("staged_distribution_build", () => {
         ...["mcp-server", "init-project", "managed-command-wrapper", "recovery-bootstrap", "repository-command",
           "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner"].map((name) => `scripts/${name}.js`),
         ...["auto-observer", "observer", "resource-sync", "lifecycle"].map((name) => `plugins/${name}.js`),
+        ...["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"].map((name) => `plugins/v2/${name}/index.js`),
       ];
       for (const path of paths) {
         mkdirSync(dirname(join(output, path)), { recursive: true });

@@ -752,12 +752,12 @@ if [ ! -f "$OC_CONFIG" ]; then
       }
     }
   },
-  "plugin": [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
-    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+  "plugins": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
   ]
 }
 OCEOF
@@ -766,6 +766,10 @@ fi
 # Vault-backed child runs copy this provider-bearing config into tmpfs only when
 # it is owner-private. The persistent OpenCode server still reads the same file.
 secure_persistent_path file "$OC_CONFIG" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 0660
+# OpenCode V2 requires HTTP basic auth, so ttyd attaches with the same local
+# secret the internal auth proxy validates and forwards.
+setfacl -m u:ingenium-ttyd:--x "$RUNTIME_OPENCODE_SECRET_DIR"
+setfacl -m u:ingenium-ttyd:r-- "$RUNTIME_OPENCODE_PASSWORD_FILE"
 
 OC_AUTH="/home/ingenium-opencode/.local/share/opencode/auth.json"
 if [ -L "$OC_AUTH" ] || { [ -e "$OC_AUTH" ] && [ ! -f "$OC_AUTH" ]; }; then

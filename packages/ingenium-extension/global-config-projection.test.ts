@@ -5,20 +5,22 @@ import { join } from "node:path";
 // @ts-expect-error This deployment-only ESM script intentionally has no TypeScript declaration file.
 import { projectOpenCodeGlobalConfig } from "../../scripts/project-opencode-global-config.mjs";
 // @ts-expect-error This deployment-only ESM manifest intentionally has no TypeScript declaration file.
-import { CANONICAL_PLUGIN_SPECS } from "./plugin-specs.mjs";
+import { CANONICAL_PLUGIN_SPECS, CANONICAL_PLUGIN_SPECS_V2 } from "./plugin-specs.mjs";
 // @ts-expect-error This deployment-only ESM plugin intentionally has no TypeScript declaration file.
-import { ProtectedBrokerPlugin } from "../../config/opencode-managed/enforce-reserved-broker.mjs";
+import ProtectedBrokerPlugin from "../../config/opencode-managed/plugins/enforce-reserved-broker/index.mjs";
 
 const directories: string[] = [];
 const canonicalPluginOrder = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"];
 
 function pluginName(path: string): string | undefined {
+  const v2 = path.match(/\/plugins\/v2\/(auto-observer|observer|resource-sync|lifecycle|ponytail)$/);
+  if (v2) return v2[1];
   if (path.includes("ponytail")) return "ponytail";
   return path.match(/([^/]+)\.(?:ts|mjs)$/)?.[1];
 }
 
 function shellPluginSpecs(path: URL): string[] {
-  const block = readFileSync(path, "utf8").match(/"plugin": \[([\s\S]*?)\]/)?.[1];
+  const block = readFileSync(path, "utf8").match(/"plugins": \[([\s\S]*?)\]/)?.[1];
   return [...(block?.matchAll(/"([^"]+)"/g) ?? [])].map((match) => match[1]!);
 }
 
@@ -39,54 +41,74 @@ afterEach(() => {
 });
 
 describe("container OpenCode global-config projection", () => {
-  it("replaces every writable broker shadow without changing normal OpenCode configuration", async () => {
-    const config = {
-      provider: { retained: { npm: "provider-package" } },
-      mcp: { retained: { type: "local", command: ["retained"] } },
-      plugin: ["retained-plugin"],
-      mode: {
-        "ingenium-llm-broker": { model: "untrusted/mode", permission: { "*": "allow" } },
-      },
-      agent: {
-        "ingenium-llm-broker": {
-          disable: true,
-          hidden: false,
-          model: "untrusted/model",
-          mode: "primary",
-          tools: { bash: true },
-          permission: { "*": "allow", bash: "allow" },
-        },
-        alias: { name: "ingenium-llm-broker", permission: { "*": "allow" } },
-        retained: { model: "trusted/model" },
+  it("replaces every writable broker shadow without changing unrelated agents", async () => {
+    const registry = new Map<string, Record<string, unknown>>([
+      ["ingenium-llm-broker", {
+        id: "ingenium-llm-broker",
+        name: "ingenium-llm-broker",
+        description: "untrusted",
+        disabled: true,
+        hidden: false,
+        mode: "primary",
+        model: "untrusted/model",
+        permissions: [{ action: "*", resource: "*", effect: "allow" }],
+      }],
+      ["alias", {
+        id: "alias",
+        name: "ingenium-llm-broker",
+        mode: "primary",
+        hidden: false,
+        permissions: [{ action: "*", resource: "*", effect: "allow" }],
+      }],
+      ["retained", {
+        id: "retained",
+        name: "retained",
+        mode: "primary",
+        hidden: false,
+        model: "trusted/model",
+        permissions: [],
+      }],
+    ]);
+    const editor = {
+      list: () => [...registry.values()],
+      get: (id: string) => registry.get(id),
+      remove: (id: string) => { registry.delete(id); },
+      update: (id: string, update: (agent: Record<string, unknown>) => void) => {
+        const agent = registry.get(id);
+        if (agent) update(agent);
       },
     };
 
-    const plugin = await ProtectedBrokerPlugin({}, {
-      profilePath: new URL("../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url).pathname,
-    });
-    await plugin.config(config);
+    await ProtectedBrokerPlugin.setup({
+      options: { profilePath: new URL("../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url).pathname },
+      agent: { transform: async (callback: (value: typeof editor) => void) => { callback(editor); } },
+    } as never);
 
-    expect(config.provider).toEqual({ retained: { npm: "provider-package" } });
-    expect(config.mcp).toEqual({ retained: { type: "local", command: ["retained"] } });
-    expect(config.plugin).toEqual(["retained-plugin"]);
-    expect(config.mode).not.toHaveProperty("ingenium-llm-broker");
-    expect(config.agent).toEqual({
-      retained: { model: "trusted/model" },
-      "ingenium-llm-broker": {
-        name: "ingenium-llm-broker",
-        description: "Internal agent for Ingenium LLM broker — never invoke directly",
-        mode: "subagent",
-        hidden: true,
-        prompt: expect.stringContaining("This agent is reserved for system use."),
-        permission: {
-          "*": "deny",
-          external_directory: {
-            "/home/appuser/.local/share/opencode/tool-output/*": "deny",
-            "/home/ingenium-opencode/.local/share/opencode/tool-output/*": "deny",
-          },
-        },
-      },
+    expect(registry.get("alias")).toBeUndefined();
+    expect(registry.get("retained")).toEqual({
+      id: "retained",
+      name: "retained",
+      mode: "primary",
+      hidden: false,
+      model: "trusted/model",
+      permissions: [],
     });
+    const broker = registry.get("ingenium-llm-broker");
+    expect(broker).toMatchObject({
+      id: "ingenium-llm-broker",
+      name: "ingenium-llm-broker",
+      description: "Internal agent for Ingenium LLM broker — never invoke directly",
+      mode: "subagent",
+      hidden: true,
+      disabled: false,
+      system: expect.stringContaining("This agent is reserved for system use."),
+    });
+    expect(broker?.model).toBeUndefined();
+    expect(broker?.permissions).toEqual([
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "external_directory", resource: "/home/appuser/.local/share/opencode/tool-output/*", effect: "deny" },
+      { action: "external_directory", resource: "/home/ingenium-opencode/.local/share/opencode/tool-output/*", effect: "deny" },
+    ]);
   });
 
   it("keeps root, projected global, Docker, and runtime plugin order aligned", () => {
@@ -94,18 +116,29 @@ describe("container OpenCode global-config projection", () => {
     writeFileSync(configPath, "{}\n", { mode: 0o600 });
     projectOpenCodeGlobalConfig(configPath);
 
-    const rootConfig = JSON.parse(readFileSync(new URL("../../opencode.json", import.meta.url), "utf8")) as { plugin: string[] };
-    const projectedConfig = JSON.parse(readFileSync(configPath, "utf8")) as { plugin: string[] };
-    const managedConfig = JSON.parse(readFileSync(new URL("../../config/opencode-managed/opencode.json", import.meta.url), "utf8")) as {
+    const rootConfig = JSON.parse(readFileSync(new URL("../../opencode.json", import.meta.url), "utf8")) as {
       plugin: string[];
+      plugins: string[];
+    };
+    const projectedConfig = JSON.parse(readFileSync(configPath, "utf8")) as { plugins: string[] };
+    const managedConfig = JSON.parse(readFileSync(new URL("../../config/opencode-managed/opencode.json", import.meta.url), "utf8")) as {
+      plugins: string[];
       mcp: { ingenium: { command: string[]; environment: Record<string, string> } };
     };
 
     expect(rootConfig.plugin.map(pluginName)).toEqual(canonicalPluginOrder);
     expect(rootConfig.plugin).toEqual(CANONICAL_PLUGIN_SPECS);
-    expect(projectedConfig.plugin.map(pluginName)).toEqual(canonicalPluginOrder);
-    expect(projectedConfig.plugin).toEqual(CANONICAL_PLUGIN_SPECS);
-    expect(managedConfig.plugin.filter((spec) => !spec.includes("enforce-reserved-broker.mjs"))).toEqual(CANONICAL_PLUGIN_SPECS);
+    // The repository root config is resolved from its own directory, so it uses
+    // relative V2 directories; entrypoints and the projection use the PWD-prefixed
+    // canonical form.
+    expect(rootConfig.plugins).toEqual(CANONICAL_PLUGIN_SPECS_V2.map((spec: string) =>
+      spec.replace("file://{env:PWD}/packages/ingenium-extension/", "./packages/ingenium-extension/"),
+    ));
+    expect(projectedConfig.plugins).toEqual(CANONICAL_PLUGIN_SPECS_V2);
+    expect(managedConfig.plugins.filter((spec) => !spec.includes("enforce-reserved-broker"))).toEqual(CANONICAL_PLUGIN_SPECS_V2);
+    expect(managedConfig.plugins.filter((spec) => spec.includes("enforce-reserved-broker"))).toEqual([
+      "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker",
+    ]);
     expect(managedConfig.mcp.ingenium.command).toEqual([
       "node",
       "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js",
@@ -116,7 +149,7 @@ describe("container OpenCode global-config projection", () => {
       new URL("../../scripts/runtime-entrypoint.sh", import.meta.url),
     ]) {
       expect(shellPluginOrder(entrypoint)).toEqual(canonicalPluginOrder);
-      expect(shellPluginSpecs(entrypoint)).toEqual(CANONICAL_PLUGIN_SPECS);
+      expect(shellPluginSpecs(entrypoint)).toEqual(CANONICAL_PLUGIN_SPECS_V2);
     }
     const rootEnvironment = (rootConfig as unknown as {
       mcp: { ingenium: { environment: Record<string, string> } };
@@ -236,34 +269,37 @@ describe("container OpenCode global-config projection", () => {
     const config = JSON.parse(raw) as {
       provider: { example: { enabled: boolean } };
       permission: string;
-      agent: Record<string, { [key: string]: unknown }>;
+      agent?: Record<string, { [key: string]: unknown }>;
+      agents: Record<string, { [key: string]: unknown }>;
       mcp: {
         other: unknown;
         ponytail?: unknown;
         "unrelated-ponytail": unknown;
         ingenium: { command: string[]; environment: Record<string, string> };
       };
-      plugin: string[];
+      plugin?: string[];
+      plugins: string[];
     };
     expect(raw).not.toContain(inlineToken);
     expect(config.provider).toEqual({ example: { enabled: true } });
     expect(config.permission).toBe("ask");
-    expect(config.agent["operator-agent"]).toEqual({
+    expect(config.agent).toBeUndefined();
+    expect(config.agents["operator-agent"]).toEqual({
       model: "operator/model",
       question: "allow",
       permission: "ask",
     });
-    expect(config.agent["non-plan-agent"]).toEqual({
+    expect(config.agents["non-plan-agent"]).toEqual({
       permission: { bash: "allow", question: "allow" },
     });
-    expect(config.agent["ingenium-llm-broker"]).toEqual({
+    expect(config.agents["ingenium-llm-broker"]).toEqual({
       hidden: true,
       permission: { "*": "deny", question: "allow" },
     });
-    expect(config.agent.plan).toEqual({
+    expect(config.agents.plan).toEqual({
       variant: "operator-plan",
     });
-    expect(config.agent["ingenium-orchestrator"]).toEqual({ model: "openai/model", variant: "high" });
+    expect(config.agents["ingenium-orchestrator"]).toEqual({ model: "openai/model", variant: "high" });
     expect(config.mcp.other).toEqual({ command: ["other"] });
     expect(config.mcp["unrelated-ponytail"]).toEqual({ command: ["unrelated-ponytail"] });
     expect(config.mcp.ponytail).toBeUndefined();
@@ -284,11 +320,11 @@ describe("container OpenCode global-config projection", () => {
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN_FILE).toBeUndefined();
     expect(config.mcp.ingenium.environment.INGENIUM_MCP_CREDENTIAL).toBeUndefined();
     expect(JSON.stringify(config)).not.toContain(inlineToken);
+    expect(config.plugins).toEqual(CANONICAL_PLUGIN_SPECS_V2);
     expect(config.plugin).toEqual([
       "@other/ponytail",
       "@dietrichgebert/ponytail-extra",
       "plugins/operator-plugin.ts",
-      ...CANONICAL_PLUGIN_SPECS,
     ]);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });
@@ -311,13 +347,13 @@ describe("container OpenCode global-config projection", () => {
 
     projectOpenCodeGlobalConfig(configPath);
     const firstProjection = readFileSync(configPath, "utf8");
-    const agent = (JSON.parse(firstProjection) as { agent: Record<string, unknown> }).agent;
+    const agents = (JSON.parse(firstProjection) as { agents: Record<string, unknown> }).agents;
 
-    expect(agent).not.toHaveProperty("browser-agent");
-    expect(agent["browser-agent-helper"]).toEqual({ model: "operator/helper", permission: { "*": "allow" } });
-    expect(agent["operator-agent"]).toEqual({ model: "operator/model", question: "allow" });
-    expect(agent["ingenium-chat"]).toEqual({ model: "deepseek/deepseek-v4-flash", variant: "max" });
-    expect(agent["ingenium-llm-broker"]).toEqual({ hidden: true, permission: { "*": "deny" } });
+    expect(agents).not.toHaveProperty("browser-agent");
+    expect(agents["browser-agent-helper"]).toEqual({ model: "operator/helper", permission: { "*": "allow" } });
+    expect(agents["operator-agent"]).toEqual({ model: "operator/model", question: "allow" });
+    expect(agents["ingenium-chat"]).toEqual({ model: "deepseek/deepseek-v4-flash", variant: "max" });
+    expect(agents["ingenium-llm-broker"]).toEqual({ hidden: true, permission: { "*": "deny" } });
 
     projectOpenCodeGlobalConfig(configPath);
     expect(readFileSync(configPath, "utf8")).toBe(firstProjection);

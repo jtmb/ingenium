@@ -220,7 +220,14 @@ describe("ingenium-init-project production runtime contract", () => {
     expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
     expect(dockerfile).not.toContain("/app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts");
     expect(dockerfile).not.toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
-    expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`file://{env:PWD}/${pluginPath}`)).join(",")}]`);
+    const configuredV2PluginPaths = [
+      "auto-observer",
+      "observer",
+      "resource-sync",
+      "lifecycle",
+      "ponytail",
+    ].map((name) => `/app/packages/ingenium-extension/plugins/v2/${name}`);
+    expect(dockerfile).toContain(`"plugins":${JSON.stringify(configuredV2PluginPaths)}`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
     expect(runtimeLauncher.indexOf("--help|--version)")).toBeLessThan(runtimeLauncher.indexOf("normalize-agent-profiles.sh"));
   });

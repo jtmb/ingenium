@@ -1,12 +1,12 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
-    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
-    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs"
+  "plugins": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail",
+    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker"
   ],
   "mcp": {
     "ingenium": {
@@ -25,22 +25,17 @@
       }
     }
   },
-  "agent": {
+  "agents": {
     "ingenium-llm-broker": {
-      "name": "ingenium-llm-broker",
       "description": "Internal agent for Ingenium LLM broker — never invoke directly",
       "mode": "subagent",
       "hidden": true,
-      "disable": false,
-      "model": "",
-      "prompt": "{file:/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md}",
-      "permission": {
-        "*": "deny",
-        "external_directory": {
-          "/home/appuser/.local/share/opencode/tool-output/*": "deny",
-          "/home/ingenium-opencode/.local/share/opencode/tool-output/*": "deny"
-        }
-      }
+      "system": "{file:/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md}",
+      "permissions": [
+        { "action": "*", "resource": "*", "effect": "deny" },
+        { "action": "external_directory", "resource": "/home/appuser/.local/share/opencode/tool-output/*", "effect": "deny" },
+        { "action": "external_directory", "resource": "/home/ingenium-opencode/.local/share/opencode/tool-output/*", "effect": "deny" }
+      ]
     }
   }
 }

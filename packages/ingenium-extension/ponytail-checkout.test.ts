@@ -10,6 +10,7 @@ const checkoutRoot = join(extensionRoot, "ponytail");
 const pluginPath = join(checkoutRoot, ".opencode", "plugins", "ponytail.mjs");
 const projectPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
 const projectPluginSpec = `file://{env:PWD}/${projectPluginPath}`;
+const projectPluginSpecV2 = "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail";
 
 const upstreamHashes: Record<string, string> = {
   ".opencode/plugins/ponytail.mjs": "e9e2214149ace3e589a584a27136bf5bd9da558fbad948f8cf1d3bc2c50d3828",
@@ -116,7 +117,7 @@ describe("Ponytail immutable checkout integration", () => {
     expect(packageJson.devDependencies?.["@dietrichgebert/ponytail"]).toBeUndefined();
     expect(dockerfile).toContain("COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension");
     expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
-    expect(dockerfile).toContain(projectPluginSpec);
-    expect(entrypoint).toContain(projectPluginSpec);
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/plugins/v2/ponytail");
+    expect(entrypoint).toContain(projectPluginSpecV2);
   });
 });
