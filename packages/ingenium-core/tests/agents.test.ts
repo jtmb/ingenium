@@ -7,8 +7,25 @@ import { resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import { getDb } from "../lib/db.js";
 import { saveConfig } from "../lib/tools/configs.js";
-import { bootstrapReservedBroker as bootstrapReservedBrokerRuntime, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent, validateProtectedOpenCodeDeployment } from "../lib/tools/agents.js";
+import { bootstrapReservedBroker as bootstrapReservedBrokerRuntime, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DEPLOYMENT_ROOT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent, validateProtectedOpenCodeDeployment } from "../lib/tools/agents.js";
 import { deleteProject } from "../lib/tools/projects.js";
+
+const installedRootOpen = vi.hoisted(() => ({ intercept: false, attempted: [] as string[] }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    openSync(...args: Parameters<typeof actual.openSync>) {
+      if (installedRootOpen.intercept) {
+        const path = String(args[0]);
+        installedRootOpen.attempted.push(path);
+        if (path !== "/usr/local/share/ingenium/opencode-managed") throw new Error(`Unexpected deployment root: ${path}`);
+        throw Object.assign(new Error("Synthetic missing deployment root"), { code: "ENOENT" });
+      }
+      return actual.openSync(...args);
+    },
+  };
+});
 
 let root = "";
 let projectId = "";
@@ -87,6 +104,7 @@ beforeEach(() => {
   const ownerUid = process.getuid();
   vi.spyOn(process, "getuid").mockReturnValue(ownerUid + 1);
   root = mkdtempSync(join(tmpdir(), "ingenium-agents-"));
+  vi.stubEnv("INGENIUM_HOME", root);
   mkdirSync(join(root, ".ingenium"));
   process.env.INGENIUM_CORE_DB_PATH = join(root, ".ingenium", "data.db");
   resetDbForTest();
@@ -100,6 +118,7 @@ afterEach(() => {
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
   delete process.env.INGENIUM_GLOBAL_CONFIG_PATH;
+  vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -507,11 +526,16 @@ describe("agent path and category integrity", () => {
 
   it("does not fall back to the repository profile when a production deployment profile is missing", () => {
     const previousVitest = process.env.VITEST;
+    installedRootOpen.attempted.length = 0;
+    installedRootOpen.intercept = true;
     delete process.env.VITEST;
     try {
+      expect(LLM_BROKER_DEPLOYMENT_ROOT).toBe("/usr/local/share/ingenium/opencode-managed");
       expect(() => bootstrapReservedBrokerRuntime(projectId)).toThrow(/could not be opened safely \(ENOENT\)/);
+      expect(installedRootOpen.attempted).toEqual([LLM_BROKER_DEPLOYMENT_ROOT]);
       expect(getAgent(projectId, "ingenium-llm-broker")).toBeUndefined();
     } finally {
+      installedRootOpen.intercept = false;
       if (previousVitest === undefined) delete process.env.VITEST;
       else process.env.VITEST = previousVitest;
     }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -38,12 +38,15 @@ let directory = "";
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "ingenium-runtime-isolation-"));
+  vi.stubEnv("INGENIUM_HOME", directory);
+  vi.stubEnv("INGENIUM_GLOBAL_CONFIG_PATH", join(directory, "opencode-global"));
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "data");
   resetDbForTest();
 });
 
 afterEach(() => {
   resetDbForTest();
+  vi.unstubAllEnvs();
   delete process.env.INGENIUM_CORE_DB_PATH;
   rmSync(directory, { recursive: true, force: true });
 });
