@@ -12,6 +12,35 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+
+const guardedUploadCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const isSharedUpload = (path: string | Buffer | URL) =>
+    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+  const guard = (operation: string, path: string | Buffer | URL) => {
+    if (!isSharedUpload(path)) return false;
+    guardedUploadCalls.push(operation);
+    return true;
+  };
+
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) =>
+      guard("mkdirSync", args[0]) ? undefined : fs.mkdirSync(...args),
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) =>
+      guard("readdirSync", args[0]) ? [] : fs.readdirSync(...args),
+    statSync: (...args: Parameters<typeof fs.statSync>) =>
+      guard("statSync", args[0]) ? undefined : fs.statSync(...args),
+    existsSync: (...args: Parameters<typeof fs.existsSync>) =>
+      guard("existsSync", args[0]) ? false : fs.existsSync(...args),
+    unlinkSync: (...args: Parameters<typeof fs.unlinkSync>) => {
+      if (!guard("unlinkSync", args[0])) fs.unlinkSync(...args);
+    },
+  };
+});
+
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +58,9 @@ let tempDir: string;
 let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
+const originalGlobalConfigPath = process.env.INGENIUM_GLOBAL_CONFIG_PATH;
+const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
+const originalHome = process.env.INGENIUM_HOME;
 
 /** MUST be a function — evaluates projectName at call time, not module load time. */
 function projectQ(name?: string): string {
@@ -48,8 +80,12 @@ function buildApp(): express.Express {
 }
 
 beforeAll(async () => {
+  expect(guardedUploadCalls).toEqual(["mkdirSync", "readdirSync"]);
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-llm-config-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
+  process.env.INGENIUM_HOME = join(tempDir, "home");
+  process.env.INGENIUM_GLOBAL_CONFIG_PATH = join(tempDir, "opencode-config");
+  resetDbForTest();
 
   const globalProjectId = projects.createProject("global-default", true).id;
   projectName = "llm-config-test-project";
@@ -59,11 +95,6 @@ beforeAll(async () => {
   expect(vault.initializeVault(globalProjectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
   vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
   vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
-  // Chat config always performs runtime provider discovery. Keep this fixture
-  // isolated from the real OpenCode password/configuration state unless a test
-  // explicitly exercises an unavailable catalog.
-  vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({ all: [] });
-
   // Start a local server for fetch-based testing
   const app = buildApp();
   server = createServer(app);
@@ -77,10 +108,28 @@ beforeAll(async () => {
   });
 });
 
+beforeEach(() => {
+  vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({ all: [] });
+  vi.spyOn(opencodeClient, "updateGlobalConfig").mockResolvedValue({});
+});
+
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-  vi.restoreAllMocks();
+  try {
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  } finally {
+    try {
+      resetDbForTest();
+      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    } finally {
+      if (originalDbPath === undefined) delete process.env.INGENIUM_CORE_DB_PATH;
+      else process.env.INGENIUM_CORE_DB_PATH = originalDbPath;
+      if (originalHome === undefined) delete process.env.INGENIUM_HOME;
+      else process.env.INGENIUM_HOME = originalHome;
+      if (originalGlobalConfigPath === undefined) delete process.env.INGENIUM_GLOBAL_CONFIG_PATH;
+      else process.env.INGENIUM_GLOBAL_CONFIG_PATH = originalGlobalConfigPath;
+      vi.restoreAllMocks();
+    }
+  }
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────

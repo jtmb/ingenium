@@ -13,6 +13,35 @@
  */
 
 import { describe, it, expect, afterEach, vi, beforeAll, afterAll } from "vitest";
+
+const guardedUploadCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const isSharedUpload = (path: string | Buffer | URL) =>
+    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+  const guard = (operation: string, path: string | Buffer | URL) => {
+    if (!isSharedUpload(path)) return false;
+    guardedUploadCalls.push(operation);
+    return true;
+  };
+
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) =>
+      guard("mkdirSync", args[0]) ? undefined : fs.mkdirSync(...args),
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) =>
+      guard("readdirSync", args[0]) ? [] : fs.readdirSync(...args),
+    statSync: (...args: Parameters<typeof fs.statSync>) =>
+      guard("statSync", args[0]) ? undefined : fs.statSync(...args),
+    existsSync: (...args: Parameters<typeof fs.existsSync>) =>
+      guard("existsSync", args[0]) ? false : fs.existsSync(...args),
+    unlinkSync: (...args: Parameters<typeof fs.unlinkSync>) => {
+      if (!guard("unlinkSync", args[0])) fs.unlinkSync(...args);
+    },
+  };
+});
+
 import express from "express";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -48,6 +77,7 @@ function buildApp(): express.Express {
 }
 
 beforeAll(async () => {
+  expect(guardedUploadCalls).toEqual(["mkdirSync", "readdirSync"]);
   process.env.INGENIUM_API_TOKEN = API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
   const app = buildApp();
