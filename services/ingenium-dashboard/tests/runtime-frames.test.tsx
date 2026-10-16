@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const runtimeId = "11111111-1111-4111-8111-111111111111";
+const { ownerRequest, ownerStepUp, runtimeWorkspace } = vi.hoisted(() => ({
+  ownerRequest: vi.fn(), ownerStepUp: vi.fn(),
+  runtimeWorkspace: { mode: "isolated", confirmedWorkspaceId: "workspace-one" },
+}));
 const runtimeLaunch = vi.hoisted(() => vi.fn((audience: "web" | "cli" | "vscode", _workspace: unknown, enabled = true) => ({
   status: enabled ? "ready" : "loading",
   url: enabled ? `https://${audience}--11111111-1111-4111-8111-111111111111.runtime.example.test/` : null,
@@ -14,13 +18,17 @@ vi.mock("next/navigation", () => ({
 vi.mock("../src/lib/use-runtime-launch", () => ({
   useRuntimeLaunch: runtimeLaunch,
 }));
+vi.mock("../src/lib/api", () => ({
+  request: ownerRequest,
+  api: { auth: { stepUp: ownerStepUp } },
+}));
 vi.mock("../src/lib/RuntimeContext", () => ({
   useRuntime: () => ({ workspace: {
-    mode: "isolated",
+    mode: runtimeWorkspace.mode,
     status: "ready",
     workspaces: [],
     selectedWorkspaceId: "workspace-one",
-    confirmedWorkspaceId: "workspace-one",
+    confirmedWorkspaceId: runtimeWorkspace.confirmedWorkspaceId,
     confirmedRuntimeId: runtimeId,
     error: null,
     selectWorkspace: vi.fn(),
@@ -38,6 +46,10 @@ beforeEach(() => {
   localStorage.clear();
   window.history.replaceState(null, "", "/opencode");
   runtimeLaunch.mockClear();
+  runtimeWorkspace.mode = "isolated";
+  runtimeWorkspace.confirmedWorkspaceId = "workspace-one";
+  ownerRequest.mockReset().mockResolvedValue({ data: { status: "ready" } });
+  ownerStepUp.mockReset().mockResolvedValue({ data: {} });
 });
 
 afterEach(() => {
@@ -46,6 +58,34 @@ afterEach(() => {
 });
 
 describe("AUTH-109 protected runtime frames", () => {
+  it("exposes background learning only to an explicitly confirmed compatibility workspace after step-up", async () => {
+    const { rerender } = render(<OpenCodePageClient initialMode="web" restoreStoredMode />);
+    expect(screen.queryByRole("button", { name: "Enable background learning" })).toBeNull();
+    runtimeWorkspace.mode = "compatibility";
+    rerender(<OpenCodePageClient initialMode="web" restoreStoredMode />);
+    expect(ownerRequest).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Enable background learning" }));
+    expect(screen.getByRole("dialog", { name: "Confirm it’s you" })).toBeTruthy();
+    expect(ownerRequest).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "fixture-only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(ownerRequest).toHaveBeenCalledWith(
+      "/runtimes/browser/workspaces/workspace-one/automation", { method: "POST", body: "{}" },
+    ));
+    expect(ownerStepUp).toHaveBeenCalledWith("fixture-only");
+    await screen.findByText("Background learning enabled for this runtime.");
+  });
+
+  it("does not claim a failed owner authorization succeeded", async () => {
+    runtimeWorkspace.mode = "compatibility";
+    ownerRequest.mockRejectedValue(new Error("Denied"));
+    render(<OpenCodePageClient initialMode="web" restoreStoredMode />);
+    fireEvent.click(screen.getByRole("button", { name: "Enable background learning" }));
+    fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "fixture-only" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText("Background learning could not be enabled. Confirm the runtime is active and try again.");
+  });
+
   it("uses audience roots without sandbox expansion and launches the protected pop-out", () => {
     const open = vi.spyOn(window, "open").mockImplementation(() => null);
     render(<OpenCodePageClient initialMode="web" restoreStoredMode />);
