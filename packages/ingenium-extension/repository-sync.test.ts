@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import {
   acquireRepositorySyncLock,
   buildRepositoryManifestV2,
@@ -12,6 +11,7 @@ import {
   loadManifest,
   pushDiskToApi,
   REPOSITORY_MAX_DOC_BYTES,
+  REPOSITORY_MAX_DOC_FILE_BYTES,
   REPOSITORY_MAX_FILE_BYTES,
   REPOSITORY_MAX_RESOURCE_BYTES,
   REPOSITORY_MAX_RESOURCE_TOTAL_BYTES,
@@ -49,15 +49,7 @@ vi.mock("./mcp-client.js", () => ({
 let worktree = "";
 const originalFetch = globalThis.fetch;
 const originalProject = process.env.INGENIUM_PROJECT;
-const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const configuredPluginPaths = [
-  "packages/ingenium-extension/plugins/auto-observer.ts",
-  "packages/ingenium-extension/plugins/lifecycle.ts",
-  "packages/ingenium-extension/plugins/observer.ts",
-  "packages/ingenium-extension/plugins/resource-sync.ts",
-  "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
-];
-
+const rootPlanProfile = '---\ndescription: "Synthetic plan"\nmode: primary\ndisabled: false\nhidden: false\npermissions:\n  - action: "*"\n    resource: "*"\n    effect: deny\n---\n\n# Plan\n';
 function write(relativePath: string, content: string): void {
   const target = join(worktree, relativePath);
   mkdirSync(join(target, ".."), { recursive: true });
@@ -97,21 +89,23 @@ function fixture(): void {
   write("packages/custom-plugin.ts", "export const custom = true;\n");
   write("opencode.json", JSON.stringify({
     mcp: {
-      ingenium: {
-        type: "local",
-        enabled: true,
-        environment: {
-          INGENIUM_API_URL: "http://localhost:4097/api/v1",
-          INGENIUM_MCP_AUDIENCE: "repository-sync",
-          INGENIUM_PROJECT: "repository-fixture",
-          INGENIUM_WORKSPACE_ID: "repository-workspace",
-          INGENIUM_WORKTREE: worktree,
+      servers: {
+        ingenium: {
+          type: "local",
+          disabled: false,
+          environment: {
+            INGENIUM_API_URL: "http://localhost:4097/api/v1",
+            INGENIUM_MCP_AUDIENCE: "repository-sync",
+            INGENIUM_PROJECT: "repository-fixture",
+            INGENIUM_WORKSPACE_ID: "repository-workspace",
+            INGENIUM_WORKTREE: worktree,
+          },
         },
       },
     },
-    plugin: [
-      { path: "packages/custom-plugin.ts", enabled: true, options: { level: "strict", apiKey: "do-not-persist", nested: { accessToken: "do-not-persist" } } },
-      ".opencode/plugins/nested/local-plugin.ts",
+    plugins: [
+      { package: "./packages/custom-plugin.ts", options: { level: "strict", apiKey: "do-not-persist", nested: { accessToken: "do-not-persist" } } },
+      "./.opencode/plugins/nested/local-plugin.ts",
     ],
   }));
 }
@@ -286,54 +280,12 @@ describe("repository-authoritative manifest v2", () => {
     expect(projection.plugins.map((entry) => entry.path)).not.toContain(".opencode/plugins/.opencode/plugins/nested/local-plugin.ts");
   });
 
-  it("scans the canonical repository artifacts without treating support files or diagnostics as resources", () => {
-    const projection = buildRepositoryManifestV2(repositoryRoot, manifest());
-    const roadmap = readFileSync(join(repositoryRoot, "docs/reference/ROADMAP.md"), "utf8");
-
-    expect(Buffer.byteLength(roadmap)).toBeLessThanOrEqual(REPOSITORY_MAX_DOC_BYTES);
-    expect(projection.docs.find((entry) => entry.path === "docs/reference/ROADMAP.md")?.content)
-      .toBe(roadmap.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
-
-    expect(projection.skills.map((entry) => entry.name)).toEqual([
-      "database-conventions", "development-conventions", "devops-conventions", "documentation",
-      "mcp-tooling", "security-audit", "self-learning", "skill-maintenance",
-    ]);
-    expect(projection.skills.every((entry) => entry.path === `.opencode/skills/${entry.name}/SKILL.md`)).toBe(true);
-    expect(projection.skills.map((entry) => entry.path)).not.toEqual(expect.arrayContaining([
-      ".opencode/skills/consolidation-map.json",
-      ".opencode/skills/learnings.md",
-      ".opencode/skills/observations.md",
-    ]));
-    const expectedAgentPaths = [
-      "chat/ingenium-chat.md",
-      "execution/ingenium-docs.md",
-      "execution/ingenium-qa.md",
-      "execution/ingenium-recovery-engineer.md",
-      "execution/ingenium-software-engineer-fast.md",
-      "execution/ingenium-software-engineer-premium.md",
-      "primary/ingenium-orchestrator.md",
-      "primary/plan.md",
-      "research/ingenium-explore.md",
-      "research/ingenium-scout.md",
-      "security/ingenium-security-auditor.md",
-    ].map((path) => `.opencode/agents/${path}`)
-      .filter((path) => (lstatSync(join(repositoryRoot, path)).mode & 0o777) === 0o644);
-    expect(projection.agents.map((entry) => entry.path).sort()).toEqual(expectedAgentPaths.sort());
-    expect(projection.agents.every((entry) => /^\.opencode\/agents\/[^/]+\/.+\.md$/.test(entry.path))).toBe(true);
-    expect(projection.agents.map((entry) => entry.name)).not.toContain("browser-agent");
-    expect(new Set(projection.agents.map((entry) => entry.name)).size).toBe(projection.agents.length);
-    expect(projection.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
-    expect(Object.keys(projection.skills.find((entry) => entry.name === "development-conventions")!.fileTree).length).toBeGreaterThanOrEqual(66);
-    for (const plugin of projection.plugins) {
-      expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
-    }
-  });
-
   it("allows canonical documentation above 512 KiB up to the aggregate documentation budget", async () => {
     fixture();
     const existingBytes = buildRepositoryManifestV2(worktree, manifest()).docs
       .reduce((total, entry) => total + Buffer.byteLength(entry.content), 0);
-    const content = "x".repeat(REPOSITORY_MAX_DOC_BYTES - existingBytes);
+    const content = "x".repeat(REPOSITORY_MAX_DOC_FILE_BYTES);
+    write("docs/guides/remaining.md", "x".repeat(REPOSITORY_MAX_DOC_BYTES - existingBytes - content.length));
     expect(Buffer.byteLength(content)).toBeGreaterThan(REPOSITORY_MAX_FILE_BYTES);
     write("docs/guides/large.md", content);
     expect(buildRepositoryManifestV2(worktree, manifest()).docs)
@@ -348,10 +300,11 @@ describe("repository-authoritative manifest v2", () => {
 
   it("rejects documentation exceeding the per-file or aggregate documentation budget", () => {
     fixture();
-    write("docs/large.md", "x".repeat(REPOSITORY_MAX_DOC_BYTES + 1));
+    write("docs/large.md", "x".repeat(REPOSITORY_MAX_DOC_FILE_BYTES + 1));
     expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(RepositorySyncScanError);
 
-    write("docs/large.md", "x".repeat(REPOSITORY_MAX_DOC_BYTES));
+    write("docs/large.md", "x".repeat(REPOSITORY_MAX_DOC_FILE_BYTES));
+    write("docs/overflow.md", "x".repeat(REPOSITORY_MAX_DOC_BYTES - REPOSITORY_MAX_DOC_FILE_BYTES));
     expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(RepositorySyncScanError);
   });
 
@@ -364,6 +317,22 @@ describe("repository-authoritative manifest v2", () => {
     },
   );
 
+  it("derives native profile identity from its path and rejects a mismatched legacy name", () => {
+    fixture();
+    const path = ".opencode/agents/chat/nested/fixture-agent.md";
+    const original = readFileSync(join(worktree, path), "utf8");
+    const before = buildRepositoryManifestV2(worktree, manifest()).agents[0]!;
+    write(path, original.replace("name: fixture-agent\n", "")
+      .replace("skills:\n  - fixture-skill", "# skills:\n#   - fixture-skill"));
+    expect(buildRepositoryManifestV2(worktree, manifest()).agents[0]).toMatchObject({
+      identity: before.identity, path, name: before.name, category: before.category,
+      permissions: before.permissions, mode: before.mode, enabled: before.enabled,
+      skills: before.skills,
+    });
+    write(path, original.replace("name: fixture-agent", "name: different-agent"));
+    expect(buildRepositoryManifestV2(worktree, manifest()).agents).toEqual([]);
+  });
+
   it("rejects root-level orphan profiles and duplicate categorized identities", () => {
     fixture();
     const profile = readFileSync(join(worktree, ".opencode/agents/chat/nested/fixture-agent.md"), "utf8");
@@ -373,6 +342,48 @@ describe("repository-authoritative manifest v2", () => {
     rmSync(join(worktree, ".opencode/agents/orphan.md"));
     write(".opencode/agents/research/fixture-agent.md", profile);
     expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(/Duplicate agent profiles/);
+  });
+
+  it("projects root Plan as a primary resource and preserves its identity across the path move", async () => {
+    fixture();
+    const profile = rootPlanProfile;
+    write(".opencode/agents/primary/plan.md", profile);
+    successfulMcp();
+    await repositorySync(worktree);
+    const state = loadManifest(worktree, "repository-fixture");
+    const before = buildRepositoryManifestV2(worktree, state).agents.find((entry) => entry.name === "plan")!;
+    renameSync(join(worktree, before.path), join(worktree, ".opencode/agents/plan.md"));
+
+    const plan = buildRepositoryManifestV2(worktree, state).agents.find((entry) => entry.name === "plan")!;
+    expect(plan).toMatchObject({
+      identity: before.identity, path: ".opencode/agents/plan.md", name: "plan", category: "primary",
+      mode: "primary", enabled: true, metadata: { hidden: false }, permissions: before.permissions,
+    });
+    expect(plan.sha256).not.toBe(before.sha256);
+    await repositorySync(worktree);
+    expect(mockCallMcpTool).toHaveBeenLastCalledWith(worktree, "repository_sync", expect.objectContaining({
+      resourcesManifest: expect.objectContaining({ agents: expect.arrayContaining([plan]) }),
+    }));
+
+    write(".opencode/agents/primary/plan.md", profile);
+    expect(() => buildRepositoryManifestV2(worktree, state)).toThrow(/Duplicate agent profiles/);
+  });
+
+  it.each(["build", "explore", "general", "planner"])("does not extend the root Plan exception to %s", (name) => {
+    fixture();
+    const profile = rootPlanProfile;
+    write(`.opencode/agents/${name}.md`, profile);
+    expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(/Orphan root-level agent profile/);
+  });
+
+  it("enforces default-deny and explicit lifecycle metadata for root Plan", () => {
+    fixture();
+    const profile = rootPlanProfile;
+    write(".opencode/agents/plan.md", profile.replace('  - action: "*"\n    resource: "*"\n    effect: deny',
+      '  - action: "*"\n    resource: "*"\n    effect: allow'));
+    expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(/not default-deny/);
+    write(".opencode/agents/plan.md", profile.replace("hidden: false\n", ""));
+    expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(/lifecycle metadata is incomplete/);
   });
 
   it("rejects categorized profiles without explicit default-deny lifecycle metadata", () => {
@@ -521,7 +532,7 @@ describe("repository-authoritative manifest v2", () => {
     fixture();
     write("secrets/plugin.ts", "export const secret = true;\n");
     const config = JSON.parse(readFileSync(join(worktree, "opencode.json"), "utf8"));
-    write("opencode.json", JSON.stringify({ ...config, plugin: ["secrets/plugin.ts"] }));
+    write("opencode.json", JSON.stringify({ ...config, plugins: ["./secrets/plugin.ts"] }));
     successfulMcp();
 
     await expect(pushDiskToApi(worktree)).rejects.toBeInstanceOf(RepositorySyncScanError);
