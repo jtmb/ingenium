@@ -63,10 +63,11 @@ arbitrary shell, `question`, delegation, or implementation authority. Root and
 profile loading occurs only after a full parent replacement/restart, and
 activation plus runtime proof remain pending.
 
-For this documentation migration, `ingenium-software-engineer-premium` is mapped
-to `openai/gpt-5.6-sol` / `xhigh` and is review-only; all other mapped
-operational agents use `openai/gpt-5.6-luna` / `max`. This temporary routing
-status does not change the canonical Premium profile's permanent role.
+The root `opencode.json` maps `ingenium-software-engineer-premium` to
+`openai/gpt-6-sol` / `high`. The other declared model/variant assignments are
+listed in [Agent Configuration](docs/configure/agents.md). Profiles define
+permissions separately; these declarations do not prove which model or
+permissions an existing session has loaded.
 
 The self-learning pipeline runs server-side: the extraction engine reads OpenCode messages, uses a regex pre-filter for candidate selection, batches candidates to the synthesis LLM, and creates observations from extracted behaviour rules. The API scheduler runs extraction → synthesis every 15 minutes (configurable via `SYNTHESIS_INTERVAL_MS`). The extension's `resource-sync.ts` plugin separately reconciles disk and API state on `session.created` and throttled `session.idle` events.
 

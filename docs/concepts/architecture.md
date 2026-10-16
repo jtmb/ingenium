@@ -898,15 +898,15 @@ case returns an empty catalog as though no providers were configured.
 ### Agent Model and Chat Selection
 
 The `ingenium-chat` Markdown profile intentionally has no `model` field. The
-root `opencode.json` supplies its runtime mapping (`openai/gpt-5.6-luna`,
-variant `max`), while the Dashboard Chat page sends the validated provider/model
+root `opencode.json` supplies its runtime mapping (`openai/gpt-6-luna`,
+variant `xhigh`), while the Dashboard Chat page sends the validated provider/model
 pair selected from `chat-config` with each prompt. The profile also sets
 `hidden: true`, keeping it out of OpenCode's general agent selectors.
 
 | Property | Value | Reason |
 |----------|-------|--------|
 | Markdown `model` | (not set) | Profile metadata does not own model assignment |
-| Root mapping | `openai/gpt-5.6-luna`, `max` | Runtime model/variant mapping |
+| Root mapping | `openai/gpt-6-luna`, `xhigh` | Declared model/variant mapping; loaded-session proof is separate |
 | Chat turn | Selected `providerID`/`modelID` | ChatShell sends the catalog-validated pair |
 | `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
 
