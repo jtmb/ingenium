@@ -40,6 +40,21 @@ done
 can_read() { runuser -u "$1" -- test -r "$2"; }
 can_write_dir() { runuser -u "$1" -- test -w "$2"; }
 
+if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
+  gateway_dir=/run/ingenium-opencode-gateway
+  node /app/scripts/opencode-auth-proxy.mjs --verify-gateway-directory || fail
+  can_write_dir ingenium-opencode "$gateway_dir" || fail
+  for user in $users; do
+    if [ "$user" = ingenium-opencode ] || [ "$user" = ingenium-gateway ]; then
+      runuser -u "$user" -- test -x "$gateway_dir" || fail
+    else
+      ! runuser -u "$user" -- test -x "$gateway_dir" || fail
+      case " $(id -G "$user") " in *" 1104 "*) fail ;; esac
+    fi
+    [ "$user" = ingenium-opencode ] || ! can_write_dir "$user" "$gateway_dir" || fail
+  done
+fi
+
 for file in "$api_dir"/*; do
   can_read ingenium-api "$file" || fail
   for user in ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-restore ingenium-cloudflare appuser; do

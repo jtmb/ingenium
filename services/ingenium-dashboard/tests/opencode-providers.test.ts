@@ -120,6 +120,7 @@ describe("OpenCode provider catalog client", () => {
       {
         id: "que_1:0",
         requestId: "que_1",
+        sessionID: "ses_1",
         question: "Which files?",
         header: "Scope",
         options: [{ label: "Source", description: "Application code" }],
@@ -127,11 +128,48 @@ describe("OpenCode provider catalog client", () => {
       {
         id: "que_1:1",
         requestId: "que_1",
+        sessionID: "ses_1",
         question: "Continue?",
         multiple: true,
       },
       { id: "legacy-1", requestId: "legacy-1", question: "Continue?" },
     ]);
+  });
+
+  it("normalizes native v2 form fields and option values", () => {
+    expect(normalizeOpenCodeQuestions([{
+      id: "frm_1",
+      sessionID: "ses_1",
+      title: "Deployment",
+      fields: [{
+        key: "target",
+        type: "string",
+        title: "Target",
+        description: "Choose the environment",
+        required: true,
+        options: [{ value: "prod", label: "Production" }],
+      }],
+    }])).toEqual([{
+      id: "target",
+      requestId: "frm_1",
+      sessionID: "ses_1",
+      question: "Target",
+      header: "Choose the environment",
+      type: "string",
+      required: true,
+      options: [{ value: "prod", label: "Production" }],
+    }]);
+  });
+
+  it("keeps native form defaults, visibility and validation without a display title", () => {
+    expect(normalizeOpenCodeQuestions([{ id: "frm_2", fields: [{
+      key: "count", type: "integer", required: true, hidden: true, default: 2,
+      minimum: 1, maximum: 3, when: [{ key: "enabled", op: "eq", value: true }],
+    }] }])).toEqual([{
+      id: "count", requestId: "frm_2", question: "count", type: "integer",
+      required: true, hidden: true, default: 2, minimum: 1, maximum: 3,
+      when: [{ key: "enabled", op: "eq", value: true }],
+    }]);
   });
 
   it("drops malformed permission and question entries", () => {

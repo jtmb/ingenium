@@ -30,8 +30,8 @@ services:
       # Keep the bearer API boundary loopback-scoped for host MCP clients.
       # Browser traffic must use the same-origin dashboard proxy instead.
       - "127.0.0.1:4097:4097"
-      # Nginx binds this port and exposes only GET /auth/callback.
-      - "127.0.0.1:1455:1455"
+      # Nginx exposes only GET /auth/callback on a port distinct from OpenCode's private listener.
+      - "127.0.0.1:1455:1456"
     environment:
       - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
       # The host credential is mounted read-only; entrypoint copies it to the
@@ -108,7 +108,7 @@ services:
     ports:
       - "3000:3000"
       - "127.0.0.1:4097:4097"
-      - "127.0.0.1:1455:1455"
+      - "127.0.0.1:1455:1456"
     environment:
       - INGENIUM_DEPLOYMENT_MODE=control-plane
       # Loaded from the operator environment or ignored mode-0600 .env file;

@@ -9,7 +9,7 @@ import type { ToolState } from "./ToolCallCard";
 import type { OpenCodePart, ToolPart, FilePart } from "../../../lib/opencode";
 import type { PermissionRequest } from "../../../lib/use-opencode-chat";
 import type { ChatGrounding } from "../../../lib/chat-grounding";
-import type { QuestionItem as ChatQuestionItem } from "./QuestionPrompt";
+import type { QuestionAnswerValue, QuestionItem as ChatQuestionItem } from "./QuestionPrompt";
 import type { ActivitySelection } from "./chat-activity";
 
 export interface ChatMessage {
@@ -42,8 +42,8 @@ interface ChatMessagesProps {
   onDismissError?: () => void;
   /** Active questions from the agent. */
   questions?: ChatQuestionItem[];
-  /** Send a reply to the agent's question as a regular prompt. */
-  onSendReply?: (text: string) => void;
+  /** Reply to the native OpenCode form backing the question prompt. */
+  replyQuestion?: (requestId: string, answers: Record<string, QuestionAnswerValue>) => Promise<void>;
   /** Open the selected Web Search activity in the shared drawer. */
   onActivityOpen?: (messageId: string, partId: string) => void;
   /** Current drawer selection, used to expose expanded state on the trigger. */
@@ -68,7 +68,7 @@ function mapToolState(status?: string): ToolState {
   }
 }
 
-/** Render source metadata only; excerpts remain confined to the provider system prompt. */
+/** Render source metadata only; excerpts remain confined to the provider turn instructions. */
 function ProjectContextStatus({ grounding }: { grounding: ChatGrounding }) {
   if (grounding.status === "not_requested") {
     return (
@@ -406,7 +406,7 @@ export default function ChatMessages({
   replyPermission,
   onDismissError,
   questions: activeQuestions,
-  onSendReply,
+  replyQuestion,
   onActivityOpen,
   activitySelection,
   mcpProject,
@@ -779,19 +779,11 @@ export default function ChatMessages({
           <div className="flex justify-start">
             <div className="max-w-full sm:max-w-[85%]">
               <QuestionPrompt
-                requestId={activeQuestions[0]!.id}
-                questions={activeQuestions}
+                requestId={activeQuestions[0]!.requestId ?? activeQuestions[0]!.id}
+                questions={activeQuestions.filter((question) =>
+                  (question.requestId ?? question.id) === (activeQuestions[0]!.requestId ?? activeQuestions[0]!.id))}
                 isActive={!isStreaming}
-                onReply={(_requestId, answers) => {
-                  const answerText = Object.entries(answers)
-                    .map(([, labels]) =>
-                      Array.isArray(labels) ? labels.join(", ") : labels,
-                    )
-                    .join("\n");
-                  if (onSendReply) {
-                    onSendReply(answerText);
-                  }
-                }}
+                onReply={(requestId, answers) => void replyQuestion?.(requestId, answers)}
               />
             </div>
           </div>

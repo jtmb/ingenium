@@ -88,6 +88,8 @@ export interface SendPromptBody {
   model?: { providerID: string; modelID: string };
   agent?: string;
   system?: string;
+  /** Delimited untrusted reference data supplied by the dashboard. */
+  context?: string;
   tools?: Record<string, boolean>;
   variant?: string;
 }
@@ -176,8 +178,8 @@ export interface RevertBody {
 /** Shape for command request body */
 export interface CommandBody {
   command: string;
-  args?: string[];
-  arguments?: string[];
+  args?: string | string[];
+  arguments?: string | string[];
 }
 
 /* ── Message shape on the retained OpenCode REST surface ── */
@@ -214,13 +216,25 @@ export interface MessagePart {
   id: string;
   sessionID: string;
   messageID: string;
-  type: "text" | "reasoning" | "step-start" | "step-finish" | "tool";
+  type: "text" | "reasoning" | "step-start" | "step-finish" | "tool" | "file";
   text?: string;
   time?: { start: number; end: number };
   snapshot?: string;
   reason?: string;
   tokens?: unknown;
   cost?: number;
+  tool?: string;
+  callID?: string;
+  state?: {
+    status: "pending" | "running" | "completed" | "error";
+    input?: unknown;
+    output?: unknown;
+    error?: string;
+  };
+  mime?: string;
+  url?: string;
+  filename?: string;
+  dataUrl?: string;
 }
 
 export interface MessageEnvelope {
@@ -316,6 +330,20 @@ interface V2ContentPart {
   type: string;
   text?: string;
   id?: string;
+  name?: string;
+  state?: {
+    status?: string;
+    input?: unknown;
+    content?: unknown;
+    error?: unknown;
+  };
+}
+
+interface V2FileAttachment {
+  data: string;
+  mime: string;
+  source: { type: "inline" } | { type: "uri"; uri: string };
+  name?: string;
 }
 
 interface V2ConversationMessage {
@@ -327,10 +355,12 @@ interface V2ConversationMessage {
   agent?: string;
   model?: V2ModelRef;
   content?: V2ContentPart[];
+  files?: V2FileAttachment[];
   finish?: string;
   tokens?: MessageInfo["tokens"];
   cost?: number;
   error?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 interface V2Page<T> {
@@ -395,6 +425,28 @@ interface V2FormInfo {
   id: string;
   sessionID: string;
   title: string;
+  fields: Array<{
+    key: string;
+    type: "string" | "number" | "integer" | "boolean" | "multiselect" | "external";
+    title?: string;
+    description?: string;
+    required?: boolean;
+    hidden?: boolean;
+    when?: Array<{ key: string; op: "eq" | "neq"; value: string | number | boolean }>;
+    placeholder?: string;
+    options?: Array<{ value: string; label: string; description?: string }>;
+    url?: string;
+    default?: string | number | boolean | string[];
+    format?: "email" | "uri" | "date" | "date-time";
+    minimum?: number;
+    maximum?: number;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+    minItems?: number;
+    maxItems?: number;
+    custom?: boolean;
+  }>;
 }
 
 /* ── Provider shape on the retained OpenCode REST surface ── */
@@ -573,7 +625,32 @@ export interface QuestionInfo {
   id: string;
   text?: string;
   sessionID?: string;
+  questions?: Array<{
+    id: string;
+    question: string;
+    header?: string;
+    type: V2FormInfo["fields"][number]["type"];
+    required?: boolean;
+    hidden?: boolean;
+    when?: V2FormInfo["fields"][number]["when"];
+    placeholder?: string;
+    options?: Array<{ value: string; label: string; description?: string }>;
+    multiple?: boolean;
+    url?: string;
+    default?: V2FormInfo["fields"][number]["default"];
+    format?: V2FormInfo["fields"][number]["format"];
+    minimum?: number;
+    maximum?: number;
+    minLength?: number;
+    maxLength?: number;
+    pattern?: string;
+    minItems?: number;
+    maxItems?: number;
+    custom?: boolean;
+  }>;
 }
+
+export type FormAnswerValue = string | number | boolean | string[];
 
 /* ── Session status shape ── */
 
@@ -804,12 +881,43 @@ function messagePartId(messageId: string, suffix: string): string {
   return `${messageId}:${suffix}`;
 }
 
+function v2ErrorText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "message" in value
+    && typeof (value as { message?: unknown }).message === "string") {
+    return (value as { message: string }).message;
+  }
+  return undefined;
+}
+
 function mapV2Message(message: V2ConversationMessage, sessionId: string): MessageEnvelope | null {
   const base = { id: message.id, sessionID: sessionId };
   if (message.type === "user") {
+    const visibleText = typeof message.metadata?.ingeniumVisibleText === "string"
+      ? message.metadata.ingeniumVisibleText
+      : message.text ?? "";
+    const parts: MessagePart[] = [{
+      id: messagePartId(message.id, "text"),
+      sessionID: sessionId,
+      messageID: message.id,
+      type: "text",
+      text: visibleText,
+    }];
+    message.files?.forEach((file, index) => {
+      const url = file.source.type === "uri" ? file.source.uri : undefined;
+      parts.push({
+        id: messagePartId(message.id, `file-${index}`),
+        sessionID: sessionId,
+        messageID: message.id,
+        type: "file",
+        mime: file.mime,
+        filename: file.name,
+        ...(url ? { url } : { dataUrl: `data:${file.mime};base64,${file.data}` }),
+      });
+    });
     return {
       info: { ...base, role: "user", time: message.time },
-      parts: [{ id: messagePartId(message.id, "text"), sessionID: sessionId, messageID: message.id, type: "text", text: message.text ?? "" }],
+      parts,
     };
   }
   if (message.type === "assistant") {
@@ -824,7 +932,26 @@ function mapV2Message(message: V2ConversationMessage, sessionId: string): Messag
       if (part.type === "text" || part.type === "reasoning") {
         parts.push({ id: partId, sessionID: sessionId, messageID: message.id, type: part.type, text: part.text ?? "" });
       } else if (part.type === "tool") {
-        parts.push({ id: partId, sessionID: sessionId, messageID: message.id, type: "tool" });
+        const status = part.state?.status === "streaming"
+          ? "pending"
+          : part.state?.status === "running" || part.state?.status === "completed" || part.state?.status === "error"
+            ? part.state.status
+            : "pending";
+        const error = v2ErrorText(part.state?.error);
+        parts.push({
+          id: partId,
+          sessionID: sessionId,
+          messageID: message.id,
+          type: "tool",
+          tool: part.name,
+          callID: part.id,
+          state: {
+            status,
+            ...(part.state?.input !== undefined ? { input: part.state.input } : {}),
+            ...(part.state?.content !== undefined ? { output: part.state.content } : {}),
+            ...(error ? { error } : {}),
+          },
+        });
       }
     });
     const finishTime = message.time.completed ?? message.time.created;
@@ -872,7 +999,7 @@ async function getV2Session(sessionId: string, directory?: string): Promise<Open
   const expectedDirectory = expectedOpenCodeDirectory(directory);
   const result = await v2Data<V2SessionInfo>(`/api/session/${pathSegment(sessionId)}`);
   if (isOpenCodeError(result)) return result;
-  return validateV2Session(result, expectedDirectory) ? result : bindingError();
+  return validateV2Session(result, expectedDirectory) && result.id === sessionId ? result : bindingError();
 }
 
 async function getV2MessagePage(
@@ -911,10 +1038,14 @@ async function getV2MessagePage(
  * file parts become `uri` attachments.
  */
 function promptInputFromParts(body: SendPromptBody): OpenCodeResult<Record<string, unknown>> {
-  const text = body.parts
+  const visibleText = body.parts
     .filter((part): part is TextPartInput => part.type === "text")
     .map((part) => part.text)
     .join("\n");
+  const context = body.context?.trim();
+  const text = context
+    ? `${context}\n\n<ingenium-user-message>\n${visibleText}\n</ingenium-user-message>`
+    : visibleText;
   const files = body.parts
     .filter((part): part is FilePartInput => part.type === "file")
     .map((part) => ({ uri: part.url, ...(part.filename ? { name: part.filename } : {}) }));
@@ -925,6 +1056,7 @@ function promptInputFromParts(body: SendPromptBody): OpenCodeResult<Record<strin
     ...(body.messageID && /^msg_/.test(body.messageID) ? { id: body.messageID } : {}),
     text,
     ...(files.length > 0 ? { files } : {}),
+    ...(context ? { metadata: { ingeniumVisibleText: visibleText } } : {}),
   };
 }
 
@@ -1352,21 +1484,25 @@ export const opencodeClient = {
     body: UpdateSessionBody,
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo>> => {
-    const patched = await request<unknown>(`/api/session/${pathSegment(id)}`, {
+    const session = await getV2Session(id, directory);
+    if (isOpenCodeError(session)) return session;
+    const patched = await request<unknown>(`/api/session/${pathSegment(session.id)}`, {
       method: "PATCH",
       body: body.title === undefined ? {} : { title: body.title },
     });
     if (isOpenCodeError(patched)) return patched;
-    const result = await getV2Session(id, directory);
+    const result = await getV2Session(session.id, directory);
     return isOpenCodeError(result) ? result : mapV2Session(result);
   },
 
   /** DELETE /api/session/{sessionID} [session.remove]. */
   deleteSession: async (
     id: string,
-    _directory?: string,
+    directory?: string,
   ): Promise<OpenCodeResult<boolean>> => {
-    const result = await request<unknown>(`/api/session/${pathSegment(id)}`, { method: "DELETE" });
+    const session = await getV2Session(id, directory);
+    if (isOpenCodeError(session)) return session;
+    const result = await request<unknown>(`/api/session/${pathSegment(session.id)}`, { method: "DELETE" });
     return isOpenCodeError(result) ? result : true;
   },
 
@@ -1428,9 +1564,9 @@ export const opencodeClient = {
    * The v2 body is `{ id?, text, files, agents, skills, metadata, delivery,
    * resume }`; it has no per-prompt model, agent, system, tools, or variant
    * fields. Model/agent/variant selections are applied to the session first
-   * through the v2 switch endpoints, tool selections are owned by the selected
-   * agent's permission rules, and a `system` instruction fails closed because
-   * v2 session system prompts belong to agents.
+   * through the v2 switch endpoints and tool selections are owned by the
+   * selected agent's permission rules. The removed per-prompt system field
+   * fails closed; bounded dashboard reference data is user content instead.
    */
   sendPrompt: async (
     sessionId: string,
@@ -1646,18 +1782,29 @@ export const opencodeClient = {
     directory?: string,
   ): Promise<OpenCodeResult<SessionInfo[]>> => {
     const expectedDirectory = expectedOpenCodeDirectory(directory);
-    const query: Record<string, string | number> = { parentID: sessionId };
-    if (expectedDirectory !== undefined) query.directory = expectedDirectory;
-    const result = await request<V2Page<V2SessionInfo>>("/api/session", { query });
-    if (isOpenCodeError(result)) return result;
-    if (!Array.isArray(result.data)) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
     const children: SessionInfo[] = [];
-    for (const child of result.data) {
-      if (child.parentID !== sessionId) continue;
-      if (!validateV2Session(child, expectedDirectory)) return bindingError();
-      children.push(mapV2Session(child));
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_V2_LIST_PAGES; page += 1) {
+      const query: Record<string, string | number> = { parentID: sessionId, limit: V2_PAGE_SIZE };
+      if (expectedDirectory !== undefined) query.directory = expectedDirectory;
+      if (cursor === undefined) query.order = "desc";
+      else query.cursor = cursor;
+      const result = await request<V2Page<V2SessionInfo>>("/api/session", { query });
+      if (isOpenCodeError(result)) return result;
+      if (!Array.isArray(result.data)) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+      for (const child of result.data) {
+        if (child.parentID !== sessionId) continue;
+        if (!validateV2Session(child, expectedDirectory)) return bindingError();
+        children.push(mapV2Session(child));
+      }
+      const next = result.cursor?.next;
+      if (!next) return children;
+      if (cursors.has(next)) return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination failed" } };
+      cursors.add(next);
+      cursor = next;
     }
-    return children;
+    return { error: { code: "OPENCODE_V2_CURSOR_FAILED", message: "OpenCode pagination exceeded its safety limit" } };
   },
 
   /** GET /api/session/{sessionID}/diff [session.diff] — v1 `messageID` is v2 `from`. */
@@ -1679,12 +1826,24 @@ export const opencodeClient = {
     body: CommandBody,
     directory?: string,
   ): Promise<OpenCodeResult<unknown>> => {
+    if (!body || typeof body !== "object" || Array.isArray(body)
+      || typeof body.command !== "string" || body.command.trim().length === 0
+      || ![body.args, body.arguments].every((args) => args === undefined
+        || typeof args === "string"
+        || Array.isArray(args) && args.every((arg) => typeof arg === "string"))) {
+      const error: OpenCodeErrorShape["error"] = {
+        code: "INVALID_COMMAND",
+        message: "Command requests require a name and string or string-array arguments",
+      };
+      Object.defineProperty(error, "status", { value: 400, enumerable: false });
+      return { error };
+    }
+    const args = body.args ?? body.arguments ?? "";
     const session = await getV2Session(sessionId, directory);
     if (isOpenCodeError(session)) return session;
-    const args = body.args ?? body.arguments ?? [];
     const result = await request<unknown>(`/api/session/${pathSegment(session.id)}/command`, {
       method: "POST",
-      body: { name: body.command, text: args.join(" ") },
+      body: { name: body.command, text: typeof args === "string" ? args : args.join(" ") },
     });
     return isOpenCodeError(result) ? result : true;
   },
@@ -1997,8 +2156,10 @@ export const opencodeClient = {
   /* ── Permissions ── */
 
   /** GET /api/permission/request [permission.request.list]. */
-  getPermissions: async (_directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> => {
-    const result = await v2Data<V2PermissionRequest[]>("/api/permission/request");
+  getPermissions: async (directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> => {
+    const result = await v2Data<V2PermissionRequest[]>("/api/permission/request", {
+      query: directory ? { "location[directory]": directory } : undefined,
+    });
     if (isOpenCodeError(result)) return result;
     return result.map((request) => ({
       id: request.id,
@@ -2032,10 +2193,60 @@ export const opencodeClient = {
    * returns pending forms for the location; the retained question contract is
    * projected from each form's id and title.
    */
-  getQuestions: async (_directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> => {
-    const result = await v2Data<V2FormInfo[]>("/api/form");
+  getQuestions: async (directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> => {
+    const result = await v2Data<V2FormInfo[]>("/api/form", {
+      query: directory ? { "location[directory]": directory } : undefined,
+    });
     if (isOpenCodeError(result)) return result;
-    return result.map((form) => ({ id: form.id, text: form.title, sessionID: form.sessionID }));
+    return result.map((form) => ({
+      id: form.id,
+      text: form.title,
+      sessionID: form.sessionID,
+      questions: form.fields.map((field) => ({
+        id: field.key,
+        question: field.title ?? form.title,
+        type: field.type,
+        ...(field.description ? { header: field.description } : {}),
+        ...(field.required !== undefined ? { required: field.required } : {}),
+        ...(field.hidden !== undefined ? { hidden: field.hidden } : {}),
+        ...(field.when ? { when: field.when } : {}),
+        ...(field.placeholder ? { placeholder: field.placeholder } : {}),
+        ...(field.options ? { options: field.options } : {}),
+        ...(field.type === "multiselect" ? { multiple: true } : {}),
+        ...(field.url ? { url: field.url } : {}),
+        ...(field.default !== undefined ? { default: field.default } : {}),
+        ...(field.format ? { format: field.format } : {}),
+        ...(field.minimum !== undefined ? { minimum: field.minimum } : {}),
+        ...(field.maximum !== undefined ? { maximum: field.maximum } : {}),
+        ...(field.minLength !== undefined ? { minLength: field.minLength } : {}),
+        ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}),
+        ...(field.pattern ? { pattern: field.pattern } : {}),
+        ...(field.minItems !== undefined ? { minItems: field.minItems } : {}),
+        ...(field.maxItems !== undefined ? { maxItems: field.maxItems } : {}),
+        ...(field.custom !== undefined ? { custom: field.custom } : {}),
+      })),
+    }));
+  },
+
+  /** POST /api/session/{sessionID}/form/{formID}/reply [session.form.reply]. */
+  replyQuestion: async (
+    sessionId: string,
+    formId: string,
+    answer: Record<string, FormAnswerValue>,
+    directory?: string,
+  ): Promise<OpenCodeResult<boolean>> => {
+    const session = await getV2Session(sessionId, directory);
+    if (isOpenCodeError(session)) return session;
+    const form = await v2Data<V2FormInfo>(
+      `/api/session/${pathSegment(session.id)}/form/${pathSegment(formId)}`,
+    );
+    if (isOpenCodeError(form)) return form;
+    if (form.sessionID !== session.id) return bindingError();
+    const result = await request<unknown>(
+      `/api/session/${pathSegment(session.id)}/form/${pathSegment(form.id)}/reply`,
+      { method: "POST", body: { answer } },
+    );
+    return isOpenCodeError(result) ? result : true;
   },
 
   /* ── SSE ── */
@@ -2043,8 +2254,8 @@ export const opencodeClient = {
   /**
    * GET /api/event [event.subscribe]. v2 streams native events across every
    * location and accepts no `session`/`directory` query filters, so subscribers
-   * receive the full stream and filter by `properties.sessionID` themselves
-   * (the dashboard already does this).
+   * receive the full stream. The API route projects and filters that stream
+   * before exposing the retained per-session browser contract.
    */
   streamEvents: (
     _sessionId?: string,

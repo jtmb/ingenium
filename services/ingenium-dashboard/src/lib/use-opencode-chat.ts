@@ -15,16 +15,16 @@ import { useOpenCodeClient } from "./RuntimeContext";
 import type { ChatGrounding } from "./chat-grounding";
 import type {
   QuestionItem as ChatQuestionItem,
+  QuestionAnswerValue,
   QuestionOption,
 } from "../app/chat/components/QuestionPrompt";
 
-/** Options that control model/agent/variant/system for the next send. */
+/** Options that control the next native v2 send. */
 export interface SendOptions {
   model?: { providerID: string; modelID: string };
   agent?: string;
   variant?: string;
-  system?: string;
-  tools?: Record<string, boolean>;
+  context?: string;
   /** Local-only display/retry metadata; never forwarded to OpenCode. */
   grounding?: ChatGrounding;
 }
@@ -193,7 +193,7 @@ type ChatAction =
   | { type: "UPDATE_SESSION_INFO"; info: SessionInfo }
   | { type: "ADD_QUESTION"; question: ChatQuestionItem }
   | { type: "ADD_QUESTIONS"; questions: ChatQuestionItem[] }
-  | { type: "REMOVE_QUESTIONS" }
+  | { type: "REMOVE_QUESTIONS"; requestId?: string }
   | { type: "REMOVE_LAST_USER" }
   | { type: "FINALIZE_STREAMING" }
   | { type: "CLEAR" };
@@ -430,7 +430,18 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       );
       const newParts = [...target.parts];
       if (idx >= 0) {
-        newParts[idx] = incomingPart;
+        const existingPart = newParts[idx]!;
+        newParts[idx] = existingPart.type === "tool" && incomingPart.type === "tool"
+          ? {
+              ...existingPart,
+              ...incomingPart,
+              state: {
+                ...existingPart.state,
+                ...incomingPart.state,
+                status: incomingPart.state?.status ?? existingPart.state?.status ?? "pending",
+              },
+            }
+          : incomingPart;
       } else {
         newParts.push(incomingPart);
       }
@@ -552,15 +563,21 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       // Merge unique questions (source may be polling which returns full list)
       const merged = [...state.questions];
       for (const q of action.questions) {
-        if (!merged.some((m) => m.id === q.id)) {
-          merged.push(q);
-        }
+        const existing = merged.findIndex((candidate) => candidate.id === q.id
+          && (candidate.requestId ?? candidate.id) === (q.requestId ?? q.id));
+        if (existing >= 0) merged[existing] = q;
+        else merged.push(q);
       }
       return { ...state, questions: merged };
     }
 
     case "REMOVE_QUESTIONS":
-      return { ...state, questions: [] };
+      return {
+        ...state,
+        questions: action.requestId
+          ? state.questions.filter((question) => (question.requestId ?? question.id) !== action.requestId)
+          : [],
+      };
 
     case "REMOVE_LAST_USER": {
       const msgs = [...state.messages];
@@ -685,10 +702,27 @@ function normalizeMessages(rawMessages: OpenCodeApiMessage[]): ChatMessage[] {
 function toChatQuestion(question: OpenCodeQuestion): ChatQuestionItem {
   return {
     id: question.id,
+    ...(question.requestId ? { requestId: question.requestId } : {}),
     question: question.question,
     ...(question.header ? { header: question.header } : {}),
     ...(question.options ? { options: question.options } : {}),
     ...(question.multiple !== undefined ? { multiple: question.multiple } : {}),
+    ...(question.type ? { type: question.type } : {}),
+    ...(question.required !== undefined ? { required: question.required } : {}),
+    ...(question.hidden !== undefined ? { hidden: question.hidden } : {}),
+    ...(question.when ? { when: question.when } : {}),
+    ...(question.placeholder ? { placeholder: question.placeholder } : {}),
+    ...(question.url ? { url: question.url } : {}),
+    ...(question.default !== undefined ? { default: question.default } : {}),
+    ...(question.format ? { format: question.format } : {}),
+    ...(question.minimum !== undefined ? { minimum: question.minimum } : {}),
+    ...(question.maximum !== undefined ? { maximum: question.maximum } : {}),
+    ...(question.minLength !== undefined ? { minLength: question.minLength } : {}),
+    ...(question.maxLength !== undefined ? { maxLength: question.maxLength } : {}),
+    ...(question.pattern ? { pattern: question.pattern } : {}),
+    ...(question.minItems !== undefined ? { minItems: question.minItems } : {}),
+    ...(question.maxItems !== undefined ? { maxItems: question.maxItems } : {}),
+    ...(question.custom !== undefined ? { custom: question.custom } : {}),
   };
 }
 
@@ -845,6 +879,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   const correlatedUserIdsRef = useRef(new Set<string>());
 
   const questionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const repliedQuestionIdsRef = useRef(new Set<string>());
   const contextLinkRef = useRef<{
     key: string;
     promise: Promise<{ id: string; revision: number }>;
@@ -875,6 +910,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     lastSendOptionsRef.current = undefined;
     pendingUserTurnsRef.current.clear();
     correlatedUserIdsRef.current.clear();
+    repliedQuestionIdsRef.current.clear();
     dispatch({ type: "CLEAR" });
 
     if (!sessionId || !scopeKey) {
@@ -1382,8 +1418,13 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
       case "question.asked":
       case "question.v2.asked":
       case "session.question":
-      case "message.question": {
-        const questions = normalizeOpenCodeQuestions([props]).map(toChatQuestion);
+      case "message.question":
+      case "form.created":
+      case "form.updated": {
+        const source = props.form ?? props.data ?? props;
+        const questions = normalizeOpenCodeQuestions([source])
+          .filter((question) => !question.sessionID || question.sessionID === sid)
+          .map(toChatQuestion);
         if (questions.length > 0) dispatch({ type: "ADD_QUESTIONS", questions });
         break;
       }
@@ -1391,7 +1432,10 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
       case "question.replied":
       case "question.v2.replied":
       case "question.rejected":
-      case "question.v2.rejected": {
+      case "question.v2.rejected":
+      case "form.replied":
+      case "form.cancelled":
+      case "form.deleted": {
         dispatch({ type: "REMOVE_QUESTIONS" });
         break;
       }
@@ -1549,7 +1593,10 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     try {
       const raw = await opencode.questions.list();
       if (activeScopeRef.current !== requestScope) return;
-      const items = normalizeOpenCodeQuestions(raw).map(toChatQuestion);
+      const items = raw
+        .filter((question) => !question.sessionID || question.sessionID === sessionId)
+        .filter((question) => !repliedQuestionIdsRef.current.has(question.requestId ?? question.id))
+        .map(toChatQuestion);
       if (items.length > 0) {
         dispatch({ type: "ADD_QUESTIONS", questions: items });
       }
@@ -1605,13 +1652,32 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     [opencode, scopeKey, sessionId, refreshPermissions],
   );
 
+  const replyQuestion = useCallback(async (
+    requestId: string,
+    answers: Record<string, QuestionAnswerValue>,
+  ) => {
+    if (!sessionId || !scopeKey) return;
+    const requestScope = scopeKey;
+    try {
+      await opencode.questions.reply(sessionId, requestId, answers);
+      repliedQuestionIdsRef.current.add(requestId);
+      if (activeScopeRef.current === requestScope) dispatch({ type: "REMOVE_QUESTIONS", requestId });
+    } catch (error) {
+      if (activeScopeRef.current !== requestScope) return;
+      dispatch({
+        type: "SET_ERROR",
+        error: error instanceof Error ? error.message : "Failed to submit form",
+      });
+    }
+  }, [opencode, scopeKey, sessionId]);
+
   /** Active permissions (not yet replied). */
   const activePermissions = permissionState.scopeKey === scopeKey
     ? permissionState.requests.filter((p) => !permissionState.replied.has(p.id))
     : [];
 
 
-  /** Send a message with optional model/agent/variant/system/tools overrides. */
+  /** Send a message with optional model/agent/variant/turn-instruction overrides. */
   const send = useCallback(
     async (
       parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }>,
@@ -1682,9 +1748,8 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
           parts,
           model: options?.model,
           agent: options?.agent,
-          system: options?.system,
+          context: options?.context,
           variant: options?.variant,
-          tools: options?.tools,
         };
         dispatch({ type: "SET_STREAMING", value: true });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "connecting" });
@@ -1863,6 +1928,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     questions: sessionReady ? state.questions : [],
     permissions: sessionReady ? activePermissions : [],
     replyPermission,
+    replyQuestion,
     streamActivity: sessionReady ? state.streamActivity : "idle",
     send,
     stop,

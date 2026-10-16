@@ -21,6 +21,34 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import express from "express";
 import { createServer, type Server } from "node:http";
 
+const guardedUploadCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const isSharedUpload = (path: string | Buffer | URL) =>
+    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+  const guard = (operation: string, path: string | Buffer | URL) => {
+    if (!isSharedUpload(path)) return false;
+    guardedUploadCalls.push(operation);
+    return true;
+  };
+
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) =>
+      guard("mkdirSync", args[0]) ? undefined : fs.mkdirSync(...args),
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) =>
+      guard("readdirSync", args[0]) ? [] : fs.readdirSync(...args),
+    statSync: (...args: Parameters<typeof fs.statSync>) =>
+      guard("statSync", args[0]) ? undefined : fs.statSync(...args),
+    existsSync: (...args: Parameters<typeof fs.existsSync>) =>
+      guard("existsSync", args[0]) ? false : fs.existsSync(...args),
+    unlinkSync: (...args: Parameters<typeof fs.unlinkSync>) => {
+      if (!guard("unlinkSync", args[0])) fs.unlinkSync(...args);
+    },
+  };
+});
+
 /* ── Module-level mock of opencode-client ────────────────────────────────── */
 
 const mockSendPrompt = vi.fn();
@@ -28,6 +56,7 @@ const mockCompactSession = vi.fn();
 const mockStreamEvents = vi.fn();
 const mockGetPermissions = vi.fn();
 const mockGetQuestions = vi.fn();
+const mockReplyQuestion = vi.fn();
 const mockForkSession = vi.fn();
 const mockRevertSession = vi.fn();
 const mockSendCommand = vi.fn();
@@ -42,6 +71,7 @@ vi.mock("../lib/opencode-client.js", () => ({
     streamEvents: (...args: unknown[]) => mockStreamEvents(...args),
     getPermissions: (...args: unknown[]) => mockGetPermissions(...args),
     getQuestions: (...args: unknown[]) => mockGetQuestions(...args),
+    replyQuestion: (...args: unknown[]) => mockReplyQuestion(...args),
     forkSession: (...args: unknown[]) => mockForkSession(...args),
     revertSession: (...args: unknown[]) => mockRevertSession(...args),
     sendCommand: (...args: unknown[]) => mockSendCommand(...args),
@@ -117,6 +147,10 @@ function api(path: string): string {
 }
 
 describe("v2 message read availability", () => {
+  it("isolates router startup from the shared upload directory", () => {
+    expect(guardedUploadCalls).toEqual(["mkdirSync", "readdirSync"]);
+  });
+
   it("returns 503 instead of an empty successful result when OpenCode is unavailable", async () => {
     mockReadRecentOpenCodeUserMessages.mockResolvedValue({
       error: { code: "NETWORK_ERROR", message: "Network error contacting OpenCode server" },
@@ -244,7 +278,7 @@ describe("Defect 1: Prompt body field passthrough", () => {
     );
   });
 
-  it("acknowledges a long-running prompt before the upstream provider settles", async () => {
+  it("acknowledges a prompt only after native admission settles", async () => {
     let settlePrompt!: (value: { info: { id: string }; parts: never[] }) => void;
     mockSendPrompt.mockImplementation(
       () => new Promise((resolve) => {
@@ -252,12 +286,20 @@ describe("Defect 1: Prompt body field passthrough", () => {
       }),
     );
 
-    const res = await fetch(api("/sessions/ses_streaming/prompt"), {
+    let settled = false;
+    const response = fetch(api("/sessions/ses_streaming/prompt"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ parts: [{ type: "text", text: "Start streaming" }] }),
+    }).then((value) => {
+      settled = true;
+      return value;
     });
 
+    await vi.waitFor(() => expect(mockSendPrompt).toHaveBeenCalledTimes(1));
+    expect(settled).toBe(false);
+    settlePrompt({ info: { id: "msg_streaming" }, parts: [] });
+    const res = await response;
     expect(res.status).toBe(202);
     await expect(res.json()).resolves.toEqual({ data: { accepted: true } });
     expect(mockSendPrompt).toHaveBeenCalledWith(
@@ -266,7 +308,21 @@ describe("Defect 1: Prompt body field passthrough", () => {
       undefined,
     );
 
-    settlePrompt({ info: { id: "msg_streaming" }, parts: [] });
+  });
+
+  it("returns native admission failures instead of a false 202", async () => {
+    mockSendPrompt.mockResolvedValue({
+      error: { code: "OPENCODE_V2_TOOLS_UNAVAILABLE", message: "OpenCode request failed", status: 400 },
+    });
+    const res = await fetch(api("/sessions/ses_rejected/prompt"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "Hello" }], tools: { bash: true } }),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "OPENCODE_V2_TOOLS_UNAVAILABLE", message: "OpenCode request failed." },
+    });
   });
 
   it("SendPromptBody type includes all contract fields", () => {
@@ -454,9 +510,15 @@ describe("Defect 2: Compact body construction", () => {
 describe("Defect 3: SSE Last-Event-ID forwarding", () => {
   it("forwards Last-Event-ID header to streamEvents for session event stream", async () => {
     const encoder = new TextEncoder();
+    const events = [
+      'id: evt-1\ndata: {"type":"message.updated","data":{"info":{"id":"msg_target","sessionID":"ses_sse"}}}\n\n',
+      'id: evt-2\ndata: {"type":"message.updated","data":{"info":{"id":"msg_foreign","sessionID":"ses_other"}}}\n\n',
+      'data: {"type":"server.heartbeat","data":{"time":1}}\n\n',
+    ].join("");
     const stream = new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode("data: {\"test\":true}\n\n"));
+        controller.enqueue(encoder.encode(events.slice(0, 37)));
+        controller.enqueue(encoder.encode(events.slice(37)));
         controller.close();
       },
     });
@@ -471,6 +533,10 @@ describe("Defect 3: SSE Last-Event-ID forwarding", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const body = await res.text();
+    expect(body).toContain("msg_target");
+    expect(body).not.toContain("msg_foreign");
+    expect(body).toContain('data: {"type":"server.heartbeat","properties":{"time":1}}');
     expect(mockStreamEvents).toHaveBeenCalledTimes(1);
 
     // Verify Last-Event-ID is forwarded as the 3rd argument
@@ -478,6 +544,64 @@ describe("Defect 3: SSE Last-Event-ID forwarding", () => {
     expect(sessionId).toBe("ses_sse");
     expect(directory).toBeUndefined();
     expect(lastEventId).toBe("12345");
+  });
+
+  it("projects native session.next events onto the retained browser stream", async () => {
+    const encoder = new TextEncoder();
+    const nativeEvents = [
+      {
+        id: "evt-step",
+        type: "session.next.step.started",
+        data: {
+          sessionID: "ses_sse",
+          assistantMessageID: "msg_assistant",
+          timestamp: 10,
+          agent: "chat/ingenium-chat",
+          model: { providerID: "openai", id: "gpt-test" },
+        },
+      },
+      {
+        id: "evt-text-start",
+        type: "session.next.text.started",
+        data: { sessionID: "ses_sse", assistantMessageID: "msg_assistant", timestamp: 11, textID: "text_1" },
+      },
+      {
+        id: "evt-text-delta",
+        type: "session.next.text.delta",
+        data: { sessionID: "ses_sse", assistantMessageID: "msg_assistant", timestamp: 12, textID: "text_1", delta: "Hello" },
+      },
+      {
+        id: "evt-step-end",
+        type: "session.next.step.ended",
+        data: {
+          sessionID: "ses_sse",
+          assistantMessageID: "msg_assistant",
+          timestamp: 13,
+          finish: "stop",
+          cost: 1,
+          tokens: { input: 2, output: 3, reasoning: 0, cache: { read: 0, write: 0 } },
+        },
+      },
+    ].map((event) => `event: message\ndata: ${JSON.stringify(event)}\n\n`).join("");
+    mockStreamEvents.mockResolvedValue(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(nativeEvents));
+        controller.close();
+      },
+    }));
+
+    const res = await fetch(api("/sessions/ses_sse/events"), {
+      headers: { Accept: "text/event-stream" },
+    });
+    const body = await res.text();
+
+    expect(body).toContain('id: evt-step');
+    expect(body).toContain('"type":"message.updated"');
+    expect(body).toContain('"model":{"providerID":"openai","modelID":"gpt-test"}');
+    expect(body).toContain('"type":"message.part.updated"');
+    expect(body).toContain('"type":"message.part.delta"');
+    expect(body).toContain('"delta":"Hello"');
+    expect(body).toContain('"type":"session.idle"');
   });
 
   it("forwards Last-Event-ID header to streamEvents for global event stream", async () => {
@@ -665,28 +789,30 @@ describe("Defect 5: Questions endpoint", () => {
     expect(body.data).toEqual([]);
   });
 
-  it("🔴 GAP: No POST /questions/{id}/reply endpoint exists", async () => {
-    // The OpenCode API has GET /question to list pending questions, but
-    // there is no corresponding POST /question/{id}/reply to answer them.
-    // Questions can only be answered through the SSE event stream.
-    //
-    // Current implementation in routes/opencode.ts:
-    //   - GET /opencode/questions → proxies to /question (line 356-361)
-    //   - No POST /opencode/questions/:id/reply endpoint
-    //
-    // The frontend needs to reply to questions. Currently, the only way
-    // is to send a prompt with the answer, which is not a clean API.
-    //
-    // To fix: Add route: POST /sessions/:id/questions/:qid/reply
-    //   that sends answer via the SSE stream's question reply mechanism.
-
-    // Verify there's no reply endpoint by checking for 404
-    const res = await fetch(api("/questions/q_1/reply"), {
+  it("replies to a native form through the retained session question route", async () => {
+    mockReplyQuestion.mockResolvedValue(true);
+    const res = await fetch(api("/sessions/ses_1/questions/frm_1?directory=%2Fworkspace"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answer: "My name is Ingenium" }),
+      body: JSON.stringify({ answer: { branch: "main", confirmed: true } }),
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect(mockReplyQuestion).toHaveBeenCalledWith(
+      "ses_1",
+      "frm_1",
+      { branch: "main", confirmed: true },
+      "/workspace",
+    );
+  });
+
+  it("rejects malformed form answers before transport", async () => {
+    const res = await fetch(api("/sessions/ses_1/questions/frm_1"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answer: { choices: [{ unsafe: true }] } }),
+    });
+    expect(res.status).toBe(400);
+    expect(mockReplyQuestion).not.toHaveBeenCalled();
   });
 
   it("forwards directory query parameter", async () => {

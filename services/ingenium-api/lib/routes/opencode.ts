@@ -96,6 +96,7 @@ const MAX_PENDING_OAUTH_ATTEMPTS = 100;
 const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://localhost:1455/auth/callback";
 const pendingOAuthAttempts = new Map<string, {
   attemptID: string;
+  state: string | null;
   mode: "auto" | "code";
   expiresAt: number;
   actorType: "compatibility" | "user" | "service" | "system";
@@ -117,8 +118,8 @@ export function createOAuthCallbackRateLimiter(maxRequests = 20, windowMs = 60_0
 
 function pruneOAuthAttempts(): void {
   const now = Date.now();
-  for (const [state, attempt] of pendingOAuthAttempts) {
-    if (attempt.expiresAt <= now) pendingOAuthAttempts.delete(state);
+  for (const [attemptID, attempt] of pendingOAuthAttempts) {
+    if (attempt.expiresAt <= now) pendingOAuthAttempts.delete(attemptID);
   }
 }
 
@@ -128,10 +129,7 @@ function pruneOAuthAttempts(): void {
  * it before asking the client for an attempt-scoped operation.
  */
 function resolveAttemptIntegrationID(attemptID: string): string | undefined {
-  for (const attempt of pendingOAuthAttempts.values()) {
-    if (attempt.attemptID === attemptID) return attempt.providerId;
-  }
-  return undefined;
+  return pendingOAuthAttempts.get(attemptID)?.providerId;
 }
 
 function oauthCallbackPage(res: Response, status: number, title: string, message: string): void {
@@ -157,16 +155,38 @@ function getOAuthCallbackForwardUrl(): URL | null {
     || DEFAULT_OAUTH_CALLBACK_FORWARD_URL;
   try {
     const url = new URL(configuredUrl);
-    const isLoopback = url.hostname === "localhost"
-      || url.hostname === "127.0.0.1"
-      || url.hostname === "[::1]";
-    if (url.protocol !== "http:" || !isLoopback || url.pathname !== "/auth/callback"
+    if (url.protocol !== "http:" || !isOAuthLoopbackHostname(url.hostname) || url.pathname !== "/auth/callback"
       || url.username || url.password || url.search || url.hash) {
       return null;
     }
     return url;
   } catch {
     return null;
+  }
+}
+
+function isOAuthLoopbackHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
+function supportsNativeOpenAICallback(authorizationUrl: URL): boolean {
+  const redirectUris = authorizationUrl.searchParams.getAll("redirect_uri");
+  if (redirectUris.length !== 1) return false;
+
+  try {
+    const callbackUrl = new URL(redirectUris[0]!);
+    const forwardUrl = getOAuthCallbackForwardUrl();
+    return callbackUrl.protocol === "http:"
+      && isOAuthLoopbackHostname(callbackUrl.hostname)
+      && callbackUrl.port === "1455"
+      && callbackUrl.pathname === "/auth/callback"
+      && !callbackUrl.username
+      && !callbackUrl.password
+      && !callbackUrl.search
+      && !callbackUrl.hash
+      && forwardUrl?.port === callbackUrl.port;
+  } catch {
+    return false;
   }
 }
 
@@ -197,14 +217,15 @@ export async function handleOAuthCallback(req: Request, res: Response): Promise<
     oauthCallbackPage(res, 400, "Authorization could not be completed", "This authorization request is invalid or has expired. Return to Ingenium and start again.");
     return;
   }
-  const attempt = pendingOAuthAttempts.get(state);
+  // ponytail: scan at most 100 pending attempts; add a state index only if this cap becomes measurable.
+  const attempt = [...pendingOAuthAttempts.values()].find((candidate) => candidate.state === state);
   if (!attempt) {
     oauthCallbackPage(res, 400, "Authorization could not be completed", "This authorization request is invalid or has expired. Return to Ingenium and start again.");
     return;
   }
 
   // Consume the state before forwarding or exchanging the code so the redirect cannot be replayed.
-  pendingOAuthAttempts.delete(state);
+  pendingOAuthAttempts.delete(attempt.attemptID);
   if (providerError || !code || code.length > 4096 || /[\r\n\0]/.test(code)) {
     if (attempt.mode === "auto") {
       const params = new URLSearchParams({ state, ...(providerError ? { error: providerError } : {}) });
@@ -298,7 +319,10 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
       result.error.message = "OpenCode is starting up. Please wait a moment and try again.";
       // Set Retry-After header so clients can back off gracefully
       res.setHeader("Retry-After", "5");
-    } else if (result.error.status === 404 || code === "NOT_FOUND" || code === "NotFoundError") {
+    } else if (typeof result.error.status === "number"
+      && result.error.status >= 400 && result.error.status < 500) {
+      status = result.error.status;
+    } else if (code === "NOT_FOUND" || code === "NotFoundError") {
       status = 404;
     } else if (code === "BadRequest" || code.startsWith("HTTP_4")) {
       status = 400;
@@ -783,10 +807,28 @@ function isPromptPart(part: unknown): boolean {
 }
 
 function hasPromptParts(body: unknown): body is SendPromptBody {
-  return body !== null
-    && typeof body === "object"
-    && Array.isArray((body as { parts?: unknown }).parts)
-    && (body as { parts: unknown[] }).parts.every(isPromptPart);
+  if (body === null || typeof body !== "object") return false;
+  const candidate = body as { parts?: unknown; context?: unknown; system?: unknown };
+  return Array.isArray(candidate.parts)
+    && candidate.parts.every(isPromptPart)
+    && (candidate.context === undefined
+      || typeof candidate.context === "string" && candidate.context.length <= 20_000)
+    && (candidate.system === undefined || typeof candidate.system === "string");
+}
+
+function isFormAnswerValue(value: unknown): boolean {
+  return typeof value === "boolean"
+    || typeof value === "number" && Number.isFinite(value)
+    || typeof value === "string" && value.length <= 10_000
+    || Array.isArray(value) && value.length <= 100
+      && value.every((entry) => typeof entry === "string" && entry.length <= 10_000);
+}
+
+function isFormAnswer(value: unknown): value is Record<string, string | number | boolean | string[]> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value);
+  return entries.length <= 100
+    && entries.every(([key, answer]) => key.length > 0 && key.length <= 200 && isFormAnswerValue(answer));
 }
 
 opencodeRouter.post("/sessions/:id/prompt", async (req, res) => {
@@ -803,28 +845,11 @@ opencodeRouter.post("/sessions/:id/prompt", async (req, res) => {
   const directory = req.query.directory as string | undefined;
   const sessionId = req.params.id!;
 
-  // OpenCode keeps this HTTP request open for the entire provider turn. The
-  // dashboard has already subscribed to the session SSE endpoint before this
-  // route runs, so keeping its API rewrite open ties prompt acceptance to a
-  // long-running generation and makes a dropped intermediary socket surface as
-  // an unrelated 500. Accept the request promptly; terminal provider errors
-  // are delivered on the authoritative session.error SSE event.
-  void opencodeClient.sendPrompt(sessionId, req.body, directory)
-    .then((result) => {
-      if (isOpenCodeError(result)) {
-        logger.warn(SOURCE, `Asynchronous prompt request failed: ${result.error.code}`, {
-          code: result.error.code,
-          sessionId,
-        });
-      }
-    })
-    .catch((error: unknown) => {
-      logger.error(SOURCE, "Asynchronous prompt request threw unexpectedly", {
-        error: error instanceof Error ? error.name : "unknown",
-        sessionId,
-      });
-    });
-
+  const result = await opencodeClient.sendPrompt(sessionId, req.body, directory);
+  if (isOpenCodeError(result)) {
+    sendResult(req, res, result);
+    return;
+  }
   res.status(202).json({ data: { accepted: true } });
 });
 
@@ -972,7 +997,264 @@ opencodeRouter.get("/questions", async (req, res) => {
   sendResult(req, res, result);
 });
 
+opencodeRouter.post("/sessions/:id/questions/:questionId", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  if (!isFormAnswer(req.body?.answer)) {
+    res.status(400).json({
+      error: {
+        code: "INVALID_FORM_ANSWER",
+        message: "Form replies require a bounded answer object.",
+      },
+    });
+    return;
+  }
+  const result = await opencodeClient.replyQuestion(
+    req.params.id!,
+    req.params.questionId!,
+    req.body.answer,
+    req.query.directory as string | undefined,
+  );
+  sendResult(req, res, result);
+});
+
 /* ── SSE event stream ── */
+
+function eventRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+interface BrowserSessionEvent {
+  type: string;
+  properties: Record<string, unknown>;
+}
+
+function eventErrorText(value: unknown): string {
+  if (typeof value === "string") return value;
+  const record = eventRecord(value);
+  return typeof record?.message === "string" ? record.message : "Tool execution failed";
+}
+
+function nativeToolPart(
+  properties: Record<string, unknown>,
+  state: Record<string, unknown>,
+): BrowserSessionEvent {
+  return {
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id: properties.callID,
+        sessionID: properties.sessionID,
+        messageID: properties.assistantMessageID,
+        type: "tool",
+        tool: properties.tool ?? properties.name,
+        callID: properties.callID,
+        state,
+      },
+    },
+  };
+}
+
+function browserEventsForNativeEvent(
+  type: string,
+  properties: Record<string, unknown>,
+): BrowserSessionEvent[] {
+  const textPart = (partType: "text" | "reasoning", id: unknown, text = ""): BrowserSessionEvent => ({
+    type: "message.part.updated",
+    properties: {
+      part: {
+        id,
+        sessionID: properties.sessionID,
+        messageID: properties.assistantMessageID,
+        type: partType,
+        text,
+      },
+    },
+  });
+
+  switch (type) {
+    case "session.next.step.started": {
+      const model = eventRecord(properties.model);
+      return [{
+        type: "message.updated",
+        properties: {
+          info: {
+            id: properties.assistantMessageID,
+            sessionID: properties.sessionID,
+            role: "assistant",
+            time: { created: properties.timestamp },
+            agent: properties.agent,
+            ...(model ? {
+              providerID: model.providerID,
+              modelID: model.id,
+              model: { providerID: model.providerID, modelID: model.id },
+            } : {}),
+          },
+        },
+      }];
+    }
+    case "session.next.text.started":
+      return [textPart("text", properties.textID)];
+    case "session.next.text.delta":
+      return [{
+        type: "message.part.delta",
+        properties: {
+          sessionID: properties.sessionID,
+          messageID: properties.assistantMessageID,
+          partID: properties.textID,
+          field: "text",
+          delta: properties.delta,
+        },
+      }];
+    case "session.next.text.ended":
+      return [textPart("text", properties.textID, typeof properties.text === "string" ? properties.text : "")];
+    case "session.next.reasoning.started":
+      return [textPart("reasoning", properties.reasoningID)];
+    case "session.next.reasoning.delta":
+      return [{
+        type: "message.part.delta",
+        properties: {
+          sessionID: properties.sessionID,
+          messageID: properties.assistantMessageID,
+          partID: properties.reasoningID,
+          field: "text",
+          delta: properties.delta,
+        },
+      }];
+    case "session.next.reasoning.ended":
+      return [textPart("reasoning", properties.reasoningID, typeof properties.text === "string" ? properties.text : "")];
+    case "session.next.tool.input.started":
+      return [nativeToolPart(properties, { status: "pending", input: "" })];
+    case "session.next.tool.input.ended": {
+      let input: unknown = properties.text;
+      if (typeof input === "string") {
+        try {
+          input = JSON.parse(input);
+        } catch {
+          // Keep malformed provider input visible as text.
+        }
+      }
+      return [nativeToolPart(properties, { status: "pending", input })];
+    }
+    case "session.next.tool.called":
+      return [nativeToolPart(properties, { status: "running", input: properties.input })];
+    case "session.next.tool.progress":
+      return [nativeToolPart(properties, { status: "running", output: properties.structured ?? properties.content })];
+    case "session.next.tool.success":
+      return [nativeToolPart(properties, {
+        status: "completed",
+        output: properties.result ?? properties.structured ?? properties.content,
+      })];
+    case "session.next.tool.failed":
+      return [nativeToolPart(properties, {
+        status: "error",
+        error: eventErrorText(properties.error),
+        output: properties.result,
+      })];
+    case "session.next.step.ended": {
+      const events: BrowserSessionEvent[] = [
+        {
+          type: "message.part.updated",
+          properties: {
+            part: {
+              id: `${String(properties.assistantMessageID)}:step-finish`,
+              sessionID: properties.sessionID,
+              messageID: properties.assistantMessageID,
+              type: "step-finish",
+              reason: properties.finish,
+              cost: properties.cost,
+              tokens: properties.tokens,
+              time: { start: properties.timestamp, end: properties.timestamp },
+              snapshot: properties.snapshot,
+            },
+          },
+        },
+        {
+          type: "message.updated",
+          properties: {
+            info: {
+              id: properties.assistantMessageID,
+              sessionID: properties.sessionID,
+              role: "assistant",
+              time: { created: properties.timestamp, completed: properties.timestamp },
+              finish: properties.finish,
+              cost: properties.cost,
+              tokens: properties.tokens,
+            },
+          },
+        },
+      ];
+      if (properties.finish !== "tool-calls") {
+        events.push({ type: "session.idle", properties: { sessionID: properties.sessionID } });
+      }
+      return events;
+    }
+    case "session.next.step.failed":
+      return [{
+        type: "session.error",
+        properties: { sessionID: properties.sessionID, error: properties.error },
+      }];
+    default:
+      return [{ type, properties }];
+  }
+}
+
+function projectSessionEventBlock(block: string, sessionId: string): string | null {
+  const lines = block.split(/\r?\n/);
+  const data = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+  if (!data) return lines.some((line) => line.startsWith(":")) ? `${block}\n\n` : null;
+
+  try {
+    let decoded: unknown = JSON.parse(data);
+    if (typeof decoded === "string") decoded = JSON.parse(decoded);
+    const root = eventRecord(decoded);
+    const event = eventRecord(root?.payload) ?? root;
+    if (!event || typeof event.type !== "string") return null;
+    const properties = eventRecord(event.properties) ?? eventRecord(event.data) ?? {};
+    const boundSession = typeof properties.sessionID === "string"
+      ? properties.sessionID
+      : ["info", "part", "form", "request"].map((key) => eventRecord(properties[key])?.sessionID)
+        .find((value): value is string => typeof value === "string");
+    if (boundSession ? boundSession !== sessionId : !event.type.startsWith("server.")) return null;
+    const sourceId = lines.find((line) => line.startsWith("id:"))
+      ?? (typeof event.id === "string" ? `id: ${event.id}` : undefined);
+    const projected = browserEventsForNativeEvent(event.type, properties);
+    return projected.map((item, index) => {
+      const id = sourceId && index === projected.length - 1 ? `${sourceId}\n` : "";
+      return `${id}data: ${JSON.stringify(item)}\n\n`;
+    }).join("");
+  } catch {
+    return null;
+  }
+}
+
+async function pipeSessionEvents(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  res: Response,
+  sessionId: string,
+  isAborted: () => boolean,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (!isAborted()) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    let boundary = buffer.search(/\r?\n\r?\n/);
+    while (boundary >= 0) {
+      const separator = buffer.slice(boundary).match(/^\r?\n\r?\n/)![0];
+      const block = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + separator.length);
+      const projected = projectSessionEventBlock(block, sessionId);
+      if (projected && !res.writableEnded) res.write(projected);
+      boundary = buffer.search(/\r?\n\r?\n/);
+    }
+    if (done) break;
+  }
+}
 
 opencodeRouter.get("/sessions/:id/events", async (req, res) => {
   if (!guardPassword(req, res)) return;
@@ -1010,13 +1292,7 @@ opencodeRouter.get("/sessions/:id/events", async (req, res) => {
   });
 
   try {
-    while (!aborted) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!res.writableEnded) {
-        res.write(value);
-      }
-    }
+    await pipeSessionEvents(reader, res, req.params.id!, () => aborted);
   } catch (err: any) {
     if (err.name !== "AbortError") {
       logger.error(SOURCE, `SSE stream error for session ${req.params.id!}: ${err.message}`);
@@ -1257,9 +1533,25 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     return;
   }
   if (!isOpenCodeError(result)) {
-    const callbackUrl = new URL(result.data.url);
-    const state = callbackUrl.searchParams.get("state");
-    if (!state || state.length > 1024 || /[\r\n\0]/.test(state)) {
+    const authorizationUrl = new URL(result.data.url);
+    const isNativeOpenAIBrowser = req.params.integrationID === "openai"
+      && req.body.methodID === "chatgpt-browser"
+      && result.data.mode === "auto";
+    if (isNativeOpenAIBrowser && !supportsNativeOpenAICallback(authorizationUrl)) {
+      try {
+        const cancellation = await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
+        if (isOpenCodeError(cancellation)) logger.warn(SOURCE, "Unsupported OAuth callback attempt cancellation failed");
+      } catch {
+        logger.warn(SOURCE, "Unsupported OAuth callback attempt cancellation failed");
+      }
+      res.status(502).json({ error: { code: "UNSUPPORTED_OAUTH_CALLBACK_TRANSPORT", message: "This OAuth callback transport is not supported by this deployment." } });
+      return;
+    }
+    const states = authorizationUrl.searchParams.getAll("state");
+    const state = states[0] ?? null;
+    const requiresState = result.data.mode === "code" || isNativeOpenAIBrowser;
+    if ((requiresState && states.length !== 1) || states.length > 1
+      || (state !== null && (state.length > 1024 || /[\r\n\0]/.test(state)))) {
       await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
       return;
@@ -1274,13 +1566,19 @@ opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, re
     const organizationId = "organizationId" in principal ? principal.organizationId ?? null : null;
     const ownerUserId = null;
     pruneOAuthAttempts();
+    if (state !== null && [...pendingOAuthAttempts.values()].some((attempt) => attempt.state === state)) {
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
+      res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
+      return;
+    }
     if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
       await opencodeClient.cancelIntegrationAttempt(result.data.attemptID, req.params.integrationID!);
       res.status(503).json({ error: { code: "OAUTH_CAPACITY_REACHED", message: "Too many pending authorization requests. Try again shortly." } });
       return;
     }
-    pendingOAuthAttempts.set(state, {
+    pendingOAuthAttempts.set(result.data.attemptID, {
       attemptID: result.data.attemptID,
+      state,
       mode: result.data.mode,
       expiresAt: Math.min(Date.now() + OAUTH_ATTEMPT_TTL_MS, result.data.time.expires),
       actorType: principal.type === "runtime-service" ? "system" : principal.type,

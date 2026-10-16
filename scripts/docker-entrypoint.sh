@@ -647,6 +647,9 @@ install -d -o ingenium-restore -g ingenium-api -m 0710 /run/ingenium-restore-han
 
 GATEWAY_RUNTIME_DIR="/run/ingenium-gateway"
 GATEWAY_ERROR_LOG="${GATEWAY_RUNTIME_DIR}/nginx-error.log"
+if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
+  node /app/scripts/opencode-auth-proxy.mjs --prepare-gateway
+fi
 # Nginx runs as its dedicated user and must create its pid, lock, and temporary files.
 # `/run` is ephemeral, so these paths remain outside persistent application
 # volumes and are recreated with owner-only access on every start.

@@ -23,7 +23,9 @@ import {
   isOpenCodeError,
   opencodeClient,
   verifyOpenCodeNativeMessage,
+  type CommandBody,
 } from "../lib/opencode-client.js";
+import { withOpenCodeRuntimeTarget } from "../lib/runtime-opencode-context.js";
 import { logger } from "ingenium-core";
 
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
@@ -599,7 +601,7 @@ describe("opencodeClient — method routing", () => {
     }));
   });
 
-  it("maps v2 assistant content to the retained message envelope without leaking non-text parts", async () => {
+  it("maps v2 assistant text, reasoning, and tool content to the retained message envelope", async () => {
     const fetchSpy = vi.fn()
       .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1") }))
       .mockResolvedValueOnce(mockResponse(200, {
@@ -615,7 +617,10 @@ describe("opencodeClient — method routing", () => {
             content: [
               { id: "part-text", type: "text", text: "visible" },
               { id: "part-reasoning", type: "reasoning", text: "private" },
-              { id: "part-tool", type: "tool", name: "secret-tool", state: { status: "completed" } },
+              {
+                id: "part-tool", type: "tool", name: "websearch",
+                state: { status: "completed", input: { query: "v2" }, content: [{ type: "text", text: "done" }] },
+              },
             ],
         }],
         cursor: { previous: null, next: null },
@@ -628,10 +633,15 @@ describe("opencodeClient — method routing", () => {
       info: expect.objectContaining({ role: "assistant", finish: "stop", providerID: "provider-1", modelID: "model-1" }),
       parts: expect.arrayContaining([
         expect.objectContaining({ type: "text", text: "visible" }),
+        expect.objectContaining({
+          type: "tool",
+          tool: "websearch",
+          callID: "part-tool",
+          state: expect.objectContaining({ status: "completed", input: { query: "v2" } }),
+        }),
         expect.objectContaining({ type: "step-finish", cost: 6 }),
       ]),
     }]);
-    expect(JSON.stringify(result)).not.toContain("secret-tool");
   });
 
   it("keeps order only on the first v2 message request and carries opaque cursors unchanged", async () => {
@@ -639,7 +649,11 @@ describe("opencodeClient — method routing", () => {
     const fetchSpy = vi.fn()
       .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1", "/workspace") }))
       .mockResolvedValueOnce(mockResponse(200, {
-        data: [{ id: "msg-1", type: "user", time: { created: 1 }, text: "one" }],
+        data: [{
+          id: "msg-1", type: "user", time: { created: 1 },
+          text: "<untrusted-reference-data>hidden</untrusted-reference-data>\none",
+          metadata: { ingeniumVisibleText: "one" },
+        }],
         cursor: { next: nextCursor },
       }))
       .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-1", "/workspace") }))
@@ -654,7 +668,10 @@ describe("opencodeClient — method routing", () => {
     const firstMessageUrl = new URL(fetchSpy.mock.calls[1][0] as string);
     const secondMessageUrl = new URL(fetchSpy.mock.calls[3][0] as string);
 
-    expect(first).toMatchObject({ nextCursor, messages: [{ info: { id: "msg-1" } }] });
+    expect(first).toMatchObject({
+      nextCursor,
+      messages: [{ info: { id: "msg-1" }, parts: [expect.objectContaining({ text: "one" })] }],
+    });
     expect(second).toMatchObject({ messages: [{ info: { id: "msg-2" } }] });
     expect(second).not.toHaveProperty("nextCursor");
     // v2 resolves the session location from the session itself; the message
@@ -800,7 +817,24 @@ describe("opencodeClient — method routing", () => {
     expect(result).toMatchObject({ info: { id: "msg_user", role: "user" } });
   });
 
-  it("sendPrompt() fails closed for v2-inexpressible prompt fields", async () => {
+  it("sendPrompt() frames untrusted reference context and keeps the visible user text in metadata", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_123", "/workspace") }))
+      .mockResolvedValueOnce(mockResponse(200, { data: { id: "msg_user", time: { created: 7 } } }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.sendPrompt("ses_123", {
+      parts: [{ type: "text", text: "Hello" }],
+      context: "<untrusted-reference-data>Source excerpt.</untrusted-reference-data>",
+    }, "/workspace");
+
+    expect(JSON.parse(String((fetchSpy.mock.calls[1][1] as RequestInit).body))).toEqual({
+      text: "<untrusted-reference-data>Source excerpt.</untrusted-reference-data>\n\n<ingenium-user-message>\nHello\n</ingenium-user-message>",
+      metadata: { ingeniumVisibleText: "Hello" },
+    });
+  });
+
+  it("sendPrompt() fails closed for v2-inexpressible system and tool fields", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -840,17 +874,221 @@ describe("opencodeClient — method routing", () => {
     });
   });
 
-  it("deleteSession() calls DELETE /api/session/:id", async () => {
+  it("deleteSession() validates the session before DELETE /api/session/:id", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_abc") }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await opencodeClient.deleteSession("ses_abc", "/workspace");
+
+    expect(fetchSpy.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual([
+      ["/api/session/ses_abc", "GET"],
+      ["/api/session/ses_abc", "DELETE"],
+    ]);
+    expect(result).toBe(true);
+  });
+
+  it("updateSession() validates before PATCH and reads back the updated session", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_abc") }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}))
+      .mockResolvedValueOnce(mockResponse(200, { data: { ...v2Session("ses_abc"), title: "Renamed" } }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await opencodeClient.updateSession("ses_abc", { title: "Renamed" }, "/workspace");
+
+    expect(fetchSpy.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual([
+      ["/api/session/ses_abc", "GET"],
+      ["/api/session/ses_abc", "PATCH"],
+      ["/api/session/ses_abc", "GET"],
+    ]);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1].body))).toEqual({ title: "Renamed" });
+    expect(result).toMatchObject({ id: "ses_abc", title: "Renamed", directory: "/workspace" });
+  });
+
+  it.each(["updateSession", "deleteSession"] as const)("%s() rejects foreign requested and runtime directories before mutation", async (method) => {
+    for (const directory of ["/workspace", undefined]) {
+      const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: v2Session("ses_abc", "/foreign") }));
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const result = await withOpenCodeRuntimeTarget({ baseUrl: "http://runtime.test", directory: "/workspace" }, () =>
+        method === "updateSession"
+          ? opencodeClient.updateSession("ses_abc", { title: "Renamed" }, directory)
+          : opencodeClient.deleteSession("ses_abc", directory));
+
+      expect(result).toMatchObject({ error: { code: "EXTERNAL_OBSERVATION_BINDING_REJECTED", status: 404 } });
+      expect(fetchSpy.mock.calls.map(([, init]) => init.method)).toEqual(["GET"]);
+    }
+  });
+
+  it.each(["updateSession", "deleteSession"] as const)("%s() rejects mismatched session identity before mutation", async (method) => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: v2Session("ses_other", "/workspace") }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await (method === "updateSession"
+      ? opencodeClient.updateSession("ses_target", { title: "Renamed" }, "/workspace")
+      : opencodeClient.deleteSession("ses_target", "/workspace"));
+
+    expect(result).toMatchObject({ error: { code: "EXTERNAL_OBSERVATION_BINDING_REJECTED", status: 404 } });
+    expect(fetchSpy.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual([
+      ["/api/session/ses_target", "GET"],
+    ]);
+  });
+
+  it.each(["updateSession", "deleteSession"] as const)("%s() rejects invalid identifiers without transport", async (method) => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
     vi.stubGlobal("fetch", fetchSpy);
 
-    const result = await opencodeClient.deleteSession("ses_abc");
+    for (const id of ["", ".", "..", "../foreign", "ses/foreign", "ses%2Fforeign", "ses?query", "s".repeat(129)]) {
+      const result = await (method === "updateSession"
+        ? opencodeClient.updateSession(id, { title: "Renamed" }, "/workspace")
+        : opencodeClient.deleteSession(id, "/workspace"));
 
-    const url = fetchSpy.mock.calls[0][0] as string;
-    const init = fetchSpy.mock.calls[0][1] as RequestInit;
-    expect(url).toContain("/api/session/ses_abc");
-    expect(init.method).toBe("DELETE");
-    expect(result).toBe(true);
+      expect(result).toMatchObject({ error: { code: "INVALID_SESSION_ID" } });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(["updateSession", "deleteSession"] as const)("%s() propagates a failed session preflight without mutation", async (method) => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(404, { name: "NotFoundError" }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await (method === "updateSession"
+      ? opencodeClient.updateSession("ses_missing", { title: "Renamed" }, "/workspace")
+      : opencodeClient.deleteSession("ses_missing", "/workspace"));
+
+    expect(result).toMatchObject({ error: { code: "NotFoundError", status: 404 } });
+    expect(fetchSpy.mock.calls.map(([, init]) => init.method)).toEqual(["GET"]);
+  });
+
+  it.each(["/workspace", undefined])("getSessionChildren() follows opaque cursors with stable parent/directory filters (%s)", async (directory) => {
+    const nextCursor = "opaque.cursor/with?=+";
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [
+          { ...v2Session("ses_child1"), parentID: "ses_parent" },
+          { ...v2Session("ses_other"), parentID: "ses_other_parent" },
+        ],
+        cursor: { next: nextCursor },
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ ...v2Session("ses_child2"), parentID: "ses_parent" }, v2Session("ses_root")],
+        cursor: { next: null },
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await withOpenCodeRuntimeTarget({ baseUrl: "http://runtime.test", directory: "/workspace" }, () =>
+      opencodeClient.getSessionChildren("ses_parent", directory));
+
+    expect(result).toMatchObject([
+      { id: "ses_child1", parentID: "ses_parent", directory: "/workspace" },
+      { id: "ses_child2", parentID: "ses_parent", directory: "/workspace" },
+    ]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const urls = fetchSpy.mock.calls.map(([url]) => new URL(url));
+    for (const url of urls) {
+      expect(url.pathname).toBe("/api/session");
+      expect(url.searchParams.get("parentID")).toBe("ses_parent");
+      expect(url.searchParams.get("directory")).toBe("/workspace");
+      expect(url.searchParams.get("limit")).toBe("100");
+    }
+    expect(urls[0].searchParams.get("order")).toBe("desc");
+    expect(urls[0].searchParams.has("cursor")).toBe(false);
+    expect(urls[1].searchParams.get("cursor")).toBe(nextCursor);
+    expect(urls[1].searchParams.has("order")).toBe(false);
+  });
+
+  it("getSessionChildren() fails closed on a foreign directory on a later page", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ ...v2Session("ses_child1"), parentID: "ses_parent" }], cursor: { next: "next" },
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        data: [{ ...v2Session("ses_child2", "/foreign"), parentID: "ses_parent" }], cursor: {},
+      }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await opencodeClient.getSessionChildren("ses_parent", "/workspace")).toMatchObject({
+      error: { code: "EXTERNAL_OBSERVATION_BINDING_REJECTED" },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("getSessionChildren() fails closed on cursor loops instead of returning partial results", async () => {
+    const fetchSpy = vi.fn();
+    for (const next of ["cursor-a", "cursor-b", "cursor-a"]) {
+      fetchSpy.mockResolvedValueOnce(mockResponse(200, {
+        data: [{ ...v2Session("ses_child"), parentID: "ses_parent" }], cursor: { next },
+      }));
+    }
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await opencodeClient.getSessionChildren("ses_parent", "/workspace")).toMatchObject({
+      error: { code: "OPENCODE_V2_CURSOR_FAILED" },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("getSessionChildren() bounds pagination even when every cursor is new", async () => {
+    let page = 0;
+    const fetchSpy = vi.fn().mockImplementation(() => Promise.resolve(mockResponse(200, {
+      data: [], cursor: { next: `page-${++page}` },
+    })));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await opencodeClient.getSessionChildren("ses_parent", "/workspace")).toMatchObject({
+      error: { code: "OPENCODE_V2_CURSOR_FAILED" },
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(100);
+  });
+
+  it.each<[CommandBody, string]>([
+    [{ command: "review", arguments: "  --target \"a b\"\t\n  " }, "  --target \"a b\"\t\n  "],
+    [{ command: "review", args: " \talpha\n " }, " \talpha\n "],
+    [{ command: "review", args: ["--target", "a b"] }, "--target a b"],
+    [{ command: "review", arguments: ["one", "two words"] }, "one two words"],
+    [{ command: "review" }, ""],
+    [{ command: "review", args: [] }, ""],
+    [{ command: "review", arguments: [] }, ""],
+    [{ command: "review", args: "", arguments: "ignored" }, ""],
+    [{ command: "review", args: ["preferred"], arguments: "ignored" }, "preferred"],
+  ])("sendCommand() maps string or array arguments to V2 name/text (%#)", async (body, text) => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_cmd") }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    expect(await opencodeClient.sendCommand("ses_cmd", body, "/workspace")).toBe(true);
+    expect(fetchSpy.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual([
+      ["/api/session/ses_cmd", "GET"],
+      ["/api/session/ses_cmd/command", "POST"],
+    ]);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1].body))).toEqual({ name: "review", text });
+  });
+
+  it.each([
+    undefined, null, [], "review", {}, { command: 42 }, { command: "" }, { command: " \t" },
+    { command: "review", args: null },
+    { command: "review", args: 42 },
+    { command: "review", args: {} },
+    { command: "review", args: ["one", false] },
+    { command: "review", args: [["nested"]] },
+    { command: "review", arguments: null },
+    { command: "review", arguments: false },
+    { command: "review", arguments: {} },
+    { command: "review", arguments: ["one", 42] },
+    { command: "review", arguments: [null] },
+    { command: "review", args: 42, arguments: "valid" },
+    { command: "review", args: "valid", arguments: 42 },
+  ].map((body) => ({ body })))("sendCommand() rejects malformed bodies without transport or TypeError (%#)", async ({ body }) => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: v2Session("ses_cmd") }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await expect(opencodeClient.sendCommand("ses_cmd", body as CommandBody, "/workspace")).resolves.toMatchObject({
+      error: { code: "INVALID_COMMAND", status: 400 },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("maps v2 session actions and queues to the retained route contracts", async () => {
@@ -877,7 +1115,12 @@ describe("opencodeClient — method routing", () => {
       // getQuestions → form.list
       .mockResolvedValueOnce(mockResponse(200, {
         location: {},
-        data: [{ id: "form_1", sessionID: "ses_act", title: "Pick a branch", metadata: {}, fields: [] }],
+        data: [{
+          id: "frm_1", sessionID: "ses_act", title: "Pick a branch", metadata: {}, fields: [{
+            key: "branch", type: "string", title: "Branch", required: true,
+            options: [{ value: "main", label: "Main", description: "Stable" }],
+          }],
+        }],
       }))
       // listAgents → agent.list
       .mockResolvedValueOnce(mockResponse(200, {
@@ -886,7 +1129,13 @@ describe("opencodeClient — method routing", () => {
           id: "agent_1", name: "ingenium-chat", mode: "primary", hidden: false,
           permissions: [{ action: "bash", resource: "*", effect: "ask" }],
         }],
-      }));
+      }))
+      // replyQuestion → session.get, session.form.get, session.form.reply
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_act", "/workspace") }))
+      .mockResolvedValueOnce(mockResponse(200, { data: {
+        id: "frm_1", sessionID: "ses_act", title: "Pick a branch", fields: [],
+      } }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}));
     vi.stubGlobal("fetch", fetchSpy);
 
     const aborted = await opencodeClient.abortSession("ses_act", "/workspace");
@@ -894,6 +1143,7 @@ describe("opencodeClient — method routing", () => {
     const permissions = await opencodeClient.getPermissions("/workspace");
     const questions = await opencodeClient.getQuestions("/workspace");
     const agents = await opencodeClient.listAgents();
+    const replied = await opencodeClient.replyQuestion("ses_act", "frm_1", { branch: "main" }, "/workspace");
 
     expect(aborted).toBe(true);
     expect(mcp).toEqual({
@@ -907,7 +1157,18 @@ describe("opencodeClient — method routing", () => {
       action: "bash",
       sessionID: "ses_act",
     }]);
-    expect(questions).toEqual([{ id: "form_1", text: "Pick a branch", sessionID: "ses_act" }]);
+    expect(questions).toEqual([{
+      id: "frm_1",
+      text: "Pick a branch",
+      sessionID: "ses_act",
+      questions: [{
+        id: "branch",
+        question: "Branch",
+        type: "string",
+        required: true,
+        options: [{ value: "main", label: "Main", description: "Stable" }],
+      }],
+    }]);
     expect(agents).toEqual([{
       id: "agent_1",
       name: "ingenium-chat",
@@ -917,6 +1178,7 @@ describe("opencodeClient — method routing", () => {
       permission: [{ permission: "bash", pattern: "*", action: "ask" }],
       options: {},
     }]);
+    expect(replied).toBe(true);
     const urls = fetchSpy.mock.calls.map(([url]) => url as string);
     expect(urls).toEqual([
       expect.stringContaining("/api/session/ses_act"),
@@ -925,7 +1187,13 @@ describe("opencodeClient — method routing", () => {
       expect.stringContaining("/api/permission/request"),
       expect.stringContaining("/api/form"),
       expect.stringContaining("/api/agent"),
+      expect.stringContaining("/api/session/ses_act"),
+      expect.stringContaining("/api/session/ses_act/form/frm_1"),
+      expect.stringContaining("/api/session/ses_act/form/frm_1/reply"),
     ]);
+    expect(urls[3]).toContain("location%5Bdirectory%5D=%2Fworkspace");
+    expect(urls[4]).toContain("location%5Bdirectory%5D=%2Fworkspace");
+    expect(JSON.parse(String((fetchSpy.mock.calls[8][1] as RequestInit).body))).toEqual({ answer: { branch: "main" } });
   });
 
   it("documents removed v1 surfaces with typed errors", async () => {

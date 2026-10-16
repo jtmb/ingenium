@@ -25,7 +25,7 @@ import {
   CHAT_CONTEXT_MAX_SOURCES,
   CHAT_CONTEXT_QUERY_MAX_CHARS,
   buildProjectContext,
-  combineSystemInstructions,
+  combineReferenceContext,
   unrequestedGrounding,
 } from "../../../lib/chat-grounding";
 import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
@@ -519,7 +519,7 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, systemPrompt: string, options?: SendOptions): Promise<boolean> => {
+    async (text: string, options?: SendOptions): Promise<boolean> => {
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
 
@@ -529,7 +529,7 @@ export default function ChatShell() {
         activeSession?.title === "New conversation";
 
       let grounding = unrequestedGrounding();
-      const systemContexts: string[] = [];
+      const referenceContexts: string[] = [];
       if ((options?.useSavedMemory && !memoryCapabilities.canRead) || (options?.saveToMemory && !memoryCapabilities.canSave)) {
         setMemoryNotice({ status: "failed", message: memoryCapabilities.reason ?? "Memory capability is unavailable." });
         return false;
@@ -539,7 +539,7 @@ export default function ChatShell() {
           const result = await api.memory.list(memoryProject, savedMemoryWorkspaceId);
           const memoryContext = buildExplicitMemoryContext(result.data, memoryProject, savedMemoryWorkspaceId);
           if (result.data.items.length > 0 && !memoryContext) throw new Error("invalid saved-memory context");
-          if (memoryContext) systemContexts.push(memoryContext);
+          if (memoryContext) referenceContexts.push(memoryContext);
         } catch {
           setMemoryNotice({ status: "failed", message: "Saved memory is unavailable. Try sending again." });
           return false;
@@ -554,13 +554,13 @@ export default function ChatShell() {
           );
           const context = buildProjectContext(selectedProject, result.data);
           grounding = context.grounding;
-          if (context.systemContext) systemContexts.push(context.systemContext);
+          if (context.referenceContext) referenceContexts.push(context.referenceContext);
         } catch {
           setContextSearchError("Project context search is unavailable. Try sending again.");
           return false;
         }
       }
-      const system = combineSystemInstructions(systemPrompt, systemContexts.join("\n\n"));
+      const context = combineReferenceContext(...referenceContexts);
 
       // Build parts array: text part + file parts from attachments
       const parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }> = [
@@ -580,10 +580,7 @@ export default function ChatShell() {
         const accepted = await chat.send(parts, {
           model: { providerID: providerId, modelID: modelId },
           agent: agentName,
-          system,
-          tools: options?.automaticLearning === false
-            ? { auto_observe_now: false, synthesize_observations: false }
-            : undefined,
+          context,
           grounding,
         });
         if (!accepted) return false;
@@ -744,21 +741,6 @@ export default function ChatShell() {
     closeActivity();
     await chat.retry();
   }, [chat, closeActivity]);
-
-  /** Send a reply to the agent's structured question as a regular prompt. */
-  const handleSendReply = useCallback(
-    async (text: string) => {
-      if (!activeId) return;
-      const parts: Array<{ type: "text"; text: string }> = [
-        { type: "text", text },
-      ];
-      await chat.send(parts, {
-        model: { providerID: providerId, modelID: modelId },
-        agent: agentName,
-      });
-    },
-    [activeId, chat, providerId, modelId, agentName],
-  );
 
   const handleRevert = useCallback(
     async (messageId: string, partId?: string) => {
@@ -1023,7 +1005,7 @@ export default function ChatShell() {
               permissions={chat.permissions}
               replyPermission={chat.replyPermission}
               questions={chat.questions}
-              onSendReply={handleSendReply}
+              replyQuestion={chat.replyQuestion}
               onActivityOpen={openActivity}
               activitySelection={activitySelection}
               mcpProject={chatConfigProject}
@@ -1156,7 +1138,7 @@ export default function ChatShell() {
               permissions={chat.permissions}
               replyPermission={chat.replyPermission}
               questions={chat.questions}
-              onSendReply={handleSendReply}
+              replyQuestion={chat.replyQuestion}
               onActivityOpen={openActivity}
               activitySelection={activitySelection}
               mcpProject={chatConfigProject}

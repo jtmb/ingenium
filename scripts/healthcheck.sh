@@ -159,7 +159,10 @@ require_gateway_status "dashboard gateway" "localhost" "/login" "200"
 require_gateway_status "dashboard gateway forwarded host" "host.docker.internal" "/login" "200"
 require_gateway_status "dashboard same-origin API" "localhost" "/api/v1/bootstrap/status" "200"
 if [ "${INGENIUM_DEPLOYMENT_MODE:-compatibility}" = "compatibility" ]; then
+  node /app/scripts/opencode-auth-proxy.mjs --verify-gateway-socket
   require_authenticated_http_ok "OpenCode Web" "http://127.0.0.1:4098/api/info" "${OPENCODE_SERVER_PASSWORD_FILE:-/run/ingenium-secrets/opencode/opencode-server-password}"
+  require_authenticated_http_ok "OpenCode internal proxy" "http://127.0.0.1:4101/api/info" "/run/ingenium-secrets/opencode/opencode-server-password"
+  require_gateway_status "OpenCode internal proxy Basic boundary" "localhost" "/api/info" "401" "4101"
 
   require_http_ok "VS Code" "http://127.0.0.1:4100/healthz"
   require_gateway_status "OpenCode Web gateway" "opencode.localhost" "/" "200"
