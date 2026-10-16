@@ -59,7 +59,7 @@ test("projected config, launcher environment and same-path mount match the issue
   try {
     const configPath = join(root, "opencode.json");
     projectOpenCodeGlobalConfig(configPath);
-    const projected = JSON.parse(readFileSync(configPath, "utf8")).mcp.ingenium.environment;
+    const projected = JSON.parse(readFileSync(configPath, "utf8")).mcp.servers.ingenium.environment;
     const expected = {
       INGENIUM_PROJECT: binding.projectName, INGENIUM_WORKSPACE_ID: binding.workspaceId,
       INGENIUM_WORKTREE: binding.launcherWorktree, INGENIUM_MCP_AUDIENCE: binding.audience,
@@ -69,12 +69,19 @@ test("projected config, launcher environment and same-path mount match the issue
     for (const [key, value] of Object.entries(expected)) assert.equal(projected[key], value);
     const readyFile = join(root, "credential");
     writeFileSync(readyFile, token, { mode: 0o600 });
+    const environment = join(root, "environment");
+    const capability = join(root, "capability");
     const launcher = readFileSync(new URL("../scripts/start-opencode-web.sh", import.meta.url), "utf8")
+      .replace('opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"', 'opencode_server_password="test-password"')
       .replaceAll("sleep 1", ":")
-      .replace(". /run/ingenium-runtime/environment", ":")
+      .replaceAll("/run/ingenium-runtime/environment", environment)
+      .replaceAll("/run/ingenium-runtime/capability", capability)
       .replace("node /app/scripts/probe-api.mjs", "true")
       .replace("[ ! -s /run/ingenium-opencode/.ingenium-mcp-credential ]", `[ ! -s ${readyFile} ]`)
       .replace("opencode serve --port 4098 --hostname 127.0.0.1", "/usr/bin/env");
+    assert.ok(!launcher.includes("$(cat /run/ingenium-secrets/opencode/opencode-server-password)"));
+    assert.ok(!launcher.includes("/run/ingenium-runtime/environment"));
+    assert.ok(!launcher.includes("[ -s /run/ingenium-runtime/capability ]"));
     const launch = spawnSync("/bin/sh", ["-c", launcher], {
       encoding: "utf8", env: { INGENIUM_PROJECT: "wrong", INGENIUM_WORKSPACE_ID: "wrong", INGENIUM_API_TOKEN: "must-not-inherit", UNRELATED_SECRET: "must-not-inherit" },
     });
@@ -125,18 +132,20 @@ test("local capability and validated launcher identity are installed privately w
     assert.equal(statSync(environment).mode & 0o777, 0o600);
     assert.ok(!readFileSync(environment, "utf8").includes(token));
     const launcher = readFileSync(new URL("../scripts/start-opencode-web.sh", import.meta.url), "utf8")
+      .replace('opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"', 'opencode_server_password="test-password"')
       .replace("[ ! -s /run/ingenium-opencode/.ingenium-mcp-credential ]", "[ 1 = 0 ]")
       .replaceAll("/run/ingenium-runtime/environment", environment)
       .replace("[ -s /run/ingenium-runtime/capability ]", `[ -s ${destination} ]`)
       .replace("node /app/scripts/probe-api.mjs", "true")
       .replace("opencode serve --port 4098 --hostname 127.0.0.1", "/usr/bin/env");
+    assert.ok(!launcher.includes("$(cat /run/ingenium-secrets/opencode/opencode-server-password)"));
     const launch = spawnSync("/bin/sh", ["-c", launcher], { encoding: "utf8", env: {} });
     assert.equal(launch.status, 0, launch.stderr);
     for (const value of [`INGENIUM_RUNTIME_ID=${id}`, `INGENIUM_PROJECT_ID=${id}`, "INGENIUM_MCP_AUDIENCE=runtime",
       "INGENIUM_WORKTREE=/workspace", "INGENIUM_RUNTIME_CREDENTIAL_FILE=/run/ingenium-runtime/capability",
       "INGENIUM_MCP_CREDENTIAL_FILE=/run/ingenium-opencode/.ingenium-mcp-credential"]) assert.ok(launch.stdout.split("\n").includes(value));
     const configLine = launch.stdout.split("\n").find(line => line.startsWith("OPENCODE_CONFIG_CONTENT="));
-    assert.equal(JSON.parse(configLine.slice("OPENCODE_CONFIG_CONTENT=".length)).mcp.ingenium.environment.INGENIUM_WORKTREE, "/workspace");
+    assert.equal(JSON.parse(configLine.slice("OPENCODE_CONFIG_CONTENT=".length)).mcp.servers.ingenium.environment.INGENIUM_WORKTREE, "/workspace");
     await assert.rejects(provisionMcpCredential({ ...options, fetcher: async () => Response.json({ data: { runtime, credential, runtimeWorktree: binding.launcherWorktree } }, { status: 201 }) }));
     await assert.rejects(provisionMcpCredential({ ...options, fetcher: async () => Response.json({ data: { runtime: { ...runtime, projectId: "wrong" }, credential, runtimeWorktree: "/workspace" } }, { status: 201 }) }));
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -161,12 +170,14 @@ test("runtime provisioning failure preserves the general credential and reports 
   assert.equal(existsSync(capability), false);
   assert.equal(existsSync(environment), false);
   const launcher = readFileSync(new URL("../scripts/start-opencode-web.sh", import.meta.url), "utf8")
+    .replace('opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"', 'opencode_server_password="test-password"')
     .replaceAll("sleep 1", ":")
     .replace("[ ! -s /run/ingenium-opencode/.ingenium-mcp-credential ]", "[ 1 = 0 ]")
     .replaceAll("/run/ingenium-runtime/environment", environment)
     .replaceAll("/run/ingenium-runtime/capability", capability)
     .replace("node /app/scripts/probe-api.mjs", "true")
     .replace("opencode serve --port 4098 --hostname 127.0.0.1", "/usr/bin/env");
+  assert.ok(!launcher.includes("$(cat /run/ingenium-secrets/opencode/opencode-server-password)"));
   const launch = spawnSync("/bin/sh", ["-c", launcher], { encoding: "utf8", env: { INGENIUM_RUNTIME_ID: "stale" } });
   assert.equal(launch.status, 0, launch.stderr);
   assert.ok(launch.stdout.includes("INGENIUM_MCP_CREDENTIAL_PURPOSE=general\n"));

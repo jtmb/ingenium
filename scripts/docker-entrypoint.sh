@@ -352,7 +352,9 @@ RESTORE_DATA_GID="$(cat /usr/local/share/ingenium/restore-data-gid)"
 OPENCODE_CONFIG_GID="$(getent group ingenium-opencode-config | cut -d: -f3)"
 VSCODE_UID="$(id -u ingenium-vscode)"
 VSCODE_GID="$(id -g ingenium-vscode)"
-for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$VSCODE_UID:$VSCODE_GID"; do
+TTYD_UID="$(id -u ingenium-ttyd)"
+TTYD_GID="$(id -g ingenium-ttyd)"
+for identity in "$API_UID:$API_GID" "$DASHBOARD_UID:$DASHBOARD_GID" "$OPENCODE_UID:$OPENCODE_GID" "$RESTORE_UID:$RESTORE_GID" "$RESTORE_DATA_GID:$OPENCODE_CONFIG_GID" "$VSCODE_UID:$VSCODE_GID" "$TTYD_UID:$TTYD_GID"; do
   case "$identity" in *[!0-9:]*|:*|*:) echo "ERROR: immutable service identity is invalid"; exit 1 ;; esac
 done
 
@@ -563,10 +565,12 @@ RUNTIME_SECRET_DIR="/run/ingenium-secrets"
 RUNTIME_API_SECRET_DIR="${RUNTIME_SECRET_DIR}/api"
 RUNTIME_DASHBOARD_SECRET_DIR="${RUNTIME_SECRET_DIR}/dashboard"
 RUNTIME_OPENCODE_SECRET_DIR="${RUNTIME_SECRET_DIR}/opencode"
+RUNTIME_TTYD_SECRET_DIR="${RUNTIME_SECRET_DIR}/ttyd"
 RUNTIME_RESTORE_SECRET_DIR="${RUNTIME_SECRET_DIR}/restore"
 RUNTIME_API_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/installation-api-token"
 RUNTIME_API_OPENCODE_PASSWORD_FILE="${RUNTIME_API_SECRET_DIR}/opencode-server-password"
 RUNTIME_OPENCODE_PASSWORD_FILE="${RUNTIME_OPENCODE_SECRET_DIR}/opencode-server-password"
+RUNTIME_TTYD_PASSWORD_FILE="${RUNTIME_TTYD_SECRET_DIR}/opencode-server-password"
 RUNTIME_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"
 RUNTIME_EMAIL_ENCRYPTION_KEY_FILE="${RUNTIME_API_SECRET_DIR}/email-encryption-key"
 RUNTIME_API_BACKUP_SIGNING_KEY_FILE="${RUNTIME_API_SECRET_DIR}/backup-signing-key"
@@ -580,6 +584,7 @@ install -d -o root -g root -m 0711 "$RUNTIME_SECRET_DIR"
 install -d -o ingenium-api -g ingenium-api -m 0700 "$RUNTIME_API_SECRET_DIR"
 install -d -o ingenium-dashboard -g ingenium-dashboard -m 0700 "$RUNTIME_DASHBOARD_SECRET_DIR"
 install -d -o ingenium-opencode -g ingenium-opencode -m 0700 "$RUNTIME_OPENCODE_SECRET_DIR"
+secure_persistent_path directory "$RUNTIME_TTYD_SECRET_DIR" "$TTYD_UID" "$TTYD_GID" 0700
 install -d -o ingenium-restore -g ingenium-restore -m 0700 "$RUNTIME_RESTORE_SECRET_DIR"
 install -d -o root -g root -m 0700 /run/ingenium-bootstrap
 install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-opencode
@@ -595,6 +600,9 @@ node /app/scripts/read-protected-api-token.mjs \
 node /app/scripts/read-protected-api-token.mjs \
   "$OPENCODE_SERVER_PASSWORD_FILE" \
   "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_OPENCODE_PASSWORD_FILE" opencode-server 0 0 "$OPENCODE_UID" "$OPENCODE_GID"
+node /app/scripts/read-protected-api-token.mjs \
+  "$OPENCODE_SERVER_PASSWORD_FILE" \
+  "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_TTYD_PASSWORD_FILE" opencode-server 0 0 "$TTYD_UID" "$TTYD_GID"
 node /app/scripts/read-protected-api-token.mjs \
   "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE is required}" \
   "$TRUSTED_ARTIFACT_UID" "$TRUSTED_ARTIFACT_GID" "$RUNTIME_LEARNING_CREDENTIAL_FILE" mcp-learning 0 0 "$OPENCODE_UID" "$OPENCODE_GID"
@@ -740,18 +748,20 @@ if [ ! -f "$OC_CONFIG" ]; then
 {
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "ingenium": {
-      "type": "local",
-      "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      "enabled": true,
-      "environment": {
-        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-opencode/.ingenium-mcp-credential",
-        "INGENIUM_MCP_AUDIENCE": "mcp",
-        "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
-        "INGENIUM_PROJECT": "ingenium",
-        "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
-        "INGENIUM_WORKTREE": "/home/brajam/repos/ingenium"
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        "disabled": false,
+        "environment": {
+          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+          "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-opencode/.ingenium-mcp-credential",
+          "INGENIUM_MCP_AUDIENCE": "mcp",
+          "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
+          "INGENIUM_PROJECT": "ingenium",
+          "INGENIUM_WORKSPACE_ID": "shared-memory-ingenium",
+          "INGENIUM_WORKTREE": "/home/brajam/repos/ingenium"
+        }
       }
     }
   },
@@ -769,11 +779,6 @@ fi
 # Vault-backed child runs copy this provider-bearing config into tmpfs only when
 # it is owner-private. The persistent OpenCode server still reads the same file.
 secure_persistent_path file "$OC_CONFIG" "$OPENCODE_UID" "$OPENCODE_CONFIG_GID" 0660
-# OpenCode V2 requires HTTP basic auth, so ttyd attaches with the same local
-# secret the internal auth proxy validates and forwards.
-setfacl -m u:ingenium-ttyd:--x "$RUNTIME_OPENCODE_SECRET_DIR"
-setfacl -m u:ingenium-ttyd:r-- "$RUNTIME_OPENCODE_PASSWORD_FILE"
-
 OC_AUTH="/home/ingenium-opencode/.local/share/opencode/auth.json"
 if [ -L "$OC_AUTH" ] || { [ -e "$OC_AUTH" ] && [ ! -f "$OC_AUTH" ]; }; then
   echo "ERROR: OpenCode auth path must be a regular non-symlink file"

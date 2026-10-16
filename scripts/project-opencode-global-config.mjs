@@ -215,7 +215,11 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
 
   const mcp = isRecord(config.mcp) ? config.mcp : {};
   delete mcp.ponytail;
-  const existingIngenium = isRecord(mcp.ingenium) ? mcp.ingenium : {};
+  const servers = isRecord(mcp.servers) ? { ...mcp.servers } : {};
+  const existingIngenium = isRecord(servers.ingenium)
+    ? servers.ingenium
+    : isRecord(mcp.ingenium) ? mcp.ingenium : {};
+  delete mcp.ingenium;
   const environment = isRecord(existingIngenium.environment) ? { ...existingIngenium.environment } : {};
 
   // Config is persistent and may predate scoped credentials. Remove every
@@ -230,13 +234,19 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   environment.INGENIUM_PROJECT = "ingenium";
   environment.INGENIUM_WORKSPACE_ID = "shared-memory-ingenium";
   environment.INGENIUM_WORKTREE = "/home/brajam/repos/ingenium";
-  mcp.ingenium = {
+  const existingTimeout = existingIngenium.timeout;
+  servers.ingenium = {
     ...existingIngenium,
     type: "local",
     command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-    enabled: true,
+    disabled: false,
+    ...(typeof existingTimeout === "number"
+      ? { timeout: { catalog: existingTimeout, execution: existingTimeout } }
+      : {}),
     environment,
   };
+  delete servers.ingenium.enabled;
+  mcp.servers = servers;
   config.mcp = mcp;
 
   const existingPlugins = Array.isArray(config.plugins) ? config.plugins : [];

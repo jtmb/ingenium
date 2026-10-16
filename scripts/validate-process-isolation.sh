@@ -17,6 +17,7 @@ done
 api_dir=/run/ingenium-secrets/api
 dashboard_dir=/run/ingenium-secrets/dashboard
 opencode_dir=/run/ingenium-secrets/opencode
+ttyd_dir=/run/ingenium-secrets/ttyd
 restore_dir=/run/ingenium-secrets/restore
 cloudflare_dir=/run/ingenium-secrets/cloudflare
 
@@ -24,6 +25,7 @@ for entry in \
   "$api_dir:ingenium-api:ingenium-api" \
   "$dashboard_dir:ingenium-dashboard:ingenium-dashboard" \
   "$opencode_dir:ingenium-opencode:ingenium-opencode" \
+  "$ttyd_dir:ingenium-ttyd:ingenium-ttyd" \
   "$restore_dir:ingenium-restore:ingenium-restore" \
   "$cloudflare_dir:ingenium-cloudflare:ingenium-cloudflare"; do
   path="${entry%%:*}"
@@ -33,7 +35,7 @@ for entry in \
   [ "$(stat -c '%F:%U:%G:%a' "$path")" = "directory:$owner:$group:700" ] || fail
 done
 
-for file in "$api_dir"/* "$dashboard_dir"/* "$opencode_dir"/* "$restore_dir"/*; do
+for file in "$api_dir"/* "$dashboard_dir"/* "$opencode_dir"/* "$ttyd_dir"/* "$restore_dir"/*; do
   [ -f "$file" ] && [ ! -L "$file" ] && [ "$(stat -c '%a' "$file")" = 600 ] || fail
 done
 
@@ -73,6 +75,15 @@ for file in "$opencode_dir"/*; do
     ! can_read "$user" "$file" || fail
   done
 done
+for file in "$ttyd_dir"/*; do
+  [ "$(stat -c '%F:%U:%G:%a' "$file")" = "regular file:ingenium-ttyd:ingenium-ttyd:600" ] || fail
+  can_read ingenium-ttyd "$file" || fail
+  for user in $users; do
+    [ "$user" = ingenium-ttyd ] && continue
+    ! can_read "$user" "$ttyd_dir" || fail
+    ! can_read "$user" "$file" || fail
+  done
+done
 for file in "$restore_dir"/*; do
   can_read ingenium-restore "$file" || fail
   for user in ingenium-api ingenium-boundary ingenium-dashboard ingenium-gateway ingenium-opencode ingenium-ttyd ingenium-vscode ingenium-cloudflare appuser; do
@@ -88,7 +99,7 @@ for file in "$cloudflare_dir"/*; do
   done
 done
 
-for entry in "$api_dir:ingenium-api" "$dashboard_dir:ingenium-dashboard" "$opencode_dir:ingenium-opencode" "$restore_dir:ingenium-restore" "$cloudflare_dir:ingenium-cloudflare"; do
+for entry in "$api_dir:ingenium-api" "$dashboard_dir:ingenium-dashboard" "$opencode_dir:ingenium-opencode" "$ttyd_dir:ingenium-ttyd" "$restore_dir:ingenium-restore" "$cloudflare_dir:ingenium-cloudflare"; do
   path="${entry%%:*}"
   owner="${entry#*:}"
   for user in $users; do
@@ -97,6 +108,7 @@ for entry in "$api_dir:ingenium-api" "$dashboard_dir:ingenium-dashboard" "$openc
 done
 
 cmp -s "$api_dir/opencode-server-password" "$opencode_dir/opencode-server-password" || fail
+cmp -s "$opencode_dir/opencode-server-password" "$ttyd_dir/opencode-server-password" || fail
 cmp -s "$api_dir/dashboard-bootstrap-token" "$dashboard_dir/bootstrap-token" || fail
 cmp -s "$api_dir/backup-signing-key" "$restore_dir/backup-signing-key" || fail
 

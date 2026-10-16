@@ -60,39 +60,49 @@ function validatePluginPath(filePath: string, projectId?: string): string {
 
 /**
  * 🔴 Convention Requirement: Every plugin lifecycle operation MUST sync opencode.json's
- * `plugin` array (see docs/concepts/conventions.md). This function appends the plugin path to
+ * `plugins` array (see docs/concepts/conventions.md). This function appends the plugin path to
  * the array on disk.
  *
  * The path format differs for global vs project-level configs:
  * - Global:  `plugins/<filePath>`
  * - Project: `.opencode/plugins/<filePath>`
  */
-function addPluginToConfig(filePath: string, projectId?: string): void {
+export function addPluginToConfig(filePath: string, projectId?: string): void {
   const isGlobalProject = isGlobal(projectId);
   const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
   try {
     const configPath = getConfigPath(projectId);
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    if (!config.plugin) config.plugin = [];
-    if (!config.plugin.includes(rel)) {
-      config.plugin.push(rel);
+    const entries = [...new Map([
+      ...(Array.isArray(config.plugins) ? config.plugins : []),
+      ...(Array.isArray(config.plugin) ? config.plugin : []),
+    ].map((entry) => [JSON.stringify(entry), entry])).values()];
+    if (!entries.includes(rel)) entries.push(rel);
+    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
+      config.plugins = entries;
+      delete config.plugin;
       writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
     }
   } catch { /* config may not exist yet — skip silently */ }
 }
 
 /**
- * Remove a plugin entry from opencode.json's `plugin` array.
+ * Remove a plugin entry from opencode.json's `plugins` array.
  * Mirror of addPluginToConfig — keeps the disk config in sync when a plugin is deleted or disabled.
  */
-function removePluginFromConfig(filePath: string, projectId?: string): void {
+export function removePluginFromConfig(filePath: string, projectId?: string): void {
   const isGlobalProject = isGlobal(projectId);
   const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
   try {
     const configPath = getConfigPath(projectId);
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    if (config.plugin) {
-      config.plugin = config.plugin.filter((p: string) => p !== rel);
+    const entries = [...new Map([
+      ...(Array.isArray(config.plugins) ? config.plugins : []),
+      ...(Array.isArray(config.plugin) ? config.plugin : []),
+    ].map((entry) => [JSON.stringify(entry), entry])).values()].filter((entry) => entry !== rel);
+    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
+      config.plugins = entries;
+      delete config.plugin;
       writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
     }
   } catch { /* config may not exist — skip silently */ }
@@ -106,7 +116,7 @@ export function listPlugins(projectId: string): Plugin[] {
 
 /**
  * Enable a plugin: updates DB, writes the .ts source to disk, and adds the plugin path
- * to opencode.json's `plugin` array.
+ * to opencode.json's `plugins` array.
  *
  * 🔴 Per HARD RULE #16, the config sync (addPluginToConfig) is mandatory here —
  * without it, OpenCode won't load the plugin on startup.
@@ -136,7 +146,7 @@ export function enablePlugin(projectId: string, name: string): Plugin | undefine
 
 /**
  * Disable a plugin: updates DB, removes the .ts file from disk, and removes the plugin path
- * from opencode.json's `plugin` array.
+ * from opencode.json's `plugins` array.
  */
 export function disablePlugin(projectId: string, name: string): Plugin | undefined {
   return execTransaction(() => {
@@ -248,7 +258,7 @@ export function deletePlugin(projectId: string, name: string): boolean {
  * 2. Only source_content changed → overwrite existing file
  * 3. Only file_path changed → move file to new location, update config
  *
- * Always syncs opencode.json when the path changes (add/remove from `plugin` array).
+ * Always syncs opencode.json when the path changes (add/remove from `plugins` array).
  */
 export function updatePlugin(
   projectId: string,

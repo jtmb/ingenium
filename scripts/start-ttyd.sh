@@ -4,12 +4,11 @@ set -eu
 
 /app/scripts/wait-for-opencode.sh
 
-# OpenCode V2 always requires HTTP basic auth; reuse the provisioned server
-# secret when this container has one (the compatibility container does, the
-# runtime container's gateway boundary supplies its own).
+# OpenCode V2 requires HTTP basic auth; use this identity's private copy,
+# never an ACL on the proxy's owner-private secret.
 opencode_server_password=""
 for candidate in \
-  /run/ingenium-secrets/opencode/opencode-server-password \
+  /run/ingenium-secrets/ttyd/opencode-server-password \
   /run/ingenium-runtime/opencode-server-password; do
   if [ -r "$candidate" ]; then
     opencode_server_password="$(cat "$candidate")"
@@ -19,8 +18,8 @@ done
 
 # Keep the browser-facing terminal free of inherited credentials. OpenCode's
 # server process owns MCP/plugin access; this process is only an attach client.
-# The empty OpenCode password is intentional: browser authentication belongs
-# to the local gateway. ttyd's loopback bind, origin check, and injected header
+# Browser authentication belongs to the local gateway, not the attach client.
+# ttyd's loopback bind, origin check, and injected header
 # keep the browser-to-terminal boundary in that gateway.
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \

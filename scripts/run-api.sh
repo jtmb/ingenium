@@ -72,7 +72,7 @@ exec env -i \
   DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}" \
   OPENCODE_SERVER_URL="${OPENCODE_SERVER_URL:-http://127.0.0.1:4101}" \
   OPENCODE_SERVER_PASSWORD_FILE="$opencode_password_file" \
-  OPENCODE_OAUTH_CALLBACK_FORWARD_URL="${OPENCODE_OAUTH_CALLBACK_FORWARD_URL:-http://127.0.0.1:4098/auth/callback}" \
+  OPENCODE_OAUTH_CALLBACK_FORWARD_URL="${OPENCODE_OAUTH_CALLBACK_FORWARD_URL:-http://localhost:1455/auth/callback}" \
   OPENCODE_DB_PATH="${OPENCODE_DB_PATH:-/home/ingenium-opencode/.local/share/opencode/opencode.db}" \
   INGENIUM_OPENCODE_DB_PATH="${INGENIUM_OPENCODE_DB_PATH:-/var/opencode/opencode.db}" \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$email_encryption_key_file" \

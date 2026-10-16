@@ -72,19 +72,21 @@ cat > "$config_file" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "ingenium": {
-      "type": "local",
-      "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      "enabled": true,
-      "environment": {
-        "INGENIUM_API_URL": "$INGENIUM_API_URL",
-        "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
-        "INGENIUM_RUNTIME_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
-        "INGENIUM_MCP_AUDIENCE": "runtime",
-        "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
-        "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
-        "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
-        "INGENIUM_WORKTREE": "/workspace"
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        "disabled": false,
+        "environment": {
+          "INGENIUM_API_URL": "$INGENIUM_API_URL",
+          "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
+          "INGENIUM_RUNTIME_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
+          "INGENIUM_MCP_AUDIENCE": "runtime",
+          "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
+          "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
+          "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
+          "INGENIUM_WORKTREE": "/workspace"
+        }
       }
     }
   },
