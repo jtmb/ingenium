@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { getDb, mcpCredentials, runtimes } from "ingenium-core";
+import { getDb, mcpCredentials, projects, runtimes } from "ingenium-core";
 import { provisionManagedRuntime, removeManagedRuntime } from "./runtime-manager-client.js";
 import { deploymentMode } from "./runtime-mode.js";
 
@@ -7,6 +7,25 @@ export const LOCAL_RUNTIME_SCOPES = [
   "child-mcp:runtime", "child-mcp:execute", "mcp-servers:write",
   "projects:read", "documentation:read", "rag:read", "memory:write",
 ].sort();
+
+export function isLocalRuntimeBinding(runtime: runtimes.RuntimeInstance, projectId: string): boolean {
+  if (deploymentMode() !== "compatibility" || process.env.INGENIUM_RUNTIME_MANAGER_URL?.trim()
+    || runtime.projectId !== projectId || runtime.workspaceId !== "shared-memory-ingenium"
+    || runtime.backendContainerId !== null
+    || runtime.backendName !== `ingenium-runtime-${runtime.id.replaceAll("-", "")}`) return false;
+  const project = projects.getProject("ingenium");
+  const workspace = runtimes.getAuthorizedWorkspace(runtime.workspaceId);
+  if (!project || project.archived_at || project.id !== projectId || !workspace
+    || workspace.status !== "authorized" || workspace.projectId !== projectId
+    || workspace.organizationId !== project.organization_id
+    || workspace.organizationId !== runtime.organizationId || workspace.ownerUserId !== runtime.ownerUserId
+    || workspace.securityEpoch !== runtime.securityEpoch
+    || workspace.storagePath !== "/home/brajam/repos/ingenium") return false;
+  const bootstrap = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    "SELECT owner_user_id AS ownerId, organization_id AS organizationId FROM bootstrap_state WHERE singleton = 1 AND state = 'claimed'",
+  ).get() as { ownerId: string; organizationId: string } | undefined;
+  return bootstrap?.ownerId === runtime.ownerUserId && bootstrap.organizationId === runtime.organizationId;
+}
 
 export function provisionLocalRuntime(workspaceId: string) {
   let stage = "mode";
@@ -107,19 +126,33 @@ function projectName(projectId: string): string | undefined {
 }
 
 function runtimeServicePrincipalId(runtime: runtimes.RuntimeInstance, name: string): string | undefined {
-  return (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT principal.id FROM automation_principal_grants grant_row
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+  const now = new Date().toISOString();
+  return (db.prepare(`SELECT sp.id FROM runtime_capability_bindings b
+    JOIN authorized_workspaces w ON w.id = b.workspace_id AND w.organization_id = b.organization_id
+      AND w.project_id = b.project_id AND w.owner_user_id = b.owner_user_id
+      AND w.security_epoch = b.security_epoch AND w.status = 'authorized'
+    JOIN mcp_credentials c ON c.id = b.mcp_credential_id AND c.organization_id = b.organization_id
+      AND c.project_id = b.project_id AND c.workspace_id = b.workspace_id
+      AND c.created_by_user_id = b.owner_user_id AND c.security_epoch = b.security_epoch
+      AND c.launcher_worktree = w.storage_path AND c.kind = 'runtime' AND c.audience = 'runtime'
+      AND c.revoked_at IS NULL AND c.expires_at = b.expires_at AND c.expires_at > ?
+    JOIN service_principals sp ON sp.id = c.service_principal_id AND sp.organization_id = b.organization_id
+      AND sp.security_epoch = b.security_epoch AND sp.status = 'active'
+    WHERE b.runtime_id = ? AND b.organization_id = ? AND b.project_id = ?
+      AND b.owner_user_id = ? AND b.workspace_id = ? AND b.security_epoch = ?
+      AND b.revoked_at IS NULL AND b.expires_at > ? LIMIT 1`).get(
+    now, runtime.id, runtime.organizationId, runtime.projectId,
+    runtime.ownerUserId, runtime.workspaceId, runtime.securityEpoch, now,
+  ) as { id: string } | undefined)?.id
+    ?? (db.prepare(`SELECT principal.id FROM automation_principal_grants grant_row
     JOIN service_principals principal ON principal.id = grant_row.service_principal_id
     WHERE grant_row.organization_id = ? AND grant_row.project_id = ?
       AND grant_row.permission = 'execute' AND grant_row.status = 'active'
       AND principal.organization_id = ? AND principal.security_epoch = ? AND principal.status = 'active'
     ORDER BY grant_row.created_at, grant_row.id LIMIT 1`)
     .get(runtime.organizationId, runtime.projectId, runtime.organizationId, runtime.securityEpoch) as { id: string } | undefined)?.id
-    ?? (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT sp.id FROM runtime_capability_bindings b
-    JOIN mcp_credentials c ON c.id = b.mcp_credential_id
-    JOIN service_principals sp ON sp.id = c.service_principal_id
-    WHERE b.runtime_id = ? AND sp.organization_id = ? AND sp.security_epoch = ? AND sp.status = 'active'
-    ORDER BY b.created_at DESC LIMIT 1`).get(runtime.id, runtime.organizationId, runtime.securityEpoch) as { id: string } | undefined)?.id
-    ?? (getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+    ?? (db.prepare(
       "SELECT id FROM service_principals WHERE organization_id = ? AND name = ? AND security_epoch = ? AND status = 'active'",
     ).get(runtime.organizationId, name, runtime.securityEpoch) as { id: string } | undefined)?.id;
 }

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
+import { coordinationWorktreeId } from "./coordination.js";
 
 export const RUNTIME_STATES = [
   "ABSENT", "PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING", "STOPPED", "FAILED", "REVOKED",
@@ -364,8 +365,15 @@ export function listRuntimeInstances(ownerUserId?: string): RuntimeInstance[] {
 export function getReadyRuntimeForProject(projectId: string): RuntimeInstance | undefined {
   const now = new Date().toISOString();
   const rows = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
-    `SELECT runtime.* FROM runtime_instances runtime
-     JOIN authorized_workspaces workspace
+     `SELECT runtime.* FROM runtime_instances runtime
+      JOIN projects project ON project.id = runtime.project_id AND project.organization_id = runtime.organization_id
+        AND project.archived_at IS NULL
+      JOIN organizations organization ON organization.id = runtime.organization_id AND organization.status = 'active'
+      JOIN organization_memberships member ON member.organization_id = runtime.organization_id
+        AND member.user_id = runtime.owner_user_id AND member.status = 'active'
+      LEFT JOIN project_memberships project_member ON project_member.project_id = runtime.project_id
+        AND project_member.user_id = runtime.owner_user_id
+      JOIN authorized_workspaces workspace
        ON workspace.id = runtime.workspace_id
       AND workspace.organization_id = runtime.organization_id
       AND workspace.project_id = runtime.project_id
@@ -385,9 +393,11 @@ export function getReadyRuntimeForProject(projectId: string): RuntimeInstance | 
       AND credential.organization_id = runtime.organization_id
       AND credential.project_id = runtime.project_id
       AND credential.workspace_id = runtime.workspace_id
-      AND credential.created_by_user_id = runtime.owner_user_id
-      AND credential.security_epoch = runtime.security_epoch
-      AND credential.kind = 'runtime' AND credential.audience = 'runtime'
+       AND credential.created_by_user_id = runtime.owner_user_id
+       AND credential.security_epoch = runtime.security_epoch
+       AND credential.launcher_worktree = workspace.storage_path
+       AND credential.expires_at = binding.expires_at
+       AND credential.kind = 'runtime' AND credential.audience = 'runtime'
       AND credential.revoked_at IS NULL AND credential.expires_at > ?
      JOIN service_principals principal
        ON principal.id = credential.service_principal_id
@@ -400,10 +410,67 @@ export function getReadyRuntimeForProject(projectId: string): RuntimeInstance | 
       AND automation_grant.service_principal_id = principal.id
       AND automation_grant.permission = 'execute' AND automation_grant.status = 'active'
      WHERE runtime.project_id = ? AND runtime.state IN ('READY', 'IDLE')
+       AND runtime.absolute_expires_at > ? AND runtime.idle_expires_at > ?
+       AND (member.role IN ('owner', 'admin') OR project_member.user_id IS NOT NULL)
      ORDER BY runtime.created_at, runtime.id
      LIMIT 2`,
-  ).all(now, now, projectId) as RuntimeRow[];
+  ).all(now, now, projectId, now, now) as RuntimeRow[];
   return rows.length === 1 ? runtimeDto(rows[0]!) : undefined;
+}
+
+export function authorizeRuntimeAutomation(workspaceId: string, ownerUserId: string): RuntimeInstance {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const now = new Date().toISOString();
+    const candidates = db.prepare(`SELECT runtime.id, runtime.project_id AS projectId,
+        runtime.organization_id AS organizationId, credential.service_principal_id AS principalId
+      FROM runtime_instances runtime
+      JOIN authorized_workspaces workspace ON workspace.id = runtime.workspace_id
+        AND workspace.organization_id = runtime.organization_id AND workspace.project_id = runtime.project_id
+        AND workspace.owner_user_id = runtime.owner_user_id AND workspace.security_epoch = runtime.security_epoch
+        AND workspace.status = 'authorized'
+      JOIN projects project ON project.id = runtime.project_id AND project.organization_id = runtime.organization_id
+        AND project.archived_at IS NULL
+      JOIN organizations organization ON organization.id = runtime.organization_id AND organization.status = 'active'
+      JOIN organization_memberships member ON member.organization_id = runtime.organization_id
+        AND member.user_id = runtime.owner_user_id AND member.status = 'active'
+      LEFT JOIN project_memberships project_member ON project_member.project_id = runtime.project_id
+        AND project_member.user_id = runtime.owner_user_id
+      JOIN runtime_capability_bindings binding ON binding.runtime_id = runtime.id
+        AND binding.organization_id = runtime.organization_id AND binding.project_id = runtime.project_id
+        AND binding.owner_user_id = runtime.owner_user_id AND binding.workspace_id = runtime.workspace_id
+        AND binding.security_epoch = runtime.security_epoch AND binding.revoked_at IS NULL AND binding.expires_at > ?
+      JOIN mcp_credentials credential ON credential.id = binding.mcp_credential_id
+        AND credential.organization_id = runtime.organization_id AND credential.project_id = runtime.project_id
+        AND credential.workspace_id = runtime.workspace_id AND credential.created_by_user_id = runtime.owner_user_id
+        AND credential.security_epoch = runtime.security_epoch AND credential.launcher_worktree = workspace.storage_path
+        AND credential.expires_at = binding.expires_at AND credential.kind = 'runtime'
+        AND credential.audience = 'runtime' AND credential.revoked_at IS NULL AND credential.expires_at > ?
+      JOIN service_principals principal ON principal.id = credential.service_principal_id
+        AND principal.organization_id = runtime.organization_id AND principal.security_epoch = runtime.security_epoch
+        AND principal.status = 'active'
+      WHERE runtime.workspace_id = ? AND runtime.owner_user_id = ? AND runtime.state IN ('READY', 'IDLE')
+        AND runtime.absolute_expires_at > ? AND runtime.idle_expires_at > ?
+        AND (member.role IN ('owner', 'admin') OR project_member.user_id IS NOT NULL)
+      LIMIT 2`).all(now, now, workspaceId, ownerUserId, now, now) as Array<{
+      id: string; projectId: string; organizationId: string; principalId: string;
+    }>;
+    if (candidates.length !== 1) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const candidate = candidates[0]!;
+    const prior = db.prepare(`SELECT status FROM automation_principal_grants
+      WHERE project_id = ? AND service_principal_id = ? AND permission = 'execute'`)
+      .get(candidate.projectId, candidate.principalId) as { status: string } | undefined;
+    if (prior && prior.status !== "active") throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    if (!prior) db.prepare(`INSERT INTO automation_principal_grants
+      (id, organization_id, project_id, service_principal_id, permission, granted_by_actor_type,
+        granted_by_actor_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'execute', 'user', ?, ?, ?)`)
+      .run(randomUUID(), candidate.organizationId, candidate.projectId, candidate.principalId, ownerUserId, now, now);
+    const ready = getReadyRuntimeForProject(candidate.projectId);
+    if (ready?.id !== candidate.id) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    return { ready, wrote: !prior };
+  });
+  if (result.wrote) checkpointAfterWrite();
+  return result.ready;
 }
 
 function appendEvent(runtime: RuntimeRow, eventType: string, actorType: "user" | "manager" | "system", actorId: string, fromState?: RuntimeState): void {
@@ -620,6 +687,10 @@ export function recordRuntimeCapabilityActivity(input: {
       .get(timestamp, timestamp, input.runtimeId, input.credentialId, input.servicePrincipalId,
         input.organizationId, input.projectId, input.workspaceId, input.storageMappingHash, timestamp) as RuntimeRow | undefined;
     if (!runtime) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    const peer = db.prepare(`SELECT 1 FROM coordination_sessions
+      WHERE project_id = ? AND worktree_id = ? AND state = 'active' AND expires_at > ? LIMIT 1`)
+      .get(input.projectId, coordinationWorktreeId(input.workspaceId, input.storageMappingHash), timestamp);
+    if (!peer) throw new RuntimeConflictError("ACTIVITY_UNAVAILABLE");
     const requestedExpiry = new Date(observedTime + input.idleLeaseMs).toISOString();
     const idleExpiresAt = [requestedExpiry, runtime.absolute_expires_at!].sort()[0]!;
     if (runtime.idle_expires_at && runtime.idle_expires_at >= idleExpiresAt) {

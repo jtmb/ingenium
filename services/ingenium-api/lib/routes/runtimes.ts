@@ -3,7 +3,7 @@ import { getDb, runtimes, securityAudit } from "ingenium-core";
 import { z } from "zod";
 import { inspectManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "../runtime-manager-client.js";
 import { deploymentMode } from "../runtime-mode.js";
-import { ensureRuntime, runtimeNumberSetting } from "../runtime-provisioner.js";
+import { ensureRuntime, isLocalRuntimeBinding, runtimeNumberSetting } from "../runtime-provisioner.js";
 
 export const runtimesRouter = Router();
 
@@ -198,6 +198,38 @@ runtimesRouter.get("/browser/workspaces", (req, res) => {
       id: workspace.id, organizationName: workspace.organization_name, projectName: workspace.project_name,
       status: "ready", runtimeId: null,
     } : browserWorkspaceDto(workspace)) });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/browser/workspaces/:workspaceId/automation", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const parsed = z.object({}).strict().safeParse(req.body);
+  if (!parsed.success || Object.keys(req.query).length !== 0) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Automation authorization takes no overrides" } });
+    return;
+  }
+  try {
+    const principal = browserPrincipal(req);
+    const workspace = browserWorkspace(principal.id, req.params.workspaceId!);
+    if (!workspace) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "denied");
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    const bound = runtimes.getRuntimeForWorkspace(workspace.id);
+    if (!bound || !isLocalRuntimeBinding(bound, workspace.project_id)) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "denied", workspace);
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    try {
+      const runtime = runtimes.authorizeRuntimeAutomation(workspace.id, principal.id);
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "success", workspace);
+      res.json({ data: { status: "ready", runtimeId: runtime.id } });
+    } catch (error) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "failure", workspace);
+      throw error;
+    }
   } catch (error) {
     runtimeError(res, error);
   }

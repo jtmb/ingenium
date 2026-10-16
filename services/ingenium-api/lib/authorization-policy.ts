@@ -84,6 +84,10 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   if (req.method === "POST" && req.path === "/api/v1/runtimes/activity") {
     return { action: "runtimes.activity.write", resource: "runtimes", permission: "write", target: "runtime-capability", sensitive: true };
   }
+  // Match Express's default case-insensitive, optional trailing-slash route semantics.
+  if (req.method === "POST" && /^\/api\/v1\/runtimes\/browser\/workspaces\/[^/]+\/automation\/?$/i.test(req.path)) {
+    return { action: "runtimes.automation.authorize", resource: "runtimes", permission: "write", target: "private", sensitive: true, browserSessionOnly: true, stepUp: true };
+  }
   if (req.path.startsWith("/api/v1/runtimes/browser/")) {
     const permission = permissionFor(req as Request);
     return { action: `runtimes.${permission}`, resource: "runtimes", permission, target: "private", sensitive: permission !== "read" };
