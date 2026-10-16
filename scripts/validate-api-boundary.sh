@@ -68,7 +68,11 @@ for path in "$compose_file" "$dockerfile" "$gitignore" "$dockerignore" "$entrypo
 done
 
 require_literal "$compose_file" '127.0.0.1:4097:4097'
-require_literal "$compose_file" '127.0.0.1:1455:1455'
+require_literal "$compose_file" '127.0.0.1:1455:1456'
+reject_literal "$compose_file" '127.0.0.1:1455:1455'
+reject_literal "$compose_file" '127.0.0.1:1457:'
+callback_mapping_count="$(grep -F -c '127.0.0.1:1455:1456' "$compose_file")"
+[ "$callback_mapping_count" -eq 2 ] || { echo 'ERROR: both Compose gateway services must map host callback 1455 to container 1456'; exit 1; }
 reject_literal "$compose_file" 'INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}'
 require_literal "$compose_file" 'INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token'
 require_literal "$compose_file" '${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro'
@@ -80,6 +84,10 @@ require_literal "$compose_file" 'INGENIUM_API_PORT=4096'
 reject_literal "$compose_file" '1455:4097'
 reject_literal "$compose_file" '4096:4096'
 require_literal "$dockerfile" 'scripts/validate-api-boundary.sh'
+require_literal "$dockerfile" 'EXPOSE 3000 4097 1456'
+reject_literal "$dockerfile" 'EXPOSE 3000 4097 1455'
+callback_expose_count="$(grep -F -c 'EXPOSE 3000 4097 1456' "$dockerfile")"
+[ "$callback_expose_count" -eq 2 ] || { echo 'ERROR: both runtime targets must expose callback port 1456'; exit 1; }
 require_literal "$dockerfile" 'scripts/api-boundary-proxy.mjs'
 require_literal "$dockerfile" 'scripts/probe-api.mjs'
 require_literal "$dockerfile" 'scripts/read-protected-api-token.mjs'
@@ -192,7 +200,8 @@ reject_literal "$api_probe" 'Authorization: `Bearer ${token}`'
 reject_literal "$healthcheck" 'Authorization: Bearer ${INGENIUM_API_TOKEN'
 require_literal "${repo_root}/scripts/wait-for-opencode.sh" 'exec env -i'
 
-require_literal "$gateway" 'listen 1455 default_server;'
+require_literal "$gateway" 'listen 1456 default_server;'
+reject_literal "$gateway" 'listen 1455 default_server;'
 require_literal "$gateway" 'location = /auth/callback'
 require_literal "$gateway" 'if ($request_method != GET) {'
 require_literal "$gateway" 'return 405;'

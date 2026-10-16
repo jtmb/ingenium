@@ -301,10 +301,10 @@ ENTRYPOINT ["/app/scripts/runtime-control-entrypoint.sh", "gateway"]
 
 FROM runtime-base AS control-plane
 ENV INGENIUM_DEPLOYMENT_MODE=control-plane
-EXPOSE 3000 4097 1455
+EXPOSE 3000 4097 1456
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 FROM runtime-base AS compatibility
 ENV INGENIUM_DEPLOYMENT_MODE=compatibility
-EXPOSE 3000 4097 1455
+EXPOSE 3000 4097 1456
 ENTRYPOINT ["/app/entrypoint.sh"]
