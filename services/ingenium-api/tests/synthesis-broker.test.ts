@@ -10,6 +10,7 @@ const temporaryPaths: string[] = [];
 function configuredProject(primary?: [string, string], secondary?: [string, string]): string {
   const directory = mkdtempSync(join(tmpdir(), "ingenium-synthesis-broker-"));
   temporaryPaths.push(directory);
+  vi.stubEnv("INGENIUM_HOME", directory);
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "test.db");
   resetDbForTest();
   const project = projects.createProject(`broker-${Date.now()}-${Math.random()}`);
