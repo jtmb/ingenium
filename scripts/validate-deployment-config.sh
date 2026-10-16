@@ -188,11 +188,17 @@ require_literal "$compose_file" "INGENIUM_RUNTIME_GATEWAY_HOST_PORT=\${INGENIUM_
 reject_literal "$compose_file" '"443:8443"'
 require_literal "$compose_file" "IMAGE_REVISION: \"\${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}\""
 require_literal "$compose_file" "IMAGE_SOURCE: \"\${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}\""
-require_literal "$compose_file" '"3000:3000"'
-reject_literal "$compose_file" "127.0.0.1:3000:3000"
+require_literal "$compose_file" '"127.0.0.1:3000:3000"'
+reject_literal "$compose_file" '"3000:3000"'
+gateway_binding_count="$(grep -F -c '"127.0.0.1:3000:3000"' "$compose_file")"
+[ "$gateway_binding_count" -eq 2 ] || { echo "ERROR: both desktop gateway profiles must publish only host loopback"; exit 1; }
 reject_literal "$compose_file" "3002"
 require_literal "$compose_file" "127.0.0.1:4097:4097"
-require_literal "$compose_file" "127.0.0.1:1455:1455"
+require_literal "$compose_file" "127.0.0.1:1455:1456"
+reject_literal "$compose_file" "127.0.0.1:1455:1455"
+reject_literal "$compose_file" "127.0.0.1:1457:"
+callback_mapping_count="$(grep -F -c '127.0.0.1:1455:1456' "$compose_file")"
+[ "$callback_mapping_count" -eq 2 ] || { echo "ERROR: both Compose gateway services must map host callback 1455 to container 1456"; exit 1; }
 require_literal "$compose_file" "vscode-data:/home/ingenium-vscode/vscode-data"
 reject_pattern "$compose_file" '(^|[^0-9])4100:4100([^0-9]|$)'
 reject_literal "$compose_file" "INGENIUM_API_TOKEN=\${INGENIUM_API_TOKEN:-}"

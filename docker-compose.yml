@@ -23,10 +23,9 @@ services:
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
     restart: unless-stopped
     ports:
-      # WSL must bind the gateway beyond its Linux-only loopback interface so
-      # Windows localhost forwarding can reach it. This is a local-only trust
-      # boundary; do not use the plain-HTTP gateway for LAN or remote access.
-      - "3000:3000"
+      # This credential-free desktop gateway must not accept LAN traffic.
+      # Verify Windows-to-WSL localhost forwarding after deployment.
+      - "127.0.0.1:3000:3000"
       # Keep the bearer API boundary loopback-scoped for host MCP clients.
       # Browser traffic must use the same-origin dashboard proxy instead.
       - "127.0.0.1:4097:4097"
@@ -106,7 +105,7 @@ services:
     labels:
       com.ingenium.control-plane: "true"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
       - "127.0.0.1:4097:4097"
       - "127.0.0.1:1455:1456"
     environment:
