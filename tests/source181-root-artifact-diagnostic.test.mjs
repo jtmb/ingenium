@@ -11,6 +11,9 @@ const head = "0181e990fa52ff950e4ec90e75e1b54814a3801f";
 const oldBlob = "8b4744b3d20a86799ae0a5cc476c06e56e5f86e0";
 const heldSha = "a06616cfe88444dc3fe64d87953ce58cf9d02f7aa3e8f7a6c66600179cde0820";
 const heldMetadata = ["2096", "2929524", "33212", "1000", "1000", "1", "3644", "1790107476685926912", "1790107476685926912"];
+const brokerDirectory = "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker";
+const brokerIndex = `${brokerDirectory}/index.mjs`;
+const staleBrokerFile = `${brokerDirectory}.mjs`;
 const git = (...args) => execFileSync("git", args);
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const statFields = (s) => [s.dev, s.ino, s.mode, s.uid, s.gid, s.nlink, s.size, s.mtimeNs, s.ctimeNs].map(String);
@@ -100,7 +103,7 @@ function selected(staged) {
 }
 
 const cases = [
-  ["safe", 0, ""],
+  ["historical-safe", 0, ""],
   ["owner", 1, "/app/scripts: uid-gid"],
   ["writable", 1, "/app/docs/public-fixture.js: writable"],
   ["exact-mode", 1, "/app/scripts: exact-mode"],
@@ -110,6 +113,24 @@ const cases = [
   ["redact", 1, "/app/docs/<redacted>: fs-EACCES"],
   ["first", 1, "/app/services: uid-gid"],
 ];
+const installedCases = [
+  ["installed", 0, ""],
+  ["missing-index", 1, `${brokerIndex}: fs-ENOENT`],
+  ["wrong-index-mode", 1, `${brokerIndex}: exact-mode`],
+];
+
+function verifyProducerContract(source) {
+  const docker = git("show", "HEAD:Dockerfile").toString();
+  const config = git("show", "HEAD:config/opencode-managed/opencode.json").toString();
+  const entrypoint = git("show", "HEAD:scripts/docker-entrypoint.sh").toString();
+  assert(docker.includes(` ${brokerDirectory} /etc/opencode`));
+  assert(docker.includes(`install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs ${brokerIndex}`));
+  assert(docker.includes("node /app/scripts/validate-root-entrypoint-chain.mjs &&"));
+  assert(config.includes(`"${brokerDirectory}"`));
+  assert.equal(entrypoint.split("node /app/scripts/validate-root-entrypoint-chain.mjs").length - 1, 2);
+  assert(source.includes(`  ["${brokerDirectory}", 0o555],\n  ["${brokerIndex}", 0o444],`));
+  assert(!source.includes(`  ["${staleBrokerFile}",`));
+}
 
 function worker(scenario) {
   const source = readFileSync(0, "utf8");
@@ -117,16 +138,22 @@ function worker(scenario) {
   assert(source.startsWith(imports));
   const modes = new Map([...source.matchAll(/^  \["([^"]+)", 0o([0-7]+)\],?$/gm)].map(([, path, mode]) => [path, Number.parseInt(mode, 8)]));
   const roots = [...source.slice(source.indexOf("const immutableTrees = ["), source.indexOf("const visited = new Set();")).matchAll(/^  "(\/[^\"]+)",?$/gm)].map(([, path]) => path);
-  assert.equal(modes.get("/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs"), 0o444);
-  assert(!modes.has("/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs"));
+  if (modes.has(staleBrokerFile)) {
+    assert.equal(modes.get(staleBrokerFile), 0o444);
+    assert(!modes.has(brokerDirectory) && !modes.has(brokerIndex));
+  } else {
+    assert.equal(modes.get(brokerDirectory), 0o555);
+    assert.equal(modes.get(brokerIndex), 0o444);
+  }
   assert.equal(roots.length, 9);
-  const dirs = new Set(["/app", "/app/packages", "/app/services", "/app/services/ingenium-api", "/app/scripts", "/app/docs", "/app/.opencode", "/app/nginx", "/app/node_modules", "/usr/local/share/ingenium/opencode-managed", "/usr/local/share/ingenium/opencode-managed/agents", "/usr/local/share/ingenium/opencode-managed/plugins", "/etc/opencode"]);
+  const dirs = new Set(["/app", "/app/packages", "/app/services", "/app/services/ingenium-api", "/app/scripts", "/app/docs", "/app/.opencode", "/app/nginx", "/app/node_modules", "/usr/local/share/ingenium/opencode-managed", "/usr/local/share/ingenium/opencode-managed/agents", "/usr/local/share/ingenium/opencode-managed/plugins", brokerDirectory, "/etc/opencode"]);
   const fs = {
     lstatSync(path) {
       if ((scenario === "missing" || scenario === "fs-error") && path === "/app/scripts") throw Object.assign(new Error("PRIVATE_MARKER"), { code: scenario === "missing" ? "ENOENT" : "PRIVATE_MARKER" });
       if (scenario === "redact" && path === "/app/docs/.env.production") throw Object.assign(new Error("PRIVATE_MARKER"), { code: "EACCES" });
+      if ((path === staleBrokerFile && installedCases.some(([name]) => name === scenario)) || (path === brokerIndex && scenario === "missing-index")) throw Object.assign(new Error("PRIVATE_MARKER"), { code: "ENOENT" });
       const symlink = path === "/etc/opencode/opencode.json";
-      const mode = scenario === "writable" && path === "/app/docs/public-fixture.js" ? 0o666 : scenario === "exact-mode" && path === "/app/scripts" ? 0o544 : modes.get(path) ?? (dirs.has(path) ? 0o555 : 0o444);
+      const mode = scenario === "writable" && path === "/app/docs/public-fixture.js" ? 0o666 : scenario === "exact-mode" && path === "/app/scripts" ? 0o544 : scenario === "wrong-index-mode" && path === brokerIndex ? 0o644 : path === brokerDirectory ? 0o555 : path === brokerIndex ? 0o444 : modes.get(path) ?? (dirs.has(path) ? 0o555 : 0o444);
       const uid = ((scenario === "owner" && path === "/app/scripts") || (scenario === "first" && ["/app/services", "/app/scripts"].includes(path))) ? 1000 : 0;
       return { uid, gid: 0, mode, dev: 1, ino: path.length, isSymbolicLink: () => symlink, isDirectory: () => dirs.has(path) };
     },
@@ -149,6 +176,14 @@ function verify(source, strict) {
     assert.equal(child.stderr, detail && strict ? `ERROR: root entrypoint artifact chain is unsafe: ${detail}\n` : code ? "ERROR: root entrypoint artifact chain is unsafe\n" : "", scenario);
     assert(!child.stderr.includes("PRIVATE_MARKER") && !child.stderr.includes(".env.production"));
   }
+  for (const [scenario, code, detail] of installedCases) {
+    const child = spawnSync(process.execPath, [process.argv[1], "--worker", scenario], { input: source, encoding: "utf8", timeout: 3000 });
+    assert.equal(child.status, strict ? code : 1, `${scenario}: ${child.error?.message ?? child.stderr}`);
+    assert.equal(child.stdout, "", scenario);
+    assert.equal(child.stderr, strict ? detail ? `ERROR: root entrypoint artifact chain is unsafe: ${detail}\n` : "" : "ERROR: root entrypoint artifact chain is unsafe\n", scenario);
+    assert(!child.stderr.includes("PRIVATE_MARKER"));
+  }
+  if (strict) verifyProducerContract(source);
 }
 
 if (process.argv[2] === "--worker") {
@@ -160,7 +195,7 @@ if (process.argv[2] === "--worker") {
     const current = git("show", mode === "--current" ? `HEAD:${validator}` : `:${validator}`).toString();
     verify(baseline, false);
     verify(current, true);
-    console.log("D181_CURRENT_VALIDATOR_PASS", { mode, sourceSha256: hash(current), baselineSha256: hash(baseline), cases: cases.length });
+    console.log("D187_CURRENT_VALIDATOR_PASS", { mode, sourceSha256: hash(current), baselineSha256: hash(baseline), cases: cases.length + installedCases.length });
   } else {
     const { source, candidate, patch } = selected(mode === "--staged");
     if (mode === "--patch") {
