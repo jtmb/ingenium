@@ -9,26 +9,14 @@ import { basename } from "node:path";
  * Next.js → API → OpenCode → SSE pipeline deterministically, without a real
  * LLM backend. The managed runner supplies an isolated port when required.
  *
- * Routes:
- *   POST /session            → create session
- *   GET  /session            → list sessions
- *   GET  /session/{id}/message → get messages
- *   POST /session/{id}/message → send prompt (201)
- *   GET  /event?session={id} → SSE stream
- *   GET  /global/health      → healthy fixture status
- *   GET  /provider           → providers (includes "opencode" free model)
- *   GET  /mcp                → empty MCP state
- *   GET  /permission         → empty permission list
- *   GET  /question           → empty question list
- *   GET  /agent              → empty agent list
- *   POST /__fixture/reset    → clear per-test session state (runner mode only)
- *
- * Any unhandled path returns 404.
+ * Implements the native OpenCode 2.0.11 `/api` contract, including location-bound
+ * sessions, paginated envelopes, split provider/model catalogs, prompt admission,
+ * and global native events. Legacy routes deliberately return 404 so stale clients
+ * cannot accidentally pass acceptance. POST /__fixture/reset is runner-only.
  */
 
 export const DEFAULT_FIXTURE_PORT = 4999;
-const FIXTURE_SESSION_ID = "fixture-session-1";
-const FIXTURE_VERSION = "1.18.9";
+const FIXTURE_VERSION = "2.0.11";
 
 export function getFixturePort(environment: NodeJS.ProcessEnv = process.env): number {
   const value = environment.CHAT_FIXTURE_PORT;
@@ -60,120 +48,57 @@ function runtime(): FixtureRuntime {
 interface FixtureSession {
   id: string;
   title: string;
-  slug: string;
   projectID: string;
-  directory: string;
-  path: string;
-  version: string;
+  location: { directory: string };
   time: { created: number; updated: number };
   cost: number;
   tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } };
-  agent?: string;
-  model?: { id: string; providerID: string; variant?: string };
-  permission?: Array<{ permission: string; pattern: string; action: string }>;
+  agent: string;
+  model: { id: string; providerID: string };
 }
 
 interface FixtureMessage {
-  info: {
-    id: string;
-    sessionID: string;
-    role: "user" | "assistant";
-    time: { created: number; completed?: number };
-    modelID?: string;
-    providerID?: string;
-    finish?: string;
-    parentID?: string;
-    mode?: string;
-    agent?: string;
-    cost?: number;
-    tokens?: { total?: number; input?: number; output?: number; reasoning?: number; cache?: { write?: number; read?: number } };
-    summary?: { diffs?: unknown[] };
-  };
-  parts: Array<{
-    id: string;
-    sessionID: string;
-    messageID: string;
-    type: string;
-    text?: string;
-    time?: { start?: number; end?: number };
-  }>;
+  id: string;
+  type: "user" | "assistant";
+  time: { created: number; completed?: number };
+  text?: string;
+  metadata?: Record<string, unknown>;
+  content?: Array<Record<string, unknown>>;
+  model?: FixtureSession["model"];
+  finish?: string;
 }
 
-const now = Date.now();
-
-function makeSession(id: string, title: string): FixtureSession {
-  return {
-    id,
-    title,
-    slug: id,
-    projectID: "fixture-project",
-    directory: "/workspace",
-    path: "/workspace",
-    version: FIXTURE_VERSION,
-    time: { created: now, updated: now },
-    cost: 0,
-    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  };
-}
-
-/**
- * Sessions list starts empty so the dashboard's auto-creation flow fires.
- * When POST /session is called, the fixture session is created and added.
- * Subsequent GET /session calls return the populated list.
- */
 const sessions: FixtureSession[] = [];
+const messages = new Map<string, FixtureMessage[]>();
+const activeTurns = new Set<string>();
+let generation = 0;
+let eventSequence = 0;
+let sessionSequence = 0;
 
-function userMessage(): FixtureMessage {
+function resetFixtureState(): void {
+  generation += 1;
+  sessions.length = 0;
+  messages.clear();
+  activeTurns.clear();
+}
+
+function makeSession(directory: string, title: string): FixtureSession {
+  // API checkpoint receipts survive a per-test fixture reset. Reusing a native
+  // session ID would collide with an earlier test's immutable turn identity.
+  const id = `fixture-session-${++sessionSequence}`;
   return {
-    info: {
-      id: "msg-1",
-      sessionID: FIXTURE_SESSION_ID,
-      role: "user",
-      time: { created: now },
-    },
-    parts: [
-      {
-        id: "part-1",
-        sessionID: FIXTURE_SESSION_ID,
-        messageID: "msg-1",
-        type: "text",
-        text: "Hello from E2E test",
-      },
-    ],
+    id, title, projectID: "fixture-project", location: { directory },
+    time: { created: Date.now(), updated: Date.now() },
+    cost: 0, tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    agent: "ingenium-chat", model: { id: "fixture-model", providerID: "opencode" },
   };
 }
 
-function fixtureProviders(port: number) {
-  return {
-  all: [
-    {
-      id: "opencode",
-      name: "OpenCode Zen",
-      source: "builtin",
-      env: [],
-      options: {},
-      models: {
-        "fixture-model": {
-          id: "fixture-model",
-          providerID: "opencode",
-          api: { id: "fixture", url: `http://127.0.0.1:${port}`, npm: "fixture" },
-          name: "Fixture Model",
-          capabilities: {},
-          cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
-          limit: { context: 4096, output: 1024 },
-          status: "active",
-          options: {},
-          headers: {},
-          release_date: "2026-01-01",
-          variants: {},
-        },
-      },
-    },
-  ],
-  default: { opencode: "fixture-model" },
-  connected: ["opencode"],
-  };
-}
+const fixtureModel = {
+  modelID: "fixture-model", providerID: "opencode", name: "Fixture Model",
+  capabilities: {}, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
+  limit: { context: 4096, output: 1024 }, status: "active", settings: {},
+};
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
@@ -199,23 +124,6 @@ function parseBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-/**
- * Generate an SSE-formatted event stream that the frontend parser consumes.
- *
- * The SSE parser in use-opencode-chat.ts accumulates `data:` lines until a
- * blank line is encountered, then JSON.parses the accumulated content.
- * `event:` lines are ignored but included for spec compliance.
- *
- * Two modes:
- * - "simple": basic text-only response (backward compatible)
- * - "rich": full v1.18.9 pipeline — reasoning deltas, shell and Web Search
- *           calls, response text, completed metadata, session.idle
- *
- * In rich mode, small delays between event groups give the frontend time
- * to render intermediate states (reasoning, tool call, activity status)
- * before the stream completes.
- */
-
 function delay(ms: number): Promise<void> {
   const state = runtime();
   if (state.shuttingDown) return Promise.resolve();
@@ -238,475 +146,174 @@ function writeSse(res: ServerResponse, body: string): boolean {
   }
 }
 
-async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"): Promise<void> {
+/** The native event endpoint is global and stays connected between turns. */
+function streamSSE(res: ServerResponse): void {
   const state = runtime();
   state.sseResponses.add(res);
-  try {
-  if (state.shuttingDown || res.destroyed || res.writableEnded) return;
-  const url = new URL(`http://localhost${res.req.url ?? ""}`);
-  const sessionId = url.searchParams.get("session");
-  const messageID = "fixture-assistant-msg";
-  const partID = "fixture-part-1";
-
-  // These headers keep the stream incremental instead of buffered.
   res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
+    "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+    Connection: "keep-alive", "X-Accel-Buffering": "no",
   });
-
-  if (mode === "rich") {
-    writeSse(res,
-      `event: session.status\ndata: ${JSON.stringify({
-        type: "session.status",
-        properties: { status: { type: "busy" } },
-      })}\n\n`,
-    );
-
-    // Allow the client to render the busy state before the next event.
-    await delay(300);
-
-    writeSse(res,
-      `event: message.updated\ndata: ${JSON.stringify({
-        type: "message.updated",
-        properties: {
-          info: {
-            id: messageID,
-            role: "assistant",
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            providerID: "opencode",
-            modelID: "fixture-model",
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    // OpenCode announces each semantic part before its deltas; reasoning uses
-    // the same "text" delta field as answer text.
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "reason-part-1",
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "reasoning",
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(100);
-
-    const reasoningChunks = [
-      "Let me think about this...",
-      " The user wants to know about the chat pipeline.",
-      " I should explain how it works step by step.",
-    ];
-    for (const chunk of reasoningChunks) {
-      await delay(100);
-      writeSse(res,
-        `event: message.part.delta\ndata: ${JSON.stringify({
-          type: "message.part.delta",
-          properties: {
-            messageID,
-            partID: "reason-part-1",
-            field: "text",
-            delta: chunk,
-          },
-        })}\n\n`,
-      );
-    }
-
-    // Keep the provider in the thinking phase separate from later tool and
-    // response events so the rich fixture exercises incremental reasoning.
-    await delay(1_500);
-
-    // Emit the full lifecycle so the UI can exercise each tool state.
-    const toolPartId = "tool-part-1";
-    const toolCallId = "call_bash_001";
-
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: toolPartId,
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "tool",
-            tool: "bash",
-            callID: toolCallId,
-            state: {
-              status: "pending",
-              input: { command: "echo 'Hello from tool'" },
-              time: { start: Date.now() },
-            },
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: toolPartId,
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "tool",
-            tool: "bash",
-            callID: toolCallId,
-            state: {
-              status: "running",
-              input: { command: "echo 'Hello from tool'" },
-              time: { start: Date.now() - 500 },
-            },
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: toolPartId,
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "tool",
-            tool: "bash",
-            callID: toolCallId,
-            state: {
-              status: "completed",
-              input: { command: "echo 'Hello from tool'" },
-              output: "Hello from tool\n",
-              time: { start: Date.now() - 1000, end: Date.now() },
-              title: "Run shell command",
-            },
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    // Concrete results let the disclosure be tested without an external provider.
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: "web-search-part-1",
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "tool",
-            tool: "websearch",
-            callID: "call_websearch_001",
-            state: {
-              status: "completed",
-              input: { query: "transparent chat streaming" },
-              output: {
-                results: [
-                  { url: "https://results.example.test/chat-streaming" },
-                ],
-                visited: [
-                  { url: "https://visited.example.test/stream-lifecycle" },
-                ],
-              },
-              time: { start: Date.now() - 700, end: Date.now() },
-            },
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    // Keep answer and reasoning as separate parts while following the same
-    // part-updated → text-delta contract.
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: partID,
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "text",
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(100);
-
-    writeSse(res,
-      `event: message.part.delta\ndata: ${JSON.stringify({
-        type: "message.part.delta",
-        properties: {
-          messageID,
-          partID,
-          field: "text",
-          delta: "I've completed the analysis. The chat pipeline is working correctly.\n\n> **Note:** This callout remains plain provider output.",
-        },
-      })}\n\n`,
-    );
-
-    await delay(300);
-
-    // Keep completion metadata separate so the browser can prove reasoning
-    // remains open until session.idle.
-    writeSse(res,
-      `event: message.updated\ndata: ${JSON.stringify({
-        type: "message.updated",
-        properties: {
-          info: {
-            id: messageID,
-            role: "assistant",
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            providerID: "opencode",
-            modelID: "fixture-model",
-            completed: true,
-            time: { created: Date.now() - 3000, completed: Date.now() },
-          },
-        },
-      })}\n\n`,
-    );
-
-    await delay(1_200);
-
-    writeSse(res,
-      `event: session.idle\ndata: ${JSON.stringify({
-        type: "session.idle",
-        properties: {},
-      })}\n\n`,
-    );
-
-    // OpenCode's real /event endpoint remains connected after a turn reaches
-    // session.idle. Hold this fixture connection open until the browser closes
-    // it so the E2E path catches intermediary proxies that buffer an entire
-    // SSE response instead of forwarding events as they arrive.
-    await new Promise<void>((resolve) => {
-      if (res.destroyed || res.writableEnded) {
-        resolve();
-        return;
-      }
-      res.once("close", resolve);
-    });
-  } else {
-    const streamText = "Hello! I received your message. This confirms the chat pipeline is working.";
-
-    writeSse(res,
-      `event: message.updated\ndata: ${JSON.stringify({
-        type: "message.updated",
-        properties: {
-          info: {
-            id: messageID,
-            role: "assistant",
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            providerID: "opencode",
-            modelID: "fixture-model",
-          },
-        },
-      })}\n\n`,
-    );
-
-    // The text part is announced before its delta.
-    writeSse(res,
-      `event: message.part.updated\ndata: ${JSON.stringify({
-        type: "message.part.updated",
-        properties: {
-          part: {
-            id: partID,
-            sessionID: sessionId ?? FIXTURE_SESSION_ID,
-            messageID,
-            type: "text",
-          },
-        },
-      })}\n\n`,
-    );
-
-    writeSse(res,
-      `event: message.part.delta\ndata: ${JSON.stringify({
-        type: "message.part.delta",
-        properties: {
-          messageID,
-          partID,
-          field: "text",
-          delta: streamText,
-        },
-      })}\n\n`,
-    );
-
-    writeSse(res,
-      `event: session.idle\ndata: ${JSON.stringify({
-        type: "session.idle",
-        properties: {},
-      })}\n\n`,
-    );
-  }
-
-  } finally {
-    state.sseResponses.delete(res);
-    if (!res.writableEnded && !res.destroyed) res.end();
-  }
+  writeSse(res, ": connected\n\n");
+  res.once("close", () => state.sseResponses.delete(res));
 }
 
-function route(req: IncomingMessage, res: ServerResponse): void {
-  const url = req.url ?? "/";
+/** Emit native events so browser acceptance also exercises the API projection. */
+async function runTurn(session: FixtureSession, user: FixtureMessage): Promise<void> {
+  const turnGeneration = generation;
+  const assistantMessageID = `${user.id}-assistant`;
+  const emit = (type: string, data: Record<string, unknown> = {}) => {
+    if (turnGeneration !== generation || !activeTurns.has(session.id)) return;
+    const event = {
+      id: `fixture-event-${++eventSequence}`, type,
+      data: { sessionID: session.id, assistantMessageID, timestamp: Date.now(), ...data },
+    };
+    for (const response of runtime().sseResponses) {
+      writeSse(response, `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+  };
+  activeTurns.add(session.id);
+  // The browser subscribes before prompt admission; delayed native events let
+  // the DOM demonstrate incremental reasoning independently of the final text.
+  await delay(300);
+  emit("session.next.step.started", { agent: session.agent, model: session.model });
+  await delay(300);
+  const reasoningID = `${assistantMessageID}:reasoning`;
+  emit("session.next.reasoning.started", { reasoningID });
+  const chunks = ["Let me think about this...", " The user wants to know about the chat pipeline.", " I should explain how it works step by step."];
+  for (const delta of chunks) {
+    await delay(100);
+    emit("session.next.reasoning.delta", { reasoningID, delta });
+  }
+  await delay(1_500);
+  emit("session.next.reasoning.ended", { reasoningID, text: chunks.join("") });
+  const shell = { callID: `${assistantMessageID}:shell`, tool: "bash", input: { command: "echo 'Hello from tool'" } };
+  emit("session.next.tool.input.ended", { ...shell, text: JSON.stringify(shell.input) });
+  await delay(300);
+  emit("session.next.tool.called", shell);
+  await delay(300);
+  emit("session.next.tool.success", { ...shell, result: "Hello from tool\n" });
+  await delay(300);
+  const search = { callID: `${assistantMessageID}:websearch`, tool: "websearch", input: { query: "transparent chat streaming" } };
+  const searchResult = {
+    results: [{ url: "https://results.example.test/chat-streaming" }],
+    visited: [{ url: "https://visited.example.test/stream-lifecycle" }],
+  };
+  emit("session.next.tool.called", search);
+  emit("session.next.tool.success", { ...search, result: searchResult });
+  await delay(300);
+  const textID = `${assistantMessageID}:text`;
+  const text = "I've completed the analysis. The chat pipeline is working correctly.\n\n> **Note:** This callout remains plain provider output.";
+  emit("session.next.text.started", { textID });
+  await delay(100);
+  emit("session.next.text.delta", { textID, delta: text });
+  emit("session.next.text.ended", { textID, text });
+  await delay(1_200);
+  if (turnGeneration !== generation || !activeTurns.has(session.id)) return;
+  messages.get(session.id)!.push({
+    id: assistantMessageID, type: "assistant", time: { created: user.time.created, completed: Date.now() },
+    model: session.model, finish: "stop", content: [
+      { type: "reasoning", text: chunks.join("") },
+      { type: "tool", id: shell.callID, name: shell.tool, state: { status: "completed", input: shell.input, content: "Hello from tool\n" } },
+      { type: "tool", id: search.callID, name: search.tool, state: { status: "completed", input: search.input, content: searchResult } },
+      { type: "text", text },
+    ],
+  });
+  emit("session.next.step.ended", { finish: "stop", cost: 0, tokens: session.tokens });
+  activeTurns.delete(session.id);
+}
+
+async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? "/", "http://fixture.local");
+  const path = url.pathname;
   const method = (req.method ?? "GET").toUpperCase();
-
-  const path = url.split("?")[0]!;
-
-  const query = new URLSearchParams(url.includes("?") ? url.slice(url.indexOf("?")) : "");
-
   if (method === "POST" && path === "/__fixture/reset") {
-    const expectedNonce = process.env.INGENIUM_TEST_RUN_NONCE;
-    if (
-      process.env.CHAT_FIXTURE_RUNNER !== "1"
-      || !expectedNonce
-      || req.headers["x-ingenium-fixture-run-nonce"] !== expectedNonce
-    ) {
-      notFound(res);
-      return;
+    const nonce = process.env.INGENIUM_TEST_RUN_NONCE;
+    if (process.env.CHAT_FIXTURE_RUNNER !== "1" || !nonce || req.headers["x-ingenium-fixture-run-nonce"] !== nonce) {
+      notFound(res); return;
     }
-    sessions.length = 0;
-    res.writeHead(204, { "Cache-Control": "no-store" });
-    res.end();
-    return;
+    resetFixtureState();
+    res.writeHead(204, { "Cache-Control": "no-store" }); res.end(); return;
   }
-
-  if (method === "POST" && path === "/session") {
-    parseBody(req).then(() => {
-      const s = makeSession(FIXTURE_SESSION_ID, "New conversation");
-      sessions.push(s);
-      json(res, 201, s);
-    }).catch(() => {
-      if (!res.destroyed && !res.writableEnded) res.destroy();
-    });
-    return;
+  if (method === "GET" && path === "/api/info") {
+    json(res, 200, { version: FIXTURE_VERSION }); return;
   }
-
-  if (method === "GET" && path === "/session") {
-    json(res, 200, sessions);
-    return;
+  if (method === "GET" && path === "/api/provider") {
+    json(res, 200, { data: [{ id: "opencode", name: "OpenCode Zen", activation: "enabled", package: "fixture", settings: {} }] }); return;
   }
-
-  const sessionDetailMatch = path.match(/^\/session\/([^/]+)$/);
-  if (method === "GET" && sessionDetailMatch) {
-    const id = sessionDetailMatch[1]!;
-    const s = sessions.find((s) => s.id === id);
-    if (s) {
-      json(res, 200, s);
-    } else {
-      notFound(res);
-    }
-    return;
+  if (method === "GET" && path === "/api/model") {
+    json(res, 200, { data: [fixtureModel] }); return;
   }
-
-  const getMessagesMatch = path.match(/^\/session\/([^/]+)\/message$/);
-  if (method === "GET" && getMessagesMatch) {
-    const id = getMessagesMatch[1]!;
-    if (id === FIXTURE_SESSION_ID) {
-      // Return the user message only — the assistant response arrives via SSE.
-      // Returning both would cause duplication with the SSE stream.
-      json(res, 200, [userMessage()]);
-    } else {
-      notFound(res);
-    }
-    return;
+  if (method === "GET" && path === "/api/model/default") {
+    json(res, 200, { data: fixtureModel }); return;
   }
-
-  const postMessageMatch = path.match(/^\/session\/([^/]+)\/message$/);
-  if (method === "POST" && postMessageMatch) {
-    parseBody(req).then((body) => {
-      let userText = "";
-      try {
-        const parsed = JSON.parse(body);
-        if (parsed.parts && Array.isArray(parsed.parts)) {
-          userText = parsed.parts
-            .filter((p: { type: string }) => p.type === "text")
-            .map((p: { text?: string }) => p.text ?? "")
-            .join(" ");
-        }
-      } catch {
-      }
-
-      const createdMsg = userMessage();
-      createdMsg.info.id = "msg-3";
-      if (userText) {
-        createdMsg.parts[0]!.text = userText;
-      }
-      json(res, 201, createdMsg);
-    }).catch(() => {
-      if (!res.destroyed && !res.writableEnded) res.destroy();
-    });
-    return;
+  if (method === "GET" && path === "/api/agent") {
+    json(res, 200, { data: [{ id: "ingenium-chat", name: "ingenium-chat", mode: "primary", permissions: [] }] }); return;
   }
-
-  if (method === "GET" && path === "/event") {
-    const sessionParam = query.get("session");
-    const mode = (query.get("mode") || "rich") as "simple" | "rich";
-    if (sessionParam && sessionParam !== FIXTURE_SESSION_ID) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      });
-      writeSse(res, `event: session.idle\ndata: {"type":"session.idle","properties":{}}\n\n`);
-      if (!res.destroyed && !res.writableEnded) res.end();
-      return;
-    }
-    streamSSE(res, mode);
-    return;
+  if (method === "GET" && ["/api/permission/request", "/api/form", "/api/integration", "/api/mcp"].includes(path)) {
+    json(res, 200, { data: [] }); return;
   }
-
-  if (method === "GET" && path === "/provider") {
-    json(res, 200, fixtureProviders(runtime().port));
-    return;
+  if (method === "GET" && path === "/api/session/active") {
+    json(res, 200, { data: Object.fromEntries([...activeTurns].map((id) => [id, { type: "busy" }])) }); return;
   }
-
-  if (method === "GET" && path === "/global/health") {
-    json(res, 200, { healthy: true, version: FIXTURE_VERSION });
-    return;
+  if (method === "GET" && path === "/api/event") {
+    streamSSE(res); return;
   }
-
-  if (method === "GET" && path === "/mcp") {
-    json(res, 200, {});
-    return;
+  if (method === "POST" && path === "/api/session") {
+    const body = JSON.parse(await parseBody(req) || "{}");
+    const session = makeSession(body.location?.directory ?? "/workspace", body.title ?? "New conversation");
+    sessions.push(session); messages.set(session.id, []);
+    json(res, 201, { data: session }); return;
   }
-
-  if (method === "GET" && path === "/permission") {
-    json(res, 200, []);
-    return;
+  if (method === "GET" && path === "/api/session") {
+    const directory = url.searchParams.get("directory");
+    json(res, 200, { data: sessions.filter((s) => directory === null || s.location.directory === directory), cursor: {} }); return;
   }
-
-  if (method === "GET" && path === "/question") {
-    json(res, 200, []);
-    return;
+  const match = path.match(/^\/api\/session\/([^/]+)(?:\/(message|prompt|model|agent|interrupt))?$/);
+  if (!match) { notFound(res); return; }
+  const session = sessions.find((s) => s.id === match[1]);
+  if (!session) { notFound(res); return; }
+  const action = match[2];
+  if (method === "GET" && !action) { json(res, 200, { data: session }); return; }
+  if (method === "PATCH" && !action) {
+    const body = JSON.parse(await parseBody(req));
+    if (typeof body.title === "string") session.title = body.title;
+    session.time.updated = Date.now();
+    res.writeHead(204); res.end(); return;
   }
-
-  if (method === "GET" && path === "/agent") {
-    json(res, 200, []);
-    return;
+  if (method === "GET" && action === "message") {
+    json(res, 200, { data: messages.get(session.id), cursor: {} }); return;
   }
-
+  if (method === "POST" && action === "interrupt") {
+    activeTurns.delete(session.id); json(res, 200, { interrupted: true }); return;
+  }
+  if (method === "POST" && (action === "agent" || action === "model")) {
+    const body = JSON.parse(await parseBody(req));
+    if (action === "agent") session.agent = body.agent;
+    else session.model = body.model;
+    res.writeHead(204); res.end(); return;
+  }
+  if (method === "POST" && action === "prompt") {
+    const body = JSON.parse(await parseBody(req));
+    const history = messages.get(session.id)!;
+    const user: FixtureMessage = {
+      id: `${session.id}-msg-${history.length + 1}`, type: "user", time: { created: Date.now() },
+      text: body.text ?? "", metadata: body.metadata,
+    };
+    history.push(user);
+    json(res, 201, { data: user });
+    void runTurn(session, user).catch(() => activeTurns.delete(session.id)); return;
+  }
   notFound(res);
 }
 
 export function createChatFixtureServer(port = getFixturePort()): Server {
-  const server = createServer(route);
+  const server = createServer((req, res) => {
+    void route(req, res).catch(() => {
+      if (!res.headersSent) json(res, 400, { error: { code: "INVALID_REQUEST", message: "Invalid fixture request" } });
+      else res.destroy();
+    });
+  });
   fixtureRuntime = {
     server,
     port,
@@ -715,7 +322,7 @@ export function createChatFixtureServer(port = getFixturePort()): Server {
     timers: new Set(),
     shuttingDown: false,
   };
-  sessions.length = 0;
+  resetFixtureState();
   server.on("connection", (socket) => {
     const state = runtime();
     state.sockets.add(socket);

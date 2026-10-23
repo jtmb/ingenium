@@ -1058,14 +1058,16 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     }
   }, [ensureContextLink, opencode, persistenceProject, persistenceRuntimeId, scopeKey, sessionId]);
 
-  const correlatePendingUser = useCallback((authoritativeId: string, correlationScope: string): void => {
+  const correlatePendingUser = useCallback((authoritativeId: string, correlationScope: string, optimisticId?: string): void => {
     const correlationKey = `${correlationScope}\0${authoritativeId}`;
     if (correlatedUserIdsRef.current.has(correlationKey)) return;
     const turns = [...pendingUserTurnsRef.current.values()];
     if (turns.some((turn) =>
       turn.scopeKey === correlationScope && turn.authoritativeId === authoritativeId)) return;
-    const pending = pendingUserTurnsRef.current.get(authoritativeId)
-      ?? turns.reverse().find((turn) => turn.scopeKey === correlationScope && !turn.authoritativeId);
+    const pending = optimisticId !== undefined
+      ? pendingUserTurnsRef.current.get(optimisticId)
+      : pendingUserTurnsRef.current.get(authoritativeId)
+        ?? turns.reverse().find((turn) => turn.scopeKey === correlationScope && !turn.authoritativeId);
     if (!pending || pending.scopeKey !== correlationScope) return;
     pending.authoritativeId = authoritativeId;
     dispatch({
@@ -1757,8 +1759,9 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         // emitting reasoning as soon as the prompt is accepted; delaying this
         // until a render effect risks receiving only a terminal snapshot.
         connectSSE(sessionId);
-        await opencode.sessions.prompt(sessionId, promptBody);
+        const admission = await opencode.sessions.prompt(sessionId, promptBody);
         if (activeScopeRef.current !== sendScope) return true;
+        if (admission?.messageID) correlatePendingUser(admission.messageID, sendScope, messageID);
 
         // The prompt endpoint can finish before the SSE subscription is
         // established. Reconcile its authoritative snapshot without treating
@@ -1797,7 +1800,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         return false;
       }
     },
-    [opencode, scopeKey, sessionId, loadedScopeKey, connectSSE, correlateSnapshotUsers],
+    [opencode, scopeKey, sessionId, loadedScopeKey, connectSSE, correlatePendingUser, correlateSnapshotUsers],
   );
 
   /** Stop generation. */

@@ -116,6 +116,13 @@ cleans up the exact manifest-owned run directory. This is the verified Phase 5E
 behavior: the run manifest is the source of truth for process identity, ports,
 paths, and cleanup ownership.
 
+The chat fixture serves the OpenCode 2.0.11 native `/api` contract: location-bound
+session envelopes, separate provider/model catalogs, prompt admission, and native
+global events projected by the API. Legacy OpenCode routes return `404`. A new
+session has no invented messages; persistence tests send and checkpoint a turn
+before checking reload behavior. Browser-only tests must enroll the fixture owner
+in the run's organization before logging in with its password.
+
 On a Linux host, the production-mode API also requires the protected broker
 artifacts installed by the Dockerfile at `/usr/local/share/ingenium/opencode-managed`.
 The root and parent directories must be owned by another user with mode `0555`,

@@ -301,7 +301,7 @@ describe("Defect 1: Prompt body field passthrough", () => {
     settlePrompt({ info: { id: "msg_streaming" }, parts: [] });
     const res = await response;
     expect(res.status).toBe(202);
-    await expect(res.json()).resolves.toEqual({ data: { accepted: true } });
+    await expect(res.json()).resolves.toEqual({ data: { accepted: true, messageID: "msg_streaming" } });
     expect(mockSendPrompt).toHaveBeenCalledWith(
       "ses_streaming",
       { parts: [{ type: "text", text: "Start streaming" }] },

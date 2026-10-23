@@ -179,8 +179,10 @@ test.describe("TASK-102 task capture", () => {
       await page.goto("/chat", { waitUntil: "domcontentloaded" });
       const chatCreateTask = page.getByRole("button", { name: "Create task from conversation" });
       await expect(chatCreateTask).toBeEnabled({ timeout: 20_000 });
+      const chatSessionId = await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"));
+      if (!chatSessionId) throw new Error("Fixture chat did not create a session");
       const upstreamSession = await request.get(
-        `${runtime.apiBase}/opencode/sessions/fixture-session-1`,
+        `${runtime.apiBase}/opencode/sessions/${encodeURIComponent(chatSessionId)}`,
         { headers: runtime.apiHeaders },
       );
       expect(upstreamSession.status(), await upstreamSession.text()).toBe(200);
@@ -198,7 +200,7 @@ test.describe("TASK-102 task capture", () => {
       const chatCapture = await captureFromDialog(page, {
         title: chatTitle,
         source_type: "chat",
-        session_id: "fixture-session-1",
+        session_id: chatSessionId,
       }, 201);
       chatTaskId = chatCapture.task.id;
       await expect(page.getByTestId("chat-task-capture-status")).toContainText(chatTitle);
@@ -207,7 +209,7 @@ test.describe("TASK-102 task capture", () => {
       const repeatedChatCapture = await captureFromDialog(page, {
         title: chatRetryTitle,
         source_type: "chat",
-        session_id: "fixture-session-1",
+        session_id: chatSessionId,
       }, 200);
       expect(repeatedChatCapture.task.id).toBe(chatCapture.task.id);
       expect(repeatedChatCapture.reference.id).toBe(chatCapture.reference.id);

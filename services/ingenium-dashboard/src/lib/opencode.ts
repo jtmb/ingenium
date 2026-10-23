@@ -594,6 +594,7 @@ export interface OpenCodePromptParams {
 
 export interface OpenCodePromptAccepted {
   accepted: boolean;
+  messageID?: string;
 }
 
 export function createOpenCodeClient(runtimeId: string | null) {

@@ -852,7 +852,13 @@ opencodeRouter.post("/sessions/:id/prompt", async (req, res) => {
     sendResult(req, res, result);
     return;
   }
-  res.status(202).json({ data: { accepted: true } });
+  // Native v2 allocates the user ID at admission, before assistant events exist.
+  // Retain that identity so the browser can reconcile its optimistic message.
+  const messageID = result.info.id;
+  res.status(202).json({ data: {
+    accepted: true,
+    ...(typeof messageID === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(messageID) ? { messageID } : {}),
+  } });
 });
 
 /* ── Session actions ── */

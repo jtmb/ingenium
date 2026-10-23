@@ -6,6 +6,7 @@ import {
   FIXTURE_OWNER_EMAIL,
   FIXTURE_OWNER_PASSWORD,
   FIXTURE_SESSION_COOKIE_NAME,
+  createTestRunBrowserStorageState,
   resetTestRunChatFixture,
 } from "../test-server-lifecycle";
 
@@ -20,6 +21,7 @@ function expectWithinPixels(actual: number | undefined, expected: number, label:
 }
 
 test.describe("Chat — end-to-end smoke", () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
   test("full send/receive cycle with fixture server", async ({ page }) => {
     // Full pipeline: browser → Next.js → API → fixture OpenCode → SSE → rendered response
     test.setTimeout(60000);
@@ -142,10 +144,13 @@ test.describe("Chat — end-to-end smoke", () => {
     const composer = page.locator('[data-testid="chat-composer"]');
     await expect(composer).toBeEnabled({ timeout: 15000 });
 
+    const activeSession = await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"));
+    expect(activeSession).not.toBeNull();
+    expect(activeSession).not.toBe(staleSessionId);
     await expect.poll(() => messageResponses.some(
-      (response) => response.sessionId === "fixture-session-1" && response.status === 200,
+      (response) => response.sessionId === activeSession && response.status === 200,
     )).toBe(true);
-    expect(messageResponses).toEqual([{ sessionId: "fixture-session-1", status: 200 }]);
+    expect(messageResponses).toEqual([{ sessionId: activeSession, status: 200 }]);
 
     await composer.fill("Show the fixture markdown");
     await composer.press("Enter");
@@ -155,9 +160,28 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(markdownCallout).toBeInViewport();
 
     await expect(page.locator('[data-testid="chat-stop-btn"]')).toBeHidden({ timeout: 10000 });
+    await expect(page.getByLabel("Chat sessions")).not.toContainText("OpenCode request failed.");
+    await expect(page.getByLabel("Chat sessions")).toContainText("Show the fixture markdown");
+    await page.screenshot({ path: test.info().outputPath("chat-desktop.png"), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(markdownCallout).toBeVisible();
     await expect(markdownCallout).toBeInViewport();
+    const projectControl = page.getByRole("button", { name: /^Context project:/ });
+    const settingsControl = page.getByRole("button", { name: "Settings", exact: true });
+    const accountControl = page.getByRole("button", { name: /^Account menu for / });
+    await expect(projectControl).toBeVisible();
+    await expect(settingsControl).toBeVisible();
+    await expect(accountControl).toBeVisible();
+    const [projectBox, settingsBox, accountBox] = await Promise.all([
+      projectControl.boundingBox(), settingsControl.boundingBox(), accountControl.boundingBox(),
+    ]);
+    expect(projectBox).not.toBeNull();
+    expect(settingsBox).not.toBeNull();
+    expect(accountBox).not.toBeNull();
+    expect(projectBox!.x + projectBox!.width).toBeLessThanOrEqual(settingsBox!.x);
+    expect(settingsBox!.x + settingsBox!.width).toBeLessThanOrEqual(accountBox!.x);
+    expect(accountBox!.x + accountBox!.width).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("chat-mobile.png"), fullPage: true });
   });
 
   test("authenticated chat survives a hard reload without duplicating its checkpoint", async ({ browser, baseURL }) => {
@@ -166,7 +190,13 @@ test.describe("Chat — end-to-end smoke", () => {
 
     const runtime = getDefaultSuiteRuntime();
     await resetTestRunChatFixture(runtime.context);
-    const context = await browser.newContext();
+    // Browser-only tests bypass the page fixture that enrolls this owner in
+    // the run's organization. Enroll it, then discard the synthetic cookie so
+    // this test still authenticates through the real password-login flow.
+    const fixtureStorage = await createTestRunBrowserStorageState(runtime.context);
+    const context = await browser.newContext({
+      storageState: { ...fixtureStorage, cookies: [] },
+    });
     const page = await context.newPage();
     const timeline: Array<Record<string, unknown>> = [];
     const cookieLabels = new Map<string, string>();
@@ -230,7 +260,7 @@ test.describe("Chat — end-to-end smoke", () => {
       const firstLink = page.waitForResponse((response) =>
         response.request().method() === "POST"
           && new URL(response.url()).pathname === "/api/v1/context/chat-sessions/link");
-      await page.goto("/chat?project=global-default", { waitUntil: "domcontentloaded" });
+      await page.goto(`/chat?project=${encodeURIComponent(runtime.project)}`, { waitUntil: "domcontentloaded" });
       await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20_000 });
       const composer = page.locator('[data-testid="chat-composer"]');
       await expect(composer).toBeEnabled({ timeout: 15_000 });
@@ -239,10 +269,26 @@ test.describe("Chat — end-to-end smoke", () => {
       const linkedConversation = ((await firstLinkResponse.json()) as {
         data: { id: string; checkpoint_count: number };
       }).data;
+      const persistedTurn = page.waitForResponse((response) =>
+        response.request().method() === "POST"
+          && new URL(response.url()).pathname === `/api/v1/context/conversations/${linkedConversation.id}/chat-turns`);
+      await composer.fill("Preserve this turn across a hard reload");
+      await composer.press("Enter");
+      expect((await persistedTurn).status()).toBe(201);
+      await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible();
+      const readCheckpoint = () => page.evaluate(async ({ conversationId, project }) => {
+        const response = await fetch(`/api/v1/context/conversations/${encodeURIComponent(conversationId)}?project=${encodeURIComponent(project)}`);
+        return { status: response.status, body: await response.json() };
+      }, { conversationId: linkedConversation.id, project: runtime.project }) as Promise<{
+        status: number; body: { data: { checkpoint_count: number } };
+      }>;
+      const initialCheckpoint = await readCheckpoint();
+      expect(initialCheckpoint.status).toBe(200);
+      expect(initialCheckpoint.body.data.checkpoint_count).toBeGreaterThan(0);
       const activeSession = await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"));
       const messageCount = await page.locator('[data-testid="chat-user-message"], [data-testid="chat-assistant-message"]').count();
       expect(activeSession).not.toBeNull();
-      expect(messageCount).toBeGreaterThan(0);
+      expect(messageCount).toBe(2);
       const otherPage = await context.newPage();
       await otherPage.goto("/login", { waitUntil: "domcontentloaded" });
 
@@ -263,18 +309,12 @@ test.describe("Chat — end-to-end smoke", () => {
       expect(otherTabCsrfStatus).toBe(200);
       expect(await otherTabCsrf.headerValue("set-cookie")).toBeNull();
       await expect(composer).toBeEnabled({ timeout: 20_000 });
-      const reloadedCheckpoint = await page.evaluate(async ({ conversationId, project }) => {
-        const response = await fetch(`/api/v1/context/conversations/${encodeURIComponent(conversationId)}?project=${encodeURIComponent(project)}`);
-        return { status: response.status, body: await response.json() };
-      }, { conversationId: linkedConversation.id, project: "global-default" }) as {
-        status: number;
-        body: { data: { checkpoint_count: number } };
-      };
+      const reloadedCheckpoint = await readCheckpoint();
       expect(reloadedCheckpoint.status).toBe(200);
 
       expect(await page.evaluate(() => localStorage.getItem("opencode-chat-active-session"))).toBe(activeSession);
       expect(await page.locator('[data-testid="chat-user-message"], [data-testid="chat-assistant-message"]').count()).toBe(messageCount);
-      expect(reloadedCheckpoint.body.data.checkpoint_count).toBe(linkedConversation.checkpoint_count);
+      expect(reloadedCheckpoint.body.data.checkpoint_count).toBe(initialCheckpoint.body.data.checkpoint_count);
 
       await Promise.all(pendingCaptures);
       const reloadResponses = timeline.filter(({ phase, event }) => phase === "reload" && event === "response");

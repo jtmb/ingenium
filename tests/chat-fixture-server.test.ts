@@ -17,30 +17,33 @@ function listeningPort(server: { address(): string | import("node:net").AddressI
 afterEach(() => vi.unstubAllEnvs());
 
 describe("chat fixture lifecycle", () => {
-  it("validates its port and publishes the actual isolated provider origin", async () => {
+  it("validates its port and publishes the native split model catalog", async () => {
     expect(getFixturePort({ CHAT_FIXTURE_PORT: "45211" })).toBe(45211);
     expect(() => getFixturePort({ CHAT_FIXTURE_PORT: "4999x" })).toThrow();
 
     const server = await startChatFixtureServer(0);
     try {
       const port = listeningPort(server);
-      const response = await fetch(`http://127.0.0.1:${port}/provider`);
-      const body = await response.json() as { all: Array<{ models: Record<string, { api: { url: string } }> }> };
+      const response = await fetch(`http://127.0.0.1:${port}/api/provider`);
+      const body = await response.json() as { data: Array<{ id: string }> };
       expect(response.status).toBe(200);
-      expect(body.all[0]!.models["fixture-model"]!.api.url).toBe(`http://127.0.0.1:${port}`);
+      expect(body.data[0]!.id).toBe("opencode");
+      const models = await (await fetch(`http://127.0.0.1:${port}/api/model`)).json();
+      expect(models.data).toEqual([expect.objectContaining({ modelID: "fixture-model", providerID: "opencode" })]);
+      expect((await fetch(`http://127.0.0.1:${port}/provider`)).status).toBe(404);
     } finally {
       await closeChatFixtureServer(server);
     }
   });
 
-  it("returns the OpenCode global health contract", async () => {
+  it("returns the native OpenCode server identity contract", async () => {
     const server = await startChatFixtureServer(0);
     try {
       const port = listeningPort(server);
-      const response = await fetch(`http://127.0.0.1:${port}/global/health`);
+      const response = await fetch(`http://127.0.0.1:${port}/api/info`);
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toEqual({ healthy: true, version: "1.18.9" });
+      await expect(response.json()).resolves.toEqual({ version: "2.0.11" });
     } finally {
       await closeChatFixtureServer(server);
     }
@@ -50,7 +53,7 @@ describe("chat fixture lifecycle", () => {
     const server = await startChatFixtureServer(0);
     try {
       const port = listeningPort(server);
-      const response = await fetch(`http://127.0.0.1:${port}/session/missing-session/message`);
+      const response = await fetch(`http://127.0.0.1:${port}/api/session/missing-session/message`);
 
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({
@@ -68,15 +71,54 @@ describe("chat fixture lifecycle", () => {
     const server = await startChatFixtureServer(0);
     try {
       const port = listeningPort(server);
-      await fetch(`http://127.0.0.1:${port}/session`, { method: "POST", body: "{}" });
-      expect(await (await fetch(`http://127.0.0.1:${port}/session`)).json()).toHaveLength(1);
+      const first = await (await fetch(`http://127.0.0.1:${port}/api/session`, { method: "POST", body: "{}" })).json();
+      expect((await (await fetch(`http://127.0.0.1:${port}/api/session`)).json()).data).toHaveLength(1);
       expect((await fetch(`http://127.0.0.1:${port}/__fixture/reset`, { method: "POST" })).status).toBe(404);
       expect((await fetch(`http://127.0.0.1:${port}/__fixture/reset`, {
         method: "POST",
         headers: { "x-ingenium-fixture-run-nonce": nonce },
       })).status).toBe(204);
-      expect(await (await fetch(`http://127.0.0.1:${port}/session`)).json()).toEqual([]);
+      expect(await (await fetch(`http://127.0.0.1:${port}/api/session`)).json()).toEqual({ data: [], cursor: {} });
+      const next = await (await fetch(`http://127.0.0.1:${port}/api/session`, { method: "POST", body: "{}" })).json();
+      expect(next.data.id).not.toBe(first.data.id);
     } finally {
+      await closeChatFixtureServer(server);
+    }
+  });
+
+  it("binds sessions to their location and emits native events only after a prompt", async () => {
+    const server = await startChatFixtureServer(0);
+    const base = `http://127.0.0.1:${listeningPort(server)}`;
+    const controller = new AbortController();
+    try {
+      const created = await (await fetch(`${base}/api/session`, {
+        method: "POST", body: JSON.stringify({ location: { directory: "/fixture/owned" }, title: "Native fixture" }),
+      })).json();
+      const session = created.data;
+      expect(session).toMatchObject({ location: { directory: "/fixture/owned" }, title: "Native fixture" });
+      expect((await (await fetch(`${base}/api/session?directory=/other`)).json()).data).toEqual([]);
+      expect((await (await fetch(`${base}/api/session?directory=/fixture/owned`)).json()).data).toEqual([session]);
+      expect((await fetch(`${base}/api/session/${session.id}`, {
+        method: "PATCH", body: JSON.stringify({ title: "Renamed native fixture" }),
+      })).status).toBe(204);
+      expect((await (await fetch(`${base}/api/session/${session.id}`)).json()).data.title).toBe("Renamed native fixture");
+      expect((await (await fetch(`${base}/api/session/${session.id}/message`)).json()).data).toEqual([]);
+      const stream = await fetch(`${base}/api/event`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      expect(decoder.decode((await reader.read()).value)).toBe(": connected\n\n");
+      const admitted = await (await fetch(`${base}/api/session/${session.id}/prompt`, {
+        method: "POST", body: JSON.stringify({ text: "Synthetic native prompt", metadata: { ingeniumVisibleText: "Visible prompt" } }),
+      })).json();
+      expect(admitted.data).toMatchObject({ type: "user", text: "Synthetic native prompt" });
+      const first = decoder.decode((await reader.read()).value);
+      expect(first).toContain('"type":"session.next.step.started"');
+      expect(first).toContain(`"sessionID":"${session.id}"`);
+      const history = await (await fetch(`${base}/api/session/${session.id}/message`)).json();
+      expect(history.data).toEqual([admitted.data]);
+      await reader.cancel();
+    } finally {
+      controller.abort();
       await closeChatFixtureServer(server);
     }
   });
@@ -89,7 +131,7 @@ describe("chat fixture lifecycle", () => {
     const responseReady = new Promise<void>((resolve) => { responseStarted = resolve; });
     let responseFinished!: () => void;
     const responseClosedReady = new Promise<void>((resolve) => { responseFinished = resolve; });
-    const request = get(`http://127.0.0.1:${port}/event?session=fixture-session-1`, (response) => {
+    const request = get(`http://127.0.0.1:${port}/api/event`, (response) => {
       responseStarted();
       response.on("data", () => undefined);
       response.on("close", () => { responseClosed = true; responseFinished(); });

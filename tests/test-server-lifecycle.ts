@@ -381,7 +381,7 @@ export function getServerSpecs(
         CHAT_FIXTURE_PORT: String(context.ports.fixture),
         CHAT_FIXTURE_RUNNER: "1",
       }),
-      readinessUrl: `http://127.0.0.1:${context.ports.fixture}/provider`,
+      readinessUrl: `http://127.0.0.1:${context.ports.fixture}/api/info`,
     },
   ];
 }

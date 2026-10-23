@@ -1124,6 +1124,21 @@ describe("useOpenCodeChat hook — send() integration", () => {
     ]));
   });
 
+  it("reconciles native admission before any assistant or parent-ID event exists", async () => {
+    mockMessages.mockResolvedValueOnce([]).mockResolvedValue([{
+      info: { id: "native-user", sessionID: "session-1", role: "user", time: { created: 1 } },
+      parts: [{ id: "native-text", sessionID: "session-1", messageID: "native-user", type: "text", text: "Question" }],
+    }]);
+    mockPrompt.mockResolvedValue({ accepted: true, messageID: "native-user" });
+    fetchSpy.mockResolvedValue(new Response(new ReadableStream<Uint8Array>()));
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => { await result.current.send([{ type: "text", text: "Question" }]); });
+    expect(result.current.messages.map(({ id, content }) => ({ id, content })))
+      .toEqual([{ id: "native-user", content: "Question" }]);
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("correlates an optimistic user to the server parent ID without duplicating the completed turn", async () => {
     const completed = [
       { info: { id: "server-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ id: "user-part", sessionID: "session-1", messageID: "server-user", type: "text", text: "Question" }] },
