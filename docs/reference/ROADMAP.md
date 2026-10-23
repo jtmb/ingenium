@@ -13,6 +13,11 @@ The archived predecessor is [ROADMAP-2026-07-31-phase-0.md](./archive/ROADMAP-20
 ## Current execution board — restored 23-item master Todo + linked current Todos 24–46 (2026-09-09)
 Board continuation: linked Todo 42 (2026-09-09) records the session-analysis documentation turn and root `AGENTS.md` rebuild; linked Todo 43 (2026-09-09) records exclusive subagent-orchestration ownership, the Plan explore-only task grant, and non-destructive Git read grants; linked Todos 44–45 record documentation upkeep and `ingenium-qa-vision` retirement; linked Todo 46 records the CLI session-context documentation boundary; no row above is altered.
 
+Current scheduling pointer: [ORCH-EFF-01..07 direct-first bounded-team
+supersession](#orch-eff-01-07-supersession-2026-09-15). The appended item is
+the active scheduler overlay; preserved one-agent-per-item and no-cap wording
+below is historical evidence unless an active overlay explicitly says otherwise.
+
 ### Consolidated session summary — 2026-09-09
 
 - **Source/test boundary status (not overall rollout):** **SOURCE/TEST COMPLETE; runtime/deployment/activation gates remain OPEN.** This applies only to the named profile-only governance, memory-contract, MCP-catalog/designation, and documentation-audit boundaries: source tests, validator/gate checks, and typechecks are recorded for those boundaries; no broader rollout or runtime acceptance is inferred.
@@ -20,19 +25,19 @@ Board continuation: linked Todo 42 (2026-09-09) records the session-analysis doc
 - **Still open:** deployment and activation gates, the environment-blocked Playwright browser binary, `SKILL-100` runtime absence after restart, deployment R09/R19, activation T29/T35/T36/R20, visual R22/R21, T41 execution, and final commit R23. The `backgroundSubagents` capability probe is inconclusive: port 3000 redirected to login and only port 3000 responded. MEMORY-100 active-path runtime fresh-session A/B/C acceptance remains open.
 - **Open-roadmap work detection:** A roadmap task or TodoWrite item is open whenever its row, marker, or evidence cell retains an unresolved gate; the explicit open-row list below is authoritative, and open work exists even when a source/test boundary is complete.
 - **Explicit open-row list:** Restored items **1–23** remain enumerated with their row-level gates: item 1 baseline reconciliation; items 2–4 policy, validator, continuation, and activation; items 5–7 recovery/access, verifier, and regression; item 8 focused validator acceptance; items 9–11 compiled/deployment/MCP; items 12–15 loaded-surface, route, memory, and activation; items 16–18 helper, source, and directly affected documentation; and items 19–23 deployment, recovery, fresh-session, visual/containment, and final reconciliation. Current Todos **25–41** retain deterministic admission/resume, activation/runtime, enforcement, active-reference, checkout-retirement, and safe-activation gates. Current Todos **42–46** retain their local boundary evidence but do not close parent activation or broader rollout gates; `RESP-FMT-01` and T-AUX-02 remain open.
-- **Open-roadmap continuation:** Execution resumes synchronously and uninterrupted on the next open dependency-ready item; this is autonomous resumption, and the orchestrator immediately dispatches the next declared phase rather than ending a turn with a status update or waiting for a user reprompt.
+- **Open-roadmap continuation:** A dependency-ready item is handled directly by the active authorized agent when feasible. If useful delegation is necessary, newly eligible work starts without waiting for unrelated team members only when a supported background capability exists; otherwise work proceeds in honest parallel synchronous waves. No async proof is inferred from policy text or a parallel call.
 - **Open-marker terminal guard:** While active `work-started` markers remain, no final completion may be claimed; only the explicitly permitted terminal states or an explicit user `STOP`/`CANCELLED` request can end execution.
-- **Standing instructions:** profile-only tool governance; one documentation audit per finalized docs boundary plus the mechanical doc-config gate; one distinct subagent per dependency-ready item under the explicit user concurrency request; no subagent delegation; preserve the 291 catalog / 289 server-registration boundary.
+- **Standing instructions:** **Retained historical evidence from 2026-09-09; superseded for current topology by 292 catalog entries / 290 server registrations across 32 categories.** Profile-only tool governance; direct-first execution with zero subagents when feasible; when delegation is necessary, a new useful team of 2–6 subagents (3 preferred, 6 active children maximum per parent), with no filler or new singleton and existing-team tails allowed; dependency-ready scheduling; conditional QA/Docs/research and applicable independent, security, visual, deployment, and recovery gates; no subagent delegation; preserve the 291 catalog / 289 server-registration boundary.
 - **Escalation:** only the five permitted conditions; the inconclusive capability probe, internal denials, and pending runtime gates are not user escalation evidence.
 - **Cell rule:** The dated `SOURCE/TEST COMPLETE` overlay is authoritative only for the named source/test evidence; each row's original missing-dependency/gates list and next action remain unchanged, and runtime/activation/model-session/visual/deployment gates are not inferred closed.
 - **Preservation boundary:** No item is deleted or renumbered; the `qa-vision` and `session-id-tui` retirements remain historical. This is a roadmap-only consolidation: no shell, source change, commit, restart, VS Code action, or Docs Workspace mutation.
-- **CLI-DOC-04 current boundary:** The installed-CLI session-context audit is the active documentation continuation; it records valid in-memory PTY-parsed captures, the `CLI_EXPORT_INVALID_JSON` framing failure, non-liveness limits, and the current one-item/one-subagent scheduling decision. It does not close runtime, deployment, review, or model/session gates.
+- **CLI-DOC-04 current boundary:** The installed-CLI session-context audit remains the active documentation continuation; it records valid in-memory PTY-parsed captures, the `CLI_EXPORT_INVALID_JSON` framing failure, and non-liveness limits. Its one-item/one-subagent scheduling decision is historical and superseded by [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15). It does not close runtime, deployment, review, or model/session gates.
 - **CLI-DOC-05 current boundary:** The response-only formatting follow-on is complete as `RESPONSE_STRUCTURE`/readback evidence. It adds no persistent formatter, profile/theme change, restart, or broader rollout completion claim.
 
 #### Current-state consolidation overlay — 2026-09-10
 
 - **Delivered governance and authority (`SOURCE/STATIC`, `SOURCE/TEST`):** Profile-only tool governance is in force in the source boundary: the coordinator tool-execution denial layer was removed, `.opencode/agents/**` is the sole tool authority, and the harness/docs/tests are aligned. Root `opencode.json` entries are model/variant-only; the canonical Plan profile is read-only and Explore-only for delegation, `plan.md` is no longer hidden by `.gitignore`, Scout is retrieval-only, and `AGENTS.md` carries the golden rules plus Correction/Clarification/Evidence safeguards.
-- **Delivered Ponytail and scheduling (`SOURCE/STATIC`, `SOURCE/TEST`, `IN-SESSION`, `RUNTIME OBSERVATION`):** Ponytail is injected canonically by `experimental.chat.system.transform`, profiles require loading it, and the session observed a passing skill call with `PONYTAIL MODE ACTIVE` at full intensity. Allocation is request-scoped with no fixed 6/3 cap, the 20-writer regression and one-agent-per-item policy are recorded, and the reachable runtime observed `backgroundSubagents:false`; the earlier inconclusive probe remains historical.
+- **Delivered Ponytail and scheduling (`SOURCE/STATIC`, `SOURCE/TEST`, `IN-SESSION`, `RUNTIME OBSERVATION`):** Ponytail is injected canonically by `experimental.chat.system.transform`, profiles require loading it, and the session observed a passing skill call with `PONYTAIL MODE ACTIVE` at full intensity. The active documentation policy is direct-first with bounded 2–6-agent teams (3 preferred, 6 active children maximum) only when delegation is useful; the prior no-cap/one-agent allocation and `backgroundSubagents:false` observation remain historical evidence. No live async capability or runtime scheduler acceptance is claimed.
 - **Delivered MCP and Playwright surfaces (`SOURCE/TEST`, `INTEGRATION`, `DEPLOYED`):** Typed launcher/bridge diagnostics, bounded redaction, `Retry-After` handling, the compatibility-only `POST /api/v1/auth/bootstrap-mcp-credential` route, migration 117 receipts, protected `0600`/UID-GID `1105` provisioning at `/run/ingenium-opencode/.ingenium-mcp-credential`, same-path mounting, and `INGENIUM_MCP_CREDENTIAL_PURPOSE=general` precedence are recorded with multiple post-restart `ingenium.status: connected` checks. The server-owned Playwright preset, anchored `@playwright/mcp` resolution, optional description (migration 116), Docker browser path, real navigate/snapshot/close/reconnect/cleanup integration, and the compatibility local-runtime live child lifecycle are complete in the final 2026-09-10 record below.
 - **Delivered memory (`SOURCE/TEST`, `API/BRIDGE LIFECYCLE`, `DASHBOARD`):** Seven `ingenium_memory_*` tools, preference/source tagging, secret rejection, project/workspace/owner isolation, versions/receipts/tombstones/restore suppression, migrations 114–117, and enabled `/chat` controls are recorded. API/bridge lifecycle proof is save `201` → restart → fresh-session recall present → forget → `404` absent; internal `/opencode` model-session recall remains open.
 - **Delivered documentation, review, and operations evidence (`DOC AUDIT`, `REVIEW`, `DEPLOYED`, `VISUAL/CONTAINMENT`):** Documentation audit repairs, the mechanical doc-config gate, Documentation Gates policy, affected README/API/MCP/auth/database/testing updates, security/Ponytail reviews, the resolved Premium `plan.md` hold, compatibility recreation with one image per service, untouched VS Code, strict containment exit `0`, and the 52/52-route HTTP-200 visual sweep with 10 screenshots are recorded in the final append-only block below. The retained non-mail `net::ERR_ABORTED` and `/vscode` wasm-404 observations remain honest findings.
@@ -128,14 +133,14 @@ This board is continued by linked Todo 46 (2026-09-09) below.
 
 - **R08 row reconciliation:** The legacy scheduler-limit details retained in the
   restored item 8 evidence cell are historical evidence only and are superseded
-  by the current no-fixed-ceiling policy in item 2. The current R08 status is
+   by the current direct-first bounded-team policy in [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15). The current R08 status is
   **SOURCE UPDATED; focused validation OPEN; runtime/deployment/activation gates
   remain OPEN**; no obsolete limit is an active scheduling requirement.
 
 | Task/gate | Current stage | Evidence | Missing dependency | Concrete next action / owner |
 |---|---|---|---|---|
 | Restored item 1 — current consolidation / [BASELINE-100](#baseline-100--rollout-preflight-and-territory-manifest) | **CONSOLIDATION COMPLETE.** This 23-row board is authoritative for current stage/next action; the broader rollout remains open and resumable. The historical 14-item note is not a current missing-nine state. This is not `BASELINE-100` or whole-feature completion. | Existing contracts, the latest ledger, and the retained 23-item Todo are linked above. This board is `SOURCE/STATIC` only. | Read-only branch/HEAD, dirty-path, task/Todo, claim, outbox, and unknown-outcome reconciliation; cleanup state is unknown. | `@ingenium-orchestrator`: run one supported read-only baseline reconciliation, retain unknowns, and do not replay mutations. |
-| Restored item 2 — scheduler instruction update / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **CURRENT POLICY CORRECTION RECORDED; no fixed active-agent or writer ceiling.** | The 2026-09-09 CLI context record retains the decision to dispatch one distinct subagent per dependency-ready item with exclusive territory and actual-count reporting. The older prospective scheduler clarification remains historical and does not override this live rule. Prior source/test evidence remains intact. | Runtime-loaded policy and enforcement are not proven; historical phase/count contracts remain preserved below. | `@ingenium-orchestrator`: use the current one-item/one-subagent rule for new dispatches, respect explicit user concurrency, and retain the static/runtime boundary. |
+| Restored item 2 — scheduler instruction update / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **CURRENT POLICY POINTER UPDATED; direct-first bounded-team scheduling.** | The 2026-09-09 CLI context and prior validator records retain the former one-item/no-cap decision as historical source/static evidence. The active rule is [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15): direct execution with zero subagents when feasible; otherwise a useful 2–6-agent team, 3 preferred, with six active children maximum, no filler/new singleton, and existing-team tails allowed. | Runtime-loaded policy and enforcement are not proven; historical phase/count contracts remain preserved below. | `@ingenium-orchestrator`: apply the active direct-first policy, use conditional background scheduling, retain the static/runtime boundary, and reconcile Todo/failure evidence. |
 | Restored item 3 — [OPENCODE-100](#opencode-100--copyable-current-session-id-in-the-opencode-tui-sidebar) sidebar roadmap addition | **Roadmap addition DONE; feature remains `PLANNED`.** | The existing [planned feature section](#planned-opencode-tui-session-id-sidebar-feature-2026-09-05) records the contract and static extension-point context only. | Source integration, focused tests, rebuilt/runtime TUI behavior, actual session proof, and wide/narrow screenshots. | `@ingenium-software-engineer-premium`: inspect the installed-versus-supported TUI extension point first; do not treat the roadmap addition as implementation. |
 | Restored item 4 — `AUTONOMY_REMINDER_V1` / coordination continuation gate / [ORCH-100](#orch-100--scoped-roadmap-dispatch-and-evidence-integrity) | **SOURCE/STATIC focused evidence PASS; no active/live hook, enforcement, or true continuation proof.** The actual-idle-continuation candidate is rejected at design level because master/abort/atomicity gaps remain. | The source hook in `packages/ingenium-extension/session-coordinator.ts` plus two autonomy tests `ses_f888cd094ffeeVnN3H7wLOAAo9`, replay-fix set of five `ses_f8830c740ffeRlyIRJYpdWZoqY`, extension typecheck `ses_f88235fb7ffeGnv22T3zpVkI3I`, and hook QA `ses_f87fe064bffe7E0ptoAvfFu8V2` are retained in the [authorization/evidence record](#current-explicit-development-authorization-and-latest-execution-evidence-2026-09-06). | Full 64-test coordinator integration is unrun/denied latest; existing-parent activation, live enforcement, and restart proof are absent. | `@ingenium-orchestrator`: retain the reminder only; close the master/abort/atomicity admission before considering any continuation design. |
 | Restored item 5 — connection reset plus Core unit timeout / [RECOVERY-100](#recovery-100--planmcp-chat-loss-recovery-and-resumable-handoff)–[RECOVERY-102](#recovery-102--launcher-safe-linkedforked-sessions-and-durable-transcript-sharing) | **UNKNOWN OUTCOME; recovery OPEN.** | Root npm-workspace Vitest timed out at `300000ms` while Core-only: 28 files / 777 observed tests, 776 PASS and 1 FAIL in `agents.test` (`uses explicit profile disable state during disk sync`, expected `Updated`, got `undefined`). Full output: `/home/brajam/.local/share/opencode/tool-output/tool_078aea7e9001k35Cxr6YKiSkkJ`. All other workspaces were not reached; cleanup is unknown and an accidental empty claim was aborted with unknown outcome. A retained note classifies native `ECONNRESET` as retryable for 1.18.29, but the current typed error/endpoint is unknown and this is not `MCP-107` proof. Current recovery/access probes are retained in the final reconciliation note below; they do not establish absence or an external credential fault. | Authorized live read-only session/supervisor access, exact status, and process/claim/outbox/session/Todo reconciliation; the actual current typed error/endpoint; and an executable verifier. | `@ingenium-orchestrator` with the recovery owner: obtain the authorized live read-only interface and exact status first, preserve the first failure, and do not retry or replay until attribution is known. |
@@ -215,7 +220,7 @@ The compatibility launcher previously discarded provisioned runtime identity and
 | **B1 governance — `git --output` deny rules** under `ORCH-100` | **SOURCE/TEST COMPLETE; remediated; runtime/activation gates remain OPEN.** | The orchestrator profile and agent-validation policy retain deny rules for both `git diff`/`git log` `--output` argument placements; this is a source/static governance remediation, not loaded-runtime proof. | Parent activation, profile-loaded behavior, and broader runtime/deployment acceptance. |
 | **B2 memory boundary — dashboard tag sanitization** under `MEMORY-100` | **SOURCE/TEST COMPLETE; remediated; fresh-session/runtime acceptance pending.** | Dashboard explicit-memory context strips both untrusted-memory delimiters from tags before JSON projection while preserving ordinary tags; the focused dashboard regression records that boundary. | Exact deployment, fresh-session A/B/C acceptance, restart replay, visual, and containment gates. |
 
-**Standing instructions (2026-09-09, owner):** Profile-only tool governance (no wrapper denial layer); one documentation audit per finalized docs boundary plus the mechanical doc-config gate in the validation suite; one distinct subagent per open dependency-ready item under explicit user concurrency requests; ChatGPT-like agent memory feature: **feature source/test complete; fresh-session/runtime acceptance pending** (`7 ingenium_memory_*` tools); MCP catalog 291 entries/289 server registrations.
+**Standing instructions (updated 2026-09-15, owner):** Profile-only tool governance (no wrapper denial layer); direct-first execution with zero subagents when feasible; delegation only as a useful 2–6-agent team (3 preferred, 6 active children maximum per parent), with no filler/new singleton and existing-team tails allowed; exactly one QA report only when a declared finalized boundary has a risk or acceptance need; at most one security report only for a predeclared changed security surface; other documentation, research, visual, deployment, and recovery gates remain conditional; ChatGPT-like agent memory feature: **feature source/test complete; fresh-session/runtime acceptance pending** (`7 ingenium_memory_*` tools); current MCP catalog 292 entries/290 server registrations across 32 categories.
 
 **Partner-report reconciliation:** The five caller reports are represented without
 changing the original 23-row shape: MCP/recovery remain `UNKNOWN`; the current scheduler
@@ -456,14 +461,23 @@ protocol above; the placeholder is not a live marker:
 
 ## Operating model
 
-Execution is synchronous and dependency-ordered. For each dependency-ready
-`TodoWrite` or roadmap item, dispatch one distinct subagent instance with an
-exclusive writer territory when writing is required; there is no fixed active-agent
-or writer ceiling. Respect explicit user concurrency, record the actual active and
-writer counts, and never manufacture a Todo, duplicate research, or overlapping
-territory. Independent work still runs in barrier subwaves: finish and verify a
-subwave before starting dependent work. QA, security, visual timing, review limits,
-STOP/CANCELLED handling, and the full master Todo remain in force.
+Execution is direct-first and dependency-ordered. When the active authorized
+agent can complete a scoped item feasibly and efficiently, use zero subagents.
+When delegation is necessary, newly form one useful team of 2–6 subagents,
+preferably 3, with no more than 6 active children per parent; do not manufacture
+roles, add filler, or create a new singleton. An existing team's one-member
+tail may continue. Every delegated item retains an exclusive writer territory,
+complete contract, and durable Todo/failure evidence.
+
+Open-roadmap work uses autonomous resumption: dependency-ready work starts while
+unrelated work continues only when a supported background capability exists;
+otherwise use honest parallel synchronous waves, finish and verify each wave
+before dependent work, and never claim async proof. QA runs exactly one report
+only when a declared finalized boundary has a risk or acceptance need; security
+runs at most one report only for a predeclared changed security surface. Visual
+timing, Docs/research, deployment, recovery, STOP/CANCELLED handling, and the
+restored master Todo plus linked-Todo reconciliation remain conditional and in
+force.
 
 The older phase/count entries and the 2026-09-07 prospective scheduler clarification
 are retained as historical records. They do not override this current scheduling
@@ -2177,6 +2191,10 @@ role envelopes; this policy does not rewrite them or the append-only marker log.
 Evidence RECOVERY-100 overflow disposition (2026-09-05): explicit user authorization abandoned only identity-less overflow key `196a4bf40b3672e0245a6a39fabeddcefb155b56fe264dc3b29b355f6258b1e2` through an adjacent owner-only typed disposition bound to operation ID `e3b31090e32ac32474f150958ecd2c2cedff8a92f3ddcad03b9a9acb108e68fc` and immutable source SHA-256 `b00ae79c982e8e3948e1ee421ef09ac12e2a7b71e83f49ac4381b56a306e0a3c`. The original 482-byte `0600` artifact, inode, mtime, 167-file physical outbox count, and hash were unchanged; raw evidence remains visible while only unresolved admission excludes the exact hash match. Nineteen focused outbox tests, two focused restart-admission cases, and extension typecheck pass. A fresh source-level read-only preflight retained `167` raw records with the one original ambiguity while reporting `166` unresolved records, zero unresolved ambiguity/overflow, and the exact canonical worktree. Deployment, parent restart, and actual TUI/session replay remain intentionally unperformed, so RECOVERY-100 has no completion marker.
 
 Evidence RECOVERY-100/RECOVERY-101 recovery-admission remediation (2026-09-05): the fixed wrapper now normalizes the tracked outer bootstrap to `0644` only after descriptor identity, owner, clean Git HEAD bytes, and non-executable Git-configuration checks; regenerated bootstrap and production-restart executables are descriptor-normalized to `0555`. Live parent identity is read from the kernel `/proc/<pid>/exe` handle with PID/start-tick, descriptor metadata, nonce, and expected executable-hash continuity, so a deleted pathname is not trusted. Legacy bootstrap no longer depends on newly loaded `SessionCoordinator` code: the external production-restart process invokes the incumbent's attested `/proc/<pid>/exe` with `export <session> --pure`, keeps the raw export in memory, verifies the exact running fixed command and project directory, and reduces actions, changed paths, checks/results, task hash, Todo state, status, and `nextWork` to the bounded redacted handoff. It then registers its own authenticated coordination session, claims only `.opencode/protected-runtime-index/tui-recovery/legacy-handoff.json`, writes and rereads that private artifact with content-free claim proof, verifies and completes the claim, and closes the capture session before detached owner enrollment. Any export, identity, binding, claim, artifact, or completion mismatch fails before owner startup or signal. Endpointless parents use `oldPort: null`, and the detached external owner must enroll that exact process/handoff before replacement preparation or retirement. Recovery temporary roots are owner-specific (`/tmp/opencode-<uid>`) to avoid a foreign-owned shared-root denial. Focused source evidence covers the external claim/capture sequence, a legacy coordinator with no enrollment hook, deleted-executable attestation, candidate admission failures, replacement ordering, and extension typecheck. No deployment, parent signal, runtime canary, or actual TUI/session replay occurred; both roadmap tasks remain open and no completion marker is added.
+
+Evidence RECOVERY-100 host-installer source (2026-09-11): No safe host installer existed before this change. The three changed files are `packages/ingenium-extension/scripts/install-host-build.mjs`, `packages/ingenium-extension/install-host-build.test.ts`, and `packages/ingenium-extension/package.json`. The `install:host-build` entry requires an exact expected HEAD and clean source, validates bootstrap and `dist` modes, hashes, and registry behavior, limits adoption to the canonical owner-controlled `~/.local/bin` only, and uses descriptor-pinned candidate/backup state, atomic rename, `fsync`, rollback, and protected provenance. It does not invoke the host command. Thirty-one focused tests and the extension typecheck pass. QA/security review, commit, live installation, and an independent verifier remain pending; this is source evidence only and not acceptance.
+
+Evidence RECOVERY-100 deployment and installer rejection (2026-09-11): Deployment of `b064d8854f05eb371a8edc571aa5fbd42948073b` used image `sha256:4e6bc545bcef7a8cfa74196aee5421546200268711729945d835e4345eb1324d` in container prefix `abc71396c08f`; services, routes, MCP, and scanner were healthy, with rollback target `ingenium-ingenium:rollback-67c40251-b064d885`. The installer was invoked once and rejected before lock or mutation with `HOST_INSTALL_SHARED_WORKTREE_TRUST_CONFLICT` because `/home/brajam/repos` was `0775` and canonical `dist` was `0575`/service-writable; the old relative symlink/inode and hashes were unchanged, with no manifest, backup, transaction, or command invocation. Next work is a private revision-pinned owner-only artifact; ACL weakening is not permitted. This is deployment/rejection evidence only, not an acceptance claim.
 
 #### UI-100 — Shared native Select primitive
 
@@ -6181,7 +6199,8 @@ first activation.
 
 #### MCP-107 — Exact `-32000` connection-closure diagnosis and causal repair
 
-- **Status:** `PLANNED`.
+- **Status:** `OPEN`; source/static and host-build gates **PASS**; compatibility
+  deployment is **UNHEALTHY/INVALIDATED**; `MODEL/SESSION` proof remains open.
 - **Outcome:** The first stderr/exit/startup stage producing the exact MCP
   `-32000: Connection closed` is retained and classified as credential/API/
   project, import/distribution, or stdio/transport failure. The distribution
@@ -6258,6 +6277,32 @@ first activation.
   reproduction, and focused regression; `DEPLOYED-RUNTIME` covers exact artifact
   health and MCP initialize/list; `MODEL/SESSION` is not inferred from either
   class; `VISUAL` is required only if a user-facing route changes.
+- **Current recovery reconciliation (2026-09-15; user-requested Ingenium MCP
+  repair):** Portable config/test source changes are recorded; focused test,
+  QA, security, Node `22.22.2` checksum/install, non-rotating protected-input
+  bootstrap, static validator, and host MCP distribution build are **PASS**.
+  These are `SOURCE/STATIC`, `SOURCE/TEST`, `HOST/BUILD`, and `REVIEW` evidence
+  only; no `MODEL/SESSION` proof is inferred.
+- **Compatibility deployment (`DEPLOYED-RUNTIME`; unhealthy and invalidated):**
+  Container `49b27edbc760...` and image `sha256:9a57173e...` were recorded; API `200`,
+  dashboard `200/307`, and OpenCode `502` were observed. Runtime is
+  unhealthy because installation `state=pending`, `revision=0`; the internal
+  scoped MCP credential is absent; and OpenCode/ttyd were not started. The
+  source snapshot changed during deployment, so current-source deployment proof
+  is invalid.
+- **Owner-claim blocker:** The explicit `ESCALATE_USER` condition is
+  `mutually exclusive installation-owner identity/password choice`. Until the
+  user claim, blocker owner=`user`; after the claim, next executable
+  owner=`@ingenium-software-engineer-premium`. No credential value is recorded.
+- **Resume signatures and nextWork:** Existing roadmap recovery evidence retains
+  the redacted signatures `INTERRUPTED_CHILD_OUTCOME_UNKNOWN` and
+  `COORDINATION_STATUS_TOOL_UNAVAILABLE`; no replay is inferred. After the user
+  claim, `nextWork` is: fence the current worktree
+  `/home/james/repos/ingenium`; rebuild/recreate the canonical Compose project
+  once; wait for health; verify the scoped credential, processes, and routes;
+  issue/provision the external host scoped MCP credential through the supported
+  path; run host `initialize`/`tools-list`; perform parent restart/reconnect only
+  with the required recovery proof; then acceptance/reconciliation.
 
 #### AGENT-100 — Scout retrieval boundary, Ponytail loading, and profile authority
 
@@ -8673,6 +8718,11 @@ owned by their earlier documentation/profile boundaries.
   and runtime broker absence. A restart acknowledgement or source read is not
   loaded-surface proof.
 
+> **Historical/superseded scheduler record (2026-09-15):** The S3 source/static
+> wording below preserves the former one-agent/no-cap evidence. The active
+> documentation policy is [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15);
+> no historical source, test, or runtime record is rewritten.
+
 ### S3 — Scoped dispatch and evidence integrity
 
 - **Source/static status:** current policy correction is one distinct subagent
@@ -8992,6 +9042,10 @@ gate.
   model-session recall remains open: the embedded UI requires manual session
   creation, automation has no input path, and a one-click manual path is
   available.
+> **Historical/superseded concurrency evidence (2026-09-15):** The following
+> retained runtime/source record is not active scheduler guidance; see
+> [ORCH-EFF-01..07](#orch-eff-01-07-supersession-2026-09-15).
+
 - **Concurrency — `SOURCE/TEST` + `RUNTIME OBSERVATION`:** Allocation is
   request-scoped with no fixed 6/3 cap; the 20-writer regression and
   one-agent-per-item policy are recorded. On the reachable runtime,
@@ -9239,3 +9293,1841 @@ notes only; all prior text and evidence remain historical. The documentation
 update itself is limited to this file and is verified by static readback only;
 it performs no source/test rerun, deployment, commit, Docs Workspace mutation,
 or delegation.
+
+## Linked Current Todos 47–56 — ten-request rollout opening (2026-09-10)
+
+This append-only block adds exactly ten linked, open rollout items. It preserves
+every earlier row, marker, evidence record, historical status, and numbering;
+these items are planning and acceptance boundaries, not implementation
+completion. The roadmap read/reconciliation is the first dependency for every
+item. Todo 53 must be complete before any browser test or visual gate, and Todo
+49 must not archive other `ingenium` Context conversations until the current
+redacted conversation has been imported and retrieved successfully. Documentation,
+MCP, visual, review, deployment, full-acceptance, and final-reconciliation gates
+remain open. Deployment is `N/A` for this roadmap-only append.
+
+### Linked Current Todo 47 — Chat Context control placement
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Place the requested Context control(s) on the intended Chat
+  surface, with an explicit relationship to the existing Context management
+  surface, project/workspace binding, and truthful loading, success, empty, and
+  failure states.
+- **OUT_OF_SCOPE:** Memory storage or archive implementation, provider changes,
+  unrelated Chat redesign, transcript export, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; the existing Context/memory contract and
+  authorized workspace/project resolution; Todo 53 before browser or visual
+  checks.
+- **Acceptance:** The control is present at the agreed `/chat` placement,
+  visibly identifies its scope, is keyboard/accessibility usable, preserves the
+  Context management boundary unless an explicit product decision changes it,
+  and has focused request/state evidence with no false success or disclosure.
+- **NextWork:** Implement and verify only the agreed placement and its direct
+  state contract; keep this item open until its applicable runtime and visual
+  gates are separately proven.
+
+### Linked Current Todo 48 — Bulk repository sync and command resources
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Bulk repository synchronization for the complete declared
+  repository resource set, including command resources, with explicit dry-run,
+  apply, manifest, project/worktree binding, and no-drift behavior.
+- **OUT_OF_SCOPE:** Unrelated Git workflow redesign, source feature changes,
+  credentials, destructive cleanup, Docs Workspace writes, and broad index
+  regeneration.
+- **Dependencies:** Roadmap first; the existing Git-authoritative
+  worktree-to-resource-sync path; Todo 52 consumes this sync boundary.
+- **Acceptance:** Dry-run validates and reports the complete resource set
+  without mutation; apply updates only the exact bound project/worktree; command
+  resources are included; a repeated apply reports no drift; manifests and
+  hashes are stable; and foreign, missing, malformed, or stale inputs fail
+  closed without deleting newer resources.
+- **NextWork:** Prove dry-run, apply, repeat/no-drift, command-resource, and
+  project-isolation cases before treating repository sync as available to later
+  items.
+
+### Linked Current Todo 49 — Redacted external Context import, retrieval, and archive gate
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Import the exact current external Context conversation through a
+  redacted, project-bound representation; keep per-project automatic upload
+  default-off; prove retrieval of that imported conversation; and archive all
+  other `ingenium` Context conversations only after that import-and-retrieval
+  proof.
+- **OUT_OF_SCOPE:** Raw transcript or secret retention, cross-project sharing,
+  silent auto-upload enablement, archive-before-proof, irreversible deletion,
+  and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; current external conversation import and
+  retrieval are hard prerequisites for the archive step. No other
+  `ingenium` Context conversation may be archived before both proofs are
+  recorded.
+- **Acceptance:** The imported record has exact redacted provenance and stable
+  project/session identity; per-project auto-upload is persisted as off until
+  explicit opt-in; a fresh authorized retrieval returns the expected redacted
+  record; an exact inventory and receipt prove that only the other `ingenium`
+  Context conversations were archived afterward; foreign-project records and
+  raw secrets/transcript content are not disclosed; and the archive remains
+  reversible or otherwise auditable under its authorized safety contract.
+- **NextWork:** Complete and retain the redacted import plus retrieval evidence
+  first, then perform the narrowly scoped archive reconciliation; do not replay
+  an uncertain import or archive mutation.
+
+### Linked Current Todo 50 — External-session observation and synthesis provenance
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Record external-session observations and synthesis with
+  project/session/source provenance, redacted lineage, stable dedupe keys, and
+  separation between user-behavior observations and operational/session data.
+- **OUT_OF_SCOPE:** Transcript stuffing, raw prompt/reasoning retention,
+  cross-project observation, inferred behavior from implementation notes, and
+  unrelated learning redesign.
+- **Dependencies:** Roadmap first; the existing self-learning observation and
+  synthesis pipeline; only authorized, redacted external-session events may be
+  consumed.
+- **Acceptance:** Each accepted observation and synthesis result identifies its
+  redacted source/session/project provenance and lineage; repeated delivery or
+  restart produces one effective observation/synthesis; unknown, hostile, or
+  operational-only data is not mislabeled as user behavior; foreign scope is
+  rejected; and the retained evidence contains no secret, prompt, or transcript
+  body.
+- **NextWork:** Prove one external-session observation-to-synthesis path and its
+  replay/dedupe behavior, retaining the first failure and provenance class.
+
+### Linked Current Todo 51 — External-session usage ingestion and `/usage` proof
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Ingest provider-reported usage from authorized external sessions
+  into the existing project-scoped usage ledger and prove the corresponding
+  `/usage` representation, freshness, provenance, and unknown-value behavior.
+- **OUT_OF_SCOPE:** Billing enforcement, inferred cost, provider credential
+  handling, fabricated counters, unrelated usage redesign, and Docs Workspace
+  mutation.
+- **Dependencies:** Roadmap first; the existing usage ledger and external
+  session attestation; Todo 50's provenance/dedupe boundary where the same
+  session event stream is consumed.
+- **Acceptance:** A bounded external-session fixture contributes only its
+  reported request/token/cache/cost fields; duplicate events do not double
+  count; `/usage` shows project-scoped totals with source and UTC freshness;
+  unknown/not-reported remains distinct from zero; no prompt, secret, or
+  credential is exposed; and the proof includes the API/ledger result and the
+  rendered `/usage` result.
+- **NextWork:** Run the smallest authorized ingestion and `/usage` proof after
+  provenance is available; keep this item open for deployment and visual gates.
+
+### Linked Current Todo 52 — Project-local plugin descriptions across repository sync
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Permit editing project-local plugin descriptions and preserve
+  those descriptions through repository synchronization, projection, reload,
+  and readback without changing global plugin authority.
+- **OUT_OF_SCOPE:** Global plugin redesign, unrelated agent/profile changes,
+  credential or prompt disclosure, broad repository cleanup, and Docs
+  Workspace mutation.
+- **Dependencies:** Roadmap first; Todo 48's bulk-sync dry-run/apply/no-drift
+  contract must be available before preservation is accepted.
+- **Acceptance:** An authorized project-local description edit persists with
+  the correct project identity; dry-run shows the expected change; apply and a
+  second sync retain the exact description without drift or truncation; another
+  project cannot read or overwrite it; and reload/readback proves sync did not
+  silently replace the editable local value with a global default.
+- **NextWork:** Add the smallest project-local edit/sync/readback proof after
+  Todo 48, preserving unrelated repository resources and current authority.
+
+### Linked Current Todo 53 — Persistent managed Playwright configuration for `ingenium`
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Persistently configure the existing managed Playwright child
+  MCP for project `ingenium`, with exact project/workspace binding, discovery,
+  least-privilege permissions, cleanup ownership, and restart retention.
+- **OUT_OF_SCOPE:** Ad-hoc or unmanaged browser processes, arbitrary browser
+  profiles, real credentials, broad Playwright upgrades, source changes outside
+  the managed preset, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first. This Todo is a hard prerequisite for every
+  browser test, changed-route visual gate, passive visual sweep, or browser
+  cleanup claim in this rollout; no such gate may run before it is proven.
+- **Acceptance:** The managed preset is persistently configured for exactly
+  `ingenium`, is rediscoverable after cleanup and a full parent/relevant service
+  restart, retains configuration while removing only run-owned browser state,
+  enforces declared tool permissions and isolation, leaves no process/port/
+  profile/credential residue, and records the exact configuration and
+  post-restart discovery proof without secrets.
+- **NextWork:** Complete configuration and persistence/restart proof first;
+  only then admit the browser and visual gates.
+
+### Linked Current Todo 54 — Protected dashboard and vault credentials
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Protect dashboard and vault credential handling, including
+  owner/mode/transport boundaries, redacted projections, and safe fixture
+  acceptance for the affected rollout surfaces.
+- **OUT_OF_SCOPE:** Credential rotation without authorization, passphrase
+  recovery, vault initialization/reset, secret-value display, provider changes,
+  and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; existing protected credential and vault
+  safety contracts; no real credential is required for the default proof.
+- **Acceptance:** Credential values are accepted only through protected
+  owner-controlled paths, never appear in responses, logs, prompts, screenshots,
+  manifests, or roadmap evidence, and are removed only through an authorized
+  identity-checked cleanup; vault state is preserved; no destructive vault reset
+  or unseal is performed; and denied/expired/foreign access fails closed with
+  content-free evidence.
+- **NextWork:** Verify the protected fixture and redaction boundary without
+  requesting or recording a secret; leave any destructive vault operation
+  outside this rollout open and untouched.
+
+### Linked Current Todo 55 — Next-steps template governance and update
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Govern and update the approved next-steps template so future
+  rollout records carry stable Todo identity, scope, acceptance, dependencies,
+  STOP/CANCELLED handling, verification, escalation, changed paths, evidence
+  class, owner, and executable `nextWork` without inventing follow-up work.
+- **OUT_OF_SCOPE:** Implementation, deployment, credentials, runtime/session
+  mutation, broad template/index regeneration, automatic task dispatch, and
+  Docs Workspace mutation.
+- **Dependencies:** Roadmap first; consume the settled boundaries from Todos
+  47–54 before finalizing wording, and remain open until the full acceptance
+  contract is reconciled.
+- **Acceptance:** The governed template contains every required contract field,
+  preserves stable IDs and prior evidence classes, distinguishes source,
+  deployed, model/session, visual, and review evidence, records blockers versus
+  follow-ups without auto-dispatch, and passes a readback against each of the
+  ten linked items with no false completion state.
+- **NextWork:** Apply the minimum authorized template/governance update after
+  the preceding boundaries are clear; do not create a separate plan or reopen
+  completed historical records.
+
+### Linked Current Todo 56 — Full acceptance and final reconciliation
+
+- **Status:** `OPEN`.
+- **IN_SCOPE:** Final docs, MCP, visual, bounded review, exact deployment, and
+  final TodoWrite/roadmap/file reconciliation for Todos 47–55, with evidence
+  classes kept distinct and all required safety boundaries rechecked.
+- **OUT_OF_SCOPE:** New product scope, unrelated cleanup, secret collection,
+  destructive vault reset or Context archive before Todo 49 proof, broad docs
+  regeneration, and Docs Workspace mutation.
+- **Dependencies:** Roadmap first; Todos 47–55; Todo 53 before any browser or
+  visual gate; Todo 49's redacted import-and-retrieval proof before its archive
+  step. Documentation, MCP, visual, review, deployment, full acceptance, and
+  final reconciliation remain open until this item passes.
+- **Acceptance:** Directly affected canonical docs have verified links,
+  commands, policy wording, and scope; MCP initialize/tools-list/state proof is
+  current; changed UI receives `1440x900` and `390x844` evidence plus the
+  passive sweep; the declared QA/security/review reports are bounded and
+  consumed once; the current merged source is rebuilt, deployed, health-checked,
+  and provenance-matched; cleanup is identity-checked; and every Todo, marker,
+  evidence class, changed path, and `nextWork` is reconciled before any overall
+  `PASS`.
+- **NextWork:** Keep all acceptance and reconciliation gates open, then run the
+  declared final checks in dependency order; this roadmap append is not
+  implementation completion and records no final `PASS`.
+
+This ten-item opening changes no source, configuration, template, credential,
+runtime, deployment, Context state, or Docs Workspace page. No work-started or
+work-complete marker is added by this append; all ten linked Todos remain
+`OPEN`.
+
+## Documentation consolidation evidence — 2026-09-11
+
+- **Scope:** Existing repository Markdown, repository-facing command/reference
+  prose, canonical model/count references, `.env.example`, package/service
+  READMEs, and this append-only roadmap record. No Docs Workspace mutation,
+  source/test/configuration implementation, runtime/session mutation, deployment,
+  commit, or push was performed.
+- **Static source inventory:** `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`
+  currently contains 292 catalog names across 32 categories: 290
+  `ingenium_` entries plus `auto_observe_now` and `synthesize_observations`.
+  The current server-source registration pattern finds 290 registrations. This
+  is source/static evidence only, not live MCP `tools/list` or deployment proof.
+- **Count discrepancy:** retained historical evidence and
+  `packages/ingenium-extension/mcp-transport-parity.test.ts` still contain the
+  older 291/289 expectation. No test or source change was authorized here; the
+  stale test expectation is recorded as **FOLLOW_UP**, not silently treated as a
+  passing parity gate.
+- **Todo 47:** canonical Chat docs now identify the action-row button and its
+  separation from Context management; runtime, accessibility, and visual gates
+  remain `OPEN`.
+- **Todo 48:** repository-sync docs now include direct-child command Markdown in
+  the v2 manifest and default projection; dry-run/apply/repeat/isolation proof
+  remains `OPEN`.
+- **Todo 49:** redacted automatic Context upload, default-off setting, protected
+  handoff, and archive-before-proof policy are documented; import, fresh
+  retrieval, and archive evidence remain `OPEN`.
+- **Todo 50:** external observation/extraction provenance, redaction, binding,
+  and dedupe behavior are documented; live observation-to-synthesis proof remains
+  `OPEN`.
+- **Todo 51:** external usage ingestion and metadata-only `/usage` behavior are
+  documented; API/ledger and rendered deployed `/usage` proof remains `OPEN`.
+- **Todo 52:** project-local plugin descriptions, validation, and migration are
+  documented; sync/reload/cross-project readback remains `OPEN`.
+- **Todo 53:** retained parent evidence records the prerequisite as **PASS**:
+  preset `48e53676-9e73-4869-bc8a-fbcfb40e05dc` is retained and enabled; 30
+  tools were discovered, 10 were enabled, and managed navigate/snapshot/close
+  succeeded after source-repair commit `97040b69`. Later full-merged restart
+  retention remains in **GATE-3**, so the Todo remains `OPEN`.
+- **Todo 54:** retained parent evidence records dashboard credentials/login and
+  `.env` mode-`0600` checks as **PASS**. The vault is initialized and sealed with
+  zero accessible items, but the existing passphrase is missing from protected
+  sources, so the vault canary is blocked. No reset or mutation was performed;
+  no secret value is recorded, and the remaining gate stays `OPEN`.
+- **Todo 55:** retained parent source validation for the exact-file Docs grant is
+  **PASS** at commit `d5135699`. Full-parent-restart activation and the template
+  edit remain pending, so the Todo remains `OPEN`.
+- **Todo 56:** no full-acceptance or final-reconciliation work was performed;
+  the Todo remains `OPEN`.
+- **Writer verification/evidence boundary:** this correction used only exact
+  block readback and `git diff --check`; no new runtime, browser, security,
+  credential, template, source, or test operation was performed here. The
+  retained parent evidence above is not new evidence from this docs correction.
+- **Mechanical audit result:** `bash tests/test-doc-config-audit.sh` was run once
+  and failed because its stale negative-pattern fixture treats the now-correct
+  `290` registration count as drift. The test was not edited under this
+  documentation-only boundary; retain the failure as the same **FOLLOW_UP**
+  count/parity drift rather than claiming an audit pass.
+
+## Linked Current Todo 57 — exact-session export, authorized branch push, and protected completion notification
+
+- **Status:** `OPEN`; this item is a finalization requirement only and makes no
+  completion claim now.
+- **Owner:** `@ingenium-orchestrator` for the later authorized finalization;
+  this roadmap append is owned by `@ingenium-docs`.
+- **Dependencies and exact order:** Todos 47–56 and all implementation,
+  deployment, documentation, review, visual, Context archive, credential, and
+  reconciliation gates must be complete before any step below. Then, in order:
+  1. Export this exact user chat/session through the redacted protected
+     exact-session export path.
+  2. Verify the export is complete and that secrets are redacted.
+  3. Inspect `git status`, `git diff`, and `git log`; freeze the intended
+     remaining-path manifest and preserve unrelated concurrent changes.
+  4. Commit only the intended remaining paths after that inspection; do not
+     stage or commit an unrelated concurrent path.
+  5. Push the current authorized feature branch without force or amend. Push
+     authorization is explicit in the current user request.
+  6. Only after the push succeeds, send exactly one completion notification to
+     the user-provided protected Discord webhook, retaining only a content-free
+     endpoint identity plus HTTP status and receipt metadata.
+- **IN_SCOPE:** The ordered final export, completeness/redaction verification,
+  exact-path commit, authorized non-force/non-amend feature-branch push, and
+  one protected-webhook completion notification described above.
+- **OUT_OF_SCOPE:** Performing export, commit, push, or webhook work in this
+  roadmap append; source/template/runtime changes; unrelated cleanup; a second
+  notification; raw transcript or secret retention; and Docs Workspace
+  mutation.
+- **Acceptance:** The exact export and its completeness/secret-redaction checks
+  pass; the inspected manifest contains only intended remaining paths; the
+  commit contains only those paths; the current authorized feature branch is
+  pushed without force or amend; and exactly one post-push notification is sent
+  and reconciled with only content-free endpoint identity, HTTP status, and
+  receipt metadata. The raw webhook URL/secret must never appear in the
+  roadmap, Git, logs, Context, screenshots, or output. Unknown export, push, or
+  webhook outcomes must be reconciled before any retry. No false completion is
+  permitted.
+- **STOP_CONDITION:** `PASS` only after every dependency, ordered action,
+  redaction/completeness check, exact-path commit, push, one-notification, and
+  final reconciliation gate passes. Explicit user `STOP` or `CANCELLED` is
+  terminal; unresolved unknown outcomes remain open.
+- **Escalation:** Only (1) unavailable required protected external
+  credential/access after its configured path was attempted, (2) an
+  unauthorized destructive or irreversible action, (3) a mutually exclusive
+  product decision, (4) genuine ambiguity, or (5) a bounded diagnosis that
+  cannot reproduce the root cause. A failed check or unreconciled unknown
+  outcome alone is not escalation.
+- **Deployment owner:** N/A.
+- **Rollback/safety:** Do not mutate anything during this append. Preserve the
+  exact export and first failure, unrelated concurrent paths, and the
+  no-force/no-amend boundary; use protected inputs only; never copy, print,
+  persist, or transmit the raw webhook URL/secret beyond the protected send
+  path; and never blindly retry an unknown export, push, or webhook result.
+- **Design admission:** `executor=Docs`; `action=ROADMAP append`;
+  `probe=current numbering`; `verifier=readback/diff`;
+  `failure=no overwrite/no secret`; `rollback=you for the exact appended
+  block`; `evidence=path/ID/checks`.
+- **Verification plan:** Read the complete tail and numbering; edit by append
+  only; read back the appended block; inspect the roadmap diff with
+  `git diff --check`; do not run a documentation audit. The later finalization
+  owner must separately retain content-free export, commit, push, and webhook
+  receipts in the protected evidence path.
+
+## Current Todo 48/55/57 evidence reconciliation — 2026-09-11
+
+- **Source gap:** The missing repository-sync credential recovery path was
+  established as a source gap. Commit `c6dbcd59` (`fix(auth): provision
+  repository sync credential`) adds `ingenium-coordination-reset
+  reset-repository-sync` with the isolated `repository-sync` audience and
+  exact two-scope grant. This is source evidence only; it is not deployment or
+  live-grant evidence.
+- **QA:** The one-time QA result is **PASS**: 53 QA tests passed. The result
+  remains bounded review evidence and does not prove a live sync.
+- **Security:** The one-time security result is **PASS**. Retain the
+  non-blocking atomic-replacement **FOLLOW_UP**; it does not block the current
+  source/documentation result and is not silently converted to a pass.
+- **Todo 48:** remains `OPEN`. Deployment, live credential grant, and the
+  bulk-sync dry-run/apply/repeated-apply no-drift evidence remain pending;
+  command-resource, manifest, binding, isolation, and no-drift acceptance are
+  not claimed here.
+- **Todo 55:** remains `OPEN`. Its source validation remains retained, while
+  the full-parent-restart activation and template gate remain pending; the
+  concurrent template and test diffs were not edited by this documentation
+  update.
+- **Todo 57:** remains `OPEN`. No exact-session export, commit, push, or
+  protected completion notification was performed. No raw webhook URL or
+  secret is present in this roadmap, the documentation change, or the output.
+- **Boundary:** This reconciliation and the directly affected OpenCode usage
+  section are repository documentation only. No deployment, live grant, bulk
+  sync, source/test/template change, Docs Workspace mutation, or final audit
+  was performed.
+
+### Todo 48 append-only live-grant and first-dry-run evidence — 2026-09-11
+
+- **Owner/provider permissions:** After ownership and non-symlink checks, the
+  owner-provider modes were repaired: `.opencode` `0770` → `0750`, and the
+  descriptor `0670` → `0600`.
+- **Deployed grant and credential:** The deployed reset grant succeeded once.
+  The repository-sync credential is exactly mode `0600` and authenticated.
+- **First dry-run:** It did not apply. The size checks stopped it before
+  mutation: `ROADMAP` was `805,779` characters / `806,581` bytes, exceeding
+  `524,288`, and total docs were `1,873,484` bytes, exceeding `1,536,000`.
+- **Agent scan:** `0`; modes `0674` were not the scanner-required `0644`.
+- **Generation and manifest:** Generation remains `18`. The retained local
+  manifest SHA-256 is
+  `24c48a1cad59deac2a3617daedf2f7e0d559247a8da803e0d6b8e518f556a042`.
+- **Replay and remaining work:** No apply and no unknown replay occurred.
+  Source and metadata remediations remain in progress; no applied or no-drift
+  claim is made. Todo 48 remains `OPEN`, and Todo 57 remains `OPEN`.
+- **Historical-marker reconciliation:** The earlier pending live-grant wording
+  is retained as historical evidence; this later marker records the one
+  successful deployed grant. Dry-run/apply/repeated-apply no-drift acceptance
+  remains `OPEN`.
+
+## Todo 48 successful projection reconciliation — 2026-09-11
+
+- **Running/source and authentication:** The running source is `ec23d755`, and
+  the repository-sync credential is authenticated. The host distribution was
+  rebuilt and adopted with
+  `services/ingenium-server/build/distribution-FTOBGd/adoption.json`.
+- **Projection sequence:** The initial dry-run succeeded at generation `18`.
+  Exactly one apply was acknowledged at generation `19`; no apply replay
+  occurred. The final dry-run succeeded at generation `19`.
+- **Final dry-run result:** `84` resources were unchanged, with zero creates,
+  updates, archives, deletes, conflicts, or errors. The reported counts were
+  `docs=55`, `skills=8`, `agents=11`, `plugins=5`, and `commands=5`.
+- **Restart state:** The apply reported `restartRequired=true`. The final
+  dry-run reported `restartRequired=false`, but that dry-run result did not
+  clear the apply's restart requirement or prove that a restart completed.
+- **Hash evidence and root cause:** Initial, apply, and final server hashes
+  were captured for their respective phases and are phase-dependent; no
+  stable-server-hash claim is made. The stable local hash is
+  `6af4179d5ae4c4af71e1d3254280b7e0e3cad7ccd3a2aa8a85fc232ea698af92`.
+  The root cause is in core: server-hash computation included phase/control
+  inputs rather than only the projected docs and resources. Core remediation is
+  active; hash fix, rebuilt deployment, and the required restart remain
+  pending.
+- **Source-backed preservation:** The apply receipt reports zero deleted
+  resources and only two previously managed project skills archived. An
+  independent before/after inventory of unmanaged resources was unavailable;
+  no broader unmanaged-resource preservation claim is made.
+- **Current status:** Todo 48 remains `OPEN` pending the core hash fix,
+  deployment, and restart. The earlier failed size-check dry-run remains
+  historical evidence, as does its no-apply/no-drift wording; this later marker
+  records the successful projection without closing the restart or stable-hash
+  gates.
+
+## Todo 48/52/ACL finalized pre-deployment evidence — 2026-09-11
+
+This append-only overlay supersedes earlier Todo 48/52 hash and projection
+notes for current pre-deployment interpretation only. It preserves every prior
+row and evidence record and does not claim final deployment, audit, or overall
+rollout completion.
+
+- **Canonical hash source:** The deployed canonical-hash source is recorded at
+  `0f446778`. This source-provenance fact does not claim that the later ACL
+  repair at `c3e5b747` is deployed.
+- **Todo 52 canary:** Dashboard plugin canary
+  `plugin_1c5e2004-e5d9-4cc3-8265-19df5a8c9cae` passed description-only
+  save/reload/full-sync persistence. The exact original description was
+  restored, and the resulting inventory hash is
+  `0697d7e7b6c23911a6234ec1cb6392a8b5ede16334be9284f68fc6a41ad533a4`.
+- **Todo 48 projection:** Exactly one apply advanced generation `28 → 29`.
+  The final full-sync result was zero drift, with the same server hash
+  `255d517aae6157c7b2d1c158be0ee6c607186999695a7761c98aae47e5d12692`.
+  The recurring pre-deployment inventory reported `agents=0`; the final
+  deployed projection must still prove `11` agents.
+- **ACL boundary:** The established root cause was the broad ACL mask in
+  `docker-entrypoint.sh`. The durable source repair is `c3e5b747`. Focused QA
+  is **PASS**. Security recorded a **BLOCKING** ordering finding; the targeted
+  regression is now closed, but the security reviewer was not rerun, so no
+  security PASS is claimed. The inode/rename concern remains **FOLLOW_UP**.
+- **Current Todo state:** Todo 48 remains `OPEN` pending deployment and the
+  final 11-agent projection. The existing roadmap's qualified subcheck status
+  pattern permits Todo 52's bounded canary to be marked **EVIDENCE COMPLETE**;
+  this is not full Todo 52, deployment, or overall-rollout completion.
+- **Boundary:** Deployment claims not returned here, source/tests/template and
+  other documentation are out of scope, and no final audit, completion action,
+  raw credential, or webhook value is recorded.
+- **Deployment owner:** N/A.
+- **Design admission:** `executor=Docs`; `action=ROADMAP append`;
+  `probe=current Todo 48/52/ACL sections`; `verifier=readback/diff`;
+  `failure=no overwrite/no completion`; `evidence=path/IDs/hashes/checks`.
+- **Verification:** Read/edit/readback and `git diff --check` only; no
+  deployment, source/test, template, audit, or follow-up action was performed.
+
+## Todo 48/GATE final deployed ACL evidence before pre-restart repository projection — 2026-09-11
+
+This append-only marker records the final deployed ACL evidence before the
+pre-restart repository projection. It does not claim that projection,
+parent restart, final audit, or overall rollout completion has occurred.
+
+- **Deployed identity:** Revision `cd42c12b70a142167e4f0e687436def6bc8bf071`;
+  image `sha256:7457543d7ecd3ee8d801dee1a3f003f696bc3e29706b7b719ea781970a8cecc2`;
+  container
+  `0874a4df31618048bb533f2c3d1d00956ccba3893f42c37384d0ded274c79d89`;
+  rollback image `ingenium-ingenium:rollback-0f446778-cd42c12b`.
+- **Deployment health:** The checked routes returned `200/401/200`, and all
+  nine services were healthy.
+- **Profile and directory ACLs:** All 12 profiles are mode `0644` with no
+  extended ACL. All six directories have no default ACL and provide service
+  traversal/write; service identities have read access and no profile write
+  access. The broker is unmapped.
+- **Protected paths:** `2,323` protected paths, including `299` directories
+  at modes `0600/0700`, were denied to all ten service identities.
+- **Repeatability:** The repeat normalizer check was metadata- and
+  content-idempotent. The local scanner reported exactly `11`.
+- **Playwright dependency:** The retained preset has `30` tools, but child
+  discovery and browser execution are not yet final.
+- **Causal closure:** The prior deployment blockers addressed by this ACL
+  repair and deployed health evidence are causally closed; no ACL or deployed
+  health blocker is carried forward from that boundary.
+- **Current dependency/state:** Todo 48 remains `OPEN`, pending the final
+  generation projection and parent restart. No projection, restart, final
+  audit, or completion claim is made here.
+- **Deployment owner:** `N/A`.
+- **Design admission:** `executor=Docs`; `action=exact roadmap append`;
+  `probe=current deployed ACL evidence`; `verifier=readback/diff`;
+  `failure=no secret/overwrite`; `evidence=content-free deployment IDs,
+  ACL counts, route/service checks, and dependency state`.
+- **Verification:** Read the current tail, append only, read back this block,
+  and run the roadmap diff check; no source, test, template, deployment,
+  projection, restart, final-audit, credential, or webhook action was
+  performed by this documentation update.
+
+## Todo 48 final pre-restart repository projection — 2026-09-11
+
+This append-only marker closes Todo 48's repository-projection evidence
+checklist only. It preserves the original row and does not close the
+separately required parent replacement/restart or any parent/final gate.
+
+- **Runtime and authentication:** The exact runtime was `cd42c12b`; repository-
+  sync authentication passed.
+- **Projection sequence:** The initial dry-run expected generation `50` and
+  returned generation `50`. Exactly one apply was acknowledged at `50 → 51`,
+  with no replay. The final dry-run returned generation `51`.
+- **Restart boundary:** The apply reported `restartRequired=false`; this does
+  not cancel the separately required parent replacement/restart.
+- **Hash evidence:** The initial, apply, and final server hashes were each
+  `35917ee7a3bc6fc7dfd5b56015809428211a67ed562fe9df4dc37ed0d8771b1b`. The
+  input identity was
+  `81c723820eaaf8e56d73acaefdd37362689375b569be208f0e8f7bcfe6ab8557`, and
+  the final local manifest hash was
+  `587ba7332e36e23d2936fd47c5d2b2068248cf807d4200f12e8fa209b6f3e375`.
+- **Final manifest:** `55` docs, `8` skills, `11` agents, `5` plugins, and
+  `5` commands (`84` total) were unchanged; creates, updates, archives,
+  deletes, renames, conflicts, and errors were all `0`.
+- **Safety and binding:** The broker was excluded, all `12` profiles were
+  safe, and the projection tracked diff was unchanged.
+- **Todo state:** Todo 48 evidence is **COMPLETE** for this pre-restart
+  projection only. Parent replacement/restart, Todos 49–51, the vault,
+  QA/audit, and Todo 57 export/push/webhook work remain `OPEN`; no overall or
+  final completion is claimed.
+- **Boundary:** This documentation append performed no restart, projection
+  mutation, final audit, credential action, export, push, or webhook action;
+  no secret or webhook value is recorded.
+- **Deployment owner:** `N/A`.
+- **Design admission:** `executor=Docs`; `action=exact roadmap append`;
+  `probe=current Todo 48 evidence checklist`; `verifier=readback/diff`;
+  `failure=no overwrite/no secret`; `evidence=content-free runtime,
+  generation, inventory, identity, and hash values`.
+- **Verification:** Current-section read, append-only edit, appended-block
+  readback, and the roadmap `git diff --check` are the only checks for this
+  documentation record.
+
+### Current recovery checkpoint — 2026-09-11
+
+- **Checkpoint/deployment:** Commit `01c44c6c64c1f4f4edc28215c3d8c0599f64d9a8`,
+  image `sha256:af3961c338b7e078b75d1b700ddb3638355438bb0b88125c3603bed2465eca33`,
+  container prefix `788cc4433191`, and rollback tag
+  `ingenium-ingenium:rollback-11dcbf37-01c44c6c`. Nine services/routes were
+  healthy.
+- **Live binding:** Project UUID `b4c1feae-1bf3-4c69-a171-c6dea5a96d92`,
+  workspace `shared-memory-ingenium`, canonical worktree
+  `/home/brajam/repos/ingenium`, and storage hash
+  `7f974be496b11344a6cf803cf224260dd16117841c32f8633ba3943fd7bea31d`.
+- **Recovery state:** Failure signature
+  `CURRENT_PARENT_ROLE_UNATTESTED`; validator invocation count `0`; candidate
+  metadata `UNKNOWN`; protected access succeeded.
+- **Owner/nextWork:** `@ingenium-orchestrator` / recovery-contract owner;
+  `nextWork=source/config diagnostic`.
+- **Open boundary:** No parent admission or restart is marked complete. Recovery
+  remains open; prior history and stable Todo markers are unchanged, and this
+  record makes no overall completion claim.
+- **Pre-wave reproducible source diagnosis (`SOURCE ONLY`):** `chat.message`
+  knew the role, but publication omitted it; recovery preflight did not consume
+  the current-parent record; the handoff retained Todo counts only; and
+  successor MCP canaries were absent. This reproduces
+  `CURRENT_PARENT_ROLE_UNATTESTED`.
+- **Premium implementation wave:** One Premium wave changed exactly these 11
+  extension paths: `packages/ingenium-extension/current-parent-recovery.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/mcp-client.test.ts`,
+  `packages/ingenium-extension/mcp-client.ts`,
+  `packages/ingenium-extension/replacement-first-restart.ts`,
+  `packages/ingenium-extension/recovery-handoff.test.ts`,
+  `packages/ingenium-extension/scripts/production-restart.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`,
+  `packages/ingenium-extension/session-coordinator.test.ts`,
+  `packages/ingenium-extension/session-coordinator.ts`, and
+  `packages/ingenium-extension/tui-recovery.ts`.
+- **Source remediation:** The wave records role-bound publication with
+  corroborating current-parent preflight, stable typed Todo/original-session
+  replay, exact handoff/transaction acknowledgement, and successor MCP
+  `initialize`, `tools/list`, and exact project binding.
+- **Source checks:** 138 focused tests passed; 59 narrowed wrapper tests passed;
+  extension typecheck passed; and `git diff --check` passed. This is source
+  evidence only: QA, security, deployment, and recovery acceptance remain
+  pending. No deployed/runtime PASS or completion claim is added; prior entries
+  and stable IDs remain unchanged.
+- **Latest deployed evidence:** Revision `6afe6e47542da3fef627a4f2b6e8a1b29ff02f76`,
+  image `sha256:410b491e7326eaa9df0a3468db7256f4921a113cbc4de4e28a423d896e89c27d`,
+  container prefix `9148e3bc04a2`, and rollback tag
+  `ingenium-ingenium:rollback-01c44c6c-6afe6e47`. Routes, MCP, artifact,
+  ACL, and scanner evidence are healthy/passing.
+- **Latest recovery preflight (nonmutating):** Digest/hash
+  `9fb1eda1213d150d9666cc850b1612f59ed7333240e9346997e334a5b339de7c`;
+  `admissible=false`; source/clean footprint present; binding `stale/live=null`;
+  parent, current-parent, session, and enrollment absent or ambiguous; handoff
+  stale and count-only; outbox count `193` with `1` ambiguous record. Wrapper
+  evidence is absent for OCI/API/supervisor/replacement/reconnect/rollback/
+  fencing. Exact failures are `binding`, `nonce_enrollment`, `outbox`,
+  `parent_identity`, and `recovery_handoff`. No restart, signal, or admission
+  artifact exists.
+- **Owner/nextWork:** `@ingenium-orchestrator` / recovery-contract owner;
+  `nextWork=source/config diagnostic`. Deployment owner: `N/A`.
+- **Open boundary:** Recovery remains **OPEN**. Deployment evidence does not
+  prove recovery, parent admission, restart, reconnect, rollback, or fencing;
+  prior history and stable Todo markers remain unchanged.
+- **Second recovery-source boundary (`SOURCE ONLY`):** A source wave changed
+  exactly these five extension paths: `packages/ingenium-extension/scripts/recovery-bootstrap.js`,
+  `packages/ingenium-extension/scripts/production-restart.ts`,
+  `packages/ingenium-extension/session-coordinator.ts`,
+  `packages/ingenium-extension/session-coordinator.test.ts`, and new
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`. Recovery now
+  resolves the configured authenticated MCP binding and independently
+  corroborates it with API preflight/project detail and OCI image/container
+  evidence; legacy process/session/active-role capture fails closed and emits
+  only typed operational references, with explicit nonce provenance. Outbox
+  disposition acceptance requires exact schema-v2 record key/hash/count/
+  operation matching and persisted authorization matching; the independent
+  systemd recovery-owner status contract remains non-authorizing and checks
+  exact job, invocation, process, lease, fence, binding, source, nonce, and
+  health evidence.
+- **Source checks:** 200 focused tests passed; extension typecheck passed; and
+  `git diff --check` passed. This remains source-only: QA, security review,
+  commit, deploy, live preflight, and restart are pending; no live acceptance
+  or completion claim is made.
+- **Latest deployed evidence:** Revision
+  `e98208da556d67eefe96c45a74c325b18c5e211c`, image
+  `sha256:580ffcd0e2194312ad0aa09920c6daa48875811f344f504965291bdf040b18ec`,
+  container prefix `e4d91b40c2cd`, and rollback tag
+  `ingenium-ingenium:rollback-6afe6e47-e98208da`. Nine services/routes were
+  healthy and authenticated preflight passed.
+- **Packaged acceptance:** Packaged MCP `initialize`/`tools/list` returned 42
+  tools with the expected project binding; all 16 packaged recovery modules
+  matched source; ACL/protected-state/scanner checks passed 11.
+- **Review and boundary:** QA is **PASS**. Security has two **FOLLOW_UP**
+  findings: potentially stale role during agent switch and lease expiry during
+  attestation. Child discovery and parent activation/recovery remain unproven;
+  neither finding nor this evidence authorizes restart.
+- **Live preparation attempt (nonmutating; 2026-09-11):** Failure
+  `RECOVERY_PREPARATION_LIVE_PROBE_UNAVAILABLE`; the first denied probe was
+  `/proc/1259022/status`. The candidate PID/listener was not live-attested;
+  `tui-recovery/` was empty; the typed handoff and recovery owner were absent;
+  outbox key prefix/operation/count `11617` was ambiguous; and the
+  authorization-provenance directory was absent. No disposition was made and
+  the original record was untouched. Supported preparation actions were absent
+  from the callable registry. Owner and `nextWork` expose the deny-default
+  recovery command path.
+- **Recovery-prepare harness source boundary (`SOURCE ONLY`):** The root cause
+  was an exact Recovery grant that allowed only fixed `production-restart` and
+  exposed no preparation registry. The seven changed non-roadmap files add only
+  the literal `ingenium-build deployment recovery-prepare`; wildcard deny
+  remains in force, with no arbitrary arguments, paths, shell, `/proc`, or
+  systemd grants. Preparation is internal and passive, reserves the fence,
+  sets `authorizesRestart=false`, reconciles rollback/unknown outcomes, and
+  leaves `production-restart` unchanged.
+- **Changed files:** `.opencode/agents/execution/ingenium-recovery-engineer.md`,
+  `packages/ingenium-extension/agent-validation.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`,
+  `packages/ingenium-extension/scripts/managed-command-wrapper.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, and
+  `tests/test-agent-validation.sh`.
+- **Harness checks:** The combined result was `174/175` before the
+  adoption-test race correction; the focused post-correction regression was
+  `1/1`. Extension typecheck passed, the full agent-validation shell check
+  passed, and `git diff --check` passed. No `175/175` claim is made.
+- **Pending boundary:** QA, security review, commit, deploy, profile activation,
+  and live preparation remain pending. Deployment owner: `N/A`; no live
+  recovery/restart or completion claim is added.
+- **Final outbox disposition race remediation (`SOURCE ONLY`):** QA found a
+  **BLOCKING** race because final confirmation ignored `confirmed.disposition`
+  and `confirmed.ambiguity`. The same Premium writer changed only
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js` and
+  `packages/ingenium-extension/recovery-pre-admission.test.ts` for this fix.
+  The final gate now rejects a changed plan, invalid summaries, remaining
+  ambiguity, or accepted disposition drift, and rolls back owned preparation
+  artifacts while preserving the original record and authorization bytes.
+- **Named regression:**
+  `rejects final outbox drift and rolls back owned preparation` passed `2` with
+  `31 skipped`. QA and security were not rerun.
+- **Nonblocking follow-ups:** Security `FOLLOW_UP` mutation-lock and profile
+  wording items, plus prior stale-role, lease-expiry, and argv items, remain
+  nonblocking. No deployment, restart, or broader recovery acceptance is
+  claimed.
+- **67c deployment boundary:** Commit `67c402511aef7f1c36e475d65d8826e1818a9608`,
+  image `sha256:4370d15b8d5023063c44094c08cedb223d5002f664e17bd346f0e254003f397c`,
+  container prefix `81f0a1dc8291`, and rollback
+  `ingenium-ingenium:rollback-e98208da-67c40251` were recorded with healthy
+  services, routes, MCP, binding, scanner, and trust checks. The packaged
+  registry recognizes the literal `recovery-prepare`, rejects eight malformed
+  forms, and recorded zero live executions. This is deployment/provenance
+  evidence only; no recovery acceptance claim is made.
+- **Finding (`BLOCKING`):** `HOST_RECOVERY_WRAPPER_STALE` — host path
+  `/home/brajam/.local/bin/ingenium-build`, hash prefix `3e557883`, has
+  `recovery-prepare` unregistered while `production-restart` is registered.
+  The denied repair made no backup or change; no live preparation or restart
+  occurred. Owner/nextWork: locate a supported atomic installer.
+- **Host-installer QA remediation (2026-09-11; source/test only):** QA found a
+  **BLOCKING** rollback defect: the existing host symlink to the canonical
+  distribution was captured after distribution replacement, so rollback
+  restored the new behavior. **Remediated** in
+  `packages/ingenium-extension/scripts/install-host-build.mjs`,
+  `packages/ingenium-extension/scripts/build-distributions.mjs`, and
+  `packages/ingenium-extension/install-host-build.test.ts`: the host entry is
+  captured pre-build with a same-directory inode backup; the distribution
+  transaction/lock remains held until host commit; rollback restores prior
+  distributions/import hashes/modes and the original host metadata, target,
+  and hash with `fsync`/readback. Named regression
+  `restores_prebuild_canonical_dist_behavior_after_host_adoption_failure`
+  passed `1` with `31 skipped`. QA/security were not rerun. Security
+  `FOLLOW_UP`s for distribution crash durability and compiler provenance remain
+  nonblocking; no live install/deploy/recovery claim is added.
+- **Manual parent restart/interruption recovery (2026-09-11):** The user
+  manually restarted the parent. TodoWrite was interrupted and then successfully
+  reinitialized; no prior Todo replay is proven. The retained manifest records
+  full Git HEAD `b064d8854f05eb371a8edc571aa5fbd42948073b` and nine dirty paths:
+  eight tracked — `docs/reference/ROADMAP.md`,
+  `packages/ingenium-extension/install-host-build.test.ts`,
+  `packages/ingenium-extension/managed-command-wrapper.test.ts`,
+  `packages/ingenium-extension/scripts/build-distributions.mjs`,
+  `packages/ingenium-extension/scripts/install-host-build.mjs`,
+  `packages/ingenium-extension/scripts/managed-command-wrapper.ts`,
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, and
+  `packages/ingenium-extension/scripts/recovery-bootstrap.ts` — plus untracked
+  `packages/ingenium-extension/recovery-private-stage.test.ts`. Nothing was
+  staged.
+- **Interruption/status boundary:** Interrupted child
+  `ses_f6d952a78ffewviE473j7B1Oo0` remains **UNKNOWN**; cancellation is not
+  completion. The current parent is responsive, but exact
+  session/incarnation/epoch/fence/claim/nonce/handoff/outbox/supervisor state
+  is **UNKNOWN**. The Recovery profile status path lacked `coordination-status`;
+  `Scout` is the authorized owner/nextWork for status retrieval. No edits,
+  replay, or restart were performed by this documentation update.
+- **Coordination-status recovery result (2026-09-11; read-only):** Recovery and
+  Scout independently lacked `ingenium_coordination_status`; Scout made zero
+  linked handoff reads. The current parent/session/claims/outbox state and child
+  `ses_f6d952a78ffewviE473j7B1Oo0` remain uncorroborated; no mutation occurred.
+  Stable internal failure: `COORDINATION_STATUS_TOOL_UNAVAILABLE`. Attempted
+  paths, in order: Recovery fixed preflight, then Scout status tool. New
+  evidence shows the nine dirty paths exactly match the cancelled source-only
+  assignment; no live mutation was authorized. Owner/nextWork:
+  `@ingenium-software-engineer-premium` (source-adoption writer) to inspect and
+  adopt the existing diff without replay while external recovery state stays
+  frozen. Deployment owner: `N/A`.
+- **Fresh Premium source-adoption boundary (2026-09-11; SOURCE ONLY):** The
+  interrupted child `ses_f6d952a78ffewviE473j7B1Oo0` remains **UNKNOWN**;
+  fresh Premium adopted every hunk in the eight tracked paths recorded above
+  plus new `packages/ingenium-extension/recovery-private-stage.test.ts`, with
+  no replay or reset. The source now covers owner-only immutable release data,
+  a regular sanitized launcher, a private manifest, and shared `dist` treated
+  only as data; committed shim stdin verification; and outer/generated
+  owner-only Git-archive staging. Shared ACLs were not mutated.
+- **Finalized source checks and boundary (2026-09-11):** Installer/stage
+  checks passed `56`; narrowed wrapper checks passed `61` with `52` skipped;
+  pre-admission checks passed `33`; and the strengthened-closure check passed
+  `1` with `38` skipped. Extension typecheck and `git diff --check` passed.
+  QA, security, commit, deploy, live install, and recovery remain pending;
+  no runtime acceptance or completion claim is added.
+- **f9c deployment boundary (2026-09-11; deployment evidence only):** Full
+  revision `f9c2d3b72d95583d0b71c616b064c2f69fede226`, image
+  `sha256:6b485618cda872d504d35dae194f4a583af3b951b1fcfa6b1e57bc1ae8548fa6`,
+  container prefix `ef7205bc93ee`, healthy routes/MCP/scanner, and rollback tag
+  `ingenium-ingenium:rollback-b064d885-f9c2d3b7` were recorded. No acceptance
+  claim is added.
+- **Installer rejection and causal remediation (2026-09-11):** One installer
+  invocation failed with `Unsafe target symlink resolution` before lock,
+  manifest, release, or backup; the prior npm relative symlink inode, target,
+  and hash were unchanged. In
+  `packages/ingenium-extension/scripts/install-host-build.mjs` and
+  `packages/ingenium-extension/install-host-build.test.ts`, the prior final
+  symlink is treated as opaque owned metadata, never resolved or executed, and
+  the rename backup restores the exact inode/target. The named regression
+  `replaces an opaque relative npm symlink and restores its exact inode after
+  post-adoption failure` passed `1` with `38 skipped`. QA/security were not
+  rerun; commit, deploy, and live retry remain pending.
+- **6772154b deployment boundary (2026-09-11; deployment evidence only):** Full
+  revision `6772154b65517dca68bf85f5e0b80d237924d1f1`, image
+  `sha256:4ac33370ebf51b0b4b4a37097f85522f8e0d594e4bf4195472375098d5be7afc`,
+  container prefix `6380c47f8947`, rollback tag
+  `ingenium-ingenium:rollback-f9c2d3b7-6772154b`, and passing runtime, MCP,
+  binding, scanner, and ACL checks were recorded. No release-closure claim is
+  added.
+- **Host-install rejection and causal source remediation (2026-09-11):** One
+  install failed with `Canonical source input failed trust validation: writable`
+  at `.dockerignore`, before host mutation, release, backup, or lock. Failed
+  receipt path:
+  `/home/brajam/.local/state/ingenium-build-install-c4acd96c-c5d6-4e79-9469-eb925a548ada.json`;
+  receipt hash
+  `d4a418329ace2d3c9387b4338b1a8fcfc95509f0e8e17ee8efc94497a5ca2287`.
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js` and
+  `packages/ingenium-extension/install-host-build.test.ts` now allow writable
+  shared tracked metadata only for archive comparison while retaining
+  ownership, no-follow, inode/nlink, stable-readback, byte-equality, and Git
+  blob checks. The named regression
+  `constructs the archive release closure from writable tracked metadata and rejects archive tree mismatch`
+  passed `1` with `39 skipped`. Commit, deploy, and install remain pending.
+
+## Append-only T57 ordering amendment and linked Current Todos 58–61 — 2026-09-11
+
+This block appends to Todo 57 and does not rewrite its earlier text or evidence.
+
+- **Todo 57 ordering amendment:** Only after all existing gates and Todos 58–61
+  pass, perform in order: (1) the redacted exact chat/session export and its
+  completeness/redaction check; (2) commit the intended evidence; (3) make the
+  authorized non-force/non-amend push; and (4) send exactly one protected
+  webhook using an ephemeral/protected credential path. Never include or record
+  the endpoint or token.
+- **Todo 58 — instructional UI/application walkthrough:** `OPEN`; produce the
+  final instructional walkthrough GIF and concise usage instructions. This is a
+  final product deliverable required before release closure.
+- **Todo 59 — final Ponytail simplicity/YAGNI review:** `OPEN`; review the final
+  product for unnecessary complexity and perform only in-scope `BLOCKING`
+  remediation. No broad refactor or follow-up work is admitted by this item.
+- **Todo 60 — final documentation audit:** `OPEN`; run exactly one final audit
+  after the canonical documentation and Todo 58 walkthrough are final. The
+  audit is a release gate, not permission for broad documentation regeneration.
+- **Todo 61 — generated/secret/recovery/export/visual artifact ignore audit:**
+  `OPEN`; audit `.gitignore` coverage for generated, secret, recovery, export,
+  and visual/GIF artifacts, applying only concrete leak remediation. No secret
+  value or artifact payload is recorded.
+
+## Linked Current Todo 62 — evidence-derived skill maintenance before final release closure — 2026-09-11
+
+- **Status:** `OPEN`; this is a linked finalization gate, and this documentation
+  append performs no skill implementation or research.
+- **Order/dependencies:** After product, recovery, and acceptance are final, the
+  Todo 58 visual walkthrough, Todo 59 Ponytail review, and Todo 61 `.gitignore`
+  audit must be final. Todo 62 then precedes Todo 60's final documentation
+  audit and Todo 57's redacted export, intended-evidence commit, authorized
+  non-force/non-amend push, and exactly one protected webhook.
+- **IN_SCOPE:** Deeply analyze this exact chat and retained task/run/evidence
+  artifacts; identify recurring application-development workflows or failure
+  patterns; reuse or update existing canonical skill categories first; create a
+  new skill only for a durable gap; add complete canonical frontmatter/meta
+  tags, category/index/cross-references, concise actionable instructions, and
+  safe redacted examples; run skill-maintenance validation and exactly one
+  documentation audit after the final skill output.
+- **OUT_OF_SCOPE for this append:** Skill implementation/research now, other
+  docs/files, Docs Workspace mutation, and any webhook, passphrase, credential,
+  or transcript secret/value.
+- **Acceptance:** The future T62 output is canonical, non-speculative, and
+  actionable with no secret material; this roadmap amendment is accepted by
+  concise append, readback, and scoped diff check only.
+
+## Append-only recovery deployment/install success and linked Todo 63 — 2026-09-11
+
+- **Exact deployment/install evidence:** Revision
+  `544c6c2a0033eb3d122a0d4cf7f6a8e6ffafeb35`, container prefix `1c4df53b3bc2`,
+  image `sha256:080f6886b9bce386bfc3a29a2c294b63ef03ae985e5b1f8732e88591c779df76`,
+  and rollback tag `ingenium-ingenium:rollback-6772154b-544c6c2a` were
+  deployed successfully. Runtime, routes, MCP `42`, binding, isolation,
+  entrypoint, ACL, and scanner checks passed.
+- **Installer evidence:** One installer invocation exited `0`; the host
+  launcher is regular, owner-only mode `0500`, and the immutable release path
+  is
+  `/home/brajam/.local/share/ingenium/host-build/releases/544c6c2a0033eb3d122a0d4cf7f6a8e6ffafeb35`.
+  Receipt
+  `/home/brajam/.local/state/ingenium-build-install-56af7221-b7e2-4b5e-99d6-71b698e05ff1.json`
+  has status `installed` and hash
+  `15aeef7013b597046ec6e00861116902d784bd8997e588c64ac4ad900de00b3d`.
+  The prior relative symlink was preserved as an exact backup. No
+  `recovery-prepare` or restart was performed.
+- **Todo 63 — plugin/OpenCode checker planning:** `COMPLETE` for planning only.
+  Premium drafted a nonintrusive offline/read-only plugin source-repository
+  checker and Docker OpenCode supported/latest checker, with check and update
+  paths separated. Proposed command names are `ingenium-check-plugins` and
+  `node scripts/check-opencode-release.mjs`; safe defaults are read-only,
+  offline, non-mutating, and credential-free. No implementation was authorized
+  or performed; implementation requires separate admission.
+- **Ordering preservation:** Todo 62 remains before Todo 60's final
+  documentation audit and Todo 57's redacted export, intended-evidence commit,
+  authorized push, and protected webhook. No secret value is recorded.
+
+## RECOVERY-44/45 append-only cancellation and reconciliation — 2026-09-11
+
+- **RECOVERY-44 — cancelled-child signature:** The cancelled child signature is
+  preserved as the first cancelled/unknown outcome; no replay, reset, discard,
+  or replacement identity is inferred.
+- **RECOVERY-45 — reconciliation:** Full revision
+  `f10acc87dd0e6534b1323a3b9f9bb9091401621c` deployment completed and was
+  healthy on container prefix `0705bd9eba6d`, image
+  `sha256:c90d9aa0bc894257bb3f4338c6eee6cd69e3c9b4fa62e96bd6aab09fc092fd87`.
+  The host installer did not reach the lock/mutation boundary. The verified
+  `544c` launcher, release, installed receipt, and original symlink backup
+  remain exact; preserve all of them, with final-source install later. The
+  externally-origin-unknown unstaged `opencode.json` change from Premium variant
+  `medium` to `max` must be preserved and reconciled, not reset or staged as
+  ours.
+
+## Linked Current Todo 64 — final visual/product audit boundary — 2026-09-11
+
+- **Status:** `OPEN`; the accepted scope has seven `BLOCKING` items: theme/status
+  contrast; keyboard-operable Chat image expansion; per-service textual health;
+  initial loading/error announcements; task-chart dark contrast or equivalent;
+  a working oversized-mail plain-text fallback; and the final GIF/instructions.
+- **Adequate existing surface:** Logo, icon, wordmark, and navigation imagery
+  are adequate and are not blockers.
+- **Territories and evidence:** W1–W5 are exclusive source territories, each
+  retaining its named focused test; W9 is the dependent GIF territory. Premium
+  owns deployment. After implementation is final, retain exactly one combined
+  QA report, one changed-route visual gate, and one passive full-site sweep after
+  final deployment.
+- **Findings:** F08–F12 remain `FOLLOW_UP` only; they are not new blockers.
+
+## Linked Current Todo 65 — final MCP/recovery/acceptance audit boundary — 2026-09-11
+
+- **Status:** `OPEN`; no general MCP expansion is justified. Blocking candidates
+  are F1 passive terminal-tool operational-memory event collection in the
+  `session-coordinator` files; F2 shell exit/result normalization across recovery
+  projections; F3 final-export large-input, completeness, and passphrase
+  redaction; and F4 current-role A/B/C acceptance harness, which depends on F1
+  and F2.
+- **Writer/order boundary:** F1–F3 are independent exclusive Premium writer
+  territories; F4 waits for F1 and F2. Predeclare changed security surfaces:
+  F1 privacy/identity/replay; F2 handoff integrity; F3 redaction/path/bounds;
+  F4 runtime selection/protected-process containment. The finalized T65
+  boundary receives exactly one QA report and at most one security report.
+- **FOLLOW_UP:** F5's fixed read-only recovery-status command and skill guidance
+  remain `FOLLOW_UP` only; Todo 62 handles skill guidance after the repaired
+  paths are complete.
+
+| Boundary | Authorized Premium writer and exact action | Safe probe / prerequisites | Preserved verifier and fail-closed behavior | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|
+| F1 | Exclusive Premium; add passive terminal-tool operational-memory event collection in `session-coordinator` files. | Synthetic event fixture with redaction, identity, and replay readback; admit the F1 privacy/identity/replay surface first. | Existing coordinator/operational-memory tests plus a focused F1 regression; reject unknown, foreign, unredacted, or replay-ambiguous events without mutation. | Premium | Source, deployed/runtime, and session evidence; visual only if a route changes. |
+| F2 | Exclusive Premium; normalize shell exit/result handling across recovery projections. | Synthetic exit/result matrix with no process mutation; preserve the recovery projection contract first. | Existing recovery/handoff verifiers plus a focused F2 regression; incomplete or ambiguous exit/result state cannot appear successful or replayable. | Premium | Source, deployed/runtime, and session evidence. |
+| F3 | Exclusive Premium; enforce final-export large-input, completeness, and passphrase-redaction handling. | Bounded synthetic large-input/redaction fixture with no real secret; admit the F3 redaction/path/bounds surface first. | Existing export size/completeness/redaction verifiers plus a focused F3 regression; overflow, truncation, or uncertain redaction fails closed. | Premium | Source, deployed/export, and session evidence; no visual claim. |
+| F4 | Dependent Premium; add the current-role A/B/C acceptance harness after F1/F2. | Synthetic three-role fixture with protected-process containment; F1/F2 and the F4 runtime-selection surface must pass first. | Existing A/B/C harness and containment verifiers; role, binding, replay, or process ambiguity fails closed. | Premium | Source, deployed/runtime, visual where applicable, and session evidence. |
+
+- **Current documentation boundary:** No T64/T65 implementation, QA, security
+  review, deployment, live acceptance, or Docs Workspace mutation was performed;
+  no raw secret or endpoint is recorded. Acceptance for this append is tail
+  readback plus the scoped roadmap diff check.
+
+## WAVE-2 finalized source evidence and T65 remediation boundary — 2026-09-11
+
+| Territory | Exact changed source | Focused result and source effect |
+|---|---|---|
+| W1 | `services/ingenium-dashboard/src/app/globals.css` | Theme/status contrast and reduced-motion coverage; `1` passed, `160` combinations, `12` selectors. |
+| W2 | `services/ingenium-dashboard/src/app/chat/components/ChatMessages.tsx` | Keyboard-operable Chat image expansion and accessibility coverage; `1` passed. |
+| W3 | `services/ingenium-dashboard/src/app/page.tsx`, `services/ingenium-dashboard/src/app/components/HealthStrip.tsx` | Per-service textual health coverage; `14` passed. |
+| W4 | `services/ingenium-dashboard/src/app/tasks/components/BoardView.tsx`, `services/ingenium-dashboard/src/app/tasks/components/TaskDetail.tsx` | Task-chart dark-contrast/equivalent coverage; `15` passed. |
+| W5 | `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` | Oversized-mail plain-text fallback coverage; `9` passed. |
+
+- **Focused tests:** W1 used the theme-contrast/reduced-motion test; W2 the
+  ChatMessages accessibility test; W3 `home-health`; W4 `tasks-visual`; and W5
+  `mail-media`. The external `opencode.json` was untouched by WAVE-2.
+- **T65 F1 source/test evidence:** Passive terminal-event collection is
+  implemented in the session coordinator, with focused event, dedupe, session,
+  and redaction tests passing; no test count is inferred here.
+- **T65 F2 source/test evidence:** Recovery zero/nonzero/unknown outcome
+  normalization is implemented, with its focused tests passing; no count is
+  inferred here.
+- **T65 F3 source/test evidence:** Export large-input, frozen-cutoff,
+  completeness, passphrase redaction, and URL redaction are implemented;
+  `11` export tests plus `8` codec/import tests passed.
+- **T65 F4:** The current-role A/B/C harness is active; review waits for its
+  dependent boundary. No actual export, live recovery, or deployment was
+  performed for this T65 evidence.
+- **T64 carry-forward:** The existing logo, icon, and wordmark remain retained;
+  T64 findings F08–F12 remain `FOLLOW_UP` only. No overall `PASS` is claimed.
+- **Boundary:** This append performed no documentation audit, Docs Workspace
+  mutation, or secret operation. Acceptance is readback plus the scoped roadmap
+  diff check.
+
+## T64/T65 finalized source QA and security evidence — 2026-09-11
+
+- **Source QA:** Dashboard typecheck `PASS`; lint `PASS` with `0` errors and
+  `326` warnings; `5` files / `40` tests. Extension typecheck `PASS`; `4` files
+  / `185` tests. Server context-upload tests: `306`; export tests: `11`;
+  coordination tests: `58`. QA reported no findings.
+- **Intake correction:** The initial QA/security intake prompts omitted the
+  embedded `STOP`/escalation rules, so no checks or review occurred under that
+  intake. The corrected intake was used and its reports were consumed.
+- **Security report:** Two `BLOCKING` findings were recorded: the session
+  coordinator ignored `metadata.code` and top-level exit fields, and recovery
+  omitted unknown operations. One bounded dedupe-cache reset/eviction item is
+  `FOLLOW_UP`; export, harness, and mail surfaces were otherwise acceptable.
+- **Causal remediation:** All supported top-level/metadata exits are reconciled;
+  contradictions remain `unknown`, and `24` focused coordinator tests passed.
+  Unknown recovery operations are preserved as bounded typed
+  `review_changes`/`nextWork`; `4` focused recovery regressions passed. QA and
+  security were not rerun.
+- **Remaining boundary:** T64 and T65 remain `OPEN` for commit, deployment,
+  live, visual, and session gates. The external `opencode.json` remains excluded
+  from these source territories and must not be claimed as ours. No overall
+  `PASS` or secret value is recorded.
+- **Acceptance:** This documentation append is accepted by readback and the
+  scoped roadmap diff check only; no documentation audit or Docs Workspace
+  mutation was performed.
+
+## CONFIG-1/2 append-only configuration authority reconciliation — 2026-09-11
+
+- **CONFIG-1 — external config boundary:** The externally-origin-unknown
+  `opencode.json` Premium variant change `medium` → `max` is preserved. A
+  read-only audit verified that `openai/gpt-6-astra` supports `max`: Plan uses
+  it and the validator permits it. Adopt this as a separate quality-aligned
+  configuration boundary under the user's Astra/deep-quality direction, with
+  no permission, scope, or tool widening.
+- **CONFIG-2 — companion authority references:** The required companion paths
+  are `tests/test-agent-validation.sh` for the exact expectation,
+  `.opencode/models.md`, `docs/configure/agents.md`, and `AGENTS.md` for roster
+  truth. The Premium profile remains unchanged because the root map owns the
+  runtime variant.
+
+| Boundary | Authorized writer and exact action | Smallest probe / prerequisite | Verifier and fail behavior | Rollback/adoption owner | Expected evidence |
+|---|---|---|---|---|---|
+| CONFIG-1 | Premium; reconcile the exact `opencode.json` variant and `tests/test-agent-validation.sh` expectation only. | Read-only exact diff/authority probe; exclusive paths and the existing working parent are preserved. | `bash tests/test-agent-validation.sh`; failure is non-mutating and keeps the current parent. | Premium | Source validation, then later full-parent replacement, effective mapping/profile/grants, and model/session proof. |
+| CONFIG-2 | Docs; reconcile `.opencode/models.md`, `docs/configure/agents.md`, and `AGENTS.md` canonical references without changing the Premium profile. | Exact authority/reference diff; CONFIG-1's exclusive path and existing parent remain prerequisites. | The same validator plus canonical-reference readback; failure is non-mutating and keeps the current parent. | Premium | Source/reference validation, later full-parent replacement, effective mapping/profile/grants, and model/session proof. |
+
+- **Restart/secret boundary:** No child-only restart is permitted; no secret value
+  is recorded. This append performs no config implementation or source mutation.
+- **Acceptance:** Readback plus the scoped roadmap diff check only.
+
+## CONFIG-2 finalized source/config evidence — 2026-09-11
+
+- **Implementation paths:** `opencode.json`,
+  `tests/test-agent-validation.sh`, `.opencode/models.md`,
+  `docs/configure/agents.md`, and `AGENTS.md`.
+- **Roster result:** `ingenium-software-engineer-premium` retains model
+  `openai/gpt-6-astra` and changes only variant `medium` → `max`; role,
+  permissions, and every other agent entry remain unchanged.
+- **Verification evidence:** One QA scoped-diff review `PASS`; one execution of
+  `bash tests/test-agent-validation.sh` `PASS`; and one read-only documentation
+  audit `PASS` with no findings.
+- **Activation boundary:** This is source/config validation only. Activation
+  remains pending the exact committed deployment/host install and a
+  replacement-first full parent restart, followed by effective
+  mapping/profile/grant and model/session proof. The current parent is preserved
+  until those gates pass.
+- **Safety/acceptance:** No secret value is recorded. This append is accepted by
+  readback and the scoped roadmap diff check only.
+
+## DEPLOY-1 exact c132 deployment/install and recovery-preflight boundary — 2026-09-11
+
+- **Deployment/install identity:** Full revision
+  `c132ee462cecc84bdcb2cbef83e62ac4fb3f730f`, container prefix
+  `f440ac26a6c1`, image
+  `sha256:031b1f54bd3fed5faa13c2e763ef04bd014c3ef4c1629b3652bd7da307220900`,
+  and rollback tag `ingenium-ingenium:rollback-f10acc87-c132ee46`. Routes,
+  nine services, MCP `42`, binding, isolation, ACL, and scanner checks passed.
+  Installed receipt:
+  `/home/brajam/.local/state/ingenium-build-install-331c96e5-a883-4fc6-ad00-c457b070d113.json`.
+  The launcher and release are exact `c132`, and the worktree was clean.
+- **Mandatory read-only recovery preflight:** `REJECT_AND_REPLAN`. Source,
+  deployment, and API were independently healthy, but tracked clean
+  `opencode.json` mode `0674` was rejected as writable. No enrollment, nonce,
+  current-parent record, supervisor, handoff, fence, or replay existed; state
+  was stale from September 3. The outbox held `193` records with one unresolved
+  ambiguity and a distinct historical disposition. No preparation, restart, or
+  signal occurred.
+- **Failure signature:** `RECOVERY_PREFLIGHT_FILE_UNAVAILABLE`; first path
+  `opencode.json`; no retry, and the state remains unchanged.
+- **Fix admission:** Premium owns only the preflight repository-data reader and
+  tests. Preserve the shared ACL and require exact clean HEAD/Git-blob identity,
+  owner/no-follow/inode/nlink checks, stable byte readback, and rejection of
+  dirty input, blob mismatch, symlink, or race. Preserve the existing
+  deployed/host verifier. The gate requires one focused test, one QA report,
+  one security report, commit/deploy/install, and then a fresh read-only
+  preflight.
+- **Rollback/evidence boundary:** Premium owns rollback/adoption. Keep
+  `SOURCE/TEST`, `DEPLOYED/HOST`, and `RECOVERY/RUNTIME/SESSION` evidence
+  distinct; no secret or transcript is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.
+
+## DEPLOY-1 repository-data trust source and hidden-drift remediation — 2026-09-11
+
+- **Repository-data trust source:** The admitted source is
+  `packages/ingenium-extension/scripts/recovery-bootstrap.js`, verified by
+  `packages/ingenium-extension/recovery-pre-admission.test.ts`. The initial
+  focused result was `31` passed and `41` skipped.
+- **QA/security evidence:** One QA report was `PASS`. One security report was
+  `BLOCKING`: hidden tracked sibling drift could be masked by
+  `assume-unchanged` or `skip-worktree`, because status alone can report a
+  clean worktree.
+- **Causal remediation:** Read repository-wide
+  `git ls-files -v -f -z` state before and after the repository-data read; accept
+  only normal `H` entries and never mutate the flags. The focused remediation
+  result was `5` passed and `72` skipped. QA and security were not rerun.
+- **Trust boundary:** The shared ACL is preserved, and strict private/executable
+  trust is unchanged. Commit, deploy/install, and a fresh read-only preflight
+  remain pending.
+- **Safety/acceptance:** No secret is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.
+
+## DEPLOY-1 exact 16a deployment-attempt and test-fix boundary — 2026-09-12
+
+- **Deployment attempt:** Full revision
+  `16a618bfb15ddd2ae9965ee5aec2ac3a5014c179` had one build failure before
+  recreate, install, or preflight. TypeScript reported `TS2339` because the
+  `process.getuid` spy's `mockReturnValue` was inferred as `never` in
+  `recovery-pre-admission.test.ts`. The c132 container, image, host receipt,
+  and launcher remained healthy and exact. Rollback tag:
+  `ingenium-ingenium:rollback-c132ee46-16a618bf`.
+- **Mutation boundary:** Installer invocation count was zero, and no recovery
+  mutation occurred.
+- **Causal test-only fix:** Use the existing `vi.mocked` pattern; ownership-
+  negative behavior is unchanged. One execution of
+  `npm run typecheck --workspace=@ingenium/extension` passed.
+- **Pending gates:** A new commit, deploy/install, and fresh read-only preflight
+  remain pending.
+- **Safety/acceptance:** No secret is recorded. Acceptance for this append is
+  readback plus the scoped roadmap diff check.
+
+## RECOVERY-47 exact b491 deployment and policy-recovery checkpoint — 2026-09-12
+
+- **DEPLOYED/HOST PASS:** Exact source `b491a05fbf40475462d8e9468ca4d60e00e8be9a`
+  ran in container `c2d3e7fe406eb09b4b1421bd2348c8788c9b330890621b055743f4280d2c17df`
+  on image
+  `sha256:d028ff20be610dda72da8821351b65d90a16261289f0c58314dace1b70d12124`.
+  The host-install receipt
+  `/home/brajam/.local/state/ingenium-build-install-f8fd8716-f62a-4d1b-a50a-015cba870d66.json`
+  returned `PASS`/`installed`; no receipt payload or secret is copied into this
+  content-free checkpoint.
+- **SOURCE/PREFLIGHT:** Repository Git identity acceptance allowed the tracked
+  mode-`0674` input after the exact clean-HEAD/Git-blob, owner, no-follow,
+  inode/nlink, stable-readback, and byte-identity checks. The preflight digest
+  was retained for that exact read. Missing recovery gates remained the current
+  parent identity, fresh enrollment/nonce, durable handoff, independent
+  supervisor authority/current-source/health, epoch/fence/claim split-brain
+  fencing, and accepted task/TodoWrite state. The outbox contained `193`
+  records with one unresolved ambiguity; no recovery or session proof follows
+  from this preflight.
+- **SAFE FAILURE, NO MUTATION:** A preparation attempt was safely rejected
+  because the loaded Recovery policy permitted only
+  `ingenium-build deployment production-restart`; no preparation, restart,
+  parent signal, or state mutation occurred. Stable content-free failure label:
+  `RECOVERY_PREPARE_POLICY_DENIED`.
+- **EXTERNAL-SUPERVISOR PROBE:** A fresh read-only probe proved the source
+  contradiction: the Recovery profile granted `recovery-prepare`, while its
+  loaded prompt still described a restart-only command boundary. Stable
+  content-free failure signature: `RECOVERY_PROFILE_EXECUTOR_CONFLICT`.
+- **SOURCE/STATIC PASS:** The minimal fix updated
+  `.opencode/agents/execution/ingenium-recovery-engineer.md` and added the
+  matching guard in `tests/test-agent-validation.sh`. Writer validation passed
+  once. The initial QA dispatch executed zero checks because the orchestrator
+  contract omitted the required intake; it was not a QA report. The corrected
+  single QA report was `PASS`.
+- **COMMIT/BOUNDARY:** The scoped source fix is commit
+  `c06bf886f8fcacfd05d0cf0bfd0b50789760bba4`; this is source validation only.
+  Deployed b491/host evidence remains separate, and actual model/session
+  recovery proof is still absent. `nextWork` is to deploy/install the exact
+  current c06 source while preserving b491/c132 rollback, then perform a fresh
+  external-supervisor read-only authority/identity probe and preparation without
+  signaling the old parent first.
+
+## T61/T66/T67 and RECOVERY-48/49 append-only checkpoint — 2026-09-12
+
+- **T61/T67 — source validation:** The gitignore audit found the tracked
+  repository-root `:memory:` SQLite database (`1,626,112` bytes, introduced by
+  commit `99d39f0d`) and its untracked `:memory:-shm`/`:memory:-wal` sidecars.
+  Added `:memory:` and `:memory:-*`; `git rm --cached` untracked the database
+  while retaining the working file on disk. The read-only dependency check found
+  no path-like consumers, only SQLite in-memory DSN usages. Existing ignore
+  coverage was otherwise adequate: zero non-ignored untracked artifacts. Commit
+  `418f657b`.
+- **FOLLOW_UP — build context:** `.dockerignore` lacks the entry, so
+  `Dockerfile`'s `COPY . .` still includes the database in the build context;
+  this is non-blocking.
+- **FOLLOW_UP — history:** The database remains in branch history since
+  `99d39f0d`; assess before any push under T57. History rewrite is not
+  authorized.
+- **T66 — source validation:** One-line orchestrator output guidance was
+  committed at `bc356d5d`; contracts and status render as plain Markdown. The
+  validator passed, and the guidance is effective on the next orchestrator
+  restart.
+- **RECOVERY-48 — deployed canary:** `bc356d5d` deploy/install/scanner passed
+  with container `34199ba4ffea92321951998f1dab13a4ed798776d9996fbf908491f619bf36dd`,
+  image `sha256:710a27da1668d625e647552c009b17464e89b6a254cf4e4434a2e290772441aa`,
+  and receipt
+  `/home/brajam/.local/state/ingenium-build-install-4eee0581-e0bb-4c11-9891-9c8e53a8df52.json`.
+- **RECOVERY-48 — recovery preflight:** One recovery preflight was executed
+  once, with digest
+  `01bac2dd3b52978c33aaae5ddc041097a367f87a6c0f1e36a2a290dad13c83d3`, and
+  rejected. Remaining gates were unavailable parent identity/session/incarnation;
+  ambiguous nonce/enrollment; missing typed handoff; unavailable supervisor
+  ownership (expected `systemd-user` `ingenium-recovery-owner.service`);
+  unavailable fence/claim; an outbox with `193` records and one unresolved
+  ambiguity; one disposition record; freeze clear; and an empty Git footprint.
+  Zero mutations occurred. This distinguishes source validation and deployed
+  canary evidence from still-absent actual model/session recovery proof.
+- **RECOVERY-49 — nextWork:** After this roadmap commit, deploy/install the
+  final revision and run `ingenium-build deployment recovery-prepare` through
+  the installed source, then perform replacement activation.
+
+## RECOVERY-48..58 and T53 evidence checkpoint — 2026-09-12
+
+- **Deployment chain — `DEPLOYED/HOST` and `DEPLOYED/MCP` evidence:**
+  `bc356d5d` deploy/install/scanner `PASS`; `d71d2764` deploy/install `PASS`;
+  `d13667c7` deploy/install `PASS`; `fde4d358` built/recreated healthy, but its
+  MCP canary failed with `FDE_MCP_CONNECTION_CLOSED` and installation was
+  deferred; `0aa682c7` deploy/install `PASS` with a fresh MCP acceptance of
+  `42` unique tools. The fresh `0aa682c7` acceptance used container
+  `891f4d68ef32fe7fe7b149b970a71f460015142e5e038a0a8bdb4c3a0ee927c2`, image
+  `sha256:75fce783428c43df5d8c0f962501a154a7df4d5f7cd378fcf18f09633ce93d74`,
+  and receipt
+  `/home/brajam/.local/state/ingenium-build-install-05db5887-c2db-4874-9227-882ac45a06c3.json`.
+- **Recovery preparation — `SOURCE/TEST` and failure evidence:** Direct
+  `recovery-prepare` returned `RECOVERY_PREPARATION_FAILED` at phase `inspect`.
+  Root cause 1 was empty launcher defaults forwarded as bindings, fixed at
+  `d13667c7`; a retry returned the same public signature. Root cause 2 was
+  captured as `Recovery preparation parent is ambiguous` from foreign-user
+  `/proc/<pid>/exe` `EACCES`, fixed at `fde4d358`; its ancestry walker uses
+  stable UID/PID/start-time linkage and has `10` focused tests.
+- **MCP flake — deployed diagnostic evidence:** The `fde4d358` closure did not
+  reproduce on one diagnostic pass, which listed `42` tools. The cause was not
+  established. The `0aa682c7` canary is the fresh acceptance, not a retry.
+- **Control-plane verdict — recovery gate:** The current TUI parent cannot
+  qualify for legacy capture: it has no loopback listener and no
+  `OPENCODE_SERVER_PASSWORD`, and neither can be retrofitted into a running
+  process. The container `4101` proxy cannot substitute. The managed launcher
+  `ingenium-opencode` reserved a port but lacked password provisioning; this
+  was fixed at `0aa682c7` with `13` focused tests and one security review
+  `PASS`, with no `BLOCKING`/`FOLLOW_UP` findings.
+- **T53 — visual gate `PASS` at `d71d2764`:** Changed-route evidence and the
+  `24`-route sweep are retained under
+  `tests/artifacts/visual-qa/t53-d71-20260912-1410/`. There were no `BLOCKING`
+  findings. Retained `INFORMATIONAL` notes cover masked sweep bodies and
+  superseded harness attempts.
+- **Evidence boundary:** `SOURCE/TEST`, deployed canary, and still-absent
+  model/session recovery proof remain distinct. The failed canary, deferred
+  installation, unestablished MCP cause, and non-mutations are not converted
+  into acceptance; no replacement activation or actual model/session recovery
+  proof is claimed.
+- **nextWork:** The user must relaunch OpenCode through the documented managed
+  `ingenium-opencode` launcher in `docs/usage/opencode.md` so a capture-eligible
+  parent exists; then run `recovery-prepare` and replacement activation; then
+  perform T49–T51 acceptance.
+
+## Current user-authorized multi-session checkpoint — 2026-09-13
+
+- **Parent recovery boundary:** The user explicitly cancelled parent
+  recovery/relaunch. Committed recovery fixes remain, but parent
+  restart/replacement is not active scope.
+- **COORD run:** `1025dfa5-c629-45ca-a476-e9d17cacb744` ended at
+  `phase=readiness` with `failureCode=harness_failure`; cleanup is now
+  `complete/resolved`. Owned PIDs and ports are gone, the provider is
+  disconnected, credentials are revoked/removed, exact sessions/claims/run-
+  outbox records are zero, and remote deletes/signals are zero. Evidence is
+  under
+  `tests/artifacts/coordination/1025dfa5-c629-45ca-a476-e9d17cacb744/`.
+- **Committed source boundaries (SOURCE/TEST only):** `131e0018` internal-C
+  metadata handling (QA `PASS`); `640dbd48` external usage canonical session
+  ID (QA/security `PASS`); `4be8e085` scoped Context service handoff
+  (QA/security found a source-key bypass, remediated with the minimum
+  regression, and no reviewer rerun); and `b839e480` auto-observer canonical
+  session ID (QA/security `PASS`). T49/T50/T51 source tests are source evidence
+  only; these fixes are not deployed and live acceptance is not passed.
+- **T54 credential boundary:** The configured protected passphrase path was
+  attempted and unavailable; canary attempt count is `0`. Redacted evidence:
+  `tests/artifacts/manual/t54-protected-vault-canary-20260913T040105Z.json`.
+  Classification: `BLOCKED_EXTERNAL_CREDENTIAL`.
+- **Configuration boundary:** The sole tracked dirty path is the unrelated,
+  uncommitted `opencode.json` remapping of six agents. Clean-tree
+  coordination/host-deployment admission rejects it, and deployment would
+  consume it. Ownership and acceptance are not inferred. The mutually
+  exclusive next decision is to adopt it (validate/commit/deploy as its own
+  scope) or preserve/remove it from this worktree through its owner; neither
+  action is authorized by the current coordination task.
+- **Runtime/evidence boundary:** Current HEAD is `b839e480`; deployed runtime
+  remains `8560029d`. No runtime or model-session acceptance is claimed.
+  `COORD-1` is an artifact-local label semantically mapped to T65 F4, not a
+  new canonical roadmap ID; do not create `META-3` or other new canonical IDs.
+- **NextWork:** After configuration resolution, the clean-tree deployment
+  owner must rebuild, restart, and health-check the current committed source;
+  then run parallel live COORD/T49/T50/T51 acceptance. Remaining final gates
+  stay waiting. Deployment owner for this documentation task: `N/A`.
+
+<a id="orch-eff-01-07-supersession-2026-09-15"></a>
+
+## ORCH-EFF-01..07 — Direct-first bounded-team scheduling supersession — 2026-09-15
+
+This append-only linked item is the active documentation overlay for
+orchestration scheduling. It explicitly supersedes active
+one-agent-per-item/no-cap scheduler language in current guidance. Every older
+row, evidence record, runtime observation, and archive reference remains
+unchanged and is historical evidence; it is not silently converted into live
+policy or runtime proof.
+
+| ID | Active decision |
+|---|---|
+| **ORCH-EFF-01** | Direct-first: when the active authorized agent can complete the scoped work feasibly and efficiently, use zero subagents. This does not widen the coordination-only orchestrator's grants. |
+| **ORCH-EFF-02** | If delegation is necessary, newly form one useful team of 2–6 subagents, with 3 preferred and no more than 6 active children per parent. No filler and no new singleton; an existing team's one-member tail may continue. An explicit concurrency request does not override this shape or deny-default permissions. |
+| **ORCH-EFF-03** | Select only dependency-ready work with exclusive territories. Start newly eligible work without waiting for unrelated team members only when a supported background capability exists; otherwise use honest parallel synchronous waves. Synchronous batches remain synchronous; true async requires correlated results, and no async proof is claimed without those conditions. |
+| **ORCH-EFF-04** | Preserve independent verification and run QA, Docs, research, security, visual, deployment, and recovery work only when the declared boundary genuinely requires it. These are conditional gates, not token-wasting ritual. |
+| **ORCH-EFF-05** | Active loading is `@ponytail` plus task-matching skills and relevant roadmap/context; do not load every skill or the full roadmap by default. Durable Todo, failure, and recovery evidence remains required. |
+| **ORCH-EFF-06** | Directory auto-approval remains limited to the declared project and canonical worktree. Keep orchestrator grants narrow and preserve the other tool surfaces and grants from baseline `e25f5519`. |
+| **ORCH-EFF-07** | Reconcile TodoWrite and roadmap state before terminal output; preserve first failures, stable signatures, unknown outcomes, recovery preflight, and applicable deployment/runtime evidence. No restart, deployment, live async, or model/session proof is claimed by this documentation item. |
+
+**IN_SCOPE:** Active orchestration guidance in `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and the active
+top/current overlay plus operating model in this `ROADMAP.md`; append this
+ORCH-EFF-01..07 supersession record at EOF.
+
+**OUT_OF_SCOPE:** `.opencode/**`, source, tests, configuration, Docs Workspace
+mutation/export, deployment, restart, runtime activation, model/session proof,
+full documentation/agent audit, unrelated documentation cleanup, and rewriting
+or deleting historical rows or records.
+
+**Owner:** Documentation wave writer C. **Dependencies:** current canonical
+worktree and baseline `e25f5519`. **Acceptance:** Active canonical guidance is
+coherent, the direct-first/team and conditional-scheduling rules are explicit,
+historical contradictions are identified as historical/superseded, and links
+and headings read back successfully.
+
+**STOP_CONDITION:** Stop after the scoped searches and readback pass. `PASS`
+applies only to this documentation boundary, not to rollout completion.
+
+**Escalation:** Only unavailable external access, unauthorized destructive
+action, a required mutually exclusive decision, genuine ambiguity, or no
+reproducible cause after bounded diagnosis. A failed scoped check is repaired
+at its named documentation root cause and rerun once; it is not automatic
+user escalation.
+
+**Verification owner/plan:** Writer C performs scoped searches and readback of
+the changed sections and EOF record only. The independent documentation audit
+is a later declared gate; no full audit, runtime command, restart, deployment,
+or session proof is run or implied here. **Deployment owner:** `N/A` for this
+docs-only item; later activation, if separately admitted, is owned by Premium.
+
+**Exclusive writer territory:** `AGENTS.md` and active canonical Markdown under
+`docs/**`. **Evidence class:** `DOC/STATIC` readback only.
+
+**Rollback/safety:** This is append-only documentation work; preserve every
+historical row/record, make no runtime or Workspace mutation, and do not adopt
+source or profile changes as proof. **Tests:** Scoped searches and changed-
+section/EOF readback only. **Docs:** `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and this roadmap.
+**Phase/counts:** Declared existing wave `active=3`, `writers=3`; writer C dispatches
+zero new subagents. **Causal remediation rule:** Fix only the named
+reproducible in-scope documentation root cause, then rerun its targeted search
+and readback. **Finding classification:** In-scope acceptance failures are
+`BLOCKING`; out-of-scope drift is `FOLLOW_UP`; retained historical context is
+`INFORMATIONAL`.
+
+**Remaining-mention classification:** The active mentions in `AGENTS.md`,
+`docs/configure/agents.md`, `docs/usage/multi-session.md`, and the current
+roadmap overlays point to this policy. Retained CLI-DOC-04, S3/source-static,
+delivered-feature, prior Todo, and archive references to one-agent/no-cap or
+six-active/three-writer scheduling are historical records and remain preserved.
+Older all-skill/full-roadmap wording in those retained contracts and recovery
+records is likewise historical contract/evidence text, not an active loading
+instruction.
+Out-of-scope `.opencode/**` and test/profile assertions are not changed by this
+docs boundary. No QA, Docs Workspace, visual, security, implementation, or
+follow-up task is requested by this record.
+
+### Operational evidence update — 2026-09-15 (not completion)
+
+- **Source boundary (`SOURCE/TEST`):** Commit `f9c7287382ca9e677b17eb1f8283474aa3b29587` owns 14 task paths. Three unrelated dirty files remain: `.opencode/package.json`, `.opencode/package-lock.json`, and `packages/ingenium-extension/mcp-launcher.test.ts`.
+- **Source/test evidence:** Core coordination is `52/52`; the extension coordinator is `92/92`; both typechecks, scheduler policy, and full agent validation passed. One QA report, one security report, and one documentation audit were consumed; blockers were remediated; no reviewer was rerun; the minimum validator passed.
+- **Compatibility deployment evidence:** Image ID prefix `79ba394` was used with source commit `f9c72873` and dirty-fingerprint prefix `4a4f3b2e`. Only the `ingenium` compatibility service was recreated. Prior rollback image prefix `9a57173` remains retained.
+- **Health evidence:** API `200`, dashboard/login `200`, VS Code `302/200`, and the OAuth callback's expected `400` were observed. OpenCode/CLI returned `502`; the container is unhealthy.
+- **Stable blocker:** `MCP_BOOTSTRAP_PROVISION_FAILED` remains because installation bootstrap is pending and no installation owner exists; project/owner-bound credential provisioning is unavailable. The user must privately open `http://localhost:3000/bootstrap`, claim or create the installation owner, share no credentials, and reply `claimed`.
+- **Async/recovery boundary:** `backgroundSubagents` capability and true-async runtime proof remain blocked. Full host-parent restart remains **REJECTED** pending a durable typed handoff, external supervisor, replacement health, reconnect/full Todo replay, rollback/adoption, and fencing. The invalidated read-only preflight created and deleted one ephemeral `/tmp` diagnostic but changed no repository, credential, process, Docker-lifecycle, or coordination state; it is not admission evidence and must not be reused.
+- **NextWork after `claimed`:** The existing Premium deployment owner provisions through the configured supported path, rechecks OpenCode/CLI and container health, probes background capability, then runs a fresh mutation-free restart preflight. No parent signal occurs before admission.
+- **Boundary:** This evidence update does not mark ORCH-EFF-01..07 complete or `PASS`; it records no secrets, transcripts, or reasoning and adds no runtime admission.
+
+### Operational continuation — 2026-09-16 (credential-blocked recovery)
+
+- **Git boundary:** Source commit `f9c7287382ca9e677b17eb1f8283474aa3b29587`
+  and prior evidence commit `e7a2470fc27308d911de5c9f0a85c719b45d10cc`
+  are pushed to `origin/context-upload-hardening-opencode-1.18.9`.
+  The three unrelated dirty paths remain unchanged and unstaged.
+- **Current-source deployment:** After the user-requested container cleanup, the
+  compatibility service was rebuilt and recreated from HEAD `e7a2470f` with
+  dirty fingerprint `4a4f3b2e12299e99a684bb3194440e8a3a1ed2b5130f9c60b26f6c861493be58`.
+  Image `sha256:bce5bfcc527c129518cd5bdb1adef6db2142f261bf10a8ccc05205a56f01b573`
+  is healthy; rollback images remain retained. API, dashboard/login, OpenCode,
+  ttyd, and VS Code checks passed, the OAuth callback returned its expected
+  unauthenticated `400`, and standard MCP initialization listed `42` tools.
+- **Background capability:** Authenticated
+  `GET /experimental/capabilities` returned `200` with
+  `backgroundSubagents: false`. No background child or canary was created, no
+  interrupted call was replayed, and synchronous Task remains the only
+  supported execution mode. This is runtime capability evidence, not async
+  acceptance.
+- **Recovery preflight:** Fresh read-only recovery, durable-memory, and static
+  source streams returned `REJECT_AND_REPLAN`. The deployed MCP registers
+  `coordination_status` and `coordination_memory_read`, and the recovery/scout
+  profiles permit those reads, but the current host parent cannot inject them
+  because `.opencode/.ingenium-mcp-credential` is absent. The current parent
+  was not signalled or restarted; no claim, handoff, or replay was created.
+- **Local prerequisite repair:** Root `opencode.json` now declares the exact
+  canonical `INGENIUM_WORKTREE=/home/james/repos/ingenium` required by the
+  reset validator. The owner-controlled `.opencode` directory mode is `0755`,
+  and the full agent validation passes. This static/config evidence is not
+  parent activation proof.
+- **Stable external blocker:** `ORCH_ACT_03C_PREFLIGHT_BLOCKED` remains at the
+  protected owner-provider boundary. The configured encrypted owner credential
+  failed integrity/decryption once and was not retried. Host MCP credential
+  issuance therefore did not occur; the ignored target remains absent. The
+  outbox has retained authentication failures and changed autonomously under
+  the already-loaded parent, so no unknown record is replayed.
+- **NextWork:** The installation owner must re-enrol the protected coordination
+  owner provider through the documented owner-controlled flow without sharing
+  credentials. After that causal change, run exactly one fresh host MCP reset,
+  verify read-only status and typed memory, and repeat the mutation-free
+  replacement-first preflight. Restart remains forbidden until durable handoff,
+  external-supervisor health, reconnect/Todo replay, rollback or adoption, and
+  split-brain fencing all have current retained proof.
+- **Boundary:** Deployment health, runtime capability, and recovery admission
+  are separate evidence classes. ORCH-EFF-01..06 source/policy behavior is
+  delivered; ORCH-EFF-07 and parent activation remain open until the protected
+  credential and recovery gates are reconciled.
+
+### Native OpenCode and coordination-retirement implementation continuation — 2026-09-19 (source/test evidence, not rollout completion)
+
+- **Scope:** The current implementation retires the six public coordination MCP
+  names, removes TUI session-memory injection, routes session/message reads
+  through the pinned OpenCode `1.18.31` v2 SDK, and preserves ordinary task
+  reservations, repository-sync credentials, historical coordination data, and
+  guarded migrations.
+- **Source boundary:** The active catalog is `286` tools (`284` server
+  registrations plus `2` extension tools) across `32` categories. Retired
+  coordination names are absent from the active catalog and profiles; negative
+  parity/retirement fixtures remain intentionally retained.
+- **Focused evidence:** Extension managed-command wrapper `112/112`; recovery
+  pre-admission `155/155`; v2/extension adapter boundary `37/37`; API OpenCode
+  contract/status tests `117/117`; core coordination/task regressions `63/63`;
+  core backup/repository/restore migration tests `59/59`; API restore-maintenance
+  `18/18`; extension repository/plugin/auth tests `62/62`; server retirement and
+  parity `6/6`; core catalog parity `7/7`; documentation and permission audits
+  passed; affected core/API/extension typechecks passed.
+- **Causal repair:** Migration 121's new repository-sync generation foreign key
+  now receives its parent worktree row before retained coordination compatibility
+  paths upsert the generation child. The foreign-key failure was reproduced first,
+  then the focused coordination and restore-maintenance regressions passed.
+- **Open gates:** Lint scripts are not defined in the affected workspaces; no
+  current-source deployment, live OpenCode session proof, parent restart, commit,
+  or reset was performed. Profile/config changes still require a full parent
+  OpenCode restart, and the shared worktree remains broadly uncommitted.
+- **Next work:** Reconcile the mixed diff against its owning rollout, preserve
+  historical roadmap evidence, and perform only separately authorized deployment,
+  live-session, or restart acceptance. This marker does not claim overall rollout
+  completion or `PASS`.
+
+## OpenCode v2 redundancy-removal boundary — 2026-09-20
+
+- **Scope/status:** **COMPLETE for this source, deployment, and acceptance
+  boundary.** Orchestration migration and recovery repair were explicitly out of
+  scope. The extension no longer publishes custom current-parent recovery state
+  from the idle hook or maintains the redundant `recoverySessionMessage`
+  projection. Native OpenCode v2 session/message reads, context upload, and
+  external-usage collection remain.
+- **Changed paths:**
+  `packages/ingenium-extension/lifecycle.ts`,
+  `packages/ingenium-extension/lifecycle.test.ts`,
+  `packages/ingenium-extension/opencode-v2.ts`,
+  `packages/ingenium-extension/opencode-v2.test.ts`, and
+  `packages/ingenium-extension/scripts/production-restart.ts`.
+- **Source/test evidence:** Focused Vitest run passed `2` files and `6` tests;
+  extension typecheck passed; `git diff --check` passed. Repository search found
+  no remaining caller of the removed projection or lifecycle publication. The
+  retained v2 helpers remain used by context upload, external usage, observer,
+  and focused tests.
+- **Deployment evidence:** Premium rebuilt the current worktree source at HEAD
+  `be080e2d73822bf67d068a9874c8d29887e1ced9` with worktree diff SHA-256
+  `40336d65729781e1db621131c0ab32735cec888b7a6aee150f071591b74872d3`.
+  Compatibility container `6c4faf2446ad16dc750d67bf31a8dde935b8f7f3b9da0997137d8a04615e4e36`
+  and image `sha256:609659532d7ee24631d373ca31228ca4a275a33f351628be90c82ad8154de981`
+  were healthy; API health, dashboard, OpenCode Web, CLI, and VS Code returned
+  HTTP `200`. The host parent/predecessor was not signalled, stopped, or
+  restarted.
+- **Review evidence:** The delegated QA child failed before review with the
+  internal signature `QA_CONTRACT_INTAKE_INCOMPLETE` because its prompt omitted
+  the explicit stop-condition and escalation fields. No QA code review ran and
+  no source finding resulted. One direct bounded review then completed with no
+  `BLOCKING` findings; no QA replay was performed.
+- **Tool-policy evidence:** One optional diff-hash command was denied by the
+  repository Bash policy with signature `BASH_PERMISSION_DENIED`; it was not
+  retried. The deployment manifest's unchanged diff hash and the exact five-path
+  source diff remain the accepted evidence.
+- **Recovery boundary:** The earlier mutation-free preflight rejection at
+  `reconcile.retained` (`RECOVERY_PREPARATION_RETAINED_RECONCILIATION_UNAVAILABLE`)
+  remains preserved historical evidence. No recovery retry, parent restart,
+  protected-state mutation, or orchestration migration occurred in this
+  boundary.
+- **Evidence classes:** Source tests/typecheck prove checked source behavior;
+  the deployment record proves the rebuilt runtime route health; the direct
+  review proves only the changed-file acceptance boundary. No model/session proof
+  or recovery acceptance is claimed.
+- **Next work:** None for this boundary. The five extension source changes and
+  this append-only roadmap marker remain unstaged; no commit was requested.
+
+## OpenCode v2 descending-cursor continuation — 2026-09-21
+
+- **Scope/status:** **COMPLETE for source and focused-test evidence.** The V2
+  plugin session adapter now carries descending order in its synthetic cursor,
+  so cursor follow-ups cannot silently revert to ascending order.
+- **Changed paths:** `packages/ingenium-extension/plugin-v2.ts` and
+  `packages/ingenium-extension/plugin-v2.test.ts` within the existing unstaged
+  V2 plugin-port wave.
+- **Evidence:** Focused Vitest passed `2` files and `9` tests; extension
+  typecheck and focused `git diff --check` passed. The first npm-tool attempts
+  did not execute because its shared command lock rejected the descriptor;
+  sequential shell verification was the distinct successful path.
+- **Boundary:** No deployment, parent restart, MCP repair, commit, or model/session
+  acceptance was performed. The broader shared migration diff was preserved.
+
+### Codex release continuation — 2026-10-23
+
+The user requests full Ingenium completion, a plan and goal, and development only
+in this Codex window, never through OpenCode. This replaces historical executor
+and successor-chat routing for the current work, while preserving acceptance,
+production data, manual edits, rollback sources, and cancelled OpenRig scope.
+The active plan is [release-2026-10-23](../operations/release-2026-10-23.md).
+
+R23/source settlement is IN PROGRESS. A private verified snapshot preserves all
+106 changed/untracked source paths at HEAD 057b6ae2; no blanket staging or reset.
+The existing branch is 16 commits ahead of its remote. Actual compatibility
+container is stopped with exit 1; old rollback and 057b6ae candidate images remain.
+The current API clean-core typecheck completed with exit 0 through installed Linux
+Node. This is source evidence only. R09/R19 deployment, R12 installed profiles,
+R15/R21 real memory/model/session acceptance, R22 UI/containment, publication and
+preservation-first retirement remain OPEN. Current Codex tools are assessed on
+their actual behavior; the historical D193 OpenCode-provider failure is preserved
+without claiming it repaired or treating it as proof this executor is unavailable.
+Codex source-validation progress: canonical root discovery now excludes retained
+build/protection copies (56 containment tests PASS). Five workspace compiler gates,
+133 API/client and 71 dashboard tests PASS. The native lifecycle tool classification
+repair passes 57 agent-validator tests without widening runtime grants. Static
+deployment, API, gateway and documentation contracts pass. Chat-upload expiry is
+now isolated by the runtime temp root (61 upload/route tests PASS); fixture children
+also have run-owned global config. Browser run31d447a1 built but failed API readiness;
+strict containment exited0. Bounded startup diagnostics were repaired and a causal
+attempt is active. No deployed/browser/model acceptance or publication claimed.
+AUTH-111/112 and the original follow-up contracts remain in the full completion
+scope alongside R12/R15/R21/R22. Continue in this chat only.
+
+## Preservation and native chat progress — 2026-10-23
+
+- Reviewed test-isolation checkpoint `de332ed9f34a6212c464f2ef20f11c9d93ed11b8`
+  is pushed to the existing branch; remote readback matches. Production remains
+  stopped. No OpenCode development, successor chat, or live model call was used.
+- The missing host broker-fixture prerequisite was diagnosed from captured
+  readiness output. The three non-secret managed files were installed with
+  root-owned read-only permissions and passed the actual runtime validator.
+- The browser fixture now speaks the pinned native OpenCode 2.0.11 protocol.
+  Native prompt admission exposed a real duplicate-user-message defect: the API
+  discarded the assigned message ID. The API now returns it and the dashboard
+  correlates the exact optimistic turn. API contracts (58), hook regressions
+  (69), and the API/dashboard compiler checks passed.
+- Fixture sessions now retain unique IDs across resets, preventing accidental
+  reuse of persistent context checkpoint receipts. The real-login reload test
+  enrolls its owner in the isolated organization and checks an actual saved turn.
+- Browser run `c60ba323-4608-4fe8-8217-eea68abdca83`: all ten selected chat,
+  provider-state and task-capture tests passed; strict containment exit 0,
+  active handles 0. Visual review found a missing fixture title PATCH and mobile
+  header overlap. Both are repaired; final screenshot validation is in progress.
+- Additional source checks: core agents 42 passed; extension coordination/reset,
+  current-parent recovery, pre-admission and recovery snapshot suites 357 passed.
+  These are synthetic source checks, not installed runtime acceptance.
+- Private preservation root:
+  `/home/brajam/.local/state/ingenium-release/20261023-volumes-104241`.
+  All four original volume archives were extracted and compared against stable
+  source inventories: bytes, modes, ownership, nanosecond modification times,
+  xattrs/ACLs, hardlink counts and symlink targets match. Eight persistent bind
+  files, including credential/config files, passed the same checks. Secret
+  contents remain private. Originals and prior preservation sources are retained.
+- The copied SQLite database passed integrity and foreign-key checks before and
+  after migration. All 220 tables retained identical row counts, identifiers and
+  per-column hashes. This qualifies a database rehearsal, not the complete
+  production restore/restart gate. Reports and archive hashes are in the private
+  preservation manifest and migration-rehearsal directory.
+
+Remaining: finish visual/checkpoint review, separate dated session-specific
+lifecycle helpers from release code while retaining their historical tests,
+settle the remaining source/build/profile changes, build the exact release
+inputs, capture current repository ACL rollback metadata, and verify deployment
+bindings before startup. Then run the real installed-profile, memory,
+simultaneous-session/restart, identity/tenancy, UI and publication gates. The full
+release goal remains active.
+
+
+## Native release source audit — 2026-10-23 follow-up
+
+- Native chat checkpoint `d5c165d39026b04d39d901209a025456c9bb42fd` is pushed
+  and remote-verified. Final browser run `b5d79353-66cf-4d94-a642-e0d9e2711394`
+  passed; desktop/mobile screenshots were inspected and strict containment
+  exited 0 with zero active handles. This completes that source/fixture feature,
+  not production or real-model acceptance.
+- The dated lifecycle diagnostic harness and inventory helpers are retained under
+  `packages/ingenium-extension/tests/historical/`. The runtime lifecycle registers
+  only the general parent recovery publisher. Its exact grant replaces the dated
+  utility grant on the orchestrator; other roles remain denied. Six focused
+  suites passed 97 tests. Root-level test typechecking is preserved separately
+  while the production compiler excludes test files.
+- Thirteen additional affected installer/config/recovery suites now pass 365
+  tests in aggregate. The first selection had 29 failures: 24 needed a dated
+  temporary parent directory, three expected the retired admission contract,
+  and two hit timing limits under parallel load. Fixtures now allocate their
+  own bounded synthetic paths and validate native preparation receipts; retired
+  admission still fails closed. The two timing cases passed serially without
+  changing their timeouts or runtime rules. Full reruns of the three affected
+  suites passed; a typo in the new fallback-config test was corrected and its
+  entire 16-test suite plus test TypeScript check passed.
+- Docker's generated fallback MCP config still used the pre-native schema.
+  It now uses `mcp.servers` and `disabled: false`, preserving its configured
+  service and environment. The new regression checks that generated fallback.
+- Canonical distribution build correctly refused its existing group-writable
+  build directory. No permission normalization or deletion was performed.
+  Private staged compiler output at
+  `/home/brajam/.local/state/ingenium-release/distribution-stage-k73x58we`
+  contains 263 extension files, no test artifacts or dated lifecycle tools, and
+  the general publisher. MCP parity verified all 284 registrations. This is
+  compiler/package-content proof; actual image build remains pending.
+- Core API Plan handling now uses native ID `plan` and root `plan.md`, matching
+  repository sync and the global projection. Create/edit/enable/disable/delete
+  and import retain this identity; old nested config overrides migrate without
+  losing the selected model/variant. Root-path symlinks are rejected. Core agent
+  regression suite: 44 passed; core TypeScript passed.
+
+All preservation sources remain retained. No production startup, live provider
+call, OpenCode development, successor chat, or final main/release publication has
+occurred. The source audit still needs to settle the remaining pre-existing
+recovery/build/profile changes before an exact-source image and live acceptance.
+The canonical release plan retains the full goal and original gates.
+
+
+## Deployment candidate follow-up — 2026-10-23
+
+- API clean-core passed after the 44-test Plan lifecycle suite. Supervisor process
+  isolation, scheduler policy, and global profile projection checks passed.
+- The older candidate image failed the current ACL fixture because it lacks root
+  `plan.md`; failure project `ingenium-compatibility-acl-pusfo3` is retained. Source
+  review also found startup omitted root Plan from the workspace copy. It now
+  copies Plan explicitly, with both global and workspace readback assertions.
+- The current-source image build passed deployment checks, all six workspace
+  builds, the distribution adopter, and native plugin-loading smoke. It then spent
+  over five minutes in recursive ownership normalization, writing over a gigabyte
+  of unchanged root-owned content into an overlay layer. That isolated build was
+  deliberately cancelled (exit 130); its full logs and source snapshot remain in
+  the private `image-source-dbf7qa0p` stage. It is not a successful image.
+- Docker hardening now repairs only non-root ownership and group/world write bits,
+  without following symlinks. The same root-entrypoint and protected broker checks
+  remain mandatory. Validated provenance is applied after runtime dependency
+  layers so changing a revision does not invalidate those layers.
+- A separate container-config projection excludes host-only MCP commands/plugins
+  while preserving model choices and leaving the original config untouched.
+  Compose accepts `INGENIUM_OPENCODE_CONFIG_FILE` for this explicit deployment
+  copy. The 17-test projection suite, deployment validator, image-provenance
+  contracts, and documentation/config audit passed.
+- Recovery acknowledgement now restores `primary/ingenium-orchestrator`, matching
+  native profile identity. All 21 native HTTP recovery tests passed.
+- Fresh copies of all four volume archives and the eight persistent bind files
+  are extracted for a full-stack, network-disabled restore rehearsal under
+  `/home/brajam/.local/state/ingenium-release/runtime-restore-20261023-075614`.
+  The original archives and verified extraction are unchanged. Startup is pending.
+
+The recovery audit still needs real native-session verification: the bootstrap
+live summary retains old HTTP paths, process admission assumes a session argument
+that native `serve` does not carry, and clean-source versus snapshot admission
+needs reconciliation. These are unresolved migration work, not runtime passes.
+The next image must include the later source fixes and pass the isolated startup
+fixture before any production use. Production remains stopped; full installed
+behavior, restore/restart, browser review and final publication remain open.
+
+
+## Compatibility startup verification follow-up — 2026-10-23
+
+The candidate `ingenium-ingenium:release-20261023-eb9bc7e2adb4` built successfully
+(image `sha256:5607f6acbef985ce798277fa074725e90ca39ef84764fef6b16ec9bca7406225`).
+Its revision label is `d5c165d39026b04d39d901209a025456c9bb42fd`; its exact source
+inventory digest is `eb9bc7e2adb43787742fe6fd20a9558bdf29a3e71ce0a655bbc9c1c2e7f141a3`.
+This is a candidate built from the retained working-tree snapshot, not final release publication.
+
+The current ACL fixture first had an incorrect Plan assertion at `/workspace/.opencode`
+instead of `/workspace/ingenium/.opencode`. After correcting the assertion, its strict
+repository scan exposed a real startup defect: ordinary categorized profiles were
+copied to root-level duplicates. Startup now seeds missing profiles at their native
+relative paths and preserves existing workspace profile contents. The complete fixture
+passed with this source entrypoint, including all 11 mapped profiles, secret/process
+isolation, protected-file guards, canonical bind guards, and sibling preservation.
+Failed projects `ingenium-compatibility-acl-b6ices` and `ingenium-compatibility-acl-nlfe6t`
+remain retained. The passing fixture cleaned only its own generated resources.
+
+A new image build includes the profile-path fix under source inventory
+`fbb89a2b88938719bd909a704c88c86f6fc5aa95223c1cd9517097dc823d8689`.
+Full restored-stack startup, production adoption and real-model acceptance remain open.
+The host ACL utilities were installed to enable exact ACL preservation and the separate
+UID-1105-readable container config; no production workspace ACLs were changed.
+
+
+## Isolated restore startup and credential-expiry diagnosis — 2026-10-23
+
+The rebuilt profile-path candidate `ingenium-ingenium:release-20261023-fbb89a2b8893`
+completed in 218.3 seconds with image ID
+`sha256:890ae27ceb63943d3ba7674e5191df6407be367ea4fa3a99a216b7ecbb7422c8`.
+The restored-stack Compose project started with network disabled, no published ports,
+and only private copied data/config/workspace inputs. It has never mounted the
+production volumes or canonical workspace. The legacy read-only host OpenCode bridge
+is represented by an empty directory, so that bridge is not covered by this rehearsal.
+
+The first start rejected the restored learning credential's mode 0660. Its copied
+metadata was saved; only the rehearsal copy was hardened to 0600, and its bytes were
+verified unchanged. The next start reached all primary supervised processes, API,
+dashboard and gateway. OpenCode remained in its bounded MCP-credential startup wait.
+The API bootstrap returned `MCP_BOOTSTRAP_UNAVAILABLE` (503). Read-only API checks
+confirmed the installation is claimed and the Ingenium project remains present.
+An additional offline copy of the preserved database showed that the fixed startup
+credential expired on 2026-10-19 while its workspace, owner, principal and epoch still
+matched. The receipt replay path refuses expiry without issuing a replacement.
+The rehearsal has been stopped through Compose, retaining every copy and failure log.
+Production remains stopped and unchanged.
+
+A source repair adds explicit expired-receipt renewal only at the authenticated
+compatibility bootstrap caller. It creates a fresh token and immutable credential
+row, retains the expired row, preserves scope/binding checks, and keeps replay of the
+new receipt idempotent. The generic issuance path still rejects expired receipts
+unless explicitly opted in. Runtime capability renewal rules are unchanged.
+Tests and fresh-image restore verification are pending; this is not a healthy restore.
+
+Native restart admission now carries the admitted session identity independently
+of a server command line, with unchanged process nonce, owner, publication, source,
+HTTP binding and typed-work checks. The native-parent and HTTP suites passed 67 tests,
+including a parent without a session argument and a rejected foreign session.
+Extension source/test typechecking passed after correcting the full project binding.
+The raw bootstrap's legacy live-summary paths and clean-source admission remain open.
+
+
+## Production dependency audit gate — 2026-10-23
+
+A read-only `npm audit --omit=dev --json` reported 73 production dependency findings:
+47 moderate, 23 high and 3 critical. The full advisory/path report and compact
+summary are retained privately. Critical package reports include DOMPurify, Next.js
+and proxy-addr; additional direct findings include MCP SDK, OpenCode packages,
+Tiptap and Nodemailer. These are audit reports, not established exploitability of
+Ingenium routes. Reachability, supported fixed versions and focused regressions
+must be reviewed before release publication. No automatic `npm audit fix`, forced
+upgrade, downgrade, or dependency mutation has been performed. Current images
+remain isolated restore candidates while this gate is open.
+
+
+## Release scope supersession — 2026-10-23, direct user instruction
+
+The user cancelled multichat orchestration and requested immediate focus on
+plain-English release blockers. Coordinated parent/child recovery, replacement
+attestation, simultaneous A/B/C orchestration and their R21 acceptance gates are
+retired from the release scope. Preserve their historical evidence and saved
+sessions. Normal single-chat use, memory, authentication, ordinary restart,
+security and preservation-safe publication remain required.
+
+The expired startup credential repair is verified in a restored full stack: the
+current candidate reaches healthy composite health and OpenCode is listening.
+Production remains untouched. Remaining work is dependency security triage,
+retirement of obsolete entry points, retained-function runtime acceptance and
+final reviewed rollout/publication. See the current scope section in
+`docs/operations/release-2026-10-23.md`; older orchestration gates no longer block
+this release. No OpenCode development or successor chat was used.
+
+
+## Restored installation and ordinary restart acceptance — 2026-10-23
+
+The candidate with source digest `143bd2ff1f540d13cae6367361279f9b06581bc9a80f61ba2762e602cb6842c3`
+built and passed native plugin loading after preserving workspace-local
+production dependencies in the image. The restored full stack reached healthy
+composite health and `MCP_BOOTSTRAP_READY`. A synthetic memory item written
+through installed MCP survived image replacement and an ordinary Compose
+restart; installed MCP readback matched its exact content and version after
+both transitions. This is installed transport/API/persistence proof; actual
+model behavior and production rollout remain open. Production is untouched.
+Runtime credential renewal checkpoint `71b7552a1a122a87d34a4379362076ae2e18dfc5`
+is pushed and remote-verified. Dependency npm audit: zero critical, zero high,
+21 moderate. The browser fixture build failed under host pressure before tests;
+strict containment recheck passed with zero active handles. The bounded-CPU
+browser rerun is pending. Multichat/coordinated recovery gates remain cancelled.
+
+
+## Renamed-chat reconnect and bounded browser acceptance — 2026-10-23
+
+A real browser reload returned `IDEMPOTENCY_KEY_REUSED` after the native session
+title changed. Exact private identity lookup now reconnects to the original
+conversation without mutating its title or adding checkpoints. Four API tests
+and API clean-core TypeScript validation passed. Browser run
+`a7f9819d-cf52-49ea-80f1-82cb5b501716` passed send/receive, persisted-session
+desktop/mobile rendering and authenticated reload with no duplicate checkpoints.
+Screenshots were inspected and strict containment passed with zero active handles.
+Fixture-only Next.js page workers are bounded to two after measured memory
+pressure; production config and test timeouts are unchanged.
+Checkpoint `31ae49668842b3cbca7ebf787f3ac852af33396f` is pushed and remote-verified.
+Restored auth-encryption, backup-signing and email-encryption keys match the
+originals byte for byte after restart. Production rollout, settled-source final
+build, actual model behavior and release publication remain open.
+
+
+## Release native discovery checkpoint - 2026-10-23
+
+The cancelled multichat gates remain retired. The curated source passed clean
+install/typechecking and focused core/extension/API checks. Chat browser acceptance
+passed all three desktop/mobile/reload cases. Installed memory survived image
+replacement and an ordinary restart; persistent keys matched the preserved originals.
+
+Native runtime acceptance found an empty global configuration root and an
+undiscovered managed broker policy. Launchers, isolated profile projection and API
+location forwarding are repaired. The broker enforcer recreates missing entries,
+reapplies after native activation and independently denies broker tool authorization.
+A copied project override attempting disable/model/permission changes was restored
+to the protected native registry shape after activation. Retired session-coordinator
+projection is removed. See docs/operations/native-config-discovery-2026-10-23.md.
+
+Revised clean source/image acceptance, legacy session/auth continuity, reversible
+production adoption, real browser/model acceptance and final publication remain.
+Production is still stopped and preserved. The full release goal is not complete.
+
+
+## Release acceptance and publication record - 2026-10-23
+
+Final runtime acceptance passed: unchanged configured models; a fresh real free-Zen
+reply and its persistence after normal restart; authenticated reload and
+desktop/mobile rendering; 24 actual routes without unexpected HTTP/page errors; installed
+memory save/update/restart/read/forget; three historical sessions and three
+persistent keys preserved; healthy image and all existing mounts retained.
+Multichat R21, simultaneous A/B/C and coordinated replacement-parent recovery
+are cancelled and do not gate this release. Original failure evidence, rollback
+images, migration archives and unrelated manual work remain preserved. The owned
+restore rehearsal is stopped without removing data.
+
+The portable acceptance ledger is docs/operations/release-acceptance-2026-10-23.md.
+Publication is recorded by https://github.com/jtmb/ingenium/pull/4 and its merge
+commit; historical pending checkpoint entries above are superseded by this row.
+The extra final fresh inference after restart reached Zen's free usage limit.
+Earlier fresh post-restart inference passed on the catalog image; relevant chat,
+native and frontend source inputs are unchanged. This constraint is retained.

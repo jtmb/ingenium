@@ -139,7 +139,7 @@ export function assertRepositorySyncStructure(
 
   if (input.resourcesManifest !== null && typeof input.resourcesManifest === "object" && !Array.isArray(input.resourcesManifest)) {
     const resources = input.resourcesManifest as Record<string, unknown>;
-    const lists = [resources.skills, resources.agents, resources.plugins];
+    const lists = [resources.skills, resources.agents, resources.plugins, resources.commands];
     let entries = 0;
     for (const list of lists) {
       if (!Array.isArray(list)) continue;
@@ -169,7 +169,10 @@ function stable(value: unknown): string {
 }
 
 function manifestHash(input: Pick<RepositorySyncApplyInput, "docsManifest" | "resourcesManifest">): string {
-  return createHash("sha256").update(stable(input)).digest("hex");
+  return createHash("sha256").update(stable({
+    docsManifest: input.docsManifest,
+    resourcesManifest: input.resourcesManifest,
+  })).digest("hex");
 }
 
 export function applyRepositorySync(projectId: string, input: RepositorySyncApplyInput) {
@@ -184,11 +187,11 @@ export function applyRepositorySync(projectId: string, input: RepositorySyncAppl
     const updatedAt = new Date().toISOString();
     if (!input.dryRun) {
       db.prepare(
-        `INSERT INTO coordination_worktrees (project_id, worktree_id, next_fence, created_at, updated_at)
-         VALUES (?, ?, 1, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
+        `INSERT INTO repository_sync_worktrees (project_id, worktree_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
       ).run(projectId, input.worktreeId, updatedAt, updatedAt);
       const worktreeExists = db.prepare(
-        "SELECT 1 FROM coordination_worktrees WHERE project_id = ? AND worktree_id = ?",
+        "SELECT 1 FROM repository_sync_worktrees WHERE project_id = ? AND worktree_id = ?",
       ).get(projectId, input.worktreeId);
       if (!worktreeExists) throw new RepositorySyncError("INVALID_REPOSITORY_SYNC");
       db.prepare(

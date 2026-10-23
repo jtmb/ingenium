@@ -5,13 +5,14 @@ import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mcpToolStates, projects, resetDbForTest } from "ingenium-core";
+import { childMcpServers, mcpToolStates, projects, resetDbForTest } from "ingenium-core";
 import {
   createFixtureMcpUsefulnessCollector,
   type McpUsefulnessConnection,
   type McpUsefulnessLaunchRequest,
 } from "../lib/mcp-usefulness-collector.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { createMcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { compatibilityAuthHeaders } from "./http-fixtures.js";
@@ -38,10 +39,14 @@ function fixtureConnection(overrides: Partial<McpUsefulnessConnection> = {}): Mc
   };
 }
 
-async function start(launch: (request: McpUsefulnessLaunchRequest) => McpUsefulnessConnection = fixtureConnection): Promise<void> {
+async function start(
+  launch: (request: McpUsefulnessLaunchRequest) => McpUsefulnessConnection = fixtureConnection,
+  configure?: (app: express.Application) => void,
+): Promise<void> {
   const app = express();
   app.use(express.json());
   app.use(authMiddleware);
+  configure?.(app);
   app.use("/mcp-tools", createMcpToolsRouter({
     usefulnessCollector: createFixtureMcpUsefulnessCollector({
       clock: { now: () => new Date("2026-07-31T12:00:00.000Z") },
@@ -218,6 +223,30 @@ describe("MCP usefulness report route", () => {
     expect(emptyBody).toMatchObject({ project: projectAName, project_id: projectAId, total: 0, data: { tools: [] } });
   });
 
+  it("returns a persisted Playwright-sized dynamic catalog between the core and route bounds", async () => {
+    childMcpServers.createPlaywrightChildMcpServer(projectAId);
+    childMcpServers.recordChildMcpDiscovery(projectAId, "playwright", {
+      status: "ready",
+      tools: Array.from({ length: 30 }, (_, index) => ({
+        name: `browser_action_${String(index).padStart(2, "0")}_${"x".repeat(44)}`,
+        description: `Playwright browser action ${index}`,
+        input_schema: { type: "object", properties: {} },
+      })),
+    });
+    resetDbForTest();
+
+    const response = await report("");
+    const body = await response.json();
+    const serializedBytes = Buffer.byteLength(JSON.stringify(body), "utf8");
+    const dynamicTools = body.data.tools.filter((entry: { category: string }) => entry.category === "Child MCP / playwright");
+
+    expect(response.status).toBe(200);
+    expect(body.total).toBe(body.data.tools.length);
+    expect(dynamicTools).toHaveLength(30);
+    expect(serializedBytes).toBeGreaterThan(64 * 1024);
+    expect(serializedBytes).toBeLessThanOrEqual(128 * 1024);
+  });
+
   it("rejects unknown, invalid, and oversized report queries with fixed statuses", async () => {
     for (const suffix of ["&unknown=value", "&enabled=maybe", "&q=%C3%A9", "&q=", "&category="]) {
       const response = await report(suffix);
@@ -240,8 +269,32 @@ describe("MCP usefulness report route", () => {
     const response = await report("");
     expect(response.status).toBe(503);
     const body = await response.json();
-    expect(body).toEqual({ error: { code: "MCP_REPORT_UNAVAILABLE", message: "The MCP report is unavailable." } });
+    expect(body).toEqual({ error: {
+      code: "MCP_REPORT_UNAVAILABLE", message: "The MCP report is unavailable.", stage: "close",
+    } });
     expect(JSON.stringify(body)).not.toContain("fixture-secret");
     expect(JSON.stringify(body)).not.toContain("private.invalid");
+  });
+
+  it("keeps general authorization denials at 403 without invoking the collector", async () => {
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    let launches = 0;
+    await start(() => {
+      launches += 1;
+      return fixtureConnection();
+    }, (app) => {
+      app.use((req, _res, next) => {
+        req.principal = {
+          type: "service", id: "general-denied", audience: "mcp", scopes: ["mcp:read"],
+          projectId: projectAId, projectIds: [projectAId], organizationId: null,
+        };
+        next();
+      });
+      app.use(authorizationMiddleware);
+    });
+
+    const response = await report("");
+    expect(response.status).toBe(403);
+    expect(launches).toBe(0);
   });
 });

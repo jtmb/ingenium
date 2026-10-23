@@ -63,7 +63,7 @@ export default function ProjectDropdown() {
         title={disabled ? "Project switching disabled on this page" : isChatRoute ? `Context project: ${activeProject}` : `Active project: ${activeProject}`}
         className={[
           "flex min-w-0 items-center gap-1 rounded p-1.5",
-          isChatRoute ? "max-w-[calc(100vw-8rem)] sm:max-w-sm" : "",
+          isChatRoute ? "max-w-full sm:max-w-sm" : "",
           disabled ? "cursor-not-allowed opacity-50" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]",
         ].join(" ")}
       >

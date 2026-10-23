@@ -94,13 +94,17 @@ require_literal "$dockerfile" "ARG NEXT_PUBLIC_RUNTIME_SCHEME=\"\""
 # these values as runtime environment variables to application processes.
 require_literal "$dockerfile" "ARG IMAGE_REVISION"
 require_literal "$dockerfile" "ARG IMAGE_SOURCE=\"https://github.com/jtmb/ingenium\""
+require_literal "$dockerfile" 'ARG IMAGE_SOURCE_SHA256=""'
+require_literal "$dockerfile" "test -z \"\$IMAGE_SOURCE_SHA256\" || { test \"\${#IMAGE_SOURCE_SHA256}\" -eq 64 && printf '%s' \"\$IMAGE_SOURCE_SHA256\" | grep -Eq '^[0-9a-f]{64}\$'; }"
 require_literal "$dockerfile" "grep -Eq '^[0-9a-f]{40}\$'"
 require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac'
 require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac'
 require_literal "$dockerfile" "org.opencontainers.image.revision=\"\${IMAGE_REVISION}\""
 require_literal "$dockerfile" "org.opencontainers.image.source=\"\${IMAGE_SOURCE}\""
+require_literal "$dockerfile" 'org.ingenium.source.sha256="${IMAGE_SOURCE_SHA256}"'
 reject_literal "$dockerfile" "ENV IMAGE_REVISION"
 reject_literal "$dockerfile" "ENV IMAGE_SOURCE"
+reject_literal "$dockerfile" "ENV IMAGE_SOURCE_SHA256"
 reject_literal "$dockerfile" "/usr/local/bin/xdg-open"
 require_literal "$dockerfile" "FROM node:22-slim AS builder"
 require_literal "$dockerfile" "FROM node:22-slim AS runtime-base"
@@ -155,7 +159,8 @@ require_literal "$dockerfile" "nginx/proxy-vscode.conf"
 require_literal "$dockerfile" "scripts/generate-dashboard-safe-read-policy.mjs"
 require_literal "$dockerfile" "nginx/dashboard-safe-reads-map.conf"
 require_literal "$dockerfile" "services/ingenium-api/config/dashboard-safe-reads.json ./services/ingenium-api/dist/config/dashboard-safe-reads.json"
-require_literal "$dockerfile" "EXPOSE 3000 4097 1455"
+require_literal "$dockerfile" "EXPOSE 3000 4097 1456"
+reject_literal "$dockerfile" "EXPOSE 3000 4097 1455"
 require_literal "$dockerfile" "validate-vault-job-secret-root.sh"
 require_literal "$dockerfile" "COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh scripts/validate-process-isolation.sh ./scripts/"
 require_literal "$dockerfile" '`/dev/shm` is a container-runtime tmpfs'
@@ -188,16 +193,27 @@ require_literal "$compose_file" "INGENIUM_RUNTIME_GATEWAY_HOST_PORT=\${INGENIUM_
 reject_literal "$compose_file" '"443:8443"'
 require_literal "$compose_file" "IMAGE_REVISION: \"\${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}\""
 require_literal "$compose_file" "IMAGE_SOURCE: \"\${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}\""
-require_literal "$compose_file" '"3000:3000"'
-reject_literal "$compose_file" "127.0.0.1:3000:3000"
+require_literal "$compose_file" 'IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"'
+source_sha256_wires="$(grep -F -c 'IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"' "$compose_file")"
+[ "$source_sha256_wires" -eq 5 ] || { echo "ERROR: every Compose image target must receive the optional source SHA-256 input"; exit 1; }
+require_literal "$compose_file" '"127.0.0.1:3000:3000"'
+reject_literal "$compose_file" '"3000:3000"'
+gateway_binding_count="$(grep -F -c '"127.0.0.1:3000:3000"' "$compose_file")"
+[ "$gateway_binding_count" -eq 2 ] || { echo "ERROR: both desktop gateway profiles must publish only host loopback"; exit 1; }
 reject_literal "$compose_file" "3002"
 require_literal "$compose_file" "127.0.0.1:4097:4097"
-require_literal "$compose_file" "127.0.0.1:1455:1455"
+require_literal "$compose_file" "127.0.0.1:1455:1456"
+reject_literal "$compose_file" "127.0.0.1:1455:1455"
+reject_literal "$compose_file" "127.0.0.1:1457:"
+callback_mapping_count="$(grep -F -c '127.0.0.1:1455:1456' "$compose_file")"
+[ "$callback_mapping_count" -eq 2 ] || { echo "ERROR: both Compose gateway services must map host callback 1455 to container 1456"; exit 1; }
 require_literal "$compose_file" "vscode-data:/home/ingenium-vscode/vscode-data"
 reject_pattern "$compose_file" '(^|[^0-9])4100:4100([^0-9]|$)'
 reject_literal "$compose_file" "INGENIUM_API_TOKEN=\${INGENIUM_API_TOKEN:-}"
 require_literal "$compose_file" "INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token"
 require_literal "$compose_file" '${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro'
+require_literal "$compose_file" "INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential"
+require_literal "$compose_file" '${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro'
 require_literal "$compose_file" "INGENIUM_BACKUPS_DIR=\${INGENIUM_BACKUPS_DIR:-}"
 require_literal "$compose_file" "DASHBOARD_ALLOWED_ORIGINS=\${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
 reject_literal "$compose_file" "1455:4097"
@@ -262,7 +278,9 @@ reject_literal "$entrypoint" "htpasswd"
 require_literal "$entrypoint" 'INGENIUM_API_TOKEN_FILE is required'
 require_literal "$entrypoint" "unset INGENIUM_API_TOKEN"
 require_literal "$entrypoint" 'RUNTIME_API_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/installation-api-token"'
+require_literal "$entrypoint" 'RUNTIME_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"'
 require_literal "$entrypoint" 'node /app/scripts/read-protected-api-token.mjs'
+require_literal "$entrypoint" 'mcp-learning'
 require_literal "$entrypoint" 'node /app/scripts/validate-root-entrypoint-chain.mjs'
 require_literal "$protected_token_reader" 'constants.O_RDONLY | constants.O_NOFOLLOW'
 require_literal "$protected_token_reader" '(metadata.mode & 0o777) !== 0o600'
@@ -271,9 +289,9 @@ require_literal "$dockerfile" 'chmod 0755 /app /app/packages /app/services /app/
 require_literal "$dockerfile" 'chmod 0555 /app/scripts /app/entrypoint.sh /app/scripts/*.sh'
 require_literal "$dockerfile" 'chmod 0444 /app/control-plane-supervisord.conf /app/runtime-supervisord.conf /app/supervisord.conf /app/scripts/*.mjs'
 require_literal "$dockerfile" 'node /app/scripts/validate-root-entrypoint-chain.mjs'
-require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /etc/opencode'
+require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode'
 require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json'
-require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/enforce-reserved-broker.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker.mjs'
+require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs'
 require_literal "$dockerfile" 'install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md'
 require_literal "$dockerfile" 'ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json'
 require_literal "$dockerfile" 'import("file:///app/packages/ingenium-core/dist/lib/index.js")'
@@ -300,6 +318,7 @@ reject_literal "$entrypoint" '.ingenium-api-token'
 reject_literal "$entrypoint" 'cmp -s "$RUNTIME_API_TOKEN_FILE"'
 reject_literal "$env_example" "INGENIUM_API_TOKEN="
 require_literal "$env_example" "INGENIUM_API_TOKEN_FILE=/home/you/.config/ingenium/live-production/installation-api.token"
+require_literal "$env_example" "INGENIUM_LEARNING_CREDENTIAL_FILE=/home/you/repos/ingenium/.opencode/.ingenium-learning-credential"
 require_literal "$env_example" "OPENCODE_SERVER_PASSWORD="
 require_literal "$env_example" "OPENCODE_SERVER_PASSWORD_FILE=/absolute/path/to/opencode-server.password"
 require_literal "$env_example" "INGENIUM_EMAIL_ENCRYPTION_KEY="
@@ -313,7 +332,11 @@ for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.
 done
 require_file "${repo_root}/scripts/normalize-agent-profiles.sh"
 require_file "${repo_root}/scripts/project-agent-profiles.mjs"
-require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (entry.name === RESERVED_BROKER_PROFILE) continue;'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (removeWorkspaceAcls) removeAcl(directoryFd, "-k");'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (entry.name === RESERVED_BROKER_PROFILE && !removeWorkspaceAcls) continue;'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'if (removeWorkspaceAcls) removeAcl(profile.fd, "-b");'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" '} else if (args[0] === "--remove-workspace-acls" && args.length === 2) {'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'normalizeAgentProfiles(args[1], true);'
 reject_literal "${repo_root}/scripts/project-agent-profiles.mjs" '["execution", "ingenium-llm-broker.md"]'
 require_literal "${repo_root}/scripts/run-api.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "${repo_root}/scripts/run-api.sh" 'backup_dir="${INGENIUM_BACKUPS_DIR:-}"'
@@ -393,15 +416,30 @@ for binding in 'INGENIUM_PROJECT ingenium' 'INGENIUM_WORKSPACE_ID shared-memory-
   require_literal "$entrypoint" "\"$name\": \"$value\""
   require_literal "${repo_root}/scripts/project-opencode-global-config.mjs" "environment.$name = \"$value\";"
 done
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts"'
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts"'
-require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
+require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync"'
+  require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle"'
+require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"'
 require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups'
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'
-require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
+require_line_before "$entrypoint" 'secure_persistent_path private-credential "$credential_path" - - 0600' '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "$entrypoint" 'workspace_root=/workspace/ingenium'
+require_literal "$entrypoint" 'workspace_alias=/home/brajam/repos/ingenium'
+require_literal "$entrypoint" 'workspace_identity=$(stat -Lc '\''%d:%i'\'' "$workspace_root")'
+require_literal "$entrypoint" 'if [ "$workspace_identity" != "$alias_identity" ]; then'
+reject_literal "$entrypoint" 'for workspace_root in /workspace /workspace/*; do'
+require_line_before "$entrypoint" 'if [ "$workspace_identity" != "$alias_identity" ]; then' 'WORKSPACE_OPENCODE_DIR="$workspace_root/.opencode"'
+reject_literal "$entrypoint" 'WORKSPACE_OPENCODE_DIR="/workspace/.opencode"'
+require_line_before "$entrypoint" 'WORKSPACE_OPENCODE_DIR="$workspace_root/.opencode"' 'WORKSPACE_AGENTS_DIR="${WORKSPACE_OPENCODE_DIR}/agents"'
+recovery_normalization='/app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"'
+require_line_before "$entrypoint" 'secure_persistent_path private-credential "$credential_path" - - 0600' "$recovery_normalization"
+require_line_before "$entrypoint" "$recovery_normalization" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'const suffix = "/packages/ingenium-extension/scripts/recovery-bootstrap.js";'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'fail("recovery bootstrap path is not allowlisted");'
+require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"'
 require_literal "$entrypoint" '[ "$(basename "$source_profile")" = "ingenium-llm-broker.md" ] && continue'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_AUDIENCE="mcp"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_MCP_CREDENTIAL_PURPOSE="general"'
 reject_literal "${repo_root}/scripts/start-opencode-web.sh" '.ingenium-repository-sync-credential'
@@ -412,10 +450,14 @@ for identity in PROJECT_ID ORGANIZATION_ID RUNTIME_ID RUNTIME_OWNER_ID STORAGE_M
   require_literal "${repo_root}/scripts/start-opencode-web.sh" "INGENIUM_${identity}=\"\$INGENIUM_${identity}\""
 done
 require_literal "${repo_root}/scripts/start-opencode-web.sh" '"$@"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode"'
+for launcher in start-opencode-web.sh start-runtime-opencode-web.sh; do
+  require_literal "${repo_root}/scripts/$launcher" 'OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json"'
+done
+require_literal "$runtime_entrypoint" '--project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents'
 require_literal "$entrypoint" 'install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-runtime'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" '. /run/ingenium-runtime/environment'
-require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "coordination:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'
+require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'
 require_literal "${repo_root}/scripts/start-runtime-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'attempts=10'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'

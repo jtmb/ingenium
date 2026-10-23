@@ -13,6 +13,35 @@
  */
 
 import { describe, it, expect, afterEach, vi, beforeAll, afterAll } from "vitest";
+
+const guardedUploadCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const isSharedUpload = (path: string | Buffer | URL) =>
+    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+  const guard = (operation: string, path: string | Buffer | URL) => {
+    if (!isSharedUpload(path)) return false;
+    guardedUploadCalls.push(operation);
+    return true;
+  };
+
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) =>
+      guard("mkdirSync", args[0]) ? undefined : fs.mkdirSync(...args),
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) =>
+      guard("readdirSync", args[0]) ? [] : fs.readdirSync(...args),
+    statSync: (...args: Parameters<typeof fs.statSync>) =>
+      guard("statSync", args[0]) ? undefined : fs.statSync(...args),
+    existsSync: (...args: Parameters<typeof fs.existsSync>) =>
+      guard("existsSync", args[0]) ? false : fs.existsSync(...args),
+    unlinkSync: (...args: Parameters<typeof fs.unlinkSync>) => {
+      if (!guard("unlinkSync", args[0])) fs.unlinkSync(...args);
+    },
+  };
+});
+
 import express from "express";
 import { createServer, request as httpRequest, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -48,6 +77,7 @@ function buildApp(): express.Express {
 }
 
 beforeAll(async () => {
+  expect(guardedUploadCalls).toEqual(["mkdirSync", "readdirSync"]);
   process.env.INGENIUM_API_TOKEN = API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
   const app = buildApp();
@@ -518,30 +548,58 @@ describe("Native provider integrations", () => {
     const callback = await fetch(`${baseUrl}/auth/callback?state=state-1&code=oauth-code`);
     expect(callback.status).toBe(200);
     expect(await callback.text()).toContain("Authorization complete");
-    expect(complete).toHaveBeenCalledWith("attempt-1", "oauth-code");
+    expect(complete).toHaveBeenCalledWith("attempt-1", "oauth-code", "openai");
   });
 
   it("forwards auto OAuth callbacks to OpenCode's local listener", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "http://localhost:1455/auth/callback");
     vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
       location: {},
       data: {
         attemptID: "attempt-auto",
-        url: "https://auth.openai.com/authorize?state=state-auto",
+        url: "https://auth.openai.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=state-auto",
         instructions: "",
         mode: "auto",
         time: { created: Date.now(), expires: Date.now() + 60_000 },
       },
     });
 
-    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+    const nativeListener = createServer();
+    await new Promise<void>((resolve) => nativeListener.listen(0, "127.0.0.1", resolve));
+    const nativePort = (nativeListener.address() as AddressInfo).port;
+    let resolveDelivery!: (url: string) => void;
+    const delivered = new Promise<string>((resolve) => { resolveDelivery = resolve; });
+    nativeListener.on("request", (req, res) => {
+      resolveDelivery(req.url ?? "");
+      res.writeHead(204).end();
+    });
     const originalFetch = globalThis.fetch;
-    const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
-    const callback = await originalFetch(`${baseUrl}/auth/callback?state=state-auto&code=oauth-code`);
+    let callbackForwardCount = 0;
+    const forward = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const inputUrl = input instanceof Request ? input.url : input instanceof URL ? input.toString() : input;
+      if (inputUrl.startsWith("http://localhost:1455/auth/callback")) {
+        callbackForwardCount += 1;
+        return originalFetch(inputUrl.replace("http://localhost:1455", `http://127.0.0.1:${nativePort}`), init);
+      }
+      return originalFetch(input, init);
+    });
 
-    expect(callback.status).toBe(200);
-    expect(await callback.text()).toContain("Authorization received");
-    expect(forward).toHaveBeenCalledWith("http://localhost:1455/auth/callback?code=oauth-code&state=state-auto");
+    try {
+      await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+      const callback = await originalFetch(`${baseUrl}/auth/callback?state=state-auto&code=oauth-code`);
+      const replay = await originalFetch(`${baseUrl}/auth/callback?state=state-auto&code=oauth-code`);
+      const nativeRequest = await delivered;
+
+      expect(callback.status).toBe(200);
+      expect(await callback.text()).toContain("Authorization received");
+      expect(replay.status).toBe(400);
+      expect(nativeRequest).toBe("/auth/callback?code=oauth-code&state=state-auto");
+      expect(forward).toHaveBeenCalledWith("http://localhost:1455/auth/callback?code=oauth-code&state=state-auto");
+      expect(callbackForwardCount).toBe(1);
+    } finally {
+      await new Promise<void>((resolve, reject) => nativeListener.close((error) => error ? reject(error) : resolve()));
+    }
   });
 
   it("uses a validated configured auto OAuth callback forward URL", async () => {
@@ -549,7 +607,7 @@ describe("Native provider integrations", () => {
     vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "http://[::1]:1455/auth/callback");
     vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
       location: {},
-      data: { attemptID: "attempt-configured-forward", url: "https://auth.openai.com/authorize?state=configured-forward-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+      data: { attemptID: "attempt-configured-forward", url: "https://auth.openai.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=configured-forward-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
     });
     await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
     const originalFetch = globalThis.fetch;
@@ -557,6 +615,60 @@ describe("Native provider integrations", () => {
     await originalFetch(`${baseUrl}/auth/callback?state=configured-forward-state&code=oauth-code`);
 
     expect(forward).toHaveBeenCalledWith("http://[::1]:1455/auth/callback?code=oauth-code&state=configured-forward-state");
+  });
+
+  it("cancels native browser OAuth when OpenCode falls back to unpublished port 1457", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "http://localhost:1455/auth/callback");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-native-1457", url: "https://auth.openai.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1457%2Fauth%2Fcallback&state=native-1457-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    const cancel = vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("cancelled");
+
+    const response = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({ error: { code: "UNSUPPORTED_OAUTH_CALLBACK_TRANSPORT", message: "This OAuth callback transport is not supported by this deployment." } });
+    expect(JSON.stringify(body)).not.toContain("1457");
+    expect(cancel).toHaveBeenCalledWith("attempt-native-1457", "openai");
+  });
+
+  it("cancels native browser OAuth when its loopback forward target disagrees with the redirect", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "http://[::1]:1457/auth/callback");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-forward-mismatch", url: "https://auth.openai.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=forward-mismatch-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    const cancel = vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("cancelled");
+
+    const response = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "UNSUPPORTED_OAUTH_CALLBACK_TRANSPORT" } });
+    expect(cancel).toHaveBeenCalledWith("attempt-forward-mismatch", "openai");
+  });
+
+  it("keeps state-less headless OAuth attempts pollable without a redirect URI", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-headless", url: "https://auth.openai.com/codex/device", instructions: "Enter the device code", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    const getAttempt = vi.spyOn(opencodeClient, "getIntegrationAttempt").mockResolvedValue({ location: {}, data: { status: "pending" } });
+
+    const begin = await beginOAuth({ methodID: "chatgpt-headless", inputs: {} });
+    const attempt = await begin.json();
+    const status = await fetch(`${apiUrl}/integration-attempts/attempt-headless`, {
+      headers: compatibilityAuthHeaders(API_TOKEN),
+    });
+
+    expect(begin.status).toBe(200);
+    expect(attempt.data.data.url).toBe("https://auth.openai.com/codex/device");
+    expect(status.status).toBe(200);
+    expect(getAttempt).toHaveBeenCalledWith("attempt-headless", "openai");
   });
 
   it("consumes OAuth callback state to prevent code replay", async () => {
@@ -581,6 +693,28 @@ describe("Native provider integrations", () => {
     expect(complete).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels a second OAuth attempt that reuses pending state", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth")
+      .mockResolvedValueOnce({
+        location: {},
+        data: { attemptID: "attempt-state-first", url: "https://auth.openai.com/authorize?state=shared-state", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+      })
+      .mockResolvedValueOnce({
+        location: {},
+        data: { attemptID: "attempt-state-second", url: "https://auth.openai.com/authorize?state=shared-state", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+      });
+    const cancel = vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("cancelled");
+
+    const first = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+    const second = await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(502);
+    expect(await second.json()).toMatchObject({ error: { code: "INVALID_OAUTH_STATE" } });
+    expect(cancel).toHaveBeenCalledWith("attempt-state-second", "openai");
+  });
+
   it("cancels the attempt when the provider rejects authorization", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
@@ -594,7 +728,7 @@ describe("Native provider integrations", () => {
 
     expect(callback.status).toBe(400);
     expect(await callback.text()).toContain("Authorization was cancelled");
-    expect(cancel).toHaveBeenCalledWith("attempt-3");
+    expect(cancel).toHaveBeenCalledWith("attempt-3", "openai");
   });
 
   it("returns a safe error page when OAuth completion throws", async () => {
@@ -666,7 +800,7 @@ describe("Encoded dot segment proxy integration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("forwards an encoded dot segment to the sentinel and returns a fixed error promptly", async () => {
+  it("rejects an encoded dot segment before transport instead of forwarding it", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(404, {
       name: "NotFoundError",
@@ -701,16 +835,13 @@ describe("Encoded dot segment proxy integration", () => {
       request.end();
     });
 
-    expect(response.status).toBe(404);
+    // v2 session reads validate the identifier before any transport call, so a
+    // dot segment can never reach an upstream path.
+    expect(response.status).toBe(502);
     expect(JSON.parse(response.body)).toEqual({
-      error: { code: "NotFoundError", message: "OpenCode request failed." },
+      error: { code: "INVALID_SESSION_ID", message: "OpenCode request failed." },
     });
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const upstreamPath = new URL(fetchSpy.mock.calls[0]![0] as string).pathname;
-    expect(upstreamPath).toBe("/session/__invalid_opencode_path_segment__");
-    expect(upstreamPath).not.toBe("/");
-    expect(upstreamPath).not.toBe("/session/");
-    expect(upstreamPath).not.toContain("/global/config");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

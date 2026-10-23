@@ -7,14 +7,35 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 ## Overview
 
-**The root `opencode.json` `agent` map contains 11 mapped entries: built-in Plan plus 10 named Ingenium agents.** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **Chat primary** (`ingenium-chat`) handles user-facing conversational interactions and may be hidden from general selectors. The mapped agents cover exploration, QA, documentation, engineering, recovery, and security. Managed Playwright/browser automation is a generic capability, and passive visual QA is owned by mapped `@ingenium-qa`. The separate hidden `ingenium-llm-broker` is reserved for system use, never directly invocable, and excluded from the repository skill/reference loading surface. Every user-facing active agent, including built-in Plan, explicitly loads `@ponytail` and the task-matching allowed skills before acting; this skill/reference surface is separate from tool grants.
+**The root `opencode.json` `agents` map contains 11 mapped entries: built-in `plan` plus 10 named Ingenium agents. Plan alone uses the root agent ID `plan` and root profile `.opencode/agents/plan.md`; the named custom agents retain their nested native V2 IDs and profile paths.** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, performs feasible direct work through explicit scoped grants, delegates bounded work when necessary, and returns terminal outcomes. A dedicated **Chat primary** (`ingenium-chat`) handles user-facing conversational interactions and may be hidden from general selectors. The mapped agents cover exploration, QA, documentation, engineering, recovery, and security. Managed Playwright/browser automation is a generic capability, and passive visual QA is owned by mapped `@ingenium-qa`. The separate hidden `ingenium-llm-broker` is reserved for system use, never directly invocable, and excluded from the repository skill/reference loading surface. Every user-facing active agent, including Plan, loads `@ponytail`, task-matching skills, and relevant roadmap/context before acting; the permission surface is separate from the active loading choice.
 
-The root mapping is authoritative for the 11 entries. The repository currently
-contains 10 non-broker Markdown profiles plus the hidden broker; `plan` is the
-built-in Plan mapping. Four writer-capable
-identities remain: Fast, Premium, Recovery, and Docs.
+The root mapping is authoritative for the 11 entries. The repository contains
+11 mapped Markdown profiles plus the hidden broker. Five permission-derived
+writers remain: Orchestrator, Fast, Premium, Recovery, and Docs.
 
-Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: its root `opencode.json` permission block is the sole root-mapping permission exception. It grants `read`, `glob`, `grep`, `question`, and the read-only `ingenium_coordination_status` tool; its `task` map allows only `ingenium-explore` and denies every other agent. `edit`, `write`, `bash`, and `todowrite` are explicitly denied, coordination mutation tools remain denied, and `skill` allows all repository skills. Plan cannot invoke `ingenium-docs`, `ingenium-qa`, or any other subagent. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
+### Inherited skills
+
+Mapped user-facing profiles allow `skill` with resource `"*"`, so skills supplied
+by OpenCode, global installations, and project plugins remain available without
+adding every inherited ID to this repository. The nine explicit repository and
+Ponytail grants remain as required local coverage. This permission allows loading
+instructions; it does not grant the tools those instructions describe. All other
+tool permissions retain their profile-owned default-deny boundaries, and the
+hidden broker retains no skill allowance.
+
+OpenCode advertises permitted skills only when they have a description and have
+not disabled autoinvocation. A project definition overrides a same-ID global
+definition. To inspect this project's catalog, use the native object-query form:
+
+```sh
+opencode api get '/api/skill?location[directory]=/home/brajam/repos/ingenium'
+```
+
+Use the same exact location for agent and plugin diagnostics. A catalog entry
+proves discovery, not that a model loaded it. Profile changes still require the
+safe full-parent restart described below before claiming session activation.
+
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied in every custom operational profile. Plan is the deliberate analysis exception: `.opencode/agents/plan.md` grants `read`, `glob`, `grep`, and `question`; its `subagent` rules allow only `research/ingenium-explore` and deny every other agent. `edit`, `shell`, and `todowrite` are denied, and its broad `skill` permission is a capability rather than a requirement to load every skill. Plan cannot invoke Docs, QA, or any other subagent. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 ### Verification scope
 
@@ -76,17 +97,25 @@ not agent requirements.
 
 ### Orchestrator Agent Model
 
-The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agent"` key. Every root `agent.<name>` entry is model/variant-only except for the built-in Plan entry, which is the sole root-mapping permission exception; root owns `model` and `variant`, while native Markdown profiles own prompt content, permissions, lifecycle metadata, and named skills:
+The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agents"` key. Every root entry contains only its native `provider/model#variant` reference. Markdown profiles own prompt content, ordered permissions, lifecycle metadata, and named skills:
 
-- **Model** — Defined in `opencode.json` (not the Markdown profile). The orchestrator routes writer tasks to Fast, Premium, and Recovery tiers based on task complexity and risk, with Premium handling critical/high-risk implementation and Recovery handling only the deployment-only recovery boundary.
+- **Model** — Defined in `opencode.json` (not the Markdown profile). Exact assignments are listed below.
+- **Identity** — Derived from the Markdown path, including its category; omit
+  legacy `name:` frontmatter. Native V2 2.0.11 treats that extra field as legacy
+  syntax and can move native permission rules into request metadata instead of
+  enforcing them. Repository-only `skills` metadata is retained as YAML comments
+  by profile writers; actual skill availability uses the `skill` permission rules.
+- **Harness controls** — Code Mode's `execute` rule permits the interface;
+  nested tools need their own named permissions. Executing profiles allow
+  task/status reads, rule reconciliation and error triage. Only the primary may
+  declare/complete tasks and record child follow-up; children inherit its active
+  task. Assigned evidence-directory grants remain explicit and bounded.
 - **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
 - **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
-Agent frontmatter metadata is persisted with the agent record. A root
-`prompt: "{file:.opencode/agents/...}"` reference can load a Markdown prompt body,
-but it is not the ordinary agent-discovery mechanism; its YAML frontmatter is not
-imported as a second `agent.<name>` mapping and cannot override the root model or
-variant. The internal
+Agent frontmatter metadata is persisted with the agent record. The Markdown body
+is the native system prompt; frontmatter does not become a second root
+`agents.<id>` mapping and cannot override the root model reference. The internal
 `ingenium-llm-broker` is an API-owned, reserved profile: disk-only copies are
 never imported, and sync accepts an API row only when it matches the complete
 static canonical template before rewriting the one canonical disk profile.
@@ -101,54 +130,58 @@ neither introduces nor bypasses FK cascade semantics.
 
 ### Exact runtime mappings
 
-Root `opencode.json` sets `default_agent` to `ingenium-orchestrator` and
-`subagent_depth` to `1`. It is authoritative for these case-sensitive model and variant
-mappings. Every root entry is model/variant-only except for the built-in `plan`
-entry, whose explicit permission block is the sole root-mapping permission
-exception; canonical Markdown profiles own the prompt, permissions, lifecycle
+Root `opencode.json` sets `default_agent` to `primary/ingenium-orchestrator` and
+`experimental.subagent_depth` to `1`. It is authoritative for the case-sensitive
+native IDs and `model#variant` references. Every root entry is model-only;
+canonical Markdown profiles own the prompt, ordered permissions, lifecycle
 metadata, and skills. The canonical-profile column is a repository
-cross-reference, not a third root mapping field. The built-in `plan` entry is
-the native OpenCode Plan mapping (`openai/gpt-6-astra`, `max`); its sole
-root-level task allowance is `ingenium-explore`, while every other task target
-is denied. `ingenium-explore` is a separate mapped agent.
+cross-reference, not another root mapping field. Plan's profile allows only
+`research/ingenium-explore` through `subagent`; every other target is denied.
 The protected `ingenium-llm-broker` intentionally has no root mapping.
 
 | Agent | Model | Variant | Canonical profile |
 |---|---|---|---|
-| `plan` (built-in) | `openai/gpt-6-astra` | `max` | Built-in Plan mode (root mapping) |
-| `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
-| `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
-| `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
-| `ingenium-software-engineer-fast` | `openai/gpt-5.6-sol` | `medium` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
-| `ingenium-software-engineer-premium` | `openai/gpt-6-astra` | `medium` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
-| `ingenium-recovery-engineer` | `openai/gpt-5.6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
-| `ingenium-orchestrator` | `deepseek/deepseek-v4-flash` | `max` | `.opencode/agents/primary/ingenium-orchestrator.md` |
-| `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
-| `ingenium-chat` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
+| `plan` | `openai/gpt-6-astra` | `max` | `.opencode/agents/plan.md` |
+| `ingenium-explore` | `openai/gpt-6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
+| `ingenium-docs` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-docs.md` |
+| `ingenium-qa` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-qa.md` |
+| `ingenium-software-engineer-fast` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
+| `ingenium-software-engineer-premium` | `openai/gpt-6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-recovery-engineer` | `openai/gpt-6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
+| `ingenium-orchestrator` | `openai/gpt-6-sol` | `medium` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-scout` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/research/ingenium-scout.md` |
+| `ingenium-chat` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/chat/ingenium-chat.md` |
 | `ingenium-security-auditor` | `openai/gpt-6-astra` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |
 
-The diagram below is **serialized by dependency**: Wave 2 starts only after
-Wave 1 has returned and its declared verification has completed. Independent
-eligible items do not wait for unrelated work.
+The diagram below is a **conditional delegation example**, not a required wave.
+Directly feasible work uses zero subagents. When delegation is useful, form a
+new team of 2–6 useful subagents (3 preferred, 6 active children maximum per
+parent); do not add filler or create a new singleton. A one-member tail is
+allowed only for an already-formed team. An explicit concurrency request does
+not override this team shape or deny-default permissions.
 
-Current delegation policy follows the explicit user request and the active
-orchestrator profile: dispatch one distinct subagent instance per
-dependency-ready open TodoWrite/roadmap item, with exclusive non-overlapping
-writer territories. There is no fixed active-agent or writer ceiling; record
-actual counts for the selected items. Linked TodoWrite/roadmap entries count
-once rather than as duplicate work, and historical scheduler notes do not
-override this current policy. Multiple instances may use the same authorized
-profile; never manufacture roles.
+Dependency-ready work may start without waiting for unrelated team members only
+when a supported background capability exists. Without that capability, use
+honest parallel synchronous waves. Synchronous batches remain synchronous;
+true async also requires correlated results, and no async proof may be claimed
+without those conditions. All assignments retain complete contracts, exclusive
+territories, and durable Todo/failure evidence.
 
 Every dispatch requires a complete task contract. Writers retain exclusive
 non-overlapping territories, dependent items wait on prerequisites, and
-QA/security/visual review runs once per applicable finalized boundary, never
-prematurely. Subagents never delegate or spawn other subagents. Only
+independent verification remains required when named. QA runs exactly one
+report only when a declared finalized boundary has a risk or acceptance need;
+security runs at most one report only for a predeclared changed security
+surface; visual review runs only when its declared finalized UI boundary
+genuinely requires it. Subagents never delegate or spawn other subagents. Only
 `.opencode/agents/primary/ingenium-orchestrator.md` contains subagent-
 orchestration instructions; worker profiles carry no delegation procedure. The
 Fast and Premium profiles explicitly state: “Never delegate, spawn, reassign,
 or request another subagent; return research or documentation needs to the
 orchestrator.” Deny-default permissions and broker protection remain unchanged.
+Directory auto-approval remains limited to the declared project and canonical
+worktree; the orchestrator retains narrow grants, and other tool
+surfaces remain as established by `e25f5519`.
 
 ```mermaid
 flowchart TB
@@ -156,38 +189,24 @@ flowchart TB
         REQ["💬 User Request"]
     end
 
-    REQ --> ORCH["⚡ @ingenium-orchestrator<br/><i>Coordination Agent</i><br/>Delegates, never writes directly"]
+    REQ --> ORCH["⚡ @ingenium-orchestrator<br/><i>Coordination Agent</i><br/>Direct-first; delegates only when needed"]
 
-    subgraph Wave1["Dispatch Wave 1 — user-requested: 4 ready items, 4 distinct agents, 2 writers"]
-        T1["Selected Todo A<br/>implementation"]
-        FAST["⚡ ingenium-software-engineer-fast<br/>Routine isolated work · writer"]
-        EXPLORE["🔬 ingenium-explore · research"]
-        T2["Selected Todo B<br/>critical implementation"]
-        PREM["💎 ingenium-software-engineer-premium<br/>Critical and complex work · writer"]
-        SCOUT["🔎 ingenium-scout · docs RAG"]
-        T1 --> FAST
-        R1["Selected research item<br/>independent caller inventory"] --> EXPLORE
-        T2 --> PREM
-        R2["Selected research item<br/>existing docs context"] --> SCOUT
-        W1WAIT["Waiting items<br/>Reviewers and directly affected docs await finalized implementation"]
-    end
-
-    subgraph Wave2["Post-wave review + docs — applicable QA/security/docs items"]
-        T3["Selected Todo C<br/>behavior + visual review"]
-        QA["🔍 ingenium-qa · targeted + visual review"]
-        SECURITY["🛡️ ingenium-security-auditor · current-diff review"]
-        DOCS["📝 ingenium-docs · directly affected docs only · writer"]
-        T3 --> QA
-        S1["Selected security item<br/>predeclared changed surface"] --> SECURITY
-        D1["Selected documentation item<br/>directly affected docs"] --> DOCS
-        W2WAIT["Waiting items: none<br/>No additional work is manufactured"]
-    end
-
-    ORCH --> Wave1
-    Wave1 --> ORCH
-    ORCH --> Wave2
-    Wave2 --> ORCH
-    ORCH --> DONE["✅ Done"]
+    DECIDE{"Can the active authorized agent<br/>complete this feasibly and efficiently?"}
+    DIRECT["Direct execution<br/>0 subagents"]
+    TEAM["Useful new team<br/>2–6 children · 3 preferred<br/>max 6 active children per parent<br/>no filler or new singleton"]
+    DECIDE -->|"Yes"| DIRECT
+    DECIDE -->|"No"| TEAM
+    TEAM --> READY["Dependency-ready items only<br/>exclusive writer territories<br/>complete contracts + Todo evidence"]
+    CAP{"Supported background capability?"}
+    READY --> CAP
+    CAP -->|"Yes"| ASYNC["Start newly eligible work<br/>without unrelated waits"]
+    CAP -->|"No"| SYNC["Honest parallel synchronous wave<br/>do not claim async proof"]
+    DIRECT --> GATES
+    ASYNC --> GATES
+    SYNC --> GATES
+    GATES["Conditional gates only:<br/>independent verification, QA/Docs/research,<br/>security, visual, deployment, recovery"]
+    ORCH --> DECIDE
+    GATES --> DONE["✅ Done"]
 ```
 
 ### User-facing orchestration communication
@@ -195,36 +214,36 @@ flowchart TB
 The orchestrator communicates in four stages:
 
 1. **Plain-language introduction** — explain the goal, why it matters, and the immediate approach in one to three sentences.
-2. **Structured contract** — show `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification and escalation rules, the user concurrency request, item-to-agent assignments, active/writer counts, territories, dependencies, and waiting-item reasons.
+2. **Structured contract** — show `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification and escalation rules, the direct-versus-delegated decision, any team size and active-child count, background-capability basis, item-to-agent assignments, territories, dependencies, and waiting-item reasons.
 3. **Interpreted phase result** — explain what completed, what changed, which checks ran and their outcomes, the finding classification, and the next dependency. If work remains open, immediately continue to the next eligible phase rather than asking for a reprompt or returning raw agent/tool output.
 4. **Human-readable terminal summary** — report status, changed files, verification execution count, findings or remaining work, and Markdown links or repository paths to retained proof. Distinguish source-test, deployed-runtime, and model/session evidence.
 
-The Wave 2 example combines behavior and visual review under `@ingenium-qa` and
-assumes directly affected documentation plus applicable security review. If a
-review is blocked or not applicable, record that item's concrete dependency or
-applicability reason; do not delay safe independent reviewers or manufacture
-work.
+The conditional example combines behavior and visual review under
+`@ingenium-qa` only when those checks apply, and assumes directly affected
+documentation plus applicable security review. If a review is blocked or not
+applicable, record that item's concrete dependency or applicability reason; do
+not delay safe independent reviewers or manufacture work.
 
 ## Agent Table
 
-The table below covers the 10 named mapped agents and the hidden broker; the
-built-in Plan entry is represented by the root `plan` mapping above.
+The table below covers the 10 named mapped agents and the hidden broker; built-in
+Plan is represented by root ID `plan` in the mapping table above. The API agent lifecycle and disk synchronization also retain its root `plan.md` path; model updates migrate the old `primary/plan` override to `plan` without dropping its variant.
 
 | Agent | Type | Mode | Skills Allowed |
 |-------|------|------|----------------|
-| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | All repository skills/references |
-| **ingenium-chat** | Primary | Chat (read-only except explicit user-directed saved memory, `hidden: true`) | All repository skills/references |
-| **ingenium-explore** | Subagent | Research and exploration | All repository skills/references |
-| **ingenium-scout** | Subagent | Research + Docs RAG only; no generic source review | All repository skills/references |
-| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | All repository skills/references |
-| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | All repository skills/references |
-| **ingenium-recovery-engineer** | Subagent | **Permission-derived writer (deployment-only)** — only the fixed production-restart command plus scoped Git diff/add/commit checkpoint operations and read-only object/tree inspection; source/package/config executable paths denied; writes limited to declared recovery evidence/roadmap; no questions, delegation, or implementation | All repository skills/references |
-| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | All repository skills/references |
-| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | All repository skills/references |
-| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | All repository skills/references |
+| **ingenium-orchestrator** | Primary | Coordination — direct-first; delegates only when needed; feasible direct work uses explicit scoped grants | Ponytail + task-matching skills/references |
+| **ingenium-chat** | Primary | Chat (read-only except explicit user-directed saved memory, `hidden: true`) | Ponytail + task-matching skills/references |
+| **ingenium-explore** | Subagent | Research and exploration | Ponytail + task-matching skills/references |
+| **ingenium-scout** | Subagent | Research + Docs RAG only; no generic source review | Ponytail + task-matching skills/references |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | Ponytail + task-matching skills/references |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | Ponytail + task-matching skills/references |
+| **ingenium-recovery-engineer** | Subagent | **Permission-derived writer (deployment-only)** — only the fixed production-restart command plus scoped Git diff/add/commit checkpoint operations and read-only object/tree inspection; source/package/config executable paths denied; writes limited to declared recovery evidence/roadmap; no questions, delegation, or implementation | Ponytail + task-matching skills/references |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | Ponytail + task-matching skills/references |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | Ponytail + task-matching skills/references |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | Ponytail + task-matching skills/references |
 | **ingenium-llm-broker** | Subagent | Hidden system-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — (excluded) |
 
-> **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
+> **Model configuration**: Agent model references are defined centrally in `opencode.json` under the `"agents"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
 >
 > > **Note on `ingenium-chat`**: The canonical repository profile is
 > > `.opencode/agents/chat/ingenium-chat.md`. Runtime bootstrap may project
@@ -234,45 +253,46 @@ built-in Plan entry is represented by the root `plan` mapping above.
 ### Skill permission policy
 
 Native Markdown profiles grant the repository skill/reference surface explicitly;
-the root `opencode.json` stores the runtime model/variant mappings and does not
-serve as the profile permission authority for mapped custom agents; built-in
-Plan's root block is the sole root-mapping permission exception. User-facing profiles include the
+the root `opencode.json` stores runtime model references and does not serve as
+the profile permission authority. User-facing profiles include the
 canonical skill names, including `ponytail`, and their preflight requires loading
 `@ponytail` before any action:
 
 ```yaml
-permission:
-  "*": deny
-  skill:
-    development-conventions: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ```
 
-The same all-skill loading surface is available to built-in Plan. It is a
-repository skill/reference capability, not a tool grant. The built-in Plan root
-block is the sole root-mapping permission exception: `skill: "*"` allows all
-repository skills; `read`, `glob`, `grep`, `question`, and the read-only
-`ingenium_coordination_status` tool are allowed; and `task` denies `*` while
-allowing only `ingenium-explore`. `edit`, `write`, `bash`, and `todowrite` are
-explicitly denied, and coordination mutation tools remain denied. Plan cannot
-invoke `ingenium-docs`, `ingenium-qa`, or any other subagent. Root mappings and
-mapped profiles must remain semantically aligned, but profile frontmatter is
-not a second runtime configuration source.
+Plan retains a broad skill permission surface as a capability, but
+active planning loads `@ponytail`, task-matching skills, and relevant
+roadmap/context only. Its profile allows `skill`, `read`, `glob`, `grep`, and
+`question`; `subagent` denies `*` before allowing only
+`research/ingenium-explore`. `edit`, `shell`, and `todowrite` are explicitly
+denied. Plan cannot invoke `ingenium-docs`, `ingenium-qa`, or any other
+subagent.
 
 `@skill-name` is mention syntax for Required Skills sections and inline prose;
-it is not a `permission.skill` key. If a narrow policy is documented, use the
-actual canonical directory names without `@`, and put the wildcard first so
-specific rules follow it. The hidden `ingenium-llm-broker` is the exception:
-its skill permission is `{"*": "deny"}` and it has no tool allowances. See
+it is not a permission resource. Use canonical directory names without `@`,
+and put the wildcard deny first so later specific rules win. The hidden
+`ingenium-llm-broker` has one wildcard-deny rule and no allowances. See
 [the skill taxonomy](../reference/skill-taxonomy.md) for the canonical names
 and legacy mapping.
 
 ### Dedicated recovery-engineer boundary
 
-`@ingenium-recovery-engineer` has the universal skill/reference loading surface
-but is a **deployment-only permission-derived writer**. Source, package, and
-configuration executable paths are denied; its writes are limited to declared
-recovery evidence and roadmap state. It may execute only the fixed
+`@ingenium-recovery-engineer` retains its declared skill/reference permission
+surface, but active recovery loads `@ponytail`, matching skills, and relevant
+recovery roadmap/context only. It is a **deployment-only permission-derived
+writer**. Source, package, and configuration executable paths are denied; its
+writes are limited to declared recovery evidence and roadmap state. It may execute only the fixed
 production-restart command plus scoped Git diff/add/commit checkpoint
 operations and read-only object/tree inspection. It cannot implement source,
 package, or configuration changes, execute arbitrary shell, use `question`, or
@@ -286,34 +306,24 @@ A parent restart acknowledgement is not proof that the new surface loaded.
 After replacement, an independently read-capable verifier must check the exact
 model, variant, profile path, and effective grants from the new parent.
 
-The orchestrator and Premium writer profiles explicitly grant the top-level MCP
-tools `ingenium_coordination_update`, `ingenium_coordination_claim`, and
-`ingenium_coordination_release`; these are not Bash permissions. The read-only
-Scout profile additionally grants `ingenium_docs_search_semantic` for semantic
-Docs RAG retrieval. `ingenium_coordination_handoff` is a mixed publish/read/
-acknowledge/consume tool and is write-classified as a whole. The broader
-recovery protocol therefore performs handoff or typed-memory reads with
-`read` or `memory_read` from an authorized coordination-capable session; that
-tool is not part of Plan's grant. A stale API/root-level `allow` expectation
-must not widen Plan's surface. Epoch `recovery_state`, `reconcile_epoch`, and
-`recover_epoch` remain operations on `ingenium_coordination_update`; they are not
-Plan permissions. All other tool and MCP profile permissions remain
-deny-by-default.
+The active profiles use only the standalone Docs RAG and saved-memory tools
+needed by their roles. Private replacement-first recovery uses authenticated
+internal handoff artifacts rather than public MCP coordination tools. All other
+tool and MCP profile permissions remain deny-by-default.
 
 ### Effective role matrix
 
-The built-in Plan root block and mapped Markdown profiles use deny defaults. Plan
-is the sole root-mapping permission exception. The effective core permission
-matrix is explicitly:
+All mapped Markdown profiles use ordered native V2 rules with deny defaults.
+The effective core permission matrix is explicitly:
 
-| Profile | `read` | `glob` | `grep` | `question` | `edit`/`write` | `bash` | Effective role |
+| Profile | `read` | `glob` | `grep` | `question` | `edit` | `shell` | Effective role |
 |---|---|---|---|---|---|---|---|
-| Plan | allow | allow | allow | allow | deny | deny | Planning only; sole root-mapping permission exception; all repository skills/references plus generic inspection tools and read-only `ingenium_coordination_status`; task only `ingenium-explore`; no other subagents or handoff tool |
+| Plan | allow | allow | allow | allow | deny | deny | Planning only; Ponytail plus task-matching skills/references and generic inspection tools; subagent only `research/ingenium-explore`; no other subagents |
 | `ingenium-docs` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-fast` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-premium` | allow | allow | allow | deny | allow | allow | Intentional writer; deployment remains profile-governed below |
 | `ingenium-recovery-engineer` | allow | allow | allow | deny | declared evidence/roadmap only | fixed production-restart plus scoped Git checkpoint and read-only object/tree inspection only | Permission-derived writer for deployment only; source/package/config executable paths denied; Premium owns implementation |
-| `ingenium-orchestrator` | allow | deny | deny | deny | deny | restricted allow | Coordination and verification only; restricted Bash includes curated Git inspection/checkpoint; no file-mutation rights |
+| `ingenium-orchestrator` | allow | allow | allow | deny | instrumented allow | restricted allow | Direct-first orchestration and feasible scoped direct work via explicit read/glob/grep and instrumented edit/write grants; Bash/task/MCP/browser/question remain profile-controlled; root `external_directory` does not widen tools |
 | `ingenium-chat` | allow | allow | allow | deny | deny | deny | Read-only except explicit user-directed saved-memory operations |
 | `ingenium-explore` | allow | allow | allow | deny | deny | deny | Read-only |
 | `ingenium-scout` | allow | deny | deny | deny | deny | deny | Read-only; bounded Docs RAG MCP access |
@@ -337,32 +347,39 @@ its scoped diff/add/commit and fixed restart remain, while `git push`,
 denied. Plan, `ingenium-explore`, `ingenium-scout`, and `ingenium-chat` remain
 Bash-denied by design.
 
-`edit`/`write` are the file-mutation permissions. The intentional writer
-profiles retain those permissions; every read-only profile above does not. A
+`edit` is the native V2 file-mutation action. The intentional writer profiles
+retain scoped `edit` rules; every read-only profile above does not. A
 read-only profile with bounded Bash or MCP access does not thereby gain generic
 shell, file-mutation, or deployment authority.
 
 ### Permission and deployment boundary
 
-The built-in Plan permission block in `opencode.json` is the sole root-mapping
-permission exception. Every other root agent entry contains only `model` and
-`variant`; native Markdown profiles own effective permissions. The root config
-remains authoritative for the Premium model and variant; the Markdown profile
-is not a second model source. Custom profiles keep `question` denied; Plan is
-the deliberate root-level question exception.
+Every root agent entry contains only a `model` reference with any variant joined
+after `#`; native Markdown profiles own effective permissions. The root config
+remains authoritative for the Premium model reference; the Markdown profile is
+not a second model source. Custom operational profiles keep `question` denied;
+Plan is the deliberate profile-level exception.
 
-Tool governance for mapped custom agents is profile-only. Permissions in
-`.opencode/agents/**` are the sole tool gate for custom-agent execution; the
-built-in Plan root block is the only exception. The session coordinator does not
-register `tool.execute.before` or `tool.execute.after` hooks and never denies,
-preclaims, or admission-checks tool execution. The former managed-command
-denial layer was removed by owner decision. `ingenium-build` and
-`ingenium-repository` remain neutral optional utilities, not enforcement layers.
+Tool governance for mapped agents is profile-only. Permissions in
+`.opencode/agents/**` are the sole tool gate for agent execution. The `ingenium-lifecycle` plugin
+is a thin lifecycle adapter: root hooks are retained only for lifecycle events,
+while session/API reads use the OpenCode v2 client. Its authenticated `mcp`
+binding must match the launcher worktree, and its `session.idle` handler feeds
+the Context uploader and external-usage collector. It is not a session
+coordinator and does not provide tool-execution admission or ownership. The
+former managed-command denial layer was removed by owner decision.
+`ingenium-build` and `ingenium-repository` remain neutral optional utilities,
+not enforcement layers.
 
-**Owner decision (2026-09-09):** No wrapper denies tools; custom-agent profiles
-govern execution, with built-in Plan's root permission block as the sole
-root-mapping exception. Verification runs directly under the active agent
-profile permissions.
+**Owner decision (2026-09-09):** No wrapper denies tools; agent profiles govern
+execution. Verification runs directly under the active agent profile permissions.
+
+Private replacement-first recovery is an independent boundary. It carries
+redacted handoff and verification evidence, revalidates the project/workspace/
+worktree/storage binding and process identity, then starts and health-checks the
+replacement before creating its session, acknowledging terminal idle, and
+retiring the old parent. It is not a public coordination route or a lifecycle
+tool-admission layer.
 
 The dedicated `ingenium-recovery-engineer` is the separate deployment owner for
 the recovery lane and a permission-derived writer for deployment only. Its
@@ -371,9 +388,10 @@ utility plus scoped Git diff/add/commit checkpoint operations and read-only
 object/tree inspection; source/package/config executable paths are denied,
 writes are limited to declared recovery evidence/roadmap, and arbitrary shell,
 `question`, task/delegation, and implementation access remain denied.
-Premium owns implementation. Activation and runtime proof remain pending, and
-its parent-loaded root mapping and profile still require a full parent OpenCode
-replacement/restart before use.
+The canonical Premium profile remains implementation-capable outside this
+documentation migration; this migration routes it review-only. Activation and
+runtime proof remain pending, and its parent-loaded root mapping and profile
+still require a full parent OpenCode replacement/restart before use.
 Changing an agent profile, its prompt-file frontmatter, plugin, MCP entry, OpenCode
 config, or parent binding requires a full parent OpenCode restart; restarting only
 the child MCP process is insufficient because existing sessions retain their
@@ -393,21 +411,23 @@ The 27 email MCP tools (`ingenium_email_list` through `ingenium_email_attachment
 
 ## Lifecycle: What Triggers What
 
-Current delegation policy follows the explicit user request and the active
-orchestrator profile: dispatch one distinct subagent instance per
-dependency-ready open TodoWrite/roadmap item, with no fixed active-agent or
-writer ceiling. The phases below describe dependencies and role ownership;
-waiting items must name their concrete dependency, territory, or applicability
-reason.
+Current orchestration is direct-first: if the active authorized agent can
+complete the scoped work feasibly and efficiently, it uses zero subagents. If
+delegation is necessary, form a new useful team of 2–6 subagents, with 3
+preferred and no more than 6 active children per parent. Do not add filler or
+create a new singleton; an already-formed team's one-member tail may continue.
+The phases below describe dependencies and role ownership; waiting items must
+name their concrete dependency, territory, or applicability reason.
 
 Writer classification follows the actual permission blocks: `ingenium-software-engineer-fast`, `ingenium-software-engineer-premium`, `ingenium-recovery-engineer`, and `ingenium-docs` have `edit: allow` or `write: allow`. `ingenium-explore`, `ingenium-scout`, `ingenium-qa`, and `ingenium-security-auditor` are non-writers. Record actual active/writer counts and each waiting item's concrete dependency, territory, authorized-role availability, review, or applicability reason; never manufacture roles or work to fill capacity.
 
-After an implementation wave and its declared verification are complete,
-independent applicable QA, security, and visual review share one post-wave phase
-when safe. QA and security retain their implementation boundary, and visual QA
-retains its final-UI boundary. A blocked or non-applicable review is omitted and
-its item and concrete reason are declared rather than splitting safe
-reviewers or starting substitute work.
+After an implementation wave and its declared verification are complete, QA
+runs exactly one report only when the finalized boundary declares a risk or
+acceptance need; security runs at most one report only for a predeclared
+changed security surface; and visual review runs only for its final-UI boundary.
+Applicable reviews may share one post-wave phase when safe. A blocked or
+non-applicable review is omitted and its item and concrete reason are declared
+rather than splitting safe reviewers or starting substitute work.
 
 This classification is permission-derived rather than based on task type: Docs
 and Recovery count as writers even when handling documentation or deployment-only
@@ -418,12 +438,12 @@ task/delegation access.
 | # | Phase | Agent | Action |
 |---|-------|-------|--------|
 | 1 | **Plan** | User / Plan mode | Define the task or generate plan |
-| 2 | **Route** | `@ingenium-orchestrator` | Declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification plan, escalation rule, user concurrency request, item-to-agent assignments, counts, exclusive territories, dependencies, targeted verification owner, and waiting-item reasons before dispatch |
-| 3 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work — single-package scope |
-| 4 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work — auth, migrations, Docker, multi-service, cross-package, high-risk |
-| 5 | **Verify + visual QA** | `@ingenium-qa` | One targeted QA pass in the shared post-wave review phase, including applicable visual review after the final UI change; sole owner of a declared full E2E/container suite |
+| 2 | **Decide + contract** | `@ingenium-orchestrator` | Choose direct execution or a useful 2–6-agent team; declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification plan, escalation rule, counts, territories, dependencies, verification owner, and waiting-item reasons |
+| 3 | **Direct** | Active authorized agent | Feasible and efficient work — zero subagents |
+| 4 | **Delegated team** | Fast / Premium / Recovery / Docs as assigned | Only when delegation is necessary; dependency-ready items and exclusive territories only |
+| 5 | **Verify + visual QA** | `@ingenium-qa` | Exactly one targeted QA report only when a declared finalized boundary has a risk or acceptance need, including applicable visual review after the final UI change; sole owner of a declared full E2E/container suite |
 | 6 | **Document** | `@ingenium-docs` | Directly affected canonical documentation or explicit user request only |
-| 7 | **Audit** | `@ingenium-security-auditor` | Current diff/relevant dependency review in the shared post-wave phase; one history scan only for confirmed secret or critical explicit trigger |
+| 7 | **Audit** | `@ingenium-security-auditor` | At most one current-diff/relevant-dependency review only for a predeclared changed security surface; one history scan only for confirmed secret or critical explicit trigger |
 | 8 | **Result** | `@ingenium-orchestrator` | Report bounded outcome and classifications; no recursive dispatch |
 | 9 | **Observations** | Extraction engine (automatic) | Observations captured automatically from OpenCode messages |
 
@@ -457,11 +477,22 @@ flowchart LR
 
 ## 🔴 Orchestration Policy
 
-Current delegation policy follows the explicit user request and the active
-orchestrator profile: dispatch one distinct subagent instance per
-dependency-ready open TodoWrite/roadmap item, with exclusive non-overlapping
-writer territories and no fixed active-agent or writer ceiling. Dependent items
-wait until their prerequisites finish and are verified. Writer tiers:
+Direct-first is the active policy. Current delegation policy follows the
+explicit user request and the active orchestrator profile. When the active
+authorized agent can finish the scoped work feasibly and efficiently, it
+dispatches zero subagents. `ingenium-orchestrator` retains coordination
+ownership and may use its explicit `read`, `glob`, `grep`, and instrumented
+`edit` grants for feasible direct work; its shell, subagent, MCP, browser,
+and question boundaries remain profile-controlled, and root
+`external_directory` approval does not widen those grants. Other agents'
+grants are unchanged.
+
+When delegation is necessary, newly form one useful team of 2–6 subagents,
+preferably 3, with a maximum of 6 active children per parent. Do not create a
+new singleton or add filler. An existing team's one-member tail may continue
+when it is already in flight. An explicit concurrency request does not override
+this team shape or deny-default permissions. Use only dependency-ready items, exclusive
+non-overlapping writer territories, and complete task contracts. Writer tiers:
 
 | Tier | Agent | When to route |
 |------|-------|---------------|
@@ -470,52 +501,71 @@ wait until their prerequisites finish and are verified. Writer tiers:
 | **Recovery** | `ingenium-recovery-engineer` | Deployment-only permission-derived writer: fixed production-restart plus scoped Git diff/add/commit checkpoint operations and read-only object/tree inspection; declared recovery evidence/roadmap writes; Premium owns implementation |
 | **Docs** | `ingenium-docs` | Documentation and skill-system work |
 
-Concurrency follows the current board and user instruction: when requested,
-dispatch one distinct agent per dependency-ready open item. There is no fixed
-active-agent or writer ceiling; actual counts, exclusive territories, and
-waiting reasons are declared for each phase. Waiting review items name
-finalized implementation and verification as prerequisites. QA, security, and
-visual review then share the post-wave phase when their checks are applicable
-and safe.
+The scheduler may start newly eligible work without waiting for unrelated team
+members only when a supported background capability exists. Without that
+capability, use honest parallel synchronous waves. Synchronous batches remain
+synchronous; true async also requires correlated results, and never claim async
+proof without those conditions.
+Record the actual active-child count, team size, exclusive territories,
+dependencies, and every waiting reason; linked TodoWrite/roadmap entries count
+once. Directory auto-approval remains limited to the declared project and
+canonical worktree. The orchestrator keeps narrow grants, and other tool
+surfaces remain as established by `e25f5519`.
 
 ### Finite Task and Phase Declaration
 
 Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, and escalation rule. The verification plan names targeted checks, deployment/acceptance steps, the bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for every remediation. A check failure or retry count alone never returns **ESCALATE_USER**: reproducible in-scope defects are fixed and reverified automatically.
 
-Every orchestration phase also declares the explicit user concurrency request,
-one distinct subagent per selected item, actual active/writer counts, exclusive
-territories (zero overlap), dependencies (serialization order), targeted
-verification owner/checks, and concrete waiting-item reasons. Findings are
-**BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**; a finding
+Every orchestration phase also declares the direct-versus-delegated decision,
+any team size and active-child count, exclusive territories (zero overlap),
+dependencies, background-capability basis when relevant, targeted verification
+owner/checks, and concrete waiting-item reasons. Findings are **BLOCKING**,
+**FOLLOW_UP**, or **INFORMATIONAL**; a finding
 is BLOCKING only when it fails acceptance criteria in user scope or is
 immediately exploitable changed code. Only in-scope BLOCKING findings reopen
 work. FOLLOW_UP findings are reported separately and never auto-dispatched.
 Each remediation must name and address the currently failing root cause.
 
-QA, security, and applicable visual QA share one post-wave phase when their
-independent checks are safe to run together. Each runs once per implementation
-wave, Docs runs only for directly affected canonical docs or explicit user
-request, and no reviewer recursively triggers QA/Docs work. If a reviewer is
-blocked or not applicable, declare its item and concrete waiting or omission
-reason. After a writer fixes a reviewer-reported in-scope BLOCKING
-root cause, run only the named minimum targeted regression; never rerun QA,
-security, or any other reviewer. Proceed directly to the declared deploy and
-acceptance steps. UI gets one
-changed-route gate after final UI change and one sweep per user-requested UI
-batch; reproducible visual failures receive causal remediation and their
-smallest proving recheck. Docs/non-UI work never opens visual gates. Security
-defaults to current-diff/dependency review; history scans are once-only for a
-confirmed secret or critical explicit trigger. Continue declared source fix →
-targeted test → deploy → acceptance steps automatically. STOP/CANCELLED is
-terminal only when explicitly requested: preserve evidence and skipped work
-without spawning new agents or gates; never reinterpret a remediation request
-as terminal.
+Independent verification remains required when the acceptance contract names
+it. QA runs exactly one report only when a declared finalized implementation
+boundary has a risk or acceptance need; Docs runs only for directly affected
+canonical documentation or an explicit user request; research runs only for a
+useful in-scope research need. Security runs at most one report only for a
+predeclared changed security surface; visual review only for a changed UI
+boundary, deployment only for runtime-impacting work, and recovery only for its
+replacement-first boundary. Applicable QA, security, and visual checks may
+share one post-wave phase when safe; a blocked or non-applicable check is
+recorded with its concrete reason rather than replaced with ritual work. After
+an in-scope reviewer finding is remediated, run only
+the named minimum targeted regression; never rerun the reviewer. UI gets one
+changed-route gate and one passive full-site sweep per requested UI batch.
+Docs-only and non-UI work do not open visual gates.
+
+Each owner initializes and reconciles durable `TodoWrite` state. Preserve the
+first failure, stable redacted signatures, unknown outcomes, recovery
+preflight, and next work; never replay an uncertain mutation or infer runtime,
+deployment, restart, or model/session proof from Markdown or source checks.
+STOP/CANCELLED is terminal only when explicitly requested.
 
 ### 🔴 Autonomous Roadmap Completion Contract
 
-Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Before the final response, reconcile roadmap markers and `TodoWrite`.
+Roadmap execution continues autonomously until every scoped roadmap task has
+evidence-backed completion or one of the five narrow escalation conditions is
+proven. Never report completion from source tests alone. Runtime-impacting
+changes require a deployment owner and deployment wave; the owner must rebuild
+and restart the current merged source, then health-check actual routes.
+Applicable visual/UI, review, and recovery gates remain mandatory before
+terminal success; docs-only and other non-applicable work does not inherit
+those gates. Before the final response, reconcile roadmap markers and
+`TodoWrite`.
 
-QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per their declared bounded phase. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After a reviewer-reported BLOCKING remediation, the orchestrator runs only the named minimum targeted regression, never reruns QA, security, or any other reviewer, and proceeds directly to deploy and acceptance.
+QA produces exactly one scope-classified report only when a declared finalized
+boundary has a risk or acceptance need; security produces at most one report
+only for a predeclared changed security surface. They have no task-delegation
+authority, cannot spawn the other, and cannot reopen a closed task. After a
+reviewer-reported BLOCKING remediation, the orchestrator runs only the named
+minimum targeted regression, never reruns QA, security, or any other reviewer,
+and proceeds directly to deploy and acceptance.
 
 ### Restart Required for Agent Profile and Configuration Changes
 
@@ -538,8 +588,8 @@ Agent profiles are public Markdown metadata, not credential files. Core and exte
 ## Per-Agent Profiles
 
 Repository-managed agent details are available in `.opencode/agents/`; the
-built-in Plan entry is managed by the root mapping, while named custom-agent
-profiles are managed by the repository and agent lifecycle.
+Plan and named custom-agent profiles are managed by the repository and agent
+lifecycle. Root mappings provide only their native IDs and model references.
 
 ### Compute Split
 
@@ -547,7 +597,7 @@ profiles are managed by the repository and agent lifecycle.
 |----------|--------|-------|------|
 | Model-dependent (configurable) | All agents | 11 | Configurable via `opencode.json` agent mappings |
 
-**Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. Built-in Plan's explicit permission block is the sole root-mapping permission exception; a `{file:...}` prompt reference loads the profile body, and its frontmatter does not become a second root mapping. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file.
+**Model configuration**: Agent model mappings live in `opencode.json` under the `"agents"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated through the lifecycle, the model reference is persisted under the profile's qualified native ID in `opencode.json`, not the `.md` file.
 
 ---
 
@@ -555,7 +605,7 @@ profiles are managed by the repository and agent lifecycle.
 
 | Agent | `@` mention | Access | Mode |
 |-------|-------------|--------|------|
-| ingenium-orchestrator | `@ingenium-orchestrator` | Read; restricted Bash (verification plus curated Git inspection/checkpoint); no write | Primary — coordination, delegates to subagents |
+| ingenium-orchestrator | `@ingenium-orchestrator` | Read/glob/grep plus instrumented edit/write for feasible scoped direct work; restricted Bash; task/MCP/browser/question profile-controlled; root `external_directory` does not widen tools | Primary — direct-first coordination; delegates only when needed |
 | ingenium-chat | `@ingenium-chat` | Read-only except explicit user-directed saved-memory operations | Primary — invoked from Chat page |
 | ingenium-explore | `@ingenium-explore` | Read-only | Subagent — research and exploration |
 | ingenium-scout | `@ingenium-scout` | Read-only | Subagent — research + Docs RAG only; no generic source review |

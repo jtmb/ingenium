@@ -78,17 +78,18 @@ agent's profile permissions or exposes child stderr. The optional description is
 accepted by `POST /api/v1/mcp-servers/presets/playwright` and is shown as
 metadata in the Servers tab.
 
-Do not add a root `mcp.playwright` server or run `npx -y @playwright/mcp` from
+Do not add a root `mcp.servers.playwright` server or run `npx -y @playwright/mcp` from
 OpenCode configuration. The tracked root configuration exposes the canonical
 `ingenium` MCP server; Playwright is a project child preset and must use the
 fixed executable, browser path, arguments, and namespace above.
 
 ## Tool Manager
 
-The Tools tab shows the current project-scoped total. The built-in catalog
-contains 291 tools in 31 baseline categories (289 `ingenium_` catalog entries
-plus 2 extension tools); discovered child tools are added dynamically and may increase
-both the total and the category list for that project.
+The Tools tab shows the current project-scoped total. The active built-in surface
+contains 286 tools in 32 baseline categories (284 active `ingenium_` server registrations
+plus 2 extension tools). Retired coordination tools are not in the active catalog;
+discovered child tools are added dynamically and may increase both the total and the
+category list for that project.
 
 ### Per-Tool Enable/Disable
 - Each tool has a toggle switch to enable or disable it

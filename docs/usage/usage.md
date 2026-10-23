@@ -13,6 +13,14 @@ reasoning-token counts), optional cache state, and cost state. Prompts, message
 text, reasoning content, tool payloads, credentials, API tokens, and opaque
 upstream payloads are not collected.
 
+External OpenCode sessions may submit one completed assistant-message metadata
+record through `ingenium_usage_ingest` / `POST /api/v1/usage/external`. The
+request is accepted only from an exact project, workspace, storage-mapping,
+launcher-worktree, and active-session-bound `mcp` credential. It contains no
+message text or tool payloads; omitted token, cache, or cost values remain
+unknown. Identical replays are idempotent, while conflicting replays are
+rejected rather than overwriting the retained event.
+
 ## Project mapping and quarantine
 
 OpenCode project IDs are not Ingenium project names. Before collection, create
@@ -155,6 +163,7 @@ All routes require `?project=<name>`:
 | `GET /api/v1/usage/mappings` | Explicit project mappings |
 | `PUT /api/v1/usage/mappings` | Create or confirm a mapping |
 | `POST /api/v1/usage/sync` | Run a bounded manual sync |
+| `POST /api/v1/usage/external` | Ingest one launcher-bound completed assistant metadata record |
 | `GET /api/v1/usage/thresholds` | Read this project's threshold row |
 | `PUT /api/v1/usage/thresholds` | CAS-replace all five threshold fields |
 | `GET /api/v1/usage/thresholds/evaluate` | Read-only threshold evaluation for an explicit UTC range or all history |

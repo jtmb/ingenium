@@ -42,7 +42,7 @@ if [ -n "${INGENIUM_RUNTIME_ID:-}" ]; then
     echo "ERROR: compatibility runtime worktree is invalid"
     exit 1
   fi
-  runtime_config='{"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_MCP_AUDIENCE":"runtime","INGENIUM_MCP_CREDENTIAL_PURPOSE":"runtime","INGENIUM_RUNTIME_CREDENTIAL_FILE":"/run/ingenium-runtime/capability","INGENIUM_PROJECT":"{env:INGENIUM_PROJECT}","INGENIUM_PROJECT_ID":"{env:INGENIUM_PROJECT_ID}","INGENIUM_ORGANIZATION_ID":"{env:INGENIUM_ORGANIZATION_ID}","INGENIUM_RUNTIME_OWNER_ID":"{env:INGENIUM_RUNTIME_OWNER_ID}","INGENIUM_RUNTIME_ID":"{env:INGENIUM_RUNTIME_ID}","INGENIUM_WORKSPACE_ID":"{env:INGENIUM_WORKSPACE_ID}","INGENIUM_STORAGE_MAPPING_HASH":"{env:INGENIUM_STORAGE_MAPPING_HASH}","INGENIUM_WORKTREE":"/workspace"}}}}'
+  runtime_config='{"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"disabled":false,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_MCP_AUDIENCE":"runtime","INGENIUM_MCP_CREDENTIAL_PURPOSE":"runtime","INGENIUM_RUNTIME_CREDENTIAL_FILE":"/run/ingenium-runtime/capability","INGENIUM_PROJECT":"{env:INGENIUM_PROJECT}","INGENIUM_PROJECT_ID":"{env:INGENIUM_PROJECT_ID}","INGENIUM_ORGANIZATION_ID":"{env:INGENIUM_ORGANIZATION_ID}","INGENIUM_RUNTIME_OWNER_ID":"{env:INGENIUM_RUNTIME_OWNER_ID}","INGENIUM_RUNTIME_ID":"{env:INGENIUM_RUNTIME_ID}","INGENIUM_WORKSPACE_ID":"{env:INGENIUM_WORKSPACE_ID}","INGENIUM_STORAGE_MAPPING_HASH":"{env:INGENIUM_STORAGE_MAPPING_HASH}","INGENIUM_WORKTREE":"/workspace"}}}}}'
   set -- \
     OPENCODE_CONFIG_CONTENT="$runtime_config" \
     INGENIUM_MCP_AUDIENCE="runtime" \
@@ -67,16 +67,25 @@ attempt=1
 while [ "$attempt" -le "$attempts" ]; do
   if node /app/scripts/probe-api.mjs; then
     echo "Authenticated API readiness passed before OpenCode start after ${attempt} attempt(s)"
+    # OpenCode V2 always requires HTTP basic auth. Use the provisioned server
+    # secret so the internal auth proxy can forward the browser's validated
+    # credentials unchanged.
+    opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"
+    # V2 uses CONFIG_DIR as the complete global discovery root. Keep the
+    # projected persistent config/profiles visible and explicitly load the
+    # immutable broker policy; /etc/opencode is no longer discovered by V2.
     exec env -i \
       PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       PWD="/app" \
       HOME="/home/ingenium-opencode" \
       XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
       XDG_DATA_HOME="/home/ingenium-opencode/.local/share" \
-      OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime" \
-      OPENCODE_SERVER_PASSWORD="" \
+      OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode" \
+      OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json" \
+      OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
       INGENIUM_API_URL="http://localhost:4097/api/v1" \
       INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential" \
+      INGENIUM_LEARNING_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-learning-credential" \
       INGENIUM_MCP_AUDIENCE="mcp" \
       INGENIUM_MCP_CREDENTIAL_PURPOSE="general" \
       INGENIUM_WORKTREE="/home/brajam/repos/ingenium" \

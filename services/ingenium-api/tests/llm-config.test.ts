@@ -12,7 +12,36 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+
+const guardedUploadCalls = vi.hoisted(() => [] as string[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const isSharedUpload = (path: string | Buffer | URL) =>
+    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+  const guard = (operation: string, path: string | Buffer | URL) => {
+    if (!isSharedUpload(path)) return false;
+    guardedUploadCalls.push(operation);
+    return true;
+  };
+
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) =>
+      guard("mkdirSync", args[0]) ? undefined : fs.mkdirSync(...args),
+    readdirSync: (...args: Parameters<typeof fs.readdirSync>) =>
+      guard("readdirSync", args[0]) ? [] : fs.readdirSync(...args),
+    statSync: (...args: Parameters<typeof fs.statSync>) =>
+      guard("statSync", args[0]) ? undefined : fs.statSync(...args),
+    existsSync: (...args: Parameters<typeof fs.existsSync>) =>
+      guard("existsSync", args[0]) ? false : fs.existsSync(...args),
+    unlinkSync: (...args: Parameters<typeof fs.unlinkSync>) => {
+      if (!guard("unlinkSync", args[0])) fs.unlinkSync(...args);
+    },
+  };
+});
+
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express from "express";
@@ -29,6 +58,9 @@ let tempDir: string;
 let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
+const originalGlobalConfigPath = process.env.INGENIUM_GLOBAL_CONFIG_PATH;
+const originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
+const originalHome = process.env.INGENIUM_HOME;
 
 /** MUST be a function — evaluates projectName at call time, not module load time. */
 function projectQ(name?: string): string {
@@ -48,8 +80,12 @@ function buildApp(): express.Express {
 }
 
 beforeAll(async () => {
+  expect(guardedUploadCalls).toEqual(["mkdirSync", "readdirSync"]);
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-api-llm-config-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
+  process.env.INGENIUM_HOME = join(tempDir, "home");
+  process.env.INGENIUM_GLOBAL_CONFIG_PATH = join(tempDir, "opencode-config");
+  resetDbForTest();
 
   const globalProjectId = projects.createProject("global-default", true).id;
   projectName = "llm-config-test-project";
@@ -59,11 +95,6 @@ beforeAll(async () => {
   expect(vault.initializeVault(globalProjectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
   vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
   vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
-  // Chat config always performs runtime provider discovery. Keep this fixture
-  // isolated from the real OpenCode password/configuration state unless a test
-  // explicitly exercises an unavailable catalog.
-  vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({ all: [] });
-
   // Start a local server for fetch-based testing
   const app = buildApp();
   server = createServer(app);
@@ -77,10 +108,28 @@ beforeAll(async () => {
   });
 });
 
+beforeEach(() => {
+  vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({ all: [] });
+  vi.spyOn(opencodeClient, "updateGlobalConfig").mockResolvedValue({});
+});
+
 afterAll(async () => {
-  if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
-  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
-  vi.restoreAllMocks();
+  try {
+    if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+  } finally {
+    try {
+      resetDbForTest();
+      if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+    } finally {
+      if (originalDbPath === undefined) delete process.env.INGENIUM_CORE_DB_PATH;
+      else process.env.INGENIUM_CORE_DB_PATH = originalDbPath;
+      if (originalHome === undefined) delete process.env.INGENIUM_HOME;
+      else process.env.INGENIUM_HOME = originalHome;
+      if (originalGlobalConfigPath === undefined) delete process.env.INGENIUM_GLOBAL_CONFIG_PATH;
+      else process.env.INGENIUM_GLOBAL_CONFIG_PATH = originalGlobalConfigPath;
+      vi.restoreAllMocks();
+    }
+  }
 });
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -230,6 +279,85 @@ describe("managed provider blocks", () => {
     },
   ];
 
+  it("does not expose legacy synthesis settings as managed providers", async () => {
+    const globalProjectId = projects.getGlobalProject()!.id;
+    settings.setSetting(globalProjectId, "llm_provider_configs", "[]");
+    settings.setSetting(globalProjectId, "synthesis_provider", "openai");
+    settings.setSetting(globalProjectId, "synthesis_model", "gpt-4.1");
+    settings.setSetting(globalProjectId, "synthesis_backup_provider", "anthropic");
+    settings.setSetting(globalProjectId, "synthesis_backup_model", "claude-sonnet-4-6");
+
+    const { res, body } = await getProviderConfigs();
+
+    expect(res.status).toBe(200);
+    expect(body.data.providers).toEqual([]);
+    expect(body.data.synthesis.primary).toEqual({ providerId: "openai", modelId: "gpt-4.1" });
+  });
+
+  it("preserves an unselected legacy provider while replacing an explicitly saved block", async () => {
+    const globalProjectId = projects.getGlobalProject()!.id;
+    settings.setSetting(globalProjectId, "llm_provider_configs", "[]");
+    configs.saveConfig(globalProjectId, "global", JSON.stringify({ provider: {
+      "ingenium-primary": { name: "Stale primary" },
+      "ingenium-backup": { name: "Stale backup" },
+      "native-provider": { name: "Native Provider" },
+    }, theme: "system" }));
+
+    const response = await putProviderConfigs([managedProvider("ingenium-primary")]);
+
+    expect(response.status).toBe(200);
+    const config = JSON.parse(configs.getConfig(globalProjectId, "global")!.content);
+    expect(config.provider).toEqual({
+      "native-provider": { name: "Native Provider" },
+      "ingenium-backup": { name: "Stale backup" },
+      "ingenium-primary": {
+        name: "Provider ingenium-primary",
+        npm: "@ai-sdk/openai",
+        options: { baseURL: "https://api.openai.com/v1" },
+        models: { "test-model": { id: "test-model", name: "test-model" } },
+      },
+    });
+    expect(config.theme).toBe("system");
+  });
+
+  it("retains unselected providers and unrelated settings while removing only a previously owned provider", async () => {
+    const globalProjectId = projects.getGlobalProject()!.id;
+    settings.setSetting(globalProjectId, "llm_provider_configs", "[]");
+    const original = {
+      provider: {
+        "ingenium-primary": { name: "Unselected primary", models: { original: { id: "original" } } },
+        "ingenium-backup": { name: "Unselected backup", options: { retained: true } },
+        "operator-provider": { name: "Operator provider" },
+      },
+      agents: { plan: { model: "openai/operator-model#max" } },
+      mcp: { servers: { operator: { disabled: true } } },
+      plugins: ["operator-plugin"],
+      custom: { nested: { retained: true } },
+    };
+    configs.saveConfig(globalProjectId, "global", JSON.stringify(original));
+
+    const first = await putProviderConfigs([managedProvider("d132-owned")]);
+    expect(first.status).toBe(200);
+    const owned = {
+      name: "Provider d132-owned", npm: "@ai-sdk/openai",
+      options: { baseURL: "https://api.openai.com/v1" },
+      models: { "test-model": { id: "test-model", name: "test-model" } },
+    };
+    expect(JSON.parse(configs.getConfig(globalProjectId, "global")!.content)).toEqual({
+      ...original, provider: { ...original.provider, "d132-owned": owned },
+    });
+
+    const second = await putProviderConfigs([managedProvider("d132-replacement")]);
+    expect(second.status).toBe(200);
+    const replacement = JSON.parse(configs.getConfig(globalProjectId, "global")!.content);
+    expect(replacement).toEqual({
+      ...original,
+      provider: { ...original.provider, "d132-replacement": { ...owned, name: "Provider d132-replacement" } },
+    });
+    expect(JSON.parse(readFileSync(join(tempDir, "opencode-config", "opencode.jsonc"), "utf8"))).toEqual(replacement);
+    expect(opencodeClient.deleteAuth).toHaveBeenCalledWith("d132-owned", "/workspace", expect.any(AbortSignal));
+  });
+
   it("saves arbitrary provider blocks and projects valid OpenCode provider entries", async () => {
     const response = await putProviderConfigs(providers);
     expect(response.status).toBe(200);
@@ -244,6 +372,7 @@ describe("managed provider blocks", () => {
     expect(settings.getSetting(projects.getProject(projectName)!.id, "llm_provider_configs")).toBeUndefined();
 
     const config = JSON.parse(configs.getConfig(projects.getGlobalProject()!.id, "global")!.content);
+    expect(JSON.parse(readFileSync(join(tempDir, "opencode-config", "opencode.jsonc"), "utf8"))).toEqual(config);
     expect(config.provider["openai-main"]).toEqual({
       name: "OpenAI Main",
       npm: "@ai-sdk/openai",
@@ -717,6 +846,28 @@ describe("managed provider blocks", () => {
    ══════════════════════════════════════════════════════════════════════════ */
 
 describe("POST /settings/llm-config → GET /settings/llm-config round-trip", () => {
+  it("saves legacy selections without projecting placeholder providers into global OpenCode config", async () => {
+    const globalProject = projects.getProject("global-default")!;
+    const existingConfig = JSON.stringify({ provider: { "native-provider": { name: "Native Provider" } }, theme: "system" });
+    configs.saveConfig(globalProject.id, "global", existingConfig);
+    const reload = vi.spyOn(opencodeClient, "updateGlobalConfig").mockResolvedValue({});
+
+    const response = await postLlmConfig({
+      primary: { provider: "openai", model: "gpt-4.1" },
+      backup: { provider: "anthropic", model: "claude-sonnet-4-6" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { saved: true } });
+    expect(configs.getConfig(globalProject.id, "global")?.content).toBe(existingConfig);
+    expect(JSON.parse(configs.getConfig(globalProject.id, "global")!.content).provider).toEqual({ "native-provider": { name: "Native Provider" } });
+    expect(reload).not.toHaveBeenCalled();
+    const { body } = await getLlmConfig();
+    expect(body.data.primary).toMatchObject({ provider: "openai", model: "gpt-4.1" });
+    expect(body.data.backup).toMatchObject({ provider: "anthropic", model: "claude-sonnet-4-6" });
+    reload.mockRestore();
+  });
+
   it("preserves an omitted saved credential across a database reconnect", async () => {
     const postRes = await postLlmConfig({
       primary: {
@@ -1043,24 +1194,30 @@ describe("POST /settings/llm-config — input validation", () => {
     expect(body.error.message).toContain("non-global network address");
   });
 
-  it("preserves malformed or empty global config and reports projection failure", async () => {
+  it("saves legacy settings without reading or overwriting malformed or empty global config", async () => {
     const project = projects.getProject(projectName)!;
     const globalProject = projects.getProject("global-default")!;
     for (const originalContent of ["{ malformed config", ""]) {
       configs.saveConfig(globalProject.id, "global", originalContent);
+      const read = vi.spyOn(configs, "getConfig");
+      const write = vi.spyOn(configs, "saveConfig");
 
       const res = await postLlmConfig({
         primary: {
           provider: "openai",
-          model: "must-not-save",
+          model: "legacy-save-with-invalid-global-config",
           endpoint: "https://api.openai.com/v1",
         },
       });
 
-      expect(res.status).toBe(409);
-      expect((await res.json()).error.code).toBe("CONFIG_PROJECTION_FAILED");
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: { saved: true } });
+      expect(read).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      read.mockRestore();
+      write.mockRestore();
       expect(configs.getConfig(globalProject.id, "global")?.content).toBe(originalContent);
-      expect(settings.getSetting(project.id, "synthesis_model")).not.toBe("must-not-save");
+      expect(settings.getSetting(project.id, "synthesis_model")).toBe("legacy-save-with-invalid-global-config");
     }
     configs.saveConfig(globalProject.id, "global", "{}");
   });

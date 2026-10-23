@@ -1,10 +1,11 @@
 # WSL2 and Windows Transport
 
-The compatibility deployment supports Windows access to the Docker gateway through
-WSL's normal localhost forwarding. **Port `3000` is the only gateway-reachable
-host port** for the dashboard and the local OpenCode/VS Code roots:
+The compatibility profile targets local Windows access through WSL's localhost
+forwarding. Verify that transport after deployment; it depends on the host
+configuration. **Port `3000` is the only gateway-reachable host port** for the
+dashboard and the local OpenCode/VS Code roots:
 
-- Dashboard: `http://localhost:3000/`, published by Compose as `3000:3000` with no HTTP Basic Auth.
+- Dashboard: `http://localhost:3000/`, published by Compose as `127.0.0.1:3000:3000` with no HTTP Basic Auth.
 - OpenCode Web: local root `http://opencode.localhost:3000/` with no HTTP Basic Auth.
 - OpenCode CLI: local root `http://cli.localhost:3000/` with no HTTP Basic Auth.
 - VS Code: local root `http://vscode.localhost:3000/` with no HTTP Basic Auth.
@@ -64,7 +65,12 @@ other host-network mutation.
 
 ## Secure Windows, LAN, and remote access
 
-The unqualified Docker publication is required for WSL localhost forwarding.
+Keep the desktop gateway publication bound to `127.0.0.1:3000:3000`; do not restore
+all-interface publication to work around failed Windows forwarding. Verify the
+Windows path and remote-ingress denial before accepting the deployment. Docker
+versions before 28.0.0 have a [localhost-publishing caveat](https://docs.docker.com/engine/network/port-publishing/)
+that can expose these ports to hosts on the same network segment; the binding
+alone is not proof of isolation.
 Plaintext HTTP is not an appropriate LAN or remote security boundary. If access
 must leave the local machine, provide a separate operator-managed TLS-authenticated profile
 (reverse proxy, VPN, or equivalent) that terminates TLS and protects the

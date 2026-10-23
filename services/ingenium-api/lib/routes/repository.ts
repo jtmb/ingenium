@@ -10,8 +10,8 @@ import { requireProject } from "../helpers.js";
  *
  * Repository documentation has its own `/docs/repository/sync` endpoint because
  * it owns Docs Workspace hierarchy, tags, and RAG records. This endpoint is
- * deliberately limited to skills, agents, and plugins; it never accepts
- * commands or config, including global config.
+ * projects skills, agents, plugins, and commands; it never accepts config,
+ * including global config.
  */
 export const repositoryRouter = Router();
 

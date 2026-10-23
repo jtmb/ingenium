@@ -1,18 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { getDb, identity, mcpCredentials, observations, organizations, projects, resetDbForTest, runtimes, settings, synthesis } from "ingenium-core";
+import { getDb, identity, mcpCredentials, observations, organizations, personality, projects, resetDbForTest, runtimes, settings, synthesis } from "ingenium-core";
 import { createBackgroundSynthesisBrokerExecutor, executeSynthesisBroker, opencodeClient } from "../lib/opencode-client.js";
+import { isLocalRuntimeBinding } from "../lib/runtime-provisioner.js";
+import { withOpenCodeRuntimeTarget } from "../lib/runtime-opencode-context.js";
 
 const temporaryPaths: string[] = [];
 
-function configuredProject(primary?: [string, string], secondary?: [string, string]): string {
+function configuredProject(primary?: [string, string], secondary?: [string, string], local = false): string {
   const directory = mkdtempSync(join(tmpdir(), "ingenium-synthesis-broker-"));
   temporaryPaths.push(directory);
+  vi.stubEnv("INGENIUM_HOME", directory);
+  vi.stubEnv("INGENIUM_GLOBAL_CONFIG_PATH", join(directory, "opencode-global"));
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "test.db");
   resetDbForTest();
-  const project = projects.createProject(`broker-${Date.now()}-${Math.random()}`);
+  const project = projects.createProject(local ? "ingenium" : `broker-${Date.now()}-${Math.random()}`);
   if (primary) {
     settings.setSetting(project.id, "synthesis_provider", primary[0]);
     settings.setSetting(project.id, "synthesis_model", primary[1]);
@@ -49,11 +53,18 @@ function activateRuntime(
   projectId: string,
   owner = identity.createUser(`runtime-${crypto.randomUUID()}@example.test`, "Runtime Owner"),
   authorizeAutomation = false,
+  local = false,
 ): runtimes.RuntimeInstance {
   const project = projects.listProjects().find((candidate) => candidate.id === projectId)!;
   organizations.addOrganizationMember(project.organization_id, owner.id, "member");
-  const workspaceId = `workspace-${crypto.randomUUID()}`;
-  const storagePath = `/srv/approved/${workspaceId}`;
+  organizations.addProjectMember(projectId, owner.id, "editor");
+  const workspaceId = local ? "shared-memory-ingenium" : `workspace-${crypto.randomUUID()}`;
+  const storagePath = local ? "/home/brajam/repos/ingenium" : `/srv/approved/${workspaceId}`;
+  if (local) {
+    const now = new Date().toISOString();
+    getDb().prepare("UPDATE bootstrap_state SET state = 'claimed', owner_user_id = ?, claimed_at = ?, updated_at = ? WHERE singleton = 1")
+      .run(owner.id, now, now);
+  }
   runtimes.authorizeWorkspace({
     id: workspaceId,
     organizationId: project.organization_id,
@@ -82,16 +93,11 @@ function activateRuntime(
     createdByUserId: owner.id,
   });
   runtimes.bindRuntimeCapability(runtime.id, credential.id);
-  if (authorizeAutomation) {
-    const now = new Date().toISOString();
-    getDb().prepare(`INSERT INTO automation_principal_grants
-      (id, organization_id, project_id, service_principal_id, permission, granted_by_actor_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'execute', 'system', ?, ?)`)
-      .run(crypto.randomUUID(), project.organization_id, projectId, credential.servicePrincipalId, now, now);
-  }
   for (const toState of ["PROVISIONING", "STARTING", "READY"] as const) {
-    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState, actorType: "system", actorId: "test" });
+    runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState, actorType: "system", actorId: "test",
+      idleExpiresAt: new Date(Date.now() + 300_000), absoluteExpiresAt: new Date(Date.now() + 600_000) });
   }
+  if (authorizeAutomation) runtime = runtimes.authorizeRuntimeAutomation(workspaceId, owner.id);
   return runtime;
 }
 
@@ -155,22 +161,218 @@ describe("executeSynthesisBroker", () => {
   });
 
   it("executes background synthesis through an explicitly authorized automation runtime", async () => {
-    const projectId = configuredProject(["custom", "model-a"]);
-    const runtime = activateRuntime(projectId, undefined, true);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response({ id: "broker-session", title: "Broker" }))
-      .mockResolvedValueOnce(response({ info: { id: "user", role: "user" }, parts: [] }))
-      .mockResolvedValueOnce(response([{ info: { id: "assistant", role: "assistant", finish: "stop" }, parts: [{ type: "text", text: "done" }] }]))
-      .mockResolvedValueOnce(response(true));
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    const runtime = activateRuntime(projectId, undefined, true, true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("INGENIUM_RUNTIME_MANAGER_URL", "");
+    const credentialDirectory = mkdtempSync(join(tmpdir(), "ingenium-synthesis-password-"));
+    temporaryPaths.push(credentialDirectory);
+    const credentialPath = join(credentialDirectory, "password");
+    const password = "s".repeat(64);
+    writeFileSync(credentialPath, `${password}\n`, { mode: 0o600 });
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", credentialPath);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    expect(runtimes.getReadyRuntimeForProject(projectId)?.id).toBe(runtime.id);
+    expect(isLocalRuntimeBinding(runtime, projectId)).toBe(true);
+    personality.upsertTrait(projectId, "code_preference", "owner-private-trait", undefined, 0.8, undefined, undefined, {
+      ownerUserId: runtime.ownerUserId, visibility: "private",
+    });
+    const expectedAuth = `Basic ${Buffer.from(`opencode:${password}`).toString("base64")}`;
+    const session = { id: "ses_broker", projectID: "native-project", location: { directory: "/workspace" }, title: "Broker" };
+    const seen: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(String(input));
+      const method = init?.method ?? "GET";
+      seen.push(`${method} ${url.pathname}`);
+      const headers = init?.headers as Record<string, string> | undefined;
+      if (url.origin !== "http://127.0.0.1:4098" || headers?.Authorization !== expectedAuth) {
+        return new Response("unauthorized", { status: 401 });
+      }
+      if (method === "POST" && url.pathname === "/api/session") {
+        expect(JSON.parse(String(init?.body))).toEqual({ title: "ingenium-llm-broker", location: { directory: "/workspace" } });
+        return response({ data: session });
+      }
+      if (method === "GET" && url.pathname === "/api/session/ses_broker") return response({ data: session });
+      if (method === "GET" && url.pathname === "/api/session/ses_broker/message") return response({
+        data: [{ id: "msg_assistant", type: "assistant", time: { created: 1, completed: 2 }, finish: "stop", content: [{ type: "text", text: "done" }] }],
+        cursor: { next: null },
+      });
+      if (url.pathname.endsWith("/model")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ model: { id: "model-a", providerID: "custom" } });
+      }
+      if (url.pathname.endsWith("/agent")) {
+        expect(JSON.parse(String(init?.body))).toEqual({ agent: "ingenium-llm-broker" });
+      }
+      if (url.pathname.endsWith("/prompt")) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ text: "user" });
+      }
+      if (url.pathname.endsWith("/instructions/entries/ingenium-broker-system") && method === "PUT") {
+        expect(JSON.parse(String(init?.body))).toEqual({ value: "system" });
+      }
+      return response({ data: {} });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({
-      system: "system",
-      user: "user",
-      timeoutMs: 1_000,
-    })).resolves.toEqual({ ok: true, content: "done" });
-    expect(fetchMock).toHaveBeenCalledTimes(4);
-    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith(`http://${runtime.backendName}:4098`))).toBe(true);
+    const result = await withOpenCodeRuntimeTarget({ baseUrl: "http://foreign.test:4098", password: "foreign-password", directory: "/foreign" }, () =>
+      createBackgroundSynthesisBrokerExecutor(projectId)({
+        system: "system",
+        user: "user",
+        timeoutMs: 1_000,
+      }));
+    expect(seen).toEqual([
+      "POST /api/session", "PUT /api/experimental/session/ses_broker/instructions/entries/ingenium-broker-system",
+      "GET /api/session/ses_broker", "POST /api/session/ses_broker/model",
+      "POST /api/session/ses_broker/agent", "POST /api/session/ses_broker/prompt",
+      "GET /api/session/ses_broker", "GET /api/session/ses_broker/message",
+      "DELETE /api/experimental/session/ses_broker/instructions/entries/ingenium-broker-system",
+      "GET /api/session/ses_broker", "DELETE /api/session/ses_broker",
+    ]);
+    expect(result).toEqual({ ok: true, content: "done" });
+    expect(fetchMock.mock.calls.every(([url]) => String(url).startsWith("http://127.0.0.1:4098"))).toBe(true);
+  });
+
+  it("rejects a granted runtime without the compatibility bootstrap binding before any transport", async () => {
+    const projectId = configuredProject(["custom", "model-a"]);
+    activateRuntime(projectId, undefined, true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "synthetic-local-password");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects the canonical local binding without an active automation grant", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    activateRuntime(projectId, undefined, false, true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "synthetic-local-password");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not borrow the compatibility password in control-plane mode", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    activateRuntime(projectId, undefined, true, true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "control-plane");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "synthetic-local-password");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a locally bound runtime when the protected OpenCode password is unavailable", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    activateRuntime(projectId, undefined, true, true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", "");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the configured password file is a symlink", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    activateRuntime(projectId, undefined, true, true);
+    const directory = mkdtempSync(join(tmpdir(), "ingenium-synthesis-secret-fixture-"));
+    temporaryPaths.push(directory);
+    const file = join(directory, "secret");
+    writeFileSync(file, "s".repeat(64), { mode: 0o600 });
+    const link = join(directory, "link");
+    symlinkSync(file, link);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", link);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("never sends another owner's pending private observation to the authorized local runtime", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    const project = projects.getProject("ingenium")!;
+    const victim = identity.createUser(`victim-${crypto.randomUUID()}@example.test`, "Victim");
+    organizations.addOrganizationMember(project.organization_id, victim.id, "member");
+    const runtime = activateRuntime(projectId, undefined, true, true);
+    const canary = "VICTIM_PRIVATE_SYNTHESIS_CANARY";
+    observations.storeObservation(projectId, "preference", canary, 10, "manual", undefined, undefined, {
+      organizationId: project.organization_id,
+      ownerUserId: victim.id,
+      visibility: "private",
+    });
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", "");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "synthetic-local-password");
+    expect(runtimes.getReadyRuntimeForProject(projectId)?.id).toBe(runtime.id);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({ system: "system", user: canary, timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not send a foreign owner's existing private trait through actual synthesis", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    const project = projects.getProject("ingenium")!;
+    const victim = identity.createUser(`victim-${crypto.randomUUID()}@example.test`, "Victim");
+    organizations.addOrganizationMember(project.organization_id, victim.id, "member");
+    const runtime = activateRuntime(projectId, undefined, true, true);
+    const pending = observations.storeObservation(projectId, "preference", "Owner's pending preference", 10, "manual", undefined, undefined, {
+      organizationId: project.organization_id, ownerUserId: runtime.ownerUserId, visibility: "private",
+    });
+    const canary = "FOREIGN_PRIVATE_ACTIVE_TRAIT_CANARY";
+    const trait = personality.upsertTrait(projectId, "code_preference", canary, undefined, 0.8, undefined, undefined, {
+      ownerUserId: victim.id, visibility: "private",
+    });
+    expect(personality.getTraits(projectId).some(({ id }) => id === trait.id)).toBe(true);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("INGENIUM_RUNTIME_MANAGER_URL", "");
+    const credentialDirectory = mkdtempSync(join(tmpdir(), "ingenium-synthesis-trait-secret-"));
+    temporaryPaths.push(credentialDirectory);
+    const credentialPath = join(credentialDirectory, "password");
+    writeFileSync(credentialPath, `${"s".repeat(64)}\n`, { mode: 0o600 });
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", credentialPath);
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    expect(runtimes.getReadyRuntimeForProject(projectId)?.id).toBe(runtime.id);
+    const fetchMock = vi.fn(async () => response({ data: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await synthesis.runSynthesis(projectId, undefined, {
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+    });
+
+    expect(result.summary).toContain("unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(canary);
+    expect(observations.getObservation(projectId, pending.id)?.status).toBe("pending");
+    expect(personality.getTraits(projectId).find(({ id }) => id === trait.id)).toMatchObject({
+      trait_value: canary, confidence: 0.8, is_active: 1,
+    });
+  });
+
+  it("does not borrow a local runtime authorized for a different project", async () => {
+    const projectId = configuredProject(["custom", "model-a"], undefined, true);
+    activateRuntime(projectId, undefined, true, true);
+    const foreign = projects.createProject(`foreign-${crypto.randomUUID()}`);
+    vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "synthetic-local-password");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(createBackgroundSynthesisBrokerExecutor(foreign.id)({ system: "system", user: "private-canary", timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reports an absent selection without executing", async () => {

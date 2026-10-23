@@ -61,6 +61,8 @@ build/
 temp
 
 # SQLite runtime data
+:memory:
+:memory:-*
 /data*
 *.db
 *.db-shm

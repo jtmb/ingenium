@@ -68,13 +68,28 @@ pluginsRouter.put("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const updated = plugins.updatePlugin(projectId, req.params.name!, req.body);
+    const parsed = plugins.pluginUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Provide only description (up to 2000 characters, no NUL), or only executable fields." } });
+      return;
+    }
+    const updated = "description" in parsed.data
+      ? plugins.updatePluginDescription(projectId, req.params.name!, parsed.data.description)
+      : plugins.updatePlugin(projectId, req.params.name!, parsed.data);
     if (!updated) {
       res.status(404).json({ error: { code: "NOT_FOUND", message: "Plugin not found" } });
       return;
     }
     res.json({ data: updated });
   } catch (err: any) {
+    if (typeof req.body?.description === "string") {
+      const invalid = err.name === "ZodError";
+      res.status(invalid ? 400 : 500).json({ error: {
+        code: invalid ? "VALIDATION_ERROR" : "INTERNAL_ERROR",
+        message: invalid ? "Invalid plugin description update" : "Plugin description update failed",
+      } });
+      return;
+    }
     logger.error("plugins", `Plugin update failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
   }

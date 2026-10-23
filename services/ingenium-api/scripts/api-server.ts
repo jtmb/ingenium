@@ -14,10 +14,8 @@ import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import {
   authPreflightReadRateLimit,
   authenticatedReadRateLimit,
-  coordinationRateLimit,
   rateLimit,
   recordCandidateAuthenticationFailure,
-  recordCoordinationAttestationFailure,
 } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
@@ -60,7 +58,6 @@ import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
 import { usageRouter } from "../lib/routes/usage.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
-import { coordinationRouter } from "../lib/routes/coordination.js";
 import { bootstrapRouter } from "../lib/routes/bootstrap.js";
 import { organizationsRouter } from "../lib/routes/organizations.js";
 import { runtimesRouter } from "../lib/routes/runtimes.js";
@@ -158,7 +155,6 @@ app.use(recordCandidateAuthenticationFailure);
 app.use(authenticatedReadRateLimit);
 app.use(csrfMiddleware);
 app.use(authorizationMiddleware);
-app.use(recordCoordinationAttestationFailure);
 app.use(createRepositorySyncIngress());
 
 // OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
@@ -184,8 +180,6 @@ app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/tasks", tasksRouter);
-app.use("/api/v1/coordination", coordinationRateLimit);
-app.use("/api/v1/coordination", coordinationRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/memory", memoryRouter);
 app.use("/api/v1/plugins", pluginsRouter);

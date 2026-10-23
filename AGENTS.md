@@ -6,7 +6,7 @@ This file is the short orientation map for people and agents working in the Inge
 
 | Concern | Source |
 |---|---|
-| Root agent/model list + MCP + plugins | [`opencode.json`](opencode.json) — authoritative `agent` map; [`.opencode/models.md`](.opencode/models.md) is a reference |
+| Root agent/model list + MCP + plugins | [`opencode.json`](opencode.json) — authoritative `agents` map; [`.opencode/models.md`](.opencode/models.md) is a reference |
 | Agent prompts/permissions | [`.opencode/agents/**`](.opencode/agents/) per-agent frontmatter |
 | Conventions/skills | [`.opencode/skills/*/SKILL.md`](.opencode/skills/) (8 canonical) + [extension Ponytail](packages/ingenium-extension/ponytail/skills/ponytail/SKILL.md) |
 | Commands | [`.opencode/commands/*.md`](.opencode/commands/) |
@@ -18,7 +18,7 @@ This file is the short orientation map for people and agents working in the Inge
 Ingenium is a local-first, self-hosted AI developer workspace built around OpenCode. It is an npm-workspace monorepo with these boundaries:
 
 - **Packages:** `ingenium-core` is the shared SQLite-WAL/FTS5 and Zod library; `ingenium-email` provides IMAP/SMTP and OAuth2; `ingenium-extension` is the installable client MCP server and plugin package.
-- **Services:** `ingenium-api` is the REST and authenticated `:4097` API boundary and sole database authority; `ingenium-server` is MCP stdio (291 catalogued tools: 289 server registrations plus 2 extension tools, zero DB access); `ingenium-dashboard` is the Next.js 16 App Router frontend on `:3000`, also zero DB access.
+- **Services:** `ingenium-api` is the REST and authenticated `:4097` API boundary and sole database authority; `ingenium-server` is MCP stdio (292 catalogued tools: 290 server registrations plus 2 extension tools across 32 baseline categories, zero DB access); `ingenium-dashboard` is the Next.js 16 App Router frontend on `:3000`, also zero DB access.
 - **Deployment:** the compatibility profile is one Docker container managed by supervisord with six primary service processes (API, API boundary, dashboard, Nginx gateway, OpenCode Web, and ttyd); the current compatibility configuration also defines support processes such as restore handoff, the OpenCode auth proxy, and code-server. Private OpenCode upstreams are `:4098` and `:4099`; the OAuth callback proxy listens on `:1455`.
 - **Database:** migration files live in [`packages/ingenium-core/data/migrations`](packages/ingenium-core/data/migrations). Runtime consumers reach the database through the API, not by opening the database themselves.
 
@@ -44,40 +44,64 @@ Ingenium is a local-first, self-hosted AI developer workspace built around OpenC
 
 ## Agents and topology
 
-The authoritative agent list is the `agent` map in root [`opencode.json`](opencode.json). Profile files supply prompts, lifecycle metadata, skills, and permissions; root `opencode.json` supplies the runtime model and variant.
+The authoritative agent list is the `agents` map in root [`opencode.json`](opencode.json). Profile files supply prompts, lifecycle metadata, skills, and permissions; root `opencode.json` supplies the native `provider/model#variant` reference.
 
 | Agent | Role and current model/variant | Mode / hidden | Writer? |
 |---|---|---|---|
 | `plan` | Built-in coordination, read-only; questions allowed; task only `ingenium-explore`; `openai/gpt-6-astra / max` | built-in / n/a | No |
-| `ingenium-orchestrator` | Primary coordination; never edits; TodoWrite; scoped Git/GitHub Bash; `deepseek/deepseek-v4-flash / max` | primary / visible | No |
-| `ingenium-chat` | Read-only chat primary; `openai/gpt-5.6-luna / max` | primary / hidden | No |
-| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-5.6-sol / medium` | subagent / visible | Yes |
-| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-astra / medium` | subagent / visible | Yes |
-| `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-5.6-luna / max` | subagent / visible | Yes |
-| `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-5.6-sol / high` | subagent / visible | Yes, scoped |
-| `ingenium-explore` | Read-only search and codebase exploration; `openai/gpt-5.6-sol / medium` | subagent / visible | No |
-| `ingenium-scout` | Read-only Docs RAG plus coordination status/memory retrieval; `openai/gpt-5.6-luna / max` | subagent / visible | No |
-| `ingenium-qa` | One targeted review per finalized implementation boundary; `openai/gpt-5.6-luna / max` | subagent / visible | No |
+| `ingenium-orchestrator` | Primary coordination; direct-first with explicit scoped `read`/`glob`/`grep` and instrumented `edit`/`write` grants; TodoWrite; scoped Git/GitHub Bash; `openai/gpt-6-sol / medium` | primary / visible | Yes, scoped |
+| `ingenium-chat` | Chat primary with explicit saved-memory tools; `openai/gpt-6-luna / xhigh` | primary / hidden | No |
+| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-6-luna / xhigh` | subagent / visible | Yes |
+| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-sol / high` | subagent / visible | Yes |
+| `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-6-luna / xhigh` | subagent / visible | Yes |
+| `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-6-sol / high` | subagent / visible | Yes, scoped |
+| `ingenium-explore` | Read-only search and codebase exploration; `openai/gpt-6-sol / medium` | subagent / visible | No |
+| `ingenium-scout` | Read-only Docs RAG plus coordination status/memory retrieval; `openai/gpt-6-luna / xhigh` | subagent / visible | No |
+| `ingenium-qa` | One targeted review per finalized implementation boundary; `openai/gpt-6-luna / xhigh` | subagent / visible | No |
 | `ingenium-security-auditor` | Bounded current-diff security review for a predeclared surface; `openai/gpt-6-astra / high` | subagent / visible | No |
 
 `browser-agent` is **removed** from the topology: never route, mention it as active, or substitute it, including for website retrieval. `ingenium-qa-vision` is retired and has no root mapping; generic managed Playwright and passive visual QA belong to `@ingenium-qa`. The hidden system agent `ingenium-llm-broker` is profile-only, wildcard-denied, has no `opencode.json` mapping, and is never invoked. Profile files and the root map are kept aligned by the agent lifecycle; if they disagree, `opencode.json` wins for the agent list.
 
-Profiles are categorized under `.opencode/agents/` by responsibility: `primary/`, `chat/`, `research/`, `execution/`, and `security/`. The root map is the runtime roster; a profile that is present on disk but absent from that map is not an additional mapped agent.
+Plan uses the root profile `.opencode/agents/plan.md` and native ID `plan`. Named Ingenium profiles are categorized under `.opencode/agents/` by responsibility: `primary/`, `chat/`, `research/`, `execution/`, and `security/`. The root map is the runtime roster; a profile that is present on disk but absent from that map is not an additional mapped agent.
 
 ## Orchestration essentials
 
 Read the [primary orchestrator profile](.opencode/agents/primary/ingenium-orchestrator.md) before coordinating work.
 
-- The coordinator delegates and reconciles; it never edits files.
-- Every nonterminal task has a nonempty `TodoWrite` before dispatch.
+- The coordinator delegates and reconciles; feasible direct work uses its explicit scoped grants.
+- Direct-first is the default: when the active authorized agent can complete the
+  scoped work feasibly and efficiently, dispatch zero subagents and do the work
+  directly. This does not widen the coordination-only orchestrator's grants.
+- Every nonterminal task has a nonempty `TodoWrite` before dispatch, direct edit,
+  or command.
 - Every task/phase contract names `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification plan, and escalation rule.
-- Dispatch one distinct subagent per dependency-ready open TodoWrite/roadmap item, with exclusive non-overlapping writer territories, following the explicit user-requested concurrency.
-- Run QA once per finalized implementation boundary. Run security only for a predeclared changed security surface. Run Docs only for directly affected canonical documentation or an explicit user request.
+- When delegation is necessary, form a new useful team of 2–6 subagents,
+  preferring 3 and never exceeding 6 active children per parent. Do not add
+  filler or create a new singleton team; an existing team's one-member tail may
+  continue when it is already in flight. An explicit concurrency request does
+  not override this team shape or deny-default permissions.
+- Schedule only dependency-ready work with exclusive, non-overlapping writer
+  territories. Start newly eligible work without waiting for unrelated team
+  members only when a supported background capability exists; otherwise use
+  honest parallel synchronous waves. Synchronous batches remain synchronous;
+  true async also requires correlated results, and never claim async proof
+  without those conditions.
+- Preserve independent verification. QA runs exactly one report only when a
+  declared finalized boundary has a risk or acceptance need; security runs at
+  most one report only for a predeclared changed security surface. Docs,
+  research, visual, deployment, and recovery gates remain conditional on a
+  useful in-scope or applicable boundary, not token-wasting ritual.
+- Directory auto-approval remains limited to the declared project and
+  canonical-worktree scope. Keep the orchestrator's grants narrow and preserve
+  the other tool surfaces and grants from baseline `e25f5519` unless a separate
+  scoped change explicitly changes them.
 - Subagents never delegate: no subagent may spawn, reassign, or request another subagent; research or documentation needs return to the orchestrator (Todo 43 boundary).
 - UI work gets one changed-route visual gate and one passive full-site sweep per requested UI batch.
 - Runtime-impacting work names an authorized deployment owner—normally Premium—which rebuilds current merged source, restarts it, and health-checks actual routes.
 - Reconcile roadmap markers and `TodoWrite` before any terminal response. Source tests alone never justify `PASS`.
-- Current scheduling dispatches one distinct subagent per dependency-ready item with exclusive writer territory; there is no fixed active-agent or writer ceiling. Respect explicit user concurrency, record actual counts, and treat older phase/count entries as historical. See [`ROADMAP.md`](docs/reference/ROADMAP.md) for the live decision.
+- The current scheduling policy is the direct-first, bounded-team policy in
+  [`ROADMAP.md`](docs/reference/ROADMAP.md#orch-eff-01-07-supersession-2026-09-15); older one-agent-per-item
+  and no-cap phase/count entries are historical evidence, not live guidance.
 
 A dispatch is not ready until its contract has a real deliverable, dependency-ready Todo(s), exclusive writer territory, named verification owners, and a concrete escalation condition. A failed check is evidence to classify and repair, not an automatic user escalation. Preserve unknown outcomes and the first failure; never replay an uncertain mutation or hide an internal tool-state denial behind a status-only response.
 
@@ -96,7 +120,8 @@ Full protocol: [orchestrator deterministic-admission section](.opencode/agents/p
 
 - Read or grep the source of every claim before asserting it; distinguish verified evidence from inference.
 - Never commit API tokens or secrets. Use placeholders in config; credentials live in protected ignored files such as `.opencode/.ingenium-*credential`.
-- Load matching skills before acting: `development-conventions`, `devops-conventions`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions`, and `ponytail`.
+- Load `@ponytail`, task-matching skills, and relevant roadmap/context before
+  acting; do not load every skill or the full roadmap by default.
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries; CI enforces this boundary.
 - SQL: use parameterized queries; call `checkpointAfterWrite()` outside `execTransaction()`; check parent existence before FK child upserts; use `ON CONFLICT DO UPDATE`, never `INSERT OR REPLACE`; FTS5 triggers are the sole FTS writers.
 - Git-authoritative external sync is `worktree → extension resource-sync plugin → MCP → authenticated API → DB`. Agents never mutate the DB or mutation REST directly.

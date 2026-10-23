@@ -2,15 +2,18 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { config } from "../config/index.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { createOpenCodeMessagesClient } from "../lib/opencode-messages-client.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 
 const API_TOKEN = "a".repeat(32);
-const ORIGINAL_OPENCODE_DB_PATH = process.env.INGENIUM_OPENCODE_DB_PATH;
+const ORIGINAL_OPENCODE_URL = config.opencodeUrl;
 let server: Server;
+let upstreamServer: Server;
 let origin = "";
+let upstreamOrigin = "";
 let observedAuthorization: string | undefined;
 
 beforeAll(async () => {
@@ -29,25 +32,42 @@ beforeAll(async () => {
       resolve();
     });
   });
+
+  upstreamServer = createServer((request, response) => {
+    if (request.url?.startsWith("/api/session")) {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ data: [], cursor: {} }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => {
+    upstreamServer.listen(0, "127.0.0.1", () => {
+      upstreamOrigin = `http://127.0.0.1:${(upstreamServer.address() as AddressInfo).port}`;
+      config.opencodeUrl = upstreamOrigin;
+      resolve();
+    });
+  });
 });
 
 beforeEach(() => {
   process.env.INGENIUM_API_TOKEN = API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
-  process.env.INGENIUM_OPENCODE_DB_PATH = "/tmp/ingenium-opencode-messages-client-missing.db";
+  process.env.OPENCODE_SERVER_PASSWORD = "test-password";
   observedAuthorization = undefined;
 });
 
 afterEach(() => {
   delete process.env.INGENIUM_API_TOKEN;
   delete process.env.INGENIUM_API_TOKEN_FILE;
-  if (ORIGINAL_OPENCODE_DB_PATH === undefined) delete process.env.INGENIUM_OPENCODE_DB_PATH;
-  else process.env.INGENIUM_OPENCODE_DB_PATH = ORIGINAL_OPENCODE_DB_PATH;
+  delete process.env.OPENCODE_SERVER_PASSWORD;
   vi.unstubAllGlobals();
 });
 
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  await new Promise<void>((resolve) => upstreamServer.close(() => resolve()));
+  config.opencodeUrl = ORIGINAL_OPENCODE_URL;
 });
 
 describe("authenticated OpenCode messages client", () => {

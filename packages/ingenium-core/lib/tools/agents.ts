@@ -17,9 +17,9 @@ export const LLM_BROKER_METADATA = '{"hidden":true}';
 export const LLM_BROKER_SKILLS = "[]";
 export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-managed";
 export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
-export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker.mjs`;
-const LLM_BROKER_CONFIG_SHA256 = "4dd82cf42295fd9dba7594f101702fb6d356db66d77adc98efc3d70dcc240d47";
-const LLM_BROKER_ENFORCER_SHA256 = "aae2499e9c1fa92e236d7f406df29720d2160447665f8fe792d24251543b84e1";
+export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker/index.mjs`;
+const LLM_BROKER_CONFIG_SHA256 = "cd261d375d30b8f09cbdbf6ec435798358719a31f9b1c156dd1a35fe085aa1b0";
+const LLM_BROKER_ENFORCER_SHA256 = "13b2ad8ba5de618e28197b361b21fc76adbb4b3fded4082e3288fa68eb62e13a";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
 Its wildcard-deny permission boundary intentionally has no exceptions: it has no
@@ -29,6 +29,20 @@ grant capabilities that this profile denies.
 `;
 
 type JsonObject = Record<string, unknown>;
+type PermissionEffect = "allow" | "ask" | "deny";
+
+interface PermissionRule {
+  action: string;
+  resource: string;
+  effect: PermissionEffect;
+}
+
+const PERMISSION_ACTION_ALIASES: Record<string, string> = {
+  bash: "shell",
+  task: "subagent",
+  write: "edit",
+};
+const SCOPED_PERMISSION_ACTIONS = new Set(["edit", "shell", "subagent", "skill"]);
 
 function isJsonObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -91,12 +105,45 @@ function canonicalMetadataForAgent(name: string, value: string | null | undefine
   return isReservedAgentName(name) ? LLM_BROKER_METADATA : serializeAgentObject(value);
 }
 
+function permissionEffect(value: unknown): PermissionEffect {
+  return value === "allow" || value === "ask" ? value : "deny";
+}
+
+function permissionRules(permissions: JsonObject): PermissionRule[] {
+  const rules: PermissionRule[] = [];
+  const seen = new Set<string>();
+  for (const [rawAction, value] of Object.entries(permissions)) {
+    const action = PERMISSION_ACTION_ALIASES[rawAction] ?? rawAction;
+    const resources = isJsonObject(value) ? Object.entries(value) : [["*", value] as const];
+    for (const [resource, effectValue] of resources) {
+      const effect = permissionEffect(effectValue);
+      const key = `${action}\0${resource}\0${effect}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rules.push({ action, resource, effect });
+    }
+  }
+  return rules;
+}
+
+function permissionObject(rules: PermissionRule[]): JsonObject {
+  const permissions: JsonObject = {};
+  for (const { action, resource, effect } of rules) {
+    const current = permissions[action];
+    if (resource === "*" && current === undefined && !SCOPED_PERMISSION_ACTIONS.has(action)) {
+      permissions[action] = effect;
+      continue;
+    }
+    const resources = isJsonObject(current) ? current : current === undefined ? {} : { "*": current };
+    resources[resource] = effect;
+    permissions[action] = resources;
+  }
+  return permissions;
+}
+
 function defaultPermissionsForAgent(name: string, permissions: JsonObject): JsonObject {
-  // The broker has no implicit capability. In particular, an omitted
-  // `permission` block must never turn a wildcard-deny broker into an allow-all
-  // profile when the definition is restored from storage.
   if (isReservedAgentName(name)) return { "*": "deny" };
-  const withDefaultDeny = { "*": "deny", ...permissions };
+  const withDefaultDeny = { "*": "deny", ...permissionObject(permissionRules(permissions)) };
   withDefaultDeny["*"] = "deny";
   return withDefaultDeny;
 }
@@ -105,32 +152,25 @@ function canonicalMetadataForDisk(name: string, metadata: JsonObject): JsonObjec
   return isReservedAgentName(name) ? { hidden: true } : metadata;
 }
 
-function yamlKey(key: string): string {
-  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(key) ? key : JSON.stringify(key);
-}
-
 function yamlScalar(value: unknown): string {
   if (typeof value === "string" && /^[A-Za-z0-9._:/-]+$/.test(value)) return value;
   return JSON.stringify(value);
 }
 
-function appendYamlObject(lines: string[], value: JsonObject, indent: number): void {
-  const prefix = " ".repeat(indent);
-  for (const [key, child] of Object.entries(value)) {
-    if (isJsonObject(child)) {
-      lines.push(`${prefix}${yamlKey(key)}:`);
-      appendYamlObject(lines, child, indent + 2);
-    } else {
-      lines.push(`${prefix}${yamlKey(key)}: ${yamlScalar(child)}`);
-    }
+function appendPermissionRules(lines: string[], permissions: JsonObject): void {
+  lines.push("permissions:");
+  for (const rule of permissionRules(permissions)) {
+    lines.push(`  - action: ${yamlScalar(rule.action)}`);
+    lines.push(`    resource: ${yamlScalar(rule.resource)}`);
+    lines.push(`    effect: ${rule.effect}`);
   }
 }
 
 function writePermissionFrontmatter(frontmatter: string, permissions: JsonObject): string {
   const lines = frontmatter.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^permission:\s*/.test(line));
-  const replacement = ["permission:"];
-  appendYamlObject(replacement, permissions, 2);
+  const start = lines.findIndex((line) => /^permissions?:\s*/.test(line));
+  const replacement: string[] = [];
+  appendPermissionRules(replacement, permissions);
   if (start === -1) return `${frontmatter}\n${replacement.join("\n")}`;
 
   let end = start + 1;
@@ -171,7 +211,7 @@ function parseYamlMappingKey(value: string): string | null {
  * names. OpenCode supports wildcard keys, and reducing this to read/write/bash
  * would silently weaken a broker's `"*": deny` policy.
  */
-function parsePermissionFrontmatter(frontmatter: string): JsonObject {
+function parseLegacyPermissionFrontmatter(frontmatter: string): JsonObject {
   const lines = frontmatter.split(/\r?\n/);
   const start = lines.findIndex((line) => /^permission:\s*$/.test(line));
   if (start === -1) return {};
@@ -212,25 +252,72 @@ function parsePermissionFrontmatter(frontmatter: string): JsonObject {
   return permissions;
 }
 
+function parsePermissionFrontmatter(frontmatter: string): JsonObject {
+  const lines = frontmatter.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^permissions:\s*$/.test(line));
+  if (start === -1) return parseLegacyPermissionFrontmatter(frontmatter);
+
+  const rules: PermissionRule[] = [];
+  let current: Partial<PermissionRule> | undefined;
+  const finish = () => {
+    if (current?.action && current.resource && current.effect) rules.push(current as PermissionRule);
+  };
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent < 2) break;
+    const action = line.match(/^\s{2}-\s+action:\s*(.+?)\s*$/)?.[1];
+    if (action !== undefined) {
+      finish();
+      current = { action: unquoteYamlScalar(action) };
+      continue;
+    }
+    const field = line.match(/^\s{4}(resource|effect):\s*(.+?)\s*$/);
+    if (!current || !field) continue;
+    if (field[1] === "resource") current.resource = unquoteYamlScalar(field[2]!);
+    else current.effect = permissionEffect(unquoteYamlScalar(field[2]!));
+  }
+  finish();
+  return permissionObject(rules);
+}
+
 function parseAgentMetadata(frontmatter: string): JsonObject {
   const hidden = frontmatter.match(/^hidden:\s*(true|false)\s*$/mi)?.[1];
   return hidden === "true" ? { hidden: true } : hidden === "false" ? { hidden: false } : {};
 }
 
+function parseAgentSkills(frontmatter: string): string[] {
+  const lines = frontmatter.split(/\r?\n/).map((line) => line.replace(/^# /, ""));
+  const start = lines.findIndex((line) => /^skills:\s*$/.test(line));
+  if (start === -1) return [];
+  const skills: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!/^\s/.test(line)) break;
+    const skill = line.match(/^\s{2}-\s+(.+?)\s*$/)?.[1];
+    if (skill) skills.push(unquoteYamlScalar(skill));
+  }
+  return skills;
+}
+
 function parseAgentEnabled(frontmatter: string): boolean {
-  return frontmatter.match(/^disable:\s*(true|false)\s*$/mi)?.[1] !== "true";
+  const disabled = frontmatter.match(/^disabled:\s*(true|false)\s*$/mi)?.[1]
+    ?? frontmatter.match(/^disable:\s*(true|false)\s*$/mi)?.[1];
+  return disabled !== "true";
 }
 
 function reservedBrokerFileContent(): string {
   const escapedDescription = LLM_BROKER_DESCRIPTION.replace(/"/g, '\\"');
   return [
     "---",
-    `name: ${LLM_BROKER_AGENT}`,
     `description: "${escapedDescription}"`,
     `mode: ${LLM_BROKER_MODE}`,
     "hidden: true",
-    "permission:",
-    '  "*": deny',
+    "permissions:",
+    '  - action: "*"',
+    '    resource: "*"',
+    "    effect: deny",
     "---",
     "",
     LLM_BROKER_CONTENT,
@@ -293,14 +380,14 @@ function protectedArtifactLocation(file: "config" | "enforcer"): ProtectedArtifa
       root: deploymentRoot(),
       components: file === "config"
         ? [".opencode", "protected", "opencode.json"]
-        : [".opencode", "protected", "plugins", "enforce-reserved-broker.mjs"],
+        : [".opencode", "protected", "plugins", "enforce-reserved-broker", "index.mjs"],
     };
   }
   return {
     root: deploymentRoot(),
     components: file === "config"
       ? ["opencode.json"]
-      : ["plugins", "enforce-reserved-broker.mjs"],
+      : ["plugins", "enforce-reserved-broker", "index.mjs"],
   };
 }
 
@@ -462,13 +549,13 @@ function lstatIfPresent(path: string) {
   }
 }
 
-/** Resolve a category only through real directories beneath the repository root. */
-function safeAgentCategoryDirectory(category: AgentCategory, create = false): string | undefined {
+/** Resolve only real profile directories; null selects the built-in Plan root. */
+function safeAgentCategoryDirectory(category: AgentCategory | null, create = false): string | undefined {
   const agentsDir = resolve(getAgentsDir());
   const opencodeDir = resolve(agentsDir, "..");
   const projectRoot = resolve(opencodeDir, "..");
-  const categoryDir = resolve(agentsDir, category);
-  if (!categoryDir.startsWith(agentsDir + sep)) return undefined;
+  const categoryDir = category === null ? agentsDir : resolve(agentsDir, category);
+  if (category !== null && !categoryDir.startsWith(agentsDir + sep)) return undefined;
 
   for (const directory of [projectRoot, opencodeDir, agentsDir, categoryDir]) {
     let stat = lstatIfPresent(directory);
@@ -484,7 +571,7 @@ function safeAgentCategoryDirectory(category: AgentCategory, create = false): st
 
 /** Return a regular, contained profile path without following a symlink. */
 function safeAgentFilePath(category: AgentCategory, name: string, create = false): string | undefined {
-  const categoryDir = safeAgentCategoryDirectory(category, create);
+  const categoryDir = safeAgentCategoryDirectory(name === "plan" && category === "primary" ? null : category, create);
   if (!categoryDir) return undefined;
   const filePath = resolve(categoryDir, `${name}.md`);
   if (!filePath.startsWith(categoryDir + sep)) return undefined;
@@ -515,7 +602,7 @@ function writePublicAgentProfile(filePath: string, content: string): void {
   }
 }
 
-type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean; [key: string]: unknown }>;
+type OpenCodeAgentConfig = Record<string, { model?: string; disabled?: boolean; [key: string]: unknown }>;
 
 function parseConfig(content: string): Record<string, unknown> {
   return JSON.parse(content.replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
@@ -535,15 +622,25 @@ function readProjectConfig(projectId: string): Record<string, unknown> {
   }
 }
 
-function configuredAgentModel(projectId: string, name: string): string | null {
-  const entry = readProjectConfig(projectId).agent as OpenCodeAgentConfig | undefined;
-  return typeof entry?.[name]?.model === "string" ? entry[name].model : null;
+function runtimeAgentId(category: AgentCategory, name: string): string {
+  return name === "plan" && category === "primary" ? "plan" : `${category}/${name}`;
+}
+
+function configuredAgentModel(projectId: string, category: AgentCategory, name: string): string | null {
+  const config = readProjectConfig(projectId);
+  const agents = isJsonObject(config.agents) ? config.agents as OpenCodeAgentConfig : undefined;
+  const legacyAgents = isJsonObject(config.agent) ? config.agent as OpenCodeAgentConfig : undefined;
+  const entry = agents?.[runtimeAgentId(category, name)] ?? agents?.[`${category}/${name}`] ?? legacyAgents?.[name];
+  if (typeof entry?.model !== "string") return null;
+  return typeof entry.variant === "string" && !entry.model.includes("#")
+    ? `${entry.model}#${entry.variant}`
+    : entry.model;
 }
 
 function updateAgentRuntimeConfig(
   projectId: string,
   name: string,
-  options: { model?: string | null; remove?: boolean },
+  options: { category: AgentCategory; previousCategory?: AgentCategory; model?: string | null; remove?: boolean },
 ): void {
   // Resolve the DB/disk fallback before taking the write lock. `readProjectConfig`
   // can read opencode.json when the database copy is missing or malformed, and
@@ -559,26 +656,42 @@ function updateAgentRuntimeConfig(
     } catch {
       config = fallbackConfig;
     }
-    const agents = (config.agent && typeof config.agent === "object" && !Array.isArray(config.agent))
-      ? config.agent as OpenCodeAgentConfig
-      : {};
-    const entry = { ...(agents[name] ?? {}) };
+    const agents = isJsonObject(config.agents) ? config.agents as OpenCodeAgentConfig : {};
+    const legacyAgents = isJsonObject(config.agent) ? config.agent as OpenCodeAgentConfig : {};
+    const id = runtimeAgentId(options.category, name);
+    const previousId = runtimeAgentId(options.previousCategory ?? options.category, name);
+    const legacyPlanId = name === "plan" && (options.category === "primary" || options.previousCategory === "primary")
+      ? "primary/plan" : undefined;
+    const entry = { ...(agents[id] ?? agents[previousId] ?? (legacyPlanId ? agents[legacyPlanId] : undefined) ?? legacyAgents[name] ?? {}) };
+    const existingModel = typeof entry.model === "string" ? entry.model : undefined;
+    const legacyVariant = typeof entry.variant === "string"
+      ? entry.variant
+      : existingModel?.includes("#") ? existingModel.slice(existingModel.lastIndexOf("#") + 1) : undefined;
+    delete agents[previousId];
+    delete agents[name];
+    delete legacyAgents[name];
+    if (legacyPlanId) delete agents[legacyPlanId];
+    if (id === "plan" && config.default_agent === "primary/plan") config.default_agent = "plan";
 
     if (options.remove) {
-      delete agents[name];
+      delete agents[id];
     } else {
-      for (const key of Object.keys(entry)) {
-        if (key !== "model" && key !== "variant") delete entry[key];
-      }
+      for (const key of Object.keys(entry)) if (key !== "model") delete entry[key];
       if (options.model !== undefined) {
-        if (options.model) entry.model = options.model;
+        if (options.model) entry.model = legacyVariant && !options.model.includes("#")
+          ? `${options.model}#${legacyVariant}`
+          : options.model;
         else delete entry.model;
+      } else if (legacyVariant && typeof entry.model === "string" && !entry.model.includes("#")) {
+        entry.model = `${entry.model}#${legacyVariant}`;
       }
-      if (Object.keys(entry).length > 0) agents[name] = entry;
-      else delete agents[name];
+      if (Object.keys(entry).length > 0) agents[id] = entry;
+      else delete agents[id];
     }
 
-    if (Object.keys(agents).length > 0) config.agent = agents;
+    if (Object.keys(agents).length > 0) config.agents = agents;
+    else delete config.agents;
+    if (Object.keys(legacyAgents).length > 0) config.agent = legacyAgents;
     else delete config.agent;
     const serialized = JSON.stringify(config, null, 2);
     const now = new Date().toISOString();
@@ -683,18 +796,20 @@ function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerCo
     }
   }
 
-  const storedAgents = storedConfig?.agent;
-  const diskAgents = diskConfig?.agent;
-  const storedHasOverride = isJsonObject(storedAgents)
-    && Object.prototype.hasOwnProperty.call(storedAgents, LLM_BROKER_AGENT);
-  const diskHasOverride = isJsonObject(diskAgents)
-    && Object.prototype.hasOwnProperty.call(diskAgents, LLM_BROKER_AGENT);
+  const hasBrokerOverride = (config: Record<string, unknown> | undefined): boolean =>
+    [config?.agents, config?.agent].some((value) => isJsonObject(value)
+      && Object.keys(value).some((id) => id === LLM_BROKER_AGENT || id.endsWith(`/${LLM_BROKER_AGENT}`)));
+  const storedHasOverride = hasBrokerOverride(storedConfig);
+  const diskHasOverride = hasBrokerOverride(diskConfig);
   if (!storedHasOverride && !diskHasOverride) return undefined;
 
   const config = structuredClone(storedConfig ?? diskConfig ?? {});
-  if (isJsonObject(config.agent)) {
-    delete config.agent[LLM_BROKER_AGENT];
-    if (Object.keys(config.agent).length === 0) delete config.agent;
+  for (const key of ["agents", "agent"] as const) {
+    if (!isJsonObject(config[key])) continue;
+    for (const id of Object.keys(config[key])) {
+      if (id === LLM_BROKER_AGENT || id.endsWith(`/${LLM_BROKER_AGENT}`)) delete config[key][id];
+    }
+    if (Object.keys(config[key]).length === 0) delete config[key];
   }
   const content = JSON.stringify(config, null, 2);
   writeConfigAtomically(path, content);
@@ -707,8 +822,7 @@ function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerCo
  * Existing profiles retain handwritten permissions and body unless explicitly
  * updated. Custom YAML and skills always remain profile-authoritative.
  *
- * If the file doesn't exist, it creates a full frontmatter block from the DB record, including
- * permissions (read/write/bash/task/mcp/skill), skills list, and content body.
+ * New and updated files use native V2 lifecycle and ordered permission fields.
  */
 function writeAgentToDisk(
   agent: Agent,
@@ -729,7 +843,11 @@ function writeAgentToDisk(
     if (fmMatch) {
       const frontmatter = fmMatch[1]!;
 
-      let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
+      // V2 derives identity from the path; a legacy name field misclassifies native permissions.
+      let updated = frontmatter.replace(/^name:[^\r\n]*(?:\r?\n|$)/gm, "");
+      // Repository-only skill metadata must not select V1 normalization either.
+      updated = updated.replace(/^skills:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gm,
+        (block) => block.split(/\r?\n/).map((line) => `# ${line}`).join("\n"));
       // Models are runtime configuration only. Remove stale active model lines while
       // retaining comments that document historical model choices.
       updated = updated.replace(/^model:\s*.*(?:\r?\n|$)/gm, "");
@@ -745,10 +863,10 @@ function writeAgentToDisk(
       } else {
         updated += `\nmode: ${agent.mode}`;
       }
-      if (updated.match(/^disable:\s*.+$/m)) {
-        updated = updated.replace(/^disable:\s*.+$/m, `disable: ${agent.enabled ? "false" : "true"}`);
+      if (updated.match(/^disabled?:\s*.+$/m)) {
+        updated = updated.replace(/^disabled?:\s*.+$/m, `disabled: ${agent.enabled ? "false" : "true"}`);
       } else {
-        updated += `\ndisable: ${agent.enabled ? "false" : "true"}`;
+        updated += `\ndisabled: ${agent.enabled ? "false" : "true"}`;
       }
 
       const metadata = canonicalMetadataForDisk(
@@ -786,19 +904,16 @@ function writeAgentToDisk(
 
   const frontmatter = [
     "---",
-    `name: ${agent.name}`,
     `description: "${escapedDesc}"`,
     `mode: ${agent.mode}`,
-    `disable: ${agent.enabled ? "false" : "true"}`,
+    `disabled: ${agent.enabled ? "false" : "true"}`,
   ];
-  if (agent.reasoning_effort) frontmatter.push(`reasoning_effort: "${agent.reasoning_effort}"`);
   frontmatter.push(`hidden: ${metadata.hidden === true ? "true" : "false"}`);
-  if (Object.keys(permissions).length > 0) {
-    frontmatter.push("permission:");
-    appendYamlObject(frontmatter, permissions, 2);
+  if (Object.keys(permissions).length > 0) appendPermissionRules(frontmatter, permissions);
+  if (skills.length > 0) {
+    frontmatter.push("# skills:");
+    for (const s of skills) frontmatter.push(`#   - ${s}`);
   }
-  frontmatter.push(`skills:`);
-  for (const s of skills) frontmatter.push(`  - ${s}`);
   frontmatter.push("---");
   frontmatter.push("");
   frontmatter.push(agent.content);
@@ -813,7 +928,7 @@ function writeAgentToDisk(
 function removeAgentFromDisk(agent: Agent): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  const categoryDir = safeAgentCategoryDirectory(agent.category);
+  const categoryDir = safeAgentCategoryDirectory(agent.name === "plan" && agent.category === "primary" ? null : agent.category);
   if (!categoryDir) return;
   const filePath = resolve(categoryDir, `${agent.name}.md`);
   if (!filePath.startsWith(categoryDir + sep)) return;
@@ -912,7 +1027,7 @@ export function createAgent(
   });
   // Filesystem effects must happen after the database transaction commits.
   writeAgentToDisk(agent);
-  updateAgentRuntimeConfig(projectId, name, { model: model ?? null });
+  updateAgentRuntimeConfig(projectId, name, { category: safeCategory, model: model ?? null });
   checkpointAfterWrite();
   return agent;
 }
@@ -1049,6 +1164,8 @@ export function updateAgent(
     return { agent, previous: existing };
   });
   if (updated) {
+    assertAgentCategory(updated.agent.category);
+    assertAgentCategory(updated.previous.category);
     if (updated.agent.category !== updated.previous.category) {
       removeAgentFromDisk(updated.previous);
     }
@@ -1057,8 +1174,12 @@ export function updateAgent(
       preserveBody: updates.content === undefined,
     });
   }
-  if (updated && updates.model !== undefined) {
-    updateAgentRuntimeConfig(projectId, name, { model: updates.model || null });
+  if (updated && (updates.model !== undefined || updated.agent.category !== updated.previous.category)) {
+    updateAgentRuntimeConfig(projectId, name, {
+      category: updated.agent.category,
+      previousCategory: updated.previous.category,
+      model: updated.agent.model ?? null,
+    });
   }
   checkpointAfterWrite();
   return updated?.agent;
@@ -1077,8 +1198,9 @@ export function deleteAgent(projectId: string, name: string): boolean {
     return agent;
   });
   if (deletedAgent) {
+    assertAgentCategory(deletedAgent.category);
     removeAgentFromDisk(deletedAgent);
-    updateAgentRuntimeConfig(projectId, name, { remove: true });
+    updateAgentRuntimeConfig(projectId, name, { category: deletedAgent.category, remove: true });
   }
   checkpointAfterWrite();
   return Boolean(deletedAgent);
@@ -1099,14 +1221,15 @@ export function enableAgent(projectId: string, name: string): Agent | undefined 
     return agent;
   });
   if (agent) {
+    assertAgentCategory(agent.category);
     writeAgentToDisk(agent, { preserveBody: true });
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
+    updateAgentRuntimeConfig(projectId, name, { category: agent.category, model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
 }
 
-/** Disable an agent while retaining its profile with `disable: true`. */
+/** Disable an agent while retaining its profile with `disabled: true`. */
 export function disableAgent(projectId: string, name: string): Agent | undefined {
   if (!isSafeAgentName(name)) return undefined;
   // The reserved broker may not enter the ordinary disable lifecycle.
@@ -1121,8 +1244,9 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
     return agent;
   });
   if (agent) {
+    assertAgentCategory(agent.category);
     writeAgentToDisk(agent, { preserveBody: true });
-    updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
+    updateAgentRuntimeConfig(projectId, name, { category: agent.category, model: agent.model ?? undefined });
   }
   checkpointAfterWrite();
   return agent;
@@ -1135,10 +1259,8 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
  * If the agent exists in DB, its category from the DB is used to locate the file.
  * If not, every supported category directory is searched.
  *
- * Parses the full YAML frontmatter structure including:
- * - Basic fields: name, description, mode, reasoning_effort
- * - Permission blocks: read/write/bash, plus nested task/mcp/skill permissions
- * - Skills list
+ * Parses native V2 lifecycle, ordered permissions, and skills while accepting
+ * legacy permission/lifecycle fields only as migration input.
  */
 export function syncAgentFromDisk(projectId: string, name: string): Agent | undefined {
   if (!isSafeAgentName(name)) return undefined;
@@ -1194,7 +1316,7 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
 
   const frontmatter = fmMatch[1]!;
   const body = fmMatch[2]!.trim();
-  if (!/^disable:\s*(?:true|false)\s*$/mi.test(frontmatter)
+  if (!/^disabled?:\s*(?:true|false)\s*$/mi.test(frontmatter)
     || !/^hidden:\s*(?:true|false)\s*$/mi.test(frontmatter)) {
     logger.warn("agents", "Agent profile has incomplete lifecycle metadata", { name });
     return undefined;
@@ -1204,7 +1326,7 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const descMatch = frontmatter.match(/^description:\s*"(.+)"$/m);
   const modeMatch = frontmatter.match(/^mode:\s*(.+)$/m);
   const reasoningMatch = frontmatter.match(/^reasoning_effort:\s*"(.+)"$/m);
-  const skillMatches = [...frontmatter.matchAll(/^\s+-\s(.+)$/gm)].map(m => m[1]!);
+  const skillMatches = parseAgentSkills(frontmatter);
 
   const agentName = nameMatch?.[1] ?? name;
   if (!isSafeAgentName(agentName) || agentName !== name || !isAgentCategory(category)) return undefined;
@@ -1213,7 +1335,7 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   const enabled = parseAgentEnabled(frontmatter);
   // Markdown model lines are deliberately ignored. Config is authoritative;
   // absent a configured model, retain existing API metadata for compatibility.
-  const model = configuredAgentModel(projectId, name) ?? dbAgent?.model ?? null;
+  const model = configuredAgentModel(projectId, category, name) ?? dbAgent?.model ?? null;
   const reasoningEffort = reasoningMatch?.[1] ?? null;
   const profilePermissions = parsePermissionFrontmatter(frontmatter);
   if (Object.keys(profilePermissions)[0] !== "*" || profilePermissions["*"] !== "deny") {
@@ -1246,7 +1368,7 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
     return db.prepare("SELECT * FROM agents WHERE project_id = ? AND name = ?")
       .get(projectId, agentName) as Agent | undefined;
   });
-  if (agent) updateAgentRuntimeConfig(projectId, name, { model: agent.model ?? undefined });
+  if (agent) updateAgentRuntimeConfig(projectId, name, { category, model: agent.model ?? undefined });
   checkpointAfterWrite();
   return agent;
 }

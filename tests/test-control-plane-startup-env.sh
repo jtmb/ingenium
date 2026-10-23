@@ -9,6 +9,7 @@ COMPOSE_ENV_FILE="$RUN_ROOT/compose.env"
 INSTALLATION_TOKEN_FILE="$RUN_ROOT/installation-api.token"
 OPENCODE_PASSWORD_FILE="$RUN_ROOT/opencode-server.password"
 EMAIL_ENCRYPTION_KEY_FILE="$RUN_ROOT/email-encryption.key"
+LEARNING_CREDENTIAL_FILE="$RUN_ROOT/learning-credential"
 
 cleanup() {
   if [[ "$RUN_ROOT" == "${TMPDIR:-/tmp}/ingenium-control-plane-env."* ]]; then
@@ -27,7 +28,8 @@ mkdir -p "$RUN_ROOT/bin"
 : > "$INSTALLATION_TOKEN_FILE"
 : > "$OPENCODE_PASSWORD_FILE"
 : > "$EMAIL_ENCRYPTION_KEY_FILE"
-chmod 0600 "$INSTALLATION_TOKEN_FILE" "$OPENCODE_PASSWORD_FILE" "$EMAIL_ENCRYPTION_KEY_FILE"
+printf 'ing_%012d_%043d\n' 3 4 > "$LEARNING_CREDENTIAL_FILE"
+chmod 0600 "$INSTALLATION_TOKEN_FILE" "$OPENCODE_PASSWORD_FILE" "$EMAIL_ENCRYPTION_KEY_FILE" "$LEARNING_CREDENTIAL_FILE"
 cat > "$RUN_ROOT/bin/cat" <<'EOF'
 #!/bin/sh
 case "$1" in
@@ -67,6 +69,7 @@ PATH="$RUN_ROOT/bin:/usr/bin:/bin" \
 CAPTURE_FILE="$CAPTURE_FILE" \
 INGENIUM_API_TOKEN_FILE=/run/ingenium-secrets/api/installation-api-token \
 OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-secrets/api/opencode-server-password \
+INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-secrets/opencode/.ingenium-learning-credential \
 INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-secrets/api/email-encryption-key \
 /usr/bin/env "${runtime_environment[@]}" sh "$REPO_ROOT/scripts/run-api.sh"
 
@@ -78,6 +81,7 @@ grep -F -x -q -- 'dist/scripts/api-server.js' "$CAPTURE_FILE" || fail 'run-api d
 
 rendered="$({
   OPENCODE_SERVER_PASSWORD_FILE="$OPENCODE_PASSWORD_FILE" \
+  INGENIUM_LEARNING_CREDENTIAL_FILE="$LEARNING_CREDENTIAL_FILE" \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$EMAIL_ENCRYPTION_KEY_FILE" \
   INGENIUM_API_TOKEN_FILE="$INSTALLATION_TOKEN_FILE" \
   IMAGE_REVISION="$REVISION" \
@@ -95,6 +99,7 @@ printf '%s' "$rendered" | node -e '
   const expected = {
     INGENIUM_DEPLOYMENT_MODE: "control-plane",
     OPENCODE_SERVER_PASSWORD_FILE: "/run/ingenium-bootstrap/opencode-server-password",
+    INGENIUM_LEARNING_CREDENTIAL_FILE: "/run/ingenium-bootstrap/learning-credential",
     INGENIUM_EMAIL_ENCRYPTION_KEY_FILE: "/run/ingenium-bootstrap/email-encryption-key",
     INGENIUM_RUNTIME_MANAGER_URL: "http://runtime-manager:4110/",
     INGENIUM_RUNTIME_MANAGER_TOKEN_FILE: "/run/ingenium-runtime-manager/token",
@@ -144,6 +149,7 @@ printf '%s' "$rendered" | node -e '
   }
   for (const target of [
     "/run/ingenium-bootstrap/opencode-server-password",
+    "/run/ingenium-bootstrap/learning-credential",
     "/run/ingenium-bootstrap/email-encryption-key",
   ]) {
     if (!control?.volumes?.some((mount) => mount.type === "bind"
@@ -154,6 +160,7 @@ printf '%s' "$rendered" | node -e '
 '
 
 local_rendered="$(OPENCODE_SERVER_PASSWORD_FILE="$OPENCODE_PASSWORD_FILE" \
+  INGENIUM_LEARNING_CREDENTIAL_FILE="$LEARNING_CREDENTIAL_FILE" \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$EMAIL_ENCRYPTION_KEY_FILE" \
   INGENIUM_API_TOKEN_FILE="$INSTALLATION_TOKEN_FILE" \
   IMAGE_REVISION="$REVISION" \
@@ -180,6 +187,7 @@ printf '%s' "$local_rendered" | node -e '
 '
 
 if missing_rendered="$(env -u OPENCODE_SERVER_PASSWORD_FILE \
+  INGENIUM_LEARNING_CREDENTIAL_FILE="$LEARNING_CREDENTIAL_FILE" \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$EMAIL_ENCRYPTION_KEY_FILE" \
   INGENIUM_API_TOKEN_FILE="$INSTALLATION_TOKEN_FILE" \
   IMAGE_REVISION="$REVISION" \
@@ -191,6 +199,7 @@ fi
 if env -u OPENCODE_SERVER_PASSWORD_FILE \
   PATH="$RUN_ROOT/bin:/usr/bin:/bin" \
   CAPTURE_FILE="$CAPTURE_FILE" \
+  INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-secrets/opencode/.ingenium-learning-credential \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/run/ingenium-secrets/api/email-encryption-key \
   /usr/bin/env "${runtime_environment[@]}" sh "$REPO_ROOT/scripts/run-api.sh"; then
   fail 'run-api reached startup without OPENCODE_SERVER_PASSWORD_FILE'

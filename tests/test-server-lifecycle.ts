@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -77,6 +78,14 @@ function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildA
     },
   });
   symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
+  // Next derives its page-worker count from all host CPUs, even under taskset.
+  // Bound the isolated fixture's memory use without altering production config.
+  const configPath = join(target, "next.config.js");
+  const config = readFileSync(configPath, "utf8");
+  const exportStatement = "export default nextConfig;";
+  if (!config.includes(exportStatement)) throw new Error("Fixture Next.js config export is unsupported");
+  writeFileSync(configPath, config.replace(exportStatement,
+    "export default { ...nextConfig, experimental: { ...nextConfig.experimental, cpus: 2 } };"));
   return target;
 }
 
@@ -306,6 +315,10 @@ function serverEnvironment(context: TestRunManifest, extra: Record<string, strin
     ...getPortEnvironment(context),
     INGENIUM_CORE_DB_PATH: context.dbPath,
     INGENIUM_HOME: context.homeDir,
+    INGENIUM_GLOBAL_CONFIG_PATH: join(context.homeDir, "opencode-global"),
+    TMPDIR: context.runDir,
+    TMP: context.runDir,
+    TEMP: context.runDir,
     INGENIUM_PROJECT: context.project,
     INGENIUM_TEST_RUN_NONCE: context.runNonce,
     INGENIUM_API_PORT: String(context.ports.api),
@@ -377,7 +390,7 @@ export function getServerSpecs(
         CHAT_FIXTURE_PORT: String(context.ports.fixture),
         CHAT_FIXTURE_RUNNER: "1",
       }),
-      readinessUrl: `http://127.0.0.1:${context.ports.fixture}/provider`,
+      readinessUrl: `http://127.0.0.1:${context.ports.fixture}/api/info`,
     },
   ];
 }
@@ -1385,7 +1398,13 @@ export async function startTestServers(
         // to signal the process as belonging to this run.
         throw new Error(`${spec.name} process identity could not be bound to this test run`);
       }
-      await waitForReady(spec, startTimeoutMs, options.readinessRequestTimeoutMs);
+      try {
+        await waitForReady(spec, startTimeoutMs, options.readinessRequestTimeoutMs);
+      } catch (error) {
+        const output = (child as ChildProcess & { __testRunOutput?: { value: string } }).__testRunOutput?.value;
+        if (!output) throw error;
+        throw new Error(`${asError(error).message}\n[${spec.name} startup output]\n${output}`, { cause: error });
+      }
       // No dashboard or fixture process is started until the API has accepted
       // this exact manifest-owned project. This is the boundary before any
       // project-scoped fixture write can occur; there is intentionally no

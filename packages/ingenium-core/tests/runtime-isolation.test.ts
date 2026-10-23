@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,12 +13,14 @@ import { coordinationWorktreeId, registerCoordinationSession } from "../lib/tool
 import { createMcpCredential, resolveMcpCredential } from "../lib/tools/mcp-credentials.js";
 import {
   authorizeWorkspace,
+  authorizeRuntimeAutomation,
   bindRuntimeCapability,
   claimRuntimeLease,
   createRuntimeInstance,
   consumeRuntimeBrowserLaunchTicket,
   consumeRuntimeLaunchTicket,
   getRuntimeForWorkspace,
+  getReadyRuntimeForProject,
   markExpiredRuntimeOrphans,
   issueRuntimeLaunchTicket,
   issueRuntimeBrowserLaunchTicket,
@@ -38,12 +40,15 @@ let directory = "";
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "ingenium-runtime-isolation-"));
+  vi.stubEnv("INGENIUM_HOME", directory);
+  vi.stubEnv("INGENIUM_GLOBAL_CONFIG_PATH", join(directory, "opencode-global"));
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "data");
   resetDbForTest();
 });
 
 afterEach(() => {
   resetDbForTest();
+  vi.unstubAllEnvs();
   delete process.env.INGENIUM_CORE_DB_PATH;
   rmSync(directory, { recursive: true, force: true });
 });
@@ -69,6 +74,37 @@ const limits = {
 };
 
 describe("AUTH-108 runtime isolation", () => {
+  it("requires an explicit owner grant for the exact bound principal without credential replay", () => {
+    const scope = tenancy("automation-owner");
+    const workspace = authorizeWorkspace({
+      id: "workspace-automation-owner", organizationId: scope.organizationId, projectId: scope.project.id,
+      ownerUserId: scope.user.id, storagePath: "/srv/automation-owner",
+    });
+    const credential = createMcpCredential({
+      kind: "runtime", audience: "runtime", name: "Automation owner runtime", scopes: ["child-mcp:runtime"],
+      organizationId: scope.organizationId, projectId: scope.project.id, workspaceId: workspace.id,
+      launcherWorktree: workspace.storagePath, createdByUserId: scope.user.id,
+      expiresAt: new Date(Date.now() + 600_000),
+    });
+    let runtime = createRuntimeInstance(workspace.id, limits);
+    bindRuntimeCapability(runtime.id, credential.id);
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "PROVISIONING", actorType: "system", actorId: "test",
+      idleExpiresAt: new Date(Date.now() + 300_000), absoluteExpiresAt: new Date(Date.now() + 600_000) });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "system", actorId: "test" });
+    runtime = transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const before = db.prepare("SELECT token_hash, service_principal_id, expires_at, revoked_at FROM mcp_credentials WHERE id = ?").get(credential.id);
+    expect(getReadyRuntimeForProject(scope.project.id)).toBeUndefined();
+    expect(() => authorizeRuntimeAutomation(workspace.id, "foreign-owner")).toThrow("SCOPE_UNAVAILABLE");
+    expect(authorizeRuntimeAutomation(workspace.id, scope.user.id).id).toBe(runtime.id);
+    expect(authorizeRuntimeAutomation(workspace.id, scope.user.id).id).toBe(runtime.id);
+    expect(getReadyRuntimeForProject(scope.project.id)?.id).toBe(runtime.id);
+    expect(db.prepare("SELECT token_hash, service_principal_id, expires_at, revoked_at FROM mcp_credentials WHERE id = ?").get(credential.id))
+      .toEqual(before);
+    expect(db.prepare("SELECT service_principal_id, granted_by_actor_type, granted_by_actor_id FROM automation_principal_grants WHERE project_id = ?").all(scope.project.id))
+      .toEqual([{ service_principal_id: credential.servicePrincipalId, granted_by_actor_type: "user", granted_by_actor_id: scope.user.id }]);
+  });
+
   it("installs migration 101 exactly and refuses a partial schema", () => {
     const path = process.env.INGENIUM_CORE_DB_PATH!;
     const database = getDb(path);

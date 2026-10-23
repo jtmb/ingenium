@@ -86,12 +86,14 @@ describe("MCP tool state API", () => {
       principal: { type: "user", id: owner.userId, scopes: ["user:*"], session: { id: "browser-session" } },
     } as any, project.id);
 
-    expect(catalog.size).toBe(239);
-    expect(catalog.has("ingenium_coordination_handoff")).toBe(true);
-    expect(catalog.has("ingenium_coordination_memory_read")).toBe(true);
+    expect(catalog.size).toBe(234);
+    for (const name of [
+      "ingenium_coordination_status", "ingenium_coordination_memory_read", "ingenium_coordination_update",
+      "ingenium_coordination_claim", "ingenium_coordination_release", "ingenium_coordination_handoff",
+    ]) expect(catalog.has(name)).toBe(false);
     expect(catalog.has("ingenium_context_get")).toBe(false);
     expect(catalog.has("ingenium_context_message_retrieve")).toBe(false);
-    expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "project")).toHaveLength(151);
+    expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "project")).toHaveLength(146);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "installation")).toHaveLength(32);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "organization")).toHaveLength(49);
     expect(Array.from(catalog.values()).filter((tool) => tool.authorization?.target === "private").map((tool) => tool.name).sort())
@@ -109,9 +111,9 @@ describe("MCP tool state API", () => {
     const response = await fetch(`${baseUrl}/mcp-tools?project=${project.name}&include_categories=true`);
     const body = await response.json();
     expect(response.status).toBe(200);
-    expect(body.total).toBe(239);
-    expect(body.data).toHaveLength(28);
-    expect(body.counts).toEqual({ visibleTools: 239, visibleCategories: 28 });
+    expect(body.total).toBe(234);
+    expect(body.data).toHaveLength(29);
+    expect(body.counts).toEqual({ visibleTools: 234, visibleCategories: 29 });
     expect(body.counts).not.toHaveProperty("canonicalTools");
     expect(body.counts).not.toHaveProperty("hiddenTools");
     expect(body.counts).not.toHaveProperty("canonicalCategories");
@@ -135,17 +137,51 @@ describe("MCP tool state API", () => {
     const authorizedNames = new Set(catalog.keys());
     const excludedNames = Array.from(mcpToolStates.getAllTools(project.id).keys()).filter((name) => !authorizedNames.has(name));
     expect(reportResponse.status).toBe(200);
-    expect(report.total).toBe(239);
-    expect(report.data.tools).toHaveLength(239);
+    expect(report.total).toBe(234);
+    expect(report.data.tools).toHaveLength(234);
     expect(report.data.catalog).toEqual({
       status: "conformant",
       issues: [],
-      authorizedVisibleExpected: { toolCount: 239, categoryCount: 28 },
+      authorizedVisibleExpected: { toolCount: 234, categoryCount: 29 },
     });
     expect(report.data.tools.every((tool: { name: string }) => authorizedNames.has(tool.name))).toBe(true);
     expect(excludedNames.some((name) => JSON.stringify(report).includes(name))).toBe(false);
     expect(report).not.toHaveProperty("counts");
     expect(JSON.stringify(report.data.catalog)).not.toMatch(/canonical|hidden|private/i);
+  });
+
+  it("allows a report principal to read only its bound project catalog", async () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-report-principal-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    resetDbForTest();
+    const project = projects.createProject("mcp-report-bound");
+    const otherProject = projects.createProject("mcp-report-other");
+    const principal = {
+      type: "service" as const,
+      id: "mcp-report:test",
+      tokenId: "test",
+      scopes: ["mcp-report:inspect"],
+      organizationId: null,
+      projectId: project.id,
+      projectIds: [project.id],
+      audience: "mcp-report" as const,
+      workspaceId: project.id,
+      launcherWorktree: "/app",
+      reportToolNames: ["ingenium_health_check"],
+    };
+    const baseUrl = await startRouter(principal);
+
+    const allowed = await fetch(`${baseUrl}/mcp-tools?project=${project.name}`);
+    await expect(allowed.json()).resolves.toMatchObject({
+      project: project.name,
+      project_id: project.id,
+      total: 1,
+      data: [{ tool_name: "ingenium_health_check" }],
+    });
+    expect(allowed.status).toBe(200);
+
+    const crossProject = await fetch(`${baseUrl}/mcp-tools?project=${otherProject.name}`);
+    expect(crossProject.status).toBe(404);
   });
 
   it("returns the resolved project ID and preserves isolation with idempotent category updates", async () => {
@@ -158,7 +194,13 @@ describe("MCP tool state API", () => {
 
     const listed = await fetch(`${baseUrl}/mcp-tools?project=mcp-tools-route-a`);
     expect(listed.status).toBe(200);
-    await expect(listed.json()).resolves.toMatchObject({ project: "mcp-tools-route-a", project_id: projectA.id });
+    await expect(listed.json()).resolves.toMatchObject({
+      project: "mcp-tools-route-a", project_id: projectA.id,
+      data: expect.arrayContaining([{
+        tool_name: toolName, enabled: true,
+        authorization: mcpToolStates.getAllTools(projectA.id).get(toolName)!.authorization,
+      }]),
+    });
 
     const disabled = await fetch(`${baseUrl}/mcp-tools/${toolName}?project=mcp-tools-route-a`, {
       method: "PUT",

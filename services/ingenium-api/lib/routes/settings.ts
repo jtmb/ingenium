@@ -152,7 +152,13 @@ settingsRouter.post("/", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "key and value are required" } });
     return;
   }
-  settings.setSetting(projectId, key, value);
+  if (key === "context_auto_upload_enabled" || key === "context_upload_last_sync") {
+    try { settings.setSetting(projectId, key, value); }
+    catch {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid Context upload setting." } });
+      return;
+    }
+  } else settings.setSetting(projectId, key, value);
 
   res.json({
     data: isSensitiveSettingKey(key)
@@ -160,23 +166,6 @@ settingsRouter.post("/", (req, res) => {
       : { key, value },
   });
 });
-
-// ──────────────────────────────────────────────────────────────────────
-// Atomic LLM config save — accepts primary + backup in one request,
-// saves to settings table, and projects into OpenCode global config.
-// ──────────────────────────────────────────────────────────────────────
-
-/** Map a provider ID to the OpenCode AI SDK package name. */
-function opencodeProviderPackage(provider: string): string | null {
-  switch (provider) {
-    case "lmstudio":   return "@ai-sdk/lmstudio";
-    case "deepseek":   return "@ai-sdk/deepseek";
-    case "openai":     return "@ai-sdk/openai";
-    case "anthropic":  return "@ai-sdk/anthropic";
-    case "__custom__": return "@ai-sdk/openai-compatible";
-    default:           return null;
-  }
-}
 
 /** GET response shape — NEVER leaks the actual API key. */
 interface LlmConfigEntry {
@@ -759,46 +748,8 @@ function restoreManagedVaultCredentials(projectId: string, references: ManagedCr
   for (const reference of [...references].reverse()) restoreManagedVaultCredential(projectId, reference);
 }
 
-function legacyManagedProviders(projectId: string): StoredManagedProvider[] {
-  const primaryProvider = settings.getSetting(projectId, "synthesis_provider") || "";
-  const primaryModel = settings.getSetting(projectId, "synthesis_model") || "";
-  const backupProvider = settings.getSetting(projectId, "synthesis_backup_provider") || "";
-  const backupModel = settings.getSetting(projectId, "synthesis_backup_model") || "";
-
-  const entries: StoredManagedProvider[] = [];
-  if (primaryProvider && primaryModel) {
-    entries.push({
-      id: "ingenium-primary",
-      name: primaryProvider === "__custom__" ? "Primary provider" : primaryProvider,
-      npm: opencodeProviderPackage(primaryProvider) || "@ai-sdk/openai-compatible",
-      baseURL: settings.getSetting(projectId, "synthesis_endpoint") || "",
-      models: [primaryModel],
-      defaultModel: primaryModel,
-      roles: ["available", "primary"],
-      enabled: true,
-      allowPrivateNetwork: settings.getSetting(projectId, "synthesis_allow_private_network") === "true",
-    });
-  }
-  if (backupProvider && backupModel) {
-    entries.push({
-      id: "ingenium-backup",
-      name: backupProvider === "__custom__" ? "Backup provider" : backupProvider,
-      npm: opencodeProviderPackage(backupProvider) || "@ai-sdk/openai-compatible",
-      baseURL: settings.getSetting(projectId, "synthesis_backup_endpoint") || "",
-      models: [backupModel],
-      defaultModel: backupModel,
-      roles: ["available", "backup"],
-      enabled: true,
-      allowPrivateNetwork: settings.getSetting(projectId, "synthesis_backup_allow_private_network") === "true",
-    });
-  }
-  return entries;
-}
-
 function getManagedProviders(projectId: string): ManagedProvider[] {
-  const stored = parseManagedProviders(settings.getSetting(projectId, "llm_provider_configs"));
-  const providers = stored.length > 0 ? stored : legacyManagedProviders(projectId);
-  return providers.map(({ credentialItemId, ...provider }) => ({
+  return parseManagedProviders(settings.getSetting(projectId, "llm_provider_configs")).map(({ credentialItemId, ...provider }) => ({
     ...provider,
     apiKeySet: hasManagedVaultApiKey(projectId, provider.id, credentialItemId),
   }));
@@ -868,82 +819,6 @@ function restoreProviderSettings(
   } catch {
     return false;
   }
-}
-
-/** Project the LLM config into the OpenCode global config as synthetic providers. */
-function projectToOpenCodeConfig(
-  globalProjectId: string,
-  primary: { provider?: string; model?: string; endpoint?: string },
-  backup: { provider?: string; model?: string; endpoint?: string } | undefined,
-): string {
-  // Read existing global config
-  const existingConfig = configs.getConfig(globalProjectId, "global");
-  let config: Record<string, unknown> = {};
-  if (existingConfig) {
-    try {
-      config = JSON.parse(existingConfig.content);
-    } catch {
-      throw new Error("OpenCode global config is malformed or empty and was left unchanged");
-    }
-    if (Array.isArray(config) || config === null) {
-      throw new Error("OpenCode global config must be a JSON object and was left unchanged");
-    }
-  }
-
-  // Ensure provider section exists — preserve all existing keys
-  if (!config.provider || typeof config.provider !== "object") {
-    config.provider = {};
-  }
-  const providerSection = config.provider as Record<string, unknown>;
-
-  // Build or remove ingenium-primary
-  if (primary.provider) {
-    providerSection["ingenium-primary"] = buildProviderEntry(primary);
-  } else {
-    delete providerSection["ingenium-primary"];
-  }
-
-  // Build or remove ingenium-backup
-  if (backup?.provider) {
-    providerSection["ingenium-backup"] = buildProviderEntry(backup);
-  } else {
-    delete providerSection["ingenium-backup"];
-  }
-
-  const projectedConfig = JSON.stringify(config, null, 2);
-  configs.saveConfig(globalProjectId, "global", projectedConfig);
-  logger.info("settings", "Projected LLM config into OpenCode global config (ingenium-primary / ingenium-backup)");
-  return projectedConfig;
-}
-
-/** Build a single synthetic provider entry for the OpenCode config. */
-function buildProviderEntry(cfg: { provider?: string; model?: string; endpoint?: string }): Record<string, unknown> {
-  const pkg = opencodeProviderPackage(cfg.provider || "");
-  const isCustom = cfg.provider === "__custom__";
-
-  const entry: Record<string, unknown> = {
-    name: `Ingenium ${isCustom ? "Custom" : cfg.provider}: ${cfg.model}`,
-    npm: pkg || "@ai-sdk/openai-compatible",
-  };
-
-  // Endpoint — required for custom/openai-compatible providers.
-  // 🔴 API key is NEVER written to the OpenCode config (avoids plaintext on disk).
-  // The key lives only in the settings table and is read at runtime.
-  if (cfg.endpoint && (isCustom || !pkg)) {
-    entry.options = { baseURL: cfg.endpoint };
-  }
-
-  // Model entry
-  if (cfg.model) {
-    entry.models = {
-      [cfg.model]: {
-        name: cfg.model,
-        id: cfg.model,
-      },
-    };
-  }
-
-  return entry;
 }
 
 function buildManagedOpenCodeConfig(
@@ -1348,30 +1223,6 @@ settingsRouter.post("/llm-config", async (req, res) => {
     return;
   }
 
-  // Validate projection before saving settings so malformed global config does
-  // not produce a success response or destroy unrelated OpenCode settings.
-  const globalProject = projects.getGlobalProject();
-  if (globalProject) {
-    try {
-      const projectedConfig = projectToOpenCodeConfig(globalProject.id, primary, backup?.provider ? backup : undefined);
-      const result = await callOpenCodeWithProviderDeadline((signal) =>
-        opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>, signal),
-      );
-      if (isOpenCodeError(result)) {
-        logger.warn("settings", "OpenCode could not reload the LLM configuration automatically", {
-          operation: "provider_config_reload",
-          code: result.error.code,
-        });
-      }
-    } catch (err) {
-      logger.warn("settings", `OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
-      res.status(409).json({
-        error: { code: "CONFIG_PROJECTION_FAILED", message: "OpenCode global config could not be updated and was left unchanged" },
-      });
-      return;
-    }
-  }
-
   const credentialWrites: Record<string, string | undefined> = {};
   if (primary.apiKey?.trim()) credentialWrites[primary.provider.trim()] = primary.apiKey.trim();
   if (backup?.provider && backup.apiKey?.trim()) credentialWrites[backup.provider.trim()] = backup.apiKey.trim();
@@ -1397,11 +1248,6 @@ settingsRouter.post("/llm-config", async (req, res) => {
   }
   if (backup?.provider && backup.apiKey !== undefined) {
     if (!backup.apiKey.trim()) clearLegacyVaultApiKey(projectId, backup.provider.trim());
-  }
-
-  // Project into OpenCode global config for Chat
-  if (globalProject) {
-    // Projection was completed during preflight, before settings were saved.
   }
 
   res.json({ data: { saved: true } });

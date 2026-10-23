@@ -9,21 +9,23 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime roots only after explicit start/resume. Special-use `.localhost` roots use browser-trusted HTTP on loopback only; remote/custom roots require HTTPS. Direct 4098/4099 ports remain private.
 
-The supported embedded/container runtime is OpenCode **1.18.9**. Docker verifies the pinned
-archive SHA-256 and executable version, while package compatibility tests verify
-that the root, extension, and local `.opencode` manifests and lockfiles all
-resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.9`. OpenCode
-**1.18.3+** is retained as the historical boundary for root-relative assets;
-the current contract is tested against 1.18.9.
+The supported embedded/container OpenCode executable is **2.0.11**. Docker pins
+the archive SHA-256 and verifies the executable version. The root/extension
+package dependency graph retains the
+`@opencode-ai/plugin` and `@opencode-ai/sdk` **1.18.31** compatibility pins;
+those package versions do not identify the container executable.
+OpenCode **1.18.3+** remains a historical root-relative-assets compatibility
+boundary, not the current embedded executable version.
 
 The installed `opencode` CLI used for the session-export check below was
 **1.18.30**. That retrieval result documents the CLI's export behavior only; it
-does not change the embedded/container 1.18.9 compatibility contract.
+does not identify or change the embedded/container OpenCode 2.0.11 executable.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
-For coordinated external A/B and internal C sessions sharing one canonical
-worktree, see [Multi-session OpenCode](multi-session.md).
+For multiple ordinary sessions and safe worktree isolation, see
+[Multi-session OpenCode](multi-session.md). Ingenium does not provide a custom
+session-coordination protocol.
 
 ### Runtime selection and binding
 
@@ -38,6 +40,19 @@ read or a remembered preference. Choose it and select **Open workspace** to star
 or resume it. Starting is polled for a bounded interval; if it remains starting,
 becomes unavailable, or is no longer authorized, the dashboard keeps the client
 unbound and offers refresh/retry instead of embedding a fallback runtime.
+
+## Background learning authorization
+
+For a confirmed compatibility workspace, the OpenCode page offers **Enable
+background learning**. Select it and complete the existing owner step-up dialog.
+The Dashboard then authorizes only the principal bound to that current runtime;
+opening the page or listing a READY runtime does not authorize it automatically.
+
+The owner must retain active workspace/project access and a live, matching runtime
+credential and security epoch. Repeating the action does not rotate credentials
+or extend their lifetime. Provider configuration, genuine user-message extraction
+and completed synthesis remain separate prerequisites; a success message here is
+not proof that learning has run. See the [API contract](../develop/api.md#explicit-runtime-automation-authorization).
 
 ## OpenCode Web/CLI Mode Switch
 
@@ -119,12 +134,11 @@ API-authorized project UUID remains authoritative. The project must exist before
 credential issuance because its immutable UUID is part of the credential grant.
 
 After MCP initialization and `tools/list`, use a read that the credential is
-already authorized to perform. Coordination acceptance uses the state-bearing
-`ingenium_coordination_status` tool with the current exact project, worktree,
-session, incarnation, and ownership identity. Verify `GET /api/v1/health`
-separately. `ingenium_health_check` is available only when the credential has
-`health:read`; do not widen or rotate a least-privilege credential merely to use
-that tool as a transport canary.
+already authorized to perform, then verify `GET /api/v1/health` separately.
+The retired coordination MCP tools are not part of the current transport; do not
+use a historical coordination canary or widen a least-privilege credential just
+to probe the transport. `ingenium_health_check` is available only when the
+credential has `health:read`.
 
 OpenCode loads plugins in the parent process; the `environment` block on the
 `ingenium` MCP entry belongs only to the child MCP process and does not supply
@@ -141,9 +155,9 @@ credential files, and mismatched bindings fail closed. The canonical `/workspace
 worktree still requires an explicit project and exact worktree binding.
 
 The container also projects its persistent global config at startup with five
-registered plugins: `auto-observer`, `observer`, `resource-sync`,
-`session-coordinator`, and the `ponytail` adapter. The `auto-observer`, `observer`,
-and `resource-sync` plugins resolve the owner-only
+registered plugins: `auto-observer`, `observer`, `resource-sync`, `lifecycle`,
+and the `ponytail` adapter. The `auto-observer`, `observer`, `resource-sync`,
+and `lifecycle` plugins resolve the owner-only
 `.opencode/.ingenium-repository-sync-credential`, while the MCP child resolves
 `.opencode/.ingenium-mcp-credential`. `ingenium-init-project` preflights the
 repository-sync credential before it syncs repository resources. The shared
@@ -257,6 +271,74 @@ use the exact `ingenium-coordination-reset reset` exception: the API must report
 5,000–300,000 ms. Runtime and repository-sync credentials remain restart-mode;
 the reset never applies to a changed binding or plugin/config identity.
 
+#### Repository-sync credential recovery
+
+From the canonical `ingenium` worktree, recover only the repository-sync
+credential with:
+
+```bash
+ingenium-coordination-reset reset-repository-sync
+```
+
+This command accepts no endpoint, project, workspace, worktree, or scope
+override. It issues a credential with `kind: "repository-sync"` and
+`audience: "repository-sync"`, with exactly these scopes:
+`projects:read` and `repository:sync`. The token is installed only at the
+ignored, owner-only regular file
+`.opencode/.ingenium-repository-sync-credential` with mode `0600`; the general
+`.opencode/.ingenium-mcp-credential` is not replaced.
+
+The command validates the fixed `ingenium` project, `shared-memory-ingenium`
+workspace, exact canonical worktree, and repository-sync binding. Provide
+exactly one protected owner-secret source when using an override:
+`INGENIUM_COORDINATION_OWNER_SECRET_FILE` must name an absolute owner-private
+mode-`0600` file, or `INGENIUM_COORDINATION_OWNER_SECRET_FD` must name an
+already-open owner-private regular-file descriptor; the two are mutually
+exclusive. With neither override, the command requires the ignored
+`.opencode/.ingenium-coordination-owner-provider.json` reference. Provision
+that reference with paths only, while the protected source is available:
+
+```bash
+ingenium-coordination-reset store --key-file /absolute/protected/key --bundle-directory /absolute/owner-only/directory
+```
+
+The provider reference contains no secret material. Its AES-256-GCM bundle and
+key stay outside the worktree in separate owner-only directories, with
+mode-`0600` regular files; the provider metadata is bound to
+`bootstrap-admin@localhost`, project `ingenium`, and workspace
+`shared-memory-ingenium`. Login, any required MFA, recent step-up, project
+authorization, path/ownership/mode checks, and binding checks must pass; unsafe,
+tampered, symlinked, or mismatched inputs fail closed. See [the protected
+provider contract](../security/api-authentication.md#extension-project-initialization-preflight).
+
+Do not place secret or token values in arguments, logs, or reports. Success is
+content-free (`coordination reset: completed`); failure reports only a bounded
+failure category (and, for installation failures, a stage), never a bearer,
+plaintext/ciphertext value, endpoint, or response body. The issued credential's
+exact audience, scopes, and project/workspace/worktree binding are checked at
+issuance, then it is installed by atomically replacing the repository-sync
+credential file and authenticated with the API preflight. If preflight or the
+later source-fingerprint check fails, the pending rotation rolls back, restoring
+the prior credential when one exists; only after those checks pass does the
+local replacement commit and matching prior repository-sync credentials get
+revoked.
+
+After recovery, rebuild the extension if its artifact or plugin/config source
+changed and perform a **full parent OpenCode restart** before repository sync.
+Repository-sync credentials remain restart-mode; restarting only the child MCP
+process is insufficient. Then use the no-drift sequence for the bound project:
+
+```bash
+ingenium-init-project --dry-run --project ingenium
+ingenium-init-project --apply --project ingenium
+ingenium-init-project --apply --project ingenium  # repeat; require no drift
+```
+
+Review the dry-run before applying. Dry-run does not mutate the project,
+remote state, or local sync baseline; apply advances the baseline only after
+API confirmation. Do not claim repository synchronization is complete unless
+the repeated apply reports no drift.
+
 ## Ponytail
 
 The supported Ponytail integration is an immutable upstream checkout pinned to
@@ -265,7 +347,7 @@ The supported Ponytail integration is an immutable upstream checkout pinned to
 in `PROVENANCE.md`. It is loaded once from the project-relative path in local
 `opencode.json`, or once from the container-absolute path in the generated
 global config. The published `@dietrichgebert/ponytail@4.8.4` package is not
-used because its named export is incompatible with OpenCode 1.18.9.
+used because its named export is incompatible with OpenCode 1.18.31.
 
 Ponytail contributes six slash commands (`/ponytail`, `/ponytail-audit`,
 `/ponytail-debt`, `/ponytail-gain`, `/ponytail-help`, `/ponytail-review`) and
@@ -287,8 +369,8 @@ as Chat through the scoped Ingenium MCP server. The seven tools are
 `ingenium_memory_search`, `ingenium_memory_update`,
 `ingenium_memory_forget`, and `ingenium_memory_operation_status`. General-MCP
 credentials issued by the package-owned reset include `memory:read` and
-`memory:write` for private memory; coordination-lease and runtime capability
-credentials include `memory:read` only. Project-visible memory additionally
+`memory:write` for private memory; runtime capability credentials include
+`memory:read` only. Project-visible memory additionally
 requires `memory:share`.
 
 Use a mutation only after the current user explicitly asks to remember, correct,
@@ -330,7 +412,8 @@ replays are idempotent, matching extensions append and refresh the suffix, and
 shorter or divergent snapshots are rejected. Imported conversations become
 visible in the dashboard `/context` workspace, whose existing search, read, and
 batch message surfaces load content explicitly. There is no external Thread
-service or bridge, and no current-session/OpenCode-session import tool.
+service or bridge; automatic external-session upload uses this same protected
+handoff, rather than a separate generic transcript-import surface.
 
 ## Gateway boundaries
 
@@ -367,4 +450,4 @@ service or bridge, and no current-session/OpenCode-session import tool.
 ## Related Features
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
-- Use the OpenCode interface to interact with the built-in 291-tool Ingenium MCP catalog across 31 baseline categories (289 `ingenium_` catalog entries plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the 286-active-tool Ingenium MCP surface across 32 baseline categories (284 active `ingenium_` server registrations plus 2 extension tools). Retired coordination tools are not in the active catalog; project-scoped child discovery can add tools and categories dynamically.

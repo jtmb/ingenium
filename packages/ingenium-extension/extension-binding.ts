@@ -55,11 +55,6 @@ export function effectiveExtensionCredentialPurpose(
   return requested;
 }
 
-/** Coordination follows the protected runtime audience, never a caller-selected purpose. */
-export function coordinationCredentialPurpose(): "general" | "runtime" {
-  return effectiveExtensionCredentialPurpose("general") as "general" | "runtime";
-}
-
 export class ExtensionBindingError extends Error {
   constructor() {
     super("Unable to resolve the Ingenium extension binding");
@@ -173,21 +168,24 @@ function configuredEnvironment(worktree: string): Record<string, string> | undef
     fail();
   }
   if (!isRecord(parsed) || !isRecord(parsed.mcp)) fail();
+  const servers = isRecord(parsed.mcp.servers) ? parsed.mcp.servers : parsed.mcp;
 
-  const candidates = Object.entries(parsed.mcp).filter(([name, entry]) => {
+  const candidates = Object.entries(servers).filter(([name, entry]) => {
     if (name === "ingenium") return true;
     if (!isRecord(entry)) return false;
     const command = entry.command;
     const environment = entry.environment;
     return (Array.isArray(command) && command.some((part) => typeof part === "string"
-      && part.endsWith("/packages/ingenium-extension/dist/scripts/mcp-server.js")))
+      && (part === "packages/ingenium-extension/dist/scripts/mcp-server.js"
+        || part.endsWith("/packages/ingenium-extension/dist/scripts/mcp-server.js"))))
       || (isRecord(environment) && typeof environment.INGENIUM_MCP_AUDIENCE === "string");
   });
   if (candidates.length === 0) return undefined;
   if (candidates.length !== 1 || candidates[0]![0] !== "ingenium") fail();
 
   const entry = candidates[0]![1];
-  if (!isRecord(entry) || entry.type !== "local" || entry.enabled === false || !isRecord(entry.environment)) fail();
+  if (!isRecord(entry) || entry.type !== "local" || entry.enabled === false || entry.disabled === true
+    || !isRecord(entry.environment)) fail();
   const environment: Record<string, string> = {};
   for (const [key, value] of Object.entries(entry.environment)) {
     if (typeof value !== "string") fail();

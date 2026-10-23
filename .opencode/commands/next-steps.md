@@ -34,7 +34,7 @@ Suggest a bug, issue, or feature request based on the tracking template `next-st
    - Bugs: `N. Description text here.`
    - Features: `N. Description text here.`
 7. Shows a confirmation message: `Suggested Bug #N under ### /section: description` or `Suggested Feature #N under ### FEATURE-NAME: description`
-8. After displaying the suggestion, appends a note about the `# REQUEST/DIRECTIVE:` block that would be generated (summarizing ALL current bugs and features), reminding the user to add the orchestrator weakness clause: *"The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below."*
+8. After displaying the suggestion, appends a note about the `# REQUEST/DIRECTIVE:` block that would be generated (summarizing ALL current bugs and features), reminding the user to include scoped orchestration guidance for the generated plan.
 
 ## 🔴 HARD RULE — Read-Only
 

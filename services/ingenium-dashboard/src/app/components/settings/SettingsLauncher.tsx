@@ -31,7 +31,7 @@ export default function SettingsLauncher() {
       onClick={handleClick}
       title="Settings"
       aria-label="Settings"
-      className={`p-1.5 rounded hover:bg-[var(--color-surface-hover)] ${
+      className={`shrink-0 p-1.5 rounded hover:bg-[var(--color-surface-hover)] ${
         isOpen ? "bg-[var(--color-surface-muted)]" : ""
       }`}
     >

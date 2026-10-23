@@ -13,15 +13,18 @@ import {
   fchownSync,
   fstatSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 const PROFILE_MODE = 0o644;
@@ -30,7 +33,7 @@ const RETIRED_PROFILE_NAMES = new Set(["browser-agent.md"]);
 const DIRECTORY_MODE = 0o700;
 const ALLOWLISTED_PROFILES = [
   ["chat", "ingenium-chat.md"],
-  ["primary", "plan.md"],
+  [null, "plan.md"],
 ];
 
 if (process.platform !== "linux" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
@@ -38,7 +41,7 @@ if (process.platform !== "linux" || typeof constants.O_NOFOLLOW !== "number" || 
 }
 
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
-const REGULAR_FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;
+const REGULAR_FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 function fail(message) {
   throw new Error(`Agent profile maintenance failed: ${message}`);
@@ -243,7 +246,7 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, expectedOwner,
 }
 
 function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, targetDirectoryStat, group, profileName) {
-  const groupFd = openDirectoryAt(sourceDirectoryFd, group, `source agent group ${group}`);
+  const groupFd = group === null ? sourceDirectoryFd : openDirectoryAt(sourceDirectoryFd, group, `source agent group ${group}`);
   let source;
   let target;
   try {
@@ -279,7 +282,7 @@ function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectorySta
   } finally {
     closeQuietly(target?.fd);
     closeQuietly(source?.fd);
-    closeSync(groupFd);
+    if (group !== null) closeSync(groupFd);
   }
 }
 
@@ -305,7 +308,62 @@ function projectServerOwnedProfiles(sourcePath, targetPath) {
   }
 }
 
-function normalizeDirectory(directoryFd) {
+function removeAcl(fd, option) {
+  // Inherit the verified descriptor so setfacl cannot follow a replaced workspace path.
+  execFileSync("setfacl", [option, "/proc/self/fd/3"], { stdio: ["ignore", "inherit", "inherit", fd] });
+}
+
+function normalizeRecoveryBootstrap(target) {
+  const suffix = "/packages/ingenium-extension/scripts/recovery-bootstrap.js";
+  const root = target.slice(0, -suffix.length);
+  if (!target.endsWith(suffix) || resolve(target) !== target
+    || (root !== "/workspace" && (root.split("/").length !== 3 || !root.startsWith("/workspace/")))) {
+    fail("recovery bootstrap path is not allowlisted");
+  }
+  let directoryFd = openDirectoryPath(root);
+  let directoryPath = root;
+  let file;
+  try {
+    for (const component of ["packages", "ingenium-extension", "scripts"]) {
+      if (realpathSync(`/proc/self/fd/${directoryFd}`) !== directoryPath) fail("recovery bootstrap parent moved");
+      let childFd;
+      try {
+        childFd = openDirectoryAt(directoryFd, component, "recovery bootstrap parent");
+      } catch (error) {
+        if (isMissing(error)) return;
+        throw error;
+      }
+      closeSync(directoryFd);
+      directoryFd = childFd;
+      directoryPath += `/${component}`;
+    }
+    if (realpathSync(`/proc/self/fd/${directoryFd}`) !== directoryPath) fail("recovery bootstrap parent moved");
+    file = openRegularFileAt(directoryFd, "recovery-bootstrap.js", target, { optional: true });
+    if (!file) return;
+    const contents = readStableFile(file);
+    const verify = () => {
+      const current = fstatSync(file.fd);
+      assertExclusiveRegularFile(current, target);
+      assertSameOwner(current, file.stat, target);
+      const linked = lstatSync(target);
+      if (realpathSync(target) !== target || linked.dev !== current.dev || linked.ino !== current.ino
+        || current.size !== file.stat.size || current.mtimeMs !== file.stat.mtimeMs
+        || !readFileSync(`/proc/self/fd/${file.fd}`).equals(contents)) fail("recovery bootstrap changed");
+    };
+    verify();
+    removeAcl(file.fd, "-b");
+    fchmodSync(file.fd, PROFILE_MODE);
+    fsyncSync(file.fd);
+    verify();
+    if ((fstatSync(file.fd).mode & 0o7777) !== PROFILE_MODE) fail("recovery bootstrap mode is not 0644");
+  } finally {
+    closeQuietly(file?.fd);
+    closeSync(directoryFd);
+  }
+}
+
+function normalizeDirectory(directoryFd, removeWorkspaceAcls = false) {
+  if (removeWorkspaceAcls) removeAcl(directoryFd, "-k");
   for (const entry of readdirSync(`/proc/self/fd/${directoryFd}`, { withFileTypes: true })) {
     if (RETIRED_PROFILE_NAMES.has(entry.name)) {
       retireProfileAt(directoryFd, entry.name, `retired agent profile ${entry.name}`);
@@ -315,18 +373,19 @@ function normalizeDirectory(directoryFd) {
     if (entry.isDirectory()) {
       const childDirectoryFd = openDirectoryAt(directoryFd, entry.name, `agent directory ${entry.name}`);
       try {
-        normalizeDirectory(childDirectoryFd);
+        normalizeDirectory(childDirectoryFd, removeWorkspaceAcls);
       } finally {
         closeSync(childDirectoryFd);
       }
       continue;
     }
     if (!entry.name.endsWith(".md")) continue;
-    if (entry.name === RESERVED_BROKER_PROFILE) continue;
+    if (entry.name === RESERVED_BROKER_PROFILE && !removeWorkspaceAcls) continue;
     const profile = openRegularFileAt(directoryFd, entry.name, `agent profile ${entry.name}`);
     try {
       assertExclusiveRegularFile(fstatSync(profile.fd), `agent profile ${entry.name}`);
-      if ((profile.stat.mode & 0o777) !== PROFILE_MODE) {
+      if (removeWorkspaceAcls) removeAcl(profile.fd, "-b");
+      if ((fstatSync(profile.fd).mode & 0o7777) !== PROFILE_MODE) {
         fchmodSync(profile.fd, PROFILE_MODE);
         fsyncSync(profile.fd);
       }
@@ -336,7 +395,7 @@ function normalizeDirectory(directoryFd) {
   }
 }
 
-function normalizeAgentProfiles(path) {
+function normalizeAgentProfiles(path, removeWorkspaceAcls = false) {
   let directoryFd;
   try {
     directoryFd = openDirectoryPath(path);
@@ -345,7 +404,7 @@ function normalizeAgentProfiles(path) {
     throw error;
   }
   try {
-    normalizeDirectory(directoryFd);
+    normalizeDirectory(directoryFd, removeWorkspaceAcls);
     fsyncSync(directoryFd);
   } finally {
     closeSync(directoryFd);
@@ -353,7 +412,7 @@ function normalizeAgentProfiles(path) {
 }
 
 function usage() {
-  fail("usage: project-agent-profiles.mjs AGENTS_DIR | --project-server-owned SOURCE_AGENTS_DIR TARGET_AGENTS_DIR");
+  fail("usage: project-agent-profiles.mjs [--remove-workspace-acls] AGENTS_DIR | --project-server-owned SOURCE_AGENTS_DIR TARGET_AGENTS_DIR | --normalize-recovery-bootstrap WORKSPACE_BOOTSTRAP_FILE");
 }
 
 try {
@@ -361,6 +420,10 @@ try {
   if (args[0] === "--project-server-owned") {
     if (args.length !== 3) usage();
     projectServerOwnedProfiles(args[1], args[2]);
+  } else if (args[0] === "--remove-workspace-acls" && args.length === 2) {
+    normalizeAgentProfiles(args[1], true);
+  } else if (args[0] === "--normalize-recovery-bootstrap" && args.length === 2) {
+    normalizeRecoveryBootstrap(args[1]);
   } else if (args.length === 1) {
     normalizeAgentProfiles(args[0]);
   } else {

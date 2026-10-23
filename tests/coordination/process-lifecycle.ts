@@ -148,7 +148,7 @@ export function prepareExternalHome(
   writeFileSync(paths.configFile, configContent, { mode: 0o600, flag: "wx" });
   writeFileSync(paths.captureFile, "", { mode: 0o600, flag: "wx" });
   writeFileSync(paths.traceFile, "", { mode: 0o600, flag: "wx" });
-  if (label === "external-a") {
+  if (label === "external-a" && configContent.includes("file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}")) {
     writeFileSync(paths.pluginFile, canaryPluginSource(options), { mode: 0o600, flag: "wx" });
     writeFileSync(paths.planFile, "{}\n", { mode: 0o600, flag: "wx" });
   }
@@ -235,7 +235,7 @@ export async function startHostOpenCode(
     INGENIUM_TEST_RUN_NONCE: runNonce,
     INGENIUM_COORDINATION_NODE_EXECUTABLE: process.execPath,
     INGENIUM_COORDINATION_NODE_ARGV: Buffer.from(JSON.stringify(process.execArgv), "utf8").toString("base64url"),
-    ...(label === "external-a" ? {
+    ...(label === "external-a" && configContent.includes("file://{env:INGENIUM_COORDINATION_CANARY_PLUGIN}") ? {
       INGENIUM_COORDINATION_CANARY_PLUGIN: prepared.pluginFile,
       INGENIUM_COORDINATION_CANARY_PLAN_FILE: prepared.planFile,
     } : {}),

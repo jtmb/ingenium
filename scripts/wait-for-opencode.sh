@@ -27,7 +27,25 @@ fi
 
 attempt=1
 while [ "$attempt" -le "$attempts" ]; do
-  if curl --fail --silent --max-time 2 --output /dev/null http://127.0.0.1:4098/; then
+  # OpenCode V2 requires HTTP basic auth on every route. Read the provisioned
+  # secret inside this clean environment; the credential reaches curl through
+  # stdin config, never argv. Containers without a provisioned secret keep
+  # the unauthenticated probe.
+  opencode_password=""
+  for candidate in \
+    /run/ingenium-secrets/ttyd/opencode-server-password \
+    /run/ingenium-runtime/opencode-server-password; do
+    if [ -r "$candidate" ]; then
+      opencode_password="$(cat "$candidate")"
+      break
+    fi
+  done
+  if [ -n "$opencode_password" ]; then
+    if printf 'user = "opencode:%s"\n' "$opencode_password" | curl --fail --silent --config - --max-time 2 --output /dev/null http://127.0.0.1:4098/api/info; then
+      echo "OpenCode readiness check passed after ${attempt} attempt(s)"
+      exit 0
+    fi
+  elif curl --fail --silent --max-time 2 --output /dev/null http://127.0.0.1:4098/api/info; then
     echo "OpenCode readiness check passed after ${attempt} attempt(s)"
     exit 0
   fi

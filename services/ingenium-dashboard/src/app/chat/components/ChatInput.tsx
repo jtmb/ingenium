@@ -9,7 +9,6 @@ export interface SendOptions {
   useProjectContext?: boolean;
   useSavedMemory?: boolean;
   saveToMemory?: boolean;
-  automaticLearning?: boolean;
 }
 
 export interface Attachment {
@@ -23,7 +22,7 @@ export interface Attachment {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, systemPrompt: string, options?: SendOptions) => Promise<boolean>;
+  onSend: (message: string, options?: SendOptions) => Promise<boolean>;
   onStop: () => void;
   isLoading: boolean;
   providerId?: string;
@@ -88,7 +87,6 @@ function isTextFile(name: string): boolean {
  * - Auto-growing textarea (max 200px, min 24px single-line)
  * - Enter to send, Shift+Enter for newline
  * - Send button (right arrow) when idle, Stop button (square) when loading
- * - Instructions toggle for system prompt
  * - Attachment button with file picker + drag-and-drop
  * - Attachment preview pills above textarea
  * - Passes provider/model/agent info to the send handler
@@ -112,12 +110,9 @@ export default function ChatInput({
   memorySavePending = false,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [showInstructions, setShowInstructions] = useState(false);
   const [useProjectContext, setUseProjectContext] = useState(false);
   const [useSavedMemory, setUseSavedMemory] = useState(false);
   const [saveToMemory, setSaveToMemory] = useState(false);
-  const [automaticLearning, setAutomaticLearning] = useState(true);
   const [isDragOver, setIsDragOver] = useState(false);
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -252,14 +247,13 @@ export default function ChatInput({
     if (!trimmed || isLoading || sending || !hasSelectableModel) return;
     setSending(true);
     try {
-      const accepted = await onSend(trimmed, systemPrompt.trim(), {
+      const accepted = await onSend(trimmed, {
         providerId,
         modelId,
         agentName,
         useProjectContext,
         useSavedMemory: Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory,
         saveToMemory: Boolean(memoryWorkspaceId) && memoryCanSave && !memorySavePending && saveToMemory,
-        automaticLearning,
       });
       if (accepted) {
         setValue("");
@@ -290,50 +284,6 @@ export default function ChatInput({
 
   return (
     <div className="shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2">
-      {/* Instructions drawer */}
-      {showInstructions && (
-        <div className="mb-2 max-w-3xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
-          <div className="flex items-center justify-between mb-2">
-            <label
-              htmlFor="chat-system-prompt"
-              className="text-xs font-medium text-[var(--color-text-secondary)]"
-            >
-              System Instructions
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowInstructions(false)}
-              className="p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-              aria-label="Close instructions"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M3.5 3.5l7 7M10.5 3.5l-7 7"
-                />
-              </svg>
-            </button>
-          </div>
-          <textarea
-            id="chat-system-prompt"
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Custom instructions for this conversation..."
-            rows={3}
-            className="w-full resize-none rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] px-3 py-2 outline-none focus:border-blue-500"
-          />
-        </div>
-      )}
-
       {/* Attachment preview pills */}
       {attachments.length > 0 && (
         <div className="mb-2 mx-auto flex w-full max-w-3xl flex-wrap gap-1.5">
@@ -448,59 +398,48 @@ export default function ChatInput({
           </button>
           <button
             type="button"
-            onClick={() => setAutomaticLearning((value) => !value)}
+            onClick={() => setUseProjectContext((value) => !value)}
             disabled={isLoading || sending}
             className={[
-              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-              automaticLearning
+              "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
+              useProjectContext
                 ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
                 : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+              "disabled:cursor-not-allowed disabled:opacity-40",
             ].join(" ")}
-            aria-pressed={automaticLearning}
-            aria-label="Allow automatic learning tools"
+            aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
+            aria-pressed={useProjectContext}
+            title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
+            data-testid="chat-use-project-context"
           >
-            Learning tools
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
+              />
+            </svg>
+            <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
+            <span
+              className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
+              data-testid="chat-context-project"
+            >
+              {projectContextProject ?? "Unavailable"}
+            </span>
           </button>
         </div>
         {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
         <div className="flex min-w-0 items-end gap-2 px-3 py-2">
           {/* Left buttons */}
           <div className="flex min-w-0 items-center gap-1 pb-0.5">
-            {/* Instructions toggle */}
-            <button
-              type="button"
-              onClick={() => setShowInstructions((v) => !v)}
-              className={[
-                "p-1.5 rounded-lg transition-colors",
-                showInstructions
-                  ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                  : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]",
-              ].join(" ")}
-              aria-label="Toggle instructions"
-              title="Instructions"
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M8 10a2 2 0 100-4 2 2 0 000 4z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M12.93 6.87c.09.37.11.75.07 1.13M3.07 9.13a5.6 5.6 0 00-.07-1.13M10.41 3.59a5.6 5.6 0 00-1.02-.65M5.59 12.41c.31.27.65.49 1.02.65M12.94 10.41a5.68 5.68 0 00.65-1.02M3.06 5.59a5.68 5.68 0 01.65 1.02M10.41 12.41a5.56 5.56 0 01-4.82 0M5.59 3.59a5.56 5.56 0 014.82 0"
-                />
-              </svg>
-            </button>
-
             {/* Attachment button with file picker */}
             <input
               ref={fileInputRef}
@@ -545,46 +484,6 @@ export default function ChatInput({
               </svg>
             </button>
 
-            {/* Project context toggle */}
-            <button
-              type="button"
-              onClick={() => setUseProjectContext((value) => !value)}
-              disabled={isLoading || sending}
-              className={[
-                "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
-                useProjectContext
-                  ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                  : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-                "disabled:cursor-not-allowed disabled:opacity-40",
-              ].join(" ")}
-              aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
-              aria-pressed={useProjectContext}
-              title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
-              data-testid="chat-use-project-context"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 14 14"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.25"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
-                />
-              </svg>
-              <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
-              <span
-                className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
-                data-testid="chat-context-project"
-              >
-                {projectContextProject ?? "Unavailable"}
-              </span>
-            </button>
           </div>
 
           {/* Textarea */}

@@ -496,7 +496,8 @@ describe("job-runner process lifecycle", () => {
       TERM: expect.any(String), LANG: expect.any(String), XDG_CONFIG_HOME: expect.any(String),
       XDG_DATA_HOME: expect.any(String), XDG_CACHE_HOME: expect.any(String), INGENIUM_JOB_PROJECT_ID: "project-id",
     });
-    expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--pure", "--dir", "/workspace"]));
+    expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--standalone"]));
+    expect(vi.mocked(spawn).mock.calls.at(-1)?.[2]?.cwd).toBe("/workspace");
     expect(JSON.parse(readFileSync(join(runtimeRoot, runId, "data", "opencode", "auth.json"), "utf8")))
       .toEqual({ "test-provider": { type: "api", key: "provider-credential" } });
     for (const name of ["INGENIUM_API_TOKEN", "OPENCODE_SERVER_PASSWORD", "OPENAI_API_KEY", "COOKIE"]) {
@@ -543,8 +544,8 @@ describe("job-runner process lifecycle", () => {
       await executeJobRun(runId, job, job.prompt_template);
       const spawnCall = vi.mocked(spawn).mock.calls.at(-1)!;
       const environment = spawnCall[2]!.env!;
-      expect(spawnCall[1]).toEqual(expect.arrayContaining(["--pure", "--dir", "/workspace"]));
-      expect(spawnCall[2]?.cwd).toBe(join(root, runId, "home"));
+      expect(spawnCall[1]).toEqual(expect.arrayContaining(["--standalone"]));
+      expect(spawnCall[2]?.cwd).toBe("/workspace");
       const fileMap = JSON.parse(environment.INGENIUM_VAULT_SECRET_FILES!) as Record<string, string>;
       const filePath = fileMap[vaultItemId]!;
       expect(Object.keys(fileMap)).toEqual([vaultItemId]);

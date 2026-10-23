@@ -18,6 +18,7 @@ const launcher = readFileSync(`${process.argv[2]}/scripts/start-opencode-web.sh`
   .replaceAll('[ -s /run/ingenium-runtime/capability ]', '[ "${TEST_RUNTIME_CAPABILITY:-}" = present ]')
   .replace('. /run/ingenium-runtime/environment', 'eval "$TEST_RUNTIME_CONTENT"')
   .replace('[ ! -s /run/ingenium-opencode/.ingenium-mcp-credential ]', '[ 1 = 0 ]')
+  .replace('cat /run/ingenium-secrets/opencode/opencode-server-password', 'printf test-opencode-secret')
   .replace('node /app/scripts/probe-api.mjs', 'true')
   .replace('opencode serve --port 4098 --hostname 127.0.0.1', '/usr/bin/env');
 const launch = (env) => spawnSync('/bin/sh', ['-c', launcher], { env, encoding: 'utf8' });
@@ -55,6 +56,13 @@ const provisioned = {
 const explicit = launch(provisioned);
 assert.equal(explicit.status, 0, explicit.stderr);
 assert.ok(explicit.stdout.split('\n').includes('INGENIUM_MCP_CREDENTIAL_PURPOSE=runtime'));
+const entrypoint = readFileSync(`${process.argv[2]}/scripts/docker-entrypoint.sh`, 'utf8');
+assert.match(entrypoint, /workspace_root=\/workspace\/ingenium/);
+assert.match(entrypoint, /workspace_identity=\$\(stat -Lc/);
+assert.doesNotMatch(entrypoint, /for workspace_root in \/workspace \/workspace\/\*; do/);
+assert.match(entrypoint, /if \[ "\$workspace_identity" != "\$alias_identity" \]; then[\s\S]*?WORKSPACE_OPENCODE_DIR="\$workspace_root\/\.opencode"/);
+assert.match(entrypoint, /WORKSPACE_AGENTS_DIR="\$\{WORKSPACE_OPENCODE_DIR\}\/agents"[\s\S]*?target_profile="\$\{WORKSPACE_AGENTS_DIR\}\/\$\(basename "\$source_profile"\)"/);
+assert.doesNotMatch(entrypoint, /WORKSPACE_OPENCODE_DIR="\/workspace\/\.opencode"/);
 for (const [name, value] of Object.entries(identity)) {
   assert.ok(explicit.stdout.split('\n').includes(`${name}=${value}`), `${name} must survive env -i`);
 }

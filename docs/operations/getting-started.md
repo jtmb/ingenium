@@ -48,6 +48,24 @@ project name across invocations (for example, always use
 `docker compose --profile compatibility -p ingenium ...`) and never use `docker compose down -v` for a
 normal restart; otherwise Docker can select or create an empty volume.
 
+If the checkout has host-only MCP commands or plugins, prepare a separate
+container configuration before starting Compose:
+
+```bash
+node scripts/project-opencode-global-config.mjs --container opencode.json \
+  "$HOME/.config/ingenium/container-opencode.json"
+setfacl -m u:1105:r "$HOME/.config/ingenium/container-opencode.json"
+export INGENIUM_OPENCODE_CONFIG_FILE="$HOME/.config/ingenium/container-opencode.json"
+```
+
+Keep that absolute file path in the ignored `.env` for subsequent Compose
+invocations. The projection preserves agent models and other top-level settings,
+uses the image's Ingenium MCP and plugins, and leaves the host file unchanged.
+The file starts owner-only; the ACL grants the container's OpenCode UID read
+access through its read-only bind mount. Repeat both commands after changing
+the source configuration. Without this override,
+Compose retains its existing `./opencode.json` mount.
+
 The script creates separate owner-only mode-`0600` installation, OpenCode-proxy, and
 email-encryption files below mode-`0700` directories and writes only their paths
 to ignored `.env`. In the container, the entrypoint validates and atomically
@@ -139,7 +157,8 @@ Once everything is running:
   `/usr/local/bin/ingenium-init-project`. This is a documented procedure, not
   evidence that onboarding has been run in the current session.
 - The default projection includes `docs/**/*.md`, eligible skills and agents,
-  and configured local plugin sources. It excludes commands, MCP server
+  configured local plugin sources, and direct-child `.opencode/commands/*.md`.
+  It excludes MCP server
   definitions, project/global config, incomplete agent notes, migrated skill
   directories, the reserved `ingenium-llm-broker`, symlinks, and secret-like
   plugin paths or option keys. The production image preserves configured plugin

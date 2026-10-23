@@ -94,8 +94,9 @@ divergent snapshot rejection without partial writes. The tests also verify
 fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
 markers and rejection of same-inode, same-size mutation during the
 descriptor-bound read. The transport-parity check
-also verifies `ingenium_context_upload_file` and the **291-tool** inventory
-(289 `ingenium_` catalog entries plus 2 extension tools).
+also verifies `ingenium_context_upload_file` and the **286-active-tool** inventory
+(284 active `ingenium_` server registrations plus 2 extension tools; historical
+coordination names are excluded from the active catalog).
 
 ## Explicit full/release/cross-cutting acceptance gates
 
@@ -114,6 +115,21 @@ concurrent fixture cannot replace another run's live Next.js artifacts. Teardown
 cleans up the exact manifest-owned run directory. This is the verified Phase 5E
 behavior: the run manifest is the source of truth for process identity, ports,
 paths, and cleanup ownership.
+
+The chat fixture serves the OpenCode 2.0.11 native `/api` contract: location-bound
+session envelopes, separate provider/model catalogs, prompt admission, and native
+global events projected by the API. Legacy OpenCode routes return `404`. A new
+session has no invented messages; persistence tests send and checkpoint a turn
+before checking reload behavior. Browser-only tests must enroll the fixture owner
+in the run's organization before logging in with its password.
+
+On a Linux host, the production-mode API also requires the protected broker
+artifacts installed by the Dockerfile at `/usr/local/share/ingenium/opencode-managed`.
+The root and parent directories must be owned by another user with mode `0555`,
+and the canonical files must have mode `0444`. Provision this non-secret test
+prerequisite before running the fixture; the runner does not install system
+files or bypass the production validator. A missing deployment root causes API
+startup to fail before browser tests can run.
 
 ```bash
 npx playwright test --config=tests/playwright.config.ts
@@ -158,7 +174,12 @@ identity, run nonce, ports, database, project, and temporary directory in a
 manifest. Child environments are built from an explicit allowlist of safe
 runtime variables plus service-specific values; parent credentials and
 unrelated secrets are not inherited. The API child alone receives the test
-bearer. The API and dashboard receive `INGENIUM_API_TEST_MODE=1`; background
+bearer. Each child gets `TMPDIR`, `TMP`, and `TEMP` bound to the run directory,
+so temporary uploads and their startup cleanup cannot touch another runtime.
+The global configuration path is also bound below the run-owned home. Failed
+readiness checks retain the service's bounded startup output in their diagnostics.
+Chat uploads use the operating system temporary root and return the actual
+uploaded file URL. The API and dashboard receive `INGENIUM_API_TEST_MODE=1`; background
 schedulers and mail maintenance remain disabled. Dashboard and fixture
 readiness/preflight requests receive no API bearer header; the dashboard's
 server-side credential is kept separate in its protected token-file path.

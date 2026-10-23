@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => {
   const list = vi.fn();
   const messages = vi.fn();
   const prompt = vi.fn();
+  const update = vi.fn();
   const contextLink = vi.fn();
   const persistTurn = vi.fn();
   return {
@@ -13,10 +14,11 @@ const mocks = vi.hoisted(() => {
     list,
     messages,
     prompt,
+    update,
     contextLink,
     persistTurn,
     client: {
-      sessions: { create, list, messages, prompt, abort: vi.fn(), revert: vi.fn() },
+      sessions: { create, list, messages, prompt, update, abort: vi.fn(), revert: vi.fn() },
       permissions: { list: vi.fn().mockResolvedValue([]) },
       questions: { list: vi.fn().mockResolvedValue([]) },
       events: { url: (sessionId: string) => `/sessions/${sessionId}/events` },
@@ -65,6 +67,7 @@ describe("useOpenCodeSessions", () => {
     mocks.list.mockReset();
     mocks.messages.mockReset().mockResolvedValue([]);
     mocks.prompt.mockReset().mockResolvedValue({ info: {}, parts: [] });
+    mocks.update.mockReset();
     mocks.contextLink.mockReset().mockResolvedValue({ data: { id: "11111111-1111-4111-8111-111111111112", revision: 0 } });
     mocks.persistTurn.mockReset().mockResolvedValue({ data: { revision: 1 } });
     fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new DOMException("Aborted", "AbortError"));
@@ -169,6 +172,35 @@ describe("useOpenCodeSessions", () => {
 
     expect(result.current.activeId).toBe(newSession.id);
     expect(localStorage.getItem("opencode-chat-active-session")).toBe(newSession.id);
+  });
+
+  it("archives and restores sessions without deleting their history", async () => {
+    const archivedSession = {
+      ...oldSession,
+      id: "session-archived",
+      time: { created: 3, updated: 3, archived: 3 },
+    };
+    const archivedOldSession = { ...oldSession, time: { ...oldSession.time, archived: 4 } };
+    const restoredSession = { ...oldSession };
+    mocks.list.mockResolvedValue([oldSession, newSession, archivedSession]);
+    mocks.update.mockImplementation((_id: string, body: { time?: { archived?: number } }) =>
+      body.time?.archived === undefined ? restoredSession : archivedOldSession);
+    localStorage.setItem("opencode-chat-active-session", archivedSession.id);
+    const { result } = renderHook(() => useOpenCodeSessions());
+
+    await vi.waitFor(() => expect(result.current.activeId).toBe(newSession.id));
+    expect(result.current.sessions.map(({ id }) => id)).toEqual([newSession.id, oldSession.id]);
+    expect(result.current.archivedSessions.map(({ id }) => id)).toEqual([archivedSession.id]);
+
+    await act(async () => { await result.current.archive(oldSession.id); });
+    expect(mocks.update).toHaveBeenCalledWith(oldSession.id, { time: { archived: expect.any(Number) } });
+    expect(result.current.sessions.map(({ id }) => id)).toEqual([newSession.id]);
+    expect(result.current.archivedSessions.map(({ id }) => id)).toEqual([archivedSession.id, oldSession.id]);
+
+    await act(async () => { await result.current.unarchive(oldSession.id); });
+    expect(mocks.update).toHaveBeenLastCalledWith(oldSession.id, { time: {} });
+    expect(result.current.sessions.map(({ id }) => id)).toContain(oldSession.id);
+    expect(result.current.archivedSessions.map(({ id }) => id)).toEqual([archivedSession.id]);
   });
 
   it("does not select a session whose creation resolves after unmount", async () => {

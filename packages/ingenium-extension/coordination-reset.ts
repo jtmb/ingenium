@@ -27,10 +27,13 @@ const PROJECT = "ingenium";
 const WORKSPACE = "shared-memory-ingenium";
 const CREDENTIAL_REFERENCE = ".opencode/.ingenium-mcp-credential";
 const LEARNING_CREDENTIAL_REFERENCE = ".opencode/.ingenium-learning-credential";
+const REPOSITORY_SYNC_CREDENTIAL_REFERENCE = ".opencode/.ingenium-repository-sync-credential";
 const OWNER_PROVIDER_REFERENCE = ".opencode/.ingenium-coordination-owner-provider.json";
+const PRIVATE_PROVIDER_REFERENCE = ".opencode/protected-runtime-index/owner-provider/reference.json";
+const PRIVATE_LEARNING_CREDENTIAL_REFERENCE = ".opencode/protected-runtime-index/learning/.ingenium-learning-credential";
 const OWNER_EMAIL = "bootstrap-admin@localhost";
-const COORDINATION_SCOPES = [
-  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+const MCP_SCOPES = [
+  "projects:read", "repository:sync", "documentation:read", "rag:read",
   "memory:read", "memory:write",
 ] as const;
 const LEARNING_SCOPES = [
@@ -123,7 +126,9 @@ interface CanonicalBinding {
 
 interface CredentialProfile {
   credentialFile: string;
-  name: "Ingenium coordination" | "Ingenium learning";
+  name: "Ingenium MCP" | "Ingenium learning" | "Ingenium repository sync";
+  kind: "service" | "repository-sync";
+  audience: "mcp" | "repository-sync";
   scopes: readonly string[];
 }
 
@@ -274,6 +279,53 @@ function protectedDirectory(path: string): void {
     || realpathSync(path) !== resolve(path) || (owner !== undefined && metadata.uid !== owner)) return fail("binding");
 }
 
+function stablePrivateAncestor(worktree: string): boolean {
+  const mode = lstatSync(resolve(worktree, ".opencode")).mode;
+  return (mode & 0o002) === 0 && ((mode & 0o020) === 0 || (mode & 0o1000) !== 0);
+}
+
+function ownerPrivateChain(directory: string, failure: CoordinationResetFailure, substage?: CredentialInstallSubstage): void {
+  const owner = currentOwner();
+  if (owner === undefined || !isAbsolute(directory) || resolve(directory) !== directory) return fail(failure, substage);
+  try {
+    for (let path = directory; ; path = dirname(path)) {
+      const stat = lstatSync(path);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(path) !== path
+        || (stat.uid !== owner && stat.uid !== 0)
+        || ((stat.mode & 0o022) !== 0 && !(stat.uid === 0 && (stat.mode & 0o1000) !== 0))
+        || (path === directory && (stat.uid !== owner || (stat.mode & 0o7777) !== 0o700))) {
+        return fail(failure, substage);
+      }
+      if (path === dirname(path)) return;
+    }
+  } catch (error) {
+    if (error instanceof CoordinationResetError) throw error;
+    return fail(failure, substage);
+  }
+}
+
+function providerCommonAncestor(reference: OwnerProviderReference): string {
+  const keyParent = dirname(reference.keyFile);
+  const bundleParent = dirname(reference.bundleFile);
+  let common = keyParent;
+  while (common !== dirname(common) && common !== bundleParent && !isContained(common, bundleParent)) {
+    common = dirname(common);
+  }
+  if (common === dirname(common) || common === keyParent || common === bundleParent) return fail("binding");
+  return common;
+}
+
+function secureCredentialLocation(root: string, target: string, failure: CoordinationResetFailure,
+  substage?: CredentialInstallSubstage): void {
+  if (isContained(resolve(root), resolve(target))) return secureFileLocation(root, target, failure, substage);
+  const learning = process.env.INGENIUM_LEARNING_CREDENTIAL_FILE;
+  if (!learning || !isAbsolute(learning) || resolve(learning) !== learning
+    || basename(learning) !== ".ingenium-learning-credential" || dirname(target) !== dirname(learning)) {
+    return fail(failure, substage);
+  }
+  ownerPrivateChain(dirname(target), failure, substage);
+}
+
 function readProtectedFile(path: string, maximumBytes: number): Buffer {
   if (!isAbsolute(path) || resolve(path) !== path) return fail("binding");
   let descriptor: number | undefined;
@@ -353,11 +405,37 @@ function parseProviderReference(source: Buffer, worktree: string): OwnerProvider
   return value as unknown as OwnerProviderReference;
 }
 
-function readProviderReference(worktree: string): OwnerProviderReference {
-  const referencePath = resolve(worktree, OWNER_PROVIDER_REFERENCE);
-  secureFileLocation(worktree, referencePath, "binding");
-  const source = readProviderReferenceFile(referencePath);
-  try { return parseProviderReference(source, worktree); } finally { source.fill(0); }
+function readProviderReference(worktree: string, environment: NodeJS.ProcessEnv = process.env): OwnerProviderReference {
+  const explicit = environment.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+  const privateReference = resolve(worktree, PRIVATE_PROVIDER_REFERENCE);
+  const external = explicit !== undefined && isAbsolute(explicit) && resolve(explicit) === explicit
+    && !isContained(worktree, explicit);
+  if (explicit !== undefined && explicit !== privateReference && !external) return fail("binding");
+  const referencePath = explicit ?? resolve(worktree, OWNER_PROVIDER_REFERENCE);
+  if (external) {
+    if (basename(referencePath) !== "reference.json") return fail("binding");
+    ownerPrivateChain(dirname(referencePath), "binding");
+  } else secureFileLocation(worktree, referencePath, "binding");
+  if (explicit && !external) {
+    try {
+      if (!stablePrivateAncestor(worktree)) return fail("binding");
+      protectedDirectory(resolve(worktree, ".opencode/protected-runtime-index"));
+      protectedDirectory(dirname(referencePath));
+    } catch (error) {
+      if (error instanceof CoordinationResetError) throw error;
+      return fail("binding");
+    }
+  }
+  const source = explicit ? readProtectedFile(referencePath, PROVIDER_MAX_BYTES) : readProviderReferenceFile(referencePath);
+  try {
+    const reference = parseProviderReference(source, worktree);
+    if (external) {
+      const common = providerCommonAncestor(reference);
+      ownerPrivateChain(common, "binding");
+      if (dirname(referencePath) !== resolve(common, "owner-reference")) return fail("binding");
+    }
+    return reference;
+  } finally { source.fill(0); }
 }
 
 function optionalProviderReference(worktree: string): OwnerProviderReference | undefined {
@@ -369,7 +447,8 @@ function optionalProviderReference(worktree: string): OwnerProviderReference | u
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     return fail("binding");
   }
-  return readProviderReference(worktree);
+  // Store owns the legacy reference, even when reset uses an external override.
+  return readProviderReference(worktree, {});
 }
 
 function parseProviderEnvelope(source: Buffer): OwnerProviderEnvelope {
@@ -414,8 +493,9 @@ export function readProtectedOwnerSecret(
 ): OwnerSecret {
   const hasFile = environment.INGENIUM_COORDINATION_OWNER_SECRET_FILE !== undefined;
   const hasDescriptor = environment.INGENIUM_COORDINATION_OWNER_SECRET_FD !== undefined;
+  if (environment.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE !== undefined && (hasFile || hasDescriptor)) return fail("binding");
   if (hasFile || hasDescriptor) return readExplicitProtectedOwnerSecret(environment);
-  return decryptProviderSecret(readProviderReference(worktree));
+  return decryptProviderSecret(readProviderReference(worktree, environment));
 }
 
 function canonicalBinding(worktree: string): CanonicalBinding {
@@ -434,9 +514,10 @@ function canonicalBinding(worktree: string): CanonicalBinding {
     const stat = fstatSync(descriptor);
     if (!stat.isFile() || stat.size > CONFIG_MAX_BYTES) return fail("binding");
     const config: unknown = JSON.parse(readFileSync(descriptor, "utf8"));
-    if (!isRecord(config) || !isRecord(config.mcp) || !isRecord(config.mcp.ingenium)
-      || !isRecord(config.mcp.ingenium.environment)) return fail("binding");
-    const environment = config.mcp.ingenium.environment;
+    if (!isRecord(config) || !isRecord(config.mcp)) return fail("binding");
+    const servers = isRecord(config.mcp.servers) ? config.mcp.servers : config.mcp;
+    if (!isRecord(servers.ingenium) || !isRecord(servers.ingenium.environment)) return fail("binding");
+    const environment = servers.ingenium.environment;
     if (environment.INGENIUM_API_URL !== API_URL || environment.INGENIUM_PROJECT !== PROJECT
       || environment.INGENIUM_WORKSPACE_ID !== WORKSPACE || environment.INGENIUM_WORKTREE !== root
       || environment.INGENIUM_MCP_AUDIENCE !== "mcp"
@@ -564,7 +645,7 @@ export function persistEncryptedOwnerSecret(
       "binding",
     );
     referenceInstalled = true;
-    decryptProviderSecret(readProviderReference(binding.worktree));
+    decryptProviderSecret(readProviderReference(binding.worktree, {}));
     bundleInstalled = false;
   } catch (error) {
     if (referenceInstalled) {
@@ -600,12 +681,38 @@ interface CredentialRotation {
 }
 
 function secureCredentialParent(root: string, target: string): string {
-  const parent = resolve(root, ".opencode");
+  const defaultParent = resolve(root, ".opencode");
+  const privateLearning = resolve(root, PRIVATE_LEARNING_CREDENTIAL_REFERENCE);
+  const external = isAbsolute(target) && !isContained(root, target);
+  const parent = external || target === privateLearning ? dirname(target) : defaultParent;
   try {
-    secureFileLocation(root, target, "credential_install", "ancestor");
+    secureCredentialLocation(root, target, "credential_install", "ancestor");
+    if (external) {
+      const referencePath = process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+      if (!referencePath || !isAbsolute(referencePath) || isContained(root, referencePath)) return fail("binding");
+      const common = providerCommonAncestor(readProviderReference(root));
+      ownerPrivateChain(common, "credential_install", "ancestor");
+      if (parent !== resolve(common, "learning")) return fail("credential_install", "ancestor");
+      return parent;
+    }
+    if (target === privateLearning) {
+      if (!stablePrivateAncestor(root)) return fail("credential_install", "ancestor");
+      const index = resolve(defaultParent, "protected-runtime-index");
+      for (const directory of [index, parent]) {
+        const metadata = lstatSync(directory);
+        const owner = currentOwner();
+        if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o700
+          || owner === undefined || metadata.uid !== owner || realpathSync(directory) !== directory) {
+          return fail("credential_install", "ancestor");
+        }
+      }
+      return parent;
+    }
     const metadata = lstatSync(parent);
     const owner = currentOwner();
-    if (dirname(target) !== parent || owner === undefined || !metadata.isDirectory() || metadata.isSymbolicLink()
+    if (![CREDENTIAL_REFERENCE, LEARNING_CREDENTIAL_REFERENCE, REPOSITORY_SYNC_CREDENTIAL_REFERENCE]
+      .some((reference) => target === resolve(root, reference))
+      || dirname(target) !== parent || owner === undefined || !metadata.isDirectory() || metadata.isSymbolicLink()
       || metadata.uid !== owner || (metadata.mode & 0o022) !== 0 || realpathSync(parent) !== parent) {
       return fail("credential_install", "ancestor");
     }
@@ -676,7 +783,7 @@ function syncCredentialDirectory(parent: string, substage: "directory_sync" | "r
 function exclusiveSibling(root: string, target: string, suffix: "tmp" | "quarantine"): string {
   const ending = suffix === "quarantine" ? "quarantine.credential" : suffix;
   const path = resolve(dirname(target), `.${basename(target)}.${randomUUID()}.${ending}`);
-  secureFileLocation(root, path, "credential_install", suffix === "tmp" ? "temporary_create" : "rename");
+  secureCredentialLocation(root, path, "credential_install", suffix === "tmp" ? "temporary_create" : "rename");
   try {
     lstatSync(path);
     return fail("credential_install", suffix === "tmp" ? "temporary_create" : "rename");
@@ -913,8 +1020,8 @@ async function issueCredential(
       headers: sessionHeaders(session, true),
       body: JSON.stringify({
         ...(servicePrincipalId ? { servicePrincipalId } : {}),
-        kind: "service",
-        audience: "mcp",
+        kind: profile.kind,
+        audience: profile.audience,
         name: profile.name,
         scopes: profile.scopes,
         organizationId: identity.organizationId,
@@ -930,7 +1037,7 @@ async function issueCredential(
   if (response.status !== 201) return fail(response.status === 403 || response.status === 404 ? "authorization" : "credential_issue");
   const credential = data(await json(response));
   if (typeof credential.id !== "string" || typeof credential.token !== "string" || !TOKEN.test(credential.token)
-    || credential.kind !== "service" || credential.audience !== "mcp" || credential.projectId !== identity.id
+    || credential.kind !== profile.kind || credential.audience !== profile.audience || credential.projectId !== identity.id
     || !Array.isArray(credential.projectIds) || credential.projectIds.length !== 1 || credential.projectIds[0] !== identity.id
     || credential.workspaceId !== WORKSPACE || credential.launcherWorktree !== binding.worktree
     || !exactScopes(credential.scopes, profile.scopes)) return fail("credential_issue");
@@ -958,7 +1065,7 @@ function matchesBinding(
   binding: CanonicalBinding,
   profile: CredentialProfile,
 ): boolean {
-  return entry.revokedAt === null && entry.kind === "service" && entry.audience === "mcp"
+  return entry.revokedAt === null && entry.kind === profile.kind && entry.audience === profile.audience
     && entry.projectId === identity.id && entry.workspaceId === WORKSPACE
     && entry.launcherWorktree === binding.worktree && exactScopes(entry.scopes, profile.scopes);
 }
@@ -975,7 +1082,7 @@ async function verifyCredential(
     response = await request(`${API_URL}/auth/preflight`, {
       headers: {
         authorization: `Bearer ${token}`,
-        "x-ingenium-audience": "mcp",
+        "x-ingenium-audience": profile.audience,
         "x-ingenium-workspace": WORKSPACE,
         "x-ingenium-launcher-worktree": binding.worktree,
       },
@@ -983,7 +1090,7 @@ async function verifyCredential(
     });
   } catch { return fail("unavailable"); }
   const result = response.status === 200 ? data(await json(response)) : {};
-  if (response.status !== 200 || result.audience !== "mcp" || result.projectId !== identity.id
+  if (response.status !== 200 || result.audience !== profile.audience || result.projectId !== identity.id
     || !Array.isArray(result.projectIds) || result.projectIds.length !== 1 || result.projectIds[0] !== identity.id
     || result.workspaceId !== WORKSPACE || result.launcherWorktree !== binding.worktree
     || !exactScopes(result.scopes, profile.scopes)) {
@@ -1020,7 +1127,7 @@ function defaultSourceFingerprint(worktree: string): Buffer {
 
 function acquireResetLock(worktree: string, credentialFile: string): { close(): void } {
   const lock = resolve(dirname(credentialFile), `${basename(credentialFile)}.reset-lock`);
-  secureFileLocation(worktree, lock, "binding");
+  secureCredentialLocation(worktree, lock, "binding");
   let descriptor: number;
   try {
     descriptor = openSync(lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -1033,7 +1140,7 @@ function acquireResetLock(worktree: string, credentialFile: string): { close(): 
     closed = true;
     closeSync(descriptor);
     try {
-      secureFileLocation(worktree, lock, "binding");
+      secureCredentialLocation(worktree, lock, "binding");
       unlinkSync(lock);
     } catch { /* a failed cleanup remains fail-closed for the next reset */ }
   } };
@@ -1053,21 +1160,49 @@ export async function resetLearningCredential(
   return resetCredential(worktree, "learning", dependencies);
 }
 
+export async function resetRepositorySyncCredential(
+  worktree = process.cwd(),
+  dependencies: CoordinationResetDependencies = {},
+): Promise<{ status: "completed" }> {
+  return resetCredential(worktree, "repository-sync", dependencies);
+}
+
 async function resetCredential(
   worktree: string,
-  purpose: "coordination" | "learning",
+  purpose: "coordination" | "learning" | "repository-sync",
   dependencies: CoordinationResetDependencies,
 ): Promise<{ status: "completed" }> {
   const binding = canonicalBinding(worktree);
+  const learningPath = process.env.INGENIUM_LEARNING_CREDENTIAL_FILE;
+  const externalLearning = purpose === "learning" && learningPath !== undefined && isAbsolute(learningPath)
+    && !isContained(binding.worktree, learningPath);
   const profile: CredentialProfile = purpose === "coordination"
-    ? { credentialFile: binding.credentialFile, name: "Ingenium coordination", scopes: COORDINATION_SCOPES }
-    : {
-      credentialFile: resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE),
+    ? { credentialFile: binding.credentialFile, name: "Ingenium MCP", scopes: MCP_SCOPES, kind: "service", audience: "mcp" }
+    : purpose === "learning" ? {
+      credentialFile: externalLearning ? learningPath!
+        : learningPath === resolve(binding.worktree, PRIVATE_LEARNING_CREDENTIAL_REFERENCE)
+          ? resolve(binding.worktree, PRIVATE_LEARNING_CREDENTIAL_REFERENCE)
+          : resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE),
       name: "Ingenium learning",
       scopes: LEARNING_SCOPES,
+      kind: "service",
+      audience: "mcp",
+    } : {
+      credentialFile: resolve(binding.worktree, REPOSITORY_SYNC_CREDENTIAL_REFERENCE),
+      name: "Ingenium repository sync",
+      scopes: ["projects:read", "repository:sync"],
+      kind: "repository-sync",
+      audience: "repository-sync",
     };
-  if (!isContained(resolve(binding.worktree, ".opencode"), profile.credentialFile)) return fail("binding");
-  secureFileLocation(binding.worktree, profile.credentialFile, "binding");
+  if (purpose === "learning" && process.env.INGENIUM_LEARNING_CREDENTIAL_FILE !== undefined
+    && process.env.INGENIUM_LEARNING_CREDENTIAL_FILE !== LEARNING_CREDENTIAL_REFERENCE
+    && process.env.INGENIUM_LEARNING_CREDENTIAL_FILE !== resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE)
+    && process.env.INGENIUM_LEARNING_CREDENTIAL_FILE !== resolve(binding.worktree, PRIVATE_LEARNING_CREDENTIAL_REFERENCE)
+    && !externalLearning) return fail("binding");
+  if (!externalLearning && !isContained(resolve(binding.worktree, ".opencode"), profile.credentialFile)) return fail("binding");
+  secureCredentialLocation(binding.worktree, profile.credentialFile, "binding");
+  secureCredentialParent(binding.worktree, profile.credentialFile);
+  credentialTarget(profile.credentialFile, "existing_target");
   const lock = acquireResetLock(binding.worktree, profile.credentialFile);
   const fingerprint = dependencies.sourceFingerprint ?? defaultSourceFingerprint;
   const before = fingerprint(binding.worktree);
@@ -1081,7 +1216,7 @@ async function resetCredential(
     // Scope changes and credential revocation do not remove the uniquely named principal.
     // The issuance API validates that the reused principal is active in this organization.
     const servicePrincipalId = (prior.find((entry) => matchesBinding(entry, identity, binding, profile))
-      ?? prior.find((entry) => entry.kind === "service" && entry.audience === "mcp"
+      ?? prior.find((entry) => entry.kind === profile.kind && entry.audience === profile.audience
         && entry.name === profile.name && entry.organizationId === identity.organizationId))?.servicePrincipalId;
     const issued = await issueCredential(
       request, session, identity, binding, profile, (dependencies.now ?? Date.now)(), servicePrincipalId,
@@ -1096,7 +1231,10 @@ async function resetCredential(
     if (!fingerprint(binding.worktree).equals(before)) return fail("source_changed");
     rotation.commit();
     rotation = undefined;
-    await revokePriorCredentials(request, session, issued.id, identity, binding, profile, prior);
+    // The legacy learning consumer may still use its old token in .opencode; listings do not identify credential files.
+    if (purpose !== "learning" || profile.credentialFile === resolve(binding.worktree, LEARNING_CREDENTIAL_REFERENCE)) {
+      await revokePriorCredentials(request, session, issued.id, identity, binding, profile, prior);
+    }
     return { status: "completed" };
   } catch (error) {
     rotation?.rollback();
@@ -1106,9 +1244,10 @@ async function resetCredential(
   }
 }
 
-export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "reset-learning" | PersistOwnerSecretOptions {
+export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "reset-learning" | "reset-repository-sync" | PersistOwnerSecretOptions {
   if (args.length === 1 && args[0] === "reset") return "reset";
   if (args.length === 1 && args[0] === "reset-learning") return "reset-learning";
+  if (args.length === 1 && args[0] === "reset-repository-sync") return "reset-repository-sync";
   if (args.length === 5 && args[0] === "store" && args[1] === "--key-file" && args[3] === "--bundle-directory") {
     return { keyFile: args[2]!, bundleDirectory: args[4]! };
   }
@@ -1116,11 +1255,19 @@ export function parseCoordinationResetArgs(args: readonly string[]): "reset" | "
 }
 
 export async function runCoordinationResetCli(args = process.argv.slice(2)): Promise<number> {
+  if (args.length === 1 && args[0] === "--help") {
+    process.stdout.write("Usage: ingenium-coordination-reset reset|reset-learning|reset-repository-sync\n"
+      + "       ingenium-coordination-reset store --key-file <path> --bundle-directory <path>\n"
+      + "reset-repository-sync: install the owner-issued repository-sync credential at "
+      + `${REPOSITORY_SYNC_CREDENTIAL_REFERENCE}\n`);
+    return 0;
+  }
   try {
     const operation = parseCoordinationResetArgs(args);
-    if (operation === "reset" || operation === "reset-learning") {
+    if (operation === "reset" || operation === "reset-learning" || operation === "reset-repository-sync") {
       if (operation === "reset") await resetCoordinationCredential();
-      else await resetLearningCredential();
+      else if (operation === "reset-learning") await resetLearningCredential();
+      else await resetRepositorySyncCredential();
       process.stdout.write("coordination reset: completed\n");
     } else {
       persistEncryptedOwnerSecret(process.cwd(), operation);

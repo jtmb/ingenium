@@ -89,10 +89,11 @@ Git-authoritative projection path:
 | Scheduled learning | Every 15 min (API scheduler) | Runs extraction → synthesis; this is separate from resource sync |
 
 The explicit `ingenium_repository_sync` operation projects repository Markdown
-and, when requested, version-2 skills/agents/plugins manifests through
+and, when requested, version-2 skills/agents/plugins/commands manifests through
 `POST /api/v1/repository/sync`. It carries an `expectedGeneration` for
 compare-and-swap and has a `dryRun` mode; it does not carry a coordination claim
-proof. Commands and config are excluded from this repository-sync lifecycle.
+proof. Commands are included in the repository resource lifecycle; project and
+global configuration remain excluded.
 
 ### Lineage-proven tombstone cleanup
 

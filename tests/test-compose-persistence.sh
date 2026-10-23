@@ -18,6 +18,7 @@ TEST_EMAIL_ENCRYPTION_KEY="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 TEST_OPENCODE_PASSWORD="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 TEST_EMAIL_ENCRYPTION_KEY_FILE="$RUN_ROOT/email-encryption.key"
 TEST_OPENCODE_PASSWORD_FILE="$RUN_ROOT/opencode-server.password"
+TEST_LEARNING_CREDENTIAL_FILE="$RUN_ROOT/learning-credential"
 ownership_verified=0
 resources_created=0
 
@@ -39,6 +40,7 @@ compose_command() (
   export IMAGE_SOURCE="https://github.com/jtmb/ingenium"
   export OPENCODE_SERVER_PASSWORD_FILE="$TEST_OPENCODE_PASSWORD_FILE"
   export INGENIUM_API_TOKEN_FILE="$TEST_API_TOKEN_FILE"
+  export INGENIUM_LEARNING_CREDENTIAL_FILE="$TEST_LEARNING_CREDENTIAL_FILE"
   export INGENIUM_EMAIL_ENCRYPTION_KEY_FILE="$TEST_EMAIL_ENCRYPTION_KEY_FILE"
   export INGENIUM_RUNTIME_ROOT_DOMAIN="runtime.example.test"
   export INGENIUM_RUNTIME_SCHEME="https"
@@ -60,7 +62,8 @@ compose() {
 printf '%s\n' "$TEST_OPENCODE_PASSWORD" > "$TEST_OPENCODE_PASSWORD_FILE"
 printf '%s\n' "$TEST_EMAIL_ENCRYPTION_KEY" > "$TEST_EMAIL_ENCRYPTION_KEY_FILE"
 printf '%s\n' "$TEST_API_TOKEN" > "$TEST_API_TOKEN_FILE"
-chmod 0600 "$TEST_API_TOKEN_FILE" "$TEST_OPENCODE_PASSWORD_FILE" "$TEST_EMAIL_ENCRYPTION_KEY_FILE"
+printf 'ing_%012d_%043d\n' 3 4 > "$TEST_LEARNING_CREDENTIAL_FILE"
+chmod 0600 "$TEST_API_TOKEN_FILE" "$TEST_OPENCODE_PASSWORD_FILE" "$TEST_EMAIL_ENCRYPTION_KEY_FILE" "$TEST_LEARNING_CREDENTIAL_FILE"
 
 cleanup() {
   local status=$?

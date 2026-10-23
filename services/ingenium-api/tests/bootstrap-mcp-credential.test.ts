@@ -16,7 +16,7 @@ import { CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter, mcpServersRouter
 import { authorizedCatalog } from "../lib/routes/mcp-tools.js";
 
 const installationToken = "b".repeat(64);
-const scopes = ["coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
+const scopes = ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
 let directory: string;
 let server: Server;
 let baseUrl: string;
@@ -36,6 +36,10 @@ beforeEach(async () => {
   vi.stubEnv("INGENIUM_CORE_DB_PATH", join(directory, "data"));
   vi.stubEnv("INGENIUM_API_TOKEN", installationToken);
   vi.stubEnv("INGENIUM_API_TOKEN_FILE", "");
+  vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
+  vi.stubEnv("INGENIUM_RUNTIME_MANAGER_URL", "");
+  vi.stubEnv("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", "");
+  vi.stubEnv("INGENIUM_RUNTIME_IDLE_LEASE_MS", "");
   const keyPath = join(directory, "key");
   writeFileSync(keyPath, Buffer.alloc(32, 7).toString("base64url"), { mode: 0o600 });
   vi.stubEnv("INGENIUM_AUTH_ENCRYPTION_KEY_FILE", keyPath);
@@ -57,12 +61,169 @@ beforeEach(async () => {
 afterEach(async () => {
   if (server) await closeHttpServer(server);
   resetDbForTest();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   rmSync(directory, { recursive: true, force: true });
 });
 
 describe("compatibility MCP bootstrap", () => {
+  it("renews an expired startup credential without extending the old token or changing its binding", async () => {
+    const firstResponse = await issue();
+    expect(firstResponse.status).toBe(201);
+    const first = (await firstResponse.json()).data;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.expiresAt) + 1);
+
+    expect(mcpCredentials.resolveMcpCredential(first.token, "mcp")).toBeUndefined();
+    const response = await issue();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    expect(renewed.id).not.toBe(first.id);
+    expect(renewed.token).not.toBe(first.token);
+    expect(renewed).toMatchObject({ servicePrincipalId: first.servicePrincipalId,
+      projectId: first.projectId, organizationId: first.organizationId, workspaceId: first.workspaceId,
+      launcherWorktree: first.launcherWorktree, securityEpoch: first.securityEpoch, scopes });
+    expect(Date.parse(renewed.expiresAt)).toBe(Date.now() + 30 * 24 * 60 * 60_000);
+    expect(mcpCredentials.resolveMcpCredential(first.token, "mcp")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(renewed.token, "mcp")?.id).toBe(renewed.id);
+    expect((await (await issue()).json()).data).toMatchObject({ id: renewed.id,
+      token: renewed.token, expiresAt: renewed.expiresAt });
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+  });
+
+  it.each(["workspace", "principal", "epoch"])("rejects expired startup renewal after %s changes", async (invalid) => {
+    const first = (await (await issue()).json()).data;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.expiresAt) + 1);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    if (invalid === "workspace") db.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(first.workspaceId);
+    if (invalid === "principal") db.prepare("UPDATE service_principals SET status = 'revoked' WHERE id = ?").run(first.servicePrincipalId);
+    if (invalid === "epoch") db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1 WHERE id = ?").run(first.workspaceId);
+    const receipt = db.prepare("SELECT * FROM mcp_credential_receipts WHERE credential_id = ?").get(first.id);
+    expect((await issue()).status).toBe(503);
+    expect(db.prepare("SELECT * FROM mcp_credential_receipts WHERE credential_id = ?").get(first.id)).toEqual(receipt);
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(1);
+  });
+
+  it("renews an expired local capability and keeps the old token invalid", async () => {
+    expect((await issue()).status).toBe(201);
+    const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const first = (await (await local()).json()).data;
+    expect(first.credential.kind).toBe("runtime");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.credential.expiresAt) + 1);
+    expect(mcpCredentials.resolveMcpCredential(first.credential.token, "runtime")).toBeUndefined();
+    const response = await local();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    expect(renewed.runtime.id).toBe(first.runtime.id);
+    expect(renewed.credential.id).not.toBe(first.credential.id);
+    expect(renewed.credential.servicePrincipalId).toBe(first.credential.servicePrincipalId);
+    expect(mcpCredentials.resolveMcpCredential(first.credential.token, "runtime")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(renewed.credential.token, "runtime")?.id).toBe(renewed.credential.id);
+    expect((await (await local()).json()).data.credential).toMatchObject({ id: renewed.credential.id, token: renewed.credential.token });
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT expires_at FROM mcp_credentials WHERE id = ?").get(first.credential.id))
+      .toEqual({ expires_at: first.credential.expiresAt });
+  });
+
+  it.each([
+    { name: "default window", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: null },
+    { name: "configured window", absoluteMs: 120_000, idleMs: 600_000, remainingCapabilityMs: null },
+    { name: "capability expiry cap", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: 30_000 },
+  ])("renews an expired compatibility lifetime within its $name", async ({ name, absoluteMs, idleMs, remainingCapabilityMs }) => {
+    if (name === "configured window") {
+      vi.stubEnv("INGENIUM_RUNTIME_ABSOLUTE_LEASE_MS", String(absoluteMs));
+      vi.stubEnv("INGENIUM_RUNTIME_IDLE_LEASE_MS", String(idleMs));
+    }
+    expect((await issue()).status).toBe(201);
+    const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const first = (await (await local()).json()).data;
+    const now = remainingCapabilityMs === null
+      ? Date.parse(first.runtime.absoluteExpiresAt) + 1
+      : Date.parse(first.credential.expiresAt) - remainingCapabilityMs;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    const lease = () => fetch(`${baseUrl}/api/v1/auth/repository-sync-credential`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" },
+      body: JSON.stringify({ runtimeId: first.runtime.id }),
+    });
+    expect((await lease()).status).toBe(404);
+    const response = await local();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    const absoluteExpiry = Math.min(now + absoluteMs, Date.parse(first.credential.expiresAt));
+    expect(renewed.runtime).toMatchObject({
+      id: first.runtime.id, state: "READY", backendContainerId: null, revision: first.runtime.revision + 1,
+      securityEpoch: first.runtime.securityEpoch,
+      absoluteExpiresAt: new Date(absoluteExpiry).toISOString(),
+      idleExpiresAt: new Date(Math.min(now + idleMs, absoluteExpiry)).toISOString(),
+    });
+    expect(renewed.credential.token).toBe(first.credential.token);
+    expect(renewed.credential.expiresAt).toBe(first.credential.expiresAt);
+    const issued = await lease();
+    expect(issued.status).toBe(201);
+    expect(Date.parse((await issued.json()).data.expiresAt)).toBe(Math.min(now + 15 * 60_000, absoluteExpiry));
+    expect((await (await local()).json()).data.runtime).toEqual(renewed.runtime);
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT count(*) AS count FROM runtime_capability_bindings WHERE runtime_id = ?",
+    ).get(first.runtime.id)).toEqual({ count: 1 });
+  });
+
+  it.each(["capability", "workspace", "epoch", "backend", "state", "principal"].flatMap(invalid => [
+    { invalid, expiredCredential: false }, { invalid, expiredCredential: true },
+  ]))(
+    "does not renew invalid $invalid with credential expired=$expiredCredential", async ({ invalid, expiredCredential }) => {
+      expect((await issue()).status).toBe(201);
+      const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+        method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+      });
+      const first = (await (await local()).json()).data;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse(expiredCredential ? first.credential.expiresAt : first.runtime.absoluteExpiresAt) + 1);
+      const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+      const receiptBefore = invalid === "capability" ? db.prepare(
+        "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE credential_id = ?",
+      ).get(first.credential.id) : undefined;
+      if (invalid === "capability") mcpCredentials.revokeMcpCredential(first.credential.id, ownerId);
+      if (invalid === "workspace") db.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(first.runtime.workspaceId);
+      if (invalid === "epoch") db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1 WHERE id = ?").run(first.runtime.workspaceId);
+      if (invalid === "backend") runtimes.transitionRuntime({ id: first.runtime.id, expectedRevision: first.runtime.revision,
+        toState: "IDLE", actorType: "system", actorId: "test", backendContainerId: "a".repeat(64) });
+      if (invalid === "state") runtimes.transitionRuntime({ id: first.runtime.id, expectedRevision: first.runtime.revision,
+        toState: "STOPPING", actorType: "system", actorId: "test" });
+      if (invalid === "principal") db.prepare("UPDATE service_principals SET status = 'revoked' WHERE id = ?").run(first.credential.servicePrincipalId);
+      const before = runtimes.getRuntimeInstance(first.runtime.id);
+      expect((await local()).status).toBe(503);
+      expect(runtimes.getRuntimeInstance(first.runtime.id)).toEqual(before);
+      if (invalid === "capability") {
+        expect(db.prepare(
+          "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE credential_id = ?",
+        ).get(first.credential.id)).toEqual(receiptBefore);
+        expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+      }
+    },
+  );
+
+  it("keeps local lifetime renewal revision-checked and rejects invalid bounds", async () => {
+    expect((await issue()).status).toBe(201);
+    const response = await fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const { runtime } = (await response.json()).data;
+    const input = { id: runtime.id, expectedRevision: runtime.revision,
+      absoluteExpiresAt: new Date(Date.now() + 120_000), idleExpiresAt: new Date(Date.now() + 60_000) };
+    expect(() => runtimes.renewLocalRuntimeLifetime(input)).toThrow("STATE_CONFLICT");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, expectedRevision: runtime.revision - 1 })).toThrow("REVISION_CONFLICT");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, idleExpiresAt: new Date(0) })).toThrow("Invalid local runtime lifetime");
+    expect(() => runtimes.renewLocalRuntimeLifetime({ ...input, absoluteExpiresAt: new Date(NaN) })).toThrow("Invalid local runtime lifetime");
+    expect(runtimes.getRuntimeInstance(runtime.id)).toEqual(runtime);
+  });
+
   it("recovers an existing failed local runtime without weakening capability binding", async () => {
     expect((await issue()).status).toBe(201);
     const runtime = runtimes.createRuntimeInstance("shared-memory-ingenium", {
@@ -93,18 +254,18 @@ describe("compatibility MCP bootstrap", () => {
     expect(data.credential).toMatchObject({ kind: "runtime", audience: "runtime", scopes: LOCAL_RUNTIME_SCOPES,
       launcherWorktree: "/home/brajam/repos/ingenium" });
     expect(data.credential.scopes).toEqual([
-      "child-mcp:execute", "child-mcp:runtime", "coordination:write", "documentation:read",
+      "child-mcp:execute", "child-mcp:runtime", "documentation:read",
       "mcp-servers:write", "memory:write", "projects:read", "rag:read",
     ]);
     const catalog = authorizedCatalog({
       authorizationPolicy: {},
       principal: { ...data.credential, type: "service", id: data.credential.servicePrincipalId },
     } as Parameters<typeof authorizedCatalog>[0], data.credential.projectId);
-    for (const name of ["coordination_status", "coordination_memory_read", "coordination_update", "coordination_claim",
-      "coordination_release", "memory_read", "memory_list", "memory_search", "memory_save", "memory_update",
+    for (const name of ["memory_read", "memory_list", "memory_search", "memory_save", "memory_update",
       "memory_forget", "memory_operation_status", "project_detail", "docs_search", "docs_get_page", "docs_search_semantic",
       "docs_rag_sources_list"]) expect(catalog.has(`ingenium_${name}`), name).toBe(true);
-    for (const name of ["repository_sync", "docs_create_page", "docs_ingest"])
+    for (const name of ["coordination_status", "coordination_memory_read", "coordination_update", "coordination_claim",
+      "coordination_release", "coordination_handoff", "repository_sync", "docs_create_page", "docs_ingest"])
       expect(catalog.has(`ingenium_${name}`), name).toBe(false);
     expect(data.runtimeWorktree).toBe("/workspace");
     expect(mcpCredentials.resolveMcpCredential(data.credential.token, "runtime")?.id).toBe(data.credential.id);
@@ -169,6 +330,23 @@ describe("compatibility MCP bootstrap", () => {
     expect(mcpCredentials.resolveMcpCredential(data.token, "mcp")?.id).toBe(data.id);
   });
 
+  it("rotates past a retained v1 receipt after the v2 scope contract", async () => {
+    const project = projects.getProject("ingenium")!;
+    const oldScopes = ["coordination:read", "coordination:write", "documentation:read", "memory:read", "memory:write", "projects:read", "rag:read", "repository:sync"];
+    mcpCredentials.createMcpCredential({
+      servicePrincipalName: "Compatibility OpenCode", kind: "service", audience: "mcp", name: "Compatibility OpenCode",
+      scopes: oldScopes, organizationId: project.organization_id, projectId: project.id,
+      workspaceId: "shared-memory-ingenium", launcherWorktree: "/home/brajam/repos/ingenium",
+      expiresAt: new Date(Date.now() + 30 * 86_400_000), createdByUserId: ownerId,
+    }, "compatibility-opencode-v1");
+
+    const response = await issue();
+    expect(response.status).toBe(201);
+    const { data } = await response.json();
+    expect(data.scopes).toEqual(scopes);
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+  });
+
   it("rejects browser users and scoped service credentials with 403", async () => {
     const { data } = await (await issue()).json();
     const service = await issue({}, { authorization: `Bearer ${data.token}`, "x-ingenium-internal-service": "", "x-ingenium-audience": "mcp", "x-ingenium-workspace": data.workspaceId, "x-ingenium-launcher-worktree": data.launcherWorktree });
@@ -191,15 +369,31 @@ describe("compatibility MCP bootstrap", () => {
     expect(emitted).not.toContain(marker);
   });
 
-  it("fails closed with a safe error when a receipt credential is revoked", async () => {
-    const { data } = await (await issue()).json();
-    mcpCredentials.revokeMcpCredential(data.id, ownerId);
+  it("replaces a revoked receipt credential without extending expiry and replays the replacement", async () => {
+    const { data: original } = await (await issue()).json();
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    mcpCredentials.revokeMcpCredential(original.id, ownerId);
+
     const response = await issue();
-    expect(response.status).toBe(503);
-    const text = await response.text();
-    expect(text).toContain("MCP_BOOTSTRAP_UNAVAILABLE");
-    expect(text).not.toContain(data.token);
-    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(1);
+    expect(response.status).toBe(201);
+    const { data: replacement } = await response.json();
+    expect(replacement.id).not.toBe(original.id);
+    expect(replacement.token).not.toBe(original.token);
+    expect(replacement.expiresAt).toBe(original.expiresAt);
+    expect(database.prepare("SELECT credential_id FROM mcp_credential_receipts WHERE idempotency_key = ?")
+      .get("compatibility-opencode-v2")).toEqual({ credential_id: replacement.id });
+    expect(database.prepare("SELECT revoked_at FROM mcp_credentials WHERE id = ?").get(original.id))
+      .toMatchObject({ revoked_at: expect.any(String) });
+    expect(mcpCredentials.resolveMcpCredential(original.token, "mcp")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(replacement.token, "mcp")?.id).toBe(replacement.id);
+
+    resetDbForTest();
+    const retry = await issue();
+    expect(retry.status).toBe(201);
+    expect((await retry.json()).data).toMatchObject({
+      id: replacement.id, token: replacement.token, expiresAt: replacement.expiresAt,
+    });
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
   });
 
   it("rate limits bootstrap issuance without creating extra credentials", async () => {

@@ -46,6 +46,12 @@ export interface CreateMcpCredentialInput {
   createdByUserId: string;
 }
 
+export interface CreateMcpCredentialOptions {
+  replaceRevokedReceipt?: boolean;
+  /** Issue a new credential after expiry; never extend the old token's lifetime. */
+  replaceExpiredReceipt?: boolean;
+}
+
 export interface ServiceCredentialIdentity {
   credentialId: string;
   authenticatedCredentialId: string;
@@ -58,20 +64,14 @@ export interface ServiceCredentialIdentity {
   storageMappingHash: string;
 }
 
-export interface CoordinationLeaseCredentials {
-  coordination: McpCredential & { token: string };
-  repositorySync: McpCredential & { token: string };
-}
+export type RepositorySyncCredential = McpCredential & { token: string };
 
-export const COORDINATION_LEASE_CREDENTIAL_TTL_MS = 15 * 60_000;
-export const COORDINATION_LEASE_SCOPES = [
-  "coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync",
-] as const;
+export const REPOSITORY_SYNC_CREDENTIAL_TTL_MS = 15 * 60_000;
 export const REPOSITORY_SYNC_SCOPES = ["projects:read", "repository:sync"] as const;
 
-export class CoordinationLeaseUnavailableError extends Error {
+export class RepositorySyncCredentialUnavailableError extends Error {
   constructor() {
-    super("Coordination lease runtime is unavailable");
+    super("Repository sync credential runtime is unavailable");
   }
 }
 
@@ -176,7 +176,26 @@ function newCredentialToken(): { id: string; tokenPrefix: string; token: string 
   return { id, tokenPrefix, token: `${tokenPrefix}_${randomBytes(32).toString("base64url")}` };
 }
 
-export function createMcpCredential(input: CreateMcpCredentialInput, idempotencyKey?: string): McpCredential & { token: string } {
+function matchesCredentialBinding(
+  row: CredentialRow,
+  input: CreateMcpCredentialInput,
+  scopes: string[],
+  grants: string[],
+): boolean {
+  return row.kind === input.kind && row.audience === input.audience && row.name === normalizeText(input.name, 128, "credential name")
+    && row.scopes_json === JSON.stringify(scopes) && row.organization_id === input.organizationId
+    && row.project_id === input.projectId && row.project_grants_json === JSON.stringify(grants)
+    && row.workspace_id === normalizeText(input.workspaceId, 256, "workspace binding")
+    && row.launcher_worktree === normalizeWorktree(input.launcherWorktree)
+    && row.created_by_user_id === input.createdByUserId
+    && (!input.servicePrincipalId || row.service_principal_id === input.servicePrincipalId);
+}
+
+export function createMcpCredential(
+  input: CreateMcpCredentialInput,
+  idempotencyKey?: string,
+  options: CreateMcpCredentialOptions = {},
+): McpCredential & { token: string } {
   const { scopes, grants } = validateInput(input);
   const { id, tokenPrefix, token } = newCredentialToken();
   // The first issuance owns expiry; retries must not extend credential lifetime.
@@ -193,16 +212,35 @@ export function createMcpCredential(input: CreateMcpCredentialInput, idempotency
       if (receipt) {
         const row = db.prepare(`${SELECT_CREDENTIAL}
           JOIN service_principals principal ON principal.id = mcp_credentials.service_principal_id
-          WHERE mcp_credentials.id = ? AND mcp_credentials.revoked_at IS NULL AND mcp_credentials.expires_at > ?
+          WHERE mcp_credentials.id = ?
+            AND principal.organization_id = mcp_credentials.organization_id
             AND principal.status = 'active' AND principal.security_epoch = mcp_credentials.security_epoch
             AND authorized_workspaces.status = 'authorized'
+            AND authorized_workspaces.organization_id = mcp_credentials.organization_id
+            AND authorized_workspaces.project_id = mcp_credentials.project_id
+            AND authorized_workspaces.owner_user_id = mcp_credentials.created_by_user_id
+            AND authorized_workspaces.storage_path = mcp_credentials.launcher_worktree
             AND authorized_workspaces.security_epoch = mcp_credentials.security_epoch`)
-          .get(receipt.credential_id, new Date().toISOString()) as CredentialRow | undefined;
-        if (receipt.request_hash !== requestHash || !row
-          || (input.servicePrincipalId && input.servicePrincipalId !== row.service_principal_id)) {
+          .get(receipt.credential_id) as CredentialRow | undefined;
+        if (receipt.request_hash !== requestHash || !row || !matchesCredentialBinding(row, input, scopes, grants)) {
           throw new Error("Credential replay is unavailable");
         }
-        return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
+        const expiry = Date.parse(row.expires_at);
+        const expired = expiry <= Date.now();
+        if (!Number.isFinite(expiry) || (expired && !options.replaceExpiredReceipt)
+          || (row.revoked_at && !options.replaceRevokedReceipt)) throw new Error("Credential replay is unavailable");
+        if (!expired && !row.revoked_at) return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
+        const credential = insertMcpCredential(db, {
+          ...input,
+          servicePrincipalId: row.service_principal_id,
+          expiresAt: expired ? input.expiresAt : new Date(row.expires_at),
+        }, scopes, grants, id, tokenPrefix, token);
+        if (db.prepare(`UPDATE mcp_credential_receipts SET credential_id = ?, encrypted_token = ?
+          WHERE idempotency_key = ? AND request_hash = ? AND credential_id = ?`)
+          .run(id, encryptedToken!, idempotencyKey, requestHash, row.id).changes !== 1) {
+          throw new Error("Credential replay is unavailable");
+        }
+        return { credential, encryptedToken: undefined };
       }
     }
     const servicePrincipalId = input.servicePrincipalId ?? insertServicePrincipal(db, input);
@@ -217,9 +255,8 @@ export function createMcpCredential(input: CreateMcpCredentialInput, idempotency
   return { ...created.credential, token: created.encryptedToken ? decryptAuthSecret(created.encryptedToken) : token };
 }
 
-export function issueCoordinationLeaseCredentials(runtimeId: string, now = new Date()): CoordinationLeaseCredentials {
+export function issueRepositorySyncCredential(runtimeId: string, now = new Date()): RepositorySyncCredential {
   const timestamp = now.toISOString();
-  const coordinationToken = newCredentialToken();
   const repositoryToken = newCredentialToken();
   const issued = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
@@ -265,15 +302,15 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
         absolute_expires_at: string; storage_path: string; storage_mapping_hash: string;
         binding_expires_at: string; capability_expires_at: string; service_principal_id: string;
       } | undefined;
-    if (!scope) throw new CoordinationLeaseUnavailableError();
+    if (!scope) throw new RepositorySyncCredentialUnavailableError();
     const expiresAt = new Date(Math.min(
-      now.getTime() + COORDINATION_LEASE_CREDENTIAL_TTL_MS,
+      now.getTime() + REPOSITORY_SYNC_CREDENTIAL_TTL_MS,
       Date.parse(scope.absolute_expires_at),
       Date.parse(scope.binding_expires_at),
       Date.parse(scope.capability_expires_at),
     ));
     if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= now.getTime()) {
-      throw new CoordinationLeaseUnavailableError();
+      throw new RepositorySyncCredentialUnavailableError();
     }
     const base = {
       servicePrincipalId: scope.service_principal_id,
@@ -284,14 +321,6 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
       expiresAt,
       createdByUserId: scope.owner_user_id,
     };
-    const coordination = insertMcpCredential(db, {
-      ...base,
-      kind: "service",
-      audience: "mcp",
-      name: `Coordination lease ${runtimeId}`,
-      scopes: [...COORDINATION_LEASE_SCOPES],
-    }, [...COORDINATION_LEASE_SCOPES], [scope.project_id], coordinationToken.id,
-    coordinationToken.tokenPrefix, coordinationToken.token);
     const repositorySync = insertMcpCredential(db, {
       ...base,
       kind: "repository-sync",
@@ -300,13 +329,10 @@ export function issueCoordinationLeaseCredentials(runtimeId: string, now = new D
       scopes: [...REPOSITORY_SYNC_SCOPES],
     }, [...REPOSITORY_SYNC_SCOPES], [scope.project_id], repositoryToken.id,
     repositoryToken.tokenPrefix, repositoryToken.token);
-    return { coordination, repositorySync };
+    return repositorySync;
   });
   checkpointAfterWrite();
-  return {
-    coordination: { ...issued.coordination, token: coordinationToken.token },
-    repositorySync: { ...issued.repositorySync, token: repositoryToken.token },
-  };
+  return { ...issued, token: repositoryToken.token };
 }
 
 function insertServicePrincipal(db: Database.Database, input: CreateMcpCredentialInput): string {

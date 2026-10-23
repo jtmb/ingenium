@@ -48,7 +48,7 @@ export default function Home() {
   if (error && !loading && !data) {
     return (
       <div className="max-w-lg mx-auto mt-20 text-center">
-        <div className="bg-[var(--color-error-bg)] border border-red-200 rounded-xl p-8">
+        <div role="alert" className="bg-[var(--color-error-bg)] border border-red-200 rounded-xl p-8">
           <h2 className="text-lg font-semibold text-red-700 dark:text-red-300 mb-2">
             Unable to load dashboard
           </h2>
@@ -78,9 +78,10 @@ export default function Home() {
             <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">
               Ingenium
             </h1>
+            <p role="status" aria-live="polite" className="sr-only">Loading dashboard…</p>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div aria-hidden="true" className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div
               key={i}

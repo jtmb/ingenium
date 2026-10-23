@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as filesystem from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   ChildMcpGateway,
+  childMcpGatewayApi,
   resolveChildMcpProjectIdentity,
   type ChildMcpDiscoveryReport,
   type ChildMcpGatewayApi,
@@ -14,6 +15,7 @@ import {
 } from "../lib/child-mcp-gateway.js";
 import type { ProjectStateAttestation } from "../lib/tool-state-gate.js";
 import { ChildMcpRuntimeManager } from "../lib/proxy.js";
+import { api as httpApi } from "../lib/client.js";
 import {
   ManagedPlaywrightRuntime,
   PLAYWRIGHT_CHILD_MCP_ARGS,
@@ -33,8 +35,9 @@ const gateways: ChildMcpGateway[] = [];
 const runtimeDirectories: string[] = [];
 
 describe("compatibility runtime MCP launcher handoff", () => {
-  const launcher = readFileSync(new URL("../../../scripts/start-opencode-web.sh", import.meta.url), "utf8")
+  const launcherTemplate = readFileSync(new URL("../../../scripts/start-opencode-web.sh", import.meta.url), "utf8")
     .replace("node /app/scripts/probe-api.mjs", "true")
+    .replace('opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"', 'opencode_server_password="test-password"')
     .replace("opencode serve --port 4098 --hostname 127.0.0.1", `${process.execPath} -e 'console.log(JSON.stringify(process.env))'`);
   const identity = {
     INGENIUM_PROJECT: "ingenium",
@@ -44,40 +47,76 @@ describe("compatibility runtime MCP launcher handoff", () => {
     INGENIUM_RUNTIME_OWNER_ID: "44444444-4444-4444-8444-444444444444",
     INGENIUM_WORKSPACE_ID: "shared-memory-ingenium",
     INGENIUM_STORAGE_MAPPING_HASH: "a".repeat(64),
+    INGENIUM_WORKTREE: "/workspace",
+  };
+  const createLauncher = (runtimeIdentity: Record<string, string> | null = identity) => {
+    const fixtureDirectory = mkdtempSync(join(tmpdir(), "ingenium-compatibility-launcher-"));
+    const credentialPath = join(fixtureDirectory, ".ingenium-mcp-credential");
+    const runtimeEnvironmentPath = join(fixtureDirectory, "environment");
+    const runtimeCapabilityPath = join(fixtureDirectory, "capability");
+    writeFileSync(credentialPath, `${"f".repeat(32)}\n`, { mode: 0o600 });
+    writeFileSync(runtimeEnvironmentPath, runtimeIdentity === null
+      ? "# legacy compatibility runtime\n"
+      : `${Object.entries(runtimeIdentity).map(([name, value]) => `${name}=${value}`).join("\n")}\n`, { mode: 0o600 });
+    writeFileSync(runtimeCapabilityPath, `${"r".repeat(32)}\n`, { mode: 0o600 });
+    return {
+      launcher: launcherTemplate
+        .replaceAll("/run/ingenium-opencode/.ingenium-mcp-credential", credentialPath)
+        .replaceAll("/run/ingenium-runtime/environment", runtimeEnvironmentPath)
+        .replaceAll("/run/ingenium-runtime/capability", runtimeCapabilityPath),
+      runtimeCapabilityPath,
+      cleanup: () => rmSync(fixtureDirectory, { recursive: true, force: true }),
+    };
   };
 
   it("passes provisioned identity and an enabled runtime MCP entry instead of the persistent global-default entry", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: identity, encoding: "utf8" });
-    expect(result.status).toBe(0);
-    const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    expect(environment).toMatchObject(identity);
-    expect(environment.INGENIUM_MCP_AUDIENCE).toBe("runtime");
-    const config = JSON.parse(environment.OPENCODE_CONFIG_CONTENT.replace(/\{env:([^}]+)\}/g,
-      (_match: string, key: string) => environment[key]));
-    expect(config.mcp.ingenium).toMatchObject({
-      enabled: true,
-      command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      environment: { INGENIUM_MCP_AUDIENCE: "runtime", INGENIUM_MCP_CREDENTIAL_PURPOSE: "runtime",
-        INGENIUM_RUNTIME_CREDENTIAL_FILE: "/run/ingenium-runtime/capability",
-        INGENIUM_PROJECT: "ingenium", INGENIUM_WORKSPACE_ID: "shared-memory-ingenium", INGENIUM_WORKTREE: "/workspace" },
-    });
+    const launcherFixture = createLauncher();
+
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: identity, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      expect(environment).toMatchObject(identity);
+      expect(environment.INGENIUM_MCP_AUDIENCE).toBe("runtime");
+      const config = JSON.parse(environment.OPENCODE_CONFIG_CONTENT.replace(/\{env:([^}]+)\}/g,
+        (_match: string, key: string) => environment[key]));
+      expect(config.mcp.servers.ingenium).toMatchObject({
+        disabled: false,
+        command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        environment: { INGENIUM_MCP_AUDIENCE: "runtime", INGENIUM_MCP_CREDENTIAL_PURPOSE: "runtime",
+          INGENIUM_RUNTIME_CREDENTIAL_FILE: launcherFixture.runtimeCapabilityPath,
+          INGENIUM_PROJECT: "ingenium", INGENIUM_WORKSPACE_ID: "shared-memory-ingenium", INGENIUM_WORKTREE: "/workspace" },
+      });
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 
   it("rejects incomplete runtime identity before starting OpenCode", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: { ...identity, INGENIUM_PROJECT_ID: "" }, encoding: "utf8" });
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain("compatibility runtime identity is incomplete");
-    expect(result.stdout).not.toContain("OPENCODE_CONFIG_CONTENT");
+    const launcherFixture = createLauncher({ ...identity, INGENIUM_PROJECT_ID: "" });
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: identity, encoding: "utf8" });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("compatibility runtime identity is incomplete");
+      expect(result.stdout).not.toContain("OPENCODE_CONFIG_CONTENT");
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 
   it("does not manufacture empty runtime identity fields for a legacy compatibility launch", () => {
-    const result = spawnSync("/bin/sh", ["-c", launcher], { env: {}, encoding: "utf8" });
-    expect(result.status).toBe(0);
-    const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
-    expect(environment.INGENIUM_MCP_AUDIENCE).toBe("mcp");
-    expect(environment.INGENIUM_RUNTIME_ID).toBeUndefined();
-    expect(environment.INGENIUM_PROJECT_ID).toBeUndefined();
-    expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    const launcherFixture = createLauncher(null);
+    try {
+      const result = spawnSync("/bin/sh", ["-c", launcherFixture.launcher], { env: {}, encoding: "utf8" });
+      expect(result.status).toBe(0);
+      const environment = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+      expect(environment.INGENIUM_MCP_AUDIENCE).toBe("mcp");
+      expect(environment.INGENIUM_RUNTIME_ID).toBeUndefined();
+      expect(environment.INGENIUM_PROJECT_ID).toBeUndefined();
+      expect(environment.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+    } finally {
+      launcherFixture.cleanup();
+    }
   });
 });
 
@@ -164,6 +203,9 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
       reports.push(report);
       return true;
     },
+    async toolStates(project, toolNames) {
+      return new Map(await Promise.all(toolNames.map(async (name) => [name, await api.toolEnabled(project, name)] as const)));
+    },
     async toolEnabled(_project, toolName) {
       checkedTools.push(toolName);
       return {
@@ -196,6 +238,55 @@ afterEach(async () => {
 });
 
 describe("ChildMcpGateway", () => {
+  it("reads one attested authorization batch and fails closed for foreign or incomplete state", async () => {
+    const fixtureApi = createApi([]);
+    const state = await fixtureApi.api.toolEnabled("child-gateway-project", "ingenium_fixture_echo");
+    const data = [
+      { tool_name: "ingenium_fixture_echo", enabled: true, authorization: state.policy },
+      { tool_name: "ingenium_fixture_disabled", enabled: false, authorization: state.policy },
+      { tool_name: "ingenium_fixture_missing_policy", enabled: true },
+    ];
+    const response = { ok: true, data, payload: { ...state.attestation, data } };
+    const get = vi.spyOn(httpApi.settled, "get").mockResolvedValue(response as never);
+    const states = await childMcpGatewayApi.toolStates("child-gateway-project", data.map((tool) => tool.tool_name));
+    expect(get).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledWith("/mcp-tools", { project: "child-gateway-project" });
+    expect(states.get("ingenium_fixture_echo")).toEqual(state);
+    expect(states.get("ingenium_fixture_disabled")?.state).toBe("disabled");
+    expect(states.has("ingenium_fixture_missing_policy")).toBe(false);
+    response.payload.project = "foreign-project";
+    expect(await childMcpGatewayApi.toolStates("child-gateway-project", [])).toEqual(new Map());
+    get.mockResolvedValue({ ok: false } as never);
+    expect(await childMcpGatewayApi.toolStates("child-gateway-project", [])).toEqual(new Map());
+  });
+
+  it("batches periodic 30-tool discovery without consuming launcher preflight capacity", async () => {
+    const { host, tools } = createHost();
+    const state = createApi([runtimeDefinition()]);
+    const manager = createManager();
+    const discovered = Array.from({ length: 30 }, (_, index) => ({
+      name: index === 0 ? "echo" : `tool_${index}`, description: "fixture", inputSchema: {},
+    }));
+    vi.spyOn(manager, "listTools").mockResolvedValue(discovered);
+    const original = state.api.toolEnabled;
+    const single = vi.spyOn(state.api, "toolEnabled");
+    const batch = vi.fn(async () => new Map(await Promise.all(discovered.map(async (tool) => {
+      const name = `ingenium_fixture_${tool.name}`;
+      return [name, await original("child-gateway-project", name)] as const;
+    }))));
+    Object.assign(state.api, { toolStates: batch });
+    const gateway = new ChildMcpGateway(host, "child-gateway-project", state.api, manager);
+    gateways.push(gateway);
+    for (let tick = 0; tick < 12; tick++) await gateway.refresh();
+    expect(batch).toHaveBeenCalledTimes(12);
+    expect(single).not.toHaveBeenCalled();
+    expect(tools.size).toBe(30);
+    state.setToolState("disabled");
+    await expect(tools.get("fixture_echo")!.handler({ project: "child-gateway-project", arguments: {} }))
+      .resolves.toMatchObject({ isError: true });
+    expect(single).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { executable: "npx" },
     { args: [...PLAYWRIGHT_CHILD_MCP_ARGS, "--no-sandbox"] },

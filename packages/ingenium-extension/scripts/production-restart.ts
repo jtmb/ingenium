@@ -23,22 +23,24 @@ import { createServer, type Server } from "node:net";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
+  apiRequestHeaders,
   preflightApiAuthentication,
 } from "../api-auth.js";
 import {
-  coordinationCredentialPurpose,
+  effectiveExtensionCredentialPurpose,
   resolveExtensionBinding,
 } from "../extension-binding.js";
 import {
   COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY,
-  COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
+  COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT,
   CoordinationOutbox,
+  type CoordinationOutboxQuarantine,
 } from "../coordination-outbox.js";
-import { mcpToolData, openMcpToolClient, type McpToolClient } from "../mcp-client.js";
 import {
   decodeReplacementFirstRestartRequest,
   isSafeRestartHandoffPath,
   parseRedactedRestartHandoff,
+  stableRestartTodos,
   runReplacementFirstRestart,
   type RedactedRestartHandoff,
   type ReplacementFirstRestartDependencies,
@@ -58,6 +60,7 @@ import {
   readRecoveryServerAuthentication,
   reconcileManagedRecoveryReplacement,
   recoveryServerAuthenticationPath,
+  verifyRecoveryMcpCanary,
   type RecoveryServerAuthentication,
 } from "../tui-recovery.js";
 
@@ -74,8 +77,10 @@ const UNNONCED_PARENT_SHA256 = "0".repeat(64);
 const GENERAL_CREDENTIAL_FILE = ".ingenium-mcp-credential";
 const REPLACEMENT_SERVER_USERNAME = "opencode";
 const LEGACY_HANDOFF_PATH = ".opencode/protected-runtime-index/tui-recovery/legacy-handoff.json";
+const RECOVERY_PREPARATION_FREEZE_MAX_BYTES = 4 * 1024;
+const RECOVERY_PREPARATION_FREEZE_SOURCE = "coordination-outbox-mutation.lock";
+const RECOVERY_PREPARATION_FREEZE_ARCHIVE = `${RECOVERY_PREPARATION_FREEZE_SOURCE}.adopted`;
 export const PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY = COORDINATION_OUTBOX_AUTHORIZED_OVERFLOW_KEY;
-const OVERFLOW_AUTHORIZATION_LIFETIME_MS = 24 * 60 * 60 * 1_000;
 export const RECOVERY_BOOTSTRAP_GUARD = "INGENIUM_RECOVERY_BOOTSTRAP_VERIFIED";
 export const RECOVERY_CANONICAL_WORKTREE = "INGENIUM_RECOVERY_CANONICAL_WORKTREE";
 export const ADMITTED_RECOVERY_CONTEXT = "INGENIUM_ADMITTED_RECOVERY_CONTEXT";
@@ -85,7 +90,6 @@ const DEFAULT_TIMEOUTS: ReplacementFirstRestartRequest["timeouts"] = {
   identityMs: 5_000,
   healthMs: 60_000,
   sessionMs: 10_000,
-  memoryAckMs: 120_000,
   terminalIdleMs: 120_000,
   retirementMs: 10_000,
 };
@@ -109,6 +113,14 @@ export interface AdmittedRecoveryContext {
     storageMappingHash: string;
     worktree: string;
   }>;
+  readonly freeze: Readonly<{
+    status: "clear" | "adopted";
+    source: typeof RECOVERY_PREPARATION_FREEZE_SOURCE;
+    archive: typeof RECOVERY_PREPARATION_FREEZE_ARCHIVE;
+    sha256: string | null;
+    owner: Readonly<{ pid: number; startTimeTicks: number }> | null;
+  }>;
+  readonly outboxQuarantine: Readonly<CoordinationOutboxQuarantine> | null;
   readonly receipt: Readonly<{
     id: string;
     schema: "ingenium.recovery-admission-receipt";
@@ -158,45 +170,31 @@ export interface ProductionRestartAdapterDependencies<Session> {
     worktree: string;
     binding: ProductionRestartBinding;
     parent: ProductionRestartParentCandidate;
+    outboxQuarantine?: Readonly<CoordinationOutboxQuarantine> | null;
   }): Promise<PreparedProductionReplacement<Session>>;
+  revalidateOutboxQuarantine?(
+    worktree: string,
+    expected: Readonly<CoordinationOutboxQuarantine> | null,
+  ): Promise<boolean> | boolean;
+  revalidatePreparationFreeze?(
+    worktree: string,
+    expected: AdmittedRecoveryContext["freeze"],
+  ): Promise<boolean> | boolean;
 }
 
 interface ReplacementSession {
   id: string;
   initialMessageCount: number;
-  captureOffset: number;
   transactionSha256: string;
 }
 
-export interface RestartHandoffPublisher {
-  client: McpToolClient;
-  identity: {
-    project: string;
-    worktree_id: string;
-    session_id: string;
-    incarnation: number;
-  };
-  ownershipToken: string;
-  revision: number;
-  fence: number;
-}
-
-interface RestartCaptureClaim extends RestartHandoffPublisher {
-  acceptedEpoch: number;
-  operationId: string;
-  clientClaimKey: string;
-}
-
 interface ProductionPreparedState {
-  acknowledgementFile: string;
   child?: ChildProcess;
-  captureFile: string;
   evidenceFile: string;
   executable: string;
   expectedExecutableSha256: string;
   expectedVersion: string;
   healthEvidenceFile: string;
-  handoffPublisher?: RestartHandoffPublisher;
   logDescriptor: number;
   nonce: string;
   parentStateFile: string;
@@ -205,10 +203,10 @@ interface ProductionPreparedState {
   reservation: Server;
   runDirectory: string;
   scoutEvidenceFile: string;
-  traceFile: string;
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
+  outboxQuarantine: CoordinationOutboxQuarantine | null;
   productionRestartScriptSha256: string;
   serverAuthentication: RecoveryServerAuthentication;
   serverAuthenticationRetained: boolean;
@@ -246,11 +244,35 @@ function isCanonicalRfc3339(value: unknown): value is string {
     && calendar.getUTCMinutes() === minute && calendar.getUTCSeconds() === second;
 }
 
+function isOutboxQuarantine(value: unknown): value is CoordinationOutboxQuarantine | null {
+  return value === null || hasExactKeys(value, ["schemaVersion", "status", "recordKey", "recordSha256", "recordCount"])
+    && value.schemaVersion === 1 && value.status === "fenced"
+    && value.recordKey === PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY
+    && typeof value.recordSha256 === "string" && SHA256.test(value.recordSha256)
+    && value.recordCount === COORDINATION_OUTBOX_QUARANTINED_OVERFLOW_COUNT;
+}
+
+function isPreparationFreezeEvidence(value: unknown): value is AdmittedRecoveryContext["freeze"] {
+  const owner = isRecord(value) && isRecord(value.owner) ? value.owner : undefined;
+  const pid = typeof owner?.pid === "number" ? owner.pid : undefined;
+  const startTimeTicks = typeof owner?.startTimeTicks === "number" ? owner.startTimeTicks : undefined;
+  return hasExactKeys(value, ["status", "source", "archive", "sha256", "owner"])
+    && (value.status === "clear" || value.status === "adopted")
+    && value.source === RECOVERY_PREPARATION_FREEZE_SOURCE
+    && value.archive === RECOVERY_PREPARATION_FREEZE_ARCHIVE
+    && (value.status === "clear"
+      ? value.sha256 === null && value.owner === null
+      : typeof value.sha256 === "string" && SHA256.test(value.sha256)
+        && hasExactKeys(owner, ["pid", "startTimeTicks"])
+        && typeof pid === "number" && Number.isSafeInteger(pid) && pid >= 2
+        && typeof startTimeTicks === "number" && Number.isSafeInteger(startTimeTicks) && startTimeTicks >= 1);
+}
+
 export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process.env): AdmittedRecoveryContext {
   const serialized = source[ADMITTED_RECOVERY_CONTEXT];
   let value: unknown;
   try { value = serialized ? JSON.parse(serialized) : undefined; } catch { value = undefined; }
-  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "receipt"])
+  if (!hasExactKeys(value, ["schemaVersion", "action", "preflightDigest", "head", "parent", "binding", "freeze", "outboxQuarantine", "receipt"])
     || value.schemaVersion !== 1 || value.action !== "production-restart"
     || typeof value.preflightDigest !== "string" || !SHA256.test(value.preflightDigest)
     || typeof value.head !== "string" || !/^[0-9a-f]{40,64}$/.test(value.head)
@@ -260,14 +282,16 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     || typeof value.parent.executableSha256 !== "string" || !SHA256.test(value.parent.executableSha256)
     || typeof value.parent.nonceSha256 !== "string" || !SHA256.test(value.parent.nonceSha256)
     || typeof value.parent.sessionId !== "string" || !SAFE_SESSION_ID.test(value.parent.sessionId)
-    || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
+     || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "storageMappingHash", "worktree"])
     || typeof value.binding.project !== "string" || value.binding.project.length < 1 || value.binding.project.length > 64
     || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
     || typeof value.binding.workspaceId !== "string"
     || value.binding.workspaceId.length < 1 || value.binding.workspaceId.length > 128
     || typeof value.binding.storageMappingHash !== "string" || !SHA256.test(value.binding.storageMappingHash)
     || typeof value.binding.worktree !== "string" || !isAbsolute(value.binding.worktree)
-    || resolve(value.binding.worktree) !== value.binding.worktree
+     || resolve(value.binding.worktree) !== value.binding.worktree
+     || !isPreparationFreezeEvidence(value.freeze)
+     || !isOutboxQuarantine(value.outboxQuarantine)
     || !hasExactKeys(value.receipt, ["id", "schema", "version", "action", "admissionDigest", "consumedAt"])
     || typeof value.receipt.id !== "string" || !UUID.test(value.receipt.id)
     || value.receipt.schema !== "ingenium.recovery-admission-receipt"
@@ -281,6 +305,8 @@ export function parseAdmittedRecoveryContext(source: NodeJS.ProcessEnv = process
     ...context,
     parent: Object.freeze({ ...context.parent }),
     binding: Object.freeze({ ...context.binding }),
+    freeze: Object.freeze({ ...context.freeze, owner: context.freeze.owner ? Object.freeze({ ...context.freeze.owner }) : null }),
+    outboxQuarantine: context.outboxQuarantine ? Object.freeze({ ...context.outboxQuarantine }) : null,
     receipt: Object.freeze({ ...context.receipt }),
   });
 }
@@ -311,37 +337,6 @@ export function restartHandoffEvidence(handoff: RedactedRestartHandoff, handoffS
   const validated = parseRedactedRestartHandoff(handoff);
   if (hash(JSON.stringify(validated)) !== handoffSha256) throw new Error("Production restart handoff hash changed");
   return { schemaVersion: 1, handoffSha256, ...handoffCounts(validated), handoff: validated };
-}
-
-export function typedMemoryAcknowledgementEvidence(input: {
-  handoff: RedactedRestartHandoff;
-  handoffSha256: string;
-  captureFile: string;
-  captureOffset: number;
-  sessionId: string;
-  replacementIdentity: RestartProcessIdentity;
-  transactionSha256: string;
-}): Record<string, unknown> {
-  if (!isAbsolute(input.captureFile) || resolve(input.captureFile) !== input.captureFile
-    || !Number.isSafeInteger(input.captureOffset) || input.captureOffset < 0
-    || !SAFE_SESSION_ID.test(input.sessionId) || !SHA256.test(input.transactionSha256)) {
-    throw new Error("Typed memory acknowledgement evidence is invalid");
-  }
-  const handoff = restartHandoffEvidence(input.handoff, input.handoffSha256);
-  return {
-    schemaVersion: 1,
-    handoffSha256: input.handoffSha256,
-    actionCount: handoff.actionCount,
-    changedPathCount: handoff.changedPathCount,
-    checkCount: handoff.checkCount,
-    captureFile: input.captureFile,
-    captureOffset: input.captureOffset,
-    successorSessionSha256: hash(input.sessionId),
-    replacementIdentitySha256: restartIdentitySha256(input.replacementIdentity),
-    transactionSha256: input.transactionSha256,
-    assistantResult: "completed",
-    terminalStatus: "idle",
-  };
 }
 
 function exactMode(mode: number, expected: number): boolean {
@@ -528,6 +523,104 @@ export function readPrivateProductionRestartFile(
     return content;
   } finally {
     fileSystem.closeSync(descriptor);
+  }
+}
+
+function absentPrivateProductionRestartFile(path: string): boolean {
+  const parentPath = dirname(path);
+  try {
+    lstatSync(parentPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+  assertPrivateDirectory(parentPath);
+  const descriptor = openSync(parentPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    const uid = processOwner();
+    if (!opened.isDirectory() || !exactMode(opened.mode, 0o700) || uid !== undefined && opened.uid !== uid) {
+      throw new Error("Production restart state is unavailable");
+    }
+    const anchored = `/proc/self/fd/${descriptor}/${basename(path)}`;
+    let absent;
+    try {
+      lstatSync(anchored);
+      absent = false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      absent = true;
+    }
+    const after = fstatSync(descriptor);
+    const current = lstatSync(parentPath);
+    if (after.dev !== opened.dev || after.ino !== opened.ino || after.mode !== opened.mode || after.uid !== opened.uid
+      || current.dev !== opened.dev || current.ino !== opened.ino || current.mode !== opened.mode || current.uid !== opened.uid) {
+      throw new Error("Production restart state changed");
+    }
+    return absent;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function preparationFreezeOwnerState(pid: number, startTimeTicks: number): "dead" | "live" | "ambiguous" {
+  let directory: Stats;
+  try {
+    directory = lstatSync(`/proc/${pid}`);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "dead" : "ambiguous";
+  }
+  if (!directory.isDirectory() || directory.isSymbolicLink()) return "ambiguous";
+  try {
+    const source = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const closeParen = source.lastIndexOf(")");
+    const fields = closeParen > 0 ? source.slice(closeParen + 1).trim().split(/\s+/) : [];
+    const observed = Number(fields[19]);
+    if (!Number.isSafeInteger(observed) || observed < 1) return "ambiguous";
+    return observed === startTimeTicks ? "live" : "dead";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "dead" : "ambiguous";
+  }
+}
+
+export function revalidatePreparationFreeze(
+  worktree: string,
+  evidence: AdmittedRecoveryContext["freeze"],
+): boolean {
+  try {
+    if (!isPreparationFreezeEvidence(evidence)) return false;
+    const root = resolve(worktree);
+    if (realpathSync(root) !== root) return false;
+    const index = resolve(root, ".opencode/protected-runtime-index");
+    const source = resolve(index, RECOVERY_PREPARATION_FREEZE_SOURCE);
+    const archiveDirectory = resolve(index, "tui-recovery/preparation");
+    const archive = resolve(archiveDirectory, RECOVERY_PREPARATION_FREEZE_ARCHIVE);
+    if (evidence.status === "clear") {
+      const clear = absentPrivateProductionRestartFile(source) && absentPrivateProductionRestartFile(archive);
+      return clear && absentPrivateProductionRestartFile(source) && absentPrivateProductionRestartFile(archive);
+    }
+    for (const path of [resolve(root, ".opencode"), index, resolve(index, "tui-recovery"), archiveDirectory]) {
+      assertPrivateDirectory(path);
+    }
+    if (!absentPrivateProductionRestartFile(source)) return false;
+    const bytes = readPrivateProductionRestartFile(archive, RECOVERY_PREPARATION_FREEZE_MAX_BYTES);
+    if (hash(bytes) !== evidence.sha256) return false;
+    const text = bytes.toString("utf8");
+    if (!Buffer.from(text, "utf8").equals(bytes)) return false;
+    const lock: unknown = JSON.parse(text);
+    const pid = isRecord(lock) && typeof lock.pid === "number" ? lock.pid : undefined;
+    const startTimeTicks = isRecord(lock) && typeof lock.startTimeTicks === "number" ? lock.startTimeTicks : undefined;
+    const nonce = isRecord(lock) && typeof lock.nonce === "string" ? lock.nonce : undefined;
+    if (!hasExactKeys(lock, ["schemaVersion", "pid", "startTimeTicks", "nonce"])
+      || lock.schemaVersion !== 1 || typeof pid !== "number" || !Number.isSafeInteger(pid) || pid < 2
+      || typeof startTimeTicks !== "number" || !Number.isSafeInteger(startTimeTicks) || startTimeTicks < 1
+      || !UUID.test(nonce ?? "")) return false;
+    if (pid !== evidence.owner?.pid || startTimeTicks !== evidence.owner?.startTimeTicks) return false;
+    if (preparationFreezeOwnerState(pid, startTimeTicks) !== "dead") return false;
+    const confirmed = readPrivateProductionRestartFile(archive, RECOVERY_PREPARATION_FREEZE_MAX_BYTES);
+    return confirmed.equals(bytes) && absentPrivateProductionRestartFile(source);
+  } catch {
+    return false;
   }
 }
 
@@ -746,6 +839,15 @@ export async function runProductionRestartAdapter<Session>(
   admittedContext?: AdmittedRecoveryContext,
 ): Promise<ReplacementFirstRestartResult> {
   const worktree = admittedContext?.binding.worktree ?? dependencies.canonicalWorktree();
+  const revalidateFreeze = async () => admittedContext === undefined
+    || await (dependencies.revalidatePreparationFreeze ?? revalidatePreparationFreeze)(worktree, admittedContext.freeze);
+  if (!await revalidateFreeze()) {
+    throw new Error("Production restart preparation freeze changed after admission");
+  }
+  if (admittedContext && (!dependencies.revalidateOutboxQuarantine
+    || !await dependencies.revalidateOutboxQuarantine(worktree, admittedContext.outboxQuarantine))) {
+    throw new Error("Production restart outbox quarantine changed after admission");
+  }
   const binding = await dependencies.resolveBinding(worktree);
   if (admittedContext && (binding.project !== admittedContext.binding.project
     || binding.projectId !== admittedContext.binding.projectId
@@ -771,7 +873,8 @@ export async function runProductionRestartAdapter<Session>(
     if (admittedContext && (candidate.oldProcess.pid !== admittedContext.parent.pid
       || candidate.oldProcess.startTimeTicks !== admittedContext.parent.startTimeTicks
       || candidate.oldProcess.executableSha256 !== admittedContext.parent.executableSha256
-      || candidate.oldProcess.nonceSha256 !== admittedContext.parent.nonceSha256)) {
+      || candidate.oldProcess.nonceSha256 !== admittedContext.parent.nonceSha256
+      || candidate.handoff.replay.sessionIdSha256 !== hash(admittedContext.parent.sessionId))) {
       await dependencies.retainCandidateRejection(worktree, value, "binding_mismatch");
       return undefined;
     }
@@ -798,8 +901,15 @@ export async function runProductionRestartAdapter<Session>(
     if (enrolled) parent = await admit(enrolled, false);
   }
   if (!parent) throw new Error("Production restart parent identity is absent or ambiguous");
-  const prepared = await dependencies.prepareReplacement({ worktree, binding, parent });
+  if (!await revalidateFreeze()) throw new Error("Production restart preparation freeze changed before use");
+  const prepared = await dependencies.prepareReplacement({
+    worktree,
+    binding,
+    parent,
+    ...(admittedContext ? { outboxQuarantine: admittedContext.outboxQuarantine } : {}),
+  });
   try {
+    if (!await revalidateFreeze()) throw new Error("Production restart preparation freeze changed before authorization");
     const request = decodeReplacementFirstRestartRequest(encodeRequest({
       schemaVersion: 1,
       worktree,
@@ -1163,10 +1273,23 @@ function restartCheckName(command: unknown): RedactedRestartHandoff["checks"][nu
   return undefined;
 }
 
-function restartExitCode(state: Record<string, unknown>): number | null {
-  const metadata = isRecord(state.metadata) ? state.metadata : state;
-  const value = metadata.exitCode ?? metadata.exit_code ?? metadata.code;
-  return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 255 ? value as number : null;
+function restartToolOutcome(tool: string, state: Record<string, unknown>): {
+  result: "passed" | "failed" | "unknown";
+  exitCode: number | null;
+} {
+  const unknown = { result: "unknown" as const, exitCode: null };
+  if (!["completed", "error"].includes(state.status as string)) return unknown;
+  if (!["bash", "shell"].includes(tool)) {
+    return { result: state.status === "completed" ? "passed" : "failed", exitCode: null };
+  }
+  if (state.metadata !== undefined && !isRecord(state.metadata)) return unknown;
+  const sources = isRecord(state.metadata) ? [state, state.metadata] : [state];
+  const codes = sources.flatMap((source) => ["exit", "exitCode", "exit_code", "code"]
+    .filter((key) => Object.hasOwn(source, key)).map((key) => source[key]));
+  const exitCode = codes[0];
+  if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode) || exitCode < 0 || exitCode > 255
+    || codes.some((code) => code !== exitCode) || (state.status === "error" && exitCode === 0)) return unknown;
+  return { result: exitCode === 0 ? "passed" : "failed", exitCode };
 }
 
 function restartInputPath(input: Record<string, unknown>, worktree: string): string | undefined {
@@ -1207,15 +1330,14 @@ function redactedHandoffFromSession(
 ): RedactedRestartHandoff | undefined {
   const list = messageList(messages);
   if (!list) return undefined;
-  let todos: unknown[] = [];
-  for (const message of [...list].reverse()) {
+  let todos: RedactedRestartHandoff["replay"]["todos"] = [];
+  for (const message of list) {
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
-    const part = [...message.parts].reverse().find((entry) => isRecord(entry) && entry.type === "tool"
-      && entry.tool === "todowrite" && isRecord(entry.state) && entry.state.status === "completed"
-      && isRecord(entry.state.input) && Array.isArray(entry.state.input.todos));
-    if (isRecord(part) && isRecord(part.state) && isRecord(part.state.input)) {
-      todos = part.state.input.todos as unknown[];
-      break;
+    for (const part of message.parts) {
+      if (isRecord(part) && part.type === "tool" && part.tool === "todowrite" && isRecord(part.state)
+        && part.state.status === "completed" && isRecord(part.state.input)) {
+        todos = stableRestartTodos(part.state.input.todos, todos);
+      }
     }
   }
   const counts = { pending: 0, inProgress: 0, completed: 0, cancelled: 0 };
@@ -1232,17 +1354,24 @@ function redactedHandoffFromSession(
   const actions: RedactedRestartHandoff["actions"] = [];
   const changed = new Map<string, RedactedRestartHandoff["changedPaths"][number]>();
   const checks: RedactedRestartHandoff["checks"] = [];
+  // The strict handoff has no unknown check variant; a hash chain retains every unresolved target in bounded space.
+  let unresolvedOperationsHash: string | null = null;
   for (const message of list) {
     if (!isRecord(message) || !Array.isArray(message.parts)) continue;
     for (const part of message.parts) {
       if (!isRecord(part) || part.type !== "tool" || typeof part.tool !== "string" || !isRecord(part.state)
         || !["completed", "error"].includes(part.state.status as string) || !isRecord(part.state.input)) continue;
       const tool = part.tool.toLowerCase().replace(/[.-]/g, "_");
+      const { result, exitCode } = restartToolOutcome(tool, part.state);
+      if (result === "unknown") {
+        unresolvedOperationsHash = hash(JSON.stringify({ kind: "unresolved_operation", result,
+          sourceTargetHash: hash(`${tool}\0${JSON.stringify(part.state.input)}`), previousHash: unresolvedOperationsHash }));
+      }
       const changes = restartInputChanges(tool, part.state.input, worktree);
       const path = changes.length === 1 ? changes[0]!.path : undefined;
       const kind = tool === "read" ? "read" : tool === "grep" || tool === "glob" ? "search"
         : tool === "write" || tool === "file_write" ? "write" : tool === "edit" || tool === "file_edit" ? "edit" : "execute";
-      if (part.state.status === "completed") {
+      if (result === "passed") {
         actions.push({
           kind,
           result: "succeeded",
@@ -1259,11 +1388,9 @@ function redactedHandoffFromSession(
           changeRevision: changed.size + 1,
         });
       }
-      const name = tool === "bash" ? restartCheckName(part.state.input.command) : undefined;
-      if (name) {
-        const result = part.state.status === "completed" ? "passed" as const : "failed" as const;
+      const name = ["bash", "shell"].includes(tool) ? restartCheckName(part.state.input.command) : undefined;
+      if (name && result !== "unknown") {
         const checkStatus = result === "passed" ? "completed" as const : "failed" as const;
-        const exitCode = restartExitCode(part.state);
         checks.push({
           name,
           status: checkStatus,
@@ -1285,12 +1412,14 @@ function redactedHandoffFromSession(
   const failed = [...boundedChecks].reverse().find((check) => check.result === "failed");
   const latestCheck = boundedChecks.at(-1);
   const latestAction = boundedActions.at(-1);
-  const nextWork = failed ? { kind: "address_failure" as const, referenceHash: failed.targetHash }
-    : open ? { kind: "continue_task" as const, referenceHash: taskHash }
-      : latestCheck ? { kind: "run_checks" as const, referenceHash: latestCheck.targetHash }
-        : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
-          : { kind: "none" as const, referenceHash: null };
+  const nextWork = unresolvedOperationsHash ? { kind: "review_changes" as const, referenceHash: unresolvedOperationsHash }
+    : failed ? { kind: "address_failure" as const, referenceHash: failed.targetHash }
+      : open ? { kind: "continue_task" as const, referenceHash: taskHash }
+        : latestCheck ? { kind: "run_checks" as const, referenceHash: latestCheck.targetHash }
+          : latestAction ? { kind: "review_changes" as const, referenceHash: latestAction.targetHash ?? hash(latestAction.path!) }
+            : { kind: "none" as const, referenceHash: null };
   return parseRedactedRestartHandoff({
+    replay: { sessionIdSha256: hash(sessionId), todos },
     status: operationalStatus,
     taskHash,
     actions: boundedActions,
@@ -1464,7 +1593,7 @@ async function enrollRunningProductionParent(
     timeouts: DEFAULT_TIMEOUTS,
   };
   validateParentCandidate(parent, worktree);
-  if (parent.oldPort === null) await persistClaimedLegacyHandoff(worktree, binding, parent, discovered.sessionId);
+  if (parent.oldPort === null) persistLegacyHandoff(worktree, binding, parent, discovered.sessionId);
   await bootstrapLegacyRecoveryOwner(worktree, {
     project: binding.project,
     projectId: binding.projectId,
@@ -1498,49 +1627,6 @@ async function attestProductionParent(parent: ProductionRestartParentCandidate):
         && liveHandoff !== undefined && hash(JSON.stringify(liveHandoff)) === hash(JSON.stringify(parent.handoff)));
 }
 
-export function restartHandoffMemoryEntry(handoff: RedactedRestartHandoff): Record<string, unknown> {
-  const validated = parseRedactedRestartHandoff(handoff);
-  const pathSegments = (path: string) => path.split("/").map((segment) => Buffer.from(segment, "utf8").toString("base64url"));
-  return {
-    status: validated.status,
-    actions: validated.actions.map((action) => ({
-      kind: action.kind,
-      result: action.result,
-      pathSegments: action.path === null ? null : pathSegments(action.path),
-      targetHash: action.targetHash,
-    })),
-    checks: validated.checks.map((check) => ({ kind: check.name, result: check.result, targetHash: check.targetHash })),
-    todos: validated.todos,
-    currentTaskId: validated.taskHash === null ? null : `task-${validated.taskHash}`,
-    changedPaths: validated.changedPaths.map(({ path, ...entry }) => ({ pathSegments: pathSegments(path), ...entry })),
-    nextWork: validated.nextWork,
-  };
-}
-
-function hasCapturedHandoff(
-  path: string,
-  expectedHandoff: RedactedRestartHandoff,
-  expectedSha256: string,
-  offset: number,
-): boolean {
-  let source: Buffer;
-  try { source = readFileSync(path); } catch { return false; }
-  if (source.length <= offset) return false;
-  if (hash(JSON.stringify(expectedHandoff)) !== expectedSha256) return false;
-  const expectedEntry = restartHandoffMemoryEntry(expectedHandoff);
-  for (const line of source.subarray(offset).toString("utf8").split(/\r?\n/).filter(Boolean).reverse()) {
-    let capture: unknown;
-    try { capture = JSON.parse(line); } catch { continue; }
-    if (!isRecord(capture) || !Array.isArray(capture.operationalEntries)) continue;
-    for (const entry of [...capture.operationalEntries].reverse()) {
-      if (!isRecord(entry)) continue;
-      const projected = Object.fromEntries(Object.keys(expectedEntry).map((key) => [key, entry[key]]));
-      if (JSON.stringify(projected) === JSON.stringify(expectedEntry)) return true;
-    }
-  }
-  return false;
-}
-
 function sessionIds(value: unknown): Set<string> | undefined {
   const sessions = messageList(value);
   if (!sessions) return undefined;
@@ -1553,243 +1639,38 @@ function hasScoutCapabilities(value: unknown): boolean {
   if (!isRecord(scout)) return false;
   const permissions = scout.permission;
   if (!Array.isArray(permissions)) return false;
-  const required = ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"];
+  const required = ["ingenium_docs_search", "ingenium_docs_get_page"];
   return required.every((permission) => permissions.some((rule: unknown) => isRecord(rule) && rule.permission === permission
     && rule.pattern === "*" && rule.action === "allow"));
 }
 
-function restartPublisherMutation(value: unknown): { revision: number; fence: number } {
-  if (!isRecord(value) || !Number.isSafeInteger(value.revision) || (value.revision as number) < 0
-    || !Number.isSafeInteger(value.fence) || (value.fence as number) < 1) {
-    throw new Error("Production restart handoff publication failed");
-  }
-  return { revision: value.revision as number, fence: value.fence as number };
-}
-
-function restartCaptureClaim(value: unknown): {
-  revision: number;
-  fence: number;
-  acceptedEpoch: number;
-  operationId: string;
-} {
-  const mutation = restartPublisherMutation(responseRecord(value)?.session);
-  const result = responseRecord(value);
-  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1
-    || typeof result.operationId !== "string" || !UUID.test(result.operationId)) {
-    throw new Error("Production restart capture claim failed");
-  }
-  return {
-    ...mutation,
-    acceptedEpoch: result.acceptedEpoch as number,
-    operationId: result.operationId,
-  };
-}
-
-function restartCaptureClaimProof(value: unknown): { revision: number; fence: number; acceptedEpoch: number } {
-  const result = responseRecord(value);
-  const mutation = restartPublisherMutation(result?.session);
-  if (!result || !Number.isSafeInteger(result.acceptedEpoch) || (result.acceptedEpoch as number) < 1) {
-    throw new Error("Production restart capture claim verification failed");
-  }
-  return { ...mutation, acceptedEpoch: result.acceptedEpoch as number };
-}
-
-function optionalPrivateFileSha256(path: string): string | null {
-  try {
-    return hash(readPrivateProductionRestartFile(path, MAX_STATE_BYTES));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-export async function persistClaimedLegacyHandoff(
+export function persistLegacyHandoff(
   worktree: string,
   binding: ProductionRestartBinding,
   parent: ProductionRestartParentCandidate,
   parentSessionId: string,
-  openClient: typeof openMcpToolClient = openMcpToolClient,
-): Promise<void> {
+): void {
   if (parent.oldPort !== null || !SAFE_SESSION_ID.test(parentSessionId)) {
     throw new Error("Production restart durable capture input is invalid");
   }
   if (!bindingsMatch(parent.binding, binding)) throw new Error("Production restart durable capture binding changed");
   const absolutePath = resolve(worktree, LEGACY_HANDOFF_PATH);
-  const beforeSha256 = optionalPrivateFileSha256(absolutePath);
-  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
-  const identity = {
+  const retainedPath = persistLegacyRecoveryHandoff(worktree, {
     project: binding.project,
-    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
-    session_id: `session-${hash(randomBytes(32))}`,
-    incarnation: Date.now(),
-  };
-  const ownershipToken = randomBytes(32).toString("base64url");
-  let publisher: RestartHandoffPublisher | undefined;
-  try {
-    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
-      ...identity,
-      operation: "register",
-      ownership_token: ownershipToken,
-      ttl_ms: 60_000,
-      idempotency_key: randomUUID(),
-    })));
-    const registration = restartPublisherMutation(registered?.session);
-    publisher = { client, identity, ownershipToken, ...registration };
-    const clientClaimKey = randomBytes(32).toString("base64url");
-    const acquired = restartCaptureClaim(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: registration.revision,
-      fence: registration.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      claims: [{
-        claim: { kind: "path", path: LEGACY_HANDOFF_PATH },
-        baseline_sha256: beforeSha256,
-        current_sha256: beforeSha256,
-        repository_sha256: null,
-      }],
-      operation: beforeSha256 === null ? "create" : "edit",
-      idempotency_key: randomUUID(),
-    })));
-    const claim: RestartCaptureClaim = { ...publisher, ...acquired, clientClaimKey };
-    publisher = claim;
-    const retainedPath = persistLegacyRecoveryHandoff(worktree, {
-      project: binding.project,
-      projectId: binding.projectId,
-      workspaceId: binding.workspaceId,
-      launcherWorktree: binding.launcherWorktree,
-      storageMappingHash: binding.storageMappingHash,
-    }, {
-      ...parent.oldProcess,
-      port: null,
-      dataHome: parent.oldDataHome,
-    }, parent.handoff, {
-      sessionIdSha256: hash(parentSessionId),
-      incarnation: identity.incarnation,
-      revision: acquired.revision,
-      fence: acquired.fence,
-      captureClaimEpoch: acquired.acceptedEpoch,
-      captureClaimSha256: hash(`${clientClaimKey}\0${acquired.operationId}`),
-    });
-    const retained = readLegacyRecoveryHandoff(worktree);
-    if (retainedPath !== absolutePath || !retained
-      || hash(JSON.stringify(retained.handoff)) !== hash(JSON.stringify(parent.handoff))
-      || retained.coordination.captureClaimEpoch !== acquired.acceptedEpoch
-      || retained.coordination.captureClaimSha256 !== hash(`${clientClaimKey}\0${acquired.operationId}`)) {
-      throw new Error("Production restart durable capture verification failed");
-    }
-    const verified = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: acquired.revision,
-      fence: acquired.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      accepted_epoch: acquired.acceptedEpoch,
-      action: "verify",
-      idempotency_key: randomUUID(),
-    })));
-    if (verified.acceptedEpoch !== acquired.acceptedEpoch || verified.fence !== acquired.fence) {
-      throw new Error("Production restart capture claim verification failed");
-    }
-    const afterSha256 = optionalPrivateFileSha256(absolutePath);
-    if (!afterSha256) throw new Error("Production restart durable capture verification failed");
-    const completed = restartCaptureClaimProof(mcpToolData(await client.callTool("coordination_claim", {
-      ...identity,
-      expected_revision: verified.revision,
-      fence: verified.fence,
-      ownership_token: ownershipToken,
-      client_claim_key: clientClaimKey,
-      accepted_epoch: acquired.acceptedEpoch,
-      action: "complete",
-      operation_id: acquired.operationId,
-      operation: beforeSha256 === null ? "create" : "edit",
-      footprint: [{
-        path: LEGACY_HANDOFF_PATH,
-        path_sha256: hash(LEGACY_HANDOFF_PATH),
-        before_sha256: beforeSha256,
-        after_sha256: afterSha256,
-      }],
-      idempotency_key: randomUUID(),
-    })));
-    if (completed.acceptedEpoch !== acquired.acceptedEpoch) {
-      throw new Error("Production restart capture claim verification failed");
-    }
-    publisher = { ...publisher, revision: completed.revision, fence: completed.fence };
-  } finally {
-    if (publisher) await closeRestartHandoffPublisher(publisher, true);
-    else await client.close().catch(() => undefined);
+    projectId: binding.projectId,
+    workspaceId: binding.workspaceId,
+    launcherWorktree: binding.launcherWorktree,
+    storageMappingHash: binding.storageMappingHash,
+  }, {
+    ...parent.oldProcess,
+    port: null,
+    dataHome: parent.oldDataHome,
+  }, parent.handoff);
+  const retained = readLegacyRecoveryHandoff(worktree);
+  if (retainedPath !== absolutePath || !retained
+    || hash(JSON.stringify(retained.handoff)) !== hash(JSON.stringify(parent.handoff))) {
+    throw new Error("Production restart durable capture verification failed");
   }
-}
-
-export async function publishRestartHandoff(
-  worktree: string,
-  binding: ProductionRestartBinding,
-  handoff: RedactedRestartHandoff,
-  openClient: typeof openMcpToolClient = openMcpToolClient,
-): Promise<RestartHandoffPublisher> {
-  const client = await openClient(worktree, { project: binding.project, credentialPurpose: "general" });
-  const identity = {
-    project: binding.project,
-    worktree_id: `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}`,
-    session_id: `session-${hash(randomBytes(32))}`,
-    incarnation: Date.now(),
-  };
-  const ownershipToken = randomBytes(32).toString("base64url");
-  let registeredPublisher: RestartHandoffPublisher | undefined;
-  let published = false;
-  try {
-    const registered = responseRecord(mcpToolData(await client.callTool("coordination_update", {
-      ...identity,
-      operation: "register",
-      ownership_token: ownershipToken,
-      ttl_ms: 60_000,
-      idempotency_key: randomUUID(),
-    })));
-    const registeredSession = restartPublisherMutation(registered?.session);
-    registeredPublisher = { client, identity, ownershipToken, ...registeredSession };
-    const response = responseRecord(mcpToolData(await client.callTool("coordination_handoff", {
-      ...identity,
-      operation: "memory",
-      ownership_token: ownershipToken,
-      expected_revision: registeredSession.revision,
-      fence: registeredSession.fence,
-      idempotency_key: randomUUID(),
-      memory_entry: {
-        ...restartHandoffMemoryEntry(handoff),
-      },
-    })));
-    const publishedSession = restartPublisherMutation(response?.session);
-    published = true;
-    return { client, identity, ownershipToken, ...publishedSession };
-  } finally {
-    if (!published) {
-      if (registeredPublisher) await closeRestartHandoffPublisher(registeredPublisher, true);
-      else await client.close().catch(() => undefined);
-    }
-  }
-}
-
-async function closeRestartHandoffPublisher(publisher: RestartHandoffPublisher, refresh = false): Promise<void> {
-  let revision = publisher.revision;
-  let fence = publisher.fence;
-  if (refresh) {
-    try {
-      const status = responseRecord(mcpToolData(await publisher.client.callTool("coordination_status", {
-        ...publisher.identity,
-        ownership_token: publisher.ownershipToken,
-      })));
-      ({ revision, fence } = restartPublisherMutation(status?.session));
-    } catch {}
-  }
-  await publisher.client.callTool("coordination_update", {
-    ...publisher.identity,
-    operation: "close",
-    ownership_token: publisher.ownershipToken,
-    expected_revision: revision,
-    fence,
-    idempotency_key: randomUUID(),
-  }).catch(() => undefined);
-  await publisher.client.close().catch(() => undefined);
 }
 
 function hasSuccessfulTerminalAssistant(
@@ -1854,30 +1735,15 @@ async function resume(identity: RestartProcessIdentity, signal: AbortSignal): Pr
   process.kill(identity.pid, "SIGCONT");
 }
 
-function overflowAuthorization(now = Date.now()) {
-  return {
-    schemaVersion: 1 as const,
-    authorizationId: COORDINATION_OUTBOX_OVERFLOW_AUTHORITY_SHA256,
-    recordKey: PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY,
-    mode: "abandon_identityless_overflow" as const,
-    authority: "explicit_user_authorization" as const,
-    scope: "exact_key_same_record_family" as const,
-    reason: "nonrecoverable_identityless_overflow" as const,
-    issuedAt: new Date(now).toISOString(),
-    expiresAt: new Date(now + OVERFLOW_AUTHORIZATION_LIFETIME_MS).toISOString(),
-  };
-}
-
 export function commitProductionRetirement(
   worktree: string,
   transactionSha256: string,
   commit: (subjectWorktree: string, subjectTransactionSha256: string) => void = commitManagedRecoveryReplacement,
+  expectedQuarantine: CoordinationOutboxQuarantine | null = null,
 ): void {
   const outbox = new CoordinationOutbox(worktree);
   outbox.withRetirementFreeze(() => {
-    if (outbox.unresolved().some((record) => record.ambiguous || record.kind === "overflow")) {
-      throw new Error("Production restart coordination state changed before retirement");
-    }
+    outbox.assertFencedOverflowQuarantine(expectedQuarantine);
     commit(worktree, transactionSha256);
   });
 }
@@ -1901,9 +1767,6 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
     INGENIUM_WORKTREE: state.worktree,
     INGENIUM_MCP_AUDIENCE: "mcp",
     INGENIUM_MCP_CREDENTIAL_PURPOSE: "general",
-    INGENIUM_COORDINATION_TRANSFORM_CAPTURE: "1",
-    INGENIUM_COORDINATION_TRANSFORM_CAPTURE_FILE: state.captureFile,
-    INGENIUM_COORDINATION_TRACE_FILE: state.traceFile,
     INGENIUM_RESTART_NONCE: state.nonce,
     INGENIUM_RECOVERY_OWNER_NONCE: process.env.INGENIUM_RECOVERY_OWNER_NONCE,
     INGENIUM_RECOVERY_OWNER_PID: process.env.INGENIUM_RECOVERY_OWNER_PID,
@@ -1912,7 +1775,7 @@ function safeEnvironment(state: ProductionPreparedState, home: string): NodeJS.P
   };
 }
 
-function productionDependencies(state: ProductionPreparedState): ReplacementFirstRestartDependencies<ReplacementSession> {
+export function productionDependencies(state: ProductionPreparedState): ReplacementFirstRestartDependencies<ReplacementSession> {
   const baseUrl = `http://127.0.0.1:${state.port}`;
   const headers = { "content-type": "application/json" };
   const request = (url: string, init: RequestInit, signal: AbortSignal) =>
@@ -1991,7 +1854,7 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
               writePrivateFile(state.scoutEvidenceFile, `${JSON.stringify({
                 schemaVersion: 1,
                 agent: "ingenium-scout",
-                capabilities: ["ingenium_docs_search", "ingenium_docs_get_page", "ingenium_coordination_memory_read"],
+                capabilities: ["ingenium_docs_search", "ingenium_docs_get_page"],
                 runtimeVersion: state.expectedVersion,
               })}\n`);
               return;
@@ -2032,32 +1895,11 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
         session: {
           id: session.id,
           initialMessageCount: initial.length,
-          captureOffset: readPrivateProductionRestartFile(state.captureFile, MAX_STATE_BYTES).length,
           transactionSha256,
         },
       };
     },
-    acknowledgeTypedMemory: async (_identity, session, handoffSha256, transactionSha256, signal) => {
-      if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
-      const expectedText = `READY ${transactionSha256}`;
-      const prompted = await request(`${baseUrl}/session/${encodeURIComponent(session.id)}/prompt_async`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          agent: "ingenium-scout",
-          parts: [{ type: "text", text: `Return only ${expectedText}. Do not use tools.` }],
-        }),
-      }, signal);
-      if (![200, 202, 204].includes(prompted.status)) throw new Error("Replacement acknowledgement prompt failed");
-      while (true) {
-        signal.throwIfAborted();
-        if (hasCapturedHandoff(state.captureFile, state.parent.handoff, handoffSha256, session.captureOffset)) {
-          return { status: "acknowledged", handoffSha256, transactionSha256 };
-        }
-        await wait(100, signal);
-      }
-    },
-    awaitTerminalIdleAcknowledgement: async (identity, session, handoffSha256, transactionSha256, signal) => {
+    awaitTerminalIdleAcknowledgement: async (_identity, session, handoffSha256, transactionSha256, signal) => {
       if (session.transactionSha256 !== transactionSha256) throw new Error("Replacement acknowledgement transaction changed");
       const expectedText = `READY ${transactionSha256}`;
       while (true) {
@@ -2076,15 +1918,6 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
           const current = statuses?.[session.id];
           if (statusResponse.status === 200 && statuses
             && (current === undefined || (isRecord(current) && (current.type === "idle" || current.status === "idle")))) {
-            writePrivateFile(state.acknowledgementFile, `${JSON.stringify(typedMemoryAcknowledgementEvidence({
-              handoff: state.parent.handoff,
-              handoffSha256,
-              captureFile: state.captureFile,
-              captureOffset: session.captureOffset,
-              sessionId: session.id,
-              replacementIdentity: identity,
-              transactionSha256,
-            }))}\n`);
             return { status: "idle", handoffSha256, transactionSha256, assistantResult: "completed" };
           }
         }
@@ -2092,6 +1925,10 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
       }
     },
     prepareRecoveryOwner: async (identity, session, handoffSha256, transactionSha256, signal) => {
+      verifyRecoveryMcpCanary(join(state.runDirectory, "home", ".local", "share"), {
+        project: state.binding.project, projectId: state.binding.projectId, workspaceId: state.binding.workspaceId,
+        launcherWorktree: state.worktree, storageMappingHash: state.binding.storageMappingHash,
+      }, identity, state.port);
       await prepareManagedRecoveryReplacement(
         state.worktree,
         state.parent.oldProcess,
@@ -2117,14 +1954,12 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
     },
     prepareRetirement: async (_identity, signal) => {
       signal.throwIfAborted();
-      const outbox = new CoordinationOutbox(state.worktree);
-      const target = outbox.unresolved().find((record) => record.key === PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY);
-      if (!target) return { rollback() {} };
-      return outbox.prepareIdentitylessOverflowDisposition(overflowAuthorization());
+      new CoordinationOutbox(state.worktree).assertFencedOverflowQuarantine(state.outboxQuarantine);
+      return { rollback() {} };
     },
     commitRetirement: async (transactionSha256, signal) => {
       signal.throwIfAborted();
-      commitProductionRetirement(state.worktree, transactionSha256);
+      commitProductionRetirement(state.worktree, transactionSha256, commitManagedRecoveryReplacement, state.outboxQuarantine);
       state.serverAuthenticationRetained = true;
     },
     reconcileRetirement: async (transactionSha256, signal) => {
@@ -2155,11 +1990,16 @@ function productionDependencies(state: ProductionPreparedState): ReplacementFirs
 }
 
 async function resolveProductionBinding(worktree: string): Promise<ProductionRestartBinding> {
-  const purpose = coordinationCredentialPurpose();
+  const purpose = effectiveExtensionCredentialPurpose("general");
   if (purpose === "general") hardenLegacyProductionCredentialPermissions(worktree);
+  return inspectProductionRestartBinding(worktree);
+}
+
+export async function inspectProductionRestartBinding(worktree: string, request: typeof fetch = fetch): Promise<ProductionRestartBinding> {
+  const purpose = effectiveExtensionCredentialPurpose("general");
   const local = resolveExtensionBinding(worktree, { purpose });
   if (local.audience !== "mcp") throw new Error("Production restart requires an MCP binding");
-  const authentication = await preflightApiAuthentication(local.apiUrl, worktree, fetch, {
+  const authentication = await preflightApiAuthentication(local.apiUrl, worktree, request, {
     credentialPurpose: purpose,
     timeoutMs: 5_000,
   });
@@ -2169,6 +2009,13 @@ async function resolveProductionBinding(worktree: string): Promise<ProductionRes
     || attested.workspaceId !== local.workspaceId || attested.launcherWorktree !== local.launcherWorktree) {
     throw new Error("Production restart binding is unavailable");
   }
+  const response = await request(`${local.apiUrl}/projects/${encodeURIComponent(local.project)}/detail`, {
+    method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
+    headers: apiRequestHeaders(worktree, undefined, { binding: local }),
+  });
+  const detail = responseRecord(await response.json());
+  if (response.status !== 200 || !isRecord(detail?.project) || detail.project.id !== attested.projectId
+    || detail.project.name !== local.project) throw new Error("Production restart project binding is unavailable");
   return {
     apiUrl: local.apiUrl,
     project: local.project,
@@ -2185,7 +2032,13 @@ async function prepareProductionReplacement(input: {
   worktree: string;
   binding: ProductionRestartBinding;
   parent: ProductionRestartParentCandidate;
+  outboxQuarantine?: Readonly<CoordinationOutboxQuarantine> | null;
 }, productionRestartScriptSha256: string): Promise<PreparedProductionReplacement<ReplacementSession>> {
+  const outbox = new CoordinationOutbox(input.worktree);
+  if (input.outboxQuarantine !== undefined) outbox.assertFencedOverflowQuarantine(input.outboxQuarantine);
+  const outboxQuarantine = input.outboxQuarantine === undefined
+    ? outbox.fencedOverflowQuarantine()
+    : input.outboxQuarantine ? { ...input.outboxQuarantine } : null;
   const selectedExecutable = replacementExecutable(input.parent.oldProcess.pid);
   if (!selectedExecutable) throw new Error("Production OpenCode executable is unavailable");
   const { path: executable, sha256: expectedExecutableSha256 } = selectedExecutable;
@@ -2223,14 +2076,9 @@ async function prepareProductionReplacement(input: {
   const authSource = readPrivateProductionRestartFile(currentAuthFile(input.parent.oldDataHome), MAX_AUTH_BYTES);
   const authDestination = join(dataHome, "opencode", "auth.json");
   writePrivateBuffer(authDestination, authSource);
-  const captureFile = join(runDirectory, "coordination-capture.jsonl");
-  writePrivateFile(captureFile, "\n");
-  const traceFile = join(runDirectory, "coordination-trace.jsonl");
-  writePrivateFile(traceFile, "\n");
-  const evidenceFile = join(runDirectory, "phase-history.jsonl");
-  writePrivateFile(evidenceFile, "\n");
-  const acknowledgementFile = join(runDirectory, "typed-memory-acknowledgement.json");
-  const healthEvidenceFile = join(runDirectory, "health-gate.json");
+   const evidenceFile = join(runDirectory, "phase-history.jsonl");
+   writePrivateFile(evidenceFile, "\n");
+   const healthEvidenceFile = join(runDirectory, "health-gate.json");
   const scoutEvidenceFile = join(runDirectory, "scout-capabilities.json");
   const logFile = join(runDirectory, "opencode.log");
   const logDescriptor = openSync(logFile, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
@@ -2247,8 +2095,6 @@ async function prepareProductionReplacement(input: {
   writePrivateNewFile(recoveryServerAuthenticationPath(dataHome), `${JSON.stringify(serverAuthentication)}\n`);
   const nonce = randomBytes(32).toString("base64url");
   const state: ProductionPreparedState = {
-    acknowledgementFile,
-    captureFile,
     evidenceFile,
     executable,
     expectedExecutableSha256,
@@ -2262,22 +2108,14 @@ async function prepareProductionReplacement(input: {
     reservation: reservation.server,
     runDirectory,
     scoutEvidenceFile,
-    traceFile,
     worktree: input.worktree,
     binding: input.binding,
     parent: input.parent,
+    outboxQuarantine,
     productionRestartScriptSha256,
     serverAuthentication,
     serverAuthenticationRetained: false,
   };
-  try {
-    state.handoffPublisher = await publishRestartHandoff(input.worktree, input.binding, input.parent.handoff);
-  } catch (error) {
-    await closeServer(reservation.server);
-    closeSync(logDescriptor);
-    removeRecoveryServerAuthentication(dataHome, serverAuthentication);
-    throw error;
-  }
   return {
     replacement: {
       port: reservation.port,
@@ -2286,7 +2124,6 @@ async function prepareProductionReplacement(input: {
     },
     dependencies: productionDependencies(state),
     release: async () => {
-      if (state.handoffPublisher) await closeRestartHandoffPublisher(state.handoffPublisher);
       await closeServer(reservation.server);
       closeSync(logDescriptor);
       if (!state.serverAuthenticationRetained) {
@@ -2303,10 +2140,9 @@ export function productionRestartDependencies(
   return {
     canonicalWorktree: () => {
       const worktree = productionRestartCanonicalWorktree();
-      if (new CoordinationOutbox(worktree).unresolved().some((record) =>
-        (record.ambiguous || record.kind === "overflow")
-        && (record.key !== PRODUCTION_RESTART_AUTHORIZED_OVERFLOW_KEY || record.kind !== "overflow"
-          || !record.ambiguous || !/^0+$/.test(record.sessionHash) || record.mutation !== null))) {
+      try {
+        new CoordinationOutbox(worktree).fencedOverflowQuarantine();
+      } catch {
         throw new Error("Production restart coordination state is ambiguous; ESCALATE_USER without exact epoch evidence");
       }
       return worktree;
@@ -2324,6 +2160,14 @@ export function productionRestartDependencies(
       }] : readProtectedProductionRestartState(worktree);
     },
     retainCandidateRejection: appendProductionRestartCandidateRejection,
+    revalidateOutboxQuarantine: (worktree, expected) => {
+      try {
+        new CoordinationOutbox(worktree).assertFencedOverflowQuarantine(expected as CoordinationOutboxQuarantine | null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
     enrollParentCandidate: enrollRunningProductionParent,
     attestParentProcess: attestProductionParent,
     prepareReplacement: (input) => prepareProductionReplacement(input, productionRestartScriptSha256),

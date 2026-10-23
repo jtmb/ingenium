@@ -29,7 +29,7 @@
   /* Text colors */
   --color-text-primary: #111827;
   --color-text-secondary: #6b7280;
-  --color-text-muted: #9ca3af;
+  --color-text-muted: #656c78;
   --color-text-link: #2563eb;
   --color-text-link-hover: #1d4ed8;
 
@@ -38,10 +38,10 @@
   --color-error-text: #dc2626;
   --color-error-border: #fecaca;
   --color-warning-bg: #fffbeb;
-  --color-warning-text: #d97706;
+  --color-warning-text: #b45309;
   --color-warning-border: #fde68a;
   --color-success-bg: #f0fdf4;
-  --color-success-text: #16a34a;
+  --color-success-text: #15803d;
   --color-success-border: #bbf7d0;
   --color-info-bg: #eff6ff;
   --color-info-text: #2563eb;
@@ -84,7 +84,7 @@
   /* Text colors */
   --color-text-primary: #e5e5e5;
   --color-text-secondary: #a0a0a0;
-  --color-text-muted: #707070;
+  --color-text-muted: #a0a0a0;
   --color-text-link: #60a5fa;
   --color-text-link-hover: #93bbfd;
 
@@ -219,6 +219,12 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-spin,
+  .animate-ping {
+    animation: none;
+  }
+
   .desktop-navigation,
   .desktop-navigation .desktop-nav-item,
   .desktop-navigation .desktop-nav-group-control,

@@ -22,6 +22,11 @@ before mounting the Chat shell; an invalid, missing, or archived selection never
 falls back to another project. URL query values are encoded with
 `URLSearchParams`.
 
+The **Use project context** control is a button in the ChatInput action row above
+the text composer. It shows the selected Context project (or `Unavailable`) and
+is separate from the top-navigation project selector and Chat's global tool
+authority.
+
 If the URL or stored selection is no longer valid, Chat fails closed with
 **Project context unavailable** and mounts no project-scoped Chat content. Use
 **Clear project selection and use server default** to remove the invalid URL and
@@ -126,7 +131,7 @@ The left sidebar lists all chat sessions. Sessions are loaded from OpenCode via 
 | **Rename** | Double-click the title in the ChatHeader and type a new name (Enter to save, Escape to cancel) |
 | **Delete** | Hover over a session in the sidebar and click the trash icon |
 | **Fork** | Click the fork button in the header; duplicates the session from the last assistant message |
-| **Share** | Click the share button to generate a shareable link and copy it to clipboard. Share state auto-resets after 5 seconds. |
+| **Share** | Use Share to copy an existing share URL to the clipboard. OpenCode V2 does not support creating or removing share links. Share state auto-resets after 5 seconds. |
 | **Compact** | Click the compact button to summarize the conversation via the selected model. Compact state auto-resets after 5 seconds. |
 
 Newly created sessions are selected immediately and remain in the sidebar even if
@@ -167,14 +172,14 @@ The composer bar sits at the bottom of the chat area with a `rounded-2xl` border
 
 ### Optional Project Context
 
-The **Use project context** checkbox is an explicit per-send control and is off
+The **Use project context** button is an explicit per-send control and is off
 by default. After an accepted send, it resets to off. The selected project is
 validated before Chat mounts and is the authority for this optional Context
 search; Chat tools and provider/model selection remain owned by the active
 global project.
 
 The request binds the validated Context project to that send. Retrieval is sent
-only when the checkbox is enabled; a failed search leaves the prompt unsent so
+only when the button is enabled; a failed search leaves the prompt unsent so
 the user can retry. The API rechecks the project at request time, so an archive
 race is rejected rather than serving another project's context. Context source
 contents and excerpts are not written to logs.
@@ -188,7 +193,7 @@ title, the persisted chunk UUID as `citationId`, `sourceId`, `sourceHash`,
 optional source reference. It never renders the source excerpt.
 
 If retrieval finds no matches, the original prompt is still sent without
-grounding. If the search fails, Chat preserves the prompt and the checkbox so
+grounding. If the search fails, Chat preserves the prompt and the button state so
 you can retry. Citation metadata is live per-turn UI state and is not durable
 across a reload. Stable citation reproducibility comes from CTX-101's immutable
 chunk identity and deterministic retrieval order, not from persisted Chat UI
@@ -238,11 +243,10 @@ The authenticated API routes are mounted at `/api/v1/memory`: `POST /` saves,
 `ingenium_memory_search`, `ingenium_memory_update`,
 `ingenium_memory_forget`, and `ingenium_memory_operation_status`.
 
-Extension-bound OpenCode sessions retain an independent finalizer read path:
-`packages/ingenium-extension/session-coordinator.ts` invokes `memory_list` during
-`experimental.chat.system.transform` for every turn using the general
-binding's `memory:read` grant. It injects only bounded private memory as
-untrusted data, so this path is separate from the dashboard composer toggles.
+Extension-bound OpenCode sessions do not inject saved memory into TUI system
+turns. Dashboard/API memory remains available through the authenticated
+composer controls above; the extension lifecycle adapter handles only context
+upload and metadata-only usage telemetry.
 
 Before enabling either composer control, Chat probes the project-scoped MCP
 catalog and performs a read-only private-memory capability check. Without a
@@ -271,7 +275,7 @@ Right-aligned with `rounded-2xl` and a `--color-surface-selected` background.
 
 ### Assistant Messages
 Left-aligned with **no card wrapper** — full-width text with relaxed leading. Includes:
-- **Live provider-emitted reasoning**: OpenCode v1.18.9 first identifies a part through `message.part.updated` (`part.type: "reasoning"`), then sends its text through `message.part.delta` with `field: "text"`. Chat uses that authoritative part ID/type mapping, so reasoning remains separate from the user-facing answer. It is displayed as escaped plain text in an open disclosure while streaming, then becomes user-toggleable as "Reasoning" after the terminal event. The display is not generated by the dashboard and is not mixed into Markdown content or copy.
+- **Live provider-emitted reasoning**: In the API's SSE projection, `message.part.updated` identifies each reasoning part (`part.type: "reasoning"`), then `message.part.delta` carries its text with `field: "text"`. Chat uses that authoritative part ID/type mapping, so reasoning remains separate from the user-facing answer. It is displayed as escaped plain text in an open disclosure while streaming, then becomes user-toggleable as "Reasoning" after the terminal event. The display is not generated by the dashboard and is not mixed into Markdown content or copy.
 - **Markdown content**: Rendered via ChatMarkdown component in plain flow. Chat-only callouts, quotes, code blocks, and tables do not add card, border, or background-bubble chrome; Docs callouts are unchanged.
 - **File parts**: Rendered inline based on MIME type without attachment cards, borders, or background bubbles.
 - **Tool-call traces**: Compact OpenCode-style rows showing a human-friendly tool label and a short argument summary. **Web Search is the sole interactive trace**: its keyboard-accessible row opens the **Activity** drawer for the selected assistant message rather than expanding details inline. The drawer shows the provider's chronological reasoning, response text, and tool activity; Web Search entries may include the query and only concrete, validated `http`/`https` URLs, grouped as **Visited**, **Results**, or **Sites**. A URL is **Visited** only when it is in an explicit `visited`/`crawled` collection or its own object has an exact positive visitation flag; status fields, unrelated sibling fields, and names such as `unvisited` do not imply visitation. Query text is never converted into a fabricated URL or title; provider result titles and arbitrary payload fields are not rendered. Opened links use a new tab with `noopener noreferrer`. All other tools remain non-interactive compact traces; traces do not expand into payloads or expose execution status, duration, output, or error details. A separate revert affordance may appear for failed calls.

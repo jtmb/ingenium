@@ -45,11 +45,14 @@ separate and documented below:
 |--------|----------|---------|
 | GET | `/api/v1/auth/preflight` | Authenticated capability probe. Scoped credentials receive server-derived scopes, audience, organization/project grants, workspace/worktree binding, and restart guidance. Invalid credentials return `401`, missing scope `403`, and inaccessible bindings `404`; failures never disclose credential or upstream details. |
 | GET/POST | `/api/v1/auth/mcp-credentials` | List redacted metadata or issue a scoped service/runtime/repository-sync credential. Human issuance requires recent step-up; plaintext is returned once. `servicePrincipalId` is optional and omission creates the credential's service principal atomically. |
-| POST | `/api/v1/auth/coordination-lease` | Internal installation-only issuance of the fixed coordination and repository-sync credential pair for one ready/idle runtime. Plaintext is returned once. |
 | POST | `/api/v1/auth/mcp-credentials/:id/rotate` | Issue a replacement and immediately revoke the prior credential. Requires recent step-up; plaintext is returned once. |
 | DELETE | `/api/v1/auth/mcp-credentials/:id` | Immediately revoke a credential. Browser users require recent step-up; an exactly bound service credential may revoke only itself. |
 
-### Internal coordination lease
+### Retired internal coordination lease (historical)
+
+> This section is retained for migration archaeology only. The coordination-lease
+> route and its public coordination surface are retired; current provisioning uses
+> the authenticated runtime/bootstrap and repository-sync credential paths above.
 
 `POST /api/v1/auth/coordination-lease` is not a browser or general credential
 issuance route. It requires the installation bearer plus
@@ -97,11 +100,9 @@ and `repository:sync`. This is separate from the runtime capability credential,
 whose `runtime` audience uses `child-mcp:runtime`, `coordination:read`,
 `coordination:write`, `memory:read`, `projects:read`, and `runtime:activity`.
 It is also separate from the package-owned general-MCP reset command,
-`ingenium-coordination-reset reset`, which issues exactly these eight scopes:
+`ingenium-coordination-reset reset`, which currently issues exactly these six scopes:
 
 ```text
-coordination:read
-coordination:write
 projects:read
 repository:sync
 documentation:read
@@ -111,8 +112,8 @@ memory:write
 ```
 
 The general-MCP reset does not issue `health:read`; the installation-wide
-health tool remains outside both the reset credential and the runtime-issued
-coordination lease. The effective expiry is the earliest of 15 minutes,
+health tool remains outside both the reset credential and the runtime capability
+credential. The effective expiry is the earliest of 15 minutes,
 the runtime absolute expiry, the capability-binding expiry, and the runtime
 credential expiry. The database stores only token hashes; each plaintext token
 appears only in this response.
@@ -300,6 +301,7 @@ truncated.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
+| POST | `/api/v1/usage/external` | Ingest one completed assistant-message usage record from an exact launcher-bound external MCP session. New events return `201`; an identical replay returns `200`. |
 | GET | `/api/v1/usage/summary` | Totals, complete UTC daily series, and freshness metadata. Cost and metric availability distinguish `known`, `partial`, and `unavailable`; cache and reasoning-token counts are nullable and no hit rate is invented. |
 | GET | `/api/v1/usage/breakdown` | Provider/model/assistant-agent breakdown for the filtered UTC range. Raw provider and model IDs are preserved; assistant-agent attribution is nullable. |
 | GET | `/api/v1/usage/events` | Bounded metadata-only event page with `pagination.nextCursor`, `hasMore`, and `total`. |
@@ -317,6 +319,22 @@ truncated.
 The scheduler runs the same bounded collector every five minutes by default.
 Unmapped OpenCode projects are quarantined without usage-event insertion until a
 project owner creates an explicit mapping.
+
+`POST /usage/external` accepts strict metadata only: the launcher `worktree`,
+external `sessionId` and `messageId`, `role: "assistant"`, `completedAt`,
+optional provider/model/agent IDs, nullable token/cache fields, and optional
+provider-reported `costAmount`. It requires an authenticated `mcp` service
+credential whose project and project grant match the query, with a workspace,
+storage-mapping hash, and launcher worktree that exactly matches the request;
+dashboard/UI callers are rejected. The API then verifies the native OpenCode
+session and assistant message with `verifyOpenCodeNativeMessage` before
+ingestion. This path does not require a coordination route or coordination
+session lease. Missing metrics remain unknown; prompt text, reasoning content,
+tool payloads, credentials, and upstream envelopes are never accepted. An
+identical replay is idempotent; a conflicting replay returns `409
+EXTERNAL_USAGE_SOURCE_CONFLICT`, a foreign or inactive binding returns `403
+EXTERNAL_USAGE_BINDING_REJECTED`, and an unavailable OpenCode upstream returns
+`503 OPENCODE_UNAVAILABLE`. The MCP adapter is `ingenium_usage_ingest`.
 
 #### Advisory thresholds (USAGE-100)
 
@@ -429,6 +447,20 @@ in SQL before returning rows.
 | GET | `/api/v1/observations/:id` | Get a project-owned observation |
 | PATCH | `/api/v1/observations/:id` | Update a project-owned observation |
 | POST | `/api/v1/extraction/run` | Trigger server-side extraction |
+
+The extraction trigger also accepts one external-session request in the strict
+shape `{ "external": { "worktree", "sessionId", "message?" } }`. It requires
+the same authenticated `mcp` binding: project and project grant, workspace,
+storage-mapping hash, and launcher worktree must match, and dashboard/UI callers
+are rejected. The API verifies the native OpenCode session and, when supplied,
+the native user message ID and text before extraction; it does not use a
+coordination route or session lease. The optional message is one redacted,
+visible user message (maximum 6,000 characters); omitting it only probes
+learning eligibility. External source receipts are keyed by session/message
+identity and content fingerprint, so a replay does not create a second
+observation. Disabled automatic learning returns a no-op. Operational data,
+task markers, foreign sessions, and raw prompt/secret material are not stored
+as user behavior.
 
 ### Personality
 | Method | Endpoint | Purpose |
@@ -613,7 +645,12 @@ Both routes return the task in `data` and use `422 INVALID_TASK_MUTATION_INPUT`,
 
 ### Task source references
 
-### Coordination registry (COORD-102)
+### Retired coordination registry (COORD-102 historical)
+
+> The following route and MCP descriptions are archival migration records, not
+> active API contracts. The public coordination router and six coordination tools
+> are retired; private replacement-first recovery uses separate authenticated
+> internal handoff paths.
 
 The project-scoped coordination transport exposes 28 routes. Every route uses
 `?project=<name>`; mutation bodies use strict snake_case fields and require an
@@ -828,12 +865,12 @@ tools are defined here.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/v1/settings/provider-configs` | Read the ordered managed provider collection. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. Falls back to legacy primary/backup settings until the collection is first saved. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
+| GET | `/api/v1/settings/provider-configs` | Read only the explicitly saved ordered managed provider collection; legacy primary/backup settings do not synthesize provider blocks. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
 | PUT | `/api/v1/settings/provider-configs` | Atomically save any number of provider blocks. Accepts `roles` array and/or legacy `role` scalar (`available`\|`primary`\|`backup`) for backwards compatibility. `roles` supports multi-role: `["available", "primary"]` or `["available", "backup"]`. Also accepts an optional `synthesis` body field with `{ primary?: SynthesisSelection, secondary?: SynthesisSelection }` to override the role-derived synthesis provider selections — enabling same-provider different-model configurations. Validates exclusivity (at most one primary, at most one backup), synthesis selection constraints (cannot select the same provider+model for both primary and secondary), endpoint SSRF policy via `validateEndpointUrl`, and `allowPrivateNetwork` flag. Projects into OpenCode global config and mirrors synthesis selections into synthesis settings. API keys are stored in the encrypted vault (`vault_items` table, AES-256-GCM). |
 | GET | `/api/v1/settings/llm-config` | Read atomic primary+backup LLM config. Returns provider, model, endpoint, `allowPrivateNetwork`, and `apiKeySet: boolean` — **the actual API key is never exposed**. API keys are stored in the vault, never in plaintext settings. Legacy `synthesis_api_key`/`synthesis_backup_api_key`/`llm_provider_api_keys` settings are auto-migrated into the vault on first read and then deleted from the settings table. |
 | GET | `/api/v1/settings?key=oauth_gmail_client_secret` (or Outlook) | Return only `{ key, isSet, masked }` for a protected OAuth client secret. The value is never returned. The key is resolved against the sole active global project, regardless of the selected `project` query parameter. Sealed/unavailable vaults fail closed; unresolved legacy conflicts return `409 SECRET_MIGRATION_CONFLICT`. Duplicate active globals return `503 GLOBAL_PROJECT_UNAVAILABLE`. |
 | POST | `/api/v1/settings` with `key` plus `action: preserve\|replace\|clear` | Manage a protected OAuth client secret in the active global project. `replace` requires a non-empty `value`; `clear` is explicit; `preserve` leaves the saved value unchanged. A blank implicit value is preserve. The vault must be initialized and unsealed for writes. |
-| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. |
+| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. Legacy saves do not publish synthetic providers into OpenCode global config. |
 | POST | `/api/v1/settings/test-llm` | Test an LLM connection. Accepts `allowPrivateNetwork` boolean body field. Rejects unsafe/internal endpoint addresses (same `validateEndpointUrl` guard as provider-configs save). On transport failure, returns `{ ok: false, status: 0, message: "Unable to reach LLM endpoint" }` — the endpoint URL is never reflected in error messages. |
 
 #### Managed provider credential desired state
@@ -992,10 +1029,9 @@ the same binding and ownership checks.
 The package-owned general-MCP reset credential includes `memory:read` and
 `memory:write`, so an attested general binding can use private saved-memory
 reads and mutations. It does not include `memory:share`; project-visible memory
-still requires that separate permission. The coordination-lease `mcp` audience
-and the runtime capability audience are read-only for saved memory (`memory:read`);
-they do not gain `memory:write` merely from their coordination or child-runtime
-scopes.
+still requires that separate permission. The runtime capability audience is
+read-only for saved memory (`memory:read`) and does not gain `memory:write` from
+its child-runtime scopes.
 
 The MCP save operation is the remember path: use it only after an explicit
 current-user request, with private preference visibility by default, and confirm
@@ -1110,14 +1146,25 @@ only their suffix and refresh the mapping, and shorter or divergent snapshots
 return a conflict without partial writes. The response is metadata only.
 
 This is the only Context-native OpenCode file import surface. There is no
-external Thread service or bridge and no current-session/OpenCode-session import
-tool. Imported conversations appear in the dashboard `/context` workspace,
+external Thread service or bridge and no separate generic transcript import API;
+the extension's automatic external-session path uses this same
+`ingenium_context_upload_file` transport. Imported conversations appear in the dashboard `/context` workspace,
 which uses the existing conversation and message list/get/search/retrieve/batch
 surfaces rather than this internal transport for browsing.
 
 Context checkpoint links freeze their referenced RAG source/chunks and persist a
 citation snapshot. Attempts to re-ingest or delete such a source are rejected;
 normal checkpoint and source ownership checks remain project-scoped.
+
+The Context workspace exposes **Automatically upload external sessions** through
+the project settings keys `context_auto_upload_enabled` and
+`context_upload_last_sync` (`GET`/`POST /api/v1/settings?project=<name>&key=...`). The setting
+defaults to disabled. When enabled, the extension handles `session.idle` for an
+exact `mcp` launcher/worktree binding, filters to visible user and completed
+assistant text, redacts secrets and sensitive URLs, and submits one complete
+snapshot. Upload failures are non-blocking and write only bounded status metadata
+to `context_upload_last_sync`; disabling the setting stops future uploads without
+deleting imported Context.
 
 #### Live OpenCode chat checkpoints
 
@@ -1210,7 +1257,8 @@ The request body contains exactly these top-level fields:
     "version": 2,
     "skills": [],
     "agents": [],
-    "plugins": []
+    "plugins": [],
+    "commands": []
   },
   "dryRun": true,
   "expectedGeneration": 0
@@ -1248,7 +1296,7 @@ Core performs an allocation-light structural walk before canonical map/sort/join
 hashing. It does not serialize or copy the untrusted structure during this
 preflight. The limits are depth 16, 196,608 visited nodes, 512 own entries per
 object/array, 512-character object keys/paths/bounded string-array values,
-at most 256 documentation files (each at most 2 MiB and 2 MiB in aggregate),
+at most 256 documentation files (each at most 2 MiB and 3 MiB in aggregate),
 at most 512 resource items (1,500 KiB in aggregate), 256 KiB resource
 text/record fields, a 1,536,768-byte resource envelope, and a 4 MiB estimated
 canonical envelope. Structural-limit failures return sanitized
@@ -1270,14 +1318,15 @@ All routes prefixed with `/api/v1/repository`.
 |--------|----------|---------|
 | POST | `/resources/sync?project=<project>` | Retired near path. Returns `409 REPOSITORY_SYNC_ENDPOINT_REQUIRED`; use `/api/v1/repository/sync` for the combined docs/resources request. |
 
-The v2 resource manifest accepts exactly `skills`, `agents`, and `plugins`.
+The v2 resource manifest accepts `skills`, `agents`, `plugins`, and `commands`.
 Each item carries stable identity, normalized path, and SHA-256 of its full
 semantic projection. It preserves skill frontmatter/metadata/file trees, agent
 permissions/hidden/skills plus compatibility-mirror paths, and plugin source,
-order, enabled state, and options. The immutable `ingenium-llm-broker` cannot
-be imported. Missing entries archive/remove only resources previously recorded
-as repository-managed; manual, unmanaged, and system resources are untouched.
-Commands and project/global configuration are deliberately excluded.
+order, enabled state, and options, plus regular direct-child command Markdown.
+The immutable `ingenium-llm-broker` cannot be imported. Missing entries
+archive/remove only resources previously recorded as repository-managed;
+manual, unmanaged, and system resources are untouched. Project/global
+configuration is deliberately excluded.
 This legacy near path, like other non-exact paths and methods, retains the
 ordinary 2 MiB global JSON parser and does not use the 4 MiB repository-sync
 ingress.
@@ -1299,7 +1348,8 @@ manifest. `--apply` provisions the validated project when necessary, applies the
 projection, and advances the local repository baseline only after API
 confirmation. The `all` scope covers repository Markdown plus `.opencode/skills`,
 `.opencode/agents` (including compatibility mirrors), and configured/local
-`.opencode/plugins` sources. `--docs-only` submits only the Markdown manifest.
+`.opencode/plugins` sources and direct-child `.opencode/commands/*.md` files.
+`--docs-only` submits only the Markdown manifest.
 `--project` is validated and takes precedence over `INGENIUM_PROJECT`, which
 takes precedence over the validated worktree basename; the CLI never defaults
 to `global-default`. In the production image, the command is on `PATH` at the
@@ -1450,12 +1500,12 @@ mode omits the runtime binding and uses the fixed local path.
 | DELETE | `/api/v1/opencode/sessions/:id` | Delete session |
 | GET | `/api/v1/opencode/sessions/:id/messages` | Get messages (with optional `limit` and `before` pagination) |
 | GET | `/api/v1/opencode/sessions/:id/messages/:msgId` | Get a single message |
-| DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Delete a message |
-| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the current OpenCode 1.18.9 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
+| DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Retained wrapper path; OpenCode V2 does not expose per-message deletion, so the route returns `OPENCODE_V2_MESSAGE_DELETE_UNAVAILABLE`. |
+| POST | `/api/v1/opencode/sessions/:id/prompt` | Requires a `parts` array and adapts it to the OpenCode V2 session-prompt route. Success returns HTTP `202` with `{ data: { accepted: true } }`; this is only an acknowledgement and does not contain the assistant response. |
 | POST | `/api/v1/opencode/sessions/:id/abort` | Abort session |
 | POST | `/api/v1/opencode/sessions/:id/fork` | Fork session |
-| POST | `/api/v1/opencode/sessions/:id/share` | Share session |
-| DELETE | `/api/v1/opencode/sessions/:id/share` | Unshare session |
+| POST | `/api/v1/opencode/sessions/:id/share` | Retained wrapper path; new OpenCode V2 sharing returns `OPENCODE_V2_SHARE_UNAVAILABLE` (an existing share URL may be returned). |
+| DELETE | `/api/v1/opencode/sessions/:id/share` | Retained wrapper path; OpenCode V2 unsharing returns `OPENCODE_V2_SHARE_UNAVAILABLE`. |
 | POST | `/api/v1/opencode/sessions/:id/compact` | Compact session |
 | POST | `/api/v1/opencode/sessions/:id/revert` | Revert session to a message/part checkpoint |
 | POST | `/api/v1/opencode/sessions/:id/unrevert` | Unrevert session |
@@ -1476,7 +1526,8 @@ mode omits the runtime binding and uses the fixed local path.
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | Accepts one MIME-allowlisted multipart file, maximum 5 MiB, stores it temporarily in `/tmp/ingenium-chat-uploads/`, and schedules deletion after one hour. This endpoint is not the Chat composer multi-file path. |
-| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in OpenCode 1.18.9) |
+| GET | `/api/v1/opencode/questions` | Pending OpenCode V2 location forms projected into the retained question shape (read-only list) |
+| POST | `/api/v1/opencode/sessions/:id/questions/:questionId` | Reply to a session-scoped V2 form; `:questionId` is the form ID and the body requires a bounded `{ answer: { ... } }` object. |
 
 ### Chat Context project authority
 
@@ -1528,7 +1579,49 @@ values, endpoints, headers, cookies, sessions, or other credentials. Unsafe
 scalars are rejected or replaced with a safe fallback; they are never partially
 redacted and returned as opaque identifiers.
 
-> **Known gap**: Questions cannot be replied to via the REST API in OpenCode 1.18.9. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
+> **V2 form bridge:** `GET /api/v1/opencode/questions` projects location forms
+> into the retained question shape. `POST
+> /api/v1/opencode/sessions/:id/questions/:questionId` accepts a bounded answer
+> object and maps it to OpenCode V2
+> `POST /api/session/{sessionID}/form/{formID}/reply`; there is no standalone
+> `/questions/:id/reply` route.
+
+## Explicit runtime automation authorization
+
+### POST `/api/v1/runtimes/browser/workspaces/:workspaceId/automation`
+
+The authenticated workspace owner can enable background learning for the current
+compatibility runtime. This browser-session-only operation requires recent
+step-up authentication and the normal cross-site request forgery (CSRF) header;
+an installation bearer or runtime credential is not a substitute for the owner.
+
+**Path parameter:** `workspaceId`, an authorized workspace owned by the caller.
+**Query parameters:** none. **JSON body:** exactly `{}`. Principal, project,
+credential, token and expiry overrides are rejected.
+
+On success, HTTP `200` returns
+`{ "data": { "status": "ready", "runtimeId": "<runtime-id>" } }`.
+The API attests the compatibility binding; core checks the active project,
+organization, owner access, workspace/security epoch, runtime lifetime,
+capability, immutable runtime credential and principal. It grants `execute` to
+that bound principal only and requires exactly one eligible project runtime.
+An idempotent retry preserves the grant and credential identity/expiry. Merely
+listing a READY runtime never grants automation permission.
+
+Authentication/step-up failures retain the shared authentication middleware's
+error contract. Route errors use `{ "error": { "code", "message" } }`:
+
+| Status | Code | Meaning |
+|---|---|---|
+| `404` | `SCOPE_UNAVAILABLE` | Owner/workspace/runtime binding or eligibility unavailable. |
+| `422` | `VALIDATION_ERROR` | Body or query includes overrides. |
+| `503` | `RUNTIME_UNAVAILABLE` | Runtime authorization service failed. |
+
+For example, an ineligible binding returns
+`{ "error": { "code": "SCOPE_UNAVAILABLE", "message": "Runtime request rejected" } }`.
+This operation authorizes an executor; it does not select a provider, extract an
+observation, run synthesis or prove a successful model call. The Dashboard control
+is described in [OpenCode usage](../usage/opencode.md#background-learning-authorization).
 
 ## Data Flow
 

@@ -166,8 +166,8 @@ describe("extension authentication preflight", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Ingenium-Internal-Service": "1",
-        "X-Test-Preflight-Audience": "mcp",
-        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Audience": "runtime",
+        "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
       },
     });
 
@@ -176,16 +176,16 @@ describe("extension authentication preflight", () => {
     expect(body).toEqual({ data: {
       authenticated: true,
       principal: { type: "service", id: servicePrincipalId },
-      scopes: ["projects:read", "coordination:read"],
+      scopes: ["projects:read", "runtime:activity"],
       organizationId,
       projectId,
       projectIds: [projectId],
-      audience: "mcp",
+      audience: "runtime",
       workspaceId: "workspace-id",
       launcherWorktree: "/workspace",
       storageMappingHash: "a".repeat(64),
       restartRequiredOnCredentialChange: true,
-      credentialChangeMode: "live-mcp-reload",
+      credentialChangeMode: "restart",
       runtime: { id: runtimeId, imageRevision: "d".repeat(40), state },
     } });
     expect(JSON.stringify(body)).not.toContain('"running"');
@@ -208,8 +208,8 @@ describe("extension authentication preflight", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Ingenium-Internal-Service": "1",
-        "X-Test-Preflight-Audience": "mcp",
-        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Audience": "runtime",
+        "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
       },
     });
 
@@ -219,10 +219,10 @@ describe("extension authentication preflight", () => {
   });
 
   it.each([
-    ["repository-sync", "projects:read,coordination:read"],
-    ["mcp", "projects:read"],
-    ["runtime", "coordination:read"],
-  ])("requires an MCP/runtime audience and both fixed scopes (%s)", async (audience, scopes) => {
+    ["mcp", "projects:read,runtime:activity"],
+    ["repository-sync", "projects:read,runtime:activity"],
+    ["runtime", "projects:read"],
+  ])("requires a runtime audience and both fixed scopes (%s)", async (audience, scopes) => {
     const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -236,13 +236,13 @@ describe("extension authentication preflight", () => {
     expect((await response.json()).error).toMatchObject({ code: "FORBIDDEN" });
   });
 
-  it("fails closed when the coordination identity is not attested", async () => {
+  it("fails closed when the runtime identity is not attested", async () => {
     const response = await fetch(`${baseUrl}/api/v1/auth/preflight?runtime_id=${runtimeId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Ingenium-Internal-Service": "1",
-        "X-Test-Preflight-Audience": "mcp",
-        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Audience": "runtime",
+        "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
         "X-Test-Preflight-Attestation": "missing",
       },
     });
@@ -260,7 +260,7 @@ describe("extension authentication preflight", () => {
           Authorization: `Bearer ${token}`,
           "X-Ingenium-Internal-Service": "1",
           "X-Test-Preflight-Audience": "runtime",
-          "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+          "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
         },
       });
 
@@ -306,8 +306,8 @@ describe("extension authentication preflight", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Ingenium-Internal-Service": "1",
-        "X-Test-Preflight-Audience": "mcp",
-        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Audience": "runtime",
+        "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
       },
     });
 
@@ -333,7 +333,7 @@ describe("extension authentication preflight", () => {
         Authorization: `Bearer ${token}`,
         "X-Ingenium-Internal-Service": "1",
         "X-Test-Preflight-Audience": "runtime",
-        "X-Test-Preflight-Scopes": "projects:read,coordination:read",
+        "X-Test-Preflight-Scopes": "projects:read,runtime:activity",
       },
     });
 

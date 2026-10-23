@@ -2,6 +2,7 @@ import { tool } from "@opencode-ai/plugin"
 import { importObservationsFromFile, triggerSynthesis, logPipelineEvent, type ObserverFailureReporter, type ObserverRequestFailure } from "./observer-core.js"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
+import { eventSessionId, resolveSessionDirectory } from "./opencode-v2.js"
 
 /**
  * How many session.idle events to skip between synthesis checks.
@@ -35,7 +36,7 @@ function reportObserverError(
  * The dual throttle prevents rapid re-synthesis during burst idle events
  * while ensuring eventual processing in slow sessions.
  */
-export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => {
+export const ObserverPlugin = async (ctx: { worktree: string; client: any; serverUrl?: URL }) => {
   const worktree = ctx.worktree
   const reportWarning: ObserverFailureReporter = (operation, reason) => {
     logPluginLifecycle(ctx.client, "observer-pipeline", "warn", `${operation}: ${reason}`)
@@ -43,7 +44,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
 
   return {
     event: async ({ event }: { event: any }) => {
-      const sessionId = (event as any).session?.id || undefined;
+      const sessionId = eventSessionId(event)
 
       if (event.type === "session.created") {
         try {
@@ -112,9 +113,11 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
       synthesize_observations: tool({
         description: "Process all pending observations through the synthesis pipeline. Reads unprocessed observations, classifies them, generates/updates personality traits and skills, and marks them as processed in the DB. Returns a JSON summary of what was done.",
         args: {},
-        async execute(_args: any, context: { worktree: string }) {
-          await assertExtensionToolEnabled("synthesize_observations", context.worktree)
-          const result = await triggerSynthesis(context.worktree)
+        async execute(_args: any, context: { worktree: string; directory?: string; sessionID?: string }) {
+          const fallback = context.directory ?? context.worktree
+          const worktree = await resolveSessionDirectory(ctx, context.sessionID, fallback)
+          await assertExtensionToolEnabled("synthesize_observations", worktree)
+          const result = await triggerSynthesis(worktree)
           return JSON.stringify(result, null, 2)
         },
       }),

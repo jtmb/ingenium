@@ -5465,6 +5465,46 @@ function runMigrations(db: Database.Database): void {
   }
 
   db.exec(readFileSync(resolve(migrationsDir, "117_mcp_credential_receipts.sql"), "utf-8"));
+  const repositoryResourceSchema = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_resources'",
+  ).get() as { sql: string };
+  if (!repositoryResourceSchema.sql.includes("'command'")) {
+    const migration = readFileSync(resolve(migrationsDir, "118_repository_command_resources.sql"), "utf-8");
+    db.transaction(() => {
+      db.exec(migration);
+      if (db.prepare("PRAGMA foreign_key_check(repository_sync_resources)").all().length > 0) {
+        throw new Error("Migration 118 failed repository resource foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 118_repository_command_resources.sql");
+  }
+  if (!(db.prepare("PRAGMA table_info(plugins)").all() as Array<{ name: string }>).some((column) => column.name === "description")) {
+    db.transaction(() => {
+      db.exec(readFileSync(resolve(migrationsDir, "119_plugin_description.sql"), "utf-8"));
+      if (db.prepare("PRAGMA foreign_key_check(plugins)").all().length > 0) {
+        throw new Error("Migration 119 failed plugin foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 119_plugin_description.sql");
+  }
+  db.exec(readFileSync(resolve(migrationsDir, "120_lifecycle_plugin_description.sql"), "utf-8"));
+  logger.info("db", "Applied migration 120_lifecycle_plugin_description.sql");
+  const repositorySyncWorktreeState = db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_worktrees'",
+  ).get() as { count: number };
+  const repositorySyncGenerationSchema = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_generations'",
+  ).get() as { sql?: string } | undefined;
+  if (repositorySyncWorktreeState.count === 0 || !repositorySyncGenerationSchema?.sql?.includes("REFERENCES repository_sync_worktrees")) {
+    db.transaction(() => {
+      db.exec(readFileSync(resolve(migrationsDir, "121_repository_sync_worktree_state.sql"), "utf-8"));
+      if (db.prepare("PRAGMA foreign_key_check(repository_sync_worktrees)").all().length > 0
+        || db.prepare("PRAGMA foreign_key_check(repository_sync_generations)").all().length > 0) {
+        throw new Error("Migration 121 failed repository-sync worktree foreign key integrity");
+      }
+    })();
+    logger.info("db", "Applied migration 121_repository_sync_worktree_state.sql");
+  }
   enforceReservedBrokerInvariant(db);
 }
 

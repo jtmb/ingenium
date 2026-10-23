@@ -4,8 +4,60 @@ import { useState, useEffect, useRef } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Plugin } from "../../lib/api";
 import Overlay from "../components/Overlay";
-import MarkdownViewer from "../components/MarkdownViewer";
-import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+
+function PluginDescription({ plugin, project, onSaved }: { plugin: Plugin; project: string; onSaved: (plugin: Plugin) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [description, setDescription] = useState(plugin.description ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  return (
+    <section className="space-y-3" aria-label="Plugin description">
+      <p className="text-sm text-[var(--color-text-muted)]">Project-local description. Repository sync preserves these notes. Do not include secrets.</p>
+      {editing ? (
+        <form className="space-y-3" onSubmit={async (event) => {
+          event.preventDefault();
+          if (saving) return;
+          setSaving(true);
+          setError("");
+          setSaved(false);
+          try {
+            await api.plugins.updateDescription(plugin.name, description, project);
+            const refreshed = await api.plugins.get(plugin.name, project);
+            onSaved(refreshed.data);
+            setEditing(false);
+            setSaved(true);
+          } catch (error) {
+            setError(error instanceof Error ? error.message : "Could not save and reload description");
+          } finally {
+            setSaving(false);
+          }
+        }}>
+          <label htmlFor="plugin-description" className="block text-sm font-medium">Description</label>
+          <textarea id="plugin-description" value={description} onChange={(event) => setDescription(event.target.value)}
+            maxLength={2000} rows={4} disabled={saving} aria-describedby="plugin-description-limit"
+            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm" />
+          <p id="plugin-description-limit" className="text-xs text-[var(--color-text-muted)]">{description.length}/2000 characters</p>
+          {error && <p role="alert" className="text-[var(--color-error-text)]">{error}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" disabled={saving || description.length > 2000 || description.includes("\0")}
+              className="rounded bg-blue-600 px-3 py-2 text-sm text-white disabled:opacity-50">{saving ? "Saving..." : "Save description"}</button>
+            <button type="button" disabled={saving} onClick={() => setEditing(false)}
+              className="rounded bg-[var(--color-surface-muted)] px-3 py-2 text-sm">Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <p className="whitespace-pre-wrap break-words text-sm">{plugin.description || "No description yet."}</p>
+          <button type="button" onClick={() => { setDescription(plugin.description ?? ""); setError(""); setSaved(false); setEditing(true); }}
+            className="rounded bg-[var(--color-surface-muted)] px-3 py-2 text-sm">Edit description</button>
+        </>
+      )}
+      {saved && <p role="status" className="text-sm text-[var(--color-success-text)]">Description saved and reloaded.</p>}
+    </section>
+  );
+}
 
 /**
  * Plugin management page.
@@ -13,6 +65,10 @@ import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
  */
 export default function PluginsPage() {
   const project = useProject();
+  return <ProjectPlugins key={project} project={project} />;
+}
+
+function ProjectPlugins({ project }: { project: string }) {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -263,6 +319,7 @@ export default function PluginsPage() {
                     </button>
                   </div>
                 </div>
+                <p className="whitespace-pre-wrap break-words text-sm text-[var(--color-text-secondary)]">{p.description || "No description yet."}</p>
                 {p.source_content && (
                   <pre className="break-all whitespace-pre-wrap rounded bg-[var(--color-surface-muted)] p-2 text-xs font-mono text-[var(--color-text-muted)]">
                     {p.source_content.slice(0, 120)}
@@ -282,6 +339,10 @@ export default function PluginsPage() {
       >
         {selectedPlugin && (
           <div className="space-y-4">
+            <PluginDescription key={`${project}:${selectedPlugin.id}`} plugin={selectedPlugin} project={project} onSaved={(updated) => {
+              setSelectedPlugin(updated);
+              setPlugins((current) => current.map((plugin) => plugin.id === updated.id ? updated : plugin));
+            }} />
             <div className="text-sm text-[var(--color-text-secondary)]">
               <span className="font-semibold">Enabled:</span>{" "}
               <span className={selectedPlugin.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>

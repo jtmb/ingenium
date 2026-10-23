@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
+import { redactContextText } from "@ingenium/extension/context-upload-codec";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,6 +28,10 @@ export interface ReplacementIdentityExpectation {
 }
 
 export interface RedactedRestartHandoff {
+  replay: {
+    sessionIdSha256: string;
+    todos: RestartTodo[];
+  };
   status: "active" | "working" | "idle" | "completed" | "error";
   taskHash: string | null;
   actions: Array<{
@@ -63,6 +68,43 @@ export interface RedactedRestartHandoff {
   };
 }
 
+export interface RestartTodo {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  priority: "high" | "medium" | "low";
+}
+
+export function stableRestartTodos(value: unknown, prior: RestartTodo[] = []): RestartTodo[] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error("invalid TodoWrite record");
+  return parseRestartTodos(value.map((todo) => {
+    if (!isRecord(todo) || typeof todo.content !== "string") throw new Error("invalid TodoWrite record");
+    return {
+      id: typeof todo.id === "string" && todo.id.length > 0 ? todo.id
+        : prior.find((entry) => entry.content === todo.content)?.id
+          ?? `todo-${createHash("sha256").update("todo\0").update(JSON.stringify(todo.content)).digest("hex")}`,
+      content: todo.content, status: todo.status, priority: todo.priority ?? "medium",
+    };
+  }));
+}
+
+export function parseRestartTodos(value: unknown): RestartTodo[] {
+  if (!Array.isArray(value) || value.length > 64) throw new Error("handoff Todo entries are invalid");
+  const todos = value.map((todo) => {
+    if (!hasExactKeys(todo, ["id", "content", "status", "priority"])
+      || typeof todo.id !== "string" || !SAFE_BINDING_ID.test(todo.id)
+      || typeof todo.content !== "string" || !todo.content.trim() || todo.content.length > 2048
+      || todo.content.includes("\0") || redactContextText(todo.content) !== todo.content
+      || redactContextText(todo.id) !== todo.id
+      || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status as string)
+      || !["high", "medium", "low"].includes(todo.priority as string)) throw new Error("handoff Todo entries are invalid");
+    return { id: todo.id, content: todo.content, status: todo.status, priority: todo.priority } as RestartTodo;
+  });
+  if (new Set(todos.map((todo) => todo.id)).size !== todos.length
+    || Buffer.byteLength(JSON.stringify(todos)) > 24 * 1024) throw new Error("handoff Todo entries are invalid");
+  return todos;
+}
+
 export interface ReplacementFirstRestartRequest {
   schemaVersion: 1;
   worktree: string;
@@ -88,7 +130,6 @@ export interface ReplacementFirstRestartRequest {
     identityMs: number;
     healthMs: number;
     sessionMs: number;
-    memoryAckMs: number;
     terminalIdleMs: number;
     retirementMs: number;
   };
@@ -99,7 +140,6 @@ export type ReplacementFirstRestartPhase =
   | "replacement_started"
   | "replacement_healthy"
   | "session_created"
-  | "typed_memory_acknowledged"
   | "terminal_idle_acknowledged"
   | "recovery_owner_ready"
   | "old_parent_quiesced"
@@ -161,13 +201,6 @@ export interface ReplacementFirstRestartDependencies<Session> {
     transactionSha256: string,
     signal: AbortSignal,
   ): Promise<ReplacementSessionCreation<Session>>;
-  acknowledgeTypedMemory(
-    identity: RestartProcessIdentity,
-    session: Session,
-    handoffSha256: string,
-    transactionSha256: string,
-    signal: AbortSignal,
-  ): Promise<{ status: "acknowledged"; handoffSha256: string; transactionSha256: string }>;
   awaitTerminalIdleAcknowledgement(
     identity: RestartProcessIdentity,
     session: Session,
@@ -353,10 +386,13 @@ function todoState(todos: RedactedRestartHandoff["todos"]): RedactedRestartHando
 }
 
 export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHandoff {
-  if (!hasExactKeys(value, ["status", "taskHash", "actions", "changedPaths", "checks", "todos", "nextWork"])
+  if (!hasExactKeys(value, ["replay", "status", "taskHash", "actions", "changedPaths", "checks", "todos", "nextWork"])
     || !["active", "working", "idle", "completed", "error"].includes(value.status as string)
     || !hasExactKeys(value.todos, ["total", "pending", "inProgress", "completed", "cancelled", "state"])
-    || !hasExactKeys(value.nextWork, ["kind", "referenceHash"])) throw new Error("handoff is invalid");
+    || !hasExactKeys(value.nextWork, ["kind", "referenceHash"])
+    || !hasExactKeys(value.replay, ["sessionIdSha256", "todos"])) throw new Error("handoff is invalid");
+  const replay = { sessionIdSha256: sha256(value.replay.sessionIdSha256, "handoff.replay.sessionIdSha256"),
+    todos: parseRestartTodos(value.replay.todos) };
   const todos = {
     total: boundedInteger(value.todos.total, "handoff.todos.total", 0, 1_000_000),
     pending: boundedInteger(value.todos.pending, "handoff.todos.pending", 0, 1_000_000),
@@ -366,12 +402,17 @@ export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHand
     state: value.todos.state as RedactedRestartHandoff["todos"]["state"],
   };
   if (todos.total !== todos.pending + todos.inProgress + todos.completed + todos.cancelled
-    || todos.state !== todoState(todos)) throw new Error("handoff.todos is invalid");
+    || todos.state !== todoState(todos) || todos.total !== replay.todos.length
+    || todos.pending !== replay.todos.filter((todo) => todo.status === "pending").length
+    || todos.inProgress !== replay.todos.filter((todo) => todo.status === "in_progress").length
+    || todos.completed !== replay.todos.filter((todo) => todo.status === "completed").length
+    || todos.cancelled !== replay.todos.filter((todo) => todo.status === "cancelled").length) throw new Error("handoff.todos is invalid");
   const nextWorkKind = value.nextWork.kind;
   if (!["none", "continue_task", "review_changes", "run_checks", "address_failure"].includes(nextWorkKind as string)) {
     throw new Error("handoff.nextWork is invalid");
   }
-  return {
+  const handoff: RedactedRestartHandoff = {
+    replay,
     status: value.status as RedactedRestartHandoff["status"],
     taskHash: nullableSha256(value.taskHash, "handoff.taskHash"),
     actions: handoffActions(value.actions),
@@ -383,10 +424,12 @@ export function parseRedactedRestartHandoff(value: unknown): RedactedRestartHand
       referenceHash: nullableSha256(value.nextWork.referenceHash, "handoff.nextWork.referenceHash"),
     },
   };
+  if (Buffer.byteLength(JSON.stringify(handoff)) > 48 * 1024) throw new Error("handoff is too large");
+  return handoff;
 }
 
 function timeouts(value: unknown): ReplacementFirstRestartRequest["timeouts"] {
-  const keys = ["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "memoryAckMs", "terminalIdleMs", "retirementMs"] as const;
+  const keys = ["handoffMs", "launchMs", "identityMs", "healthMs", "sessionMs", "terminalIdleMs", "retirementMs"] as const;
   if (!hasExactKeys(value, keys)) throw new Error("timeouts are invalid");
   return Object.fromEntries(keys.map((key) => [key, boundedInteger(value[key], `timeouts.${key}`, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)])) as unknown as ReplacementFirstRestartRequest["timeouts"];
 }
@@ -395,7 +438,7 @@ export function decodeReplacementFirstRestartRequest(
   encoded: string,
   expectedWorktree = process.cwd(),
 ): ReplacementFirstRestartRequest {
-  if (!/^[A-Za-z0-9_-]{2,8192}$/.test(encoded)) throw new Error("Replacement-first restart payload is invalid");
+  if (encoded.length > 96 * 1024 || !/^[A-Za-z0-9_-]+$/.test(encoded)) throw new Error("Replacement-first restart payload is invalid");
   const bytes = Buffer.from(encoded, "base64url");
   if (bytes.toString("base64url") !== encoded) throw new Error("Replacement-first restart payload is invalid");
   let parsed: unknown;
@@ -483,6 +526,7 @@ export async function runReplacementFirstRestart<Session>(
   request: ReplacementFirstRestartRequest,
   dependencies: ReplacementFirstRestartDependencies<Session>,
 ): Promise<ReplacementFirstRestartResult> {
+  request = { ...request, handoff: parseRedactedRestartHandoff(request.handoff) };
   const handoffDigest = handoffSha256(request.handoff);
   let lastCompletedPhase: ReplacementFirstRestartPhase | null = null;
   let replacement: RestartProcessIdentity | undefined;
@@ -563,13 +607,6 @@ export async function runReplacementFirstRestart<Session>(
     const session = creation.session as Session;
     await persist("session_created");
 
-    const memoryAcknowledgement = await bounded("typed memory acknowledgement", request.timeouts.memoryAckMs, (signal) =>
-      dependencies.acknowledgeTypedMemory(replacement!, session, handoffDigest, transaction, signal));
-    if (memoryAcknowledgement.status !== "acknowledged" || memoryAcknowledgement.handoffSha256 !== handoffDigest
-      || memoryAcknowledgement.transactionSha256 !== transaction) {
-      throw new Error("Typed memory acknowledgement is invalid");
-    }
-    await persist("typed_memory_acknowledged");
     const idleAcknowledgement = await bounded("terminal idle acknowledgement", request.timeouts.terminalIdleMs, (signal) =>
       dependencies.awaitTerminalIdleAcknowledgement(replacement!, session, handoffDigest, transaction, signal));
     if (idleAcknowledgement.status !== "idle" || idleAcknowledgement.handoffSha256 !== handoffDigest

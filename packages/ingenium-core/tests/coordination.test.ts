@@ -1378,7 +1378,7 @@ describe("COORD-101 coordination registry fixtures", () => {
     expect(memory.id).not.toBe(legacy.id);
   });
 
-  it.each([1, 20])("persists manifests, review admission and requested %i-writer allocations", (requestedConcurrency) => {
+  it.each([2, 3, 6])("persists manifests, review admission and valid %i-agent allocations", (requestedConcurrency) => {
     const { alpha } = setup();
     const memory = ensureCoordinationMemory(alpha.id, MAIN.worktreeId);
     let session = registerCoordinationSession(alpha.id, {
@@ -1430,29 +1430,42 @@ describe("COORD-101 coordination registry fixtures", () => {
         exclusivePaths: [path(`src/territory-${i}`)],
       })),
     };
+    const sevenAgentAllocation: CoordinationAllocation = {
+      ...allocation,
+      requestedConcurrency: 7,
+      agents: Array.from({ length: 7 }, (_, i) => ({
+        agentId: `seven-agent-${i}`, todoId: `seven-todo-${i}`, writer: true,
+        exclusivePaths: [path(`seven/territory-${i}`)],
+      })),
+    };
     for (const bad of [
       ...[undefined, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, requestedConcurrency + 1].map((count) => ({ ...allocation, requestedConcurrency: count })),
+      { ...allocation, requestedConcurrency: 1, agents: allocation.agents.slice(0, 1) },
+      sevenAgentAllocation,
       { ...allocation, agents: [] },
-      { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0], allocation.agents[0]] },
+      { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
+        { ...allocation.agents[1]!, agentId: allocation.agents[0]!.agentId }] },
+      { ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
+        { ...allocation.agents[1]!, todoId: allocation.agents[0]!.todoId }] },
       ...["src/territory-0", "src/territory-0/child", "src"].map((territory) => ({
         ...allocation, requestedConcurrency: 2, agents: [allocation.agents[0],
-          { ...allocation.agents[0], agentId: "overlap", exclusivePaths: [path(territory)] }],
+          { ...allocation.agents[0], agentId: "overlap", todoId: "overlap-todo", exclusivePaths: [path(territory)] }],
       })),
       ...[{ todoId: "" }, { agentId: "" }, { exclusivePaths: [] }, { writer: false },
         { exclusivePaths: [path("src/duplicate"), path("src/duplicate")] }].map((invalid) => ({
-        ...allocation, requestedConcurrency: 1, agents: [{ ...allocation.agents[0], ...invalid }],
+        ...allocation, requestedConcurrency: 2, agents: [{ ...allocation.agents[0], ...invalid }, allocation.agents[1]],
       })),
     ]) expectCode(() => publish({ manifest: finalized, allocation: bad }), "INVALID_COORDINATION_INPUT");
     const reviewed = publish({ manifest: finalized, reviewAdmission, allocation });
     session = reviewed.session;
-    const single = publish({ manifest: finalized, allocation: { phaseId: "one", mode: "single_todo", requestedConcurrency: 1,
-      agents: [{ ...allocation.agents[0]!, writer: false, exclusivePaths: [] }] } });
-    expect(single.memory.entry.allocation?.agents).toHaveLength(1);
+    const continuation = publish({ manifest: finalized });
+    expect(continuation.memory.entry.allocation).toBeUndefined();
     register(alpha.id, NEXT_INCARCINATION, TOKEN_C, "manifest-restart");
     const replay = readCoordinationMemory(alpha.id, MAIN.worktreeId).entries;
     expect(replay[0]?.manifest?.unresolvedOperations).toEqual(manifest.unresolvedOperations);
     expect(replay[0]?.manifest?.todoWrite).toEqual(manifest.todoWrite);
     expect(replay[1]).toMatchObject({ manifest: finalized, reviewAdmission, allocation });
+    expect(replay[2]?.allocation).toBeUndefined();
   });
 
   it("appends exact-schema operational entries without lost updates and replays them after restart", () => {

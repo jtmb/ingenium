@@ -1,11 +1,12 @@
 import { Router, type Response } from "express";
-import { authorization, mcpToolStates } from "ingenium-core";
+import { authorization, mcpToolStates, mcpUsefulnessReport } from "ingenium-core";
 import {
   buildMcpUsefulnessReport,
   createMcpUsefulnessCollector,
   enrichMcpUsefulnessReport,
+  McpUsefulnessCollectionError,
+  MCP_USEFULNESS_STAGES,
   type McpUsefulnessCatalogEntry,
-  type McpUsefulnessCollectionError,
   type McpUsefulnessReportCollector,
 } from "../mcp-usefulness-collector.js";
 import { requireProject } from "../helpers.js";
@@ -16,14 +17,8 @@ export interface McpToolsRouterOptions {
   usefulnessCollector?: McpUsefulnessReportCollector;
 }
 
-const REPORT_MAX_BYTES = 64 * 1024;
+const REPORT_MAX_BYTES = 2 * mcpUsefulnessReport.MCP_TOOL_USEFULNESS_MAX_JSON_BYTES;
 const REPORT_QUERY_KEYS = new Set(["project", "q", "category", "enabled", "boundary", "visibility", "invocation"]);
-const REPOSITORY_COORDINATION_TOOLS = new Set([
-  "ingenium_coordination_update",
-  "ingenium_coordination_claim",
-  "ingenium_coordination_release",
-]);
-
 interface ReportFilters {
   q?: string;
   category?: string;
@@ -126,10 +121,6 @@ export function authorizedCatalog(req: import("express").Request, projectId: str
     const policy = tool.authorization;
     if (!policy) return false;
     if (principal.type === "compatibility") return true;
-    if (principal.type === "service" && principal.audience === "repository-sync"
-      && REPOSITORY_COORDINATION_TOOLS.has(tool.name)) {
-      return authorization.requireProjectPermission(authorizationPrincipal, projectId, "repository", "execute").allowed;
-    }
     if (policy.target === "installation") return authorization.requireInstallationPermission(authorizationPrincipal, policy.resource, policy.permission).allowed;
     if (policy.target === "organization") return Boolean(projectAccess.organizationId)
       && authorization.requireOrganizationPermission(authorizationPrincipal, projectAccess.organizationId!, policy.resource, policy.permission).allowed;
@@ -144,13 +135,19 @@ function isBusy(error: unknown): error is McpUsefulnessCollectionError {
   return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "MCP_REPORT_BUSY";
 }
 
-function reportUnavailable(res: Response, busy = false): void {
-  res.status(503).json({
-    error: {
-      code: busy ? "MCP_REPORT_BUSY" : "MCP_REPORT_UNAVAILABLE",
-      message: busy ? "The MCP report is busy." : "The MCP report is unavailable.",
-    },
-  });
+function reportStage(error: unknown): typeof MCP_USEFULNESS_STAGES[number] {
+  return error instanceof McpUsefulnessCollectionError && error.stage !== undefined
+    && MCP_USEFULNESS_STAGES.includes(error.stage) ? error.stage : "report";
+}
+
+function reportUnavailable(res: Response, error?: unknown): void {
+  const busy = isBusy(error);
+  const responseError = {
+    code: busy ? "MCP_REPORT_BUSY" : "MCP_REPORT_UNAVAILABLE",
+    message: busy ? "The MCP report is busy." : "The MCP report is unavailable.",
+    ...(!busy ? { stage: reportStage(error) } : {}),
+  };
+  res.status(503).json({ error: responseError });
 }
 
 function filterReportTools<T extends {
@@ -233,7 +230,7 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
       }
       res.json(body);
     } catch (error) {
-      reportUnavailable(res, isBusy(error));
+      reportUnavailable(res, error);
     }
   });
 
@@ -261,7 +258,9 @@ export function createMcpToolsRouter(options: McpToolsRouterOptions = {}): Route
     })).filter((category) => category.total_count > 0);
     res.json({ project, project_id: projectId, data: tools, total: tools.reduce((s, g) => s + g.total_count, 0), counts });
   } else {
-    const tools = mcpToolStates.listToolStatesWithDefaults(projectId).filter((tool) => authorized.has(tool.tool_name));
+    const tools = mcpToolStates.listToolStatesWithDefaults(projectId)
+      .filter((tool) => authorized.has(tool.tool_name))
+      .map((tool) => ({ ...tool, authorization: authorized.get(tool.tool_name)!.authorization }));
     res.json({ project, project_id: projectId, data: tools, total: tools.length, counts });
   }
   });

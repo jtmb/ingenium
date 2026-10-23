@@ -61,11 +61,17 @@ function resolveLocalImport(root, importer, specifier) {
 }
 
 export function canonicalPluginEntryPaths(specs) {
-  return specs.map((spec) => {
+  return specs.flatMap((spec) => {
     if (typeof spec !== "string" || !spec.startsWith(projectPluginPrefix)) {
       throw new Error(`Canonical plugin spec must use ${projectPluginPrefix}: ${String(spec)}`);
     }
-    return spec.slice(projectPluginPrefix.length);
+    const entryPath = spec.slice(projectPluginPrefix.length);
+    const absolutePath = resolve(extensionRoot, entryPath);
+    // V2 config plugins target directories; the runtime loads their index file.
+    if (existsSync(absolutePath) && statSync(absolutePath).isDirectory()) {
+      return [join(entryPath, "index.ts")];
+    }
+    return [entryPath];
   });
 }
 
@@ -139,8 +145,8 @@ async function canonicalClosure() {
   const specs = await import(pathToFileURL(specsPath).href);
   return createCanonicalPluginClosure(
     extensionRoot,
-    specs.CANONICAL_PLUGIN_SPECS,
-    specs.CANONICAL_PLUGIN_RUNTIME_ASSETS,
+    [...specs.CANONICAL_PLUGIN_SPECS, ...(specs.CANONICAL_PLUGIN_SPECS_V2 ?? [])],
+    [...specs.CANONICAL_PLUGIN_RUNTIME_ASSETS, ...(specs.CANONICAL_PLUGIN_RUNTIME_ASSETS_V2 ?? [])],
   );
 }
 

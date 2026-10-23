@@ -19,6 +19,7 @@ import ContextConversationList from "./ContextConversationList";
 import ContextMessageTimeline from "./ContextMessageTimeline";
 import ContextSourcesSection from "./ContextSourcesSection";
 import ExplicitMemorySection from "./ExplicitMemorySection";
+import ContextUploadSettings from "./ContextUploadSettings";
 
 type ContextDetail = {
   conversation: ContextConversationSummary;
@@ -247,6 +248,7 @@ export default function ContextWorkspace() {
       </header>
 
       <ContextSourcesSection project={project} />
+      <ContextUploadSettings key={project} project={project} />
 
       {!savedMemoryWorkspaceId && runtime.workspace.status !== "ready" && (
         <div className="relative min-h-[28rem] overflow-hidden rounded-lg border border-[var(--color-border)]" data-testid="context-workspace-picker">

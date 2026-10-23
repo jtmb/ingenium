@@ -1428,6 +1428,14 @@ function worktreeEpoch(db: Db, projectId: string, worktreeId: string, current: s
 
 function repositoryGeneration(db: Db, projectId: string, worktreeId: string, current: string): number {
   db.prepare(
+    `INSERT INTO repository_sync_worktrees (project_id, worktree_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
+  ).run(projectId, worktreeId, current, current);
+  const worktreeExists = db.prepare(
+    "SELECT 1 FROM repository_sync_worktrees WHERE project_id = ? AND worktree_id = ?",
+  ).get(projectId, worktreeId);
+  if (!worktreeExists) throw new CoordinationError("COORDINATION_INTEGRITY_ERROR");
+  db.prepare(
     `INSERT INTO repository_sync_generations (project_id, worktree_id, generation, manifest_hash, updated_at)
      VALUES (?, ?, 0, NULL, ?) ON CONFLICT(project_id, worktree_id) DO NOTHING`,
   ).run(projectId, worktreeId, current);
@@ -1610,14 +1618,17 @@ function normalizedManifestRecords(value: Record<string, unknown>): Pick<Coordin
     const allocation = value.allocation;
     if (!exact(allocation, ["phaseId", "mode", "requestedConcurrency", "agents"]) || !text(allocation.phaseId)
       || !["single_todo", "multi_todo"].includes(allocation.mode as string)
-      || !isSafePositiveInteger(allocation.requestedConcurrency) || !Array.isArray(allocation.agents)
+      || !isSafePositiveInteger(allocation.requestedConcurrency) || allocation.requestedConcurrency < 2
+      || allocation.requestedConcurrency > 6 || !Array.isArray(allocation.agents)
       || allocation.agents.length !== allocation.requestedConcurrency) return invalid();
     const agents = new Set<string>();
+    const todos = new Set<string>();
     const territories: string[] = [];
     for (const agent of allocation.agents) {
       if (!exact(agent, ["agentId", "todoId", "writer", "exclusivePaths"]) || !text(agent.agentId) || !text(agent.todoId)
-        || typeof agent.writer !== "boolean" || agents.has(agent.agentId)) return invalid();
+        || typeof agent.writer !== "boolean" || agents.has(agent.agentId) || todos.has(agent.todoId)) return invalid();
       agents.add(agent.agentId);
+      todos.add(agent.todoId);
       const owned = paths(agent.exclusivePaths);
       if (!agent.writer && owned.length > 0) return invalid();
       if (agent.writer) {

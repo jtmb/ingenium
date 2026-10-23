@@ -255,6 +255,10 @@ describe("test server lifecycle contracts", () => {
     expect(specs[0]!.env.INGENIUM_TEST_RUN_NONCE).toBe(context.runNonce);
     for (const spec of specs) {
       expect(spec.env.INGENIUM_PROJECT).toBe(context.project);
+      expect(spec.env.INGENIUM_GLOBAL_CONFIG_PATH).toBe(join(context.homeDir, "opencode-global"));
+      expect(spec.env.TMPDIR).toBe(context.runDir);
+      expect(spec.env.TMP).toBe(context.runDir);
+      expect(spec.env.TEMP).toBe(context.runDir);
       expect(spec.env.INGENIUM_PROJECT).not.toBe("global-default");
     }
     expect(specs[1]!.readinessHeaders).toBeUndefined();
@@ -289,6 +293,27 @@ describe("test server lifecycle contracts", () => {
       updateTestRunManifest(context.manifestPath, { status: "created", processes: [] });
       cleanupTestRun(context.manifestPath);
     }
+  });
+
+  it("retains captured service output when readiness fails and still cleans up", async () => {
+    const context = createTestRunContext();
+    track(context);
+    await expect(startTestServers(context, {
+      production: false,
+      build: false,
+      startTimeoutMs: 100,
+      stopTimeoutMs: 1_000,
+      spawnServer: (spec) => {
+        const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+          cwd: spec.cwd, env: spec.env, detached: true, stdio: "ignore",
+        });
+        return Object.assign(child, { __testRunOutput: { value: "synthetic startup failure detail" } });
+      },
+    })).rejects.toThrow("[api startup output]\nsynthetic startup failure detail");
+    expect(readTestRunManifest(context.manifestPath).processes).toEqual([]);
+    expect(readTestRunTelemetry(context.telemetryPath!).failures.join("\n"))
+      .toContain("synthetic startup failure detail");
+    await stopRunFromManifest(context.manifestPath, { cleanup: false });
   });
 
   it("adds the internal marker only to explicitly bound fixture API calls", () => {

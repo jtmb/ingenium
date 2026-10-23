@@ -29,8 +29,8 @@
     "@azure/msal-node": "^2.0.0",
     "google-auth-library": "^9.0.0",
     "imapflow": "^1.0.0",
-    "mailparser": "^3.7.0",
-    "nodemailer": "^9.0.3"
+    "mailparser": "^3.12.4",
+    "nodemailer": "^10.2.1"
   },
   "devDependencies": {
     "@types/nodemailer": "^6.4.0",

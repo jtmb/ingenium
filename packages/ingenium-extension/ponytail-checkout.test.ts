@@ -9,7 +9,8 @@ const repositoryRoot = resolve(extensionRoot, "../..");
 const checkoutRoot = join(extensionRoot, "ponytail");
 const pluginPath = join(checkoutRoot, ".opencode", "plugins", "ponytail.mjs");
 const projectPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
-const projectPluginSpec = `file://{env:PWD}/${projectPluginPath}`;
+const projectPluginSpecV2 = "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail";
+const projectPluginSpecV2Root = "./packages/ingenium-extension/plugins/v2/ponytail";
 
 const upstreamHashes: Record<string, string> = {
   ".opencode/plugins/ponytail.mjs": "e9e2214149ace3e589a584a27136bf5bd9da558fbad948f8cf1d3bc2c50d3828",
@@ -32,15 +33,15 @@ const upstreamHashes: Record<string, string> = {
 };
 
 describe("Ponytail immutable checkout integration", () => {
-  it("uses one canonical local file URL without recursive companion discovery", () => {
-    const config = JSON.parse(readFileSync(join(repositoryRoot, "opencode.json"), "utf8")) as { plugin: string[] };
-    const configuredPonytail = config.plugin.filter((entry) => entry.includes("ponytail"));
+  it("uses one canonical native adapter without recursive companion discovery", () => {
+    const config = JSON.parse(readFileSync(join(repositoryRoot, "opencode.json"), "utf8")) as { plugins: Array<string | { package: string }> };
+    const configuredPonytail = config.plugins.filter((entry) => typeof entry === "string" && entry.includes("ponytail"));
 
-    expect(configuredPonytail).toEqual([projectPluginSpec]);
-    expect(config.plugin).toContain("file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts");
-    expect(config.plugin).toContain("file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts");
-    expect(config.plugin).toContain("file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts");
-    expect(config.plugin).not.toContain("@dietrichgebert/ponytail");
+    expect(configuredPonytail).toEqual([projectPluginSpecV2Root]);
+    expect(config.plugins).toContain("./packages/ingenium-extension/plugins/v2/auto-observer");
+    expect(config.plugins).toContain("./packages/ingenium-extension/plugins/v2/observer");
+    expect(config.plugins).toContain("./packages/ingenium-extension/plugins/v2/resource-sync");
+    expect(config.plugins).not.toContain("@dietrichgebert/ponytail");
     expect(relative(repositoryRoot, pluginPath)).toBe(projectPluginPath);
     const discoveryRoot = join(repositoryRoot, ".opencode", "plugins");
     expect(existsSync(discoveryRoot)).toBe(false);
@@ -116,7 +117,7 @@ describe("Ponytail immutable checkout integration", () => {
     expect(packageJson.devDependencies?.["@dietrichgebert/ponytail"]).toBeUndefined();
     expect(dockerfile).toContain("COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension");
     expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
-    expect(dockerfile).toContain(projectPluginSpec);
-    expect(entrypoint).toContain(projectPluginSpec);
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/plugins/v2/ponytail");
+    expect(entrypoint).toContain(projectPluginSpecV2);
   });
 });

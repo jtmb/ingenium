@@ -21,22 +21,23 @@ services:
         # supply the checkout SHA explicitly so the image remains traceable.
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     ports:
-      # WSL must bind the gateway beyond its Linux-only loopback interface so
-      # Windows localhost forwarding can reach it. This is a local-only trust
-      # boundary; do not use the plain-HTTP gateway for LAN or remote access.
-      - "3000:3000"
+      # This credential-free desktop gateway must not accept LAN traffic.
+      # Verify Windows-to-WSL localhost forwarding after deployment.
+      - "127.0.0.1:3000:3000"
       # Keep the bearer API boundary loopback-scoped for host MCP clients.
       # Browser traffic must use the same-origin dashboard proxy instead.
       - "127.0.0.1:4097:4097"
-      # Nginx binds this port and exposes only GET /auth/callback.
-      - "127.0.0.1:1455:1455"
+      # Nginx exposes only GET /auth/callback on a port distinct from OpenCode's private listener.
+      - "127.0.0.1:1455:1456"
     environment:
       - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
       # The host credential is mounted read-only; entrypoint copies it to the
       # owner-only runtime file consumed by supervised services.
       - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
+      - INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       # Forward an optional operator override; blank values fall back safely.
       - INGENIUM_BACKUPS_DIR=${INGENIUM_BACKUPS_DIR:-}
@@ -65,10 +66,11 @@ services:
       # full terminal. It is unsupported for LAN, remote, shared, or untrusted users.
       - vscode-data:/home/ingenium-vscode/vscode-data
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
-      - ./opencode.json:/app/opencode.json:ro
+      - "${INGENIUM_OPENCODE_CONFIG_FILE:-./opencode.json}:/app/opencode.json:ro"
       # Compose must be started from a WSL/Linux shell with HOME set. The
       # complete host repository root is the workspace contract; do not replace
       # it with a checkout-specific path.
@@ -99,20 +101,22 @@ services:
         NEXT_PUBLIC_RUNTIME_SCHEME: "${INGENIUM_RUNTIME_SCHEME:-http}"
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     container_name: ingenium-control-plane
     labels:
       com.ingenium.control-plane: "true"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
       - "127.0.0.1:4097:4097"
-      - "127.0.0.1:1455:1455"
+      - "127.0.0.1:1455:1456"
     environment:
       - INGENIUM_DEPLOYMENT_MODE=control-plane
       # Loaded from the operator environment or ignored mode-0600 .env file;
       # never bake this server-side credential into source or an image layer.
       - OPENCODE_SERVER_PASSWORD_FILE=/run/ingenium-bootstrap/opencode-server-password
       - INGENIUM_API_TOKEN_FILE=/run/ingenium-bootstrap/api-token
+      - INGENIUM_LEARNING_CREDENTIAL_FILE=/run/ingenium-bootstrap/learning-credential
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       - INGENIUM_API_PORT=4096
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/ingenium-opencode/.config/opencode
@@ -149,10 +153,11 @@ services:
       - opencode-config:/home/ingenium-opencode/.config
       - opencode-data:/home/ingenium-opencode/.local
       - "${INGENIUM_API_TOKEN_FILE:?INGENIUM_API_TOKEN_FILE must point to the protected host installation token}:/run/ingenium-bootstrap/api-token:ro"
+      - "${INGENIUM_LEARNING_CREDENTIAL_FILE:?INGENIUM_LEARNING_CREDENTIAL_FILE must point to the protected host learning credential}:/run/ingenium-bootstrap/learning-credential:ro"
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
-      - ./opencode.json:/app/opencode.json:ro
+      - "${INGENIUM_OPENCODE_CONFIG_FILE:-./opencode.json}:/app/opencode.json:ro"
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
       - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-gateway/token:ro"
     networks:
@@ -178,6 +183,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     group_add:
       - "${DOCKER_GID:-999}"
@@ -220,6 +226,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     container_name: ingenium-runtime-gateway
     labels:
@@ -271,6 +278,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     entrypoint: ["/bin/true"]
 
 volumes:

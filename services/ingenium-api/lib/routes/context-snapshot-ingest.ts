@@ -1,5 +1,6 @@
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { performance } from "node:perf_hooks";
+import { getDb } from "ingenium-core";
 import {
   CONTEXT_SNAPSHOT_MAX_BYTES,
   ImportContextConversationSnapshotInputSchema,
@@ -11,7 +12,9 @@ import {
   importContextConversationSnapshot,
   type ContextConversationSnapshotImportResult,
 } from "ingenium-core/lib/tools/context-snapshot-import";
+import { getContextConversation } from "ingenium-core/lib/tools/context-conversations";
 import { getProject, isValidProjectName } from "ingenium-core/lib/tools/projects";
+import { setSetting } from "ingenium-core/lib/tools/settings";
 
 /**
  * This dedicated binary route is a bearer-authenticated MCP-to-API transport
@@ -185,8 +188,29 @@ function parseSnapshotBody(body: unknown): unknown | null {
   }
 }
 
+function isCoordinationMemory(metadata: unknown): boolean {
+  let value = metadata;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return false;
+    }
+  }
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+    && (value as Record<string, unknown>).kind === "coordination_operational_memory";
+}
+
+function existingSnapshotTargetId(projectId: string, sourceKey: string, explicitTargetId?: string): string | undefined {
+  const mapping = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+    "SELECT conversation_id FROM context_conversation_sources WHERE project_id = ? AND source_key = ?",
+  ).get(projectId, sourceKey) as { conversation_id: string } | undefined;
+  return mapping?.conversation_id ?? explicitTargetId;
+}
+
 function sendImportError(res: Response, error: ContextSnapshotImportError): void {
   const contract: Record<ContextSnapshotImportError["code"], { status: number; code: string; message: string }> = {
+    CONTEXT_UPLOAD_DISABLED: { status: 409, code: "CONTEXT_UPLOAD_DISABLED", message: "Automatic Context upload is disabled." },
     INVALID_CONTEXT_SNAPSHOT: {
       status: 422,
       code: "INVALID_CONTEXT_SNAPSHOT",
@@ -293,6 +317,17 @@ contextSnapshotIngestRouter.post(
       sendSnapshotError(res, 422, "INVALID_CONTEXT_SNAPSHOT", "Snapshot ingest payload is invalid.");
       return;
     }
+    if (req.principal?.type === "service") {
+      const targetId = existingSnapshotTargetId(projectId, parsed.data.sourceKey, parsed.data.existingConversationId);
+      if (targetId) {
+        const target = getContextConversation(projectId, targetId);
+        if (req.authorizedProjectId !== projectId || !target || target.visibility !== "project"
+          || target.owner_user_id !== null || isCoordinationMemory(target.metadata)) {
+          sendSnapshotError(res, 404, "SNAPSHOT_TARGET_NOT_FOUND", "Snapshot target was not found.");
+          return;
+        }
+      }
+    }
     const jsonValidationMs = toBoundedContextSnapshotTimingMs(performance.now() - jsonValidationStartedAt);
 
     try {
@@ -300,6 +335,10 @@ contextSnapshotIngestRouter.post(
       // snapshot; API code never iterates or appends individual messages.
       const coreImportStartedAt = performance.now();
       const result = importContextConversationSnapshot(projectId, parsed.data);
+      if (parsed.data.sourceKey.startsWith("context-upload-file:") && parsed.data.sourceSessionId) {
+        setSetting(projectId, "context_upload_last_sync", JSON.stringify({ status: "synced",
+          at: new Date().toISOString(), session: parsed.data.sourceSessionId, revision: result.revision }));
+      }
       const coreImportMs = toBoundedContextSnapshotTimingMs(performance.now() - coreImportStartedAt);
       res.status(result.created ? 201 : 200).json({
         data: snapshotResponse(result, snapshotIngestTiming(req, jsonValidationMs, coreImportMs)),

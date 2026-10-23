@@ -34,7 +34,7 @@ const ADMIN_PROJECT_PREFIXES = ["/api/v1/mcp-tools", "/api/v1/mcp-servers"];
 const INSTALLATION_PROJECT_PREFIXES = ["/api/v1/config"];
 const PRIVATE_PREFIXES = ["/api/v1/context", "/api/v1/emails"];
 const PROJECT_PREFIXES = [
-  "/api/v1/skills", "/api/v1/tasks", "/api/v1/coordination", "/api/v1/context",
+  "/api/v1/skills", "/api/v1/tasks", "/api/v1/context",
   "/api/v1/plugins", "/api/v1/servers", "/api/v1/settings", "/api/v1/agents",
   "/api/v1/observations", "/api/v1/personality", "/api/v1/pipeline", "/api/v1/emails",
   "/api/v1/commands", "/api/v1/extraction", "/api/v1/jobs", "/api/v1/dashboard",
@@ -50,8 +50,6 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 function permissionFor(req: Request): PolicyPermission {
   if (READ_METHODS.has(req.method)) return "read";
   if (req.method === "DELETE" && req.path.startsWith("/api/v1/memory/")) return "write";
-  if (req.method === "POST" && req.path === "/api/v1/coordination/memory/read") return "read";
-  if (req.method === "POST" && req.path === "/api/v1/coordination/epoch/recover") return "write";
   if (/\/(run|sync|execute|test|connect|disconnect|prompt|command|abort|compact|fork|revert|unrevert)(?:\/|$)/.test(req.path)) return "execute";
   if (req.method === "DELETE" || /\/(purge|restore|global|authorize|approve|rollback|recover)(?:\/|$)/.test(req.path)) return "admin";
   return "write";
@@ -68,6 +66,12 @@ function isProjectScopedDocumentationRead(req: Pick<Request, "method" | "path">)
     || /^\/api\/v1\/docs\/pages\/[^/]+$/.test(req.path));
 }
 
+function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "path">): boolean {
+  if (req.method === "POST" && req.path === "/api/v1/context/conversations/import") return true;
+  if (req.method === "GET" && /^\/api\/v1\/context\/conversations\/[^/]+\/messages\/(?!search$)[^/]+$/.test(req.path)) return true;
+  return req.method === "POST" && /^\/api\/v1\/context\/conversations\/[^/]+\/(?:maintenance\/authorize|archive)$/.test(req.path);
+}
+
 export function policyForRequest(req: Pick<Request, "method" | "path">): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
   if ((req.method === "GET" && req.path === "/auth/callback") || PUBLIC_AUTH_PATHS.has(route)) return PUBLIC_POLICY;
@@ -79,6 +83,10 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
   }
   if (req.method === "POST" && req.path === "/api/v1/runtimes/activity") {
     return { action: "runtimes.activity.write", resource: "runtimes", permission: "write", target: "runtime-capability", sensitive: true };
+  }
+  // Match Express's default case-insensitive, optional trailing-slash route semantics.
+  if (req.method === "POST" && /^\/api\/v1\/runtimes\/browser\/workspaces\/[^/]+\/automation\/?$/i.test(req.path)) {
+    return { action: "runtimes.automation.authorize", resource: "runtimes", permission: "write", target: "private", sensitive: true, browserSessionOnly: true, stepUp: true };
   }
   if (req.path.startsWith("/api/v1/runtimes/browser/")) {
     const permission = permissionFor(req as Request);
@@ -342,6 +350,8 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
     throw new AppError("The authenticated principal cannot perform this action", "FORBIDDEN", 403);
   }
   const principal = toAuthorizationPrincipal(req.principal);
+  const projectBoundServiceContext = policy.target === "private" && req.principal.type === "service"
+    && isProjectBoundServiceContextOperation(req);
   let decision: authorization.AuthorizationDecision;
   if (req.principal.type === "service" && isProjectScopedDocumentationRead(req)) {
     const project = requestedProject(req);
@@ -374,7 +384,20 @@ export function authorizationMiddleware(req: Request, _res: Response, next: Next
         ? authorization.requireProjectPermission(principal, project.id, policy.resource, policy.permission)
         : { allowed: false, visible: false };
     }
-    if (policy.target === "private" && !req.path.startsWith("/api/v1/auth/")) {
+    if (projectBoundServiceContext && req.principal.type === "service") {
+      const project = requestedProject(req);
+      const attestation = req.attestedCoordinationIdentity;
+      // The exact route and launcher attestation are the mutation capability;
+      // projects:read only proves the configured MCP credential's project grant.
+      decision = req.principal.audience === "mcp" && project && project.id === req.principal.projectId
+        && req.principal.projectIds?.includes(project.id)
+        && attestation?.credentialId === req.principal.tokenId
+        && attestation.workspaceId === req.principal.workspaceId
+        && attestation.storageMappingHash === req.principal.storageMappingHash
+        ? authorization.requireProjectPermission(principal, project.id, "projects", "read")
+        : { allowed: false, visible: false };
+    }
+    if (policy.target === "private" && !req.path.startsWith("/api/v1/auth/") && !projectBoundServiceContext) {
       const browserUser = principal.type === "browser-user";
       if (req.principal.type !== "service" || !req.path.startsWith("/api/v1/memory")) {
         decision = { allowed: browserUser, visible: browserUser };

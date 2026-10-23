@@ -52,4 +52,11 @@ describe("MCP server startup", () => {
     expect(source.match(/server\.registerTool\(\s*"repository_sync"/g)).toHaveLength(1);
     expect(source).toMatch(/"repository_sync",[\s\S]*?docsManifest: repositoryDocsManifestParam,[\s\S]*?wrapLauncherBoundHandler\(C\("repository_sync"\), launcherProject/);
   });
+
+  it("does not register retired coordination transport tools", () => {
+    const source = readFileSync(SERVER_SOURCE_PATH, "utf8");
+
+    expect(source.match(/server\.registerTool\(\s*"coordination_[a-z_]+"/g)).toBeNull();
+    expect(source).not.toContain("coordinationTools");
+  });
 });

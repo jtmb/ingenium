@@ -37,7 +37,8 @@ describe("learning credential packaging boundary", () => {
     expect(dockerignore).toContain("**/.opencode/.ingenium-learning-credential");
     expect(dockerfile).toContain("COPY . .");
     expect(packageJson.files).toEqual([
-      "dist/", "scripts/recovery-bootstrap.js", "README.md", "plugin-specs.mjs", "ponytail/",
+      "dist/", "context-upload-codec.mjs", "context-upload-codec.d.mts", "scripts/recovery-bootstrap.js",
+      "README.md", "plugin-specs.mjs", "ponytail/",
     ]);
     expect(packageJson.files?.some((path) => path.includes(".opencode"))).toBe(false);
   });

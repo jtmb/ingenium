@@ -37,7 +37,7 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
     if (status === "ok" || status === "running" || status === "healthy") bg = "bg-green-500";
     if (status === "degraded") bg = "bg-amber-500";
     if (status === "down" || status === "error" || status === "stopped" || status === "unhealthy") bg = "bg-red-500";
-    return <span className={`inline-block w-2 h-2 rounded-full ${bg} shrink-0`} />;
+    return <span aria-hidden="true" className={`inline-block w-2 h-2 rounded-full ${bg} shrink-0`} />;
   };
 
   // Compute overall summary — three-tier health assessment:
@@ -112,7 +112,9 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
               {data.services.map((svc, i) => (
                 <span key={i} className="inline-flex items-center gap-1">
                   {dot(svc.status)}
-                  <span className="text-xs text-[var(--color-text-muted)]">{svc.name}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    {svc.name}: {svc.status || "unknown"}{svc.required === false ? " (optional)" : ""}
+                  </span>
                 </span>
               ))}
             </span>

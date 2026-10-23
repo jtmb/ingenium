@@ -653,7 +653,11 @@ try {
 }
 
 if (config) {
-  for (const entry of Array.isArray(config.plugin) ? config.plugin : []) {
+  const pluginEntries = [
+    ...(Array.isArray(config.plugins) ? config.plugins : []),
+    ...(Array.isArray(config.plugin) ? config.plugin : []),
+  ];
+  for (const entry of pluginEntries) {
     const source = typeof entry === "string" ? entry : entry && typeof entry.path === "string" ? entry.path : null;
     if (source === null) continue;
     const normalized = source.replace(/^\.\//, "").replaceAll("\\", "/");
@@ -675,7 +679,11 @@ NODE
     printf '%b✅ CLEAN: %s configured extension plugin source path(s) and implementation closure%b\n' "$GREEN" "$(node --input-type=module -e '
       import { readFileSync } from "node:fs";
       const config = JSON.parse(readFileSync(process.argv[1], "utf8"));
-      console.log((Array.isArray(config.plugin) ? config.plugin : []).filter((entry) => {
+      const entries = [
+        ...(Array.isArray(config.plugins) ? config.plugins : []),
+        ...(Array.isArray(config.plugin) ? config.plugin : []),
+      ];
+      console.log(entries.filter((entry) => {
         const source = typeof entry === "string" ? entry : entry && typeof entry.path === "string" ? entry.path : "";
         return source.replace(/^\.\//, "").startsWith("packages/ingenium-extension/");
       }).length);

@@ -34,6 +34,7 @@ reject_text docker-compose.yml '${HOME:-~}/repos'
 rendered_config="$(
   HOME="$RENDER_HOME" \
   OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
+  INGENIUM_LEARNING_CREDENTIAL_FILE=/tmp/learning-credential \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
   DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \
@@ -47,6 +48,7 @@ expected_mount=$'        source: /tmp/ingenium-workspace-contract-home/repos\n  
 # HOME is required rather than silently falling back to an arbitrary host path.
 if env -u HOME \
   OPENCODE_SERVER_PASSWORD_FILE=/tmp/opencode-server.password \
+  INGENIUM_LEARNING_CREDENTIAL_FILE=/tmp/learning-credential \
   INGENIUM_EMAIL_ENCRYPTION_KEY_FILE=/tmp/email-encryption.key \
   INGENIUM_RUNTIME_ROOT_DOMAIN=runtime.example.test \
   DASHBOARD_ALLOWED_ORIGINS=https://dashboard.example.test \

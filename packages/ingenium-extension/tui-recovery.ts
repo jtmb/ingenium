@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import {
   closeSync,
   constants,
@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -22,6 +23,7 @@ import { CoordinationOutbox } from "./coordination-outbox.js";
 import type { ApiAuthenticationBinding } from "./api-auth.js";
 import type { ExtensionBinding } from "./extension-binding.js";
 import { isValidExtensionProjectName } from "./project-name.js";
+import { mcpToolData, openMcpToolClient, type McpToolClient } from "./mcp-client.js";
 import {
   parseRedactedRestartHandoff,
   type RedactedRestartHandoff,
@@ -59,15 +61,6 @@ export interface ManagedRecoveryEnrollment {
   binding: ManagedRecoveryBinding;
   parent: RestartProcessIdentity & { port: number | null; dataHome: string };
   handoff: RedactedRestartHandoff;
-}
-
-export interface LegacyRecoveryCoordination {
-  sessionIdSha256: string;
-  incarnation: number;
-  revision: number;
-  fence: number;
-  captureClaimEpoch: number;
-  captureClaimSha256: string;
 }
 
 type RecoveryOwnerIdentity = RestartProcessIdentity;
@@ -130,7 +123,6 @@ interface LegacyOwnerBootstrap {
 
 export interface LegacyRecoveryHandoff extends ManagedRecoveryEnrollment {
   schemaVersion: 1;
-  coordination: LegacyRecoveryCoordination;
 }
 
 type RecoveryEventName = "attach_started" | "attach_healthy" | "adoption" | "rollback" | "fence_transition";
@@ -364,6 +356,197 @@ function readJson(path: string): unknown {
   }
 }
 
+export interface CurrentRecoverySession {
+  role: string;
+  sessionId: string;
+  coordinationSessionId: string;
+  worktreeId: string;
+  incarnation: number;
+  revision: number;
+  fence: number;
+  epoch: number | null;
+  claimReferenceSha256: string | null;
+  handoff: RedactedRestartHandoff;
+  todos: Array<{ id: string; status: "pending" | "in_progress" | "completed" | "cancelled" }>;
+}
+
+interface CurrentRecoveryHandoff {
+  status: RedactedRestartHandoff["status"];
+  taskHash: string | null;
+  actionsSha256: string;
+  changedPathsSha256: string;
+  checks: RedactedRestartHandoff["checks"];
+  todos: Array<{ idSha256: string; status: CurrentRecoverySession["todos"][number]["status"] }>;
+  nextWork: RedactedRestartHandoff["nextWork"];
+}
+
+export interface CurrentParentRecoveryRecord {
+  schemaVersion: 1;
+  binding: ManagedRecoveryBinding;
+  runtimeId: string;
+  parent: RestartProcessIdentity;
+  controlPlane: string;
+  sourceHead: string;
+  sourceClean: boolean;
+  expiresAt: number;
+  sessions: Array<Omit<CurrentRecoverySession, "handoff" | "todos"> & { handoff: CurrentRecoveryHandoff }>;
+  enrollmentSha256: string;
+}
+
+export function currentRecoverySource(worktree: string): { head: string; clean: boolean } {
+  const git = (args: string[]) => execFileSync("git", ["-c", "core.fsmonitor=false", ...args], {
+    cwd: worktree, encoding: "utf8", timeout: 5_000, maxBuffer: 1024 * 1024,
+    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+  }).trim();
+  return { head: git(["rev-parse", "HEAD"]), clean: git(["status", "--porcelain", "--untracked-files=all"]) === "" };
+}
+
+function validControlPlane(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.origin === value && ["http:", "https:"].includes(url.protocol)
+      && ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname)
+      && !url.username && !url.password;
+  } catch { return false; }
+}
+
+function parseCurrentParent(value: unknown): CurrentParentRecoveryRecord {
+  const invalid = () => { throw new Error("Current parent recovery record is invalid"); };
+  if (!hasExactKeys(value, ["schemaVersion", "binding", "runtimeId", "parent", "controlPlane", "sourceHead",
+    "sourceClean", "expiresAt", "sessions", "enrollmentSha256"])) return invalid();
+  const record = value as unknown as CurrentParentRecoveryRecord;
+  const { binding, parent } = record;
+  if (record.schemaVersion !== 1
+    || !hasExactKeys(binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
+    || !isValidExtensionProjectName(binding.project) || typeof binding.projectId !== "string" || !UUID.test(binding.projectId)
+    || typeof binding.workspaceId !== "string" || !SAFE_ID.test(binding.workspaceId)
+    || typeof binding.storageMappingHash !== "string" || !HASH.test(binding.storageMappingHash) || typeof binding.launcherWorktree !== "string"
+    || resolve(binding.launcherWorktree) !== binding.launcherWorktree
+    || !hasExactKeys(parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+    || typeof record.runtimeId !== "string" || !UUID.test(record.runtimeId) || typeof record.controlPlane !== "string" || !validControlPlane(record.controlPlane)
+    || typeof record.sourceHead !== "string" || !/^[0-9a-f]{40,64}$/.test(record.sourceHead)
+    || typeof record.sourceClean !== "boolean" || !Number.isSafeInteger(record.expiresAt)
+    || !Array.isArray(record.sessions) || record.sessions.length > 64) return invalid();
+  parseIdentity(parent);
+  if (parent.nonceSha256 === "0".repeat(64)) return invalid();
+  const ids = new Set<string>();
+  for (const session of record.sessions) {
+    if (!hasExactKeys(session, ["role", "sessionId", "coordinationSessionId", "worktreeId", "incarnation", "revision", "fence",
+      "epoch", "claimReferenceSha256", "handoff"])
+      || !isValidRecoveryRole(session.role)
+      || typeof session.sessionId !== "string" || !SAFE_SESSION_ID.test(session.sessionId)
+      || session.coordinationSessionId !== `session-${hash(session.sessionId)}`
+      || session.worktreeId !== `worktree-${hash(`${binding.workspaceId}\0${binding.storageMappingHash}`)}` || ids.has(session.sessionId)
+      || !Number.isSafeInteger(session.incarnation) || session.incarnation < 1
+      || !Number.isSafeInteger(session.revision) || session.revision < 0
+      || !Number.isSafeInteger(session.fence) || session.fence < 1
+      || (session.epoch !== null && (!Number.isSafeInteger(session.epoch) || session.epoch < 1))
+      || (session.claimReferenceSha256 !== null && (typeof session.claimReferenceSha256 !== "string" || !HASH.test(session.claimReferenceSha256)))
+      || (session.epoch === null && session.claimReferenceSha256 !== null)) return invalid();
+    ids.add(session.sessionId);
+    const handoff = session.handoff;
+    if (!hasExactKeys(handoff, ["status", "taskHash", "actionsSha256", "changedPathsSha256", "checks", "todos", "nextWork"])
+      || typeof handoff.actionsSha256 !== "string" || !HASH.test(handoff.actionsSha256)
+      || typeof handoff.changedPathsSha256 !== "string" || !HASH.test(handoff.changedPathsSha256)
+      || !Array.isArray(handoff.todos) || handoff.todos.length > 256
+      || handoff.todos.some((todo) => !hasExactKeys(todo, ["idSha256", "status"]) || typeof todo.idSha256 !== "string" || !HASH.test(todo.idSha256)
+        || !["pending", "in_progress", "completed", "cancelled"].includes(todo.status))
+      || new Set(handoff.todos.map((todo) => todo.idSha256)).size !== handoff.todos.length) return invalid();
+    parseRedactedRestartHandoff({ status: handoff.status, taskHash: handoff.taskHash, actions: [], changedPaths: [],
+      replay: { sessionIdSha256: hash(session.sessionId), todos: [] },
+      checks: handoff.checks, nextWork: handoff.nextWork,
+      todos: { total: 0, pending: 0, inProgress: 0, completed: 0, cancelled: 0, state: "none" } });
+  }
+  const { enrollmentSha256, ...payload } = record;
+  if (typeof enrollmentSha256 !== "string" || !HASH.test(enrollmentSha256) || hash(JSON.stringify(payload)) !== enrollmentSha256) return invalid();
+  return record;
+}
+
+export function isValidRecoveryRole(value: unknown): value is string {
+  return typeof value === "string" && SAFE_ID.test(value);
+}
+
+export function publishCurrentParentRecovery(input: {
+  binding: ManagedRecoveryBinding;
+  runtimeId: string;
+  nonce: string;
+  controlPlane: string;
+  source: { head: string; clean: boolean };
+  sessions: CurrentRecoverySession[];
+}): string {
+  if (!BASE64URL.test(input.nonce) || input.nonce.length < 43 || input.nonce.length > 128) throw new Error("Current parent nonce is unavailable");
+  const parent = processIdentity(process.pid, hash(input.nonce));
+  if (!parent || realpathSync(input.binding.launcherWorktree) !== input.binding.launcherWorktree) {
+    throw new Error("Current parent identity is unavailable");
+  }
+  const payload = {
+    schemaVersion: 1 as const, binding: input.binding, runtimeId: input.runtimeId, parent,
+    controlPlane: input.controlPlane, sourceHead: input.source.head, sourceClean: input.source.clean,
+    expiresAt: Date.now() + 60_000,
+    sessions: input.sessions.map(({ handoff: raw, todos, ...session }) => {
+      const handoff = parseRedactedRestartHandoff(raw);
+      if (handoff.replay.sessionIdSha256 !== hash(session.sessionId)
+        || JSON.stringify(todos) !== JSON.stringify(handoff.replay.todos.map(({ id, status }) => ({ id, status })))) {
+        throw new Error("Current parent replay identity changed");
+      }
+      return { ...session, handoff: {
+        status: handoff.status, taskHash: handoff.taskHash,
+        actionsSha256: hash(JSON.stringify(handoff.actions)), changedPathsSha256: hash(JSON.stringify(handoff.changedPaths)),
+        checks: handoff.checks, todos: todos.map(({ id, status }) => ({ idSha256: hash(id), status })), nextWork: handoff.nextWork,
+      } };
+    }),
+  };
+  const record = parseCurrentParent({ ...payload, enrollmentSha256: hash(JSON.stringify(payload)) });
+  const path = join(recoveryDirectory(input.binding.launcherWorktree), `current-parent-${input.runtimeId}.json`);
+  atomicWrite(path, record);
+  return path;
+}
+
+/** Discovery is not restart admission: no ownership token, takeover, or activation authority is returned. */
+export function readCurrentParentRecoveryCandidate(binding: ManagedRecoveryBinding): CurrentParentRecoveryRecord {
+  if (!hasExactKeys(binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])) {
+    throw new Error("Incomplete recovery binding");
+  }
+  const root = realpathSync(binding.launcherWorktree);
+  if (root !== binding.launcherWorktree) throw new Error("Foreign recovery worktree");
+  const directory = join(root, ".opencode", "protected-runtime-index", "tui-recovery");
+  for (const path of [join(root, ".opencode"), dirname(directory), directory]) {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(path) !== path
+      || (ownerUid() !== undefined && stat.uid !== ownerUid())
+      || (path !== join(root, ".opencode") && (stat.mode & 0o777) !== 0o700)) {
+      throw new Error("Recovery index is not private");
+    }
+  }
+  const source = currentRecoverySource(root);
+  if (!source.clean) throw new Error("Dirty recovery source");
+  const candidates: CurrentParentRecoveryRecord[] = [];
+  const namesAt = () => readdirSync(directory).filter((name) => name.startsWith("current-parent-") && name.endsWith(".json")).sort();
+  const names = namesAt();
+  const enrollments: string[] = [];
+  if (names.length > 128) throw new Error("Recovery index exceeds discovery bound");
+  for (const name of names) {
+    const record = parseCurrentParent(readJson(join(directory, name)));
+    enrollments.push(record.enrollmentSha256);
+    if (name !== `current-parent-${record.runtimeId}.json`
+      || Object.keys(binding).some((key) => binding[key as keyof ManagedRecoveryBinding] !== record.binding[key as keyof ManagedRecoveryBinding])) {
+      throw new Error("Foreign recovery binding");
+    }
+    if (record.expiresAt <= Date.now() || record.expiresAt > Date.now() + 60_000
+      || !identitiesMatch(processIdentity(record.parent.pid, record.parent.nonceSha256), record.parent)) continue;
+    if (!record.sourceClean || record.sourceHead !== source.head) throw new Error("Unmatched recovery source");
+    if (record.sessions.length > 1) throw new Error("Ambiguous recovery sessions");
+    if (record.sessions.length === 1) candidates.push(record);
+  }
+  if (candidates.length !== 1) throw new Error(candidates.length ? "Ambiguous recovery parents" : "No live recovery candidate");
+  const afterSource = currentRecoverySource(root);
+  if (!afterSource.clean || afterSource.head !== source.head || JSON.stringify(namesAt()) !== JSON.stringify(names)
+    || names.some((name, index) => parseCurrentParent(readJson(join(directory, name))).enrollmentSha256 !== enrollments[index])) {
+    throw new Error("Recovery index changed during discovery");
+  }
+  return candidates[0]!;
+}
+
 export function recoveryServerAuthenticationPath(dataHome: string): string {
   return join(realpathSync(resolve(dataHome)), ".ingenium-recovery-server-auth.json");
 }
@@ -376,6 +559,53 @@ export function readRecoveryServerAuthentication(dataHome: string): RecoveryServ
     throw new Error("Recovery server authentication is unavailable");
   }
   return { username: value.username, password: value.password };
+}
+
+export async function verifyRecoveryMcpBinding(client: McpToolClient, binding: ManagedRecoveryBinding): Promise<void> {
+  const catalog = await client.listTools?.();
+  if (!isRecord(catalog) || !Array.isArray(catalog.tools) || catalog.tools.length > 1024 || catalog.nextCursor !== undefined
+    || !catalog.tools.some((tool) => isRecord(tool) && tool.name === "project_detail")) {
+    throw new Error("Recovery MCP tools/list failed");
+  }
+  const result = mcpToolData(await client.callTool("project_detail", { name: binding.project }));
+  const data = isRecord(result) && Object.hasOwn(result, "data") ? result.data : result;
+  if (!isRecord(data) || !isRecord(data.project) || data.project.id !== binding.projectId || data.project.name !== binding.project) {
+    throw new Error("Recovery MCP project binding changed");
+  }
+}
+
+export async function publishRecoveryMcpCanary(binding: ManagedRecoveryBinding): Promise<void> {
+  const nonce = process.env.INGENIUM_RESTART_NONCE;
+  const port = Number(process.env[PORT_ENV]);
+  if (!nonce || !process.env[OWNER_NONCE_ENV]) return;
+  const dataHome = currentDataHome();
+  const parent = processIdentity(process.pid, hash(nonce));
+  if (!dataHome || !parent || !Number.isSafeInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("Recovery MCP successor identity is unavailable");
+  }
+  readRecoveryServerAuthentication(dataHome);
+  const client = await openMcpToolClient(binding.launcherWorktree, { project: binding.project, credentialPurpose: "general" });
+  try {
+    await verifyRecoveryMcpBinding(client, binding);
+    atomicWrite(join(dataHome, ".ingenium-recovery-mcp-canary.json"), {
+      schemaVersion: 1, parent, binding, port, initialized: true, toolsListed: true, projectVerified: true, expiresAt: Date.now() + 300_000,
+    });
+  } finally { await client.close(); }
+}
+
+export function verifyRecoveryMcpCanary(
+  dataHome: string, binding: ManagedRecoveryBinding, parent: RestartProcessIdentity, port: number,
+): void {
+  const value = readJson(join(dataHome, ".ingenium-recovery-mcp-canary.json"));
+  if (!hasExactKeys(value, ["schemaVersion", "parent", "binding", "port", "initialized", "toolsListed", "projectVerified", "expiresAt"])
+    || value.schemaVersion !== 1 || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256"])
+    || !identitiesMatch(parseIdentity(value.parent), parent) || value.port !== port
+    || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
+    || Object.entries(binding).some(([key, entry]) => (value.binding as Record<string, unknown>)[key] !== entry)
+    || value.initialized !== true || value.toolsListed !== true || value.projectVerified !== true
+    || !Number.isSafeInteger(value.expiresAt) || Number(value.expiresAt) <= Date.now() || Number(value.expiresAt) > Date.now() + 300_000) {
+    throw new Error("Recovery MCP successor canary is invalid");
+  }
 }
 
 function removeRecoveryServerAuthentication(dataHome: string): void {
@@ -544,9 +774,11 @@ function journalCoherence(state: RecoveryState): Pick<RecoveryJournal,
 }
 
 function writeJournal(worktree: string, state: RecoveryState, input: ManagedRecoveryJournalInput | RecoveryJournal): void {
+  const { replay, status, taskHash, actions, changedPaths, checks, todos, nextWork } = input;
+  const handoff = parseRedactedRestartHandoff({ replay, status, taskHash, actions, changedPaths, checks, todos, nextWork });
   atomicWrite(join(recoveryDirectory(worktree), "journal.json"), {
     schemaVersion: 1,
-    ...input,
+    ...handoff,
     ...journalCoherence(state),
   } satisfies RecoveryJournal);
 }
@@ -564,6 +796,7 @@ export function readManagedRecoveryEnrollment(worktree: string): ManagedRecovery
       || journal.transactionSha256 !== null || journal.replacementIdentitySha256 !== null
       || journal.boundIdentitySha256 !== identitySha256(parent)) return undefined;
     const handoff = parseRedactedRestartHandoff({
+      replay: journal.replay,
       status: journal.status,
       taskHash: journal.taskHash,
       actions: journal.actions,
@@ -683,18 +916,12 @@ export function persistLegacyRecoveryHandoff(
   binding: ManagedRecoveryBinding,
   parent: RestartProcessIdentity & { port: null; dataHome: string },
   handoff: RedactedRestartHandoff,
-  coordination: LegacyRecoveryCoordination,
 ): string {
   const canonicalWorktree = realpathSync(resolve(worktree));
   const validatedHandoff = parseRedactedRestartHandoff(handoff);
   if (binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(binding.project)
     || !UUID.test(binding.projectId) || !SAFE_ID.test(binding.workspaceId) || !HASH.test(binding.storageMappingHash)
-    || resolve(parent.dataHome) !== parent.dataHome || !processMatchesAttestedIdentity(parseIdentity(parent), true)
-    || !HASH.test(coordination.sessionIdSha256) || !Number.isSafeInteger(coordination.incarnation)
-    || coordination.incarnation < 1 || !Number.isSafeInteger(coordination.revision) || coordination.revision < 0
-    || !Number.isSafeInteger(coordination.fence) || coordination.fence < 1
-    || !Number.isSafeInteger(coordination.captureClaimEpoch) || coordination.captureClaimEpoch < 1
-    || !HASH.test(coordination.captureClaimSha256)) {
+    || resolve(parent.dataHome) !== parent.dataHome || !processMatchesAttestedIdentity(parseIdentity(parent), true)) {
     throw new Error("Legacy recovery handoff is invalid");
   }
   const path = join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json");
@@ -703,7 +930,6 @@ export function persistLegacyRecoveryHandoff(
     binding,
     parent,
     handoff: validatedHandoff,
-    coordination,
   } satisfies LegacyRecoveryHandoff);
   return path;
 }
@@ -712,27 +938,17 @@ export function readLegacyRecoveryHandoff(worktree: string): LegacyRecoveryHando
   try {
     const canonicalWorktree = realpathSync(resolve(worktree));
     const value = readJson(join(recoveryDirectory(canonicalWorktree), "legacy-handoff.json"));
-    if (!hasExactKeys(value, ["schemaVersion", "binding", "parent", "handoff", "coordination"])
+    if (!hasExactKeys(value, ["schemaVersion", "binding", "parent", "handoff"])
       || value.schemaVersion !== 1
       || !hasExactKeys(value.binding, ["project", "projectId", "workspaceId", "launcherWorktree", "storageMappingHash"])
-      || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])
-      || !hasExactKeys(value.coordination, [
-        "sessionIdSha256", "incarnation", "revision", "fence", "captureClaimEpoch", "captureClaimSha256",
-      ])) return undefined;
+      || !hasExactKeys(value.parent, ["pid", "startTimeTicks", "executableSha256", "nonceSha256", "port", "dataHome"])) return undefined;
     const parent = parseIdentity(value.parent);
-    const coordination = value.coordination;
     if (value.binding.launcherWorktree !== canonicalWorktree || !isValidExtensionProjectName(value.binding.project)
       || typeof value.binding.projectId !== "string" || !UUID.test(value.binding.projectId)
       || typeof value.binding.workspaceId !== "string" || !SAFE_ID.test(value.binding.workspaceId)
       || typeof value.binding.storageMappingHash !== "string" || !HASH.test(value.binding.storageMappingHash)
       || value.parent.port !== null || typeof value.parent.dataHome !== "string"
       || resolve(value.parent.dataHome) !== value.parent.dataHome
-      || typeof coordination.sessionIdSha256 !== "string" || !HASH.test(coordination.sessionIdSha256)
-      || !Number.isSafeInteger(coordination.incarnation) || (coordination.incarnation as number) < 1
-      || !Number.isSafeInteger(coordination.revision) || (coordination.revision as number) < 0
-      || !Number.isSafeInteger(coordination.fence) || (coordination.fence as number) < 1
-      || !Number.isSafeInteger(coordination.captureClaimEpoch) || (coordination.captureClaimEpoch as number) < 1
-      || typeof coordination.captureClaimSha256 !== "string" || !HASH.test(coordination.captureClaimSha256)
       || !processMatchesAttestedIdentity(parent, true)) return undefined;
     return {
       schemaVersion: 1,
@@ -745,7 +961,6 @@ export function readLegacyRecoveryHandoff(worktree: string): LegacyRecoveryHando
       },
       parent: { ...parent, port: null, dataHome: value.parent.dataHome },
       handoff: parseRedactedRestartHandoff(value.handoff),
-      coordination: coordination as unknown as LegacyRecoveryCoordination,
     };
   } catch {
     return undefined;
@@ -805,6 +1020,7 @@ export async function prepareManagedRecoveryReplacement(
     }
     const preparedJournal = readJson(join(recoveryDirectory(worktree), "journal.json")) as RecoveryJournal;
     const durableHandoff = {
+      replay: preparedJournal.replay,
       status: preparedJournal.status,
       taskHash: preparedJournal.taskHash,
       actions: preparedJournal.actions,
@@ -1201,6 +1417,14 @@ async function spawnManagedTui(
   argv: string[],
 ): Promise<ChildProcess> {
   if (argv.some((value) => value === "--port" || value.startsWith("--port="))) throw new Error("ingenium-opencode owns the recovery port");
+  let password = process.env.OPENCODE_SERVER_PASSWORD;
+  if (!password || !/^[A-Za-z0-9_-]{43,128}$/.test(password)) {
+    try {
+      password = randomBytes(32).toString("base64url");
+    } catch {
+      throw new Error("TUI recovery server authentication is unavailable");
+    }
+  }
   const reservation = await reservePort();
   const nonce = randomBytes(32).toString("base64url");
   await closeServer(reservation.server);
@@ -1210,6 +1434,7 @@ async function spawnManagedTui(
     stdio: "inherit",
     env: {
       ...process.env,
+      OPENCODE_SERVER_PASSWORD: password,
       PWD: worktree,
       INGENIUM_WORKTREE: worktree,
       INGENIUM_RESTART_NONCE: nonce,

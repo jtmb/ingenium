@@ -1,69 +1,186 @@
 ---
-name: ingenium-docs
 description: "Documentation and skill management agent. Updates directly affected canonical documentation or documentation explicitly requested by the user."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit:
-    "*": allow
-    "next-steps-plan/**": deny
-  write:
-    "*": allow
-    "next-steps-plan/**": deny
-  bash:
-    "*": allow
-    "next-steps-plan/**": deny
-  glob: allow
-  grep: allow
-  playwright_*: deny
-  ingenium_docs_search: allow
-  ingenium_docs_get_page: allow
-  ingenium_docs_create_page: allow
-  ingenium_docs_update_page: allow
-  ingenium_docs_delete_page: allow
-  ingenium_docs_restore_page: allow
-  ingenium_docs_move_page: allow
-  ingenium_docs_list_spaces: allow
-  ingenium_docs_get_space: allow
-  ingenium_docs_create_space: allow
-  ingenium_docs_get_page_tree: allow
-  ingenium_docs_get_draft: allow
-  ingenium_docs_save_draft: allow
-  ingenium_docs_list_versions: allow
-  ingenium_docs_restore_version: allow
-  ingenium_docs_list_tags: allow
-  ingenium_docs_get_page_tags: allow
-  ingenium_docs_add_tag: allow
-  ingenium_docs_remove_tag: allow
-  ingenium_docs_get_backlinks: allow
-  ingenium_docs_list_comments: allow
-  ingenium_docs_create_comment: allow
-  ingenium_docs_resolve_comment: allow
-  ingenium_docs_delete_comment: allow
-  ingenium_docs_list_templates: allow
-  ingenium_docs_get_template: allow
-  ingenium_docs_create_template: allow
-  ingenium_docs_toggle_favorite: allow
-  ingenium_docs_get_favorites: allow
-  ingenium_docs_link_project: allow
-  ingenium_docs_unlink_project: allow
-  ingenium_docs_import_pages: allow
-  ingenium_docs_export_space: allow
-  ingenium_docs_get_stats: allow
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: edit
+    resource: next-steps-plan/next-steps-template.md
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_create_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_update_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_delete_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_restore_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_move_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_spaces
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_space
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_create_space
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page_tree
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_draft
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_save_draft
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_versions
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_restore_version
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_tags
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page_tags
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_add_tag
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_remove_tag
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_backlinks
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_comments
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_create_comment
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_resolve_comment
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_delete_comment
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_templates
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_template
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_create_template
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_toggle_favorite
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_favorites
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_link_project
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_unlink_project
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_import_pages
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_export_space
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_stats
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
 
 # Ingenium Docs

@@ -79,7 +79,7 @@ describe("repository-authoritative documentation manifests", () => {
     ] })).toThrow(RepositoryDocsManifestError);
   });
 
-  it("bounds each document and aggregate documentation at 2 MiB of UTF-8 bytes", () => {
+  it("bounds each document at 2 MiB and aggregate documentation at 3 MiB of UTF-8 bytes", () => {
     const budget = 2 * 1024 * 1024;
     const full = entry("docs/full.md", "é".repeat(budget / 2));
     expect(validateRepositoryDocsManifest({ files: [full] }).files).toEqual([full]);
@@ -88,7 +88,7 @@ describe("repository-authoritative documentation manifests", () => {
     ] })).toThrow(RepositoryDocsManifestError);
 
     const half = "é".repeat(budget / 4);
-    const files = [entry("docs/first.md", half), entry("docs/second.md", half)];
+    const files = [entry("docs/first.md", half), entry("docs/second.md", half), entry("docs/third.md", half)];
     expect(validateRepositoryDocsManifest({ files }).files).toEqual(files);
     expect(() => validateRepositoryDocsManifest({ files: [...files, entry("docs/extra.md", "x")] }))
       .toThrow(RepositoryDocsManifestError);

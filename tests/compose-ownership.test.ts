@@ -1,11 +1,15 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import {
   inspectComposeOwnership,
   type DockerReadOnlyRunner,
 } from "./compose-ownership";
 
 const repoRoot = resolve(import.meta.dirname, "..");
+const dockerfile = readFileSync(resolve(repoRoot, "Dockerfile"), "utf8");
+const composeFile = readFileSync(resolve(repoRoot, "docker-compose.yml"), "utf8");
 const containerId = "a".repeat(64);
 const replacementContainerId = "b".repeat(64);
 const revision = "e5e76703f6daf45b972e41894cfc9f33ff3961d5";
@@ -15,7 +19,7 @@ function healthyContainer(
   service: "ingenium" | "control-plane" = "ingenium",
 ): Record<string, unknown> {
   const labels = {
-    "com.docker.compose.project": "ingenium",
+    "com.docker.compose.project": basename(repoRoot),
     "com.docker.compose.service": service,
     "com.docker.compose.project.working_dir": repoRoot,
     "com.docker.compose.project.config_files": `${repoRoot}/docker-compose.yml`,
@@ -32,7 +36,7 @@ function healthyContainer(
           { HostIp: "::", HostPort: "3000" },
         ],
         "4097/tcp": [{ HostIp: "127.0.0.1", HostPort: "4097" }],
-        "1455/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }],
+        "1456/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }],
       },
     },
     ...overrides,
@@ -71,6 +75,29 @@ function containerWithWrongMapping(): Record<string, unknown> {
 }
 
 describe("Compose ownership inspection", () => {
+  it("validates an optional source digest and wires its image label into every Compose build", () => {
+    const validation = dockerfile
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('RUN test -z "$IMAGE_SOURCE_SHA256"'));
+
+    expect(dockerfile).toContain('ARG IMAGE_SOURCE_SHA256=""');
+    expect(dockerfile).toContain('org.ingenium.source.sha256="${IMAGE_SOURCE_SHA256}"');
+    expect(validation).toBeDefined();
+    expect(composeFile.match(/^\s+IMAGE_SOURCE_SHA256: "\$\{IMAGE_SOURCE_SHA256:-\}"$/gm)).toHaveLength(5);
+
+    const validate = (value: string) => execFileSync("sh", ["-c", validation!.slice(4)], {
+      env: { ...process.env, IMAGE_SOURCE_SHA256: value },
+      stdio: "ignore",
+    });
+
+    expect(() => validate("")).not.toThrow();
+    expect(() => validate("a".repeat(64))).not.toThrow();
+    expect(() => validate("A".repeat(64))).toThrow();
+    expect(() => validate("g".repeat(64))).toThrow();
+    expect(() => validate("a".repeat(63))).toThrow();
+    expect(() => validate(`${"a".repeat(32)}\n${"a".repeat(31)}`)).toThrow();
+  });
+
   it("accepts one healthy, stable Compose container with exact labels, mappings, and optional OCI revision", () => {
     const report = inspectComposeOwnership({
       repoRoot,
@@ -138,6 +165,23 @@ describe("Compose ownership inspection", () => {
     });
 
     expect(report).toMatchObject({ classification: "unverified" });
+  });
+
+  it("rejects publishing the private native callback listener", () => {
+    const base = healthyContainer();
+    const ports = (base.NetworkSettings as { Ports: Record<string, unknown> }).Ports;
+    const container = healthyContainer({
+      NetworkSettings: {
+        Ports: { ...ports, "1455/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }] },
+      },
+    });
+    const report = inspectComposeOwnership({
+      repoRoot,
+      docker: runner([`${containerId.slice(0, 12)}\n`, inspection(container)]),
+    });
+
+    expect(report).toMatchObject({ classification: "unverified" });
+    expect(report.reason).toMatch(/unexpected host mapping 1455\/tcp/i);
   });
 
   it("does not treat multiple same-port candidates as Compose ownership", () => {

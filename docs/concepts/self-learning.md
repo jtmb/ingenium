@@ -18,10 +18,10 @@ do not share a save or synthesis path:
 |------|---------------------|---------|
 | **Explicit saved preference memory** | `ingenium_memory_save`, `/api/v1/memory` | Content the current user explicitly asks to remember. It defaults to a private owner/project/workspace scope, is returned as `source=user-directive`, and can be updated or forgotten with receipts and versions. It is not inferred or synthesized. |
 | **Inferred learning** | `ingenium_observe`, server-side extraction, `observations` | Durable user-behavior rules extracted from eligible interactions and then consolidated into personality traits or governed skill proposals. An observation is not an explicit-memory receipt. |
-| **Operational coordination memory** | `ingenium_coordination_memory_read` | Typed session/worktree handoff and recovery state used by agents. It is not a user preference and is not a personality observation. |
-| **Context, documents, and transcripts** | Context conversations/RAG, repository Docs, linked-session transcript storage | User-provided working material, canonical guidance, or transcript replay. These remain separate from both saved preferences and inferred observations. |
+| **Private recovery handoff** | Authenticated internal recovery artifacts | Bounded replacement-first recovery state used by the recovery path. It is not a user preference and is not a personality observation. |
+| **Context, documents, and OpenCode sessions** | Context conversations/RAG, repository Docs, native OpenCode session/message APIs | User-provided working material, canonical guidance, or native session history. These remain separate from both saved preferences and inferred observations. |
 
-Retrieved explicit memory, coordination entries, Context content, and transcripts
+Retrieved explicit memory, recovery artifacts, Context content, and session data
 are reference data. They do not become instructions merely because they are
 inserted into a model context.
 
@@ -192,7 +192,7 @@ User interacts with OpenCode (:4098)
 | **Extraction Engine** (extraction.ts) | **Server-side**: Reads OpenCode messages via API, watermark-gated + content-hash dedup, regex pre-filter selects candidates, LLM batch extraction creates durable behavior rule observations. Runs in the scheduler. |
 | **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
 | **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, calls Ingenium MCP, which invokes the authenticated extraction API route. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
-| **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, commands, and config on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
+| **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, and commands on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
 | **Synthesis Pipeline** | Processes observations via LLM consolidation (CONFIRM/CREATE/IGNORE), generates normalized personality traits (Phase 1), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion |
 | **API Layer** | REST endpoints for all operations (sole DB authority). New: `POST /api/v1/extraction/run`, DELETE observations/personality endpoints |
 | **MCP Server** | Tool handlers that forward to API layer |
@@ -244,13 +244,12 @@ Allow automatic learning removes the `auto_observe_now` and
 `synthesize_observations` tools from that Chat turn, but does not disable the
 scheduled extraction/synthesis cycle.
 
-The extension's `SessionCoordinator` in
-`packages/ingenium-extension/session-coordinator.ts` retains an independent
-per-turn read in `experimental.chat.system.transform`: it invokes `memory_list`
-through the general binding's `memory:read` grant, and
-`packages/ingenium-extension/explicit-memory.ts` injects only validated private
-memory as untrusted data. This finalizer path is separate from the dashboard
-controls and must not be confused with operational `coordination_memory_read`.
+The extension does not inject explicit saved memory into TUI turns. The
+`memory_*` API/MCP paths and dashboard controls remain independent. The former
+`coordination_memory_read` name is retained only in historical migration data
+and negative fixtures; it is not an operational memory path. Current recovery
+state is private authenticated replacement-first handoff data, not user memory
+or self-learning input.
 
 ### Explicit current-learning RAG snapshots
 
@@ -345,6 +344,14 @@ Auto-Observer Plugin (auto-observer.ts)
 ```
 
 If the plugin fails to load in OpenCode, the scheduler covers extraction anyway — plugin loading is no longer a dependency. The plugin requires no `better-sqlite3` dependency since it only makes HTTP calls.
+
+External OpenCode sessions can call the same extraction boundary through
+`ingenium_extraction_run` with a strict `external` payload. The request must be
+bound to the active `mcp` launcher session and may include only one redacted,
+visible user message (up to 6,000 characters). Without a message it only checks
+learning eligibility. Operational/task text is excluded, automatic learning
+off is a no-op, and session/message plus content-fingerprint receipts make
+replays idempotent without storing raw source text.
 
 The extraction trigger does not report observations created at request time.
 Check pipeline status after the asynchronous work completes. When a session

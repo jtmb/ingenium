@@ -3,7 +3,8 @@ import { getDb, runtimes, securityAudit } from "ingenium-core";
 import { z } from "zod";
 import { inspectManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "../runtime-manager-client.js";
 import { deploymentMode } from "../runtime-mode.js";
-import { ensureRuntime, runtimeNumberSetting } from "../runtime-provisioner.js";
+import { ensureRuntime, isLocalRuntimeBinding, runtimeNumberSetting } from "../runtime-provisioner.js";
+import { buildAuthHeader } from "../opencode-client.js";
 
 export const runtimesRouter = Router();
 
@@ -130,8 +131,8 @@ function runtimeScheme(): runtimes.RuntimeTransportScheme {
 }
 
 export function compatibilityRuntimeTarget(audience: "web" | "cli" | "vscode"): string {
-  if (audience === "web") return "http://127.0.0.1:4098/";
-  if (audience === "cli") return "http://127.0.0.1:4099/";
+  if (audience === "web") return "http://127.0.0.1:4098/api/info";
+  if (audience === "cli") return "http://127.0.0.1:3000/_ingenium/health";
   return "http://127.0.0.1:4100/?folder=/workspace";
 }
 
@@ -140,9 +141,20 @@ export async function compatibilityRuntimeReady(
   probe: typeof fetch = fetch,
 ): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {};
+    if (audience === "web") {
+      const authorization = buildAuthHeader();
+      if (!authorization) return false;
+      headers.authorization = authorization;
+    } else if (audience === "cli") {
+      // ttyd only accepts the gateway's fixed identity. Use its loopback-only
+      // health route rather than bypassing that boundary at the private port.
+      headers.host = "cli.localhost";
+    }
     const response = await probe(compatibilityRuntimeTarget(audience), {
       method: "GET",
       redirect: "manual",
+      headers,
       signal: AbortSignal.timeout(2_000),
     });
     await response.body?.cancel().catch(() => undefined);
@@ -198,6 +210,38 @@ runtimesRouter.get("/browser/workspaces", (req, res) => {
       id: workspace.id, organizationName: workspace.organization_name, projectName: workspace.project_name,
       status: "ready", runtimeId: null,
     } : browserWorkspaceDto(workspace)) });
+  } catch (error) {
+    runtimeError(res, error);
+  }
+});
+
+runtimesRouter.post("/browser/workspaces/:workspaceId/automation", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  const parsed = z.object({}).strict().safeParse(req.body);
+  if (!parsed.success || Object.keys(req.query).length !== 0) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Automation authorization takes no overrides" } });
+    return;
+  }
+  try {
+    const principal = browserPrincipal(req);
+    const workspace = browserWorkspace(principal.id, req.params.workspaceId!);
+    if (!workspace) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "denied");
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    const bound = runtimes.getRuntimeForWorkspace(workspace.id);
+    if (!bound || !isLocalRuntimeBinding(bound, workspace.project_id)) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "denied", workspace);
+      throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
+    }
+    try {
+      const runtime = runtimes.authorizeRuntimeAutomation(workspace.id, principal.id);
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "success", workspace);
+      res.json({ data: { status: "ready", runtimeId: runtime.id } });
+    } catch (error) {
+      browserRuntimeAudit(principal.id, "runtime.automation.authorize", "failure", workspace);
+      throw error;
+    }
   } catch (error) {
     runtimeError(res, error);
   }

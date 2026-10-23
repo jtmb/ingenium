@@ -1,8 +1,9 @@
 /**
  * McpToolCatalog — canonical single source of truth for all Ingenium MCP tools.
  *
- * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls
- * plus extension-registered tools (synthesize_observations, auto_observe_now).
+ * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls,
+ * retained compatibility entries, and extension-registered tools
+ * (synthesize_observations, auto_observe_now).
  *
  * Every tool known to the system MUST be listed here. The mcp-tool-states
  * category projection derives from this catalog.
@@ -163,6 +164,7 @@ const MEMORY_ENDPOINTS = {
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
   "POST /api/v1/projects",
+  "POST /api/v1/projects/migrate-workspace",
   "DELETE /api/v1/projects/:name",
   "POST /api/v1/projects/:name/restore",
   "GET /api/v1/projects/archive",
@@ -824,11 +826,20 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: SYNTHESIS_ENDPOINTS,
   },
 
+  {
+    name: "ingenium_usage_ingest",
+    category: "Usage",
+    description: "Ingest metadata-only usage from one completed assistant message in an exact launcher-bound external session. Durable deduplication rejects conflicting replay; absent metrics remain unknown.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: ["POST /api/v1/usage/external"],
+  },
+
   // ── Extraction + Auto-Observer (2) ───────────────────
   {
     name: "ingenium_extraction_run",
     category: "Extraction",
-    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
+    description: "Extract durable user behavior rules. Optional external input probes learning eligibility or ingests one redacted visible user message from an exact launcher-bound session; otherwise schedules the server scan.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: EXTRACTION_ENDPOINTS,
@@ -1052,14 +1063,6 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: TASKS_ENDPOINTS,
   },
 
-  // ── Task Coordination (6) ─────────────────────────────
-  { name: "ingenium_coordination_status", category: "Tasks", description: "Read the durable coordination status for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["GET /api/v1/coordination/snapshot"] },
-  { name: "ingenium_coordination_memory_read", category: "Tasks", description: "Read typed operational coordination memory updates for an exact session identity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/memory/read"] },
-  { name: "ingenium_coordination_update", category: "Tasks", description: "Update a coordination snapshot or renew its attested runtime activity.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/register", "POST /api/v1/coordination/recover", "PATCH /api/v1/coordination/update", "POST /api/v1/coordination/heartbeat", "POST /api/v1/runtimes/activity", "POST /api/v1/coordination/close", "POST /api/v1/coordination/takeover"] },
-  { name: "ingenium_coordination_claim", category: "Tasks", description: "Claim non-overlapping coordination paths for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/batch"] },
-  { name: "ingenium_coordination_release", category: "Tasks", description: "Release owned coordination claims for an active session.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/claims/release"] },
-  { name: "ingenium_coordination_handoff", category: "Tasks", description: "Exchange sanitized handoffs, operational memory, and linked-session transcripts.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: ["POST /api/v1/coordination/handoffs/publish", "POST /api/v1/coordination/handoffs/read", "POST /api/v1/coordination/handoffs/ack", "POST /api/v1/coordination/handoffs/consume", "POST /api/v1/coordination/memory/publish", "POST /api/v1/coordination/memory/read", "POST /api/v1/coordination/memory/ack", "POST /api/v1/coordination/sessions/link", "POST /api/v1/coordination/transcripts/publish", "POST /api/v1/coordination/transcripts/read", "POST /api/v1/coordination/transcripts/ack"] },
-
   // ── Plans (3) ────────────────────────────────────────
   {
     name: "ingenium_plan_save",
@@ -1250,7 +1253,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   {
     name: "ingenium_plugin_update",
     category: "Plugins",
-    description: "Update a plugin's file path or source content.",
+    description: "Update a project-local plugin description alone, or executable file path/source alone. Description edits never change files or configuration.",
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: PLUGINS_ENDPOINTS,

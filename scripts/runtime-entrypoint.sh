@@ -56,7 +56,7 @@ if [ "$(wc -c < "$capability")" -ne 61 ] || ! grep -qxE 'ing_[A-Za-z0-9_-]{12}_[
 fi
 
 mkdir -p \
-  "/home/appuser/.config/opencode/agents" \
+  "/home/appuser/.config/opencode/runtime/agents" \
   "/home/appuser/.config/opencode/runtime" \
   "/home/appuser/.local/share/opencode/log" \
   "/home/appuser/.local/state" \
@@ -65,35 +65,37 @@ mkdir -p \
 chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state" "/home/appuser/vscode-data"
 chmod 0700 "/home/appuser/.config/opencode/runtime"
 
-/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/agents
+/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents
 
 config_file="/home/appuser/.config/opencode/runtime/opencode.jsonc"
 cat > "$config_file" <<EOF
 {
   "\$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "ingenium": {
-      "type": "local",
-      "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      "enabled": true,
-      "environment": {
-        "INGENIUM_API_URL": "$INGENIUM_API_URL",
-        "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
-        "INGENIUM_RUNTIME_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
-        "INGENIUM_MCP_AUDIENCE": "runtime",
-        "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
-        "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
-        "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
-        "INGENIUM_WORKTREE": "/workspace"
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        "disabled": false,
+        "environment": {
+          "INGENIUM_API_URL": "$INGENIUM_API_URL",
+          "INGENIUM_MCP_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
+          "INGENIUM_RUNTIME_CREDENTIAL_FILE": "/run/ingenium-runtime/capability",
+          "INGENIUM_MCP_AUDIENCE": "runtime",
+          "INGENIUM_PROJECT": "$INGENIUM_PROJECT",
+          "INGENIUM_WORKSPACE_ID": "$INGENIUM_WORKSPACE_ID",
+          "INGENIUM_STORAGE_MAPPING_HASH": "$INGENIUM_STORAGE_MAPPING_HASH",
+          "INGENIUM_WORKTREE": "/workspace"
+        }
       }
     }
   },
-  "plugin": [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
-    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+  "plugins": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
   ]
 }
 EOF

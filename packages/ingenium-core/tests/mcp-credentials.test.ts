@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -10,10 +10,9 @@ import { createOrganization } from "../lib/tools/organizations.js";
 import { createProject } from "../lib/tools/projects.js";
 import { createServicePrincipal } from "../lib/tools/security-tokens.js";
 import {
-  COORDINATION_LEASE_CREDENTIAL_TTL_MS,
   createMcpCredential,
   incrementServicePrincipalSecurityEpoch,
-  issueCoordinationLeaseCredentials,
+  issueRepositorySyncCredential,
   listMcpCredentials,
   resolveMcpCredential,
   revokeMcpCredential,
@@ -27,11 +26,16 @@ let directory = "";
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-credentials-"));
   process.env.INGENIUM_CORE_DB_PATH = join(directory, "data");
+  const keyPath = join(directory, "key");
+  writeFileSync(keyPath, Buffer.alloc(32, 7).toString("base64url"), { mode: 0o600 });
+  process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE = keyPath;
   resetDbForTest();
 });
 
 afterEach(() => {
   resetDbForTest();
+  vi.useRealTimers();
+  delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
   rmSync(directory, { recursive: true, force: true });
 });
 
@@ -231,25 +235,98 @@ describe("AUTH-107 MCP credentials", () => {
     expect((db.prepare("SELECT count(*) AS count FROM service_principals").get() as { count: number }).count).toBe(before + 1);
   });
 
-  it("issues only the fixed short-lived coordination and repository credentials for an exact ready runtime", () => {
+  it("replaces only opted-in revoked receipts and preserves their expiry and binding", () => {
+    const seeded = fixture();
+    const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const input = {
+      servicePrincipalId: seeded.servicePrincipalId,
+      kind: "service" as const,
+      audience: "mcp" as const,
+      name: "receipt fixture",
+      scopes: ["projects:read"],
+      organizationId: seeded.organizationId,
+      projectId: seeded.projectId,
+      workspaceId: seeded.workspaceId,
+      launcherWorktree: seeded.launcherWorktree,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdByUserId: seeded.createdByUserId,
+    };
+    const idempotencyKey = "revoked-receipt";
+    const original = createMcpCredential(input, idempotencyKey);
+    const originalReceipt = database.prepare(
+      "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE idempotency_key = ?",
+    ).get(idempotencyKey) as { request_hash: string; credential_id: string; encrypted_token: string };
+    expect(revokeMcpCredential(original.id, original.createdByUserId)).toBe(true);
+
+    expect(() => createMcpCredential(input, idempotencyKey)).toThrow("Credential replay is unavailable");
+    database.prepare("UPDATE mcp_credential_receipts SET credential_id = ? WHERE idempotency_key = ?")
+      .run(seeded.id, idempotencyKey);
+    expect(() => createMcpCredential(input, idempotencyKey, { replaceRevokedReceipt: true }))
+      .toThrow("Credential replay is unavailable");
+    database.prepare("UPDATE mcp_credential_receipts SET credential_id = ? WHERE idempotency_key = ?")
+      .run(original.id, idempotencyKey);
+
+    const replacement = createMcpCredential(input, idempotencyKey, { replaceRevokedReceipt: true });
+    const replacementReceipt = database.prepare(
+      "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE idempotency_key = ?",
+    ).get(idempotencyKey) as { request_hash: string; credential_id: string; encrypted_token: string };
+    expect(replacement).toMatchObject({ servicePrincipalId: original.servicePrincipalId, expiresAt: original.expiresAt });
+    expect(replacement.id).not.toBe(original.id);
+    expect(replacement.token).not.toBe(original.token);
+    expect(replacementReceipt).toMatchObject({ request_hash: originalReceipt.request_hash, credential_id: replacement.id });
+    expect(replacementReceipt.encrypted_token).not.toBe(originalReceipt.encrypted_token);
+    expect(replacementReceipt.encrypted_token).not.toContain(original.token);
+    expect(replacementReceipt.encrypted_token).not.toContain(replacement.token);
+    expect(resolveMcpCredential(original.token, "mcp")).toBeUndefined();
+    expect(resolveMcpCredential(replacement.token, "mcp")?.id).toBe(replacement.id);
+    expect(createMcpCredential(input, idempotencyKey, { replaceRevokedReceipt: true })).toMatchObject({
+      id: replacement.id, token: replacement.token, expiresAt: replacement.expiresAt,
+    });
+    expect(listMcpCredentials(original.createdByUserId)).toHaveLength(3);
+  });
+
+  it("requires explicit expiry renewal and preserves expiry, revocation and request binding on rejected replay", () => {
+    const seeded = fixture();
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const input = { servicePrincipalId: seeded.servicePrincipalId, kind: "service" as const,
+      audience: "mcp" as const, name: "expiry receipt", scopes: ["projects:read"],
+      organizationId: seeded.organizationId, projectId: seeded.projectId, workspaceId: seeded.workspaceId,
+      launcherWorktree: seeded.launcherWorktree, createdByUserId: seeded.createdByUserId,
+      expiresAt: new Date(Date.now() + 60_000) };
+    const original = createMcpCredential(input, "expiry-receipt");
+    const expiredAt = original.expiresAt;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(expiredAt) + 1);
+    input.expiresAt = new Date(Date.now() + 60_000);
+    const receipt = () => db.prepare("SELECT * FROM mcp_credential_receipts WHERE idempotency_key = ?").get("expiry-receipt");
+    const before = receipt();
+    expect(() => createMcpCredential(input, "expiry-receipt")).toThrow("Credential replay is unavailable");
+    expect(() => createMcpCredential(input, "expiry-receipt", { replaceRevokedReceipt: true }))
+      .toThrow("Credential replay is unavailable");
+    expect(() => createMcpCredential({ ...input, scopes: ["projects:read", "vault:read"] }, "expiry-receipt",
+      { replaceExpiredReceipt: true })).toThrow("Credential replay is unavailable");
+    expect(receipt()).toEqual(before);
+    expect(revokeMcpCredential(original.id, original.createdByUserId)).toBe(true);
+    expect(() => createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true }))
+      .toThrow("Credential replay is unavailable");
+    const renewed = createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true, replaceRevokedReceipt: true });
+    expect(renewed.id).not.toBe(original.id);
+    expect(renewed.expiresAt).toBe(input.expiresAt.toISOString());
+    expect(db.prepare("SELECT expires_at FROM mcp_credentials WHERE id = ?").get(original.id)).toEqual({ expires_at: expiredAt });
+    expect(resolveMcpCredential(original.token, "mcp")).toBeUndefined();
+    expect(resolveMcpCredential(renewed.token, "mcp")?.id).toBe(renewed.id);
+    expect(createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true })).toMatchObject({
+      id: renewed.id, token: renewed.token, expiresAt: renewed.expiresAt,
+    });
+  });
+
+  it("issues only the fixed short-lived repository credential for an exact ready runtime", () => {
     const { capability, runtime } = readyRuntimeFixture();
     const before = new Date();
 
-    const issued = issueCoordinationLeaseCredentials(runtime.id, before);
+    const issued = issueRepositorySyncCredential(runtime.id, before);
 
-    expect(issued.coordination).toMatchObject({
-      servicePrincipalId: capability.servicePrincipalId,
-      kind: "service",
-      audience: "mcp",
-      scopes: ["coordination:read", "coordination:write", "memory:read", "memory:write", "projects:read", "repository:sync"],
-      organizationId: capability.organizationId,
-      projectId: capability.projectId,
-      projectIds: [capability.projectId],
-      workspaceId: capability.workspaceId,
-      launcherWorktree: capability.launcherWorktree,
-      storageMappingHash: capability.storageMappingHash,
-    });
-    expect(issued.repositorySync).toMatchObject({
+    expect(issued).toMatchObject({
       servicePrincipalId: capability.servicePrincipalId,
       kind: "repository-sync",
       audience: "repository-sync",
@@ -260,35 +337,31 @@ describe("AUTH-107 MCP credentials", () => {
       launcherWorktree: capability.launcherWorktree,
       storageMappingHash: capability.storageMappingHash,
     });
-    expect(new Date(issued.coordination.expiresAt).getTime() - before.getTime())
-      .toBeLessThanOrEqual(COORDINATION_LEASE_CREDENTIAL_TTL_MS);
-    expect(issued.repositorySync.expiresAt).toBe(issued.coordination.expiresAt);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")?.id).toBe(issued.coordination.id);
-    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
-    expect(() => issueCoordinationLeaseCredentials(randomUUID())).toThrow("Coordination lease runtime is unavailable");
+    expect(new Date(issued.expiresAt).getTime() - before.getTime()).toBeLessThanOrEqual(15 * 60_000);
+    expect(resolveMcpCredential(issued.token, "repository-sync")?.id).toBe(issued.id);
+    expect(() => issueRepositorySyncCredential(randomUUID())).toThrow("Repository sync credential runtime is unavailable");
   });
 
   it("revokes only the exact attested service credential and remains idempotent", () => {
     const { runtime } = readyRuntimeFixture();
-    const issued = issueCoordinationLeaseCredentials(runtime.id);
+    const issued = issueRepositorySyncCredential(runtime.id);
     const exact = {
-      credentialId: issued.coordination.id,
-      authenticatedCredentialId: issued.coordination.id,
-      servicePrincipalId: issued.coordination.servicePrincipalId,
-      audience: issued.coordination.audience,
-      organizationId: issued.coordination.organizationId,
-      projectId: issued.coordination.projectId,
-      workspaceId: issued.coordination.workspaceId,
-      launcherWorktree: issued.coordination.launcherWorktree,
-      storageMappingHash: issued.coordination.storageMappingHash,
+      credentialId: issued.id,
+      authenticatedCredentialId: issued.id,
+      servicePrincipalId: issued.servicePrincipalId,
+      audience: issued.audience,
+      organizationId: issued.organizationId,
+      projectId: issued.projectId,
+      workspaceId: issued.workspaceId,
+      launcherWorktree: issued.launcherWorktree,
+      storageMappingHash: issued.storageMappingHash,
     };
 
-    expect(revokeOwnMcpCredential({ ...exact, authenticatedCredentialId: issued.repositorySync.id })).toBe(false);
+    expect(revokeOwnMcpCredential({ ...exact, authenticatedCredentialId: randomUUID() })).toBe(false);
     expect(revokeOwnMcpCredential({ ...exact, storageMappingHash: "f".repeat(64) })).toBe(false);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeDefined();
+    expect(resolveMcpCredential(issued.token, "repository-sync")).toBeDefined();
     expect(revokeOwnMcpCredential(exact)).toBe(true);
     expect(revokeOwnMcpCredential(exact)).toBe(true);
-    expect(resolveMcpCredential(issued.coordination.token, "mcp")).toBeUndefined();
-    expect(resolveMcpCredential(issued.repositorySync.token, "repository-sync")?.id).toBe(issued.repositorySync.id);
+    expect(resolveMcpCredential(issued.token, "repository-sync")).toBeUndefined();
   });
 });

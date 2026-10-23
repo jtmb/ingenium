@@ -133,13 +133,16 @@ describe("agent resource sync", () => {
       category: "execution",
       mode: "subagent",
       model: "deepseek/centralized-only",
+      skills: '["ponytail"]',
     });
 
     const content = readFileSync(join(worktree, ".opencode", "agents", "execution", "sync-agent.md"), "utf8");
-    expect(content).not.toMatch(/^model:/m);
-    expect(content).toMatch(/^disable: false$/m);
+    expect(content).not.toMatch(/^(?:model|name):/m);
+    expect(content).not.toMatch(/^skills:/m);
+    expect(content).toContain("# skills:\n#   - ponytail");
+    expect(content).toMatch(/^disabled: false$/m);
     expect(content).toMatch(/^hidden: false$/m);
-    expect(content).toMatch(/^permission:\n  "\*": deny$/m);
+    expect(content).toContain('permissions:\n  - action: "*"\n    resource: "*"\n    effect: deny');
   });
 
   it("writes public agent profiles as 0644 and never follows a profile symlink", () => {
@@ -176,8 +179,9 @@ describe("agent resource sync", () => {
       "utf8",
     );
     expect(content).toContain("hidden: true");
-    expect(content).toContain('"*": deny');
-    expect(content).not.toMatch(/^\s+(?:read|write|bash):\s+allow$/m);
+    expect(content).not.toMatch(/^name:/m);
+    expect(content).toContain('permissions:\n  - action: "*"\n    resource: "*"\n    effect: deny');
+    expect(content).not.toMatch(/^\s+- action: (?:read|edit|shell)$/m);
   });
 
   it.each([
@@ -199,8 +203,8 @@ describe("agent resource sync", () => {
       "utf8",
     );
     expect(content).toContain("hidden: true");
-    expect(content).toMatch(/^permission:\n  "\*": deny$/m);
-    expect(content).not.toMatch(/^\s+(?:read|write|bash):\s+allow$/m);
+    expect(content).toContain('permissions:\n  - action: "*"\n    resource: "*"\n    effect: deny');
+    expect(content).not.toMatch(/^\s+- action: (?:read|edit|shell)$/m);
   });
 
   it("rejects traversal names, invalid categories, and symlinked agent directories", () => {
@@ -228,7 +232,7 @@ describe("agent resource sync", () => {
 
     expect(result.synced).toBe(1);
     const profile = readFileSync(join(worktree, ".opencode", "agents", "execution", "disabled-agent.md"), "utf8");
-    expect(profile).toMatch(/^disable: true$/m);
+    expect(profile).toMatch(/^disabled: true$/m);
     expect(profile).toContain("# API");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -298,7 +302,7 @@ describe("agent resource sync", () => {
     mkdirSync(profileDir, { recursive: true });
     writeFileSync(
       join(profileDir, "permissive-agent.md"),
-      '---\nname: permissive-agent\ndescription: "unsafe"\nmode: subagent\ndisable: false\nhidden: false\npermission:\n  "*": allow\n---\n\n# Unsafe\n',
+      '---\nname: permissive-agent\ndescription: "unsafe"\nmode: subagent\ndisabled: false\nhidden: false\npermissions:\n  - action: "*"\n    resource: "*"\n    effect: allow\n---\n\n# Unsafe\n',
     );
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -448,6 +452,38 @@ describe("agent resource sync", () => {
 
     expect(result).toMatchObject({ pushed: 1, conflicts: 0, errors: 0 });
     expect(manifest.resources[resource][name]).toBe(hashContent(source));
+  });
+
+  it("projects API plugins into the native plugins array while preserving bootstrap adapters", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    writeFileSync(join(worktree, "opencode.json"), JSON.stringify({
+      plugins: ["./packages/ingenium-extension/plugins/v2/resource-sync"],
+      plugin: ["legacy-entry.ts"],
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{
+        name: "local-plugin",
+        file_path: ".opencode/plugins/local-plugin.ts",
+        source_content: "export {};",
+        enabled: true,
+      }] }),
+    }));
+    const manifest: SyncManifest = {
+      version: 1,
+      project: "project",
+      lastFullSync: "",
+      resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} },
+    };
+
+    expect(await syncPlugins(worktree, "project", manifest, { isInitialSync: false }))
+      .toMatchObject({ synced: 2, errors: 0 });
+    expect(JSON.parse(readFileSync(join(worktree, "opencode.json"), "utf8"))).toEqual({
+      plugins: [
+        "./packages/ingenium-extension/plugins/v2/resource-sync",
+        ".opencode/plugins/local-plugin.ts",
+      ],
+    });
   });
 
   it("records a successful initial config import as a converged baseline", async () => {

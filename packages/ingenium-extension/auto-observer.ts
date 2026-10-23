@@ -1,28 +1,12 @@
-/**
- * Auto Observer Plugin — Thin MCP trigger for server-side extraction.
- *
- * This plugin is a lightweight trigger only. The actual extraction
- * (pattern detection, enrichment, observation creation) runs server-side
- * in the Ingenium API through the Ingenium MCP transport, triggered by both
- * this plugin (on session idle) and the API's scheduled maintenance cycle.
- *
- * No regex, no OpenCode DB access, no heavy init — just a thin MCP call.
- *
- * NOTE: Extraction runs server-side to avoid duplication and ensure consistency
- * across all OpenCode sessions. The client-side trigger is merely a convenience
- * to reduce latency vs. waiting for the scheduled maintenance cycle.
- */
+import { createHash } from "node:crypto"
 import { tool } from "@opencode-ai/plugin"
 import { assertExtensionToolEnabled } from "./mcp-tool-state.js"
 import { resolveExtensionBinding } from "./extension-binding.js"
 import { logPluginLifecycle } from "./plugin-lifecycle-log.js"
 import { callMcpTool, mcpToolData } from "./mcp-client.js"
 import { classifyObserverFailure, type ObserverRequestFailure } from "./observer-core.js"
-
-// Throttle to once per 60s — extraction is expensive and the API's scheduled
-// maintenance cycle (every 15min) will catch anything this misses
-let lastFire = 0
-const THROTTLE_MS = 60000
+import { visibleContextExport } from "@ingenium/extension/context-upload-codec"
+import { eventSessionId, getV2SessionInfo, legacySessionInfo, legacySessionMessage, readV2Messages, resolveSessionDirectory, v2Client } from "./opencode-v2.js"
 
 type ExtractionRequestFailure = Extract<ObserverRequestFailure, "authentication" | "timeout" | "request_failed">
 
@@ -52,28 +36,55 @@ async function triggerExtraction(worktree: string): Promise<{
   }
 }
 
-/**
- * AutoObserverPlugin — triggers server-side extraction on session.idle events.
- * Throttled to 1/60s to avoid API load spikes.
- */
-export const AutoObserverPlugin = async (ctx: { worktree: string; client: any }) => {
+export const AutoObserverPlugin = async (ctx: { worktree: string; client: any; serverUrl?: URL }) => {
+  const pending = new Map<string, Promise<void>>()
   const reportWarning = (reason: ExtractionRequestFailure) => {
     logPluginLifecycle(ctx.client, "auto-observer", "warn", `trigger_extraction: ${reason}`)
   }
 
+  const collect = async (sessionId: string) => {
+    const binding = resolveExtensionBinding(ctx.worktree, { purpose: "learning" })
+    if (binding.launcherWorktree !== ctx.worktree) throw new Error("EXTERNAL_OBSERVATION_BINDING_REJECTED")
+    const external = {
+      worktree: binding.launcherWorktree,
+      sessionId: `session-${createHash("sha256").update(sessionId, "utf8").digest("hex")}`,
+    }
+    const invoke = async (input: Record<string, unknown>) => mcpToolData(await callMcpTool(
+      ctx.worktree, "extraction_run", { project: binding.project, external: input }, { timeoutMs: 60_000 },
+    )) as { enabled?: boolean }
+    if ((await invoke(external)).enabled !== true) return
+    const client = v2Client(ctx)
+    const info = await getV2SessionInfo(client, sessionId)
+    const messages = await readV2Messages(client, sessionId, { maxPages: 1, order: "desc" })
+    if (messages.length > 100) throw new Error("EXTERNAL_OBSERVATION_INVALID")
+    const users = messages.map((message) => legacySessionMessage(message, sessionId))
+      .reverse().filter((message) => message.info.role === "user").slice(-20)
+    if (Buffer.byteLength(JSON.stringify(users)) > 1024 * 1024) {
+      throw new Error("EXTERNAL_OBSERVATION_INVALID")
+    }
+    // Bound each idle pass; replay is safe because the API persists per-message receipts.
+    const visible = visibleContextExport({
+      info: legacySessionInfo(info, sessionId, binding.launcherWorktree), messages: users,
+    }, sessionId, binding.launcherWorktree)
+    for (const message of visible.messages) {
+      const text = message.parts[0]?.text
+      if (!text || text.length > 6000) continue
+      const result = await invoke({ ...external, message: { id: message.info.id, role: "user", text } })
+      if (result.enabled !== true) return
+    }
+  }
+
   return {
     event: async ({ event }: { event: any }) => {
-      if (event.type === "session.idle") {
-        const now = Date.now()
-        if (now - lastFire < THROTTLE_MS) return
-        lastFire = now
-        try {
-          const result = await triggerExtraction(ctx.worktree)
-          if (!result.triggered) reportWarning(result.failure ?? "request_failed")
-        } catch {
-          reportWarning("request_failed")
-        }
-      }
+      if (event.type !== "session.idle") return
+       const sessionId = eventSessionId(event)
+       if (!sessionId) return
+      const existing = pending.get(sessionId)
+      if (existing) return existing
+      const promise = collect(sessionId).catch((error) => reportWarning(classifyExtractionFailure(error)))
+        .finally(() => pending.delete(sessionId))
+      pending.set(sessionId, promise)
+      await promise
     },
 
     tool: {
@@ -81,9 +92,11 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         description:
           "Schedule server-side extraction. Returns only whether asynchronous extraction started; results are available later through pipeline status.",
         args: {},
-        async execute(_args: any, context: { worktree: string }) {
-          await assertExtensionToolEnabled("auto_observe_now", context.worktree)
-          const { failure: _failure, ...result } = await triggerExtraction(context.worktree)
+        async execute(_args: any, context: { worktree: string; directory?: string; sessionID?: string }) {
+          const fallback = context.directory ?? context.worktree
+          const worktree = await resolveSessionDirectory(ctx, context.sessionID, fallback)
+          await assertExtensionToolEnabled("auto_observe_now", worktree)
+          const { failure: _failure, ...result } = await triggerExtraction(worktree)
           return JSON.stringify(result, null, 2)
         },
       }),

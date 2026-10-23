@@ -22,14 +22,8 @@ const originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
 const originalAudience = process.env.INGENIUM_MCP_AUDIENCE;
 const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
 const storageMappingHash = "a".repeat(64);
-const extensionPluginPaths = [
-  "packages/ingenium-extension/plugins/auto-observer.ts",
-  "packages/ingenium-extension/plugins/observer.ts",
-  "packages/ingenium-extension/plugins/resource-sync.ts",
-  "packages/ingenium-extension/plugins/session-coordinator.ts",
-];
-const ponytailPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
-const configuredPluginPaths = [...extensionPluginPaths, ponytailPluginPath];
+const extensionPluginPaths = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"]
+  .map((name) => `packages/ingenium-extension/plugins/v2/${name}`);
 const manifestHash = "b".repeat(64);
 
 function temporaryDirectory(prefix: string): string {
@@ -118,6 +112,7 @@ function repositoryResponse(resources = true) {
       skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
       agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
       plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
+      command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
     } } } : {}),
   } };
 }
@@ -142,9 +137,8 @@ function createRuntimeWorktree(): string {
   writeFileSync(join(worktree, ".opencode", "agents", "sync-diagnostics.md"), "# Sync diagnostic\n", "utf8");
   for (const pluginPath of extensionPluginPaths) {
     const target = join(worktree, pluginPath);
-    mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(join(repositoryRoot, pluginPath), target);
-    expect(readFileSync(target, "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath), "utf8"));
+    cpSync(join(repositoryRoot, pluginPath), target, { recursive: true });
+    expect(readFileSync(join(target, "index.ts"), "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath, "index.ts"), "utf8"));
   }
   cpSync(join(repositoryRoot, "packages", "ingenium-extension", "ponytail"), join(worktree, "packages", "ingenium-extension", "ponytail"), { recursive: true });
   initializeGitWorktree(worktree);
@@ -218,7 +212,14 @@ describe("ingenium-init-project production runtime contract", () => {
     expect(dockerfile).toContain("smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode");
     expect(dockerfile).not.toContain("/app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts");
     expect(dockerfile).not.toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
-    expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`file://{env:PWD}/${pluginPath}`)).join(",")}]`);
+    const configuredV2PluginPaths = [
+      "auto-observer",
+      "observer",
+      "resource-sync",
+      "lifecycle",
+      "ponytail",
+    ].map((name) => `/app/packages/ingenium-extension/plugins/v2/${name}`);
+    expect(dockerfile).toContain(`"plugins":${JSON.stringify(configuredV2PluginPaths)}`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
     expect(runtimeLauncher.indexOf("--help|--version)")).toBeLessThan(runtimeLauncher.indexOf("normalize-agent-profiles.sh"));
   });
@@ -373,6 +374,8 @@ describe("ingenium-init-project production runtime contract", () => {
     const entrypoint = join(distribution, "scripts", "init-project.js");
     const command = createRuntimeSymlink(entrypoint);
     const worktree = createRuntimeWorktree();
+    mkdirSync(join(worktree, ".opencode/commands"), { recursive: true });
+    writeFileSync(join(worktree, ".opencode/commands/check.md"), "Run $ARGUMENTS\n");
     writeProtectedFallbackToken(worktree, "c".repeat(32));
     const requests: Array<{ url: string; method: string; body: string }> = [];
     const server = createServer((request, response) => {
@@ -404,6 +407,7 @@ describe("ingenium-init-project production runtime contract", () => {
             skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 8 },
             agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
             plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 5 },
+            command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 1 },
           } } } }));
           return;
         }
@@ -431,7 +435,7 @@ describe("ingenium-init-project production runtime contract", () => {
       );
 
       expect(result.code, result.stderr).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
+      expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all", commands: { skipped: 1 } });
       expect(requests.map(({ url }) => url)).toContain("/api/v1/repository/sync?project=ingenium");
       expect(requests.some(({ url }) => url.startsWith("/api/v1/coordination/"))).toBe(false);
 
@@ -441,16 +445,15 @@ describe("ingenium-init-project production runtime contract", () => {
         skills: Array<{ path: string }>;
         agents: Array<{ path: string; name: string }>;
         plugins: Array<{ path: string; source: string }>;
+        commands: Array<{ path: string; source: string }>;
       } };
       expect(payload.resourcesManifest.skills).toHaveLength(8);
+      expect(payload.resourcesManifest.commands).toEqual([expect.objectContaining({ path: ".opencode/commands/check.md", source: "Run $ARGUMENTS\n" })]);
       expect(payload.resourcesManifest.skills.every((entry) => /\.opencode\/skills\/[^/]+\/SKILL\.md$/.test(entry.path))).toBe(true);
       expect(payload.resourcesManifest.agents).toHaveLength(11);
       expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/sync-diagnostics.md");
       expect(payload.resourcesManifest.agents.map((entry) => entry.name)).not.toContain("browser-agent");
-      expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(configuredPluginPaths);
-      for (const plugin of payload.resourcesManifest.plugins) {
-        expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
-      }
+      expect(payload.resourcesManifest.plugins).toEqual([]);
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose());
@@ -502,6 +505,7 @@ describe("ingenium-init-project production runtime contract", () => {
           skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
           agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 15 },
             plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
+            command: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 0 },
         } } } }));
         return;
       }

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockAssertExtensionToolEnabled = vi.hoisted(() => vi.fn());
@@ -16,7 +17,7 @@ vi.mock("../project-resolver.js", () => ({
 }));
 
 vi.mock("../extension-binding.js", () => ({
-  resolveExtensionBinding: () => ({ project: "extension-project" }),
+  resolveExtensionBinding: () => ({ project: "extension-project", launcherWorktree: "/worktree" }),
 }));
 
 vi.mock("../mcp-client.js", () => ({
@@ -63,7 +64,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
     const log = vi.fn();
     const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { app: { log } } });
 
-    await expect(plugin.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    await expect(plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } })).resolves.toBeUndefined();
 
     const output = JSON.stringify(log.mock.calls);
     expect(output).toContain(`trigger_extraction: ${reason}`);
@@ -77,7 +78,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
     const log = vi.fn().mockRejectedValue(new Error("logger rejected Bearer secret-token"));
     const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { app: { log } } });
 
-    await expect(plugin.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    await expect(plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } })).resolves.toBeUndefined();
     await Promise.resolve();
     expect(log).toHaveBeenCalledWith(expect.objectContaining({
       body: expect.objectContaining({ service: "auto-observer", level: "warn", message: "trigger_extraction: authentication" }),
@@ -97,5 +98,72 @@ describe("AutoObserverPlugin lifecycle output", () => {
     expect(manual).toEqual({ triggered: true, status: "started", message: "Extraction scheduled" });
     expect(JSON.stringify(manual)).not.toContain("unknown");
     expect(JSON.stringify(manual)).not.toContain("created");
+  });
+
+  it("sends only exact visible redacted user messages, including after a fresh plugin instance", async () => {
+    mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: true }) }] });
+    const user = { id: "msg-user", type: "user" as const, time: { created: 1 },
+      text: "I prefer concise answers. Bearer secret-canary" };
+    const client = { app: { log: vi.fn() }, v2: { session: {
+      get: vi.fn().mockResolvedValue({ data: { id: "ses-external", location: { directory: "/worktree" } } }),
+      messages: vi.fn().mockResolvedValue({ data: { data: [user,
+        { id: "msg-assistant", type: "assistant", agent: "engineer", model: { id: "model", providerID: "openai" }, time: { created: 1, completed: 1 }, content: [{ type: "text", id: "part", text: "assistant-canary" }] },
+        { id: "msg-hidden", type: "user", metadata: { hidden: true }, time: { created: 1 }, text: "hidden-canary" },
+      ], cursor: {} } }),
+    } } };
+    const event = { event: { type: "session.idle", properties: { sessionID: "ses-external", operational: "metadata-canary" } } };
+    for (let restart = 0; restart < 2; restart++) {
+      const plugin = await AutoObserverPlugin({ worktree: "/worktree", client });
+      await Promise.all([plugin.event(event), plugin.event(event)]);
+    }
+    const coordinationSessionId = `session-${createHash("sha256").update("ses-external", "utf8").digest("hex")}`;
+    const probes = mockCallMcpTool.mock.calls.filter((call) => !call[2].external.message);
+    const sent = mockCallMcpTool.mock.calls.filter((call) => call[2].external.message);
+    expect(probes).toHaveLength(2);
+    expect(probes[0][2]).toEqual({ project: "extension-project", external: {
+      worktree: "/worktree", sessionId: coordinationSessionId,
+    } });
+    expect(sent).toHaveLength(2);
+    expect(sent[0][2]).toEqual({ project: "extension-project", external: { worktree: "/worktree", sessionId: coordinationSessionId,
+      message: { id: "msg-user", role: "user", text: "I prefer concise answers. [REDACTED]" } } });
+    expect(sent[1][2]).toEqual(sent[0][2]);
+    expect(client.v2.session.get).toHaveBeenCalledWith({ sessionID: "ses-external" });
+    expect(client.v2.session.messages).toHaveBeenCalledWith({ sessionID: "ses-external", limit: 100, order: "desc" });
+    expect(JSON.stringify(mockCallMcpTool.mock.calls)).not.toMatch(/secret-canary|hidden-canary|tool-canary|assistant-canary|metadata-canary/);
+  });
+
+  it("does not read messages when learning is disabled or the event has no exact session", async () => {
+    mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: false }) }] });
+    const client = { v2: { session: { get: vi.fn(), messages: vi.fn() } } };
+    const plugin = await AutoObserverPlugin({ worktree: "/worktree", client });
+    await plugin.event({ event: { type: "session.idle" } });
+    expect(mockCallMcpTool).not.toHaveBeenCalled();
+    await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } });
+    expect(client.v2.session.get).not.toHaveBeenCalled();
+    expect(client.v2.session.messages).not.toHaveBeenCalled();
+  });
+
+  it("does not let unfinished assistant/tool payloads suppress a later user preference", async () => {
+    mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: true }) }] });
+    const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { v2: { session: {
+      get: vi.fn().mockResolvedValue({ data: { id: "ses-external", location: { directory: "/worktree" } } }),
+      messages: vi.fn().mockResolvedValue({ data: { data: [
+        { id: "msg-assistant", type: "assistant", agent: "engineer", model: { id: "model", providerID: "openai" }, time: { created: 1 }, content: [{ type: "tool", id: "tool", text: "x".repeat(1024 * 1024) }] },
+        { id: "msg-user", type: "user", time: { created: 1 }, text: "I prefer concise replies." },
+      ], cursor: {} } }),
+     } } } });
+    await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } });
+    expect(mockCallMcpTool.mock.calls.filter((call) => call[2].external.message)).toHaveLength(1);
+  });
+
+  it("rejects foreign SDK session/worktree identity before transmitting text", async () => {
+    mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: true }) }] });
+    const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { v2: { session: {
+      get: vi.fn().mockResolvedValue({ data: { id: "foreign", location: { directory: "/foreign" } } }),
+      messages: vi.fn().mockResolvedValue({ data: { data: [], cursor: {} } }),
+    } } } });
+    await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } });
+    expect(mockCallMcpTool).toHaveBeenCalledTimes(1);
+    expect(mockCallMcpTool.mock.calls[0][2].external.message).toBeUndefined();
   });
 });

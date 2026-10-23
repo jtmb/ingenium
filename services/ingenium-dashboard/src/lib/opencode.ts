@@ -23,7 +23,7 @@ export interface OpenCodeSession {
   path: string;
   title: string;
   version: string;
-  time: { created: number; updated: number }; // epoch millis
+  time: { created: number; updated: number; archived?: number }; // epoch millis
   cost: number;
   tokens: {
     input: number;
@@ -193,6 +193,169 @@ function collectionValues(value: unknown): unknown[] {
   return Object.entries(value).map(([key, entry]) => {
     if (!isProviderRecord(entry)) return entry;
     return { ...entry, id: nonEmptyString(entry.id) ?? key };
+  });
+}
+
+export interface OpenCodePermissionRequest {
+  id: string;
+  permission: string;
+  pattern: string;
+  action: string;
+  sessionID?: string;
+}
+
+/** Keep the browser permission prompt stable across legacy and v2 request shapes. */
+export function normalizeOpenCodePermissionRequests(input: unknown): OpenCodePermissionRequest[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.requests ?? root.permissions ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodePermissionRequest[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const id = nonEmptyString(candidate.id);
+    const action = nonEmptyString(candidate.action);
+    const permission = nonEmptyString(candidate.permission) ?? action;
+    const patterns = Array.isArray(candidate.patterns)
+      ? candidate.patterns.filter((value): value is string => typeof value === "string" && value.length > 0)
+      : Array.isArray(candidate.resources)
+        ? candidate.resources.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [];
+    const pattern = nonEmptyString(candidate.pattern) ?? patterns.join("\n");
+    if (!id || !permission || !action || !pattern) return [];
+    const sessionID = nonEmptyString(candidate.sessionID);
+    return [{ id, permission, pattern, action, ...(sessionID ? { sessionID } : {}) }];
+  });
+}
+
+export interface OpenCodeQuestionOption {
+  label: string;
+  description?: string;
+  value?: string;
+}
+
+export interface OpenCodeQuestion {
+  id: string;
+  requestId?: string;
+  sessionID?: string;
+  question: string;
+  header?: string;
+  options?: OpenCodeQuestionOption[];
+  multiple?: boolean;
+  type?: "string" | "number" | "integer" | "boolean" | "multiselect" | "external";
+  required?: boolean;
+  hidden?: boolean;
+  when?: Array<{ key: string; op: "eq" | "neq"; value: string | number | boolean }>;
+  placeholder?: string;
+  url?: string;
+  default?: OpenCodeFormAnswerValue;
+  format?: "email" | "uri" | "date" | "date-time";
+  minimum?: number;
+  maximum?: number;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  minItems?: number;
+  maxItems?: number;
+  custom?: boolean;
+}
+
+export type OpenCodeFormAnswerValue = string | number | boolean | string[];
+
+/** Flatten legacy text questions and v2 question requests for the existing prompt UI. */
+export function normalizeOpenCodeQuestions(input: unknown): OpenCodeQuestion[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.requests ?? root.questions ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodeQuestion[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const requestId = nonEmptyString(candidate.requestID)
+      ?? nonEmptyString(candidate.questionID)
+      ?? nonEmptyString(candidate.id);
+    const sessionID = nonEmptyString(candidate.sessionID);
+    const nested = Array.isArray(candidate.questions)
+      ? candidate.questions
+      : Array.isArray(candidate.fields) ? candidate.fields : [candidate];
+
+    return nested.flatMap((question, index): OpenCodeQuestion[] => {
+      if (!isProviderRecord(question)) return [];
+      const text = nonEmptyString(question.question)
+        ?? nonEmptyString(question.title)
+        ?? nonEmptyString(question.text)
+        ?? nonEmptyString(question.key);
+      const id = nonEmptyString(question.key)
+        ?? nonEmptyString(question.id)
+        ?? (requestId ? nested.length === 1 ? requestId : `${requestId}:${index}` : null);
+      if (!text || !id) return [];
+
+      const options = Array.isArray(question.options)
+        ? question.options.flatMap((option): OpenCodeQuestionOption[] => {
+          if (!isProviderRecord(option)) return [];
+          const label = nonEmptyString(option.label);
+          if (!label) return [];
+          const description = nonEmptyString(option.description);
+          const value = nonEmptyString(option.value);
+          return [{ label, ...(description ? { description } : {}), ...(value ? { value } : {}) }];
+        })
+        : [];
+      const header = nonEmptyString(question.header) ?? nonEmptyString(question.description);
+      const rawType = nonEmptyString(question.type);
+      const type = rawType && ["string", "number", "integer", "boolean", "multiselect", "external"].includes(rawType)
+        ? rawType as OpenCodeQuestion["type"]
+        : undefined;
+      const placeholder = nonEmptyString(question.placeholder);
+      const url = nonEmptyString(question.url);
+      const format = nonEmptyString(question.format);
+      const when = Array.isArray(question.when)
+        ? question.when.flatMap((condition): NonNullable<OpenCodeQuestion["when"]> => {
+          if (!isProviderRecord(condition)) return [];
+          const key = nonEmptyString(condition.key);
+          const op = condition.op === "eq" || condition.op === "neq" ? condition.op : null;
+          const value = condition.value;
+          return key && op && (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+            ? [{ key, op, value }]
+            : [];
+        })
+        : [];
+      const defaultValue = question.default;
+      const validDefault = typeof defaultValue === "string"
+        || typeof defaultValue === "number"
+        || typeof defaultValue === "boolean"
+        || Array.isArray(defaultValue) && defaultValue.every((value) => typeof value === "string");
+      return [{
+        id,
+        ...(requestId ? { requestId } : {}),
+        ...(sessionID ? { sessionID } : {}),
+        question: text,
+        ...(header ? { header } : {}),
+        ...(options.length > 0 ? { options } : {}),
+        ...(typeof question.multiple === "boolean"
+          ? { multiple: question.multiple }
+          : type === "multiselect" ? { multiple: true } : {}),
+        ...(type ? { type } : {}),
+        ...(typeof question.required === "boolean" ? { required: question.required } : {}),
+        ...(typeof question.hidden === "boolean" ? { hidden: question.hidden } : {}),
+        ...(when.length > 0 ? { when } : {}),
+        ...(placeholder ? { placeholder } : {}),
+        ...(url ? { url } : {}),
+        ...(validDefault ? { default: defaultValue as OpenCodeFormAnswerValue } : {}),
+        ...(format === "email" || format === "uri" || format === "date" || format === "date-time" ? { format } : {}),
+        ...(typeof question.minimum === "number" ? { minimum: question.minimum } : {}),
+        ...(typeof question.maximum === "number" ? { maximum: question.maximum } : {}),
+        ...(typeof question.minLength === "number" ? { minLength: question.minLength } : {}),
+        ...(typeof question.maxLength === "number" ? { maxLength: question.maxLength } : {}),
+        ...(typeof question.pattern === "string" ? { pattern: question.pattern } : {}),
+        ...(typeof question.minItems === "number" ? { minItems: question.minItems } : {}),
+        ...(typeof question.maxItems === "number" ? { maxItems: question.maxItems } : {}),
+        ...(typeof question.custom === "boolean" ? { custom: question.custom } : {}),
+      }];
+    });
   });
 }
 
@@ -424,12 +587,14 @@ export interface OpenCodePromptParams {
   model?: { providerID: string; modelID: string };
   agent?: string;
   system?: string;
+  context?: string;
   tools?: Record<string, boolean>;
   variant?: string;
 }
 
 export interface OpenCodePromptAccepted {
   accepted: boolean;
+  messageID?: string;
 }
 
 export function createOpenCodeClient(runtimeId: string | null) {
@@ -454,7 +619,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
     get: (id: string) =>
       oc<OpenCodeSession>(`/opencode/sessions/${encodeURIComponent(id)}`),
 
-    update: (id: string, body: { title?: string }) =>
+    update: (id: string, body: { title?: string; time?: { archived?: number } }) =>
       oc<OpenCodeSession>(`/opencode/sessions/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify(body),
@@ -658,15 +823,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
   },
 
   permissions: {
-    list: () =>
-      oc<
-        Array<{
-          id: string;
-          permission: string;
-          pattern: string;
-          action: string;
-        }>
-      >("/opencode/permissions"),
+    list: async () => normalizeOpenCodePermissionRequests(await oc<unknown>("/opencode/permissions")),
 
     reply: (sessionId: string, permissionId: string, response: "once" | "always" | "reject") =>
       oc<unknown>(
@@ -681,13 +838,13 @@ export function createOpenCodeClient(runtimeId: string | null) {
   /* ── Questions ── */
 
   questions: {
-    /**
-     * List pending questions for a session/directory.
-     * v1.18.9 contract: GET /question returns array of { id, text } objects.
-     */
-    list: (directory?: string) =>
-      oc<Array<{ id: string; text?: string }>>(
-        `/opencode/questions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
+    list: async (directory?: string) => normalizeOpenCodeQuestions(await oc<unknown>(
+      `/opencode/questions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
+    )),
+    reply: (sessionId: string, requestId: string, answer: Record<string, OpenCodeFormAnswerValue>) =>
+      oc<unknown>(
+        `/opencode/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}`,
+        { method: "POST", body: JSON.stringify({ answer }) },
       ),
   },
 

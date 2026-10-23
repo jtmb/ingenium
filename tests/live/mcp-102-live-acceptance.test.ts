@@ -219,6 +219,11 @@ async function startFixtureApi(): Promise<FixtureApi> {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/v1/usage/external") {
+        json(response, 200, { data: { created: true } });
+        return;
+      }
+
       if (request.method === "GET") {
         json(response, 200, { project: PROJECT, project_id: projectId, data: [] });
         return;
@@ -323,6 +328,20 @@ const representativeByCategory: Record<string, { name: string; arguments: Record
   Observations: { name: "ingenium_observation_list", arguments: { project: PROJECT } },
   Personality: { name: "ingenium_personality", arguments: { project: PROJECT } },
   Synthesis: { name: "ingenium_synthesis_status", arguments: { project: PROJECT } },
+  Usage: {
+    name: "ingenium_usage_ingest",
+    arguments: {
+      project: PROJECT,
+      event: {
+        worktree: REPOSITORY_ROOT,
+        sessionId: "mcp-102-session",
+        messageId: "mcp-102-message",
+        role: "assistant",
+        completedAt: "2026-09-19T00:00:00.000Z",
+        inputTokens: 0,
+      },
+    },
+  },
   Extraction: { name: "ingenium_extraction_run", arguments: {} },
   Tasks: { name: "ingenium_task_list", arguments: { project: PROJECT } },
   Plans: { name: "ingenium_plan_list", arguments: { project: PROJECT } },
@@ -358,12 +377,12 @@ async function callRepresentative(client: Client, representative: { name: string
 }
 
 describe("MCP-102 provider-free live acceptance", () => {
-  it("connects all 31 categories with exact catalog accounting and enforces policy, project, error, disabled, and child inheritance boundaries", async () => {
-    expect(MCP_TOOL_CATALOG).toHaveLength(290);
-    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(288);
+  it("connects all 32 categories with exact catalog accounting and enforces policy, project, error, disabled, and child inheritance boundaries", async () => {
+    expect(MCP_TOOL_CATALOG).toHaveLength(286);
+    expect(MCP_TOOL_CATALOG.filter((tool) => tool.name.startsWith("ingenium_"))).toHaveLength(284);
     expect(MCP_TOOL_CATALOG.filter((tool) => !tool.name.startsWith("ingenium_")).map((tool) => tool.name).sort())
       .toEqual([...EXTENSION_TOOL_NAMES].sort());
-    expect(new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))).toHaveLength(31);
+    expect(new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))).toHaveLength(32);
     expect(Object.keys(representativeByCategory).sort())
       .toEqual([...new Set(MCP_TOOL_CATALOG.map((tool) => tool.category))].sort());
 
@@ -381,8 +400,8 @@ describe("MCP-102 provider-free live acceptance", () => {
     const categoryCalls = await Promise.all(Object.values(representativeByCategory).map((representative) => (
       callRepresentative(connection.client, representative)
     )));
-    expect(categoryCalls).toHaveLength(31);
-    expect(fixture.requests.filter((request) => /^POST \/api\/v1\/(?!mcp-servers\/fixture\/discovery)/.test(request))).toEqual([]);
+    expect(categoryCalls).toHaveLength(32);
+    expect(fixture.requests.filter((request) => /^POST \/api\/v1\/(?!mcp-servers\/fixture\/discovery|usage\/external)/.test(request))).toEqual([]);
 
     fixture.setPolicyValid("ingenium_setting_get", false);
     const invalidPolicy = await connection.client.callTool({

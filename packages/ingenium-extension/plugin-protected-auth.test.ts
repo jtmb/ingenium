@@ -166,7 +166,7 @@ describe("packaged extension lifecycle MCP boundary", () => {
     await resourceSync.event({ event: { type: "session.created", properties: { info: { id: "session-resource-sync" } } } });
     await drainRepositoryLifecycleQueue(worktree);
     const autoObserver = await AutoObserverPlugin({ worktree, client: { app: { log } } });
-    await autoObserver.event({ event: { type: "session.idle" } });
+    await autoObserver.event({ event: { type: "session.idle", properties: { sessionID: "session-1" } } });
     const observer = await ObserverPlugin({ worktree, client: { app: { log } } });
     await observer.event({ event: { type: "session.created", session: { id: "session-1" } } });
 
@@ -235,7 +235,7 @@ describe("packaged extension lifecycle MCP boundary", () => {
     const { AutoObserverPlugin } = await import("./auto-observer.js");
     const plugin = await AutoObserverPlugin({ worktree, client: { app: { log } } });
 
-    await expect(plugin.event({ event: { type: "session.idle" } })).resolves.toBeUndefined();
+    await expect(plugin.event({ event: { type: "session.idle", properties: { sessionID: "session-1" } } })).resolves.toBeUndefined();
     expect(JSON.stringify(log.mock.calls)).toContain(`trigger_extraction: ${expected}`);
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();

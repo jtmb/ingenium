@@ -6,6 +6,14 @@ import { describe, expect, it } from "vitest";
 const SERVER_SOURCE_PATH = fileURLToPath(new URL("../scripts/mcp-server.ts", import.meta.url));
 const CATALOG_SOURCE_PATH = fileURLToPath(new URL("../../../packages/ingenium-core/lib/tools/mcp-tool-catalog.ts", import.meta.url));
 const EXTENSION_TOOL_NAMES = new Set(["auto_observe_now", "synthesize_observations"]);
+const RETIRED_COORDINATION_TOOLS = new Set([
+  "ingenium_coordination_status",
+  "ingenium_coordination_memory_read",
+  "ingenium_coordination_update",
+  "ingenium_coordination_claim",
+  "ingenium_coordination_release",
+  "ingenium_coordination_handoff",
+]);
 
 interface SourceRegistration {
   name: string;
@@ -136,7 +144,8 @@ function compareRegistrations(
 ): RegistrationComparison {
   const transportNames = registrations.map((registration) => typeof registration === "string" ? registration : registration.name);
   const actualCanonicalNames = transportNames.map((name) => `ingenium_${name}`);
-  const expectedCanonicalNames = catalogNames.filter((name) => !EXTENSION_TOOL_NAMES.has(name));
+  const expectedCanonicalNames = catalogNames.filter((name) =>
+    !EXTENSION_TOOL_NAMES.has(name) && !RETIRED_COORDINATION_TOOLS.has(name));
   const expectedSet = new Set(expectedCanonicalNames);
   const catalogEntryCount = new Map<string, number>();
   for (const name of catalogNames) {
@@ -182,12 +191,12 @@ function assertCurrentRegistrationConformance(): RegistrationComparison {
 }
 
 describe("MCP server registration conformance", () => {
-  it("matches the current canonical core catalog without a historical count", () => {
+  it("matches the retained canonical core catalog after coordination retirement", () => {
     const comparison = assertCurrentRegistrationConformance();
 
     expect(new Set(comparison.actualCanonicalNames)).toEqual(new Set(comparison.expectedCanonicalNames));
-    expect(comparison.actualCanonicalNames).toContain("ingenium_coordination_memory_read");
-    expect(comparison.expectedCanonicalNames).toContain("ingenium_coordination_memory_read");
+    expect(comparison.actualCanonicalNames).toHaveLength(284);
+    expect(comparison.actualCanonicalNames).not.toEqual(expect.arrayContaining([...RETIRED_COORDINATION_TOOLS]));
   });
 
   it("requires a literal registration name and ignores calls after restoration", () => {

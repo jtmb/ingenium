@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { getSetting, setSetting } from "../lib/tools/settings.js";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import {
   CONTEXT_SNAPSHOT_TIMING_MAX_MS,
@@ -16,6 +17,8 @@ import {
   createContextCheckpoint,
   createContextConversation,
   listContextCheckpoints,
+  searchContextMessages,
+  retrieveContextMessages,
 } from "../lib/tools/context-conversations.js";
 import {
   calculateContextConversationSnapshotHash,
@@ -103,6 +106,60 @@ function expectImportTiming(timing: ContextSnapshotImportTiming, checkpointNotRu
 }
 
 describe("Context-native snapshot import", () => {
+  it("resumes bounded batches after reconnect, verifies overlaps and never resurrects archived sources", () => {
+    const { db, first, second } = setup();
+    const batch = (start: number, count: number) => snapshot(makeEntries(count, start), { startSequence: start });
+    const firstBatch = batch(0, 2);
+    const imported = importContextConversationSnapshot(first.id, firstBatch);
+    expect(importContextConversationSnapshot(first.id, batch(2, 2))).toMatchObject({ appended: 2, revision: 4 });
+    resetDbForTest();
+    expect(importContextConversationSnapshot(first.id, firstBatch)).toMatchObject({ appended: 0, revision: 4, idempotent: true });
+    expect(importContextConversationSnapshot(first.id, batch(1, 4))).toMatchObject({ appended: 1, revision: 5 });
+    expectErrorCode(() => importContextConversationSnapshot(first.id, batch(6, 1)), "SNAPSHOT_DIVERGED");
+    expectErrorCode(() => importContextConversationSnapshot(first.id, snapshot([{ ...makeEntries(1)[0]!, content: "changed" }], { startSequence: 0 })), "SNAPSHOT_DIVERGED");
+    expectErrorCode(() => importContextConversationSnapshot(second.id, batch(2, 2)), "SNAPSHOT_DIVERGED");
+    expectErrorCode(() => importContextConversationSnapshot(first.id, snapshot(makeEntries(1), { startSequence: 0, sourceSessionId: "other" })), "SOURCE_KEY_REUSED");
+    const authorization = authorizeContextMaintenanceAction(first.id, imported.conversation.id, { operation: "archive_conversation", expectedRevision: 5 });
+    archiveContextConversation(first.id, imported.conversation.id, { expectedRevision: 5, confirmationToken: authorization.confirmationToken });
+    expect(importContextConversationSnapshot(first.id, batch(0, 2)).appended).toBe(0);
+    expectErrorCode(() => importContextConversationSnapshot(first.id, batch(5, 1)), "CONVERSATION_ARCHIVED");
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT count(*) AS n FROM context_conversation_sources WHERE project_id = ?").get(first.id)).toEqual({ n: 1 });
+  });
+
+  it("redacts before hashing, persistence, retrieval and FTS indexing", () => {
+    const { db, first, second } = setup();
+    const value = randomUUID().replaceAll("-", "");
+    const content = `searchable token=${value}`;
+    const safe = "searchable token= [REDACTED]";
+    const input = snapshot([{ role: "user", content, sourceMessageId: "message" }], { startSequence: 0 });
+    expect(input.snapshotHash === snapshot([{ role: "user", content: safe, sourceMessageId: "message" }], { startSequence: 0 }).snapshotHash).toBe(true);
+    const imported = importContextConversationSnapshot(first.id, input);
+    const results = searchContextMessages(first.id, imported.conversation.id, "searchable");
+    expect(results).toHaveLength(1);
+    expect(results[0]).not.toHaveProperty("content");
+    const messages = retrieveContextMessages(first.id, imported.conversation.id, results.map((entry) => entry.id));
+    expect(messages.messages[0]!.content).toBe(safe);
+    expect(messages.messages[0]!.content_hash).toBe(createHash("sha256").update(safe).digest("hex"));
+    expect(searchContextMessages(first.id, imported.conversation.id, value)).toEqual([]);
+    expect(() => retrieveContextMessages(second.id, imported.conversation.id, results.map((entry) => entry.id))).toThrow();
+    expect(JSON.stringify(db.prepare("SELECT * FROM context_conversation_source_messages").all()).includes(value)).toBe(false);
+  });
+
+  it("keeps automatic upload default-off, project-scoped and persisted with immediate opt-out", () => {
+    const { first, second } = setup();
+    const binding = { sourceKey: "context-upload-file:ses_exact", sourceSessionId: "ses_exact" };
+    const input = snapshot(makeEntries(1), { ...binding, automatic: true, startSequence: 0 });
+    expect(getSetting(first.id, "context_auto_upload_enabled")).toBeUndefined();
+    expectErrorCode(() => importContextConversationSnapshot(first.id, input), "CONTEXT_UPLOAD_DISABLED");
+    setSetting(first.id, "context_auto_upload_enabled", "true");
+    resetDbForTest();
+    expect(importContextConversationSnapshot(first.id, input).appended).toBe(1);
+    expectErrorCode(() => importContextConversationSnapshot(second.id, input), "CONTEXT_UPLOAD_DISABLED");
+    setSetting(first.id, "context_auto_upload_enabled", "false");
+    expectErrorCode(() => importContextConversationSnapshot(first.id, snapshot(makeEntries(1, 1), { ...binding, automatic: true, startSequence: 1 })), "CONTEXT_UPLOAD_DISABLED");
+    expect(() => setSetting(first.id, "context_auto_upload_enabled", "yes")).toThrow();
+    expect(() => setSetting(first.id, "context_upload_last_sync", JSON.stringify({ status: "synced", payload: "not permitted" }))).toThrow();
+  });
   it("imports more than 1,000 entries atomically, replays idempotently, and appends a verified suffix", () => {
     const { db, first } = setup();
     const initialEntries = makeEntries(1_001);
@@ -242,6 +299,7 @@ describe("Context-native snapshot import", () => {
       ...entries,
       { role: "assistant", content: "Unverified suffix", sourceMessageId: "source-message-2" },
     ])), "SNAPSHOT_DIVERGED");
+    expectErrorCode(() => importContextConversationSnapshot(first.id, snapshot(makeEntries(1, 2), { startSequence: 2 })), "SNAPSHOT_DIVERGED");
     expect(db.prepare(
       "SELECT entry_count FROM context_conversation_sources WHERE project_id = ? AND conversation_id = ?",
     ).get(first.id, imported.conversation.id)).toEqual({ entry_count: 2 });

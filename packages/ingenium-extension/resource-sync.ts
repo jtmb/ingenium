@@ -79,13 +79,14 @@ function hashFile(filePath: string): string | null {
 // ── Repository-authoritative manifest v2 ────────────────────────────────────
 // These scanners are intentionally independent from the legacy bidirectional
 // resource scans below. Repository sync is a one-way, validated projection of
-// the local worktree; it never scans commands or either project/global config.
+// the local worktree; it never projects either project/global config.
 
 export const REPOSITORY_MAX_ITEMS = 512;
 export const REPOSITORY_MAX_DOC_ITEMS = 256;
 export const REPOSITORY_MAX_FILE_BYTES = 512 * 1024;
 export const REPOSITORY_MAX_RESOURCE_BYTES = 256 * 1024;
-export const REPOSITORY_MAX_DOC_BYTES = 2 * 1024 * 1024;
+export const REPOSITORY_MAX_DOC_BYTES = 3 * 1024 * 1024;
+export const REPOSITORY_MAX_DOC_FILE_BYTES = 2 * 1024 * 1024;
 export const REPOSITORY_MAX_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
 const REPOSITORY_PLUGIN_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
 const REPOSITORY_PLUGIN_ROOTS = [".opencode/plugins/", "packages/"] as const;
@@ -184,12 +185,23 @@ export interface RepositoryPluginManifestEntry {
   options: Record<string, unknown>;
 }
 
+export interface RepositoryCommandManifestEntry {
+  identity: string;
+  path: string;
+  sha256: string;
+  name: string;
+  source: string;
+  fileType: "regular";
+  isSymlink: false;
+}
+
 export interface RepositoryManifestV2 {
   version: 2;
   docs: RepositoryDocManifestEntry[];
   skills: RepositorySkillManifestEntry[];
   agents: RepositoryAgentManifestEntry[];
   plugins: RepositoryPluginManifestEntry[];
+  commands: RepositoryCommandManifestEntry[];
 }
 
 function normalizeRepositoryText(value: string): string {
@@ -454,7 +466,7 @@ function scanRepositoryDocs(worktree: string): RepositoryDocManifestEntry[] {
   const entries = walkRepositoryFiles(
     worktree,
     docsDir,
-    REPOSITORY_MAX_DOC_BYTES,
+    REPOSITORY_MAX_DOC_FILE_BYTES,
     (filePath) => filePath.endsWith(".md"),
     REPOSITORY_MAX_DOC_ITEMS,
   ).filter((file) => file.path.startsWith("docs/"));
@@ -533,7 +545,7 @@ function scanRepositorySkills(
 }
 
 function parseAgentSkills(frontmatter: string): string[] {
-  const lines = frontmatter.split("\n");
+  const lines = frontmatter.split(/\r?\n/).map((line) => line.replace(/^# /, ""));
   const start = lines.findIndex((line) => /^skills:\s*$/.test(line));
   if (start < 0) return [];
   const skills: string[] = [];
@@ -560,7 +572,7 @@ interface AgentCandidate {
   enabled: boolean;
 }
 
-/** Managed profiles are categorized; root-level definitions are legacy orphans. */
+/** Root-level profiles are inspected so unsupported identities fail closed. */
 function isRepositoryAgentProfileLocation(agentsRoot: string, file: RepositoryDiskFile): boolean {
   const segments = repositoryRelativePath(agentsRoot, file.absolutePath).split("/");
   return (segments.length === 1 && file.path.endsWith(".md"))
@@ -569,7 +581,7 @@ function isRepositoryAgentProfileLocation(agentsRoot: string, file: RepositoryDi
 
 /**
  * Diagnostics can live beside managed profiles. Treat only complete,
- * self-identifying profiles as resources instead of rejecting unrelated notes.
+ * path-identified profiles as resources instead of rejecting unrelated notes.
  */
 function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskFile): AgentCandidate | null {
   if (!isRepositoryAgentProfileLocation(agentsRoot, file)) return null;
@@ -581,26 +593,28 @@ function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskF
     return null;
   }
 
-  const name = parsed.fields.name;
+  const name = parsed.fields.name ?? basename(file.path, ".md");
   const description = parsed.fields.description;
   const mode = parsed.fields.mode;
   if (!safeRepositoryName(name)
     || name !== basename(file.path, ".md")
     || !description?.trim()
     || !mode?.trim()
-    || !/^permission:\s*$/m.test(parsed.raw)) {
+    || !/^permissions?:\s*$/m.test(parsed.raw)) {
     return null;
   }
 
   const relativePath = repositoryRelativePath(agentsRoot, file.absolutePath);
   const segments = relativePath.split("/");
-  const category = segments.length >= 2 ? segments[0]! as typeof AGENT_CATEGORIES[number] : null;
+  // V2's built-in Plan ID requires plan.md at the root, but remains a primary resource.
+  const category = relativePath === "plan.md" ? "primary"
+    : segments.length >= 2 ? segments[0]! as typeof AGENT_CATEGORIES[number] : null;
   const permissions = parseAgentPermissionFrontmatter(file.content);
   if (Object.keys(permissions)[0] !== "*" || permissions["*"] !== "deny") {
     throw new RepositorySyncScanError("Agent profile is not default-deny");
   }
   if (!isReservedBroker(name)
-    && (!/^(?:true|false)$/.test(parsed.fields.disable ?? "")
+    && (!/^(?:true|false)$/.test(parsed.fields.disabled ?? parsed.fields.disable ?? "")
       || !/^(?:true|false)$/.test(parsed.fields.hidden ?? ""))) {
     throw new RepositorySyncScanError("Agent profile lifecycle metadata is incomplete");
   }
@@ -616,7 +630,7 @@ function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskF
     permissions,
     metadata,
     skills,
-    enabled: parsed.fields.disable !== "true",
+    enabled: (parsed.fields.disabled ?? parsed.fields.disable) !== "true",
   };
   return { path: file.path, ...semantic };
 }
@@ -706,22 +720,42 @@ function parseConfiguredPlugins(worktree: string): PluginConfigEntry[] {
   try {
     config = JSON.parse(readRepositoryRegularText(worktree, configPath).replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
   } catch { throw new RepositorySyncScanError("Invalid opencode.json"); }
-  if (config.plugin === undefined) return [];
-  if (!Array.isArray(config.plugin)) throw new RepositorySyncScanError("Invalid plugin array");
-  return config.plugin.map((entry, order) => {
+  const native = config.plugins !== undefined;
+  const configured = native ? config.plugins : config.plugin;
+  if (configured === undefined) return [];
+  if (!Array.isArray(configured)) throw new RepositorySyncScanError("Invalid plugin array");
+  return configured.flatMap((entry, order) => {
     const configuredPath = typeof entry === "string"
       ? entry
-      : repositoryIsRecord(entry) && typeof entry.path === "string"
-        ? entry.path
+      : repositoryIsRecord(entry) && typeof (native ? entry.package : entry.path) === "string"
+        ? (native ? entry.package : entry.path) as string
         : undefined;
     if (!configuredPath) throw new RepositorySyncScanError("Invalid plugin entry");
+    if (native && !configuredPath.startsWith(CANONICAL_PROJECT_PLUGIN_PREFIX)
+      && !configuredPath.startsWith(".") && !configuredPath.startsWith("/")) return [];
+    if (native) {
+      const localPath = configuredPath.startsWith(CANONICAL_PROJECT_PLUGIN_PREFIX)
+        ? configuredPath.slice(CANONICAL_PROJECT_PLUGIN_PREFIX.length)
+        : configuredPath;
+      const relativePath = relative(resolve(worktree), resolve(worktree, localPath));
+      if (!relativePath || relativePath.startsWith(`..${sep}`) || relativePath === ".." || isAbsolute(relativePath)) return [];
+    }
     const normalizedPath = configuredRepositoryPluginPath(worktree, configuredPath);
+    try {
+      const metadata = lstatSync(resolve(worktree, normalizedPath));
+      if (metadata.isDirectory() && !metadata.isSymbolicLink()) return [];
+    } catch (error) {
+      if (isMissingPathError(error)) throw new RepositorySyncScanError("Plugin source is missing or unsafe");
+      throw error;
+    }
     if (!isAllowedRepositoryPluginPath(normalizedPath)) throw new RepositorySyncScanError("Plugin source is outside the allowed roots");
     if (typeof entry === "string") return { path: normalizedPath, enabled: true, order, options: {} };
-    if (!repositoryIsRecord(entry) || typeof entry.path !== "string") throw new RepositorySyncScanError("Invalid plugin entry");
-    const rawOptions = repositoryIsRecord(entry.options) ? entry.options : Object.fromEntries(Object.entries(entry).filter(([key]) => !["path", "enabled", "options", "name"].includes(key)));
+    if (!repositoryIsRecord(entry)) throw new RepositorySyncScanError("Invalid plugin entry");
+    const rawOptions = repositoryIsRecord(entry.options) ? entry.options : native
+      ? {}
+      : Object.fromEntries(Object.entries(entry).filter(([key]) => !["path", "enabled", "options", "name"].includes(key)));
     const options = stripSecretLikePluginOptionKeys(rawOptions);
-    return { path: normalizedPath, enabled: entry.enabled !== false, order, options: options as Record<string, unknown> };
+    return { path: normalizedPath, enabled: native || entry.enabled !== false, order, options: options as Record<string, unknown> };
   });
 }
 
@@ -776,8 +810,21 @@ function repositorySerializedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-function assertRepositoryResourceManifestBounds(manifest: Pick<RepositoryManifestV2, "skills" | "agents" | "plugins">): void {
-  const entries = [...manifest.skills, ...manifest.agents, ...manifest.plugins];
+function scanRepositoryCommands(worktree: string, baseline: RepositoryBaseline, resourceBudget: RepositoryResourceScanBudget): RepositoryCommandManifestEntry[] {
+  const directory = resolve(worktree, ".opencode", "commands");
+  return walkRepositoryFiles(worktree, directory, REPOSITORY_MAX_RESOURCE_BYTES,
+    (filePath) => dirname(filePath) === directory && filePath.endsWith(".md"), REPOSITORY_MAX_ITEMS, resourceBudget)
+    .map((file) => {
+      const name = basename(file.path, ".md");
+      if (!safeRepositoryName(name) || !file.content.trim() || file.content.includes("\u0000")) throw new RepositorySyncScanError();
+      if (file.content.startsWith("---\n") && !parseRepositoryFrontmatter(file.content).body.trim()) throw new RepositorySyncScanError();
+      const semantic = { path: file.path, name, source: file.content, fileType: "regular" as const, isSymlink: false as const };
+      return { identity: resourceIdentity("commands", file.path, hashContent(file.content), baseline), sha256: repositoryHash(semantic), ...semantic };
+    });
+}
+
+function assertRepositoryResourceManifestBounds(manifest: Pick<RepositoryManifestV2, "skills" | "agents" | "plugins" | "commands">): void {
+  const entries = [...manifest.skills, ...manifest.agents, ...manifest.plugins, ...manifest.commands];
   if (entries.length > REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
 
   let total = 0;
@@ -799,6 +846,7 @@ export function buildRepositoryManifestV2(worktree: string, manifest?: SyncManif
     skills: scanRepositorySkills(worktree, repository.skills, resourceBudget),
     agents: scanRepositoryAgents(worktree, repository.agents, resourceBudget),
     plugins: scanRepositoryPlugins(worktree, repository.plugins, resourceBudget),
+    commands: scanRepositoryCommands(worktree, repository.commands ?? {}, resourceBudget),
   };
   assertRepositoryResourceManifestBounds(projection);
   return projection;
@@ -829,12 +877,13 @@ export interface SyncManifest {
     plugins: ResourceHashes;
     commands: ResourceHashes;
     config: { hash?: string };
-    /** V2 repository-authoritative baseline. Commands and global config are excluded. */
+    /** V2 repository-authoritative baseline. Global config is excluded. */
     repository?: {
       docs: RepositoryBaseline;
       skills: RepositoryBaseline;
       agents: RepositoryBaseline;
       plugins: RepositoryBaseline;
+      commands?: RepositoryBaseline;
     };
   };
 }
@@ -1810,6 +1859,16 @@ function safeAgentFilePath(worktree: string, name: string, category: string, cre
   if (!isSafeAgentName(name) || !isAgentCategory(category)) return null;
   const agentsRoot = safeAgentsRoot(worktree, create);
   if (!agentsRoot) return null;
+  if (name === "plan" && category === "primary") {
+    const rootPlan = resolve(agentsRoot, "plan.md");
+    try {
+      if (!lstatSync(rootPlan).isFile()) return null;
+      return rootPlan;
+    } catch (error) {
+      if (!isMissingPathError(error)) return null;
+      if (create) return rootPlan;
+    }
+  }
   const categoryDir = resolve(agentsRoot, category);
   try {
     if (existsSync(categoryDir)) {
@@ -2057,6 +2116,19 @@ function scanDiskAgents(worktree: string): Map<string, string> {
   const map = new Map<string, string>();
   const agentsDir = safeAgentsRoot(worktree);
   if (!agentsDir) return map;
+  const addAgent = (filePath: string, name: string) => {
+    const rawContent = readFileSync(filePath, "utf-8");
+    // Include security-relevant frontmatter in the baseline. Hashing only the
+    // body would hide a wildcard-deny or hidden-state edit from sync.
+    const { body, frontmatter, permissions } = parseManagedAgentDiskState(rawContent, name);
+    if (map.has(name)) throw new Error(`Duplicate agent profile: ${name}`);
+    map.set(name, hashAgentDefinition(
+      body,
+      JSON.stringify(permissions),
+      JSON.stringify(parseAgentMetadata(frontmatter)),
+      (frontmatter.disabled ?? frontmatter.disable) !== "true",
+    ));
+  };
   try {
     for (const category of readdirSync(agentsDir)) {
       if (!isAgentCategory(category)) continue;
@@ -2070,19 +2142,11 @@ function scanDiskAgents(worktree: string): Map<string, string> {
         if (!isSafeAgentName(name)) continue;
         const filePath = safeAgentFilePath(worktree, name, category);
         if (!filePath || !existsSync(filePath) || lstatSync(filePath).isSymbolicLink()) continue;
-        const rawContent = readFileSync(filePath, "utf-8");
-        // Include security-relevant frontmatter in the baseline. Hashing only the
-        // body would hide a wildcard-deny or hidden-state edit from sync.
-        const { body, frontmatter, permissions } = parseManagedAgentDiskState(rawContent, name);
-        if (map.has(name)) throw new Error(`Duplicate agent profile: ${name}`);
-        map.set(name, hashAgentDefinition(
-          body,
-          JSON.stringify(permissions),
-          JSON.stringify(parseAgentMetadata(frontmatter)),
-          frontmatter.disable !== "true",
-        ));
+        addAgent(filePath, name);
       }
     }
+    const rootPlan = resolve(agentsDir, "plan.md");
+    if (existsSync(rootPlan) && lstatSync(rootPlan).isFile()) addAgent(rootPlan, "plan");
   } catch (error) {
     if (error instanceof RepositorySyncScanError
       || (error instanceof Error && error.message.startsWith("Duplicate agent profile:"))) throw error;
@@ -2116,7 +2180,6 @@ export function writeAgentToDisk(
   } catch { return false; }
 
   const parts: string[] = [];
-  parts.push(`name: ${agent.name}`);
   const description = isReservedBroker(agent.name) ? LLM_BROKER_DESCRIPTION : agent.description;
   const mode = isReservedBroker(agent.name) ? LLM_BROKER_MODE : agent.mode;
   if (description) parts.push(`description: "${description.replace(/"/g, '\\"')}"`);
@@ -2125,24 +2188,20 @@ export function writeAgentToDisk(
     ? { hidden: true }
     : parseSerializedAgentObject(agent.metadata);
   if (!isReservedBroker(agent.name)) {
-    parts.push(`disable: ${agent.enabled === false || agent.enabled === 0 ? "true" : "false"}`);
+    parts.push(`disabled: ${agent.enabled === false || agent.enabled === 0 ? "true" : "false"}`);
     parts.push(`hidden: ${metadata.hidden === true ? "true" : "false"}`);
   } else if (metadata.hidden === true) {
     parts.push("hidden: true");
   }
-  const permissions = isReservedBroker(agent.name)
+  const permissions = canonicalAgentPermissionObject(isReservedBroker(agent.name)
     ? { "*": "deny" }
-    : { "*": "deny", ...parseSerializedAgentObject(agent.permissions) };
-  if (!isReservedBroker(agent.name)) permissions["*"] = "deny";
-  if (Object.keys(permissions).length > 0) {
-    parts.push("permission:");
-    appendAgentYamlObject(parts, permissions, 2);
-  }
+    : parseSerializedAgentObject(agent.permissions));
+  appendAgentPermissionRules(parts, permissions);
   if (!isReservedBroker(agent.name)) {
     const skills = (() => { try { const value: unknown = JSON.parse(agent.skills ?? "[]"); return Array.isArray(value) ? value.filter((skill): skill is string => typeof skill === "string") : []; } catch { return []; } })();
     if (skills.length > 0) {
-      parts.push("skills:");
-      for (const skill of skills) parts.push(`  - ${skill}`);
+      parts.push("# skills:");
+      for (const skill of skills) parts.push(`#   - ${skill}`);
     }
   }
   const frontmatter = `---\n${parts.join("\n")}\n---\n`;
@@ -2151,13 +2210,18 @@ export function writeAgentToDisk(
   return writePublicAgentProfile(filePath, frontmatter + "\n" + content);
 }
 
-function configuredAgentModel(worktree: string, name: string): string | undefined {
+function configuredAgentModel(worktree: string, category: string, name: string): string | undefined {
   const configPath = resolve(worktree, "opencode.json");
   if (!existsSync(configPath)) return undefined;
   try {
     const raw = readFileSync(configPath, "utf-8").replace(/^\s*\/\/.*$/gm, "");
-    const config = JSON.parse(raw) as { agent?: Record<string, { model?: unknown }> };
-    const model = config.agent?.[name]?.model;
+    const config = JSON.parse(raw) as {
+      agents?: Record<string, { model?: unknown }>;
+      agent?: Record<string, { model?: unknown }>;
+    };
+    const model = config.agents?.[`${category}/${name}`]?.model
+      ?? (category === "primary" && name === "plan" ? config.agents?.plan?.model : undefined)
+      ?? config.agent?.[name]?.model;
     return typeof model === "string" ? model : undefined;
   } catch {
     return undefined;
@@ -2257,7 +2321,7 @@ function writeConfigToDisk(worktree: string, content: string): void {
 }
 
 /**
- * Merge API plugin definitions into the local opencode.json plugin[] array.
+ * Merge API plugin definitions into the local opencode.json plugins[] array.
  * Returns the updated config string and whether the array changed.
  */
 function mergePluginsIntoConfig(
@@ -2272,7 +2336,9 @@ function mergePluginsIntoConfig(
     // opencode.json is strict JSON; tolerate full-line comments during synchronization.
     const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
     const config = JSON.parse(stripped);
-    const existing: string[] = Array.isArray(config.plugin) ? config.plugin : [];
+    const existing: unknown[] = Array.isArray(config.plugins)
+      ? config.plugins
+      : Array.isArray(config.plugin) ? config.plugin : [];
 
     // Build set of enabled API plugin file paths
     const apiPaths = new Set(apiPlugins.filter((p) => p.enabled !== false).map((p) => p.file_path));
@@ -2280,16 +2346,24 @@ function mergePluginsIntoConfig(
     // Preserve user plugins plus the bootstrap plugins that make project
     // provisioning and sync possible. Those bootstrap entries must survive an
     // API database reset even though the recreated project has no plugin rows yet.
-    const isIngenium = (p: string) => p.includes("ingenium-extension");
-    const isBootstrapPlugin = (p: string) => /(?:^|\/)plugins\/(?:auto-observer|observer|resource-sync|session-coordinator)(?:\.ts|\.js)?$/.test(p);
-    const userPlugins = existing.filter((p) => !isIngenium(p) || isBootstrapPlugin(p));
+    const packageName = (entry: unknown): string | undefined => typeof entry === "string"
+      ? entry
+      : repositoryIsRecord(entry) && typeof entry.package === "string" ? entry.package : undefined;
+    const isIngenium = (entry: unknown) => packageName(entry)?.includes("ingenium-extension") === true;
+    const isBootstrapPlugin = (entry: unknown) => {
+      const value = packageName(entry) ?? "";
+      return /(?:^|\/)plugins\/(?:v2\/)?(?:auto-observer|observer|resource-sync|lifecycle|ponytail)(?:\.ts|\.js)?$/.test(value)
+        || /(?:^|\/)ponytail\/\.opencode\/plugins\/ponytail\.mjs$/.test(value);
+    };
+    const userPlugins = existing.filter((entry) => !isIngenium(entry) || isBootstrapPlugin(entry));
 
     // Build new plugin array: user plugins + API-managed plugins
-    const newPlugins = [...new Set([...userPlugins, ...Array.from(apiPaths)])];
-    const changed = JSON.stringify(newPlugins.sort()) !== JSON.stringify(existing.sort());
+    const newPlugins = [...new Map([...userPlugins, ...apiPaths].map((entry) => [JSON.stringify(entry), entry])).values()];
+    const changed = config.plugin !== undefined || JSON.stringify(newPlugins) !== JSON.stringify(existing);
 
     if (changed) {
-      config.plugin = newPlugins;
+      config.plugins = newPlugins;
+      delete config.plugin;
       return { config: JSON.stringify(config, null, 2), changed };
     }
     return { config: null, changed: false };
@@ -2430,7 +2504,7 @@ async function pushAgentToApi(worktree: string, project: string, name: string, c
     const mode = frontmatter.mode || "subagent";
     // Runtime config is the only model source. Legacy markdown model metadata
     // must not be pushed back into the API or reintroduced on a later sync.
-    const model = configuredAgentModel(worktree, name) || "";
+    const model = configuredAgentModel(worktree, category, name) || "";
     const permissions = JSON.stringify(profilePermissions);
     const metadata = JSON.stringify(parseAgentMetadata(frontmatter));
     const res = await fetch(`${API_BASE}/agents?${encodeProject(project)}`, {
@@ -2445,7 +2519,7 @@ async function pushAgentToApi(worktree: string, project: string, name: string, c
         model,
         permissions,
         metadata,
-        enabled: frontmatter.disable !== "true",
+        enabled: (frontmatter.disabled ?? frontmatter.disable) !== "true",
       }),
     });
     return res.ok;
@@ -2468,14 +2542,14 @@ function readAgentSnapshot(worktree: string, name: string, category: string): Ag
       description: frontmatter.description || "",
       category,
       mode: frontmatter.mode || "subagent",
-      model: configuredAgentModel(worktree, name),
+      model: configuredAgentModel(worktree, category, name),
       permissions: isReservedBroker(name)
         ? LLM_BROKER_PERMISSIONS
         : JSON.stringify(permissions),
       metadata: isReservedBroker(name)
         ? LLM_BROKER_METADATA
         : JSON.stringify(parseAgentMetadata(frontmatter)),
-      enabled: frontmatter.disable !== "true",
+      enabled: (frontmatter.disabled ?? frontmatter.disable) !== "true",
     };
   } catch {
     return null;
@@ -2484,8 +2558,7 @@ function readAgentSnapshot(worktree: string, name: string, category: string): Ag
 
 function canonicalAgentRecord(agent: AgentSyncRecord): AgentSyncRecord {
   if (!isReservedBroker(agent.name)) {
-    const permissions = { "*": "deny", ...parseSerializedAgentObject(agent.permissions) };
-    permissions["*"] = "deny";
+    const permissions = canonicalAgentPermissionObject(parseSerializedAgentObject(agent.permissions));
     const metadata = parseSerializedAgentObject(agent.metadata);
     return {
       ...agent,
@@ -2601,6 +2674,20 @@ function parseYamlFrontmatter(content: string): { body: string; frontmatter: Rec
 }
 
 type AgentJsonObject = Record<string, unknown>;
+type AgentPermissionEffect = "allow" | "ask" | "deny";
+
+interface AgentPermissionRule {
+  action: string;
+  resource: string;
+  effect: AgentPermissionEffect;
+}
+
+const AGENT_PERMISSION_ACTION_ALIASES: Record<string, string> = {
+  bash: "shell",
+  task: "subagent",
+  write: "edit",
+};
+const SCOPED_AGENT_PERMISSION_ACTIONS = new Set(["edit", "shell", "subagent", "skill"]);
 
 function isAgentJsonObject(value: unknown): value is AgentJsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -2625,15 +2712,54 @@ function agentYamlScalar(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function appendAgentYamlObject(lines: string[], value: AgentJsonObject, indent: number): void {
-  const prefix = " ".repeat(indent);
-  for (const [key, child] of Object.entries(value)) {
-    if (isAgentJsonObject(child)) {
-      lines.push(`${prefix}${agentYamlKey(key)}:`);
-      appendAgentYamlObject(lines, child, indent + 2);
-    } else {
-      lines.push(`${prefix}${agentYamlKey(key)}: ${agentYamlScalar(child)}`);
+function agentPermissionEffect(value: unknown): AgentPermissionEffect {
+  return value === "allow" || value === "ask" ? value : "deny";
+}
+
+function agentPermissionRules(permissions: AgentJsonObject): AgentPermissionRule[] {
+  const rules: AgentPermissionRule[] = [];
+  const seen = new Set<string>();
+  for (const [rawAction, value] of Object.entries(permissions)) {
+    const action = AGENT_PERMISSION_ACTION_ALIASES[rawAction] ?? rawAction;
+    const resources = isAgentJsonObject(value) ? Object.entries(value) : [["*", value] as const];
+    for (const [resource, effectValue] of resources) {
+      const effect = agentPermissionEffect(effectValue);
+      const key = `${action}\0${resource}\0${effect}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rules.push({ action, resource, effect });
     }
+  }
+  return rules;
+}
+
+function agentPermissionObject(rules: AgentPermissionRule[]): AgentJsonObject {
+  const permissions: AgentJsonObject = {};
+  for (const { action, resource, effect } of rules) {
+    const current = permissions[action];
+    if (resource === "*" && current === undefined && !SCOPED_AGENT_PERMISSION_ACTIONS.has(action)) {
+      permissions[action] = effect;
+      continue;
+    }
+    const resources = isAgentJsonObject(current) ? current : current === undefined ? {} : { "*": current };
+    resources[resource] = effect;
+    permissions[action] = resources;
+  }
+  return permissions;
+}
+
+function canonicalAgentPermissionObject(permissions: AgentJsonObject): AgentJsonObject {
+  const canonical = { "*": "deny", ...agentPermissionObject(agentPermissionRules(permissions)) };
+  canonical["*"] = "deny";
+  return canonical;
+}
+
+function appendAgentPermissionRules(lines: string[], permissions: AgentJsonObject): void {
+  lines.push("permissions:");
+  for (const rule of agentPermissionRules(permissions)) {
+    lines.push(`  - action: ${agentYamlScalar(rule.action)}`);
+    lines.push(`    resource: ${agentYamlScalar(rule.resource)}`);
+    lines.push(`    effect: ${rule.effect}`);
   }
 }
 
@@ -2658,7 +2784,7 @@ function parseAgentYamlKeyAndValue(value: string): { key: string; value: string 
   return { key, value: match[3] ?? "" };
 }
 
-function parseAgentPermissionFrontmatter(content: string): AgentJsonObject {
+function parseLegacyAgentPermissionFrontmatter(content: string): AgentJsonObject {
   const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
   if (!block) return {};
   const lines = block.split(/\r?\n/);
@@ -2697,10 +2823,53 @@ function parseAgentPermissionFrontmatter(content: string): AgentJsonObject {
   return permissions;
 }
 
+function parseAgentPermissionFrontmatter(content: string): AgentJsonObject {
+  const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  if (!block) return {};
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^permissions:\s*$/.test(line));
+  if (start === -1) {
+    if (!/^permission:\s*$/m.test(block)) return {};
+    return agentPermissionObject(agentPermissionRules(parseLegacyAgentPermissionFrontmatter(content)));
+  }
+
+  const rules: AgentPermissionRule[] = [];
+  let current: Partial<AgentPermissionRule> | undefined;
+  const finish = () => {
+    if (!current) return;
+    if (!current.action || !current.resource || !current.effect) {
+      throw new RepositorySyncScanError("Invalid agent permission rule");
+    }
+    rules.push(current as AgentPermissionRule);
+  };
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent < 2) break;
+    const action = line.match(/^\s{2}-\s+action:\s*(.+?)\s*$/)?.[1];
+    if (action !== undefined) {
+      finish();
+      current = { action: unquoteAgentYamlScalar(action) };
+      continue;
+    }
+    const field = line.match(/^\s{4}(resource|effect):\s*(.+?)\s*$/);
+    if (!current || !field) throw new RepositorySyncScanError("Invalid agent permission rule");
+    if (field[1] === "resource") current.resource = unquoteAgentYamlScalar(field[2]!);
+    else {
+      const effect = unquoteAgentYamlScalar(field[2]!);
+      if (effect !== "allow" && effect !== "ask" && effect !== "deny") {
+        throw new RepositorySyncScanError("Invalid agent permission rule");
+      }
+      current.effect = effect;
+    }
+  }
+  finish();
+  return agentPermissionObject(rules);
+}
+
 function canonicalAgentPermissions(content: string): AgentJsonObject {
-  const permissions = { "*": "deny", ...parseAgentPermissionFrontmatter(content) };
-  permissions["*"] = "deny";
-  return permissions;
+  return canonicalAgentPermissionObject(parseAgentPermissionFrontmatter(content));
 }
 
 function parseManagedAgentDiskState(content: string, name: string): {
@@ -2714,7 +2883,7 @@ function parseManagedAgentDiskState(content: string, name: string): {
     if (Object.keys(permissions)[0] !== "*" || permissions["*"] !== "deny") {
       throw new RepositorySyncScanError("Agent profile is not default-deny");
     }
-    if (!/^(?:true|false)$/.test(frontmatter.disable ?? "")
+    if (!/^(?:true|false)$/.test(frontmatter.disabled ?? frontmatter.disable ?? "")
       || !/^(?:true|false)$/.test(frontmatter.hidden ?? "")) {
       throw new RepositorySyncScanError("Agent profile lifecycle metadata is incomplete");
     }
@@ -3183,7 +3352,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
 /**
  * Sync plugins between API and disk using three-way comparison.
  * On initial sync, pushes disk-only plugins to API.
- * After reconciliation, merges API plugin definitions into opencode.json plugin[]
+ * After reconciliation, merges API plugin definitions into opencode.json plugins[]
  * so the OpenCode runtime picks up changes (requires restart).
  */
 export async function syncPlugins(worktree: string, project: string, manifest: SyncManifest, opts: SyncOptions): Promise<SyncResult> {
@@ -3390,6 +3559,7 @@ export interface RepositorySyncResult {
   skills: SyncResult;
   agents: SyncResult;
   plugins: SyncResult;
+  commands: SyncResult;
   /** Applied agent or plugin changes require a fresh OpenCode load. */
   restartRequired: boolean;
 }
@@ -3447,7 +3617,7 @@ function pluginFingerprint(entry: RepositoryPluginManifestEntry): string {
 /**
  * Deterministic repository initialization/sync. `dryRun` resolves the project
  * identity and submits repository-owned resources only through the packaged MCP
- * transport. Commands and all config are intentionally excluded.
+ * transport. All config is intentionally excluded.
  */
 export async function repositorySync(
   worktree: string,
@@ -3522,6 +3692,7 @@ function failedRepositorySyncResult(project: string, dryRun: boolean, scope: Rep
     skills: emptyResult(),
     agents: emptyResult(),
     plugins: emptyResult(),
+    commands: emptyResult(),
     restartRequired: false,
   };
 }
@@ -3549,18 +3720,19 @@ async function repositorySyncAttempt(
   const skillsResult = emptyResult();
   const agentsResult = emptyResult();
   const pluginsResult = emptyResult();
+  const commandsResult = emptyResult();
   if (scope === "all") cleanupLegacySkillTombstones(worktree, {
     dryRun,
     fileSystem: options.cleanupFileSystem,
   });
   const projection = scope === "all"
     ? buildRepositoryManifestV2(worktree, manifest)
-    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [] };
+    : { version: 2 as const, docs: scanRepositoryDocs(worktree), skills: [], agents: [], plugins: [], commands: [] };
   const response = mcpToolData(await callMcpTool(worktree, "repository_sync", {
     project,
     docsManifest: { files: projection.docs },
     resourcesManifest: scope === "all"
-      ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins }
+      ? { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins, commands: projection.commands }
       : undefined,
     dryRun,
     expectedGeneration,
@@ -3583,6 +3755,9 @@ async function repositorySyncAttempt(
     Object.assign(skillsResult, resultFromRepositorySummary(payload.resources.summary.skill));
     Object.assign(agentsResult, resultFromRepositorySummary(payload.resources.summary.agent));
     Object.assign(pluginsResult, resultFromRepositorySummary(payload.resources.summary.plugin));
+    const hasCommandState = projection.commands.length > 0 || Object.keys(manifest.resources.repository?.commands ?? {}).length > 0;
+    if (hasCommandState && !repositoryIsRecord(payload.resources.summary.command)) throw new Error("Invalid MCP response");
+    Object.assign(commandsResult, resultFromRepositorySummary(payload.resources.summary.command));
   }
 
   // The baseline advances only after the owning API endpoint confirmed the
@@ -3595,6 +3770,7 @@ async function repositorySyncAttempt(
       repository.skills = baselineFromEntries(projection.skills, skillFingerprint);
       repository.agents = baselineFromEntries(projection.agents, agentFingerprint);
       repository.plugins = baselineFromEntries(projection.plugins, pluginFingerprint);
+      repository.commands = baselineFromEntries(projection.commands, (entry) => hashContent(entry.source));
     }
     manifest.lastFullSync = new Date().toISOString();
     saveManifest(worktree, manifest, { expected: localGeneration, next: requiredGeneration });
@@ -3608,6 +3784,7 @@ async function repositorySyncAttempt(
     skills: skillsResult,
     agents: agentsResult,
     plugins: pluginsResult,
+    commands: commandsResult,
     restartRequired: !dryRun && scope === "all" && [agentsResult, pluginsResult]
       .some((result) => result.pushed + result.synced + result.removed > 0),
   };
@@ -3615,7 +3792,7 @@ async function repositorySyncAttempt(
 
 /**
  * Session hooks use the same repository-authoritative implementation as
- * `/init-project`. Legacy commands/config synchronization is deliberately not
+ * `/init-project`. Legacy bidirectional commands/config synchronization is deliberately not
  * invoked from this path.
  */
 export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
@@ -3625,7 +3802,7 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
     skills: result.skills,
     agents: result.agents,
     plugins: result.plugins,
-    commands: emptyResult(),
+    commands: result.commands,
     config: emptyResult(),
     restartRequired: result.restartRequired,
   };

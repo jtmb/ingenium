@@ -522,7 +522,7 @@ export type TaskLink = { id: string; task_id: string; linked_task_id: string; li
 export type TaskNotification = { id: string; task_id: string; recipient: string; type: string; message: string; read: boolean; created_at: string };
 
 /** An MCP plugin registered in the system. */
-export type Plugin = { id: string; name: string; file_path: string; enabled: boolean; source_content?: string };
+export type Plugin = { id: string; name: string; description: string; file_path: string; enabled: boolean; source_content?: string };
 
 /** An AI agent definition synced to OpenCode. Model metadata mirrors centralized opencode.json runtime config. */
 export type Agent = {
@@ -2408,7 +2408,11 @@ export const api = {
   },
   plugins: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${encodeURIComponent(project)}`),
-    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Plugin }>(`/plugins/${name}?project=${encodeURIComponent(project)}`),
+    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Plugin }>(`/plugins/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`),
+    updateDescription: (name: string, description: string, project: string) =>
+      request<{ data: Plugin }>(`/plugins/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
+        method: "PUT", body: JSON.stringify({ description }),
+      }),
     create: (name: string, file_path: string, source_content?: string, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins?project=${encodeURIComponent(project)}`, {
         method: "POST", body: JSON.stringify({ name, file_path, source_content }),

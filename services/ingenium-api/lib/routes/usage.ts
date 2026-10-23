@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
-import { usage } from "ingenium-core";
+import { usage, worktreeBinding } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { isOpenCodeError, verifyOpenCodeNativeMessage } from "../opencode-client.js";
 import { getOpenCodeUsageSourceInstance, getUsageSyncInterval, syncUsageFromOpenCode } from "../usage-sync.js";
 
 const MAX_RANGE_MS = 366 * 86_400_000;
@@ -14,6 +15,8 @@ function sendUsageError(res: Response, error: unknown): void {
   }
   const statusByCode: Record<usage.UsageError["code"], number> = {
     INVALID_USAGE_INPUT: 422,
+    EXTERNAL_USAGE_BINDING_REJECTED: 403,
+    EXTERNAL_USAGE_SOURCE_CONFLICT: 409,
     INVALID_USAGE_QUERY: 422,
     INVALID_USAGE_THRESHOLD_INPUT: 422,
     PROJECT_NOT_FOUND: 404,
@@ -24,6 +27,8 @@ function sendUsageError(res: Response, error: unknown): void {
   };
   const messageByCode: Record<usage.UsageError["code"], string> = {
     INVALID_USAGE_INPUT: "Invalid usage metadata.",
+    EXTERNAL_USAGE_BINDING_REJECTED: "External session binding rejected.",
+    EXTERNAL_USAGE_SOURCE_CONFLICT: "Completed usage metadata conflicts with the retained event.",
     INVALID_USAGE_QUERY: "Usage filters, range, or pagination are invalid.",
     INVALID_USAGE_THRESHOLD_INPUT: "Usage advisory thresholds are invalid.",
     PROJECT_NOT_FOUND: "Project not found.",
@@ -245,6 +250,44 @@ function csvCell(value: string | number | null): string {
   const spreadsheetSafe = /^[=+\-@]/.test(text) ? `'${text}` : text;
   return `"${spreadsheetSafe.replace(/"/g, '""')}"`;
 }
+
+usageRouter.post("/external", async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const parsed = usage.ExternalUsageSchema.safeParse(req.body);
+    if (!parsed.success) throw new usage.UsageError("INVALID_USAGE_INPUT");
+    const principal = req.principal;
+    if (principal?.type !== "service" || principal.audience !== "mcp"
+      || principal.projectId !== projectId || !principal.projectIds?.includes(projectId)
+      || !principal.workspaceId || !principal.storageMappingHash
+      || principal.launcherWorktree !== parsed.data.worktree || req.get("x-ingenium-ui") !== undefined) {
+      throw new usage.UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
+    }
+    const verified = await verifyOpenCodeNativeMessage({
+      worktree: parsed.data.worktree,
+      sessionId: parsed.data.sessionId,
+      messageId: parsed.data.messageId,
+      role: "assistant",
+    });
+    if (isOpenCodeError(verified)) {
+      const unavailable = verified.error.code === "NETWORK_ERROR"
+        || verified.error.code === "AUTH_NOT_CONFIGURED"
+        || verified.error.code.startsWith("HTTP_5");
+      if (unavailable) {
+        res.status(503).json({ error: { code: "OPENCODE_UNAVAILABLE", message: "OpenCode session binding is temporarily unavailable" } });
+        return;
+      }
+      throw new usage.UsageError("EXTERNAL_USAGE_BINDING_REJECTED");
+    }
+    const result = usage.ingestExternalUsage(projectId,
+      worktreeBinding.worktreeBindingId(principal.workspaceId, principal.storageMappingHash), parsed.data, { nativeOpenCode: true });
+    res.status(result.created ? 201 : 200).location(`/api/v1/usage/events?project=${encodeURIComponent(projectId)}`)
+      .json({ data: { created: result.created, event: eventDto(result.event) } });
+  } catch (error) {
+    sendUsageError(res, error);
+  }
+});
 
 usageRouter.get("/summary", (req, res) => {
   const projectId = requireProject(req, res);

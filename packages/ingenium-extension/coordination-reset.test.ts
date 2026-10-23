@@ -13,6 +13,7 @@ import {
   readProtectedOwnerSecret,
   resetCoordinationCredential,
   resetLearningCredential,
+  resetRepositorySyncCredential,
   runCoordinationResetCli,
 } from "./coordination-reset.js";
 
@@ -24,12 +25,17 @@ const organizationId = "00000000-0000-4000-8000-000000000002";
 const servicePrincipalId = "00000000-0000-4000-8000-000000000005";
 const coordinationResetModule = fileURLToPath(new URL("./coordination-reset.ts", import.meta.url));
 const generalMcpScopes = [
-  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
+  "projects:read", "repository:sync", "documentation:read", "rag:read",
   "memory:read", "memory:write",
+] as const;
+const legacyMcpScopes = [
+  "coordination:read", "coordination:write", "projects:read", "repository:sync", "documentation:read", "rag:read",
 ] as const;
 const directories: string[] = [];
 const originalSecretFile = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
 const originalSecretFd = process.env.INGENIUM_COORDINATION_OWNER_SECRET_FD;
+const originalProviderReference = process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+const originalLearningCredential = process.env.INGENIUM_LEARNING_CREDENTIAL_FILE;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -37,6 +43,10 @@ afterEach(() => {
   else process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE = originalSecretFile;
   if (originalSecretFd === undefined) delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FD;
   else process.env.INGENIUM_COORDINATION_OWNER_SECRET_FD = originalSecretFd;
+  if (originalProviderReference === undefined) delete process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+  else process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE = originalProviderReference;
+  if (originalLearningCredential === undefined) delete process.env.INGENIUM_LEARNING_CREDENTIAL_FILE;
+  else process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = originalLearningCredential;
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -46,14 +56,14 @@ function fixture(existing = true, secret: { email?: string; mfaCredential?: stri
   const opencode = join(worktree, ".opencode");
   mkdirSync(opencode, { mode: 0o700 });
   writeFileSync(join(worktree, "opencode.json"), JSON.stringify({
-    mcp: { ingenium: { environment: {
+    mcp: { servers: { ingenium: { environment: {
       INGENIUM_API_URL: "http://localhost:4097/api/v1",
       INGENIUM_PROJECT: "ingenium",
       INGENIUM_WORKSPACE_ID: "shared-memory-ingenium",
       INGENIUM_WORKTREE: worktree,
       INGENIUM_MCP_AUDIENCE: "mcp",
       INGENIUM_MCP_CREDENTIAL_FILE: ".opencode/.ingenium-mcp-credential",
-    } } },
+    } } } },
   }));
   const credential = join(opencode, ".ingenium-mcp-credential");
   if (existing) {
@@ -84,6 +94,37 @@ function providerFixture() {
   return { ...fixtureState, providerRoot, keyFile, bundleDirectory };
 }
 
+function privateReferenceFixture() {
+  const state = providerFixture();
+  persistEncryptedOwnerSecret(state.worktree, { keyFile: state.keyFile, bundleDirectory: state.bundleDirectory });
+  const index = join(state.worktree, ".opencode/protected-runtime-index");
+  const providerParent = join(index, "owner-provider");
+  mkdirSync(providerParent, { recursive: true, mode: 0o700 });
+  const reference = join(providerParent, "reference.json");
+  writeFileSync(reference, readFileSync(join(state.worktree, ".opencode/.ingenium-coordination-owner-provider.json")), { mode: 0o600 });
+  chmodSync(join(state.worktree, ".opencode"), 0o1770);
+  delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
+  process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE = reference;
+  return { ...state, index, providerParent, reference };
+}
+
+function externalReferenceFixture() {
+  const state = providerFixture();
+  persistEncryptedOwnerSecret(state.worktree, { keyFile: state.keyFile, bundleDirectory: state.bundleDirectory });
+  const referenceParent = join(state.providerRoot, "owner-reference");
+  const learningParent = join(state.providerRoot, "learning");
+  mkdirSync(referenceParent, { mode: 0o700 });
+  mkdirSync(learningParent, { mode: 0o700 });
+  const reference = join(referenceParent, "reference.json");
+  writeFileSync(reference, readFileSync(join(state.worktree, ".opencode/.ingenium-coordination-owner-provider.json")), { mode: 0o600 });
+  const learningCredential = join(learningParent, ".ingenium-learning-credential");
+  chmodSync(join(state.worktree, ".opencode"), 0o770);
+  delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
+  process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE = reference;
+  process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = learningCredential;
+  return { ...state, reference, referenceParent, learningParent, learningCredential };
+}
+
 function response(data: unknown, status = 200, setCookie?: string): Response {
   return new Response(JSON.stringify({ data }), {
     status,
@@ -92,6 +133,8 @@ function response(data: unknown, status = 200, setCookie?: string): Response {
 }
 
 function requestFixture(options: {
+  kind?: "service" | "repository-sync";
+  audience?: "mcp" | "repository-sync";
   scopes?: readonly string[];
   loginStatus?: number;
   loginErrorEnvelope?: boolean;
@@ -104,6 +147,8 @@ function requestFixture(options: {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const collisions: string[] = [];
   const scopes = options.scopes ?? generalMcpScopes;
+  const kind = options.kind ?? "service";
+  const audience = options.audience ?? "mcp";
   let launcherWorktree = "";
   const request = vi.fn(async (input: string | URL | globalThis.Request, init?: RequestInit) => {
     const url = String(input);
@@ -135,8 +180,8 @@ function requestFixture(options: {
       id: "00000000-0000-4000-8000-000000000004",
       servicePrincipalId,
       revokedAt: null,
-      kind: "service",
-      audience: "mcp",
+      kind,
+      audience,
       projectId,
       workspaceId: "shared-memory-ingenium",
       launcherWorktree: options.launcherWorktree ?? launcherWorktree,
@@ -151,8 +196,8 @@ function requestFixture(options: {
       return response({
       id: "00000000-0000-4000-8000-000000000003",
       token: newToken,
-      kind: "service",
-      audience: "mcp",
+       kind,
+       audience,
       projectId,
       projectIds: [projectId],
       workspaceId: "shared-memory-ingenium",
@@ -161,7 +206,7 @@ function requestFixture(options: {
       }, 201);
     }
     if (url.endsWith("/auth/preflight")) return response({
-      audience: "mcp",
+      audience,
       projectId,
       projectIds: [projectId],
       workspaceId: "shared-memory-ingenium",
@@ -195,16 +240,16 @@ function expectNoCredentialQuarantine(worktree: string): void {
   expect(readdirSync(join(worktree, ".opencode")).filter((entry) => entry !== ".ingenium-mcp-credential")).toEqual([]);
 }
 
-describe("protected coordination reset", () => {
-  it.each(["active", "revoked", "preflight failure"])("reuses the principal across the six-to-eight scope upgrade (%s)", async (scenario) => {
+describe("protected MCP credential reset", () => {
+  it.each(["active", "revoked", "preflight failure"])("reuses the principal across the retained scope set (%s)", async (scenario) => {
     const { worktree, credential } = fixture();
     const { request, calls, collisions } = requestFixture({
       existingPrincipal: true,
       priorCredentials: [{
         id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
-        name: "Ingenium coordination", organizationId, projectId,
+        name: "Ingenium MCP", organizationId, projectId,
         kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
-        launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6),
+        launcherWorktree: worktree, scopes: legacyMcpScopes,
         revokedAt: scenario === "revoked" ? "2026-08-01T00:00:00Z" : null,
       }],
     });
@@ -232,10 +277,10 @@ describe("protected coordination reset", () => {
     const { worktree } = fixture();
     const { request, calls } = requestFixture({ priorCredentials: scenario === "none" ? [] : [{
       id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
-      name: scenario === "other name" ? "Ingenium learning" : "Ingenium coordination",
+      name: scenario === "other name" ? "Ingenium learning" : "Ingenium MCP",
       organizationId: scenario === "other organization" ? "other-org" : organizationId,
       projectId, kind: "service", audience: "mcp", workspaceId: "shared-memory-ingenium",
-      launcherWorktree: worktree, scopes: generalMcpScopes.slice(0, 6), revokedAt: null,
+       launcherWorktree: worktree, scopes: legacyMcpScopes, revokedAt: null,
     }] });
     await resetCoordinationCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") });
     const issue = calls.find(({ url, init }) => url.endsWith("/auth/mcp-credentials") && init?.method === "POST");
@@ -303,6 +348,7 @@ describe("protected coordination reset", () => {
 
   it("rotates the isolated learning credential through the encrypted owner authority", async () => {
     const { worktree } = fixture();
+    process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = ".opencode/.ingenium-learning-credential";
     const credential = join(worktree, ".opencode", ".ingenium-learning-credential");
     writeFileSync(credential, `${oldToken}\n`, { mode: 0o600 });
     const scopes = [
@@ -325,7 +371,299 @@ describe("protected coordination reset", () => {
       name: "Ingenium learning",
       scopes,
     });
+    expect(calls.filter(({ init }) => init?.method === "DELETE")).toHaveLength(1);
   });
+
+  it("preserves the prior learning token while installing the owner-private target with a legacy consumer", async () => {
+    const { worktree, credential: generalCredential, index, reference } = privateReferenceFixture();
+    const learningParent = join(index, "learning");
+    mkdirSync(learningParent, { mode: 0o700 });
+    const learningCredential = join(learningParent, ".ingenium-learning-credential");
+    process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = learningCredential;
+    const legacyLearning = join(worktree, ".opencode/.ingenium-learning-credential");
+    writeFileSync(legacyLearning, `${oldToken}\n`, { mode: 0o600 });
+    const scopes = [
+      "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
+      "pipeline:write", "observe:write",
+    ];
+    const { request, calls } = requestFixture({ scopes, priorCredentials: [{
+      id: "00000000-0000-4000-8000-000000000004", servicePrincipalId,
+      name: "Ingenium learning", organizationId, projectId, kind: "service", audience: "mcp",
+      workspaceId: "shared-memory-ingenium", launcherWorktree: worktree, scopes, revokedAt: null,
+    }] });
+
+    await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+      .resolves.toEqual({ status: "completed" });
+    expect(readFileSync(learningCredential, "utf8")).toBe(`${newToken}\n`);
+    expect(lstatSync(learningCredential).mode & 0o777).toBe(0o600);
+    expect(readFileSync(legacyLearning, "utf8")).toBe(`${oldToken}\n`);
+    expect(readFileSync(generalCredential, "utf8")).toBe(`${oldToken}\n`);
+    expect(lstatSync(join(worktree, ".opencode")).mode & 0o1777).toBe(0o1770);
+    expect(lstatSync(reference).mode & 0o777).toBe(0o600);
+    expect(calls.some(({ init }) => init?.method === "POST" && String(init.body).includes('"name":"Ingenium learning"'))).toBe(true);
+    expect(calls.some(({ url, init }) => url.endsWith("/auth/preflight")
+      && (init?.headers as Record<string, string>).authorization === `Bearer ${newToken}`)).toBe(true);
+    expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+  });
+
+  it("installs an external owner-private learning credential without revoking the legacy consumer", async () => {
+    const { worktree, reference, learningCredential } = externalReferenceFixture();
+    const legacy = join(worktree, ".opencode/.ingenium-learning-credential");
+    writeFileSync(legacy, `${oldToken}\n`, { mode: 0o600 });
+    const { request, calls } = requestFixture({ scopes: [
+      "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
+      "pipeline:write", "observe:write",
+    ] });
+    await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+      .resolves.toEqual({ status: "completed" });
+    expect(readFileSync(learningCredential, "utf8")).toBe(`${newToken}\n`);
+    expect(lstatSync(learningCredential).mode & 0o777).toBe(0o600);
+    expect(readFileSync(legacy, "utf8")).toBe(`${oldToken}\n`);
+    expect(lstatSync(reference).mode & 0o777).toBe(0o600);
+    expect(lstatSync(join(worktree, ".opencode")).mode & 0o1777).toBe(0o770);
+    expect(calls.some(({ url, init }) => url.endsWith("/auth/preflight")
+      && (init?.headers as Record<string, string>).authorization === `Bearer ${newToken}`)).toBe(true);
+    expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+  });
+
+  it.each(["writable common ancestor", "writable learning parent", "writable reference", "reference symlink", "wrong sibling", "missing reference"])(
+    "rejects external %s before owner login", async (scenario) => {
+      const { worktree, providerRoot, learningParent, reference } = externalReferenceFixture();
+      if (scenario === "writable common ancestor") chmodSync(providerRoot, 0o770);
+      if (scenario === "writable learning parent") chmodSync(learningParent, 0o770);
+      if (scenario === "writable reference") chmodSync(reference, 0o670);
+      if (scenario === "reference symlink") {
+        unlinkSync(reference);
+        symlinkSync(join(worktree, ".opencode/.ingenium-coordination-owner-provider.json"), reference);
+      }
+      if (scenario === "wrong sibling") {
+        process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = join(providerRoot, "bundles/.ingenium-learning-credential");
+      }
+      if (scenario === "missing reference") delete process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+      const { request } = requestFixture();
+      await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+        .rejects.toBeInstanceOf(CoordinationResetError);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("restores the external old credential after an interrupted install", async () => {
+    const { worktree, learningCredential } = externalReferenceFixture();
+    writeFileSync(learningCredential, `${oldToken}\n`, { mode: 0o600 });
+    const before = lstatSync(learningCredential);
+    const { request, calls } = requestFixture({ scopes: [
+      "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
+      "pipeline:write", "observe:write",
+    ] });
+    await expect(resetLearningCredential(worktree, {
+      request, sourceFingerprint: () => Buffer.from("same"),
+      installDependencies: { afterRename: () => { throw new Error("injected"); } },
+    })).rejects.toMatchObject({ failure: "credential_install" });
+    expect(lstatSync(learningCredential).ino).toBe(before.ino);
+    expect(readFileSync(learningCredential, "utf8")).toBe(`${oldToken}\n`);
+    expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+  });
+
+  it.each(["provider parent", "protected index", "provider symlink", "wrong provider path", "explicit secret file", "explicit secret fd"])(
+    "rejects %s before owner login without touching the legacy credential", async (scenario) => {
+      const { worktree, credential, index, providerParent, reference } = privateReferenceFixture();
+      const learningParent = join(index, "learning");
+      mkdirSync(learningParent, { mode: 0o700 });
+      process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = join(learningParent, ".ingenium-learning-credential");
+      if (scenario === "provider parent") chmodSync(providerParent, 0o750);
+      if (scenario === "protected index") chmodSync(index, 0o770);
+      if (scenario === "provider symlink") {
+        unlinkSync(reference);
+        symlinkSync(join(worktree, ".opencode/.ingenium-coordination-owner-provider.json"), reference);
+      }
+      if (scenario === "wrong provider path") process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE = join(providerParent, "wrong.json");
+      if (scenario === "explicit secret file") process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE = join(worktree, "owner/bootstrap.json");
+      if (scenario === "explicit secret fd") process.env.INGENIUM_COORDINATION_OWNER_SECRET_FD = "3";
+      const { request } = requestFixture();
+
+      await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+        .rejects.toMatchObject(scenario === "protected index"
+          ? { failure: "credential_install", substage: "ancestor" } : { failure: "binding" });
+      expect(request).not.toHaveBeenCalled();
+      expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    },
+  );
+
+  it("retains the default shared-parent guards before contacting the owner", async () => {
+    const { worktree, credential } = privateReferenceFixture();
+    const { request } = requestFixture();
+    await expect(resetCoordinationCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+      .rejects.toMatchObject({ failure: "credential_install", substage: "ancestor" });
+    expect(request).not.toHaveBeenCalled();
+    expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+    delete process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+    expect(() => readProtectedOwnerSecret(worktree)).toThrowError(CoordinationResetError);
+  });
+
+  it("rejects a world-writable shared ancestor even when the provider itself is owner-private", () => {
+    const { worktree } = privateReferenceFixture();
+    chmodSync(join(worktree, ".opencode"), 0o772);
+    expect(() => readProtectedOwnerSecret(worktree)).toThrowError(CoordinationResetError);
+  });
+
+  it("rejects a non-sticky group-writable ancestor before owner login", async () => {
+    const { worktree, index } = privateReferenceFixture();
+    mkdirSync(join(index, "learning"), { mode: 0o700 });
+    process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = join(index, "learning/.ingenium-learning-credential");
+    chmodSync(join(worktree, ".opencode"), 0o770);
+    const { request } = requestFixture();
+    await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+      .rejects.toMatchObject({ failure: "credential_install", substage: "ancestor" });
+    expect(request).not.toHaveBeenCalled();
+    expect(() => readProtectedOwnerSecret(worktree)).toThrowError(CoordinationResetError);
+  });
+
+  it.each(["learning parent", "protected index", "shared parent world-writable", "learning symlink", "wrong learning path", "unsafe existing target"])(
+    "rejects %s before owner login on a private learning reset", async (scenario) => {
+      const { worktree, index } = privateReferenceFixture();
+      const parent = join(index, "learning");
+      mkdirSync(parent, { mode: 0o700 });
+      const target = join(parent, ".ingenium-learning-credential");
+      process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = target;
+      if (scenario === "learning parent") chmodSync(parent, 0o770);
+      if (scenario === "protected index") chmodSync(index, 0o750);
+      if (scenario === "shared parent world-writable") chmodSync(join(worktree, ".opencode"), 0o772);
+      if (scenario === "learning symlink") {
+        rmSync(parent, { recursive: true });
+        symlinkSync(join(worktree, "owner"), parent, "dir");
+      }
+      if (scenario === "wrong learning path") process.env.INGENIUM_LEARNING_CREDENTIAL_FILE = join(parent, "wrong.json");
+      if (scenario === "unsafe existing target") writeFileSync(target, `${oldToken}\n`, { mode: 0o640 });
+      const { request } = requestFixture({ scopes: [
+        "projects:read", "extraction:write", "extraction:execute", "synthesis:write", "synthesis:execute",
+        "pipeline:write", "observe:write",
+      ] });
+
+      await expect(resetLearningCredential(worktree, { request, sourceFingerprint: () => Buffer.from("same") }))
+        .rejects.toMatchObject(["wrong learning path", "learning symlink"].includes(scenario) ? { failure: "binding" }
+          : { failure: "credential_install", substage: scenario === "unsafe existing target" ? "existing_target" : "ancestor" });
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
+
+  it("discovers and runs repository-sync CLI issuance using the protected owner provider without secret output", async () => {
+    const { worktree, credential: generalCredential, keyFile, bundleDirectory } = providerFixture();
+    persistEncryptedOwnerSecret(worktree, { keyFile, bundleDirectory });
+    delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
+    const credential = join(worktree, ".opencode/.ingenium-repository-sync-credential");
+    writeFileSync(join(worktree, ".gitignore"), ".opencode/\n");
+    execFileSync("/usr/bin/git", ["-C", worktree, "init", "--quiet"]);
+    const scopes = ["projects:read", "repository:sync"];
+    const { request, calls } = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes, priorCredentials: [] });
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.spyOn(process, "cwd").mockReturnValue(worktree);
+    vi.spyOn(globalThis, "fetch").mockImplementation(request);
+
+    await expect(runCoordinationResetCli(["--help"])).resolves.toBe(0);
+    expect(stdout.mock.calls.map(([chunk]) => String(chunk)).join(""))
+      .toContain("ingenium-coordination-reset reset|reset-learning|reset-repository-sync");
+    expect(calls).toEqual([]);
+    stdout.mockClear();
+    await expect(runCoordinationResetCli(["reset-repository-sync"])).resolves.toBe(0);
+
+    expect(stdout.mock.calls).toEqual([["coordination reset: completed\n"]]);
+    expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join("")).toBe("");
+    expect(readFileSync(credential, "utf8")).toBe(`${newToken}\n`);
+    const metadata = lstatSync(credential);
+    expect(metadata.isFile()).toBe(true);
+    expect(metadata.isSymbolicLink()).toBe(false);
+    expect(metadata.mode & 0o777).toBe(0o600);
+    expect(process.geteuid).toBeDefined();
+    expect(metadata.uid).toBe(process.geteuid!());
+    expect(metadata.nlink).toBe(1);
+    expect(readFileSync(generalCredential, "utf8")).toBe(`${oldToken}\n`);
+    expect(readdirSync(join(worktree, ".opencode")).sort()).toEqual([
+      ".ingenium-coordination-owner-provider.json", ".ingenium-mcp-credential", ".ingenium-repository-sync-credential",
+    ]);
+    const issue = calls.find(({ url, init }) => url.endsWith("/auth/mcp-credentials") && init?.method === "POST")!;
+    expect(issue.url).toBe("http://localhost:3000/api/v1/auth/mcp-credentials");
+    expect(JSON.parse(String(issue.init?.body))).toEqual({
+      kind: "repository-sync", audience: "repository-sync", name: "Ingenium repository sync", scopes,
+      organizationId, projectId, projectIds: [projectId], workspaceId: "shared-memory-ingenium",
+      launcherWorktree: worktree, expiresAt: expect.any(String),
+    });
+    const headers = new Headers(issue.init?.headers);
+    expect(headers.get("cookie")).toBe("__Host-ingenium_session=elevated");
+    expect(headers.get("x-csrf-token")).toBe("s".repeat(43));
+    expect(headers.get("origin")).toBe("http://localhost:3000");
+    expect(headers.get("x-ingenium-ui")).toBe("dashboard");
+    expect(headers.has("authorization")).toBe(false);
+    const preflight = calls.find(({ url }) => url.endsWith("/auth/preflight"))!;
+    expect(Object.fromEntries(new Headers(preflight.init?.headers))).toEqual({
+      authorization: `Bearer ${newToken}`, "x-ingenium-audience": "repository-sync",
+      "x-ingenium-workspace": "shared-memory-ingenium", "x-ingenium-launcher-worktree": worktree,
+    });
+  });
+
+  it.each(["kind", "audience", "scopes", "projectId", "projectIds", "workspaceId", "launcherWorktree"])(
+    "rejects repository-sync issuance with mismatched %s before installation", async (field) => {
+      const { worktree } = fixture();
+      const base = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes: ["projects:read", "repository:sync"] });
+      await expect(resetRepositorySyncCredential(worktree, {
+        sourceFingerprint: () => Buffer.from("same"),
+        request: async (input, init) => {
+          const result = await base.request(input, init);
+          if (String(input).endsWith("/auth/mcp-credentials") && init?.method === "POST") {
+            const body = await result.json();
+            body.data[field] = field === "scopes" ? ["projects:read", "repository:sync", "memory:write"]
+              : field === "projectIds" ? [projectId, "other"] : "other";
+            return response(body.data, 201);
+          }
+          return result;
+        },
+      })).rejects.toMatchObject({ failure: "credential_issue" });
+      expectNoCredentialQuarantine(worktree);
+    },
+  );
+
+  it.each(["symlink", "directory", "unsafe mode", "interrupted install", "preflight mismatch", "success"])(
+    "preserves isolated repository-sync rotation safety: %s", async (scenario) => {
+      const { worktree, credential: generalCredential } = fixture();
+      const credential = join(worktree, ".opencode/.ingenium-repository-sync-credential");
+      if (scenario === "symlink") symlinkSync(generalCredential, credential);
+      else if (scenario === "directory") mkdirSync(credential);
+      else writeFileSync(credential, `${oldToken}\n`, { mode: scenario === "unsafe mode" ? 0o640 : 0o600 });
+      const before = lstatSync(credential);
+      const scopes = ["projects:read", "repository:sync"];
+      const { request, calls } = requestFixture({ kind: "repository-sync", audience: "repository-sync", scopes, launcherWorktree: worktree });
+      const result = resetRepositorySyncCredential(worktree, {
+        sourceFingerprint: () => Buffer.from("same"),
+        request: async (input, init) => {
+          const result = await request(input, init);
+          if (scenario === "preflight mismatch" && String(input).endsWith("/auth/preflight")) {
+            const body = await result.json();
+            return response({ ...body.data, audience: "mcp" });
+          }
+          return result;
+        },
+        installDependencies: scenario === "interrupted install" ? { afterRename: () => { throw new Error(newToken); } } : {},
+      });
+      if (scenario === "success") {
+        await expect(result).resolves.toEqual({ status: "completed" });
+        expect(readFileSync(credential, "utf8")).toBe(`${newToken}\n`);
+        expect(lstatSync(credential).mode & 0o777).toBe(0o600);
+        expect(calls.filter(({ init }) => init?.method === "DELETE")).toHaveLength(1);
+      } else {
+        const error = await result.catch((error: unknown) => error);
+        if (scenario === "preflight mismatch") expect(error).toMatchObject({ failure: "binding" });
+        else expectContentFreeInstallFailure(error, [oldToken, newToken, credential]);
+        expect(lstatSync(credential).ino).toBe(before.ino);
+        expect(lstatSync(credential).mode).toBe(before.mode);
+        if (scenario !== "directory") expect(readFileSync(credential, "utf8")).toBe(`${oldToken}\n`);
+        expect(calls.filter(({ init }) => init?.method === "DELETE")).toEqual([]);
+      }
+      expect(readFileSync(generalCredential, "utf8")).toBe(`${oldToken}\n`);
+      expect(readdirSync(join(worktree, ".opencode")).sort()).toEqual([
+        ".ingenium-mcp-credential", ".ingenium-repository-sync-credential",
+      ]);
+    },
+  );
 
   it("marks the MFA mutation without changing Dashboard reads or MCP preflight", async () => {
     const { worktree } = fixture(true, { mfaCredential: "123456" });
@@ -440,6 +778,27 @@ describe("protected coordination reset", () => {
     const bundles = readdirSync(bundleDirectory);
     expect(bundles).toHaveLength(1);
     expect(bundles[0]).not.toBe(previousBundle);
+  });
+
+  it("keeps an external provider intact when rotating the legacy reference", () => {
+    const legacy = providerFixture();
+    persistEncryptedOwnerSecret(legacy.worktree, { keyFile: legacy.keyFile, bundleDirectory: legacy.bundleDirectory });
+    const previousLegacyBundle = readdirSync(legacy.bundleDirectory)[0]!;
+    const external = externalReferenceFixture();
+    const externalBundle = readdirSync(external.bundleDirectory)[0]!;
+    const externalReference = readFileSync(external.reference, "utf8");
+    process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE = legacy.secretFile;
+
+    persistEncryptedOwnerSecret(legacy.worktree, { keyFile: legacy.keyFile, bundleDirectory: legacy.bundleDirectory });
+
+    expect(readFileSync(external.reference, "utf8")).toBe(externalReference);
+    expect(readdirSync(external.bundleDirectory)).toEqual([externalBundle]);
+    const legacyBundles = readdirSync(legacy.bundleDirectory);
+    expect(legacyBundles).toHaveLength(1);
+    expect(legacyBundles[0]).not.toBe(previousLegacyBundle);
+    delete process.env.INGENIUM_COORDINATION_OWNER_PROVIDER_REFERENCE_FILE;
+    delete process.env.INGENIUM_COORDINATION_OWNER_SECRET_FILE;
+    expect(readProtectedOwnerSecret(legacy.worktree).email).toBe("bootstrap-admin@localhost");
   });
 
   it.each([
@@ -700,6 +1059,8 @@ try {
   it("accepts only the fixed reset operation", () => {
     expect(parseCoordinationResetArgs(["reset"])).toBe("reset");
     expect(parseCoordinationResetArgs(["reset-learning"])).toBe("reset-learning");
+    expect(parseCoordinationResetArgs(["reset-repository-sync"])).toBe("reset-repository-sync");
+    expect(() => parseCoordinationResetArgs(["reset-repository-sync", "--scopes", "*"])).toThrow(CoordinationResetError);
     expect(parseCoordinationResetArgs(["store", "--key-file", "/key", "--bundle-directory", "/bundle"]))
       .toEqual({ keyFile: "/key", bundleDirectory: "/bundle" });
     for (const args of [[], ["reset", "extra"], ["--project", "other"], ["reset;curl"], ["RESET"], ["store", "/key", "/bundle"]]) {

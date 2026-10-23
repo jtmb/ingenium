@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -50,6 +50,57 @@ afterEach(() => {
 });
 
 describe("extension binding resolution", () => {
+  it("rejects unmarked relative launcher duplicates in native mcp.servers", () => {
+    prepare();
+    vi.stubEnv("INGENIUM_TRUSTED_API_URL", undefined);
+    token(".ingenium-learning-credential");
+    config({
+      INGENIUM_PROJECT: basename(worktree),
+      INGENIUM_WORKSPACE_ID: "workspace-marker",
+      INGENIUM_WORKTREE: worktree,
+      INGENIUM_LEARNING_CREDENTIAL_FILE: ".opencode/.ingenium-learning-credential",
+    });
+    const path = join(worktree, "opencode.json");
+    const { mcp: servers } = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ mcp: { servers } }));
+    expect(servers.ingenium.environment).not.toHaveProperty("INGENIUM_MCP_AUDIENCE");
+    expect(resolveExtensionBinding(worktree, { purpose: "learning" })).toMatchObject({
+      project: basename(worktree),
+      workspaceId: "workspace-marker",
+      credentialFile: join(worktree, ".opencode", ".ingenium-learning-credential"),
+      purpose: "learning",
+    });
+
+    servers.alias = servers.ingenium;
+    writeFileSync(path, JSON.stringify({ mcp: { servers } }));
+    expect(() => resolveExtensionBinding(worktree, { purpose: "learning" })).toThrow(ExtensionBindingError);
+  });
+
+  it.each(["enabled", "disabled", "duplicate"])("handles %s entries in native mcp.servers", (scenario) => {
+    prepare();
+    vi.stubEnv("INGENIUM_TRUSTED_API_URL", undefined);
+    token(".ingenium-learning-credential");
+    config({
+      INGENIUM_PROJECT: basename(worktree),
+      INGENIUM_WORKSPACE_ID: "workspace-marker",
+      INGENIUM_WORKTREE: worktree,
+      INGENIUM_MCP_AUDIENCE: "mcp",
+      INGENIUM_LEARNING_CREDENTIAL_FILE: ".opencode/.ingenium-learning-credential",
+    });
+    const path = join(worktree, "opencode.json");
+    const { mcp: servers } = JSON.parse(readFileSync(path, "utf8"));
+    if (scenario === "disabled") servers.ingenium.disabled = true;
+    if (scenario === "duplicate") servers.duplicate = servers.ingenium;
+    writeFileSync(path, JSON.stringify({ mcp: { servers } }));
+
+    const resolve = () => resolveExtensionBinding(worktree, { purpose: "learning" });
+    if (scenario === "enabled") {
+      expect(resolve()).toMatchObject({ project: basename(worktree), workspaceId: "workspace-marker", purpose: "learning" });
+    } else {
+      expect(resolve).toThrow(ExtensionBindingError);
+    }
+  });
+
   it("resolves a learning binding from project config when the parent has no Ingenium environment", () => {
     prepare();
     token(".ingenium-learning-credential");

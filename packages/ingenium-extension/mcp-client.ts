@@ -56,10 +56,12 @@ interface McpTransport {
 interface McpClient {
   connect(transport: McpTransport): Promise<void>;
   callTool(request: { name: string; arguments: Record<string, unknown> }): Promise<unknown>;
+  listTools?(): Promise<unknown>;
   close(): Promise<void>;
 }
 
 export interface McpToolClient {
+  listTools?(): Promise<unknown>;
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -479,6 +481,14 @@ export async function openMcpToolClient(
 
   let closed = false;
   return {
+    async listTools() {
+      if (closed || !client.listTools) throw new McpBridgeError("request_failed", "", "tools-list");
+      try {
+        return await bounded(() => client.listTools!(), timeoutMs);
+      } catch (error) {
+        throw attributedFailure(error, diagnostics(), "tools-list", transport);
+      }
+    },
     async callTool(name, args) {
       const diagnostic = diagnostics();
       if (closed) throw attributedFailure(new McpBridgeError("request_failed"), diagnostic, "call", transport);

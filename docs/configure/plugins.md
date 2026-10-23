@@ -14,14 +14,12 @@ same as project plugin CRUD.
 
 ## Ponytail OpenCode Integration
 
-Ponytail is integrated as an official, checkout-based OpenCode plugin. The
+Ponytail is integrated as a checkout-based native OpenCode V2 plugin. The
 runtime closure is vendored at
 `packages/ingenium-extension/ponytail/` from upstream commit
 `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`, with MIT provenance recorded in
 `packages/ingenium-extension/ponytail/PROVENANCE.md`. It is not installed from
-npm, and it does not configure or invoke Ponytail MCP. The published
-`@dietrichgebert/ponytail@4.8.4` package is deliberately not used: its named
-export is incompatible with OpenCode 1.18.9's plugin loader.
+npm, and it does not configure or invoke Ponytail MCP.
 
 Register exactly one Ponytail entry alongside the other extension plugins for the environment.
 The canonical five-entry list is exported by
@@ -29,25 +27,23 @@ The canonical five-entry list is exported by
 `opencode.json`:
 
 ```json
-"plugin": [
-  "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-  "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-  "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-  "file://{env:PWD}/packages/ingenium-extension/plugins/session-coordinator.ts",
-  "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+"plugins": [
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
 ]
 ```
 
-For the container's global config, use the equivalent absolute entry
-`/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs`.
-Do not register both entries in one config, recursively discover the checkout,
-or add the old npm package. The adapter is intentionally outside the worktree
-`.opencode/plugins/` discovery root.
+The tracked root config uses equivalent repository-relative directory entries.
+Do not register both forms in one config, recursively discover the checkout,
+or add the old npm package.
 
-The `session-coordinator.ts` entry is a server-plugin wrapper. Its implementation
-handles lifecycle events, `/add-session`, and system-prompt transforms; it does
-not register `tool.execute.before` or `tool.execute.after` and does not grant,
-deny, or gate tool execution. Profile permissions remain authoritative.
+The lifecycle adapter reads sessions through the V2 client for automatic
+context upload and metadata-only usage telemetry; it does
+not coordinate sessions or inject saved memory into TUI turns. Profile
+permissions remain authoritative.
 
 The separate `plugins/session-id-tui.ts` source is not in the canonical plugin
 specs, root config, or package exports. Runtime activation is explicitly deferred;
@@ -84,8 +80,9 @@ remove the single registration, delete the checkout, remove any legacy
 4. Click **Upload & Create** to register the plugin and write it to disk
 5. Each plugin card shows:
    - **Plugin name** and **file path**
+   - **Description** — project-local editable metadata (maximum 2,000 characters; NUL is rejected)
    - **Source content preview** (first 120 characters in monospace)
-   - **Edit** button — modify file path or source content
+   - **Edit** button — modify the description or executable file path/source content; these updates are mutually exclusive
    - **Enabled/Disabled** toggle — writes or removes the configured source file from `.opencode/plugins/`
    - **Delete** button — permanently removes the plugin (requires confirmation)
 
@@ -98,7 +95,7 @@ All endpoints require `?project=<name>` query parameter.
 | `POST` | `/api/v1/plugins` | Create plugin (`{ name, file_path, source_content }`) |
 | `GET` | `/api/v1/plugins/:name` | Get a single plugin |
 | `GET` | `/api/v1/plugins/:name/source` | Read the current plugin source |
-| `PUT` | `/api/v1/plugins/:name` | Update plugin (`{ file_path?, source_content? }`) |
+| `PUT` | `/api/v1/plugins/:name` | Update either `{ description }` (up to 2,000 characters, no NUL) or `{ file_path?, source_content? }`; the forms are mutually exclusive |
 | `DELETE` | `/api/v1/plugins/:name` | Delete plugin |
 | `POST` | `/api/v1/plugins/:name/enable` | Enable plugin (writes the configured source file to disk) |
 | `POST` | `/api/v1/plugins/:name/disable` | Disable plugin (removes the configured source file from disk) |
@@ -110,7 +107,7 @@ All endpoints require `?project=<name>` query parameter.
 | `ingenium_plugin_list` | `project` | List all plugins |
 | `ingenium_plugin_create` | `project, name, filePath, sourceContent?` | Create a new plugin |
 | `ingenium_plugin_get` | `project, name` | Get a single plugin |
-| `ingenium_plugin_update` | `project, name, { file_path?, source_content? }` | Update plugin |
+| `ingenium_plugin_update` | `project, name, { description }` or `{ file_path?, source_content? }` | Update plugin metadata or executable content |
 | `ingenium_plugin_delete` | `project, name` | Delete plugin |
 | `ingenium_plugin_enable` | `project, name` | Enable plugin |
 | `ingenium_plugin_disable` | `project, name` | Disable plugin |

@@ -35,7 +35,6 @@ import {
 
 import * as skillTools from "../lib/tools/skills.js";
 import * as taskTools from "../lib/tools/tasks.js";
-import * as coordinationTools from "../lib/tools/coordination.js";
 import * as contextTools from "../lib/tools/context.js";
 import * as memoryTools from "../lib/tools/memory.js";
 import { uploadContextFile } from "../lib/tools/context-upload.js";
@@ -49,7 +48,7 @@ import * as agentTools from "../lib/tools/agents.js";
 import * as observationTools from "../lib/tools/observations.js";
 import * as personalityTools from "../lib/tools/personality.js";
 import { synthesisRun, synthesisStatus, synthesisCrossProject } from "../lib/tools/synthesis.js";
-import { extractionRun } from "../lib/tools/extraction.js";
+import { extractionRun, externalExtractionSchema } from "../lib/tools/extraction.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
 import * as logTools from "../lib/tools/logs.js";
@@ -63,7 +62,8 @@ import * as ragTools from "../lib/tools/rag.js";
 import * as providerTools from "../lib/tools/providers.js";
 import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
-import { repositorySync } from "../lib/tools/repository.js";
+import { REPOSITORY_MAX_DOC_FILE_BYTES, repositorySync } from "../lib/tools/repository.js";
+import { externalUsageSchema, usageIngest } from "../lib/tools/usage.js";
 
 const projectStateAttestor = new ProjectStateAttestor();
 const observationSourceSchema = z.enum([
@@ -192,7 +192,7 @@ const projectParam = z.string().min(1).max(64).refine(
 const repositoryDocEntryParam = z.object({
   path: z.string().min(1).max(512),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  content: z.string().max(512 * 1024),
+  content: z.string().max(REPOSITORY_MAX_DOC_FILE_BYTES),
   fileType: z.literal("regular"),
   isSymlink: z.literal(false),
 }).strict();
@@ -204,8 +204,9 @@ const repositoryResourcesManifestParam = z.object({
   skills: z.array(z.record(z.unknown())).max(512),
   agents: z.array(z.record(z.unknown())).max(512),
   plugins: z.array(z.record(z.unknown())).max(512),
+  commands: z.array(z.record(z.unknown())).max(512).optional(),
 }).strict().superRefine((manifest, context) => {
-  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length > 512) {
+  if (manifest.skills.length + manifest.agents.length + manifest.plugins.length + (manifest.commands?.length ?? 0) > 512) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
   }
 });
@@ -779,10 +780,19 @@ server.registerTool(
 server.registerTool(
   "extraction_run",
   {
-    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
-    inputSchema: { project: projectParam },
+    description: "Extract durable user behavior rules. Optional external input probes learning eligibility or ingests one redacted visible user message from an exact launcher-bound session; otherwise schedules the server scan.",
+    inputSchema: { project: projectParam, external: externalExtractionSchema.optional() },
   },
-  wrapHandler(C("extraction_run"), async ({ project }) => extractionRun(project)),
+  wrapHandler(C("extraction_run"), async ({ project, external }) => extractionRun(project, external, launcherProject)),
+);
+
+server.registerTool(
+  "usage_ingest",
+  {
+    description: "Ingest metadata-only usage from one completed assistant message in an exact launcher-bound external session. Durable deduplication rejects conflicting replay; absent metrics remain unknown.",
+    inputSchema: { project: projectParam, event: externalUsageSchema },
+  },
+  wrapHandler(C("usage_ingest"), async ({ project, event }) => usageIngest(project, event, launcherProject)),
 );
 
 const taskRevisionParam = z.number().int().nonnegative();
@@ -800,75 +810,6 @@ const taskExpectedRevisionsParam = z.record(z.string().min(1).max(128), taskRevi
   (value) => Object.keys(value).length <= 128,
   "At most 128 expected revisions may be supplied",
 );
-
-const coordinationOpaqueIdParam = z.string().min(1).max(512).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-const coordinationRevisionParam = z.number().int().nonnegative();
-const coordinationPositiveParam = z.number().int().positive();
-const coordinationTokenParam = z.string().min(32).max(512).regex(/^[A-Za-z0-9_-]+$/);
-const coordinationTtlParam = z.number().int().min(1_000).max(300_000);
-const coordinationKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
-const coordinationPathParam = z.string().min(1).max(1_024).refine(
-  (value) => value === value.trim()
-    && !value.startsWith("/")
-    && !value.startsWith("~")
-    && !/^[A-Za-z]:\//.test(value)
-    && !value.includes("\\")
-    && !/[\u0000-\u001f\u007f*?[\]{}!]/.test(value)
-    && value.split("/").every((segment) => segment.length > 0
-      && segment !== "."
-      && segment !== ".."
-      && segment !== ".git"
-      && !segment.startsWith("@")),
-  "A safe relative coordination path is required",
-);
-const coordinationClaimParam = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("path"), path: coordinationPathParam }).strict(),
-  z.object({ kind: z.literal("tree"), path: coordinationPathParam }).strict(),
-  z.object({ kind: z.literal("reserved"), name: z.enum(["@build", "@repository"]) }).strict(),
-]);
-const coordinationClaimInputParam = z.object({
-  claim: coordinationClaimParam,
-  baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
-  current_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
-  repository_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
-}).strict();
-const coordinationClaimBatchParam = z.array(coordinationClaimInputParam).min(1).max(128);
-const coordinationSnapshotParam = z.record(z.unknown());
-const coordinationEncodedPathParam = z.array(z.string().min(1).max(342).regex(/^[A-Za-z0-9_-]+$/)).min(1).max(128);
-const coordinationMemoryEntryParam = z.object({
-  status: z.enum(["active", "working", "idle", "completed", "error"]),
-  actions: z.array(z.object({
-    kind: z.enum(["read", "search", "write", "edit", "execute"]),
-    result: z.literal("succeeded"),
-    pathSegments: coordinationEncodedPathParam.nullable(),
-    targetHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
-  }).strict()).max(64),
-  checks: z.array(z.object({
-    kind: z.enum(["test", "typecheck", "lint", "build", "format", "security", "other"]),
-    result: z.enum(["passed", "failed"]),
-    targetHash: z.string().regex(/^[0-9a-f]{64}$/),
-  }).strict()).max(32),
-  todos: z.object({
-    total: coordinationRevisionParam,
-    pending: coordinationRevisionParam,
-    inProgress: coordinationRevisionParam,
-    completed: coordinationRevisionParam,
-    cancelled: coordinationRevisionParam,
-    state: z.enum(["none", "pending", "in_progress", "complete", "cancelled", "mixed"]),
-  }).strict(),
-  currentTaskId: z.string().regex(/^task-[0-9a-f]{64}$/).nullable(),
-  changedPaths: z.array(z.object({
-    pathSegments: coordinationEncodedPathParam,
-    operation: z.enum(["write", "edit"]),
-    additions: coordinationRevisionParam,
-    deletions: coordinationRevisionParam,
-    changeRevision: coordinationPositiveParam,
-  }).strict()).max(32),
-  nextWork: z.object({
-    kind: z.enum(["none", "continue_task", "review_changes", "run_checks", "address_failure"]),
-    referenceHash: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
-  }).strict(),
-}).strict();
 
 server.registerTool(
   "task_create",
@@ -1187,186 +1128,6 @@ server.registerTool(
   },
   wrapHandler(C("task_bulk_update"), async ({ project, task_ids, fields, expected_revision, expected_revisions, idempotency_key }) =>
     taskTools.taskBulkUpdate(project, task_ids, fields, expected_revision, expected_revisions, idempotency_key)),
-);
-
-server.registerTool(
-  "coordination_status",
-  {
-    description: "Read the durable coordination status for an exact session identity.",
-    inputSchema: {
-      project: projectParam,
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      ownership_token: coordinationTokenParam,
-    },
-  },
-  wrapHandler(C("coordination_status"), async ({ project, worktree_id, session_id, incarnation, ownership_token }) =>
-    coordinationTools.coordinationStatus(project, worktree_id, session_id, incarnation, ownership_token)),
-);
-
-server.registerTool(
-  "coordination_memory_read",
-  {
-    description: "Read typed operational memory for an exact coordination session identity.",
-    inputSchema: {
-      project: projectParam,
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      expected_revision: coordinationRevisionParam,
-      fence: coordinationPositiveParam,
-      ownership_token: coordinationTokenParam,
-      idempotency_key: coordinationKeyParam,
-      limit: z.number().int().min(1).max(8).optional(),
-    },
-  },
-  wrapHandler(C("coordination_memory_read"), async ({ project, ...input }) =>
-    coordinationTools.coordinationMemoryRead(project, input)),
-);
-
-server.registerTool(
-  "coordination_update",
-  {
-    description: "Update a coordination session with an exact registry operation.",
-    inputSchema: {
-      project: projectParam,
-      operation: z.enum(["register", "recover", "recovery_state", "mint_recovery_admission", "reconcile_epoch", "recover_epoch", "update", "heartbeat", "runtime_activity", "close", "takeover"]),
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      expected_revision: coordinationRevisionParam.optional(),
-      fence: coordinationPositiveParam.optional(),
-      ownership_token: coordinationTokenParam.optional(),
-      next_ownership_token: coordinationTokenParam.optional(),
-      ttl_ms: coordinationTtlParam.optional(),
-      idempotency_key: coordinationKeyParam,
-      snapshot: coordinationSnapshotParam.optional(),
-      snapshot_revision: coordinationRevisionParam.optional(),
-      current_task_id: coordinationOpaqueIdParam.nullable().optional(),
-      current_task_revision: coordinationRevisionParam.nullable().optional(),
-      quarantined_session_id: coordinationOpaqueIdParam.optional(),
-      quarantined_incarnation: coordinationPositiveParam.optional(),
-      quarantined_fence: coordinationPositiveParam.optional(),
-      quarantined_actor_id: z.string().regex(/^actor-[0-9a-f]{64}$/).optional(),
-      accepted_epoch: coordinationPositiveParam.optional(),
-      recovery_footprint_hash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-      preflight_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
-      head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/).optional(),
-      parent_pid: coordinationPositiveParam.optional(),
-      parent_start: z.string().min(1).max(128).optional(),
-      parent_executable: z.string().min(1).max(1024).regex(/^\/[^\u0000-\u001f\u007f]*$/).optional(),
-      parent_nonce: coordinationTokenParam.optional(),
-      runtime_id: z.string().uuid().optional(),
-      observed_at: z.string().datetime({ offset: true }).optional(),
-    },
-  },
-  wrapHandler(C("coordination_update"), async ({ project, operation, ...input }) =>
-    coordinationTools.coordinationUpdate(project, operation, input)),
-);
-
-server.registerTool(
-  "coordination_claim",
-  {
-    description: "Claim non-overlapping coordination paths for an active session.",
-    inputSchema: {
-      project: projectParam,
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      expected_revision: coordinationRevisionParam,
-      fence: coordinationPositiveParam,
-      ownership_token: coordinationTokenParam,
-      client_claim_key: coordinationTokenParam,
-      action: z.enum(["acquire", "verify", "renew", "mark", "quarantine", "complete"]).optional(),
-      claims: coordinationClaimBatchParam.optional(),
-      operation: z.enum(["write", "edit", "create", "delete", "rename", "apply_patch", "repository", "build"]).optional(),
-      accepted_epoch: coordinationPositiveParam.optional(),
-      ttl_ms: coordinationTtlParam.optional(),
-      state: z.enum(["dirty", "quarantined", "collision"]).optional(),
-      code: z.enum(["uncertain_apply", "dirty_baseline"]).optional(),
-      operation_id: z.string().uuid().optional(),
-      footprint: z.array(z.object({
-        path: coordinationPathParam.optional(),
-        path_sha256: z.string().regex(/^[0-9a-f]{64}$/),
-        before_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
-        after_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
-      }).strict()).max(256).optional(),
-      idempotency_key: coordinationKeyParam,
-    },
-  },
-  wrapHandler(C("coordination_claim"), async ({ project, action = "acquire", ...input }) =>
-    action === "acquire"
-      ? coordinationTools.coordinationClaim(project, input as coordinationTools.CoordinationClaimBatchInput)
-      : coordinationTools.coordinationClaimAction(project, action, input as coordinationTools.CoordinationClaimProofInput)),
-);
-
-server.registerTool(
-  "coordination_release",
-  {
-    description: "Release owned coordination claims for an active session.",
-    inputSchema: {
-      project: projectParam,
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      expected_revision: coordinationRevisionParam,
-      fence: coordinationPositiveParam,
-      ownership_token: coordinationTokenParam,
-      client_claim_key: coordinationTokenParam,
-      idempotency_key: coordinationKeyParam,
-    },
-  },
-  wrapHandler(C("coordination_release"), async ({ project, ...input }) =>
-    coordinationTools.coordinationRelease(project, input)),
-);
-
-server.registerTool(
-  "coordination_handoff",
-  {
-    description: "Exchange sanitized handoffs, operational memory, and linked-session transcripts.",
-    inputSchema: {
-      project: projectParam,
-      operation: z.enum([
-        "publish", "read", "ack", "consume", "memory", "memory_read", "memory_ack",
-        "link", "transcript_publish", "transcript_read", "transcript_ack",
-      ]),
-      worktree_id: coordinationOpaqueIdParam,
-      session_id: coordinationOpaqueIdParam,
-      incarnation: coordinationPositiveParam,
-      expected_revision: coordinationRevisionParam,
-      fence: coordinationPositiveParam,
-      ownership_token: coordinationTokenParam,
-      idempotency_key: coordinationKeyParam,
-      operation_kind: z.enum(["write", "edit"]).optional(),
-      path: z.string().max(1024).optional(),
-      baseline_sha256: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
-      limit: z.number().int().min(1).max(32).optional(),
-      through_sequence: coordinationRevisionParam.optional(),
-      through_revision: coordinationRevisionParam.optional(),
-      memory_entry: coordinationMemoryEntryParam.optional(),
-      target_session_id: coordinationOpaqueIdParam.optional(),
-      link_kind: z.enum(["linked", "fork"]).optional(),
-      transcript_messages: z.array(z.object({
-        message_id: coordinationOpaqueIdParam,
-        payload: z.object({
-          info: z.object({
-            id: coordinationOpaqueIdParam,
-            sessionID: coordinationOpaqueIdParam,
-            role: z.enum(["user", "assistant"]),
-          }).passthrough(),
-          parts: z.array(z.object({
-            id: coordinationOpaqueIdParam,
-            sessionID: coordinationOpaqueIdParam,
-            messageID: coordinationOpaqueIdParam,
-            type: z.string().min(1).max(64),
-          }).passthrough()),
-        }).strict(),
-      }).strict()).min(1).max(16).optional(),
-    },
-  },
-  wrapHandler(C("coordination_handoff"), async ({ project, operation, ...input }) =>
-    coordinationTools.coordinationHandoff(project, operation, input)),
 );
 
 server.registerTool(
@@ -1770,10 +1531,11 @@ server.registerTool(
 server.registerTool(
   "plugin_update",
   {
-    description: "Update a plugin's file path or source content.",
-    inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), source_content: z.string().optional() }
+    description: "Update a project-local plugin description (up to 2000 characters) alone, or update executable file path/source alone. Description edits never change files or configuration.",
+    inputSchema: pluginTools.pluginUpdateInputSchema
   },
-  wrapHandler(C("plugin_update"), async ({ project, name, file_path, source_content }) => pluginTools.pluginUpdate(project, name, { file_path, source_content })),
+  wrapHandler(C("plugin_update"), async ({ project, name, description, file_path, source_content }) => pluginTools.pluginUpdate(project, name,
+    { description, file_path, source_content })),
 );
 
 server.registerTool(

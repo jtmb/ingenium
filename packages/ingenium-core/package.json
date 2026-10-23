@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ingenium/extension": "1.0.0",
     "better-sqlite3": "^11.0.0",
     "jose": "^6.2.3",
     "zod": "^3.23.0"

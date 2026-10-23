@@ -43,4 +43,4 @@ package manifest beside the configured plugin entrypoint.
 The configured adapter is deliberately outside the worktree's
 `.opencode/plugins/` discovery root. Its `ponytail-frontmatter.cjs` companion
 therefore remains a runtime dependency only and cannot be independently
-auto-discovered as a plugin by OpenCode 1.18.9's legacy loader.
+auto-discovered as a plugin by OpenCode 1.18.31's root plugin loader.

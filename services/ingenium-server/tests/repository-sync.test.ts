@@ -17,6 +17,78 @@ const docsManifest = {
 };
 const resourcesManifest = { version: 2, skills: [], agents: [], plugins: [] };
 describe("repository sync MCP tool adapter", () => {
+  it.each(["retained corpus", "exact byte limits"])("accepts documents at %s", async (size) => {
+    const roadmap = "x".repeat(805_779 - 802) + "é".repeat(802);
+    expect(roadmap.length).toBe(805_779);
+    expect(Buffer.byteLength(roadmap)).toBe(806_581);
+    const contents = size === "retained corpus"
+      ? [roadmap, "x".repeat(600_000), "x".repeat(1_873_484 - 806_581 - 600_000)]
+      : Array.from({ length: 3 }, () => "é".repeat(512 * 1024));
+    expect(contents.reduce((total, content) => total + Buffer.byteLength(content), 0))
+      .toBe(size === "retained corpus" ? 1_873_484 : 3 * 1024 * 1024);
+    const manifest = { files: contents.map((content, index) => ({
+      ...docsManifest.files[0], path: `docs/${index}.md`, content,
+    })) };
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: true, generation: 0, manifestHash: "a".repeat(64), docs: { summary: {} },
+    } });
+
+    const result = await repositorySync("ingenium", manifest, undefined, 0, true);
+
+    expect(result).not.toHaveProperty("isError");
+    expect(mockPost).toHaveBeenCalledWith("/repository/sync", {
+      docsManifest: manifest, resourcesManifest: undefined, expectedGeneration: 0, dryRun: true,
+    }, { project: "ingenium" });
+  });
+
+  it.each([
+    ["file byte", ["é".repeat(512 * 1024) + "x"]],
+    ["file character", ["x".repeat(1024 * 1024 + 1)]],
+    ["aggregate byte", [...Array.from({ length: 3 }, () => "é".repeat(512 * 1024)), "x"]],
+  ])("rejects documents one %s over the limit before forwarding", async (_label, contents) => {
+    const manifest = { files: contents.map((content, index) => ({
+      ...docsManifest.files[0], path: `docs/${index}.md`, content,
+    })) };
+
+    const result = await repositorySync("ingenium", manifest, undefined, 0, true);
+
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ isError: true });
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      error: { code: "INVALID_REPOSITORY_SYNC", message: "Repository synchronization request is invalid." },
+    });
+  });
+
+  it("forwards command resources and returns only bounded command counters", async () => {
+    const resources = { ...resourcesManifest, commands: [{ source: "Run checks" }] };
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: true, generation: 0, manifestHash: "a".repeat(64), docs: { summary: {} },
+      resources: { summary: { command: { created: 1, unchanged: 2, source: "must-not-return" } } },
+    } });
+    const result = await repositorySync("repository-project", docsManifest, resources, 0, true);
+    expect(mockPost).toHaveBeenCalledWith("/repository/sync", { docsManifest, resourcesManifest: resources, expectedGeneration: 0, dryRun: true }, { project: "repository-project" });
+    expect(JSON.parse(result.content[0]!.text).resources.summary.command).toMatchObject({ created: 1, unchanged: 2 });
+    expect(result.content[0]!.text).not.toContain("must-not-return");
+  });
+
+  it.each([
+    "not-an-array",
+    Array.from({ length: 513 }, () => ({ source: "Run" })),
+    [{ source: "x".repeat(REPOSITORY_MAX_RESOURCE_FILE_BYTES + 1) }],
+    Array.from({ length: 7 }, () => ({ source: "x".repeat(240 * 1024) })),
+  ])("rejects malformed or oversized command aggregates before forwarding", async (commands) => {
+    const result = await repositorySync("repository-project", docsManifest, { ...resourcesManifest, commands }, 0, true);
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ isError: true });
+  });
+
+  it("does not manufacture command readback when the API omits it", async () => {
+    mockPost.mockResolvedValueOnce({ ok: true, data: {
+      dryRun: false, generation: 1, manifestHash: "a".repeat(64), docs: { summary: {} }, resources: { summary: {} },
+    } });
+    expect(await repositorySync("repository-project", docsManifest, { ...resourcesManifest, commands: [] }, 0, false)).toMatchObject({ isError: true });
+  });
+
   beforeEach(() => {
     mockPost.mockReset();
   });

@@ -53,7 +53,7 @@ const EXPECTED_BINDINGS: Record<string, PortBinding[]> = {
     { HostIp: "::", HostPort: "3000" },
   ],
   "4097/tcp": [{ HostIp: "127.0.0.1", HostPort: "4097" }],
-  "1455/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }],
+  "1456/tcp": [{ HostIp: "127.0.0.1", HostPort: "1455" }],
 };
 const COMPOSE_GATEWAY_SERVICES = ["ingenium", "control-plane"] as const;
 
