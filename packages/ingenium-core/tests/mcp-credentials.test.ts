@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -34,6 +34,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetDbForTest();
+  vi.useRealTimers();
   delete process.env.INGENIUM_AUTH_ENCRYPTION_KEY_FILE;
   rmSync(directory, { recursive: true, force: true });
 });
@@ -282,6 +283,41 @@ describe("AUTH-107 MCP credentials", () => {
       id: replacement.id, token: replacement.token, expiresAt: replacement.expiresAt,
     });
     expect(listMcpCredentials(original.createdByUserId)).toHaveLength(3);
+  });
+
+  it("requires explicit expiry renewal and preserves expiry, revocation and request binding on rejected replay", () => {
+    const seeded = fixture();
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    const input = { servicePrincipalId: seeded.servicePrincipalId, kind: "service" as const,
+      audience: "mcp" as const, name: "expiry receipt", scopes: ["projects:read"],
+      organizationId: seeded.organizationId, projectId: seeded.projectId, workspaceId: seeded.workspaceId,
+      launcherWorktree: seeded.launcherWorktree, createdByUserId: seeded.createdByUserId,
+      expiresAt: new Date(Date.now() + 60_000) };
+    const original = createMcpCredential(input, "expiry-receipt");
+    const expiredAt = original.expiresAt;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(expiredAt) + 1);
+    input.expiresAt = new Date(Date.now() + 60_000);
+    const receipt = () => db.prepare("SELECT * FROM mcp_credential_receipts WHERE idempotency_key = ?").get("expiry-receipt");
+    const before = receipt();
+    expect(() => createMcpCredential(input, "expiry-receipt")).toThrow("Credential replay is unavailable");
+    expect(() => createMcpCredential(input, "expiry-receipt", { replaceRevokedReceipt: true }))
+      .toThrow("Credential replay is unavailable");
+    expect(() => createMcpCredential({ ...input, scopes: ["projects:read", "vault:read"] }, "expiry-receipt",
+      { replaceExpiredReceipt: true })).toThrow("Credential replay is unavailable");
+    expect(receipt()).toEqual(before);
+    expect(revokeMcpCredential(original.id, original.createdByUserId)).toBe(true);
+    expect(() => createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true }))
+      .toThrow("Credential replay is unavailable");
+    const renewed = createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true, replaceRevokedReceipt: true });
+    expect(renewed.id).not.toBe(original.id);
+    expect(renewed.expiresAt).toBe(input.expiresAt.toISOString());
+    expect(db.prepare("SELECT expires_at FROM mcp_credentials WHERE id = ?").get(original.id)).toEqual({ expires_at: expiredAt });
+    expect(resolveMcpCredential(original.token, "mcp")).toBeUndefined();
+    expect(resolveMcpCredential(renewed.token, "mcp")?.id).toBe(renewed.id);
+    expect(createMcpCredential(input, "expiry-receipt", { replaceExpiredReceipt: true })).toMatchObject({
+      id: renewed.id, token: renewed.token, expiresAt: renewed.expiresAt,
+    });
   });
 
   it("issues only the fixed short-lived repository credential for an exact ready runtime", () => {

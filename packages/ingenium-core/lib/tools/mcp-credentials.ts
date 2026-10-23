@@ -48,6 +48,8 @@ export interface CreateMcpCredentialInput {
 
 export interface CreateMcpCredentialOptions {
   replaceRevokedReceipt?: boolean;
+  /** Issue a new credential after expiry; never extend the old token's lifetime. */
+  replaceExpiredReceipt?: boolean;
 }
 
 export interface ServiceCredentialIdentity {
@@ -210,7 +212,7 @@ export function createMcpCredential(
       if (receipt) {
         const row = db.prepare(`${SELECT_CREDENTIAL}
           JOIN service_principals principal ON principal.id = mcp_credentials.service_principal_id
-          WHERE mcp_credentials.id = ? AND mcp_credentials.expires_at > ?
+          WHERE mcp_credentials.id = ?
             AND principal.organization_id = mcp_credentials.organization_id
             AND principal.status = 'active' AND principal.security_epoch = mcp_credentials.security_epoch
             AND authorized_workspaces.status = 'authorized'
@@ -219,16 +221,19 @@ export function createMcpCredential(
             AND authorized_workspaces.owner_user_id = mcp_credentials.created_by_user_id
             AND authorized_workspaces.storage_path = mcp_credentials.launcher_worktree
             AND authorized_workspaces.security_epoch = mcp_credentials.security_epoch`)
-          .get(receipt.credential_id, new Date().toISOString()) as CredentialRow | undefined;
+          .get(receipt.credential_id) as CredentialRow | undefined;
         if (receipt.request_hash !== requestHash || !row || !matchesCredentialBinding(row, input, scopes, grants)) {
           throw new Error("Credential replay is unavailable");
         }
-        if (!row.revoked_at) return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
-        if (!options.replaceRevokedReceipt) throw new Error("Credential replay is unavailable");
+        const expiry = Date.parse(row.expires_at);
+        const expired = expiry <= Date.now();
+        if (!Number.isFinite(expiry) || (expired && !options.replaceExpiredReceipt)
+          || (row.revoked_at && !options.replaceRevokedReceipt)) throw new Error("Credential replay is unavailable");
+        if (!expired && !row.revoked_at) return { credential: toCredential(row), encryptedToken: receipt.encrypted_token };
         const credential = insertMcpCredential(db, {
           ...input,
           servicePrincipalId: row.service_principal_id,
-          expiresAt: new Date(row.expires_at),
+          expiresAt: expired ? input.expiresAt : new Date(row.expires_at),
         }, scopes, grants, id, tokenPrefix, token);
         if (db.prepare(`UPDATE mcp_credential_receipts SET credential_id = ?, encrypted_token = ?
           WHERE idempotency_key = ? AND request_hash = ? AND credential_id = ?`)

@@ -68,6 +68,44 @@ afterEach(async () => {
 });
 
 describe("compatibility MCP bootstrap", () => {
+  it("renews an expired startup credential without extending the old token or changing its binding", async () => {
+    const firstResponse = await issue();
+    expect(firstResponse.status).toBe(201);
+    const first = (await firstResponse.json()).data;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.expiresAt) + 1);
+
+    expect(mcpCredentials.resolveMcpCredential(first.token, "mcp")).toBeUndefined();
+    const response = await issue();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    expect(renewed.id).not.toBe(first.id);
+    expect(renewed.token).not.toBe(first.token);
+    expect(renewed).toMatchObject({ servicePrincipalId: first.servicePrincipalId,
+      projectId: first.projectId, organizationId: first.organizationId, workspaceId: first.workspaceId,
+      launcherWorktree: first.launcherWorktree, securityEpoch: first.securityEpoch, scopes });
+    expect(Date.parse(renewed.expiresAt)).toBe(Date.now() + 30 * 24 * 60 * 60_000);
+    expect(mcpCredentials.resolveMcpCredential(first.token, "mcp")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(renewed.token, "mcp")?.id).toBe(renewed.id);
+    expect((await (await issue()).json()).data).toMatchObject({ id: renewed.id,
+      token: renewed.token, expiresAt: renewed.expiresAt });
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(2);
+  });
+
+  it.each(["workspace", "principal", "epoch"])("rejects expired startup renewal after %s changes", async (invalid) => {
+    const first = (await (await issue()).json()).data;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.expiresAt) + 1);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    if (invalid === "workspace") db.prepare("UPDATE authorized_workspaces SET status = 'revoked' WHERE id = ?").run(first.workspaceId);
+    if (invalid === "principal") db.prepare("UPDATE service_principals SET status = 'revoked' WHERE id = ?").run(first.servicePrincipalId);
+    if (invalid === "epoch") db.prepare("UPDATE authorized_workspaces SET security_epoch = security_epoch + 1 WHERE id = ?").run(first.workspaceId);
+    const receipt = db.prepare("SELECT * FROM mcp_credential_receipts WHERE credential_id = ?").get(first.id);
+    expect((await issue()).status).toBe(503);
+    expect(db.prepare("SELECT * FROM mcp_credential_receipts WHERE credential_id = ?").get(first.id)).toEqual(receipt);
+    expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(1);
+  });
+
   it.each([
     { name: "default window", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: null },
     { name: "configured window", absoluteMs: 120_000, idleMs: 600_000, remainingCapabilityMs: null },
