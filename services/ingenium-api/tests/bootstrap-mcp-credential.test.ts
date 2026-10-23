@@ -106,6 +106,29 @@ describe("compatibility MCP bootstrap", () => {
     expect(mcpCredentials.listMcpCredentials(ownerId)).toHaveLength(1);
   });
 
+  it("renews an expired local capability and keeps the old token invalid", async () => {
+    expect((await issue()).status).toBe(201);
+    const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
+      method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
+    });
+    const first = (await (await local()).json()).data;
+    expect(first.credential.kind).toBe("runtime");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.parse(first.credential.expiresAt) + 1);
+    expect(mcpCredentials.resolveMcpCredential(first.credential.token, "runtime")).toBeUndefined();
+    const response = await local();
+    expect(response.status).toBe(201);
+    const renewed = (await response.json()).data;
+    expect(renewed.runtime.id).toBe(first.runtime.id);
+    expect(renewed.credential.id).not.toBe(first.credential.id);
+    expect(renewed.credential.servicePrincipalId).toBe(first.credential.servicePrincipalId);
+    expect(mcpCredentials.resolveMcpCredential(first.credential.token, "runtime")).toBeUndefined();
+    expect(mcpCredentials.resolveMcpCredential(renewed.credential.token, "runtime")?.id).toBe(renewed.credential.id);
+    expect((await (await local()).json()).data.credential).toMatchObject({ id: renewed.credential.id, token: renewed.credential.token });
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("SELECT expires_at FROM mcp_credentials WHERE id = ?").get(first.credential.id))
+      .toEqual({ expires_at: first.credential.expiresAt });
+  });
+
   it.each([
     { name: "default window", absoluteMs: 28_800_000, idleMs: 1_800_000, remainingCapabilityMs: null },
     { name: "configured window", absoluteMs: 120_000, idleMs: 600_000, remainingCapabilityMs: null },
@@ -151,15 +174,17 @@ describe("compatibility MCP bootstrap", () => {
     ).get(first.runtime.id)).toEqual({ count: 1 });
   });
 
-  it.each(["capability", "workspace", "epoch", "backend", "state", "principal"])(
-    "does not renew an expired compatibility lifetime with invalid %s", async (invalid) => {
+  it.each(["capability", "workspace", "epoch", "backend", "state", "principal"].flatMap(invalid => [
+    { invalid, expiredCredential: false }, { invalid, expiredCredential: true },
+  ]))(
+    "does not renew invalid $invalid with credential expired=$expiredCredential", async ({ invalid, expiredCredential }) => {
       expect((await issue()).status).toBe(201);
       const local = () => fetch(`${baseUrl}/api/v1/auth/bootstrap-local-runtime`, {
         method: "POST", headers: { authorization: `Bearer ${installationToken}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
       });
       const first = (await (await local()).json()).data;
       vi.useFakeTimers({ toFake: ["Date"] });
-      vi.setSystemTime(Date.parse(first.runtime.absoluteExpiresAt) + 1);
+      vi.setSystemTime(Date.parse(expiredCredential ? first.credential.expiresAt : first.runtime.absoluteExpiresAt) + 1);
       const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
       const receiptBefore = invalid === "capability" ? db.prepare(
         "SELECT request_hash, credential_id, encrypted_token FROM mcp_credential_receipts WHERE credential_id = ?",

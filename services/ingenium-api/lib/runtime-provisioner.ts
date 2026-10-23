@@ -62,7 +62,7 @@ export function provisionLocalRuntime(workspaceId: string) {
       // Credential storage binding stays canonical; runtime HTTP attestation uses /workspace.
       launcherWorktree: workspace.storagePath, createdByUserId: runtime.ownerUserId,
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60_000),
-    }, `compatibility-runtime:${runtime.id}:${runtime.securityEpoch}:${profile}`);
+    }, `compatibility-runtime:${runtime.id}:${runtime.securityEpoch}:${profile}`, { replaceExpiredReceipt: true });
     stage = "binding";
     const bound = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
       "SELECT mcp_credential_id FROM runtime_capability_bindings WHERE runtime_id = ? AND revoked_at IS NULL",

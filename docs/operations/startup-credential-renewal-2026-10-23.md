@@ -21,8 +21,9 @@ extending its lifetime.
 Generic issuance still rejects expired receipts unless explicitly opted in.
 Renewal checks the original request, scopes, grants, owner, project, workspace,
 principal and security epoch. Expiry renewal does not bypass revocation: a revoked
-receipt also requires the existing explicit revoked-receipt option. Runtime
-capability renewal and its separate security boundaries are unchanged.
+receipt also requires the existing explicit revoked-receipt option. Local runtime capabilities now use the same expiry-only opt-in. Revoked runtime
+capabilities still fail closed; the general bootstrap retains its separately
+authorized revocation replacement.
 
 ## Verification and review
 
@@ -57,3 +58,20 @@ note. Other startup, profile, build, recovery and source migration changes remai
 separate review work. Consult the repository development/deployment skills and
 existing focused test commands before continuing. Private restore paths, source
 snapshots and logs are retained in the local release companion, not this note.
+
+## Installed local-runtime renewal and restart verification
+
+The second startup failure was the expired local-runtime receipt. Its bootstrap
+now opts into expiry replacement while preserving capability revocation and
+workspace, principal, backend, state and epoch checks. Thirty bootstrap tests
+pass, including those invalid bindings before and after credential expiry.
+API, extension and dashboard TypeScript checks pass.
+
+Candidate source digest
+`143bd2ff1f540d13cae6367361279f9b06581bc9a80f61ba2762e602cb6842c3`
+passed its actual plugin-loading build check. The isolated restored stack
+reports `MCP_BOOTSTRAP_READY` and healthy composite service health. A synthetic
+saved-memory item written through the installed MCP transport survived the image
+upgrade and an ordinary Compose restart, and was reread through the installed
+transport afterward. Production remains untouched; final deployment, browser
+acceptance, source settlement and publication remain due.
