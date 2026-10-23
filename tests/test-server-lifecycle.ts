@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -77,6 +78,14 @@ function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildA
     },
   });
   symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
+  // Next derives its page-worker count from all host CPUs, even under taskset.
+  // Bound the isolated fixture's memory use without altering production config.
+  const configPath = join(target, "next.config.js");
+  const config = readFileSync(configPath, "utf8");
+  const exportStatement = "export default nextConfig;";
+  if (!config.includes(exportStatement)) throw new Error("Fixture Next.js config export is unsupported");
+  writeFileSync(configPath, config.replace(exportStatement,
+    "export default { ...nextConfig, experimental: { ...nextConfig.experimental, cpus: 2 } };"));
   return target;
 }
 

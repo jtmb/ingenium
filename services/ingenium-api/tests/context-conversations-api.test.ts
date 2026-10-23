@@ -402,6 +402,16 @@ describe("immutable context conversation API", () => {
       expect(JSON.stringify(firstBody)).not.toContain("private-user-canary");
       expect(JSON.stringify(firstBody)).not.toContain("private-assistant-canary");
 
+      const renamedLink = await fetch(`${isolatedUrl}/chat-sessions/link?project=${projectName}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runtimeId: runtime.id, sessionId: "session-one", title: "Renamed by OpenCode" }),
+      });
+      expect(renamedLink.status).toBe(201);
+      expect((await json(renamedLink)).data).toMatchObject({
+        id: conversation.id, title: "Private chat", revision: 2, checkpoint_count: 1,
+        owner_user_id: owner.id, visibility: "private",
+      });
+
       const replay = await fetch(`${isolatedUrl}/conversations/${conversation.id}/chat-turns?project=${projectName}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });

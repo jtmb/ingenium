@@ -508,6 +508,17 @@ contextRouter.post("/chat-sessions/link", (req, res) => {
   if (!sourceRuntimeId) return;
   try {
     const idempotencyKey = `opencode-chat:${createHash("sha256").update(`${sourceRuntimeId}\0${sessionId}`).digest("hex")}`;
+    // OpenCode can rename a session after its first turn. The saved conversation
+    // keeps its immutable original title; reconnect by its exact private identity.
+    const existing = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(`SELECT id FROM context_conversations
+      WHERE project_id = ? AND idempotency_key = ? AND organization_id = ? AND owner_user_id = ?
+        AND visibility = 'private' AND json_extract(metadata, '$.source') = 'opencode-chat'
+        AND json_extract(metadata, '$.sourceRuntimeId') = ? AND json_extract(metadata, '$.sourceSessionId') = ?`)
+      .get(projectId, idempotencyKey, actor.organizationId, actor.ownerUserId, sourceRuntimeId, sessionId) as { id: string } | undefined;
+    if (existing) {
+      res.status(201).json({ data: contextConversations.getContextConversation(projectId, existing.id) });
+      return;
+    }
     const conversation = contextConversations.createContextConversation(projectId, {
       title,
       tags: ["chat", "opencode"],
