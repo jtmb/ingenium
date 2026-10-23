@@ -32,3 +32,23 @@ Focused checks passed: 18 configuration tests, 99 API client tests and four
 credential/launcher tests. Clean curated-source typechecking passed. Final image build,
 ordinary restart acceptance and production adoption are separate remaining gates.
 Production was not modified for this investigation. The release goal remains open.
+
+## Real free-provider chat and current event schema
+
+The release image was subsequently adopted through production Compose with all
+four named volumes and 13 mount targets preserved. Composite health, dashboard
+login, three historical session identities and creation times, encryption/signing
+key continuity, and installed MCP memory save/update/read were verified.
+
+At the user's direction, actual inference uses Zen's free `flint-40b-free` model.
+The native session returned the exact release canary with a successful outcome
+and zero reported cost. Agent model configuration was not changed. The dashboard
+continued showing Generating because its adapter recognized older `session.next.*`
+events. Captured 2.0.11 events use `session.step.*`, `session.text.*`, ordinal part
+identities, envelope creation timestamps, and explicit execution terminal events.
+
+The adapter now accepts both shapes, keeps reasoning and text ordinals separate,
+and translates current execution completion, interruption and failure. Focused
+contract tests and API typechecking passed. Rebuilt-image adoption, live browser
+stream completion, authenticated reload and final ordinary restart acceptance
+remain separate gates until verified.

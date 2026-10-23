@@ -604,6 +604,74 @@ describe("Defect 3: SSE Last-Event-ID forwarding", () => {
     expect(body).toContain('"type":"session.idle"');
   });
 
+  it("projects current native ordinal parts and execution completion without a reload", async () => {
+    const encoder = new TextEncoder();
+    const nativeEvents = [
+      { id: "evt-busy", created: 1, type: "session.execution.started", data: { sessionID: "ses_sse" } },
+      { id: "evt-step", created: 3, type: "session.step.started", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", started: 2,
+        agent: "ingenium-chat", model: { providerID: "opencode", id: "free-test" },
+      } },
+      { id: "evt-reasoning", created: 4, type: "session.reasoning.started", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", ordinal: 0,
+      } },
+      { id: "evt-reasoning-delta", created: 5, type: "session.reasoning.delta", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", ordinal: 0, delta: "Thinking",
+      } },
+      { id: "evt-text", created: 6, type: "session.text.started", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", ordinal: 0,
+      } },
+      { id: "evt-text-delta", created: 7, type: "session.text.delta", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", ordinal: 0, delta: "Hello",
+      } },
+      { id: "evt-foreign", created: 8, type: "session.text.delta", data: {
+        sessionID: "ses_foreign", assistantMessageID: "msg_foreign", ordinal: 0, delta: "PRIVATE",
+      } },
+      { id: "evt-text-end", created: 9, type: "session.text.ended", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", ordinal: 0, text: "Hello",
+      } },
+      { id: "evt-step-end", created: 10, type: "session.step.ended", data: {
+        sessionID: "ses_sse", assistantMessageID: "msg_current", finish: "stop", cost: 0,
+      } },
+      { id: "evt-done", created: 11, type: "session.execution.succeeded", data: { sessionID: "ses_sse" } },
+    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+    mockStreamEvents.mockResolvedValue(new ReadableStream({ start(controller) {
+      controller.enqueue(encoder.encode(nativeEvents.slice(0, 41)));
+      controller.enqueue(encoder.encode(nativeEvents.slice(41)));
+      controller.close();
+    } }));
+    const response = await fetch(api("/sessions/ses_sse/events"));
+    const body = await response.text();
+    const events = body.split("\n\n").filter(Boolean).map((block) => JSON.parse(
+      block.split("\n").find((line) => line.startsWith("data: "))!.slice(6),
+    ));
+    expect(events).toContainEqual({ type: "session.status", properties: { sessionID: "ses_sse", status: { type: "busy" } } });
+    expect(events).toContainEqual({ type: "message.part.delta", properties: {
+      sessionID: "ses_sse", messageID: "msg_current", partID: "msg_current:text:0", field: "text", delta: "Hello",
+    } });
+    expect(events).toContainEqual({ type: "message.part.delta", properties: {
+      sessionID: "ses_sse", messageID: "msg_current", partID: "msg_current:reasoning:0", field: "text", delta: "Thinking",
+    } });
+    expect(events.find((event) => event.type === "message.updated").properties.info.time.created).toBe(2);
+    expect(events.some((event) => event.type === "session.idle")).toBe(true);
+    expect(body).toContain('"completed":10');
+    expect(body).not.toContain("PRIVATE");
+    expect(body).not.toContain("undefined");
+  });
+
+  it("projects current native execution failure as a terminal browser error", async () => {
+    mockStreamEvents.mockResolvedValue(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+        id: "evt-failed", type: "session.execution.failed", data: {
+          sessionID: "ses_sse", error: { message: "Provider unavailable" },
+        },
+      })}\n\n`));
+      controller.close();
+    } }));
+    const response = await fetch(api("/sessions/ses_sse/events"));
+    expect(await response.text()).toContain('"type":"session.error","properties":{"sessionID":"ses_sse","error":{"message":"Provider unavailable"}}');
+  });
+
   it("forwards Last-Event-ID header to streamEvents for global event stream", async () => {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({

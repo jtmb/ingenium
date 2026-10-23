@@ -1068,6 +1068,20 @@ function browserEventsForNativeEvent(
   type: string,
   properties: Record<string, unknown>,
 ): BrowserSessionEvent[] {
+  // Current V2 events dropped `next` and identify text/reasoning parts by
+  // ordinal. Keep one projection for both persisted older streams and V2.
+  type = type.replace(/^session\.(step|text|reasoning|tool)\./, "session.next.$1.");
+  const ordinal = properties.ordinal;
+  const ordinalPart = typeof properties.assistantMessageID === "string"
+    && typeof ordinal === "number" && Number.isSafeInteger(ordinal) && ordinal >= 0;
+  properties = {
+    ...properties,
+    ...(typeof properties.started === "number" ? { timestamp: properties.started } : {}),
+    ...(ordinalPart ? {
+      textID: properties.textID ?? `${properties.assistantMessageID}:text:${ordinal}`,
+      reasoningID: properties.reasoningID ?? `${properties.assistantMessageID}:reasoning:${ordinal}`,
+    } : {}),
+  };
   const textPart = (partType: "text" | "reasoning", id: unknown, text = ""): BrowserSessionEvent => ({
     type: "message.part.updated",
     properties: {
@@ -1082,6 +1096,13 @@ function browserEventsForNativeEvent(
   });
 
   switch (type) {
+    case "session.execution.started":
+      return [{ type: "session.status", properties: { sessionID: properties.sessionID, status: { type: "busy" } } }];
+    case "session.execution.succeeded":
+    case "session.execution.interrupted":
+      return [{ type: "session.idle", properties: { sessionID: properties.sessionID } }];
+    case "session.execution.failed":
+      return [{ type: "session.error", properties: { sessionID: properties.sessionID, error: properties.error } }];
     case "session.next.step.started": {
       const model = eventRecord(properties.model);
       return [{
@@ -1230,7 +1251,11 @@ function projectSessionEventBlock(block: string, sessionId: string): string | nu
     if (boundSession ? boundSession !== sessionId : !event.type.startsWith("server.")) return null;
     const sourceId = lines.find((line) => line.startsWith("id:"))
       ?? (typeof event.id === "string" ? `id: ${event.id}` : undefined);
-    const projected = browserEventsForNativeEvent(event.type, properties);
+    const projected = browserEventsForNativeEvent(event.type, {
+      ...properties,
+      ...(properties.timestamp === undefined && typeof event.created === "number"
+        ? { timestamp: event.created } : {}),
+    });
     return projected.map((item, index) => {
       const id = sourceId && index === projected.length - 1 ? `${sourceId}\n` : "";
       return `${id}data: ${JSON.stringify(item)}\n\n`;
