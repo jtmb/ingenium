@@ -56,7 +56,7 @@ if [ "$(wc -c < "$capability")" -ne 61 ] || ! grep -qxE 'ing_[A-Za-z0-9_-]{12}_[
 fi
 
 mkdir -p \
-  "/home/appuser/.config/opencode/agents" \
+  "/home/appuser/.config/opencode/runtime/agents" \
   "/home/appuser/.config/opencode/runtime" \
   "/home/appuser/.local/share/opencode/log" \
   "/home/appuser/.local/state" \
@@ -65,7 +65,7 @@ mkdir -p \
 chmod 0700 "/home/appuser/.config" "/home/appuser/.local" "/home/appuser/.local/share" "/home/appuser/.local/state" "/home/appuser/vscode-data"
 chmod 0700 "/home/appuser/.config/opencode/runtime"
 
-/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/agents
+/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents
 
 config_file="/home/appuser/.config/opencode/runtime/opencode.jsonc"
 cat > "$config_file" <<EOF

@@ -15,18 +15,76 @@ const MANAGED_AGENT_NAMES = new Set([
 ]);
 const RETIRED_AGENT_NAMES = new Set(["browser-agent"]);
 const RESERVED_BROKER_AGENT = "ingenium-llm-broker";
+const MANAGED_AGENT_IDS = new Map([
+  ["primary/plan", "plan"],
+  ["ingenium-docs", "execution/ingenium-docs"],
+  ["ingenium-qa", "execution/ingenium-qa"],
+  ["ingenium-software-engineer-fast", "execution/ingenium-software-engineer-fast"],
+  ["ingenium-software-engineer-premium", "execution/ingenium-software-engineer-premium"],
+  ["ingenium-recovery-engineer", "execution/ingenium-recovery-engineer"],
+  ["ingenium-orchestrator", "primary/ingenium-orchestrator"],
+  ["ingenium-explore", "research/ingenium-explore"],
+  ["ingenium-scout", "research/ingenium-scout"],
+  ["ingenium-chat", "chat/ingenium-chat"],
+  ["ingenium-security-auditor", "security/ingenium-security-auditor"],
+]);
+const PERMISSION_ACTION_ALIASES = { bash: "shell", task: "subagent", write: "edit", patch: "edit" };
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function permissionRules(value) {
+  if (value === undefined) return [];
+  if (Array.isArray(value)) return value.map((rule) => ({ ...rule }));
+  if (typeof value === "string") return [{ action: "*", resource: "*", effect: value }];
+  if (!isRecord(value)) throw new Error("Invalid agent permissions");
+  return Object.entries(value).flatMap(([rawAction, effect]) => {
+    const action = PERMISSION_ACTION_ALIASES[rawAction] ?? rawAction;
+    if (typeof effect === "string") return [{ action, resource: "*", effect }];
+    if (!isRecord(effect)) throw new Error("Invalid agent permission effect");
+    return Object.entries(effect).map(([resource, resourceEffect]) => {
+      if (typeof resourceEffect !== "string") throw new Error("Invalid agent permission resource effect");
+      return { action, resource, effect: resourceEffect };
+    });
+  });
+}
+
+function nativeAgent(value) {
+  const entry = { ...value };
+  if (typeof entry.model === "string" && typeof entry.variant === "string" && !entry.model.includes("#")) {
+    entry.model = `${entry.model}#${entry.variant}`;
+  }
+  delete entry.variant;
+  if (entry.system === undefined && entry.prompt !== undefined) entry.system = entry.prompt;
+  delete entry.prompt;
+  if (entry.disabled === undefined && entry.disable !== undefined) entry.disabled = entry.disable;
+  delete entry.disable;
+  if (entry.permissions === undefined && entry.permission !== undefined) {
+    entry.permissions = permissionRules(entry.permission);
+  }
+  delete entry.permission;
+  if (isRecord(entry.tools)) {
+    entry.permissions = [
+      ...permissionRules(entry.permissions),
+      ...Object.entries(entry.tools).map(([action, enabled]) => ({
+        action: PERMISSION_ACTION_ALIASES[action] ?? action,
+        resource: "*",
+        effect: enabled === true ? "allow" : "deny",
+      })),
+    ];
+    delete entry.tools;
+  }
+  if (entry.steps === undefined && entry.maxSteps !== undefined) entry.steps = entry.maxSteps;
+  delete entry.maxSteps;
+  return entry;
+}
+
 function hasDefaultDeny(value) {
-  if (value === "deny" || (isRecord(value) && value["*"] === "deny")) return true;
-  // V2 agent permissions are an ordered rule array; a terminal wildcard deny
-  // is the equivalent guarantee.
-  return isRecord(value) && Array.isArray(value.permissions)
-    && value.permissions.some((rule) => isRecord(rule)
-      && rule.action === "*" && rule.resource === "*" && rule.effect === "deny");
+  if (!Array.isArray(value.permissions)) return false;
+  const wildcardRules = value.permissions.filter((rule) => isRecord(rule)
+    && rule.action === "*" && rule.resource === "*");
+  return wildcardRules.at(-1)?.effect === "deny";
 }
 
 /** Remove JSONC comments without changing string literal contents. */
@@ -129,8 +187,10 @@ function readConfig(configPath) {
 
 function isManagedPlugin(value) {
   return typeof value === "string" && (
+    // Retire the cancelled multichat coordinator from persistent installations.
+    /(?:^|\/)plugins\/session-coordinator(?:\.ts|\.js)?$/.test(value)
     // V2 adapter directories.
-    /(?:^|\/)plugins\/v2\/(?:auto-observer|observer|resource-sync|lifecycle|ponytail)(?:\/|$)/.test(value)
+    || /(?:^|\/)plugins\/v2\/(?:auto-observer|observer|resource-sync|lifecycle|ponytail)(?:\/|$)/.test(value)
     // Legacy V1 file entries retained in persistent configs.
     || /(?:^|\/)(?:auto-observer|observer|resource-sync|lifecycle)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
     || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)
@@ -183,39 +243,43 @@ function writeAtomically(configPath, value) {
  * from repository synchronization: it repairs only the container bootstrap
  * contract and never reads or writes token contents.
  */
-export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
-  const config = readConfig(configPath);
-  const agentsSource = isRecord(config.agents) ? config.agents : (isRecord(config.agent) ? config.agent : {});
-  const agent = { ...agentsSource };
-  for (const [name, value] of Object.entries(agent)) {
-    if (RETIRED_AGENT_NAMES.has(name)) {
-      delete agent[name];
+function projectedOpenCodeGlobalConfig(config) {
+  const legacyAgents = isRecord(config.agent) ? config.agent : {};
+  const nativeAgents = isRecord(config.agents) ? config.agents : {};
+  const agents = {};
+  for (const [name, value] of [...Object.entries(legacyAgents), ...Object.entries(nativeAgents)]) {
+    if (name === "primary/plan" && Object.hasOwn(nativeAgents, "plan")) continue;
+    const id = MANAGED_AGENT_IDS.get(name) ?? name;
+    if (RETIRED_AGENT_NAMES.has(name) || RETIRED_AGENT_NAMES.has(id)) {
+      delete agents[id];
       continue;
     }
-    if (!MANAGED_AGENT_NAMES.has(name)) {
-      if (name.startsWith("ingenium-") && name !== RESERVED_BROKER_AGENT
-        && (!isRecord(value) || !hasDefaultDeny(value.permission))) {
+    if (name === RESERVED_BROKER_AGENT || id === RESERVED_BROKER_AGENT) {
+      delete agents[id];
+      continue;
+    }
+    if (!isRecord(value)) throw new Error("Agent override must be an object");
+    const entry = nativeAgent(value);
+    if (!MANAGED_AGENT_NAMES.has(name) && !MANAGED_AGENT_IDS.has(name)
+      && ![...MANAGED_AGENT_IDS.values()].includes(id)) {
+      if (name.startsWith("ingenium-") && !hasDefaultDeny(entry)) {
         throw new Error("Permissive unknown Ingenium agent override");
       }
+      agents[id] = entry;
       continue;
     }
-    if (!isRecord(value)) {
-      delete agent[name];
-      continue;
-    }
-    const projection = Object.fromEntries(
-      Object.entries(value).filter(([key]) => key === "model" || key === "variant"),
-    );
-    if (Object.keys(projection).length > 0) agent[name] = projection;
-    else delete agent[name];
+    if (typeof entry.model === "string") agents[id] = { model: entry.model };
+    else delete agents[id];
   }
-  if (Object.keys(agent).length > 0) config.agents = agent;
+  if (Object.keys(agents).length > 0) config.agents = agents;
   else delete config.agents;
   delete config.agent;
+  if (config.default_agent === "primary/plan") config.default_agent = "plan";
 
   const mcp = isRecord(config.mcp) ? config.mcp : {};
   delete mcp.ponytail;
   const servers = isRecord(mcp.servers) ? { ...mcp.servers } : {};
+  delete servers.ponytail;
   const existingIngenium = isRecord(servers.ingenium)
     ? servers.ingenium
     : isRecord(mcp.ingenium) ? mcp.ingenium : {};
@@ -250,21 +314,41 @@ export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   config.mcp = mcp;
 
   const existingPlugins = Array.isArray(config.plugins) ? config.plugins : [];
-  const retainedPlugins = existingPlugins.filter((entry) => !isManagedPlugin(entry));
+  const legacyPlugins = Array.isArray(config.plugin) ? config.plugin : [];
+  const retainedPlugins = [...existingPlugins, ...legacyPlugins].filter((entry) => !isManagedPlugin(entry));
   config.plugins = [
     ...retainedPlugins,
     ...REQUIRED_PLUGINS.filter((entry) => !retainedPlugins.includes(entry)),
   ];
-  // Legacy V1 entries cannot load under V2. Drop the container-owned ones while
-  // preserving operator entries that are not part of the bootstrap contract.
-  if (Array.isArray(config.plugin)) {
-    const retainedLegacy = config.plugin.filter((entry) => !isManagedPlugin(entry));
-    if (retainedLegacy.length > 0) config.plugin = retainedLegacy;
-    else delete config.plugin;
-  }
+  delete config.plugin;
 
+  return config;
+}
+
+export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
+  const config = projectedOpenCodeGlobalConfig(readConfig(configPath));
   mkdirSync(dirname(configPath), { recursive: true, mode: 0o700 });
   writeAtomically(configPath, config);
+}
+
+/** Prepare an explicit container config without changing the host checkout. */
+export function projectOpenCodeContainerConfig(sourcePath, destinationPath) {
+  if (!sourcePath || !destinationPath || resolve(sourcePath) === resolve(destinationPath)) {
+    throw new Error("Container configuration requires distinct source and destination files");
+  }
+  // A missing source is an error here, rather than an empty installation seed.
+  readRegularFile(sourcePath);
+  const source = readConfig(sourcePath);
+  const config = projectedOpenCodeGlobalConfig({
+    ...source,
+    // Container services and plugins come from the image. Host-only commands,
+    // PATH overrides and credentials must not leak into this deployment copy.
+    mcp: {},
+    plugins: [],
+    plugin: [],
+  });
+  mkdirSync(dirname(destinationPath), { recursive: true, mode: 0o700 });
+  writeAtomically(destinationPath, config);
 }
 
 function isMain() {
@@ -273,7 +357,12 @@ function isMain() {
 
 if (isMain()) {
   try {
-    projectOpenCodeGlobalConfig(process.argv[2] ?? DEFAULT_CONFIG);
+    if (process.argv[2] === "--container") {
+      if (process.argv.length !== 5) throw new Error("Invalid container configuration arguments");
+      projectOpenCodeContainerConfig(process.argv[3], process.argv[4]);
+    } else {
+      projectOpenCodeGlobalConfig(process.argv[2] ?? DEFAULT_CONFIG);
+    }
   } catch {
     // This runs before OpenCode starts. Do not print a path, parsed content, or
     // lower-level error: a persistent config can contain sensitive provider data.

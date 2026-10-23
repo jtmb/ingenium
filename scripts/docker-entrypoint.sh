@@ -13,6 +13,7 @@ secure_persistent_path() {
   node - "$@" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 
 const [operation, target, uidText, gidText, directoryMode, fileMode = "-", excludedName = ""] = process.argv.slice(2);
 const directoryFlags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
@@ -185,7 +186,7 @@ function walkTree(descriptor, rootDevice, relative = "") {
 
 if (process.platform !== "linux" || !fs.constants.O_NOFOLLOW || !fs.constants.O_DIRECTORY
   || !path.isAbsolute(target) || path.resolve(target) !== target || target === "/"
-  || !["directory", "file", "tree"].includes(operation)
+  || !["directory", "file", "tree", "private-credential"].includes(operation)
   || (uid !== undefined && !Number.isInteger(uid)) || (gid !== undefined && !Number.isInteger(gid))) fail();
 
 const components = target.split("/").filter(Boolean);
@@ -197,12 +198,33 @@ for (const component of components) {
   parent = child;
 }
 
-const targetDescriptor = operation === "file"
+const targetDescriptor = operation === "file" || operation === "private-credential"
   ? openRegularFile(parent, finalName)
   : openDirectory(parent, finalName, operation === "directory");
+if (operation === "private-credential") {
+  const existing = fs.fstatSync(targetDescriptor);
+  if (uid !== undefined || gid !== undefined || directoryMode !== "0600" || fileMode !== "-"
+    || existing.nlink !== 1) fail();
+}
 if (operation === "tree") walkTree(targetDescriptor, fs.fstatSync(targetDescriptor).dev);
 applyMetadata(targetDescriptor, directoryMode);
 verifyStillLinked(parent, finalName, targetDescriptor);
+if (operation === "private-credential") {
+  const before = fs.fstatSync(targetDescriptor);
+  if (before.nlink !== 1 || (before.mode & 0o7777) !== 0o600) fail();
+  // The ACL CLI has no fd API; inherit the verified descriptor to avoid a renamed-path race.
+  try {
+    execFileSync("setfacl", ["-b", "--", "/proc/self/fd/3"], {
+      stdio: ["ignore", "ignore", "ignore", targetDescriptor],
+    });
+  } catch {
+    fail();
+  }
+  const after = fs.fstatSync(targetDescriptor);
+  if (!sameObject(before, after) || after.uid !== before.uid || after.gid !== before.gid
+    || after.nlink !== 1 || (after.mode & 0o7777) !== 0o600) fail();
+  verifyStillLinked(parent, finalName, targetDescriptor);
+}
 fs.closeSync(targetDescriptor);
 fs.closeSync(parent);
 NODE
@@ -580,7 +602,7 @@ RUNTIME_RESTORE_JOURNAL_KEY_FILE="${RUNTIME_RESTORE_SECRET_DIR}/restore-journal-
 RUNTIME_API_DASHBOARD_TOKEN_FILE="${RUNTIME_API_SECRET_DIR}/dashboard-bootstrap-token"
 RUNTIME_DASHBOARD_TOKEN_FILE="${RUNTIME_DASHBOARD_SECRET_DIR}/bootstrap-token"
 umask 077
-install -d -o root -g root -m 0711 "$RUNTIME_SECRET_DIR"
+secure_persistent_path directory "$RUNTIME_SECRET_DIR" 0 0 0711
 install -d -o ingenium-api -g ingenium-api -m 0700 "$RUNTIME_API_SECRET_DIR"
 install -d -o ingenium-dashboard -g ingenium-dashboard -m 0700 "$RUNTIME_DASHBOARD_SECRET_DIR"
 install -d -o ingenium-opencode -g ingenium-opencode -m 0700 "$RUNTIME_OPENCODE_SECRET_DIR"
@@ -700,46 +722,67 @@ remove_verified_stale_socket /home/ingenium-vscode/vscode-data/user-data/code-se
 secure_persistent_path directory /home/ingenium-vscode/vscode-data/extensions "$VSCODE_UID" "$VSCODE_GID" 0700
 secure_persistent_path tree /home/ingenium-vscode/vscode-data "$VSCODE_UID" "$VSCODE_GID" 0700 user-only
 
-/app/scripts/validate-process-isolation.sh
-
 # Compatibility mode retains the historical single-user OpenCode/VS Code state.
 if [ "$DEPLOYMENT_MODE" = "compatibility" ]; then
 # Preserve host ownership while granting only the three interactive workspace
 # identities access to the mounted workspace.
-setfacl -R -m u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX /workspace
-setfacl -R -m d:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX /workspace
+# Exclude private paths before granting ACLs so a partial traversal cannot expose them.
+workspace_root=/workspace/ingenium
+workspace_alias=/home/brajam/repos/ingenium
+if [ ! -d /workspace ] || [ -L /workspace ] || [ ! -d "$workspace_root" ] || [ -L "$workspace_root" ] \
+  || [ ! -d "$workspace_alias" ] || [ -L "$workspace_alias" ]; then
+  echo "ERROR: canonical Ingenium workspace bind mismatch"
+  exit 1
+fi
+workspace_identity=$(stat -Lc '%d:%i' "$workspace_root") || exit 1
+alias_identity=$(stat -Lc '%d:%i' "$workspace_alias") || exit 1
+if [ "$workspace_identity" != "$alias_identity" ]; then
+  echo "ERROR: canonical Ingenium workspace bind mismatch"
+  exit 1
+fi
+# Only search access belongs on the repositories root; never inherit grants into siblings.
+setfacl -m 'u:ingenium-opencode:--x,u:ingenium-ttyd:--x,u:ingenium-vscode:--x' /workspace
+root_acls=$(getfacl -cp /workspace)
+for identity in ingenium-opencode ingenium-ttyd ingenium-vscode; do
+  if printf '%s\n' "$root_acls" | grep -q "^default:user:$identity:"; then
+    setfacl -x "d:u:$identity" /workspace
+  fi
+done
+find -P "$workspace_root" \
+  \( -path "$workspace_root/.env" \
+    -o -path "$workspace_root/tests/artifacts/test-runs/.retention-control" \
+    -o -path "$workspace_root/.opencode/protected-runtime-index" \
+    -o -path "$workspace_root/.opencode/.ingenium-mcp-credential" \
+    -o -path "$workspace_root/.opencode/.ingenium-learning-credential" \
+    -o -path "$workspace_root/.opencode/.ingenium-repository-sync-credential" \) -prune -o \
+  \( -type d -exec setfacl -P \
+    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' \
+    -m 'd:u:ingenium-opencode:rwX,d:u:ingenium-ttyd:rwX,d:u:ingenium-vscode:rwX' {} + \) -o \
+  \( -type f -exec setfacl -P \
+    -m 'u:ingenium-opencode:rwX,u:ingenium-ttyd:rwX,u:ingenium-vscode:rwX' {} + \)
 # Collaboration ACLs must not expose private runtime state or scoped credentials.
 # The recursive ACL grant also changes existing owner-only env file masks.
-for env_path in /workspace/.env /workspace/*/.env; do
-  [ -e "$env_path" ] || continue
-  secure_persistent_path file "$env_path" - - 0600
-done
-for retention_root in /workspace/tests/artifacts/test-runs/.retention-control /workspace/*/tests/artifacts/test-runs/.retention-control; do
-  [ -e "$retention_root" ] || continue
+if [ -e "$workspace_root/.env" ]; then
+  secure_persistent_path file "$workspace_root/.env" - - 0600
+fi
+retention_root="$workspace_root/tests/artifacts/test-runs/.retention-control"
+if [ -e "$retention_root" ]; then
   secure_persistent_path tree "$retention_root" - - 0700 0600
   setfacl -R -b -k "$retention_root"
+fi
+opencode_root="$workspace_root/.opencode"
+protected_index="$opencode_root/protected-runtime-index"
+if [ -e "$protected_index" ]; then
+  secure_persistent_path tree "$protected_index" - - 0700 0600
+fi
+for credential_name in .ingenium-mcp-credential .ingenium-learning-credential .ingenium-repository-sync-credential; do
+  credential_path="$opencode_root/$credential_name"
+  [ -e "$credential_path" ] || continue
+  secure_persistent_path private-credential "$credential_path" - - 0600
 done
-# Revisit only the mounted root and direct worktree OpenCode directories.
-for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
-  protected_index="$opencode_root/protected-runtime-index"
-  if [ -e "$protected_index" ]; then
-    secure_persistent_path tree "$protected_index" - - 0700 0600
-  fi
-  for credential_name in .ingenium-mcp-credential .ingenium-learning-credential .ingenium-repository-sync-credential; do
-    credential_path="$opencode_root/$credential_name"
-    [ -e "$credential_path" ] || continue
-    secure_persistent_path file "$credential_path" - - 0600
-  done
-done
-# Protect every worktree before malformed profiles can abort startup.
-for workspace_root in /workspace /workspace/*; do
-  [ -d "$workspace_root" ] || continue
-  /app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"
-done
-for opencode_root in /workspace/.opencode /workspace/*/.opencode; do
-  # Directory access grants remain; inherited/file ACLs would defeat exact profile modes.
-  /app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"
-done
+/app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"
+# Directory access grants remain; inherited/file ACLs would defeat exact profile modes.
+/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"
 # Seed OpenCode config with Ingenium MCP on first start
 OC_CONFIG="/home/ingenium-opencode/.config/opencode/opencode.jsonc"
 if [ ! -f "$OC_CONFIG" ]; then
@@ -798,7 +841,7 @@ runuser -u ingenium-opencode -- env -i \
   node /app/scripts/project-opencode-global-config.mjs "$OC_CONFIG"
 
 # OpenCode receives only separately issued scoped credentials.
-WORKSPACE_OPENCODE_DIR="/workspace/.opencode"
+WORKSPACE_OPENCODE_DIR="$workspace_root/.opencode"
 if [ -L "$WORKSPACE_OPENCODE_DIR" ]; then
   echo "ERROR: OpenCode workspace directory must not be a symbolic link"
   exit 1
@@ -825,8 +868,8 @@ elif [ -e "$LEGACY_GLOBAL_BROKER" ]; then
 fi
 /app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"
 
-# Copy ordinary agent profiles into the workspace for project discovery. The
-# protected broker is deliberately excluded.
+# Seed missing ordinary agent profiles at their native repository paths. Keep
+# existing workspace profiles and exclude the protected broker.
 WORKSPACE_AGENTS_DIR="${WORKSPACE_OPENCODE_DIR}/agents"
 if [ -L "$WORKSPACE_AGENTS_DIR" ] || { [ -e "$WORKSPACE_AGENTS_DIR" ] && [ ! -d "$WORKSPACE_AGENTS_DIR" ]; }; then
   echo "ERROR: OpenCode workspace agents directory must be a real directory"
@@ -842,14 +885,23 @@ elif [ -e "$LEGACY_WORKSPACE_BROKER" ]; then
 fi
 copy_agent_profile() {
   source_profile="$1"
-  target_profile="${WORKSPACE_AGENTS_DIR}/$(basename "$source_profile")"
+  relative_profile="${source_profile#/app/.opencode/agents/}"
+  target_profile="${WORKSPACE_AGENTS_DIR}/${relative_profile}"
+  target_directory="$(dirname "$target_profile")"
+  if [ -L "$target_directory" ] || { [ -e "$target_directory" ] && [ ! -d "$target_directory" ]; }; then
+    echo "ERROR: OpenCode workspace agent category must be a real directory"
+    exit 1
+  fi
+  secure_persistent_path directory "$target_directory" - - -
   if [ -L "$target_profile" ] || { [ -e "$target_profile" ] && [ ! -f "$target_profile" ]; }; then
     echo "ERROR: OpenCode workspace agent profile must be a regular non-symlink file"
     exit 1
   fi
+  [ ! -e "$target_profile" ] || return 0
   cp "$source_profile" "$target_profile"
 }
 copy_agent_profile /app/.opencode/agents/chat/ingenium-chat.md
+copy_agent_profile /app/.opencode/agents/plan.md
 for dir in primary execution research security; do
   for source_profile in /app/.opencode/agents/$dir/*.md; do
     [ -f "$source_profile" ] || continue
@@ -862,6 +914,8 @@ done
 # repository initialization; the reserved broker remains deployment-read-only.
 /app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$WORKSPACE_AGENTS_DIR"
 fi
+
+/app/scripts/validate-process-isolation.sh
 
 # Persistent setup must not weaken or replace any executable root-owned startup artifact.
 node /app/scripts/validate-root-entrypoint-chain.mjs

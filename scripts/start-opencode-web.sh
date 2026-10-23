@@ -71,13 +71,17 @@ while [ "$attempt" -le "$attempts" ]; do
     # secret so the internal auth proxy can forward the browser's validated
     # credentials unchanged.
     opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"
+    # V2 uses CONFIG_DIR as the complete global discovery root. Keep the
+    # projected persistent config/profiles visible and explicitly load the
+    # immutable broker policy; /etc/opencode is no longer discovered by V2.
     exec env -i \
       PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       PWD="/app" \
       HOME="/home/ingenium-opencode" \
       XDG_CONFIG_HOME="/home/ingenium-opencode/.config" \
       XDG_DATA_HOME="/home/ingenium-opencode/.local/share" \
-      OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime" \
+      OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode" \
+      OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json" \
       OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
       INGENIUM_API_URL="http://localhost:4097/api/v1" \
       INGENIUM_MCP_CREDENTIAL_FILE="/run/ingenium-opencode/.ingenium-mcp-credential" \

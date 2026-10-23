@@ -1,172 +1,345 @@
 ---
-name: ingenium-chat
 description: "Conversational agent for the Ingenium Chat page. Uses read-only Ingenium tools, with an exception for explicitly user-directed saved memory. Cannot mutate projects, tasks, files, email, config, skills, or agents."
 mode: primary
-disable: false
+disabled: false
 hidden: true
-permission:
-  "*": deny
-  # Built-in OpenCode tools
-  read: allow
-  question: deny
-  edit: deny
-  write: deny
-  bash: deny
-  glob: allow
-  grep: allow
-  webfetch: allow
-  playwright_*: deny
-
-  # Subagent spawning — DENY ALL (no side-channel execution)
-  task:
-    "*": "deny"
-
-  # Saved-memory mutations are the only user-directed write exception.
-  # Mutating tools denied: ~162 tools covering projects, tasks, skills, email, config,
-  # agents, plugins, servers, observations, personality, synthesis, extraction, pipeline, jobs, docs
-  # Service & health
-  ingenium_health_check: allow
-  ingenium_logs_list: allow
-  ingenium_logs_sources: allow
-  ingenium_service_status: allow
-  ingenium_service_application_detail: allow
-  ingenium_service_process_detail: allow
-  ingenium_service_process_logs: allow
-
-  # Dashboard
-  ingenium_dashboard_summary: allow
-
-  # Projects & observations (read-only)
-  ingenium_project_list: allow
-  ingenium_project_list_archived: allow
-  ingenium_project_detail: allow
-  ingenium_observation_list: allow
-  ingenium_observation_stats: allow
-  ingenium_observation_get: allow
-  ingenium_observation_search: allow
-
-  # Personality (read-only)
-  ingenium_personality: allow
-  ingenium_personality_traits: allow
-
-  # Skills (read-only)
-  ingenium_skill_list: allow
-  ingenium_skill_load: allow
-  ingenium_skill_search: allow
-  ingenium_skill_list_archived: allow
-  ingenium_skill_versions: allow
-  ingenium_skill_lineage_list: allow
-  ingenium_skill_proposal_list: allow
-  ingenium_skill_proposal_get: allow
-
-  # Tasks (read-only)
-  ingenium_task_list: allow
-  ingenium_task_next: allow
-  ingenium_task_search: allow
-  ingenium_task_get: allow
-  ingenium_task_activity: allow
-  ingenium_task_comments_list: allow
-  ingenium_task_board_config_get: allow
-  ingenium_task_notifications: allow
-  ingenium_task_links_list: allow
-  ingenium_task_tree: allow
-
-  # Plans/context (read-only)
-  ingenium_plan_search: allow
-  ingenium_plan_list: allow
-  ingenium_memory_read: allow
-  ingenium_memory_list: allow
-  ingenium_memory_search: allow
-  ingenium_memory_operation_status: allow
-  ingenium_memory_save: allow
-  ingenium_memory_update: allow
-  ingenium_memory_forget: allow
-
-  # Plugins (read-only)
-  ingenium_plugin_list: allow
-  ingenium_plugin_get: allow
-  ingenium_plugin_source: allow
-
-  # Servers (read-only)
-  ingenium_server_list: allow
-
-  # Agents & commands (read-only)
-  ingenium_agent_list: allow
-  ingenium_agent_get: allow
-  ingenium_command_list: allow
-  ingenium_command_get: allow
-
-  # Config (read-only)
-  ingenium_config_get: allow
-
-  # Email (read-only)
-  ingenium_email_list: allow
-  ingenium_email_search: allow
-  ingenium_email_read: allow
-  ingenium_email_folders: allow
-  ingenium_email_accounts: allow
-  ingenium_email_patterns: allow
-  ingenium_email_watch_status: allow
-  ingenium_email_sync_status: allow
-  ingenium_email_summarize: allow
-  ingenium_email_review_draft: allow
-  ingenium_email_attachment_get: allow
-
-  # Pipeline (read-only)
-  ingenium_pipeline_events: allow
-  ingenium_pipeline_timeline: allow
-
-  # Jobs (read-only)
-  ingenium_job_list: allow
-  ingenium_job_runs: allow
-  ingenium_job_run_logs: allow
-  ingenium_job_get: allow
-  ingenium_job_suggest: allow
-
-  # Docs (read-only)
-  ingenium_docs_list_spaces: allow
-  ingenium_docs_get_space: allow
-  ingenium_docs_list_pages: allow
-  ingenium_docs_get_page_tree: allow
-  ingenium_docs_get_page: allow
-  ingenium_docs_search: allow
-  ingenium_docs_get_draft: allow
-  ingenium_docs_list_versions: allow
-  ingenium_docs_get_version: allow
-  ingenium_docs_list_comments: allow
-  ingenium_docs_list_tags: allow
-  ingenium_docs_get_page_tags: allow
-  ingenium_docs_get_backlinks: allow
-  ingenium_docs_list_attachments: allow
-  ingenium_docs_list_templates: allow
-  ingenium_docs_get_template: allow
-  ingenium_docs_get_projects: allow
-  ingenium_docs_get_favorites: allow
-  ingenium_docs_trash_list: allow
-  ingenium_docs_export_space: allow
-  ingenium_docs_get_stats: allow
-  ingenium_docs_attachment_download: allow
-
-  # Settings (read-only)
-  ingenium_setting_get: allow
-
-  # OpenCode (read-only)
-  ingenium_opencode_messages: allow
-
-  # Synthesis status (read-only)
-  ingenium_synthesis_status: allow
-
-  # Skills
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: webfetch
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: ingenium_health_check
+    resource: "*"
+    effect: allow
+  - action: ingenium_logs_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_logs_sources
+    resource: "*"
+    effect: allow
+  - action: ingenium_service_status
+    resource: "*"
+    effect: allow
+  - action: ingenium_service_application_detail
+    resource: "*"
+    effect: allow
+  - action: ingenium_service_process_detail
+    resource: "*"
+    effect: allow
+  - action: ingenium_service_process_logs
+    resource: "*"
+    effect: allow
+  - action: ingenium_dashboard_summary
+    resource: "*"
+    effect: allow
+  - action: ingenium_project_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_project_list_archived
+    resource: "*"
+    effect: allow
+  - action: ingenium_project_detail
+    resource: "*"
+    effect: allow
+  - action: ingenium_observation_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_observation_stats
+    resource: "*"
+    effect: allow
+  - action: ingenium_observation_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_observation_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_personality
+    resource: "*"
+    effect: allow
+  - action: ingenium_personality_traits
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_load
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_list_archived
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_versions
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_lineage_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_proposal_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_skill_proposal_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_next
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_activity
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_comments_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_board_config_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_notifications
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_links_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_task_tree
+    resource: "*"
+    effect: allow
+  - action: ingenium_plan_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_plan_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_read
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_operation_status
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_save
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_update
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_forget
+    resource: "*"
+    effect: allow
+  - action: ingenium_plugin_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_plugin_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_plugin_source
+    resource: "*"
+    effect: allow
+  - action: ingenium_server_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_agent_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_agent_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_command_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_command_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_config_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_read
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_folders
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_accounts
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_patterns
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_watch_status
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_sync_status
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_summarize
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_review_draft
+    resource: "*"
+    effect: allow
+  - action: ingenium_email_attachment_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_pipeline_events
+    resource: "*"
+    effect: allow
+  - action: ingenium_pipeline_timeline
+    resource: "*"
+    effect: allow
+  - action: ingenium_job_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_job_runs
+    resource: "*"
+    effect: allow
+  - action: ingenium_job_run_logs
+    resource: "*"
+    effect: allow
+  - action: ingenium_job_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_job_suggest
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_spaces
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_space
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_pages
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page_tree
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_draft
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_versions
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_version
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_comments
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_tags
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page_tags
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_backlinks
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_attachments
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_templates
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_template
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_projects
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_favorites
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_trash_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_export_space
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_stats
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_attachment_download
+    resource: "*"
+    effect: allow
+  - action: ingenium_setting_get
+    resource: "*"
+    effect: allow
+  - action: ingenium_opencode_messages
+    resource: "*"
+    effect: allow
+  - action: ingenium_synthesis_status
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
 
 # Ingenium Chat Agent

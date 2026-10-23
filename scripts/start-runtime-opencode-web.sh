@@ -16,6 +16,7 @@ if [ ! -r "$password_file" ]; then
 fi
 opencode_server_password="$(cat "$password_file")"
 
+# Load the immutable broker policy explicitly; V2 does not discover /etc/opencode.
 exec env -i \
   PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   PWD="/app" \
@@ -24,6 +25,7 @@ exec env -i \
   XDG_DATA_HOME="/home/appuser/.local/share" \
   XDG_STATE_HOME="/home/appuser/.local/state" \
   OPENCODE_CONFIG_DIR="/home/appuser/.config/opencode/runtime" \
+  OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json" \
   OPENCODE_SERVER_PASSWORD="$opencode_server_password" \
   INGENIUM_API_URL="$INGENIUM_API_URL" \
   INGENIUM_PROJECT="$INGENIUM_PROJECT" \

@@ -9,19 +9,21 @@
     "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker"
   ],
   "mcp": {
-    "ingenium": {
-      "type": "local",
-      "command": ["node", "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js"],
-      "enabled": true,
-      "environment": {
-        "PATH": "{env:PATH}",
-        "INGENIUM_API_URL": "{env:INGENIUM_API_URL}",
-        "INGENIUM_MCP_CREDENTIAL_FILE": "{env:INGENIUM_MCP_CREDENTIAL_FILE}",
-        "INGENIUM_RUNTIME_CREDENTIAL_FILE": "{env:INGENIUM_RUNTIME_CREDENTIAL_FILE}",
-        "INGENIUM_MCP_AUDIENCE": "{env:INGENIUM_MCP_AUDIENCE}",
-        "INGENIUM_PROJECT": "{env:INGENIUM_PROJECT}",
-        "INGENIUM_WORKSPACE_ID": "{env:INGENIUM_WORKSPACE_ID}",
-        "INGENIUM_WORKTREE": "{env:INGENIUM_WORKTREE}"
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["node", "{env:PWD}/packages/ingenium-extension/dist/scripts/mcp-server.js"],
+        "disabled": false,
+        "environment": {
+          "PATH": "{env:PATH}",
+          "INGENIUM_API_URL": "{env:INGENIUM_API_URL}",
+          "INGENIUM_MCP_CREDENTIAL_FILE": "{env:INGENIUM_MCP_CREDENTIAL_FILE}",
+          "INGENIUM_RUNTIME_CREDENTIAL_FILE": "{env:INGENIUM_RUNTIME_CREDENTIAL_FILE}",
+          "INGENIUM_MCP_AUDIENCE": "{env:INGENIUM_MCP_AUDIENCE}",
+          "INGENIUM_PROJECT": "{env:INGENIUM_PROJECT}",
+          "INGENIUM_WORKSPACE_ID": "{env:INGENIUM_WORKSPACE_ID}",
+          "INGENIUM_WORKTREE": "{env:INGENIUM_WORKTREE}"
+        }
       }
     }
   },

@@ -484,7 +484,7 @@ cold-start race without introducing a background retry loop.
 
 #### Registration
 
-The plugin is self-registering — the `@ingenium/extension` package exports `ResourceSyncPlugin` which is loaded by OpenCode's plugin system. Registration requires the plugin to be in the `opencode.json` `plugin` array and the corresponding `.ts` file at `.opencode/plugins/`.
+The plugin is self-registering — the `@ingenium/extension` package exposes the native V2 resource-sync adapter through OpenCode's plugin system. Registration requires the adapter directory in the `opencode.json` `plugins` array. Project-local plugin resources remain regular files under `.opencode/plugins/`.
 
 #### Restart Requirement
 
@@ -763,7 +763,7 @@ This allows plugins to be created by path reference alone. The dashboard Edit bu
 
 Every plugin lifecycle operation (create, enable, disable, delete, update) triggers:
 1. Write/remove `.opencode/plugins/<file>.ts` on disk
-2. Sync `opencode.json`'s `plugin` array
+2. Sync `opencode.json`'s native V2 `plugins` array
 3. This prevents "disconnected config" bugs
 
 ## Backup LLM Provider Architecture
@@ -1464,7 +1464,7 @@ services:
     ports:
       - "3000:3000"             # Local dashboard and gateway roots; WSL-forwardable
       - "127.0.0.1:4097:4097"   # Bearer-authenticated host-loopback API boundary
-      - "127.0.0.1:1455:1455"   # Exact OAuth callback listener (host loopback only)
+      - "127.0.0.1:1455:1456"   # Exact OAuth callback listener (host loopback only)
     volumes:
       - ingenium-data:/app/.ingenium
 ```

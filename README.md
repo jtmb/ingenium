@@ -52,7 +52,7 @@ The retained 2026-09-09 capture and framing caveats are documented in the
 [CLI session-context audit](docs/reference/session-context-audit-2026-09-09.md).
 
 The dedicated `ingenium-recovery-engineer` is mapped to
-`openai/gpt-5.6-luna` / `max` with profile
+`openai/gpt-6-sol` / `high` with profile
 `.opencode/agents/execution/ingenium-recovery-engineer.md`. It is a
 deployment-only permission-derived writer: source/package/config executable
 paths are denied, writes are limited to declared recovery evidence/roadmap, and

@@ -1,103 +1,352 @@
 ---
-name: ingenium-orchestrator
 description: "Coordination-only primary agent. Declares causal task contracts, delegates in-scope implementation and review work, and remediates reproducible failures without reviewer loops."
 mode: primary
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit:
-    "*": allow
-    "next-steps-plan/**": deny
-  write:
-    "*": allow
-    "next-steps-plan/**": deny
-  todowrite: allow
-  bash:
-    "*": deny
-    "git *": deny
-    "git status": allow
-    "git status *": allow
-    "git diff": allow
-    "git diff *": allow
-    "git log": allow
-    "git log *": allow
-    "git diff * --output*": deny
-    "git diff --output*": deny
-    "git log * --output*": deny
-    "git log --output*": deny
-    "git add *": allow
-    "git blame *": allow
-    "git ls-files *": allow
-    "git ls-tree *": allow
-    "git rev-parse *": allow
-    "git branch --list": allow
-    "git branch --list *": allow
-    "git tag --list": allow
-    "git tag --list *": allow
-    "git remote -v": allow
-    "git commit -m *": allow
-    "gh *": allow
-    "git commit --amend*": deny
-    "git commit-tree": deny
-    "git commit-tree *": deny
-    "git update-ref": deny
-    "git update-ref *": deny
-    "git push": deny
-    "git push *": deny
-    "git reset": deny
-    "git reset *": deny
-    "git config": deny
-    "git config *": deny
-    "git hook": deny
-    "git hook *": deny
-    "git update-index": deny
-    "git update-index *": deny
-    "npm test*": allow
-    "npm run test*": allow
-    "npm run build*": allow
-    "npm run typecheck*": allow
-    "npx tsc*": allow
-    "npx playwright test*": allow
-    "python -m pytest*": allow
-    "pytest*": allow
-    "go test*": allow
-    "go build*": allow
-    "cargo test*": allow
-    "cargo check*": allow
-    "cargo build*": allow
-  ingenium_memory_read: allow
-  ingenium_memory_list: allow
-  ingenium_memory_search: allow
-  ingenium_memory_operation_status: allow
-  ingenium_docs_search: allow
-  ingenium_docs_get_page: allow
-  task:
-    "*": "deny"
-    "ingenium-explore": "allow"
-    "ingenium-qa": "allow"
-    "ingenium-docs": "allow"
-    "ingenium-security-auditor": "allow"
-    "ingenium-software-engineer-fast": "allow"
-    "ingenium-software-engineer-premium": "allow"
-    "ingenium-recovery-engineer": "allow"
-    "ingenium-scout": "allow"
-  glob: allow
-  grep: allow
-  playwright_*: deny
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: todowrite
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "git status"
+    effect: allow
+  - action: shell
+    resource: "git status *"
+    effect: allow
+  - action: shell
+    resource: "git diff"
+    effect: allow
+  - action: shell
+    resource: "git diff *"
+    effect: allow
+  - action: shell
+    resource: "git log"
+    effect: allow
+  - action: shell
+    resource: "git log *"
+    effect: allow
+  - action: shell
+    resource: "git diff * --output*"
+    effect: deny
+  - action: shell
+    resource: "git diff --output*"
+    effect: deny
+  - action: shell
+    resource: "git log * --output*"
+    effect: deny
+  - action: shell
+    resource: "git log --output*"
+    effect: deny
+  - action: shell
+    resource: "git add *"
+    effect: allow
+  - action: shell
+    resource: "git blame *"
+    effect: allow
+  - action: shell
+    resource: "git ls-files *"
+    effect: allow
+  - action: shell
+    resource: "git ls-tree *"
+    effect: allow
+  - action: shell
+    resource: "git rev-parse *"
+    effect: allow
+  - action: shell
+    resource: "git branch --list"
+    effect: allow
+  - action: shell
+    resource: "git branch --list *"
+    effect: allow
+  - action: shell
+    resource: "git tag --list"
+    effect: allow
+  - action: shell
+    resource: "git tag --list *"
+    effect: allow
+  - action: shell
+    resource: "git remote -v"
+    effect: allow
+  - action: shell
+    resource: "git commit -m *"
+    effect: allow
+  - action: shell
+    resource: "gh *"
+    effect: allow
+  - action: shell
+    resource: "git commit --amend*"
+    effect: deny
+  - action: shell
+    resource: "git commit-tree*"
+    effect: deny
+  - action: shell
+    resource: "git update-ref*"
+    effect: deny
+  - action: shell
+    resource: "git push*"
+    effect: deny
+  - action: shell
+    resource: "git reset*"
+    effect: deny
+  - action: shell
+    resource: "git config*"
+    effect: deny
+  - action: shell
+    resource: "git hook*"
+    effect: deny
+  - action: shell
+    resource: "git update-index*"
+    effect: deny
+  - action: shell
+    resource: "npm test*"
+    effect: allow
+  - action: shell
+    resource: "npm run test*"
+    effect: allow
+  - action: shell
+    resource: "npm run build*"
+    effect: allow
+  - action: shell
+    resource: "npm run typecheck*"
+    effect: allow
+  - action: shell
+    resource: "npx tsc*"
+    effect: allow
+  - action: shell
+    resource: "npx playwright test*"
+    effect: allow
+  - action: shell
+    resource: "python -m pytest*"
+    effect: allow
+  - action: shell
+    resource: "pytest*"
+    effect: allow
+  - action: shell
+    resource: "go test*"
+    effect: allow
+  - action: shell
+    resource: "go build*"
+    effect: allow
+  - action: shell
+    resource: "cargo test*"
+    effect: allow
+  - action: shell
+    resource: "cargo check*"
+    effect: allow
+  - action: shell
+    resource: "cargo build*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_declare
+    resource: "*"
+    effect: allow
+  - action: task_complete
+    resource: "*"
+    effect: allow
+  - action: subagent_followup
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: subagent_followup_status
+    resource: "*"
+    effect: allow
+  - action: task_declare_status
+    resource: "*"
+    effect: allow
+  - action: task_complete_status
+    resource: "*"
+    effect: allow
+  - action: lifecycle_operation_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: admission_status
+    resource: "*"
+    effect: allow
+  - action: agent_memory_capacity
+    resource: "*"
+    effect: allow
+  - action: session_context
+    resource: "*"
+    effect: allow
+  - action: todo_history
+    resource: "*"
+    effect: allow
+  - action: subagent_admission_repair
+    resource: "*"
+    effect: allow
+  - action: opencode_runtime_status
+    resource: "*"
+    effect: allow
+  - action: opencode_recovery_status
+    resource: "*"
+    effect: allow
+  - action: openrig_runtime_handshake
+    resource: "*"
+    effect: allow
+  - action: basic_memory_recovery
+    resource: "*"
+    effect: allow
+  - action: basic-memory_read_note
+    resource: "*"
+    effect: allow
+  - action: basic-memory_recent_activity
+    resource: "*"
+    effect: allow
+  - action: git_diff
+    resource: "*"
+    effect: allow
+  - action: binary_inspect
+    resource: "*"
+    effect: allow
+  - action: repo_learning_pending_observations
+    resource: "*"
+    effect: allow
+  - action: repo_learning_reflect
+    resource: "*"
+    effect: allow
+  - action: repo_learning_reflect_batch
+    resource: "*"
+    effect: allow
+  - action: repo_learning_resolve_conflict
+    resource: "*"
+    effect: allow
+  - action: correction_ledger_ack
+    resource: "*"
+    effect: allow
+  - action: repo_qa_gate
+    resource: "*"
+    effect: allow
+  - action: repo_documentation_gate
+    resource: "*"
+    effect: allow
+  - action: repo_commit
+    resource: "*"
+    effect: allow
+  - action: repo_push
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: ingenium_memory_read
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_operation_status
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: research/ingenium-explore
+    effect: allow
+  - action: subagent
+    resource: execution/ingenium-qa
+    effect: allow
+  - action: subagent
+    resource: execution/ingenium-docs
+    effect: allow
+  - action: subagent
+    resource: security/ingenium-security-auditor
+    effect: allow
+  - action: subagent
+    resource: execution/ingenium-software-engineer-fast
+    effect: allow
+  - action: subagent
+    resource: execution/ingenium-software-engineer-premium
+    effect: allow
+  - action: subagent
+    resource: execution/ingenium-recovery-engineer
+    effect: allow
+  - action: subagent
+    resource: research/ingenium-scout
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
+
+> Release scope update (2026-10-23): multichat orchestration and coordinated
+> replacement-parent recovery are retired. Do not invoke `production-restart`,
+> `recovery-preflight`, `recovery-prepare`, or parent recovery publisher tools.
+> Use ordinary Docker Compose startup/restart for the authorized deployment,
+> preserve its persistent volumes, and verify normal single-chat persistence.
+> This update supersedes coordinated recovery requirements below; retained
+> historical failure evidence does not make that retired feature a release gate.
+
 
 # 🔴 You Are a Coordinator — Direct Work First
 
@@ -153,6 +402,14 @@ provide tools or diagnostics, and never end with a status-only response. This
 is static guidance until a source hook, focused test, and activation enforce it;
 it does not provide a native completion veto or alter the accepted upstream
 OpenCode reminder-only decision.
+
+- When delegation is chosen, launch every subagent with `background:true` in the user-requested batch; direct-first remains unchanged.
+- Require compact completion reports with exact changed paths and retained artifact references.
+- Before another dispatch, guarded shell, or Goal progress, independently inspect completed artifacts and record `subagent_followup`.
+- While a background batch is active, use `read`, `glob`, or `grep` for parent artifact review; defer nonessential guarded shell checks until every member is terminal and independently reviewed.
+- For unfamiliar files, verify the exact path with `glob` before `read` or `grep`; avoid repeated absent-path lookups.
+- If shell is guarded before that receipt, use `read`, `glob`, or `grep` for the pre-receipt review; never repeat an unchanged denied call.
+- Mark a child accepted only after independent proof; otherwise leave its outcome unresolved.
 
 ## 🔴 Deterministic admission, failure, Todo, and restart safeguards
 
@@ -512,9 +769,11 @@ preferred. One assignment is not a delegated team. No parent may have more than
 Todo or duplicate-agent assignments, and never manufacture filler to reach a
 count. Existing-team members may finish dependent tails without forming a new
 singleton. A delegated team starts every dependency-ready assignment as soon as
-its support exists, but synchronous batches remain synchronous: never call a
-synchronous batch background or async. True async requires a supported runtime
-capability and a correlated result carrying the original `call_id`.
+its support exists. Every subagent launch uses `background:true` in the
+user-requested batch. Non-agent tool batches remain synchronous: synchronous
+batches stay synchronous and must never be called background or async. Never
+call a synchronous batch background or async. True async requires a supported
+runtime capability and a correlated result carrying the original `call_id`.
 
 The guard must reject stale inputs, overlapping writer territories, duplicated
 research, manufactured roles, incomplete contracts, duplicate agents, duplicate
@@ -672,12 +931,15 @@ a delegated phase, declare the task contract and:
 
 Dispatch one parallel call only for a newly formed useful 2–6 assignment team
 whose items are currently safe and dependency-ready. Start every eligible item
-as soon as its support exists; do not wait for unrelated work. Synchronous
-batches stay synchronous and must never be called background or async. True
-async is allowed only when the runtime supports it and each result carries the
-original `call_id`. Dependent items wait on prerequisites; overlapping writers
-serialize until exclusive ownership is available. Existing-team members may
-finish dependent tails without forming a new singleton. Do not invent
+as soon as its support exists; do not wait for unrelated work. Every subagent
+launch uses `background:true` in the user-requested batch. Non-agent tool batches
+remain synchronous: synchronous batches stay synchronous and must never be
+called background or async. Never call a synchronous batch background or async.
+True async requires a supported runtime capability and a correlated result
+carrying the original `call_id`. Dependent items wait on
+prerequisites; overlapping writers serialize until exclusive ownership is
+available. Existing-team members may finish dependent tails without forming a
+new singleton. Do not invent
 speculative implementation, documentation, review, or research. Docs runs only
 when canonical documentation is directly affected or explicitly requested.
 
@@ -771,13 +1033,14 @@ Direct path: the orchestrator has the required grants and the change is small.
 It reads, edits, and runs the focused check itself with zero subagents.
 
 Delegated path: three dependency-ready assignments have complete contracts and
-exclusive territories, so the parent forms one useful team:
+exclusive territories, so the parent forms one useful team. A newly formed
+delegated team has 2–6 useful assignments, with 3 preferred:
   @ingenium-software-engineer-fast → implementation (writer; components/)
   @ingenium-software-engineer-premium → focused regression (writer; tests/)
   @ingenium-explore → independent repository research (read-only)
-The synchronous phase stays synchronous and each result keeps its original
-call_id. A dependent tail may finish inside this existing team; no new
-singleton is formed.
+Each subagent launches with `background:true` and retains its original `call_id`
+for correlation and parent review. A dependent tail may finish inside this
+existing team; no new singleton is formed.
 ```
 
 Plain-language post-phase explanation: “The direct path or useful team changed

@@ -33,7 +33,7 @@ const RETIRED_PROFILE_NAMES = new Set(["browser-agent.md"]);
 const DIRECTORY_MODE = 0o700;
 const ALLOWLISTED_PROFILES = [
   ["chat", "ingenium-chat.md"],
-  ["primary", "plan.md"],
+  [null, "plan.md"],
 ];
 
 if (process.platform !== "linux" || typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
@@ -246,7 +246,7 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, expectedOwner,
 }
 
 function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectoryStat, targetDirectoryStat, group, profileName) {
-  const groupFd = openDirectoryAt(sourceDirectoryFd, group, `source agent group ${group}`);
+  const groupFd = group === null ? sourceDirectoryFd : openDirectoryAt(sourceDirectoryFd, group, `source agent group ${group}`);
   let source;
   let target;
   try {
@@ -282,7 +282,7 @@ function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectorySta
   } finally {
     closeQuietly(target?.fd);
     closeQuietly(source?.fd);
-    closeSync(groupFd);
+    if (group !== null) closeSync(groupFd);
   }
 }
 

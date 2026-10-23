@@ -9,16 +9,17 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface**. The trusted runtime descriptor selects one of two behaviors: compatibility uses only the fixed `.localhost` aliases; production shows the current user's authorization-filtered workspace picker and launches exact runtime roots only after explicit start/resume. Special-use `.localhost` roots use browser-trusted HTTP on loopback only; remote/custom roots require HTTPS. Direct 4098/4099 ports remain private.
 
-The supported embedded/container runtime is OpenCode **1.18.31**. Docker verifies the pinned
-archive SHA-256 and executable version, while package compatibility tests verify
-that the root, extension, and local `.opencode` manifests and lockfiles all
-resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.31`. OpenCode
-**1.18.3+** is retained as the historical boundary for root-relative assets;
-the current contract is tested against 1.18.31.
+The supported embedded/container OpenCode executable is **2.0.11**. Docker pins
+the archive SHA-256 and verifies the executable version. The root/extension
+package dependency graph retains the
+`@opencode-ai/plugin` and `@opencode-ai/sdk` **1.18.31** compatibility pins;
+those package versions do not identify the container executable.
+OpenCode **1.18.3+** remains a historical root-relative-assets compatibility
+boundary, not the current embedded executable version.
 
 The installed `opencode` CLI used for the session-export check below was
 **1.18.30**. That retrieval result documents the CLI's export behavior only; it
-does not change the embedded/container 1.18.31 compatibility contract.
+does not identify or change the embedded/container OpenCode 2.0.11 executable.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
@@ -39,6 +40,19 @@ read or a remembered preference. Choose it and select **Open workspace** to star
 or resume it. Starting is polled for a bounded interval; if it remains starting,
 becomes unavailable, or is no longer authorized, the dashboard keeps the client
 unbound and offers refresh/retry instead of embedding a fallback runtime.
+
+## Background learning authorization
+
+For a confirmed compatibility workspace, the OpenCode page offers **Enable
+background learning**. Select it and complete the existing owner step-up dialog.
+The Dashboard then authorizes only the principal bound to that current runtime;
+opening the page or listing a READY runtime does not authorize it automatically.
+
+The owner must retain active workspace/project access and a live, matching runtime
+credential and security epoch. Repeating the action does not rotate credentials
+or extend their lifetime. Provider configuration, genuine user-message extraction
+and completed synthesis remain separate prerequisites; a success message here is
+not proof that learning has run. See the [API contract](../develop/api.md#explicit-runtime-automation-authorization).
 
 ## OpenCode Web/CLI Mode Switch
 

@@ -1040,6 +1040,13 @@ export function runManagedCommandCli(
     runCommand?: typeof managedCommand;
   } = {},
 ): void {
+  if (kind === "build") {
+    const requested = argv.length === 3 ? decodeManagedArgv(argv[2]!) : argv.slice(2);
+    if (requested[0] === "deployment"
+      && ["production-restart", "recovery-preflight", "recovery-prepare"].includes(requested[1]!)) {
+      throw new Error("Multichat coordinated recovery is retired; use the ordinary Compose restart workflow");
+    }
+  }
   const packageRoot = managedWrapperPackageRoot();
   if (basename(dirname(packageRoot)) === "releases" && realpathSync(process.cwd()) !== managedRecoveryWorktree()) {
     throw new Error("Private build launcher requires its canonical worktree");

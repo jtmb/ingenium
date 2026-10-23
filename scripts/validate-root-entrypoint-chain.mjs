@@ -56,26 +56,20 @@ const immutableTrees = [
   "/etc/opencode",
 ];
 const visited = new Set();
-let currentPath = "<unknown>";
 
-function fail(path, reason) {
-  const publicPath = exactModes.has(path) ? path
-    : immutableTrees.some((root) => path === root || path.startsWith(`${root}/`))
-      ? path.split("/").map((part) => /^[\w.@+-]*$/.test(part) && !/(?:secret|credential|token|password|private|(?:^|[._-])key(?:$|[._-])|^\.env)/i.test(part) ? part : "<redacted>").join("/")
-      : "<redacted>";
-  process.stderr.write(`ERROR: root entrypoint artifact chain is unsafe: ${publicPath}: ${reason}\n`);
+function fail() {
+  process.stderr.write("ERROR: root entrypoint artifact chain is unsafe\n");
   process.exit(1);
 }
 
 function validateMetadata(path, metadata) {
-  if (metadata.uid !== 0 || metadata.gid !== 0) fail(path, "uid-gid");
-  if (!metadata.isSymbolicLink() && (metadata.mode & 0o022) !== 0) fail(path, "writable");
+  if (metadata.uid !== 0 || metadata.gid !== 0) fail();
+  if (!metadata.isSymbolicLink() && (metadata.mode & 0o022) !== 0) fail();
   const exactMode = exactModes.get(path);
-  if (exactMode !== undefined && (metadata.mode & 0o777) !== exactMode) fail(path, "exact-mode");
+  if (exactMode !== undefined && (metadata.mode & 0o777) !== exactMode) fail();
 }
 
 function validateTree(path) {
-  currentPath = path;
   const metadata = lstatSync(path);
   validateMetadata(path, metadata);
   if (metadata.isSymbolicLink()) return;
@@ -87,13 +81,9 @@ function validateTree(path) {
 }
 
 try {
-  for (const path of exactModes.keys()) {
-    currentPath = path;
-    validateMetadata(path, lstatSync(path));
-  }
-  currentPath = "/etc/opencode/opencode.json";
-  if (readlinkSync(currentPath) !== "/usr/local/share/ingenium/opencode-managed/opencode.json") fail(currentPath, "link-target");
+  for (const path of exactModes.keys()) validateMetadata(path, lstatSync(path));
+  if (readlinkSync("/etc/opencode/opencode.json") !== "/usr/local/share/ingenium/opencode-managed/opencode.json") fail();
   for (const path of immutableTrees) validateTree(path);
-} catch (error) {
-  fail(currentPath, ["ENOENT", "EACCES", "ENOTDIR", "ELOOP"].includes(error?.code) ? `fs-${error.code}` : "fs-error");
+} catch {
+  fail();
 }

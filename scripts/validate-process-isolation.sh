@@ -21,6 +21,8 @@ ttyd_dir=/run/ingenium-secrets/ttyd
 restore_dir=/run/ingenium-secrets/restore
 cloudflare_dir=/run/ingenium-secrets/cloudflare
 
+[ "$(stat -c '%F:%U:%G:%a' /run/ingenium-secrets)" = "directory:root:root:711" ] || fail
+
 for entry in \
   "$api_dir:ingenium-api:ingenium-api" \
   "$dashboard_dir:ingenium-dashboard:ingenium-dashboard" \

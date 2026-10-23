@@ -22,15 +22,8 @@ const originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
 const originalAudience = process.env.INGENIUM_MCP_AUDIENCE;
 const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
 const storageMappingHash = "a".repeat(64);
-const extensionPluginPaths = [
-  "packages/ingenium-extension/plugins/auto-observer.ts",
-  "packages/ingenium-extension/plugins/observer.ts",
-  "packages/ingenium-extension/plugins/resource-sync.ts",
-  "packages/ingenium-extension/plugins/lifecycle.ts",
-];
-const ponytailPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
-const configuredPluginPaths = [...extensionPluginPaths, ponytailPluginPath];
-const manifestPluginPaths = [...configuredPluginPaths].sort();
+const extensionPluginPaths = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"]
+  .map((name) => `packages/ingenium-extension/plugins/v2/${name}`);
 const manifestHash = "b".repeat(64);
 
 function temporaryDirectory(prefix: string): string {
@@ -144,9 +137,8 @@ function createRuntimeWorktree(): string {
   writeFileSync(join(worktree, ".opencode", "agents", "sync-diagnostics.md"), "# Sync diagnostic\n", "utf8");
   for (const pluginPath of extensionPluginPaths) {
     const target = join(worktree, pluginPath);
-    mkdirSync(dirname(target), { recursive: true });
-    copyFileSync(join(repositoryRoot, pluginPath), target);
-    expect(readFileSync(target, "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath), "utf8"));
+    cpSync(join(repositoryRoot, pluginPath), target, { recursive: true });
+    expect(readFileSync(join(target, "index.ts"), "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath, "index.ts"), "utf8"));
   }
   cpSync(join(repositoryRoot, "packages", "ingenium-extension", "ponytail"), join(worktree, "packages", "ingenium-extension", "ponytail"), { recursive: true });
   initializeGitWorktree(worktree);
@@ -461,10 +453,7 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(payload.resourcesManifest.agents).toHaveLength(11);
       expect(payload.resourcesManifest.agents.map((entry) => entry.path)).not.toContain(".opencode/agents/sync-diagnostics.md");
       expect(payload.resourcesManifest.agents.map((entry) => entry.name)).not.toContain("browser-agent");
-      expect(payload.resourcesManifest.plugins.map((entry) => entry.path)).toEqual(manifestPluginPaths);
-      for (const plugin of payload.resourcesManifest.plugins) {
-        expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
-      }
+      expect(payload.resourcesManifest.plugins).toEqual([]);
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose());

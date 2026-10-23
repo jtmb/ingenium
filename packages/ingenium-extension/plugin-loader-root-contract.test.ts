@@ -159,12 +159,9 @@ describe.sequential("OpenCode 1.18.31 root plugin-loader contract", () => {
     else process.env.INGENIUM_STORAGE_MAPPING_HASH = originalStorageMappingHash;
   });
 
-  it("uses explicit local wrapper specs and rejects bare package-like paths", () => {
-    const config = JSON.parse(readFileSync(resolve(repositoryRoot, "opencode.json"), "utf8")) as { plugin: string[] };
-
-    expect(config.plugin).toEqual(CANONICAL_PLUGIN_SPECS);
-    expect(config.plugin).toEqual([...wrapperSpecs, ponytailPluginSpec]);
-    for (const spec of config.plugin) {
+  it("retains explicit V1 compatibility wrapper specs and rejects bare package-like paths", () => {
+    expect(CANONICAL_PLUGIN_SPECS).toEqual([...wrapperSpecs, ponytailPluginSpec]);
+    for (const spec of CANONICAL_PLUGIN_SPECS) {
       const substituted = substituteOpenCodeConfigEnvironment(spec, { PWD: repositoryRoot });
       expect(isOpenCodePathPluginSpec(substituted)).toBe(true);
       expect(resolveOpenCodePathPlugin(substituted, repositoryRoot)).toBe(substituted);

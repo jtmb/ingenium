@@ -31,23 +31,27 @@ Runtime consumers cannot import `ingenium-core` or call mutation REST directly.
 
 ## OpenCode runtime and package contract
 
-The supported OpenCode runtime is **1.18.31**. The Docker image downloads the
-`v1.18.31` Linux archive, verifies SHA-256
-`408bfbcae7d8760b4fa15f11d4b342afef25a2ea64c4807706f8180bacdb4008`, and then
-requires `opencode --version` to report exactly `1.18.31`. The root package,
-the extension package, and `.opencode/package.json` all pin
-`@opencode-ai/plugin` to `1.18.31`; both root lockfiles pin the plugin and its
-transitive `@opencode-ai/sdk` to `1.18.31` with locked integrity values. The
-extension compatibility test verifies every manifest and lock entry.
+The embedded/container OpenCode executable is **2.0.11**. The Docker image
+downloads the `2.0.11` Linux x64 archive, verifies SHA-256
+`59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13`, and
+requires `opencode --version` to report exactly `opencode v2.0.11`.
+
+Separately, the root package, extension package, and `.opencode/package.json`
+pin the `@opencode-ai/plugin` compatibility package to **1.18.31**; both root
+lockfiles pin that package and its transitive `@opencode-ai/sdk` to **1.18.31**
+with locked integrity values. These npm compatibility-package pins are not the
+embedded/container executable version. The extension compatibility test
+verifies every manifest and lock entry.
 
 OpenCode **1.18.3+** introduced the root-relative asset/WebSocket behavior
-that requires dedicated root origins rather than a shared dashboard subpath;
-the current implementation is verified against 1.18.31.
+that requires dedicated root origins rather than a shared dashboard subpath.
+This is the historical basis for that origin boundary, not the version of the
+current embedded/container executable.
 
 The installed CLI used for the 2026-09-09 session-context capture reported
-**1.18.30**. That is retrieval-tool evidence only and does not change the
-supported embedded/container runtime contract of 1.18.31; see the
-[CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
+**1.18.30**. That is historical retrieval-tool evidence only, distinct from
+the current embedded/container executable and the 1.18.31 compatibility-package
+pins; see the [CLI session-context audit](../reference/session-context-audit-2026-09-09.md).
 
 Generated `dist/` directories and TypeScript `*.tsbuildinfo` files are build
 products and remain untracked. The core and server packages expose only their
@@ -60,6 +64,7 @@ The extension includes the official Ponytail checkout closure under
 `packages/ingenium-extension/ponytail/`, pinned to upstream commit
 `16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance and recorded
 SHA-256 file hashes. It is deliberately not an npm dependency: published
-`@dietrichgebert/ponytail@4.8.4` has a named export incompatible with OpenCode
-1.18.31. The single adapter registers six commands, the Ponytail skills path,
+`@dietrichgebert/ponytail@4.8.4` had a named export incompatible with the
+OpenCode 1.18.31 integration contract; this is historical compatibility
+evidence. The single adapter registers six commands, the Ponytail skills path,
 and a system-prompt transform; it does not register MCP tools or capabilities.

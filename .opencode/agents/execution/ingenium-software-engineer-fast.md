@@ -1,40 +1,96 @@
 ---
-name: ingenium-software-engineer-fast
 description: "Budget-tier implementation agent. Use for standard, low-risk coding tasks — bug fixes, simple refactors, documentation code examples. Runs on a faster/cheaper model."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit:
-    "*": allow
-    "next-steps-plan/**": deny
-  write:
-    "*": allow
-    "next-steps-plan/**": deny
-  bash:
-    "*": allow
-    "next-steps-plan/**": deny
-  todowrite: allow
-  glob: allow
-  grep: allow
-  webfetch: allow
-  task:
-    "*": "deny"
-  ingenium_docs_search: allow
-  ingenium_docs_get_page: allow
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: shell
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: todowrite
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: webfetch
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
 
 # Principal Software Engineer — Implementation & Technical Leadership

@@ -143,10 +143,14 @@ function markdownFiles(directory, readmesOnly = false) {
 try {
   const configText = read('opencode.json');
   const config = JSON.parse(configText);
-  assert.ok(config.agent && typeof config.agent === 'object' && !Array.isArray(config.agent), 'root agent map must be an object');
-  if (Object.hasOwn(config.agent, 'ingenium-llm-broker')) {
+  assert.ok(config.agents && typeof config.agents === 'object' && !Array.isArray(config.agents), 'root agents map must be an object');
+  if (Object.keys(config.agents).some(id => id === 'ingenium-llm-broker' || id.endsWith('/ingenium-llm-broker'))) {
     report('opencode.json', lineAt(configText, configText.indexOf('"ingenium-llm-broker"')), 'broker absent from root agent mappings', 'ingenium-llm-broker mapping');
   }
+  const modelTableAgents = Object.fromEntries(Object.entries(config.agents).map(([id, projection]) => {
+    const [model, variant] = String(projection.model ?? '').split('#', 2);
+    return [id.slice(id.lastIndexOf('/') + 1), { model, variant }];
+  }));
   const catalog = [...read('packages/ingenium-core/lib/tools/mcp-tool-catalog.ts').matchAll(/\bname: "([^"]+)",\s*category: "([^"]+)"/g)]
     .map(([, name, category]) => ({ name, category }));
   assert.ok(catalog.length > 0, 'catalog name/category entries must be readable');
@@ -181,11 +185,12 @@ try {
     }
     for (const match of text.matchAll(/"plugins?"\s*:\s*\[([^\]]*)\]/g)) {
       const list = match[1];
+      if (!/["']/.test(list)) continue;
       if (!list.includes('lifecycle') || !list.includes('ponytail') || list.includes('session-id-tui.ts')) {
         report(file, lineAt(text, match.index), 'plugin array includes lifecycle and ponytail, excludes session-id-tui.ts', plain(list));
       }
     }
-    if (file === '.opencode/models.md') auditModels(text, config.agent, (line, expected, actual) => report(file, line, expected, actual));
+    if (file === '.opencode/models.md') auditModels(text, modelTableAgents, (line, expected, actual) => report(file, line, expected, actual));
   }
   if (errors.length) {
     console.error(errors.join('\n'));

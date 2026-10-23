@@ -7,14 +7,35 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 ## Overview
 
-**The root `opencode.json` `agent` map contains 11 mapped entries: built-in Plan plus 10 named Ingenium agents.** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, performs feasible direct work through explicit scoped grants, delegates bounded work when necessary, and returns terminal outcomes. A dedicated **Chat primary** (`ingenium-chat`) handles user-facing conversational interactions and may be hidden from general selectors. The mapped agents cover exploration, QA, documentation, engineering, recovery, and security. Managed Playwright/browser automation is a generic capability, and passive visual QA is owned by mapped `@ingenium-qa`. The separate hidden `ingenium-llm-broker` is reserved for system use, never directly invocable, and excluded from the repository skill/reference loading surface. Every user-facing active agent, including built-in Plan, loads `@ponytail`, task-matching skills, and relevant roadmap/context before acting; the permission surface is separate from the active loading choice.
+**The root `opencode.json` `agents` map contains 11 mapped entries: built-in `plan` plus 10 named Ingenium agents. Plan alone uses the root agent ID `plan` and root profile `.opencode/agents/plan.md`; the named custom agents retain their nested native V2 IDs and profile paths.** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, performs feasible direct work through explicit scoped grants, delegates bounded work when necessary, and returns terminal outcomes. A dedicated **Chat primary** (`ingenium-chat`) handles user-facing conversational interactions and may be hidden from general selectors. The mapped agents cover exploration, QA, documentation, engineering, recovery, and security. Managed Playwright/browser automation is a generic capability, and passive visual QA is owned by mapped `@ingenium-qa`. The separate hidden `ingenium-llm-broker` is reserved for system use, never directly invocable, and excluded from the repository skill/reference loading surface. Every user-facing active agent, including Plan, loads `@ponytail`, task-matching skills, and relevant roadmap/context before acting; the permission surface is separate from the active loading choice.
 
-The root mapping is authoritative for the 11 entries. The repository currently
-contains 10 non-broker Markdown profiles plus the hidden broker; `plan` is the
-built-in Plan mapping. Four writer-capable
-identities remain: Fast, Premium, Recovery, and Docs.
+The root mapping is authoritative for the 11 entries. The repository contains
+11 mapped Markdown profiles plus the hidden broker. Five permission-derived
+writers remain: Orchestrator, Fast, Premium, Recovery, and Docs.
 
-Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied globally and in every custom agent permission profile. The built-in Plan mode is the deliberate analysis exception: its root `opencode.json` permission block is the sole root-mapping permission exception. It grants `read`, `glob`, `grep`, and `question`; its `task` map allows only `ingenium-explore` and denies every other agent. `edit`, `write`, `bash`, and `todowrite` are explicitly denied, and its broad `skill` permission is a capability rather than a requirement to load every skill. Plan cannot invoke `ingenium-docs`, `ingenium-qa`, or any other subagent. Custom agents may not use interactive questions. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
+### Inherited skills
+
+Mapped user-facing profiles allow `skill` with resource `"*"`, so skills supplied
+by OpenCode, global installations, and project plugins remain available without
+adding every inherited ID to this repository. The nine explicit repository and
+Ponytail grants remain as required local coverage. This permission allows loading
+instructions; it does not grant the tools those instructions describe. All other
+tool permissions retain their profile-owned default-deny boundaries, and the
+hidden broker retains no skill allowance.
+
+OpenCode advertises permitted skills only when they have a description and have
+not disabled autoinvocation. A project definition overrides a same-ID global
+definition. To inspect this project's catalog, use the native object-query form:
+
+```sh
+opencode api get '/api/skill?location[directory]=/home/brajam/repos/ingenium'
+```
+
+Use the same exact location for agent and plugin diagnostics. A catalog entry
+proves discovery, not that a model loaded it. Profile changes still require the
+safe full-parent restart described below before claiming session activation.
+
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. OpenCode interactive `question` access is denied in every custom operational profile. Plan is the deliberate analysis exception: `.opencode/agents/plan.md` grants `read`, `glob`, `grep`, and `question`; its `subagent` rules allow only `research/ingenium-explore` and deny every other agent. `edit`, `shell`, and `todowrite` are denied, and its broad `skill` permission is a capability rather than a requirement to load every skill. Plan cannot invoke Docs, QA, or any other subagent. Orchestration never invokes the `question` tool. These profile/configuration changes affect current sessions only after they restart; this documentation does not imply that already-running sessions are fixed. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 ### Verification scope
 
@@ -76,17 +97,25 @@ not agent requirements.
 
 ### Orchestrator Agent Model
 
-The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agent"` key. Every root `agent.<name>` entry is model/variant-only except for the built-in Plan entry, which is the sole root-mapping permission exception; root owns `model` and `variant`, while native Markdown profiles own prompt content, permissions, lifecycle metadata, and named skills:
+The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agents"` key. Every root entry contains only its native `provider/model#variant` reference. Markdown profiles own prompt content, ordered permissions, lifecycle metadata, and named skills:
 
-- **Model** — Defined in `opencode.json` (not the Markdown profile). For this documentation migration, Premium is review-only; all other mapped operational agents use `openai/gpt-5.6-luna` / `max`. This temporary routing status does not change the canonical Premium profile's permanent writer role.
+- **Model** — Defined in `opencode.json` (not the Markdown profile). Exact assignments are listed below.
+- **Identity** — Derived from the Markdown path, including its category; omit
+  legacy `name:` frontmatter. Native V2 2.0.11 treats that extra field as legacy
+  syntax and can move native permission rules into request metadata instead of
+  enforcing them. Repository-only `skills` metadata is retained as YAML comments
+  by profile writers; actual skill availability uses the `skill` permission rules.
+- **Harness controls** — Code Mode's `execute` rule permits the interface;
+  nested tools need their own named permissions. Executing profiles allow
+  task/status reads, rule reconciliation and error triage. Only the primary may
+  declare/complete tasks and record child follow-up; children inherit its active
+  task. Assigned evidence-directory grants remain explicit and bounded.
 - **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
 - **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
-Agent frontmatter metadata is persisted with the agent record. A root
-`prompt: "{file:.opencode/agents/...}"` reference can load a Markdown prompt body,
-but it is not the ordinary agent-discovery mechanism; its YAML frontmatter is not
-imported as a second `agent.<name>` mapping and cannot override the root model or
-variant. The internal
+Agent frontmatter metadata is persisted with the agent record. The Markdown body
+is the native system prompt; frontmatter does not become a second root
+`agents.<id>` mapping and cannot override the root model reference. The internal
 `ingenium-llm-broker` is an API-owned, reserved profile: disk-only copies are
 never imported, and sync accepts an API row only when it matches the complete
 static canonical template before rewriting the one canonical disk profile.
@@ -101,31 +130,28 @@ neither introduces nor bypasses FK cascade semantics.
 
 ### Exact runtime mappings
 
-Root `opencode.json` sets `default_agent` to `ingenium-orchestrator` and
-`subagent_depth` to `1`. It is authoritative for these case-sensitive model and variant
-mappings. Every root entry is model/variant-only except for the built-in `plan`
-entry, whose explicit permission block is the sole root-mapping permission
-exception; canonical Markdown profiles own the prompt, permissions, lifecycle
+Root `opencode.json` sets `default_agent` to `primary/ingenium-orchestrator` and
+`experimental.subagent_depth` to `1`. It is authoritative for the case-sensitive
+native IDs and `model#variant` references. Every root entry is model-only;
+canonical Markdown profiles own the prompt, ordered permissions, lifecycle
 metadata, and skills. The canonical-profile column is a repository
-cross-reference, not a third root mapping field. The built-in `plan` entry is
-the native OpenCode Plan mapping (`openai/gpt-5.6-luna`, `max`); its sole
-root-level task allowance is `ingenium-explore`, while every other task target
-is denied. `ingenium-explore` is a separate mapped agent.
+cross-reference, not another root mapping field. Plan's profile allows only
+`research/ingenium-explore` through `subagent`; every other target is denied.
 The protected `ingenium-llm-broker` intentionally has no root mapping.
 
 | Agent | Model | Variant | Canonical profile |
 |---|---|---|---|
-| `plan` (built-in) | `openai/gpt-5.6-luna` | `max` | Built-in Plan mode (root mapping) |
-| `ingenium-explore` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-explore.md` |
-| `ingenium-docs` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-docs.md` |
-| `ingenium-qa` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-qa.md` |
-| `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
-| `ingenium-software-engineer-premium` | `openai/gpt-5.6-sol` | `xhigh` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
-| `ingenium-recovery-engineer` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
-| `ingenium-orchestrator` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/primary/ingenium-orchestrator.md` |
-| `ingenium-scout` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/research/ingenium-scout.md` |
-| `ingenium-chat` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/chat/ingenium-chat.md` |
-| `ingenium-security-auditor` | `openai/gpt-5.6-luna` | `max` | `.opencode/agents/security/ingenium-security-auditor.md` |
+| `plan` | `openai/gpt-6-astra` | `max` | `.opencode/agents/plan.md` |
+| `ingenium-explore` | `openai/gpt-6-sol` | `medium` | `.opencode/agents/research/ingenium-explore.md` |
+| `ingenium-docs` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-docs.md` |
+| `ingenium-qa` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-qa.md` |
+| `ingenium-software-engineer-fast` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/execution/ingenium-software-engineer-fast.md` |
+| `ingenium-software-engineer-premium` | `openai/gpt-6-sol` | `high` | `.opencode/agents/execution/ingenium-software-engineer-premium.md` |
+| `ingenium-recovery-engineer` | `openai/gpt-6-sol` | `high` | `.opencode/agents/execution/ingenium-recovery-engineer.md` |
+| `ingenium-orchestrator` | `openai/gpt-6-sol` | `medium` | `.opencode/agents/primary/ingenium-orchestrator.md` |
+| `ingenium-scout` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/research/ingenium-scout.md` |
+| `ingenium-chat` | `openai/gpt-6-luna` | `xhigh` | `.opencode/agents/chat/ingenium-chat.md` |
+| `ingenium-security-auditor` | `openai/gpt-6-astra` | `high` | `.opencode/agents/security/ingenium-security-auditor.md` |
 
 The diagram below is a **conditional delegation example**, not a required wave.
 Directly feasible work uses zero subagents. When delegation is useful, form a
@@ -200,8 +226,8 @@ not delay safe independent reviewers or manufacture work.
 
 ## Agent Table
 
-The table below covers the 10 named mapped agents and the hidden broker; the
-built-in Plan entry is represented by the root `plan` mapping above.
+The table below covers the 10 named mapped agents and the hidden broker; built-in
+Plan is represented by root ID `plan` in the mapping table above. The API agent lifecycle and disk synchronization also retain its root `plan.md` path; model updates migrate the old `primary/plan` override to `plan` without dropping its variant.
 
 | Agent | Type | Mode | Skills Allowed |
 |-------|------|------|----------------|
@@ -217,7 +243,7 @@ built-in Plan entry is represented by the root `plan` mapping above.
 | **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | Ponytail + task-matching skills/references |
 | **ingenium-llm-broker** | Subagent | Hidden system-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — (excluded) |
 
-> **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
+> **Model configuration**: Agent model references are defined centrally in `opencode.json` under the `"agents"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
 >
 > > **Note on `ingenium-chat`**: The canonical repository profile is
 > > `.opencode/agents/chat/ingenium-chat.md`. Runtime bootstrap may project
@@ -227,35 +253,36 @@ built-in Plan entry is represented by the root `plan` mapping above.
 ### Skill permission policy
 
 Native Markdown profiles grant the repository skill/reference surface explicitly;
-the root `opencode.json` stores the runtime model/variant mappings and does not
-serve as the profile permission authority for mapped custom agents; built-in
-Plan's root block is the sole root-mapping permission exception. User-facing profiles include the
+the root `opencode.json` stores runtime model references and does not serve as
+the profile permission authority. User-facing profiles include the
 canonical skill names, including `ponytail`, and their preflight requires loading
 `@ponytail` before any action:
 
 ```yaml
-permission:
-  "*": deny
-  skill:
-    development-conventions: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ```
 
-The built-in Plan retains a broad skill permission surface as a capability, but
+Plan retains a broad skill permission surface as a capability, but
 active planning loads `@ponytail`, task-matching skills, and relevant
-roadmap/context only. The built-in Plan root block is the sole root-mapping
-permission exception: `skill: "*"` remains allowed; `read`, `glob`, `grep`,
-`question` are allowed; `task` denies `*` while allowing only
-`ingenium-explore`. `edit`, `write`, `bash`, and `todowrite` are explicitly
+roadmap/context only. Its profile allows `skill`, `read`, `glob`, `grep`, and
+`question`; `subagent` denies `*` before allowing only
+`research/ingenium-explore`. `edit`, `shell`, and `todowrite` are explicitly
 denied. Plan cannot invoke `ingenium-docs`, `ingenium-qa`, or any other
-subagent. Root mappings and mapped profiles must remain semantically aligned,
-but profile frontmatter is not a second runtime configuration source.
+subagent.
 
 `@skill-name` is mention syntax for Required Skills sections and inline prose;
-it is not a `permission.skill` key. If a narrow policy is documented, use the
-actual canonical directory names without `@`, and put the wildcard first so
-specific rules follow it. The hidden `ingenium-llm-broker` is the exception:
-its skill permission is `{"*": "deny"}` and it has no tool allowances. See
+it is not a permission resource. Use canonical directory names without `@`,
+and put the wildcard deny first so later specific rules win. The hidden
+`ingenium-llm-broker` has one wildcard-deny rule and no allowances. See
 [the skill taxonomy](../reference/skill-taxonomy.md) for the canonical names
 and legacy mapping.
 
@@ -286,13 +313,12 @@ tool and MCP profile permissions remain deny-by-default.
 
 ### Effective role matrix
 
-The built-in Plan root block and mapped Markdown profiles use deny defaults. Plan
-is the sole root-mapping permission exception. The effective core permission
-matrix is explicitly:
+All mapped Markdown profiles use ordered native V2 rules with deny defaults.
+The effective core permission matrix is explicitly:
 
-| Profile | `read` | `glob` | `grep` | `question` | `edit`/`write` | `bash` | Effective role |
+| Profile | `read` | `glob` | `grep` | `question` | `edit` | `shell` | Effective role |
 |---|---|---|---|---|---|---|---|
-| Plan | allow | allow | allow | allow | deny | deny | Planning only; sole root-mapping permission exception; Ponytail plus task-matching skills/references and generic inspection tools; task only `ingenium-explore`; no other subagents |
+| Plan | allow | allow | allow | allow | deny | deny | Planning only; Ponytail plus task-matching skills/references and generic inspection tools; subagent only `research/ingenium-explore`; no other subagents |
 | `ingenium-docs` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-fast` | allow | allow | allow | deny | allow | allow | Intentional writer |
 | `ingenium-software-engineer-premium` | allow | allow | allow | deny | allow | allow | Intentional writer; deployment remains profile-governed below |
@@ -321,23 +347,21 @@ its scoped diff/add/commit and fixed restart remain, while `git push`,
 denied. Plan, `ingenium-explore`, `ingenium-scout`, and `ingenium-chat` remain
 Bash-denied by design.
 
-`edit`/`write` are the file-mutation permissions. The intentional writer
-profiles retain those permissions; every read-only profile above does not. A
+`edit` is the native V2 file-mutation action. The intentional writer profiles
+retain scoped `edit` rules; every read-only profile above does not. A
 read-only profile with bounded Bash or MCP access does not thereby gain generic
 shell, file-mutation, or deployment authority.
 
 ### Permission and deployment boundary
 
-The built-in Plan permission block in `opencode.json` is the sole root-mapping
-permission exception. Every other root agent entry contains only `model` and
-`variant`; native Markdown profiles own effective permissions. The root config
-remains authoritative for the Premium model and variant; the Markdown profile
-is not a second model source. Custom profiles keep `question` denied; Plan is
-the deliberate root-level question exception.
+Every root agent entry contains only a `model` reference with any variant joined
+after `#`; native Markdown profiles own effective permissions. The root config
+remains authoritative for the Premium model reference; the Markdown profile is
+not a second model source. Custom operational profiles keep `question` denied;
+Plan is the deliberate profile-level exception.
 
-Tool governance for mapped custom agents is profile-only. Permissions in
-`.opencode/agents/**` are the sole tool gate for custom-agent execution; the
-built-in Plan root block is the only exception. The `ingenium-lifecycle` plugin
+Tool governance for mapped agents is profile-only. Permissions in
+`.opencode/agents/**` are the sole tool gate for agent execution. The `ingenium-lifecycle` plugin
 is a thin lifecycle adapter: root hooks are retained only for lifecycle events,
 while session/API reads use the OpenCode v2 client. Its authenticated `mcp`
 binding must match the launcher worktree, and its `session.idle` handler feeds
@@ -347,10 +371,8 @@ former managed-command denial layer was removed by owner decision.
 `ingenium-build` and `ingenium-repository` remain neutral optional utilities,
 not enforcement layers.
 
-**Owner decision (2026-09-09):** No wrapper denies tools; custom-agent profiles
-govern execution, with built-in Plan's root permission block as the sole
-root-mapping exception. Verification runs directly under the active agent
-profile permissions.
+**Owner decision (2026-09-09):** No wrapper denies tools; agent profiles govern
+execution. Verification runs directly under the active agent profile permissions.
 
 Private replacement-first recovery is an independent boundary. It carries
 redacted handoff and verification evidence, revalidates the project/workspace/
@@ -460,7 +482,7 @@ explicit user request and the active orchestrator profile. When the active
 authorized agent can finish the scoped work feasibly and efficiently, it
 dispatches zero subagents. `ingenium-orchestrator` retains coordination
 ownership and may use its explicit `read`, `glob`, `grep`, and instrumented
-`edit`/`write` grants for feasible direct work; its Bash, task, MCP, browser,
+`edit` grants for feasible direct work; its shell, subagent, MCP, browser,
 and question boundaries remain profile-controlled, and root
 `external_directory` approval does not widen those grants. Other agents'
 grants are unchanged.
@@ -566,8 +588,8 @@ Agent profiles are public Markdown metadata, not credential files. Core and exte
 ## Per-Agent Profiles
 
 Repository-managed agent details are available in `.opencode/agents/`; the
-built-in Plan entry is managed by the root mapping, while named custom-agent
-profiles are managed by the repository and agent lifecycle.
+Plan and named custom-agent profiles are managed by the repository and agent
+lifecycle. Root mappings provide only their native IDs and model references.
 
 ### Compute Split
 
@@ -575,7 +597,7 @@ profiles are managed by the repository and agent lifecycle.
 |----------|--------|-------|------|
 | Model-dependent (configurable) | All agents | 11 | Configurable via `opencode.json` agent mappings |
 
-**Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. Built-in Plan's explicit permission block is the sole root-mapping permission exception; a `{file:...}` prompt reference loads the profile body, and its frontmatter does not become a second root mapping. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file.
+**Model configuration**: Agent model mappings live in `opencode.json` under the `"agents"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated through the lifecycle, the model reference is persisted under the profile's qualified native ID in `opencode.json`, not the `.md` file.
 
 ---
 

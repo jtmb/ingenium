@@ -1,47 +1,136 @@
 ---
-name: ingenium-software-engineer-premium
 description: "Premium-tier implementation agent. Use for complex, high-risk, or architecture-level coding tasks. Runs on a more capable model for deep reasoning."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit:
-    "*": allow
-    "next-steps-plan/**": deny
-  write:
-    "*": allow
-    "next-steps-plan/**": deny
-  bash:
-    "*": allow
-    "next-steps-plan/**": deny
-  todowrite: allow
-  glob: allow
-  grep: allow
-  webfetch: allow
-  task:
-    "*": "deny"
-  ingenium_docs_search: allow
-  ingenium_docs_get_page: allow
-  ingenium_docs_list_spaces: allow
-  ingenium_docs_get_page_tree: allow
-  ingenium_memory_read: allow
-  ingenium_memory_list: allow
-  ingenium_memory_search: allow
-  ingenium_memory_operation_status: allow
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: shell
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "next-steps-plan/**"
+    effect: deny
+  - action: todowrite
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: webfetch
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: basic-memory_read_note
+    resource: "*"
+    effect: allow
+  - action: basic-memory_recent_activity
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: external_directory
+    resource: "/home/brajam/repos/ingenium-v2-recovery-replay-20261001/*"
+    effect: allow
+  - action: external_directory
+    resource: "/home/brajam/repos/ingenium-v2-parent-work-20261001/*"
+    effect: allow
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_spaces
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page_tree
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_read
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_list
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_memory_operation_status
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
+
+> Release scope update (2026-10-23): multichat orchestration and coordinated
+> replacement-parent recovery are retired. Do not invoke `production-restart`,
+> `recovery-preflight`, `recovery-prepare`, or parent recovery publisher tools.
+> Use ordinary Docker Compose startup/restart for the authorized deployment,
+> preserve its persistent volumes, and verify normal single-chat persistence.
+> This update supersedes coordinated recovery requirements below; retained
+> historical failure evidence does not make that retired feature a release gate.
+
 
 # Principal Software Engineer — Implementation & Technical Leadership
 

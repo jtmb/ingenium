@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ORCHESTRATOR_PROFILE="${ORCHESTRATOR_PROFILE:-$REPO_ROOT/.opencode/agents/primary/ingenium-orchestrator.md}"
-PLAN_PROFILE="${PLAN_PROFILE:-$REPO_ROOT/.opencode/agents/primary/plan.md}"
+PLAN_PROFILE="${PLAN_PROFILE:-$REPO_ROOT/.opencode/agents/plan.md}"
 COMMAND_FILE="${COMMAND_FILE:-$REPO_ROOT/.opencode/commands/next-steps.md}"
 CONFIG="${CONFIG:-$REPO_ROOT/opencode.json}"
 
@@ -63,11 +63,13 @@ for (const obsolete of [
 assert.equal(/\b1 active\b/.test(source), false, 'singleton dispatch example must be absent');
 assert.equal(/\b7 active children\b/.test(source), false, 'oversized dispatch example must be absent');
 
-assert.deepEqual(config.permission, { external_directory: 'allow' }, 'root permission must be exact directory approval');
-assert.equal(config.mcp?.playwright?.enabled, false, 'standalone Playwright MCP must remain disabled');
-assert.equal(config.mcp?.playwright_headless?.enabled, false, 'standalone headless Playwright MCP must remain disabled');
-for (const [name, projection] of Object.entries(config.agent ?? {})) {
-  assert.deepEqual(Object.keys(projection).sort(), ['model', 'variant'], `${name} root mapping must remain model/variant-only`);
+assert.deepEqual(config.permissions, [
+  { action: 'external_directory', resource: '*', effect: 'allow' },
+], 'root permissions must retain the exact native directory approval');
+assert.equal(config.mcp?.servers?.playwright, undefined, 'standalone Playwright MCP must remain absent');
+assert.equal(config.mcp?.servers?.playwright_headless, undefined, 'standalone headless Playwright MCP must remain absent');
+for (const [name, projection] of Object.entries(config.agents ?? {})) {
+  assert.deepEqual(Object.keys(projection), ['model'], `${name} root mapping must remain native model-only`);
 }
 
 const planText = normalized(plan);

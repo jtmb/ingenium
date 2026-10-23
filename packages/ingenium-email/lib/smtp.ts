@@ -10,7 +10,7 @@
  * and non-Gmail accounts.
  */
 
-import nodemailer from "nodemailer";
+import nodemailer, { type Transporter, type SMTPTransportOptions, type SendMailOptions } from "nodemailer";
 import { simpleParser } from "mailparser";
 import type { EmailAccount, OAuthToken, EmailAddress } from "./types.js";
 import { resolveProviderEndpoints } from "./providers.js";
@@ -51,12 +51,12 @@ export interface SendOptions {
 export async function createTransport(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
-): Promise<nodemailer.Transporter> {
+): Promise<Transporter> {
   const config = resolveProviderEndpoints(account);
   const { host, port } = config.smtp;
 
   // Build SMTP options with OAuth2 or password auth
-  const smtpOptions: Record<string, unknown> = {
+  const smtpOptions: SMTPTransportOptions = {
     host,
     port,
     // Only use secure (implicit TLS) on port 465 — port 587 uses STARTTLS
@@ -87,7 +87,7 @@ export async function createTransport(
     };
   }
 
-  return nodemailer.createTransport(smtpOptions as nodemailer.TransportOptions);
+  return nodemailer.createTransport(smtpOptions);
 }
 
 /**
@@ -179,7 +179,7 @@ function addressString(a: EmailAddress): string {
 function buildMessage(
   account: EmailAccount,
   options: SendOptions,
-): Parameters<nodemailer.Transporter["sendMail"]>[0] {
+): SendMailOptions {
   return {
     from: `"${account.name}" <${account.email}>`,
     to: options.to.map((address) => addressString(address)),

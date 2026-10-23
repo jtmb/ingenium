@@ -48,13 +48,13 @@ export default {
     const profile = typeof ctx.options?.profilePath === "string" ? ctx.options.profilePath : PROFILE;
     const prompt = profileBody(await readFile(profile, "utf8"));
 
-    await ctx.agent.transform((editor) => {
+    const enforce = (editor) => {
       for (const agent of editor.list()) {
-        if (agent.id !== BROKER && agent.name === BROKER) editor.remove(agent.id);
+        if (agent.id !== BROKER && (agent.name === BROKER || agent.id.endsWith(`/${BROKER}`))) editor.remove(agent.id);
       }
-      if (editor.get(BROKER) === undefined) {
-        throw new Error("Protected broker agent is missing from the managed configuration");
-      }
+      // V2 can replay this transform while configuration registrations are
+      // being replaced. update creates a missing entry; throwing here would
+      // permanently disable enforcement during that ordinary reload window.
       editor.update(BROKER, (agent) => {
         agent.name = BROKER;
         agent.description = DESCRIPTION;
@@ -70,6 +70,36 @@ export default {
         agent.color = undefined;
         agent.request = { settings: {}, headers: {}, body: {} };
       });
+    };
+
+    // Configuration is an internal post-plugin in V2. Its transform can run
+    // after external setup and replace the broker. Deny tool authorization
+    // independently, including during that activation window.
+    await ctx.permission.hook("evaluate", (evaluation) => {
+      if (evaluation.agent === BROKER || evaluation.agent?.endsWith(`/${BROKER}`)) {
+        evaluation.effect = "deny";
+      }
     });
+    let registration = await ctx.agent.transform(enforce);
+    const controller = new AbortController();
+    const updates = (async () => {
+      for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+        if (controller.signal.aborted) break;
+        if (event.type !== "plugin.updated") continue;
+        // Activation has installed the internal configuration transform by
+        // this point. Reinsert our transform last, also after plugin reloads.
+        await registration.dispose();
+        registration = await ctx.agent.transform(enforce);
+      }
+    })().catch((error) => {
+      if (!controller.signal.aborted) {
+        console.error("ERROR: protected broker registry enforcement stopped");
+      }
+    });
+    return async () => {
+      controller.abort();
+      await updates;
+      await registration.dispose();
+    };
   },
 };

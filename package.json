@@ -16,12 +16,19 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "dependencies": {
-    "@playwright/mcp": "0.0.78"
+    "@playwright/mcp": "0.0.78",
+    "effect": "4.0.0-rc.112"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.31",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4.3.2",
     "@types/react-dom": "^19.2.3"
+  },
+  "overrides": {
+    "toml": "5.0.1",
+    "imapflow@1.4.7": {
+      "nodemailer": "10.2.1"
+    }
   }
 }

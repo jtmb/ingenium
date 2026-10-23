@@ -72,22 +72,16 @@ coordination tool is not a supported transport canary.
 5. Do not call mutation REST endpoints directly from an extension or MCP client,
    and do not open the database outside the API boundary.
 
-## Replacement-first recovery
+## Ordinary restart
 
-Managed TUI recovery is private, replacement-first, and fail-closed. Before a
-restart, perform a read-only preflight and retain the exact project, workspace,
-storage mapping, canonical worktree, parent/session binding, enrollment, changed
-paths, checks, `TodoWrite`, status, and `nextWork` state.
+Multichat orchestration and coordinated replacement-parent recovery are retired.
+The managed `production-restart`, `recovery-preflight` and `recovery-prepare`
+commands refuse execution. Historical source and failure records are retained.
 
-The replacement must be enrolled, owned by an independent supervisor, healthy on
-the current merged source, and able to reconnect before the old parent is
-signalled or retired. Preserve rollback/adoption evidence, fence stale parents,
-and never replay an uncertain mutation. Private recovery handoff artifacts and
-authenticated internal recovery routes are not public MCP coordination tools.
-
-Source tests, deployed canaries, and actual model/session replay prove different
-boundaries. Only real session reconnect/resume and `TodoWrite` replay prove the
-live recovery boundary.
+Restart the application through its documented Docker Compose deployment after
+saving in-flight work. Keep its persistent data/config/session volumes mounted;
+never remove volumes as part of a restart. Reopen the saved session after health
+checks pass. Single-chat memory and session persistence remain supported.
 
 ## Credential refresh
 

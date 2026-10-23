@@ -1,9 +1,10 @@
-import { logger, runtimes } from "ingenium-core";
+import { getDb, logger, runtimes } from "ingenium-core";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "../config/index.js";
 import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from "./runtime-opencode-context.js";
+import { isLocalRuntimeBinding } from "./runtime-provisioner.js";
 
 /**
  * Server-side typed HTTP client for the OpenCode v2.0.11 `/api/**` surface.
@@ -1155,7 +1156,7 @@ export async function request<T>(
   } = {},
 ): Promise<OpenCodeResult<T>> {
   const target = currentOpenCodeRuntimeTarget();
-  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  const auth = target ? (target.authHeader ?? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null)) : buildAuthHeader();
   if (!target && !auth) {
     return {
       error: {
@@ -1189,6 +1190,9 @@ export async function request<T>(
 
   const headers: Record<string, string> = { Accept: "application/json" };
   if (auth) headers.Authorization = auth;
+  // V2 selects location-scoped registries from this header when the request
+  // has no explicit location query (including agent/provider/MCP catalogs).
+  if (target?.directory) headers["x-opencode-directory"] = encodeURIComponent(target.directory);
   if (body !== undefined) {
     headers["Content-Type"] = "application/json";
   }
@@ -1316,7 +1320,7 @@ async function streamRequest(
   extraHeaders?: Record<string, string>,
 ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> {
   const target = currentOpenCodeRuntimeTarget();
-  const auth = target ? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null) : buildAuthHeader();
+  const auth = target ? (target.authHeader ?? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null)) : buildAuthHeader();
   if (!target && !auth) {
     return {
       error: {
@@ -2089,8 +2093,19 @@ export const opencodeClient = {
 
   /** GET /api/agent [agent.list] — v2 agents expose `permissions`, not `permission`. */
   listAgents: async (): Promise<OpenCodeResult<AgentInfo[]>> => {
-    const result = await v2Data<V2AgentInfo[]>("/api/agent");
+    // A cold V2 location activates plugins asynchronously and initially returns
+    // an empty registry. Its built-in agents guarantee a nonempty ready result.
+    // Give activation a bounded chance instead of presenting an empty roster.
+    let result = await v2Data<V2AgentInfo[]>("/api/agent");
+    for (const delay of [100, 250, 500, 1000, 2000]) {
+      if (isOpenCodeError(result) || result.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      result = await v2Data<V2AgentInfo[]>("/api/agent");
+    }
     if (isOpenCodeError(result)) return result;
+    if (result.length === 0) {
+      return { error: { code: "OPENCODE_STARTING", message: "OpenCode agent registry is still starting" } };
+    }
     return result.map((agent) => ({
       id: agent.id,
       name: agent.name,
@@ -2288,7 +2303,7 @@ export async function brokerExecute(params: {
   const source = "opencode-broker";
   const timeout = resolveBrokerTimeout(params.timeoutMs, params.timeoutPolicy);
   const timeoutMs = timeout.effectiveTimeoutMs;
-  const created = await opencodeClient.createSession({ title: "ingenium-llm-broker" });
+  const created = await opencodeClient.createSession({ title: "ingenium-llm-broker" }, currentOpenCodeRuntimeTarget()?.directory);
 
   if (isOpenCodeError(created)) {
     logger.warn(source, "Failed to create broker session", {
@@ -2298,17 +2313,31 @@ export async function brokerExecute(params: {
   }
 
   const sessionId = created.id;
+  const instructionKey = "ingenium-broker-system";
+  const instructionPath = `/api/experimental/session/${pathSegment(sessionId)}/instructions/entries/${instructionKey}`;
+  let instructionAttempted = false;
   logger.debug(source, `Created broker session ${sessionId}`, {
     providerID: params.providerID,
     modelID: params.modelID,
   });
 
   try {
+    instructionAttempted = true;
+    const instructed = await request<unknown>(instructionPath, {
+      method: "PUT",
+      body: { value: params.system },
+    });
+    if (isOpenCodeError(instructed)) {
+      logger.warn(source, `Failed to attach instructions for broker session ${sessionId}`, {
+        code: instructed.error.code,
+      });
+      return { ok: false, content: "", error: "broker request failed" };
+    }
+
     const sent = await opencodeClient.sendPrompt(sessionId, {
       parts: [{ type: "text", text: params.user }],
       model: { providerID: params.providerID, modelID: params.modelID },
       agent: LLM_BROKER_AGENT,
-      system: params.system,
       // This is an explicit empty selection; the selected agent's wildcard
       // deny is the authoritative capability boundary.
       tools: {},
@@ -2356,6 +2385,14 @@ export async function brokerExecute(params: {
     logger.error(source, `Broker session ${sessionId} failed`, { error });
     return { ok: false, content: "", error: "broker execution failed" };
   } finally {
+    if (instructionAttempted) {
+      const removed = await request<unknown>(instructionPath, { method: "DELETE" });
+      if (isOpenCodeError(removed)) {
+        logger.warn(source, `Failed to remove instructions for broker session ${sessionId}`, {
+          code: removed.error.code,
+        });
+      }
+    }
     const deleted = await opencodeClient.deleteSession(sessionId);
     if (isOpenCodeError(deleted)) {
       logger.warn(source, `Failed to delete broker session ${sessionId}`, {
@@ -2391,8 +2428,23 @@ export function createBackgroundSynthesisBrokerExecutor(projectId: string): (par
 }) => Promise<{ ok: boolean; content: string; error?: string }> {
   return async ({ system, user, timeoutMs }) => {
     const runtime = runtimes.getReadyRuntimeForProject(projectId);
-    if (runtime) {
-      return withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098` }, () => executeSynthesisBroker({
+    if (runtime && isLocalRuntimeBinding(runtime, projectId)) {
+      const foreignPrivate = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+        "SELECT 1 FROM observations WHERE project_id = ? AND status = 'pending' AND visibility = 'private' AND owner_user_id IS NOT ? LIMIT 1",
+      ).get(projectId, runtime.ownerUserId);
+      if (foreignPrivate) return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+      const foreignPrivateTrait = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+        "SELECT 1 FROM personality_traits WHERE project_id = ? AND visibility = 'private' AND is_active = 1 AND owner_user_id IS NOT ? LIMIT 1",
+      ).get(projectId, runtime.ownerUserId);
+      if (foreignPrivateTrait) return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+      let authHeader: string | null;
+      try {
+        authHeader = buildAuthHeader();
+      } catch {
+        return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+      }
+      if (!authHeader) return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+      return withOpenCodeRuntimeTarget({ baseUrl: "http://127.0.0.1:4098", authHeader, directory: "/workspace" }, () => executeSynthesisBroker({
         projectId,
         system,
         user,

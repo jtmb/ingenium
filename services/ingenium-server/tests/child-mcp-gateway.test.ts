@@ -37,6 +37,7 @@ const runtimeDirectories: string[] = [];
 describe("compatibility runtime MCP launcher handoff", () => {
   const launcherTemplate = readFileSync(new URL("../../../scripts/start-opencode-web.sh", import.meta.url), "utf8")
     .replace("node /app/scripts/probe-api.mjs", "true")
+    .replace('opencode_server_password="$(cat /run/ingenium-secrets/opencode/opencode-server-password)"', 'opencode_server_password="test-password"')
     .replace("opencode serve --port 4098 --hostname 127.0.0.1", `${process.execPath} -e 'console.log(JSON.stringify(process.env))'`);
   const identity = {
     INGENIUM_PROJECT: "ingenium",
@@ -79,8 +80,8 @@ describe("compatibility runtime MCP launcher handoff", () => {
       expect(environment.INGENIUM_MCP_AUDIENCE).toBe("runtime");
       const config = JSON.parse(environment.OPENCODE_CONFIG_CONTENT.replace(/\{env:([^}]+)\}/g,
         (_match: string, key: string) => environment[key]));
-      expect(config.mcp.ingenium).toMatchObject({
-        enabled: true,
+      expect(config.mcp.servers.ingenium).toMatchObject({
+        disabled: false,
         command: ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
         environment: { INGENIUM_MCP_AUDIENCE: "runtime", INGENIUM_MCP_CREDENTIAL_PURPOSE: "runtime",
           INGENIUM_RUNTIME_CREDENTIAL_FILE: launcherFixture.runtimeCapabilityPath,

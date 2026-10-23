@@ -33,23 +33,25 @@ do not set `INGENIUM_MCP_CREDENTIAL` inline in tracked configuration.
 ```jsonc
 {
   "mcp": {
-    "ingenium": {
-      "type": "local",
-      "command": ["npx", "-y", "@ingenium/extension"],
-      "enabled": true,
-      "environment": {
-        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
-        "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
-        "INGENIUM_API_TIMEOUT": "10000",
-        "LOG_LEVEL": "info"
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["npx", "-y", "@ingenium/extension"],
+        "disabled": false,
+        "environment": {
+          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+          "INGENIUM_MCP_CREDENTIAL_FILE": ".opencode/.ingenium-mcp-credential",
+          "INGENIUM_MCP_CREDENTIAL_PURPOSE": "general",
+          "INGENIUM_API_TIMEOUT": "10000",
+          "LOG_LEVEL": "info"
+        }
       }
     }
   }
 }
 ```
 
-The extension package ships five OpenCode plugins — `auto-observer.ts` (thin session-idle trigger for server-side behavior extraction), `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based Git-authoritative resource projection for skills, agents, plugins, and commands), `lifecycle.ts` (v2 session reads for automatic context upload and metadata-only usage telemetry), and the `ponytail` adapter. Reference them in your OpenCode config:
+The extension package ships five native V2 OpenCode plugin adapters — auto-observer, observer, resource-sync, lifecycle, and Ponytail. Reference their adapter directories in OpenCode config:
 
 `resource-sync.ts` is the Git-authoritative projection path: Git worktree files
 flow through the extension, configured MCP stdio, authenticated API, and then
@@ -59,12 +61,12 @@ OpenCode restart.
 
 ```jsonc
 {
-  "plugin": [
-    "file://{env:PWD}/packages/ingenium-extension/plugins/auto-observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/observer.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/resource-sync.ts",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/lifecycle.ts",
-    "file://{env:PWD}/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"
+  "plugins": [
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/auto-observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
   ]
 }
 ```
@@ -358,8 +360,8 @@ lifecycle, partial-cost, UTC, freshness, project reset, and export details.
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
 - Use the composer controls **Use memory** (off by default), **Save message** (one-shot), and **Learning tools** (on by default) independently. The saved-memory controls stay disabled until the selected project has a confirmed authorized workspace. Accepted saves report saving, saved, queued, or failed status; queued outcomes provide status checking before an identical retry.
 - Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
-- Fork, share (copy link to clipboard), and compact conversations via header action buttons.
-- Provider-emitted reasoning appears live in a separate escaped plain-text disclosure above the assistant answer. OpenCode 1.18.31 identifies the reasoning part in `message.part.updated` before sending its `field: "text"` deltas, and Chat uses that authoritative part mapping to keep reasoning out of the rendered Markdown answer and copy. The disclosure remains open while streaming, then becomes user-toggleable after the terminal event.
+- Fork, share (copy an existing share URL; OpenCode V2 cannot create or remove share links), and compact conversations via header action buttons.
+- Provider-emitted reasoning appears live in a separate escaped plain-text disclosure above the assistant answer. In the API's SSE projection, `message.part.updated` identifies reasoning parts (`part.type: "reasoning"`) and `message.part.delta` carries their text with `field: "text"`; Chat uses that authoritative part mapping to keep reasoning out of the rendered Markdown answer and copy. The disclosure remains open while streaming, then becomes user-toggleable after the terminal event.
 - Tool calls appear as compact trace rows with a friendly tool label and short argument summary. **Web Search is the sole exception**: its row provides an accessible inline disclosure of the actual query (keyboard support and `aria-expanded` state). When the provider returns concrete sites, only validated `http`/`https` URLs are disclosed, grouped as **Visited**, **Results**, or **Sites**; query text cannot fabricate a site, and result titles/arbitrary payload fields are omitted. External links open with `target="_blank"` and `rel="noopener noreferrer"`. All other tools remain non-interactive compact traces; detailed payload, status, timing, output, and error metadata are not shown in the trace.
 - Open the **Activity** drawer from a selected assistant tool activity to inspect a chronological timeline of reasoning, response text, and tool events. The modal traps focus, restores focus on close, supports `Escape` and backdrop dismissal, and is full-width on small screens.
 - Assistant prose, reasoning, stream activity/errors, generated attachments, Chat-only Markdown callouts, and agent permission/question prompts use borderless, background-free plain flow. User-message bubbles retain their selected-surface styling; Docs Markdown callouts are unaffected.

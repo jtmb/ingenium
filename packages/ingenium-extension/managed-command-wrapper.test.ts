@@ -1596,21 +1596,16 @@ describe("managed command wrappers", () => {
       expect(runnerCall[2].env.INGENIUM_RECOVERY_ATTESTED_CONTEXT).toContain(sha256(bytes));
       expect(runnerCall[2]).not.toHaveProperty("timeout");
 
-      runManagedCommandCli(
-        "build",
-        ["node", "build-command", "deployment", "production-restart"],
-        { runRecoveryBootstrap, runCommand },
-      );
-
-      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
-      expect(runCommand).not.toHaveBeenCalled();
-      expect(process.exitCode).toBe(0);
       expect(() => runManagedCommandCli(
-        "build",
-        ["node", "build-command", "deployment", "production-restart", "extra"],
+        "build", ["node", "build-command", "deployment", "production-restart"],
         { runRecoveryBootstrap, runCommand },
-      )).toThrow("Managed wrapper requires one encoded argv payload");
-      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      )).toThrow("Multichat coordinated recovery is retired");
+      expect(runRecoveryBootstrap).not.toHaveBeenCalled();
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(() => runManagedCommandCli(
+        "build", ["node", "build-command", "deployment", "production-restart", "extra"],
+        { runRecoveryBootstrap, runCommand },
+      )).toThrow("Multichat coordinated recovery is retired");
     } finally {
       process.exitCode = priorExitCode;
     }
@@ -1621,8 +1616,7 @@ describe("managed command wrappers", () => {
     const runCommand = vi.fn(() => 0);
     const priorExitCode = process.exitCode;
     try {
-      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-prepare"], { runRecoveryBootstrap, runCommand });
-      expect(runRecoveryBootstrap).toHaveBeenCalledWith(expect.any(String), { preparation: true });
+      expect(() => runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-prepare"], { runRecoveryBootstrap, runCommand })).toThrow("Multichat coordinated recovery is retired");
       for (const args of [
         ["deployment", "recovery-prepare", "extra"], ["deployment", "recovery-prepare", "/tmp/payload"],
         ["deployment", "recovery-prepare;id"], ["deployment", "recovery-prepare\n"],
@@ -1630,7 +1624,7 @@ describe("managed command wrappers", () => {
         [Buffer.from(JSON.stringify(["deployment", "recovery-prepare"])).toString("base64url")],
         ["node", recoveryBootstrapShim, "recovery-prepare"],
       ]) expect(() => runManagedCommandCli("build", ["node", "build-command", ...args], { runRecoveryBootstrap, runCommand })).toThrow();
-      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      expect(runRecoveryBootstrap).not.toHaveBeenCalled();
       expect(runCommand).not.toHaveBeenCalled();
       expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["deployment", "recovery-prepare"])).toString("base64url"))).toThrow("exact literal");
       const descriptor = openSync("/dev/null", constants.O_RDONLY);
@@ -1652,11 +1646,10 @@ describe("managed command wrappers", () => {
     const runCommand = vi.fn(() => 0);
     const priorExitCode = process.exitCode;
     try {
-      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
-        runRecoveryBootstrap,
-        runCommand,
-      });
-      expect(runRecoveryBootstrap).toHaveBeenCalledWith(expect.any(String), { preflight: true });
+      expect(() => runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
+        runRecoveryBootstrap, runCommand,
+      })).toThrow("Multichat coordinated recovery is retired");
+      expect(runRecoveryBootstrap).not.toHaveBeenCalled();
       for (const args of [
         ["deployment", "recovery-preflight", "extra"], ["deployment", "recovery-preflight", "/tmp/payload"],
         ["deployment", "recovery-preflight;id"], ["deployment", "recovery-preflight\n"],
@@ -1667,7 +1660,7 @@ describe("managed command wrappers", () => {
         runRecoveryBootstrap,
         runCommand,
       })).toThrow();
-      expect(runRecoveryBootstrap).toHaveBeenCalledOnce();
+      expect(runRecoveryBootstrap).not.toHaveBeenCalled();
       expect(runCommand).not.toHaveBeenCalled();
       expect(() => decodeManagedBuildArgv(Buffer.from(JSON.stringify(["deployment", "recovery-preflight"])).toString("base64url")))
         .toThrow("exact literal");
@@ -1699,11 +1692,10 @@ describe("managed command wrappers", () => {
       })).toBe(1);
 
       runRecoveryBootstrap.mockReturnValueOnce(1);
-      runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
-        runRecoveryBootstrap,
-        runCommand,
-      });
-      expect(process.exitCode).toBe(1);
+      expect(() => runManagedCommandCli("build", ["node", "build-command", "deployment", "recovery-preflight"], {
+        runRecoveryBootstrap, runCommand,
+      })).toThrow("Multichat coordinated recovery is retired");
+      expect(process.exitCode).toBe(priorExitCode);
 
       const forged = JSON.stringify({ schemaVersion: 1, kind: "source-bootstrap", sourcePath: recoveryBootstrapShim,
         repositoryRoot, head: "a".repeat(40), sourceSha256: sha256(readFileSync(recoveryBootstrapShim)) });

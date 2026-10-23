@@ -6,7 +6,7 @@ This file is the short orientation map for people and agents working in the Inge
 
 | Concern | Source |
 |---|---|
-| Root agent/model list + MCP + plugins | [`opencode.json`](opencode.json) — authoritative `agent` map; [`.opencode/models.md`](.opencode/models.md) is a reference |
+| Root agent/model list + MCP + plugins | [`opencode.json`](opencode.json) — authoritative `agents` map; [`.opencode/models.md`](.opencode/models.md) is a reference |
 | Agent prompts/permissions | [`.opencode/agents/**`](.opencode/agents/) per-agent frontmatter |
 | Conventions/skills | [`.opencode/skills/*/SKILL.md`](.opencode/skills/) (8 canonical) + [extension Ponytail](packages/ingenium-extension/ponytail/skills/ponytail/SKILL.md) |
 | Commands | [`.opencode/commands/*.md`](.opencode/commands/) |
@@ -44,25 +44,25 @@ Ingenium is a local-first, self-hosted AI developer workspace built around OpenC
 
 ## Agents and topology
 
-The authoritative agent list is the `agent` map in root [`opencode.json`](opencode.json). Profile files supply prompts, lifecycle metadata, skills, and permissions; root `opencode.json` supplies the runtime model and variant.
+The authoritative agent list is the `agents` map in root [`opencode.json`](opencode.json). Profile files supply prompts, lifecycle metadata, skills, and permissions; root `opencode.json` supplies the native `provider/model#variant` reference.
 
 | Agent | Role and current model/variant | Mode / hidden | Writer? |
 |---|---|---|---|
 | `plan` | Built-in coordination, read-only; questions allowed; task only `ingenium-explore`; `openai/gpt-6-astra / max` | built-in / n/a | No |
-| `ingenium-orchestrator` | Primary coordination; direct-first with explicit scoped `read`/`glob`/`grep` and instrumented `edit`/`write` grants; TodoWrite; scoped Git/GitHub Bash; `openai/gpt-5.6-sol / medium` | primary / visible | Yes, scoped |
-| `ingenium-chat` | Read-only chat primary; `openai/gpt-5.6-luna / max` | primary / hidden | No |
-| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-5.6-sol / high` | subagent / visible | Yes |
-| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-astra / max` | subagent / visible | Yes |
-| `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-5.6-luna / max` | subagent / visible | Yes |
-| `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-5.6-sol / high` | subagent / visible | Yes, scoped |
-| `ingenium-explore` | Read-only search and codebase exploration; `openai/gpt-5.6-sol / medium` | subagent / visible | No |
-| `ingenium-scout` | Read-only Docs RAG plus coordination status/memory retrieval; `openai/gpt-5.6-luna / max` | subagent / visible | No |
-| `ingenium-qa` | One targeted review per finalized implementation boundary; `openai/gpt-5.6-luna / max` | subagent / visible | No |
+| `ingenium-orchestrator` | Primary coordination; direct-first with explicit scoped `read`/`glob`/`grep` and instrumented `edit`/`write` grants; TodoWrite; scoped Git/GitHub Bash; `openai/gpt-6-sol / medium` | primary / visible | Yes, scoped |
+| `ingenium-chat` | Chat primary with explicit saved-memory tools; `openai/gpt-6-luna / xhigh` | primary / hidden | No |
+| `ingenium-software-engineer-fast` | Routine, isolated implementation; `openai/gpt-6-luna / xhigh` | subagent / visible | Yes |
+| `ingenium-software-engineer-premium` | Critical or cross-cutting implementation; Docker/Compose deployment owner; `openai/gpt-6-sol / high` | subagent / visible | Yes |
+| `ingenium-docs` | Canonical documentation; never `next-steps-plan/**`; `openai/gpt-6-luna / xhigh` | subagent / visible | Yes |
+| `ingenium-recovery-engineer` | Fixed restart and recovery-evidence checkpoints only; scoped paths; `openai/gpt-6-sol / high` | subagent / visible | Yes, scoped |
+| `ingenium-explore` | Read-only search and codebase exploration; `openai/gpt-6-sol / medium` | subagent / visible | No |
+| `ingenium-scout` | Read-only Docs RAG plus coordination status/memory retrieval; `openai/gpt-6-luna / xhigh` | subagent / visible | No |
+| `ingenium-qa` | One targeted review per finalized implementation boundary; `openai/gpt-6-luna / xhigh` | subagent / visible | No |
 | `ingenium-security-auditor` | Bounded current-diff security review for a predeclared surface; `openai/gpt-6-astra / high` | subagent / visible | No |
 
 `browser-agent` is **removed** from the topology: never route, mention it as active, or substitute it, including for website retrieval. `ingenium-qa-vision` is retired and has no root mapping; generic managed Playwright and passive visual QA belong to `@ingenium-qa`. The hidden system agent `ingenium-llm-broker` is profile-only, wildcard-denied, has no `opencode.json` mapping, and is never invoked. Profile files and the root map are kept aligned by the agent lifecycle; if they disagree, `opencode.json` wins for the agent list.
 
-Profiles are categorized under `.opencode/agents/` by responsibility: `primary/`, `chat/`, `research/`, `execution/`, and `security/`. The root map is the runtime roster; a profile that is present on disk but absent from that map is not an additional mapped agent.
+Plan uses the root profile `.opencode/agents/plan.md` and native ID `plan`. Named Ingenium profiles are categorized under `.opencode/agents/` by responsibility: `primary/`, `chat/`, `research/`, `execution/`, and `security/`. The root map is the runtime roster; a profile that is present on disk but absent from that map is not an additional mapped agent.
 
 ## Orchestration essentials
 

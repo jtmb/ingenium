@@ -1,10 +1,11 @@
 ---
-name: ingenium-llm-broker
 description: "Internal agent for Ingenium LLM broker — never invoke directly"
 mode: subagent
 hidden: true
-permission:
-  "*": deny
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
 ---
 
 This agent is reserved for system use. Do not invoke directly.

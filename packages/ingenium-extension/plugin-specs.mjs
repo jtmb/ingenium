@@ -31,11 +31,11 @@ export const CANONICAL_PLUGIN_RUNTIME_ASSETS = Object.freeze([
 ]);
 
 /**
- * The V2 Ponytail adapter resolves the vendored helper modules at runtime, so
- * the closure cannot follow them as static imports. Keep them as explicit
- * runtime assets.
+ * The V2 Ponytail adapter and recovery source verifier read runtime files by
+ * path, so the closure cannot follow them as static imports.
  */
 export const CANONICAL_PLUGIN_RUNTIME_ASSETS_V2 = Object.freeze([
+  "scripts/source-snapshot.mjs",
   "ponytail/hooks",
   "ponytail/.opencode/plugins/ponytail-frontmatter.cjs",
 ]);

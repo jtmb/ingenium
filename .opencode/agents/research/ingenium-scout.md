@@ -1,29 +1,54 @@
 ---
-name: ingenium-scout
 description: "RAG-aware research agent for Docs RAG context retrieval. Searches past decisions and reports findings for the caller to persist when needed."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  question: deny
-  edit: deny
-  write: deny
-  bash: deny
-  playwright_*: deny
-  ingenium_docs_search: allow
-  ingenium_docs_search_semantic: allow
-  ingenium_docs_get_page: allow
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_search_semantic
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
 
 ## 🔴 MANDATORY PREFLIGHT — Load Before Any Action

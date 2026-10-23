@@ -1,59 +1,145 @@
 ---
-name: ingenium-recovery-engineer
 description: "Permission-derived deployment writer for the fixed recovery preparation, production restart, and recovery evidence checkpoints. Use only when the orchestrator assigns an explicit recovery boundary."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit:
-    "*": deny
-    "docs/reference/ROADMAP.md": allow
-    "tests/artifacts/tui-recovery/**": allow
-  write:
-    "*": deny
-    "docs/reference/ROADMAP.md": allow
-    "tests/artifacts/tui-recovery/**": allow
-  bash:
-    "*": deny
-    "ingenium-build deployment production-restart": allow
-    "ingenium-build deployment recovery-prepare": allow
-    "ingenium-build deployment recovery-preflight": allow
-    "git status": allow
-    "git diff -- docs/reference/ROADMAP.md": allow
-    "git diff -- tests/artifacts/tui-recovery/*": allow
-    "git diff --cached -- docs/reference/ROADMAP.md": allow
-    "git diff --cached -- tests/artifacts/tui-recovery/*": allow
-    "git log --oneline -10": allow
-    "git blame *": allow
-    "git ls-files *": allow
-    "git ls-tree *": allow
-    "git rev-parse *": allow
-    "git add -- docs/reference/ROADMAP.md": allow
-    "git add -- tests/artifacts/tui-recovery/*": allow
-    "git commit -m 'recovery evidence checkpoint'": allow
-  todowrite: allow
-  glob: allow
-  grep: allow
-  webfetch: deny
-  websearch: deny
-  task:
-    "*": deny
-  playwright_*: deny
-  browser_*: deny
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: edit
+    resource: docs/reference/ROADMAP.md
+    effect: allow
+  - action: edit
+    resource: "tests/artifacts/tui-recovery/**"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: ingenium-build deployment production-restart
+    effect: allow
+  - action: shell
+    resource: ingenium-build deployment recovery-prepare
+    effect: allow
+  - action: shell
+    resource: ingenium-build deployment recovery-preflight
+    effect: allow
+  - action: shell
+    resource: git status
+    effect: allow
+  - action: shell
+    resource: git diff -- docs/reference/ROADMAP.md
+    effect: allow
+  - action: shell
+    resource: "git diff -- tests/artifacts/tui-recovery/*"
+    effect: allow
+  - action: shell
+    resource: git diff --cached -- docs/reference/ROADMAP.md
+    effect: allow
+  - action: shell
+    resource: "git diff --cached -- tests/artifacts/tui-recovery/*"
+    effect: allow
+  - action: shell
+    resource: git log --oneline -10
+    effect: allow
+  - action: shell
+    resource: "git blame *"
+    effect: allow
+  - action: shell
+    resource: "git ls-files *"
+    effect: allow
+  - action: shell
+    resource: "git ls-tree *"
+    effect: allow
+  - action: shell
+    resource: "git rev-parse *"
+    effect: allow
+  - action: shell
+    resource: git add -- docs/reference/ROADMAP.md
+    effect: allow
+  - action: shell
+    resource: "git add -- tests/artifacts/tui-recovery/*"
+    effect: allow
+  - action: shell
+    resource: git commit -m 'recovery evidence checkpoint'
+    effect: allow
+  - action: todowrite
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
+
+> Release scope update (2026-10-23): multichat orchestration and coordinated
+> replacement-parent recovery are retired. Do not invoke `production-restart`,
+> `recovery-preflight`, `recovery-prepare`, or parent recovery publisher tools.
+> Use ordinary Docker Compose startup/restart for the authorized deployment,
+> preserve its persistent volumes, and verify normal single-chat persistence.
+> This update supersedes coordinated recovery requirements below; retained
+> historical failure evidence does not make that retired feature a release gate.
+
 
 # Recovery Engineer — Finite Recovery Execution
 

@@ -6,6 +6,7 @@ import { isControlPlaneMode } from "./runtime-mode.js";
 export interface OpenCodeRuntimeTarget {
   baseUrl: string;
   password?: string;
+  authHeader?: string;
   /** Native OpenCode directory used to bind runtime requests to the workspace. */
   directory?: string;
 }

@@ -10,7 +10,7 @@ const EXTENSION_EXECUTABLES = [
   "repository-command", "build-command", "coordination-reset", "production-restart", "opencode", "recovery-owner",
 ].map((name) => `scripts/${name}.js`);
 const EXTENSION_REQUIRED = [
-  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", ...EXTENSION_EXECUTABLES,
+  "index.js", "index.d.ts", "config/index.js", "scripts/mcp-transport.js", "scripts/source-snapshot.mjs", ...EXTENSION_EXECUTABLES,
   ...[
     "auto-observer", "observer", "resource-sync", "lifecycle", "ponytail",
   ].flatMap((name) => [
@@ -128,9 +128,22 @@ export function buildDistributions({
       const candidate = stages[1].candidate;
       for (const directory of ["config", "lib"]) cpSync(join(stages[0].candidate, directory), join(candidate, directory), { recursive: true });
       cpSync(join(stages[0].candidate, "scripts/mcp-server.js"), join(candidate, "scripts/mcp-transport.js"));
+      const sourceHelper = join(extension, "scripts/source-snapshot.mjs");
+      const helperStat = lstatSync(sourceHelper);
+      if (!helperStat.isFile() || helperStat.isSymbolicLink() || helperStat.nlink !== 1
+        || helperStat.uid !== process.getuid() || (helperStat.mode & 0o002) !== 0 || helperStat.size < 1
+        || helperStat.size > 64 * 1024) throw new Error("Distribution snapshot helper is unsafe");
+      const helperBytes = readFileSync(sourceHelper);
+      const helperDigest = createHash("sha256").update(helperBytes).digest("hex");
+      const packagedHelper = join(candidate, "scripts/source-snapshot.mjs");
+      writeFileSync(packagedHelper, helperBytes, { flag: "wx", mode: 0o444 });
       requireArtifacts(candidate, EXTENSION_REQUIRED);
       for (const path of EXTENSION_EXECUTABLES) chmodSync(join(candidate, path), 0o555);
       parity(root, candidate);
+      if (createHash("sha256").update(readFileSync(sourceHelper)).digest("hex") !== helperDigest
+        || createHash("sha256").update(readFileSync(packagedHelper)).digest("hex") !== helperDigest) {
+        throw new Error("Distribution snapshot helper changed");
+      }
     }
     for (const stage of stages) {
       stage.candidateManifest = manifest(stage.candidate);

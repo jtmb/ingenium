@@ -87,6 +87,8 @@ test("projected config, launcher environment and same-path mount match the issue
     });
     assert.equal(launch.status, 0, launch.stderr);
     for (const [key, value] of Object.entries(expected)) assert.ok(launch.stdout.split("\n").includes(`${key}=${value}`));
+    assert.ok(launch.stdout.split("\n").includes("OPENCODE_CONFIG_DIR=/home/ingenium-opencode/.config/opencode"));
+    assert.ok(launch.stdout.split("\n").includes("OPENCODE_CONFIG=/usr/local/share/ingenium/opencode-managed/opencode.json"));
     assert.ok(!launch.stdout.includes("must-not-inherit"));
     const supervisor = readFileSync(new URL("../supervisord.conf", import.meta.url), "utf8");
     const priority = (name) => Number(supervisor.split(`[program:${name}]`)[1].split("[program:")[0].match(/^priority=(\d+)$/m)[1]);

@@ -49,6 +49,17 @@ the upstream session-export command. For `opencode export <session-id>` and the
 verified OpenCode 1.18.30 framing/privacy caveats, see
 [`OpenCode usage`](../../docs/usage/opencode.md#session-export-from-the-installed-cli).
 
+### Pinned host-build provenance
+
+Build package distributions with `npm run build --workspace=packages/ingenium-extension`.
+The host installer is `npm run install:host-build --workspace=@ingenium/extension -- --expected-head <40 lowercase hex> [--expected-source-digest <64 lowercase hex> --expected-helper-sha256 <64 lowercase hex>]`.
+Snapshot mode requires all three pins. Its private release manifest uses schema
+version 2; the source inventory itself uses version 1. The working-tree source
+digest excludes `docs/reference/ROADMAP.md`; the build instead copies that ledger
+from the exact expected HEAD and records its Git blob ID, SHA-256, and `0644` mode
+separately. The verifier helper is checked before it is loaded, and the source
+inventory is rechecked around the build.
+
 ## Coordination owner recovery provider
 
 `ingenium-coordination-reset reset` first uses exactly one protected owner-secret

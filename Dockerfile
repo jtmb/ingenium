@@ -45,19 +45,17 @@ RUN npm run build --workspaces --if-present
 
 RUN npm prune --omit=dev
 
-FROM node:22-slim AS runtime-base
+# npm can keep incompatible or pinned versions inside individual workspaces.
+# Preserve those installed dependency trees alongside the root node_modules.
+RUN mkdir -p /tmp/ingenium-workspace-dependencies && \
+    for workspace in packages/ingenium-core packages/ingenium-email packages/ingenium-extension services/ingenium-api services/ingenium-server services/ingenium-dashboard; do \
+      if [ -d "$workspace/node_modules" ]; then \
+        mkdir -p "/tmp/ingenium-workspace-dependencies/$workspace"; \
+        cp -a "$workspace/node_modules" "/tmp/ingenium-workspace-dependencies/$workspace/node_modules"; \
+      fi; \
+    done
 
-# Keep provenance as build arguments because `.git` is excluded from the build
-# context. The revision must be a lowercase full SHA for deployment comparison;
-# source accepts only an HTTPS repository-shaped URL without literal userinfo,
-# query, or fragment components before it becomes public OCI metadata.
-ARG IMAGE_REVISION
-ARG IMAGE_SOURCE="https://github.com/jtmb/ingenium"
-RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
-    case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac && \
-    case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac
-LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
-      org.opencontainers.image.source="${IMAGE_SOURCE}"
+FROM node:22-slim AS runtime-base
 
 ARG OPENCODE_VERSION=2.0.11
 ARG OPENCODE_SHA256=59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13
@@ -193,6 +191,9 @@ COPY --from=builder --chown=root:root /app/packages/ingenium-extension/package.j
 # OpenCode loads these TypeScript entrypoints directly. The builder derives and
 # validates their complete local graph plus Ponytail's dynamic runtime assets.
 COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension
+COPY --from=builder --chown=root:root /tmp/ingenium-workspace-dependencies/ ./
+RUN chmod 0444 /app/packages/ingenium-extension/scripts/source-snapshot.mjs && \
+    test "$(stat -c '%u:%g:%a' /app/packages/ingenium-extension/scripts/source-snapshot.mjs)" = "0:0:444"
 COPY --from=builder --chown=root:root /app/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs /tmp/smoke-opencode-plugin-load.mjs
 RUN node /tmp/smoke-opencode-plugin-load.mjs /app/packages/ingenium-extension /usr/local/bin/opencode && \
     rm /tmp/smoke-opencode-plugin-load.mjs
@@ -249,8 +250,12 @@ COPY --chown=root:root .opencode/skills ./.opencode/skills
 COPY --chown=root:root config/opencode-managed ./config/opencode-managed
 # Copy database migrations (needed for incremental DB upgrades)
 COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
-RUN chown -R root:root /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx && \
-    chmod -R go-w /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx && \
+# COPY already assigns root ownership. Avoid copying every unchanged inode into
+# a new overlay layer; repair only deviations, without following symbolic links.
+RUN find /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx \
+      \( ! -user root -o ! -group root \) -exec chown -h root:root {} + && \
+    find /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx \
+      ! -type l -perm /022 -exec chmod go-w {} + && \
     chmod 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md && \
     install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode && \
     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
@@ -278,10 +283,23 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json
+
+# Keep validated provenance late so a revision change does not rebuild pinned
+# runtime dependencies. Every final target inherits these labels.
+ARG IMAGE_REVISION
+ARG IMAGE_SOURCE="https://github.com/jtmb/ingenium"
+ARG IMAGE_SOURCE_SHA256=""
+RUN test -z "$IMAGE_SOURCE_SHA256" || { test "${#IMAGE_SOURCE_SHA256}" -eq 64 && printf '%s' "$IMAGE_SOURCE_SHA256" | grep -Eq '^[0-9a-f]{64}$'; }
+RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
+    case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac && \
+    case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac
+LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}" \
+      org.ingenium.source.sha256="${IMAGE_SOURCE_SHA256}"
 
 FROM runtime-base AS user-runtime
 USER appuser

@@ -21,6 +21,7 @@ services:
         # supply the checkout SHA explicitly so the image remains traceable.
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     ports:
       # This credential-free desktop gateway must not accept LAN traffic.
@@ -69,7 +70,7 @@ services:
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
-      - ./opencode.json:/app/opencode.json:ro
+      - "${INGENIUM_OPENCODE_CONFIG_FILE:-./opencode.json}:/app/opencode.json:ro"
       # Compose must be started from a WSL/Linux shell with HOME set. The
       # complete host repository root is the workspace contract; do not replace
       # it with a checkout-specific path.
@@ -100,6 +101,7 @@ services:
         NEXT_PUBLIC_RUNTIME_SCHEME: "${INGENIUM_RUNTIME_SCHEME:-http}"
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     container_name: ingenium-control-plane
     labels:
@@ -155,7 +157,7 @@ services:
       - "${OPENCODE_SERVER_PASSWORD_FILE:?OPENCODE_SERVER_PASSWORD_FILE must point to the protected host password}:/run/ingenium-bootstrap/opencode-server-password:ro"
       - "${INGENIUM_EMAIL_ENCRYPTION_KEY_FILE:?INGENIUM_EMAIL_ENCRYPTION_KEY_FILE must point to the protected host key}:/run/ingenium-bootstrap/email-encryption-key:ro"
       - "${INGENIUM_CLOUDFLARE_ROUTES_FILE:-/dev/null}:/etc/ingenium/cloudflare-routes.json:ro"
-      - ./opencode.json:/app/opencode.json:ro
+      - "${INGENIUM_OPENCODE_CONFIG_FILE:-./opencode.json}:/app/opencode.json:ro"
       - "${INGENIUM_RUNTIME_MANAGER_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-manager/token:ro"
       - "${INGENIUM_RUNTIME_GATEWAY_TOKEN_FILE:-/dev/null}:/run/ingenium-runtime-gateway/token:ro"
     networks:
@@ -181,6 +183,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     group_add:
       - "${DOCKER_GID:-999}"
@@ -223,6 +226,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     restart: unless-stopped
     container_name: ingenium-runtime-gateway
     labels:
@@ -274,6 +278,7 @@ services:
       args:
         IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
         IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
+        IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"
     entrypoint: ["/bin/true"]
 
 volumes:

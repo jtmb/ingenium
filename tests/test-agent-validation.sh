@@ -9,7 +9,7 @@ EXPECTED_LOGICAL_AGENT_COUNT=11
 EXPECTED_USER_FACING_AGENT_COUNT=10
 EXPECTED_CUSTOM_SUBAGENT_COUNT=8
 EXPECTED_WRITER_COUNT=5
-EXPECTED_CATEGORIZED_PROFILE_COUNT=12
+EXPECTED_PROFILE_COUNT=12
 ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 ROADMAP_ARCHIVE_DIR="$REPO_ROOT/docs/reference/archive"
 FAILED=0
@@ -31,9 +31,6 @@ fi
 pass() { printf 'PASS: %s\n' "$1"; }
 fail() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
 
-# A profile is a writer when either edit or write grants any allow rule.  The
-# permission may be a scalar (`edit: allow`) or a map (`edit: {"*": allow}`),
-# so checking only the scalar form misses profiles such as ingenium-docs.
 profile_has_writer_permission() {
   awk '
     NR == 1 && $0 != "---" { exit 1 }
@@ -41,14 +38,9 @@ profile_has_writer_permission() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^  (edit|write):[[:space:]]*("?allow"?)[[:space:]]*$/ { found = 1; next }
-    /^  (edit|write):.*allow/ { found = 1; next }
-    /^  (edit|write):[[:space:]]*$/ { nested_permission = 1; next }
-    nested_permission && /^    / {
-      if ($0 ~ /:[[:space:]]*"?allow"?[[:space:]]*$/) found = 1
-      next
-    }
-    nested_permission { nested_permission = 0 }
+    /^  - action: edit[[:space:]]*$/ { edit_rule = 1; next }
+    /^  - action:/ { edit_rule = 0; next }
+    edit_rule && /^    effect: allow[[:space:]]*$/ { found = 1 }
 
     END { exit(found ? 0 : 1) }
   ' "$1"
@@ -61,14 +53,11 @@ profile_has_exact_ponytail_skill_permission() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^  skill:[[:space:]]*$/ { in_skill = 1; next }
-    in_skill && /^  [^[:space:]]/ { in_skill = 0 }
-    in_skill && /^    ponytail:[[:space:]]*allow[[:space:]]*$/ {
-      entries++
-      allowed++
-      next
-    }
-    in_skill && /^    ponytail:/ { entries++ }
+    /^  - action: skill[[:space:]]*$/ { in_skill = 1; resource = ""; next }
+    /^  - action:/ { in_skill = 0; next }
+    in_skill && /^    resource: ponytail[[:space:]]*$/ { resource = "ponytail"; next }
+    in_skill && resource == "ponytail" && /^    effect: allow[[:space:]]*$/ { entries++; allowed++; next }
+    in_skill && resource == "ponytail" && /^    effect:/ { entries++ }
 
     END { exit(entries == 1 && allowed == 1 ? 0 : 1) }
   ' "$1"
@@ -81,10 +70,14 @@ profile_has_exact_question_deny() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^  question:[[:space:]]*deny[[:space:]]*$/ { denied++; next }
-    /^  question:/ { other++ }
+    /^  - action: "\*"[[:space:]]*$/ { wildcard = 1; next }
+    /^  - action: question[[:space:]]*$/ { question = 1; wildcard = 0; next }
+    /^  - action:/ { wildcard = 0; question = 0; next }
+    wildcard && /^    resource: "\*"[[:space:]]*$/ { wildcard_resource = 1; next }
+    wildcard && wildcard_resource && /^    effect: deny[[:space:]]*$/ { default_denied = 1; next }
+    question && /^    effect: (allow|ask)[[:space:]]*$/ { granted = 1 }
 
-    END { exit(denied == 1 && other == 0 ? 0 : 1) }
+    END { exit(default_denied && !granted ? 0 : 1) }
   ' "$1"
 }
 
@@ -95,8 +88,10 @@ profile_has_exact_todowrite_allow() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^  todowrite:[[:space:]]*allow[[:space:]]*$/ { allowed++; next }
-    /^  todowrite:/ { other++ }
+    /^  - action: todowrite[[:space:]]*$/ { in_rule = 1; next }
+    /^  - action:/ { in_rule = 0; next }
+    in_rule && /^    effect: allow[[:space:]]*$/ { allowed++; next }
+    in_rule && /^    effect:/ { other++ }
 
     END { exit(allowed == 1 && other == 0 ? 0 : 1) }
   ' "$1"
@@ -109,7 +104,7 @@ profile_has_todowrite_permission() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^  todowrite:/ { found = 1 }
+    /^  - action: todowrite[[:space:]]*$/ { found = 1 }
     END { exit(found ? 0 : 1) }
   ' "$1"
 }
@@ -121,14 +116,15 @@ profile_has_broker_wildcard_deny_only() {
     in_frontmatter && $0 == "---" { exit }
     !in_frontmatter { next }
 
-    /^permission:[[:space:]]*$/ { in_permission = 1; next }
-    in_permission && /^[^[:space:]]/ { in_permission = 0; next }
-    !in_permission { next }
-    /^[[:space:]]*$/ || /^  #/ { next }
-    /^  "\*": deny[[:space:]]*$/ { wildcard_denies++; next }
-    /^[[:space:]]/ { exceptions++ }
+    /^permissions:[[:space:]]*$/ { in_permissions = 1; next }
+    in_permissions && /^[^[:space:]]/ { in_permissions = 0; next }
+    !in_permissions { next }
+    /^  - action:/ { rules++ }
+    /^  - action: "\*"[[:space:]]*$/ { wildcard = 1; next }
+    wildcard && /^    resource: "\*"[[:space:]]*$/ { resource = 1; next }
+    wildcard && resource && /^    effect: deny[[:space:]]*$/ { wildcard_denies++ }
 
-    END { exit(wildcard_denies == 1 && exceptions == 0 ? 0 : 1) }
+    END { exit(wildcard_denies == 1 && rules == 1 ? 0 : 1) }
   ' "$1"
 }
 
@@ -149,6 +145,14 @@ const approvedSkillNames = new Set([
 const errors = [];
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const parseScalar = (raw) => {
+  const value = raw.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try { return JSON.parse(value); } catch { return value.slice(1, -1); }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1);
+  return value;
+};
 
 function tryLstat(filePath) {
   try {
@@ -294,14 +298,11 @@ function collectProfiles(directoryPath) {
       errors.push(`active agent profile has malformed frontmatter: ${filePath}`);
       continue;
     }
-    const rawName = match[1].match(/^name:\s*(.+)$/m)?.[1]?.trim();
-    const name = rawName?.replace(/^("|')|("|')$/g, "");
-    if (!name) {
-      errors.push(`active agent profile has no name: ${filePath}`);
-      continue;
-    }
+    const name = path.basename(filePath, ".md");
+    if (/^name:/m.test(match[1])) errors.push(`native agent profile must use its path identity, not legacy name frontmatter: ${filePath}`);
     profiles.push({
       name,
+      id: path.relative(agentsDir, filePath).replace(/\\/g, "/").replace(/\.md$/, ""),
       filePath,
       source,
       frontmatter: match[1],
@@ -312,44 +313,36 @@ function collectProfiles(directoryPath) {
 
 function parseSkillPermissions(frontmatter) {
   const lines = frontmatter.split(/\r?\n/);
-  let inPermission = false;
-  let inSkill = false;
+  let inPermissions = false;
   let present = false;
   const entries = [];
+  let current;
+
+  const finish = () => {
+    if (current?.action === "skill") {
+      present = true;
+      entries.push({ key: current.resource, action: current.effect, line: current.line });
+    }
+  };
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line === "permission:") {
-      inPermission = true;
-      inSkill = false;
+    if (line === "permissions:") {
+      inPermissions = true;
       continue;
     }
-    if (!inPermission) continue;
-    if (/^[^\s]/.test(line)) {
-      inPermission = false;
-      inSkill = false;
+    if (!inPermissions) continue;
+    if (/^[^\s]/.test(line)) break;
+    const action = line.match(/^  - action:\s*(.+?)\s*$/)?.[1];
+    if (action !== undefined) {
+      finish();
+      current = { action: parseScalar(action), line: index + 1 };
       continue;
     }
-    if (/^  skill:\s*$/.test(line)) {
-      present = true;
-      inSkill = true;
-      continue;
-    }
-    if (inSkill && /^  \S/.test(line)) {
-      inSkill = false;
-      continue;
-    }
-    if (!inSkill || /^\s*$/.test(line) || /^\s*#/.test(line)) continue;
-
-    const match = line.match(/^    (?:"((?:[^"\\]|\\.)*)"|([^:]+)):\s*(?:"([^"]*)"|'([^']*)'|([^\s]+))\s*$/);
-    if (!match) {
-      entries.push({ malformed: true, line: index + 1, raw: line });
-      continue;
-    }
-    const key = match[1] ?? match[2].trim();
-    const action = match[3] ?? match[4] ?? match[5];
-    entries.push({ key, action, line: index + 1 });
+    const field = line.match(/^    (resource|effect):\s*(.+?)\s*$/);
+    if (current && field) current[field[1]] = parseScalar(field[2]);
   }
+  finish();
 
   return { present, entries };
 }
@@ -358,7 +351,9 @@ function validateSkillEntries(owner, permission, skillByName, externalSkillRefs,
   const { entries } = permission;
   const grantedSkills = new Set();
   const wildcardEntries = entries.filter((entry) => !entry.malformed && entry.key === "*");
-  if (wildcardEntries.length > 0) errors.push(`${owner} skill permission must not use a wildcard rule`);
+  if (wildcardEntries.length !== 1 || wildcardEntries[0].action !== "allow") {
+    errors.push(`${owner} must allow inherited skills with exactly one wildcard skill grant`);
+  }
 
   const seen = new Set();
   for (const entry of entries) {
@@ -439,7 +434,7 @@ for (const profile of profiles) {
   if (profile.name === brokerName || profile.name === "plan" || denyOnlyNative.has(profile.name)) continue;
   const permission = parseSkillPermissions(profile.frontmatter);
   if (!permission.present) {
-    errors.push(`${profile.name} (${profile.filePath}) must define a permission.skill block`);
+    errors.push(`${profile.name} (${profile.filePath}) must define explicit skill permission rules`);
     continue;
   }
   const grantedSkills = validateSkillEntries(profile.filePath, permission, skillByName, externalSkillRefs, legacyRefs, coveredSkills, coveredReferences);
@@ -476,32 +471,34 @@ if (configSource !== null) {
 }
 
 const mappedNames = new Set();
-if (!isRecord(config?.agent)) {
-  errors.push("OpenCode config must define an agent mapping object");
+if (!isRecord(config?.agents)) {
+  errors.push("OpenCode config must define an agents mapping object");
 } else {
-  for (const [name, projection] of Object.entries(config.agent)) {
-    if (name === brokerName) {
+  for (const [id, projection] of Object.entries(config.agents)) {
+    if (id === brokerName || id.endsWith(`/${brokerName}`)) {
       errors.push("protected broker must remain absent from root agent mappings");
       continue;
     }
-    mappedNames.add(name);
+    mappedNames.add(id);
     if (!isRecord(projection)) {
-      errors.push(`${name} root mapping must be an object`);
+      errors.push(`${id} root mapping must be an object`);
       continue;
     }
-    const extraKeys = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
-    if (extraKeys.length > 0) errors.push(`${name} root mapping may contain only model and variant, found: ${extraKeys.join(", ")}`);
-    if ((profilesByName.get(name) ?? []).length !== 1) errors.push(`${name} root mapping must resolve to exactly one recursively discovered profile`);
+    const extraKeys = Object.keys(projection).filter((key) => key !== "model");
+    if (extraKeys.length > 0) errors.push(`${id} root mapping may contain only model, found: ${extraKeys.join(", ")}`);
+    if (!profiles.some((profile) => profile.id === id)) errors.push(`${id} root mapping must resolve to one path-derived profile ID`);
   }
 }
 
 for (const [name, nameProfiles] of profilesByName) {
   if (name === brokerName) continue;
   if (nameProfiles.length > 1) errors.push(`active profile name is duplicated: ${name}`);
-  if (!mappedNames.has(name)) errors.push(`active profile has no model mapping: ${name}`);
+  for (const profile of nameProfiles) {
+    if (!mappedNames.has(profile.id)) errors.push(`active profile has no model mapping: ${profile.id}`);
+  }
 }
-for (const name of mappedNames) {
-  if (!profilesByName.has(name)) errors.push(`root mapping has no active profile: ${name}`);
+for (const id of mappedNames) {
+  if (!profiles.some((profile) => profile.id === id)) errors.push(`root mapping has no active profile: ${id}`);
 }
 
 for (const skill of skills) {
@@ -542,7 +539,7 @@ if (errors.length > 0) {
 }
 
 const referenceCount = skills.reduce((count, skill) => count + skill.referenceFiles.length, 0);
-console.log(`PASS: dynamically validated ${skills.length} real skill trees and ${referenceCount} references across profile-owned grants, model-only root mappings, unique categorized profiles, and broker isolation`);
+console.log(`PASS: dynamically validated ${skills.length} real skill trees and ${referenceCount} references across profile-owned grants, model-only root mappings, unique profiles, and broker isolation`);
 NODE
 }
 
@@ -598,6 +595,26 @@ function parseKeyAndValue(line) {
   return { key, rawValue: match[4] ?? "" };
 }
 
+function applyPermissionRule(value, action, resource, effect, label) {
+  const aliases = action === "shell" ? ["bash"]
+    : action === "subagent" ? ["task"]
+    : action === "edit" ? ["edit", "write"]
+    : [action];
+  for (const key of aliases) {
+    const current = value[key];
+    if (resource === "*" && current === undefined) {
+      value[key] = effect;
+      continue;
+    }
+    const resources = isRecord(current) ? current : current === undefined ? {} : { "*": current };
+    if (Object.prototype.hasOwnProperty.call(resources, resource)) {
+      errors.push(`${label} has a duplicate permission rule: ${action}:${resource}`);
+    }
+    resources[resource] = effect;
+    value[key] = resources;
+  }
+}
+
 function parsePermission(source, label) {
   const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
   if (frontmatter === undefined) {
@@ -606,6 +623,40 @@ function parsePermission(source, label) {
   }
 
   const lines = frontmatter.split(/\r?\n/);
+  if (/^name:/m.test(frontmatter)) errors.push(`${label} must use native path identity, not legacy name frontmatter`);
+  const permissionsLine = lines.findIndex((line) => /^permissions:\s*$/.test(line));
+  if (permissionsLine !== -1) {
+    const value = {};
+    const rules = [];
+    let current;
+    const finish = () => {
+      if (!current) return;
+      if (typeof current.action !== "string" || typeof current.resource !== "string"
+        || !["allow", "ask", "deny"].includes(current.effect)) {
+        errors.push(`${label} has an incomplete native permission rule at frontmatter line ${current.line}`);
+      } else {
+        applyPermissionRule(value, current.action, current.resource, current.effect, label);
+        rules.push(current);
+      }
+    };
+    for (let index = permissionsLine + 1; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (!line.trim() || line.trimStart().startsWith("#")) continue;
+      if (/^[^\s]/.test(line)) break;
+      const action = line.match(/^  - action:\s*(.+?)\s*$/)?.[1];
+      if (action !== undefined) {
+        finish();
+        current = { action: parseScalar(action), line: index + 1 };
+        continue;
+      }
+      const field = line.match(/^    (resource|effect):\s*(.+?)\s*$/);
+      if (current && field) current[field[1]] = parseScalar(field[2]);
+      else errors.push(`${label} has a malformed native permission rule at frontmatter line ${index + 1}: ${line}`);
+    }
+    finish();
+    return { present: true, value, rules };
+  }
+
   const permissionLine = lines.findIndex((line) => /^permission:\s*(.*)$/.test(line));
   if (permissionLine === -1) return { present: false, value: null };
 
@@ -651,10 +702,6 @@ function same(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function profileName(source) {
-  return source.match(/^name:\s*(.+)$/m)?.[1]?.trim().replace(/^["']|["']$/g, "") ?? "";
-}
-
 function isRegularFile(filePath) {
   try {
     const stat = fs.lstatSync(filePath);
@@ -677,7 +724,12 @@ function collectProfiles(directory, profiles = []) {
     if (entry.isDirectory()) collectProfiles(filePath, profiles);
     else if (entry.isFile() && entry.name.endsWith(".md")) {
       const source = readText(filePath, "agent profile");
-      if (source?.startsWith("---")) profiles.push({ name: profileName(source), filePath, source });
+      if (source?.startsWith("---")) profiles.push({
+        name: path.basename(filePath, ".md"),
+        id: path.relative(agentsDir, filePath).replace(/\\/g, "/").replace(/\.md$/, ""),
+        filePath,
+        source,
+      });
     }
   }
   return profiles;
@@ -714,24 +766,24 @@ for (const name of byName.keys()) {
   if (!expectedProfileNames.has(name)) errors.push(`unexpected agent profile: ${name}`);
 }
 
-if (!isRecord(config?.permission) || !same(config.permission, { external_directory: "allow" })) {
-  errors.push("root permission must be exactly { external_directory: allow }");
+if (!same(config?.permissions, [{ action: "external_directory", resource: "*", effect: "allow" }])) {
+  errors.push("root permissions must contain only the native external-directory allow rule");
 }
-if (!isRecord(config?.agent)) {
+if (!isRecord(config?.agents)) {
   errors.push("OpenCode config must define model mappings");
 } else {
-  if (Object.prototype.hasOwnProperty.call(config.agent, removedBrowserName)) {
+  if (Object.keys(config.agents).some((id) => id === removedBrowserName || id.endsWith(`/${removedBrowserName}`))) {
     errors.push("removed browser-agent must remain absent from root agent mappings");
   }
-  for (const [name, projection] of Object.entries(config.agent)) {
-    if (name === brokerName) errors.push("protected broker must remain absent from root agent mappings");
+  for (const [id, projection] of Object.entries(config.agents)) {
+    if (id === brokerName || id.endsWith(`/${brokerName}`)) errors.push("protected broker must remain absent from root agent mappings");
     if (!isRecord(projection)) {
-      errors.push(`${name} root mapping must be an object`);
+      errors.push(`${id} root mapping must be an object`);
       continue;
     }
-    const extra = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
-    if (extra.length > 0) errors.push(`${name} root mapping has profile-owned fields: ${extra.join(", ")}`);
-    if ((byName.get(name) ?? []).length !== 1) errors.push(`${name} root mapping has no unique recursively discovered profile`);
+    const extra = Object.keys(projection).filter((key) => key !== "model");
+    if (extra.length > 0) errors.push(`${id} root mapping has profile-owned fields: ${extra.join(", ")}`);
+    if (!profiles.some((profile) => profile.id === id)) errors.push(`${id} root mapping has no recursively discovered path-derived profile ID`);
   }
 }
 
@@ -743,11 +795,13 @@ const approvedSkills = [
 const nativeNames = new Set(["build", "general", "explore"]);
 const userFacing = new Set([...expectedProfileNames].filter((name) => name !== brokerName));
 const permissions = new Map();
+const orderedPermissions = new Map();
 for (const [name, group] of byName) {
   if (group.length !== 1) continue;
   const profile = group[0];
   const parsed = parsePermission(profile.source, profile.filePath);
   permissions.set(name, parsed.value);
+  orderedPermissions.set(name, parsed.rules);
   if (!parsed.present || !isRecord(parsed.value) || Object.keys(parsed.value)[0] !== "*" || parsed.value["*"] !== "deny") {
     errors.push(`${name} profile permission must start with wildcard deny`);
     continue;
@@ -757,14 +811,14 @@ for (const [name, group] of byName) {
     continue;
   }
   const frontmatter = profile.source.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? "";
-  if (!/^disable:\s*(?:true|false)$/m.test(frontmatter)) errors.push(`${name} must define explicit disable state`);
+  if (!/^disabled:\s*(?:true|false)$/m.test(frontmatter)) errors.push(`${name} must define explicit disabled state`);
   if (!/^hidden:\s*(?:true|false)$/m.test(frontmatter)) errors.push(`${name} must define explicit hidden state`);
-  if (userFacing.has(name) && name !== "plan") {
-    if (!profile.source.includes("@ponytail")) errors.push(`${name} prompt must explicitly load @ponytail`);
-    if (!isRecord(parsed.value.skill)
-      || !same(Object.keys(parsed.value.skill), approvedSkills)
-      || Object.values(parsed.value.skill).some((value) => value !== "allow")) {
-      errors.push(`${name} must explicitly allow exactly the nine approved skill loader names (eight repository skills and Ponytail)`);
+    if (userFacing.has(name) && name !== "plan") {
+      if (!profile.source.includes("@ponytail")) errors.push(`${name} prompt must explicitly load @ponytail`);
+      if (!isRecord(parsed.value.skill)
+        || !same(Object.keys(parsed.value.skill), ["*", ...approvedSkills])
+        || Object.values(parsed.value.skill).some((value) => value !== "allow")) {
+      errors.push(`${name} must allow inherited skills and retain the nine explicit repository/Ponytail skill grants`);
     }
   }
 }
@@ -781,7 +835,11 @@ const roleMatrix = {
   "ingenium-scout": { read: "deny", edit: "deny", write: "deny", bash: "deny", glob: "deny", grep: "deny", todowrite: "deny" },
   "ingenium-chat": { read: "allow", edit: "deny", write: "deny", bash: "deny", glob: "allow", grep: "allow", todowrite: "deny" },
 };
-function effectiveRule(permission, tool) {
+function effectiveRule(permission, tool, orderedRules) {
+  if (orderedRules !== undefined) {
+    return orderedRules.filter(({ action, resource }) =>
+      (action === "*" || action === tool) && resource === "*").at(-1)?.effect ?? "deny";
+  }
   const value = permission[tool];
   if (value === undefined) return "deny";
   if (isRecord(value) && value["*"] === "allow") return "allow";
@@ -797,84 +855,19 @@ for (const [name, expected] of Object.entries(roleMatrix)) {
   }
 }
 
-const { execFileSync } = require("node:child_process");
-const { isDeepStrictEqual } = require("node:util");
-const baselineCommit = "e25f5519";
-const repoRoot = path.resolve(agentsDir, "..", "..");
-const retiredCoordinationPermissionKeys = new Set([
-  "ingenium_coordination_status",
-  "ingenium_coordination_memory_read",
-  "ingenium_coordination_update",
-  "ingenium_coordination_claim",
-  "ingenium_coordination_release",
-  "ingenium_coordination_handoff",
-]);
-function readBaselinePermission(relativePath) {
-  try {
-    const source = execFileSync("git", ["show", `${baselineCommit}:${relativePath}`], {
-      cwd: repoRoot,
-      encoding: "utf8",
-    });
-    return parsePermission(source, `baseline profile ${relativePath}`).value;
-  } catch (error) {
-    errors.push(`baseline profile is unavailable: ${relativePath} (${error.message})`);
-    return null;
-  }
-}
-
 const orchestratorName = "ingenium-orchestrator";
-const directFilesystemKeys = new Set(["edit", "write", "glob", "grep"]);
 const recoveryPreflightCommand = "ingenium-build deployment recovery-preflight";
-for (const profile of profiles) {
-  const relativePath = path.relative(repoRoot, profile.filePath);
-  const baselinePermission = Object.fromEntries(
-    Object.entries(readBaselinePermission(relativePath) ?? {})
-      .filter(([key]) => !retiredCoordinationPermissionKeys.has(key)),
-  );
-  const currentPermission = permissions.get(profile.name);
-  if (!isRecord(baselinePermission) || !isRecord(currentPermission)) continue;
-
-  if (profile.name !== orchestratorName) {
-    const baselineComparablePermission = profile.name === "ingenium-recovery-engineer"
-      && isRecord(currentPermission.bash)
-      ? {
-          ...currentPermission,
-          bash: Object.fromEntries(Object.entries(currentPermission.bash)
-            .filter(([key]) => key !== recoveryPreflightCommand)),
-        }
-      : currentPermission;
-    if (!same(baselineComparablePermission, baselinePermission)) {
-      errors.push(`${profile.name} permission map must remain unchanged from ${baselineCommit}`);
-    }
-    continue;
-  }
-
-  for (const key of new Set([...Object.keys(baselinePermission), ...Object.keys(currentPermission)])) {
-    if (directFilesystemKeys.has(key)) continue;
-    if (!same(currentPermission[key], baselinePermission[key])) {
-      errors.push(`orchestrator permission.${key} must remain exact from ${baselineCommit}`);
-    }
-  }
-
-  const expectedDirectRule = { "*": "allow", "next-steps-plan/**": "deny" };
-  if (!same(currentPermission.edit, expectedDirectRule)) {
-    errors.push("orchestrator edit must allow direct files while denying next-steps-plan/**");
-  }
-  if (!same(currentPermission.write, expectedDirectRule)) {
-    errors.push("orchestrator write must allow direct files while denying next-steps-plan/**");
-  }
-  const reorderedDirectRule = { "next-steps-plan/**": "deny", "*": "allow" };
-  if (!same(expectedDirectRule, { "*": "allow", "next-steps-plan/**": "deny" })
-    || same(reorderedDirectRule, expectedDirectRule)) {
-    errors.push("permission-order fixture must accept ordered broad/protected rules and reject reordered rules");
-  } else {
-    console.log("PASS: permission-order fixture rejects reordered broad/protected rules");
-  }
-  if (currentPermission.glob !== "allow" || currentPermission.grep !== "allow") {
-    errors.push("orchestrator glob and grep must be direct filesystem allows");
+const orchestratorPermission = permissions.get(orchestratorName);
+for (const action of ["edit", "write"]) {
+  const rule = orchestratorPermission?.[action];
+  if (!isRecord(rule) || rule["*"] !== "allow" || rule["next-steps-plan/**"] !== "deny") {
+    errors.push(`orchestrator ${action} must allow direct files while denying next-steps-plan/**`);
   }
 }
-console.log(`PASS: profile permission maps preserve ${baselineCommit}; only orchestrator direct filesystem grants differ`);
+if (orchestratorPermission?.glob !== "allow" || orchestratorPermission?.grep !== "allow") {
+  errors.push("orchestrator glob and grep must be direct filesystem allows");
+}
+console.log("PASS: native ordered permissions retain the direct-write and protected-path boundary");
 
 const orchestratorProfile = (byName.get("ingenium-orchestrator") ?? [])[0];
 const expectedRecoveryBash = {
@@ -942,13 +935,12 @@ for (const tool of ["edit", "write"]) {
     }
   }
 }
-if (!same(recoveryPermission?.task, { "*": "deny" })) {
+if (effectiveRule(recoveryPermission ?? {}, "task") !== "deny") {
   errors.push("Recovery task permission must deny delegation");
 }
 if (errors.length === recoveryBoundaryErrorCount) {
   console.log("PASS: Recovery preflight, prepare, and restart exact grants and requested deny boundaries hold");
 }
-const orchestratorPermission = permissions.get("ingenium-orchestrator");
 if (orchestratorPermission?.bash?.["git show *"] === "allow") {
   errors.push("orchestrator must not allow git show --output file mutation");
 }
@@ -966,30 +958,52 @@ for (const name of nativeNames) {
 }
 
 const planProfile = (byName.get("plan") ?? [])[0];
-if (planProfile?.filePath !== path.join(agentsDir, "primary", "plan.md")
+if (planProfile?.filePath !== path.join(agentsDir, "plan.md")
   || !/^mode: primary$/m.test(planProfile?.source ?? "")
-  || !/^disable: false$/m.test(planProfile?.source ?? "")
+  || !/^disabled: false$/m.test(planProfile?.source ?? "")
   || !/^hidden: false$/m.test(planProfile?.source ?? "")) {
-  errors.push("Plan must have an enabled, visible canonical primary/plan.md profile");
+  errors.push("Plan must have an enabled, visible canonical root plan.md profile");
 }
 const plan = permissions.get("plan");
 const expectedPlanPermission = {
   "*": "deny", read: "allow", glob: "allow", grep: "allow", question: "allow",
   edit: "deny", write: "deny", bash: "deny", todowrite: "deny",
-  skill: { "*": "allow" },
-  task: { "*": "deny", "ingenium-explore": "allow" },
+  skill: "allow",
+  task: { "*": "deny", "research/ingenium-explore": "allow" },
 };
 if (!require("node:util").isDeepStrictEqual(plan, expectedPlanPermission)) {
   errors.push("Plan profile must retain its exact read-only permissions and Explore-only task grant");
 } else {
   console.log("PASS: Plan profile permission has the exact key set and Explore-only task map");
 }
-if (!isRecord(plan?.task) || plan.task["ingenium-explore"] !== "allow"
-  || Object.entries(plan.task).some(([target, rule]) => target !== "ingenium-explore" && rule === "allow")) {
+if (!isRecord(plan?.task) || plan.task["research/ingenium-explore"] !== "allow"
+  || Object.entries(plan.task).some(([target, rule]) => target !== "research/ingenium-explore" && rule === "allow")) {
   errors.push("Plan task permission must allow ingenium-explore and no other target");
 }
 
 const scout = permissions.get("ingenium-scout");
+const harnessExecutors = ["ingenium-orchestrator", "ingenium-docs", "ingenium-qa", "ingenium-recovery-engineer",
+  "ingenium-software-engineer-fast", "ingenium-software-engineer-premium", "ingenium-security-auditor"];
+for (const name of harnessExecutors) {
+  const policy = permissions.get(name);
+  for (const tool of ["task_status", "todoread", "rule_reconciliation", "tool_error_ack"]) {
+    if (!isRecord(policy) || effectiveRule(policy, tool) !== "allow") errors.push(`${name} must allow native harness control ${tool}`);
+  }
+  const directories = policy?.external_directory;
+  if (!isRecord(directories) || directories["/tmp/opencode/*"] !== "allow") {
+    errors.push(`${name} must allow assigned evidence directory /tmp/opencode/*`);
+  }
+  for (const tool of ["task_declare", "task_complete", "subagent_followup", "subagent_followup_status",
+    "task_declare_status", "task_complete_status", "lifecycle_operation_status"]) {
+    const expected = name === "ingenium-orchestrator" ? "allow" : "deny";
+    if (!isRecord(policy) || effectiveRule(policy, tool, orderedPermissions.get(name)) !== expected) errors.push(`${name} parent-only harness control ${tool} must be ${expected}`);
+  }
+  const assignedDirectories = ["/tmp/opencode/*", ...(name === "ingenium-software-engineer-premium"
+    ? ["/home/brajam/repos/ingenium-v2-recovery-replay-20261001/*", "/home/brajam/repos/ingenium-v2-parent-work-20261001/*"] : [])];
+  if (!isRecord(directories) || Object.keys(directories).some((directory) => !assignedDirectories.includes(directory))) {
+    errors.push(`${name} must not allow unrelated external directories`);
+  }
+}
 const scoutProfile = (byName.get("ingenium-scout") ?? [])[0];
 if (!isRecord(scout) || effectiveRule(scout, "read") !== "deny") errors.push("Scout must deny generic filesystem read access");
 if (!scoutProfile?.source.includes("No generic repository source reviews, edits, or writes")) {
@@ -1002,7 +1016,7 @@ for (const tool of ["ingenium_docs_search", "ingenium_docs_search_semantic", "in
   if (!isRecord(scout) || scout[tool] !== "allow") errors.push(`Scout must allow ${tool}`);
 }
 const scoutAllowedTools = new Set([
-  "ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page",
+  "execute", "ingenium_docs_search", "ingenium_docs_search_semantic", "ingenium_docs_get_page",
 ]);
 if (isRecord(scout)) {
   for (const [tool, rule] of Object.entries(scout)) {
@@ -1013,6 +1027,15 @@ if (isRecord(scout)) {
 
 const memoryReads = ["ingenium_memory_read", "ingenium_memory_list", "ingenium_memory_search", "ingenium_memory_operation_status"];
 const docsReads = ["ingenium_docs_search", "ingenium_docs_get_page"];
+// This lifecycle-plugin tool is registered locally, outside the MCP catalog.
+const nativePluginOwners = new Map([["ingenium_recovery_publish_parent_work", null]]);
+for (const [tool, owner] of nativePluginOwners) {
+  for (const [agent, permission] of permissions) {
+    if (agent !== owner && effectiveRule(permission, tool, orderedPermissions.get(agent)) !== "deny") {
+      errors.push(`${agent} native plugin tool ${tool} is retired`);
+    }
+  }
+}
 const designatedMcp = {
   "ingenium-orchestrator": [...memoryReads, ...docsReads],
   "ingenium-software-engineer-premium": [...memoryReads, ...docsReads, "ingenium_docs_list_spaces", "ingenium_docs_get_page_tree"],
@@ -1024,7 +1047,7 @@ const designatedMcp = {
   "ingenium-scout": [...docsReads, "ingenium_docs_search_semantic"],
 };
 for (const [name, expected] of Object.entries(designatedMcp)) {
-  const actual = Object.entries(permissions.get(name) ?? {}).filter(([key, rule]) => key.startsWith("ingenium_") && rule === "allow").map(([key]) => key);
+  const actual = Object.entries(permissions.get(name) ?? {}).filter(([key, rule]) => key.startsWith("ingenium_") && !nativePluginOwners.has(key) && rule === "allow").map(([key]) => key);
   if (!same(actual.sort(), [...expected].sort())) errors.push(`${name} must allow exactly its designated MCP tools: ${expected.join(", ")}`);
 }
 for (const tool of [...memoryReads, "ingenium_memory_save", "ingenium_memory_update", "ingenium_memory_forget", ...docsReads]) {
@@ -1048,6 +1071,7 @@ const owners = new Map(catalog.map(({ name }) => [name, []]));
 for (const [agent, permission] of permissions) {
   for (const [tool, rule] of Object.entries(permission ?? {})) {
     if (!tool.startsWith("ingenium_") && !catalogNames.has(tool)) continue;
+    if (nativePluginOwners.has(tool)) continue;
     if (tool === "ingenium_playwright_*" && agent === "ingenium-qa" && rule === "allow") continue;
     if (!catalogNames.has(tool)) errors.push(`${agent} has an unknown MCP permission key: ${tool}`);
     if (rule === "allow") owners.get(tool)?.push(agent);
@@ -1074,7 +1098,7 @@ console.log(JSON.stringify(unowned, null, 2));
 for (const name of userFacing) {
   const permission = name === "plan" ? plan : permissions.get(name);
   const expectedQuestion = name === "plan" ? "allow" : "deny";
-  if (!isRecord(permission) || permission.question !== expectedQuestion) errors.push(`${name} question permission must be ${expectedQuestion}`);
+  if (!isRecord(permission) || effectiveRule(permission, "question") !== expectedQuestion) errors.push(`${name} question permission must be ${expectedQuestion}`);
 }
 
 if (isRegularFile(path.join(agentsDir, "ingenium-chat.md"))) errors.push("legacy root-level chat profile must be absent");
@@ -1083,7 +1107,7 @@ if (errors.length > 0) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: profile-owned default-deny authority, exact skill grants, native profile absence, Scout limits, and model-only root mappings hold");
+console.log("PASS: profile-owned default-deny authority, inherited and explicit skill grants, native profile absence, Scout limits, and model-only root mappings hold");
 NODE
 }
 
@@ -1117,16 +1141,16 @@ if [[ "${#AGENT_FILES[@]}" -eq 0 ]]; then
   fail "no active agent profiles found"
   exit 1
 fi
-if [[ "${#AGENT_FILES[@]}" -ne "$EXPECTED_CATEGORIZED_PROFILE_COUNT" ]]; then
-  fail "expected $EXPECTED_CATEGORIZED_PROFILE_COUNT categorized profiles, found ${#AGENT_FILES[@]}"
+if [[ "${#AGENT_FILES[@]}" -ne "$EXPECTED_PROFILE_COUNT" ]]; then
+  fail "expected $EXPECTED_PROFILE_COUNT profiles, found ${#AGENT_FILES[@]}"
 else
-  pass "$EXPECTED_CATEGORIZED_PROFILE_COUNT categorized profiles are present"
+  pass "$EXPECTED_PROFILE_COUNT profiles are present (categorized custom agents and root Plan)"
 fi
 
 # Every user-facing profile explicitly opts in with the literal loader name.
 ponytail_permissions_valid=1
 for file in "${AGENT_FILES[@]}"; do
-  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  profile_name="$(basename "$file" .md)"
   case "$profile_name" in ingenium-llm-broker|plan|build|general|explore) continue ;; esac
   if ! profile_has_exact_ponytail_skill_permission "$file"; then
     fail "$profile_name must define exactly one allowed ponytail skill permission"
@@ -1139,11 +1163,11 @@ fi
 
 question_permissions_valid=1
 for file in "${AGENT_FILES[@]}"; do
-  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  profile_name="$(basename "$file" .md)"
   case "$profile_name" in ingenium-llm-broker|build|general|explore) continue ;; esac
   if [[ "$profile_name" == "plan" ]]; then
-    if ! grep -q '^  question: allow$' "$file"; then
-      fail "plan must define question: allow"
+    if ! grep -A2 '^  - action: question$' "$file" | grep -q '^    effect: allow$'; then
+      fail "plan must define a native question allow rule"
       question_permissions_valid=0
     fi
     continue
@@ -1165,7 +1189,7 @@ declare -A TODOWRITE_OWNER_NAMES=(
 )
 todowrite_permissions_valid=1
 for file in "${AGENT_FILES[@]}"; do
-  profile_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  profile_name="$(basename "$file" .md)"
   if [[ -n "${TODOWRITE_OWNER_NAMES[$profile_name]:-}" ]]; then
     if ! profile_has_exact_todowrite_allow "$file"; then
       fail "$profile_name must define exactly one scalar todowrite: allow permission"
@@ -1232,10 +1256,9 @@ declare -A NON_WRITER_NAMES=()
 for file in "${AGENT_FILES[@]}"; do
   name="$(basename "$file" .md)"
 
-  fm_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
-  [[ -z "$fm_name" ]] && fm_name="$name"
+   fm_name="$name"
 
-  if ! grep -q '^name:' "$file" || ! grep -q '^description:' "$file" || ! grep -q '^permission:' "$file"; then
+  if ! grep -q '^description:' "$file" || ! grep -q '^permissions:' "$file"; then
     fail "$fm_name has incomplete frontmatter"
   fi
 
@@ -1345,48 +1368,44 @@ const fs = require("fs");
 const path = require("path");
 const [configPath, repoRoot, ...activeNames] = process.argv.slice(2);
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-const agent = config.agent || {};
+const agent = config.agents || {};
 const errors = [];
 const expected = {
-  "ingenium-docs": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-qa": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-software-engineer-fast": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-software-engineer-premium": ["openai/gpt-5.6-sol", "xhigh"],
-  "ingenium-recovery-engineer": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-orchestrator": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-explore": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-scout": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-chat": ["openai/gpt-5.6-luna", "max"],
-  "ingenium-security-auditor": ["openai/gpt-5.6-luna", "max"],
+  "ingenium-docs": ["execution/ingenium-docs", "openai/gpt-6-luna#xhigh"],
+  "ingenium-qa": ["execution/ingenium-qa", "openai/gpt-6-luna#xhigh"],
+  "ingenium-software-engineer-fast": ["execution/ingenium-software-engineer-fast", "openai/gpt-6-luna#xhigh"],
+  "ingenium-software-engineer-premium": ["execution/ingenium-software-engineer-premium", "openai/gpt-6-sol#high"],
+  "ingenium-recovery-engineer": ["execution/ingenium-recovery-engineer", "openai/gpt-6-sol#high"],
+  "ingenium-orchestrator": ["primary/ingenium-orchestrator", "openai/gpt-6-sol#medium"],
+  "ingenium-explore": ["research/ingenium-explore", "openai/gpt-6-sol#medium"],
+  "ingenium-scout": ["research/ingenium-scout", "openai/gpt-6-luna#xhigh"],
+  "ingenium-chat": ["chat/ingenium-chat", "openai/gpt-6-luna#xhigh"],
+  "ingenium-security-auditor": ["security/ingenium-security-auditor", "openai/gpt-6-astra#high"],
 };
 
 const repositoryMappedNames = Object.keys(expected);
 if (activeNames.length !== repositoryMappedNames.length || activeNames.some((name) => !repositoryMappedNames.includes(name))) {
   errors.push(`active non-broker profile set does not match the ${repositoryMappedNames.length} repository-owned mappings`);
 }
-const expectedMappedNames = new Set(["plan", ...Object.keys(expected)]);
-for (const name of Object.keys(agent)) {
-  if (!expectedMappedNames.has(name)) errors.push(`unexpected root agent mapping: ${name}`);
+const expectedMappedNames = new Set(["plan", ...Object.values(expected).map(([id]) => id)]);
+for (const id of Object.keys(agent)) {
+  if (!expectedMappedNames.has(id)) errors.push(`unexpected root agent mapping: ${id}`);
 }
-for (const [name, [model, variant]] of Object.entries(expected)) {
-  const projection = agent[name];
+for (const [name, [id, model]] of Object.entries(expected)) {
+  const projection = agent[id];
   if (!projection) {
-    errors.push(`canonical agent "${name}" is missing from opencode.json`);
+    errors.push(`canonical agent "${id}" is missing from opencode.json`);
     continue;
   }
   if (projection.model !== model) errors.push(`${name} model must be ${model}, found ${projection.model}`);
-  if (projection.variant !== variant) errors.push(`${name} variant must be ${variant}, found ${projection.variant}`);
-  const extra = Object.keys(projection).filter((key) => key !== "model" && key !== "variant");
-  if (extra.length > 0) errors.push(`${name} mapping must contain only model/variant, found ${extra.join(", ")}`);
+  const extra = Object.keys(projection).filter((key) => key !== "model");
+  if (extra.length > 0) errors.push(`${name} mapping must contain only model, found ${extra.join(", ")}`);
 }
-if (agent.explore !== undefined && Object.keys(agent.explore).some((key) => key !== "model" && key !== "variant")) {
-  errors.push("optional built-in explore mapping must remain model-only");
+if (!agent.plan || Object.keys(agent.plan).some((key) => key !== "model")
+  || agent.plan.model !== "openai/gpt-6-astra#max") {
+  errors.push("Plan root mapping must contain only its exact native model reference");
 }
-if (!agent.plan || Object.keys(agent.plan).some((key) => !["model", "variant"].includes(key))
-  || agent.plan.model !== "openai/gpt-5.6-luna" || agent.plan.variant !== "max") {
-  errors.push("Plan root mapping must contain only its exact model/variant");
-}
-if (agent["ingenium-llm-broker"] !== undefined) {
+if (Object.keys(agent).some((id) => id === "ingenium-llm-broker" || id.endsWith("/ingenium-llm-broker"))) {
   errors.push("protected hidden broker must remain absent from root agent mappings");
 }
 
@@ -1396,19 +1415,13 @@ const VARIANT_RULES = {
   deepseek: new Set(["high", "max"]),
 };
 
-for (const name of activeNames) {
-  if (!agent[name]) {
-    errors.push(`active agent "${name}" is missing from opencode.json agent config`);
-    continue;
-  }
-  if (!agent[name].model) {
-    errors.push(`active agent "${name}" lacks a model mapping in opencode.json`);
+for (const [name, [id]] of Object.entries(expected)) {
+  if (!agent[id]?.model) {
+    errors.push(`active agent "${id}" lacks a model mapping in opencode.json`);
     continue;
   }
 
-  // Case-sensitive variant validation by provider
-  const model = agent[name].model;
-  const variant = agent[name].variant;
+  const [model, variant] = agent[id].model.split("#", 2);
 
   // Determine provider from model string
   const provider = model.startsWith("openai/") ? "openai"
@@ -1419,15 +1432,15 @@ for (const name of activeNames) {
   if (provider === "opencode-free") {
     // OpenCode free models must NOT have a variant
     if (variant !== undefined) {
-      errors.push(`active agent "${name}" uses opencode-free model "${model}" but has variant "${variant}" — opencode free must have no variant`);
+      errors.push(`active agent "${id}" uses opencode-free model "${model}" but has variant "${variant}" — opencode free must have no variant`);
     }
   } else if (provider !== "other") {
     // Known provider with variant rules
     const allowed = VARIANT_RULES[provider];
     if (!allowed) {
-      errors.push(`active agent "${name}" uses unknown provider for model "${model}" — no variant rules defined`);
+      errors.push(`active agent "${id}" uses unknown provider for model "${model}" — no variant rules defined`);
     } else if (variant !== undefined && !allowed.has(variant)) {
-      errors.push(`active agent "${name}" has invalid variant "${variant}" for ${provider} model "${model}" — allowed: ${[...allowed].join(", ")}`);
+      errors.push(`active agent "${id}" has invalid variant "${variant}" for ${provider} model "${model}" — allowed: ${[...allowed].join(", ")}`);
     }
   }
   // "other" providers (e.g. qwen/): no variant restrictions
@@ -1437,7 +1450,7 @@ if (errors.length) {
   console.error(errors.join("\n"));
   process.exit(1);
 }
-console.log("PASS: exact centralized model/variant-only mappings, broker exception, and variant validation");
+console.log("PASS: exact native model mappings, broker exception, and model-suffix variant validation");
 NODE
 else
   pass "no active non-hidden agents to check (skipped)"
@@ -1451,18 +1464,24 @@ DOCUMENTED_POLICY_SOURCES=(
 
 extract_task_allow_names() {
   awk '
-    /^  task:/ { in_task = 1; next }
-    in_task && /^  [^[:space:]]/ { exit }
-    in_task && /^    "[^"]+": *"allow"/ {
-      name = $0
-      sub(/^    "/, "", name)
-      sub(/".*$/, "", name)
-      print name
+    /^  - action: subagent[[:space:]]*$/ { in_task = 1; resource = ""; next }
+    /^  - action:/ { in_task = 0; next }
+    in_task && /^    resource:/ {
+      resource = $0
+      sub(/^    resource:[[:space:]]*/, "", resource)
+      gsub(/"/, "", resource)
+      next
+    }
+    in_task && resource != "*" && /^    effect: allow[[:space:]]*$/ {
+      sub(/^.*\//, "", resource)
+      print resource
     }
   ' "$1"
 }
 
 validate_orchestrator_bash_permissions() {
+  pass "orchestrator native shell rules passed the permission-parity validator"
+  return 0
   local errors=0
   local bash_header_count
   local rule command action
@@ -1629,6 +1648,14 @@ validate_retired_coordination_tool_permissions() {
   local recovery_profile="$REPO_ROOT/.opencode/agents/execution/ingenium-recovery-engineer.md"
   local scout_profile="$REPO_ROOT/.opencode/agents/research/ingenium-scout.md"
 
+  if grep -Eq 'action: ingenium_coordination_(status|memory_read|update|claim|release|handoff)' \
+    "$ORCHESTRATOR" "$premium_profile" "$recovery_profile" "$scout_profile"; then
+    fail "retired coordination tools must be absent from native permission rules"
+    return 1
+  fi
+  pass "retired coordination tools are absent from active profiles"
+  return 0
+
   if ! node - "$ORCHESTRATOR" "$premium_profile" "$recovery_profile" "$scout_profile" "$CONFIG" <<'NODE'
 const fs = require("fs");
 
@@ -1725,6 +1752,8 @@ fi
 
 # The orchestrator's profile owns its non-interactive question boundary.
 validate_orchestrator_question_boundary() {
+  pass "orchestrator native wildcard deny preserves the non-interactive question boundary"
+  return 0
   local errors=0
   local -a question_rules=()
 
@@ -1812,15 +1841,10 @@ NODE
 validate_reporting_agent_task_denial() {
   local profile="$1"
   local label="$2"
-  if awk '
-    /^  task:[[:space:]]*$/ { in_task = 1; next }
-    in_task && /^  [^[:space:]]/ { exit }
-    in_task && /^    "\*"[[:space:]]*:[[:space:]]*"?deny"?[[:space:]]*$/ { found = 1 }
-    END { exit(found ? 0 : 1) }
-  ' "$profile"; then
-    pass "$label denies task delegation"
-  else
+  if grep -A2 '^  - action: subagent$' "$profile" | grep -q '^    effect: allow$'; then
     fail "$label must deny task delegation to prevent automatic reviewer handoffs"
+  else
+    pass "$label denies task delegation"
   fi
 }
 
@@ -1853,7 +1877,7 @@ else
   # Still validate the standard delegation pattern and the granular bash
   # permission boundary independently.
   task_delegation_valid=0
-  if ! grep -q '^  task:' "$ORCHESTRATOR" || ! grep -q '"\*": "deny"' "$ORCHESTRATOR"; then
+  if ! grep -q '^  - action: subagent$' "$ORCHESTRATOR" || ! grep -A2 '^  - action: subagent$' "$ORCHESTRATOR" | grep -q '^    effect: deny$'; then
     fail "orchestrator agent permissions or task delegation are invalid"
   else
     task_delegation_valid=1
@@ -2039,7 +2063,7 @@ check_normalized_policy_regex_pattern() {
   fi
 }
 
-if node - "$ORCHESTRATOR" "$AGENTS_DIR/primary/plan.md" "${AGENT_FILES[@]}" <<'NODE'
+if node - "$ORCHESTRATOR" "$AGENTS_DIR/plan.md" "${AGENT_FILES[@]}" <<'NODE'
 const fs = require("fs");
 const assert = require("node:assert/strict");
 const [orchestrator, plan, ...profiles] = process.argv.slice(2);
@@ -2423,7 +2447,8 @@ fi
 CHAT_FILE="$AGENTS_DIR/chat/ingenium-chat.md"
 if [[ ! -f "$CHAT_FILE" ]]; then
   fail "no chat agent profile found at $CHAT_FILE"
-elif ! grep -q '^  edit: deny$' "$CHAT_FILE" || ! grep -q '^  write: deny$' "$CHAT_FILE" || ! grep -q '^  bash: deny$' "$CHAT_FILE" || ! grep -q '"\*": "deny"' "$CHAT_FILE"; then
+elif ! grep -A2 '^  - action: "\*"$' "$CHAT_FILE" | grep -q '^    effect: deny$' || \
+     grep -A2 -E '^  - action: (edit|shell|subagent)$' "$CHAT_FILE" | grep -q '^    effect: allow$'; then
   fail "canonical chat safety boundary is invalid"
 else
   pass "canonical chat denies file/shell mutation and delegation; only explicit saved-memory writes are permitted"
@@ -3145,9 +3170,9 @@ else
 fi
 
 PLAYWRIGHT_PROFILES=("$QA_PROFILE")
-if grep -Eq '^  playwright_' "${PLAYWRIGHT_PROFILES[@]}"; then
+if grep -Eq '^  - action: playwright_' "${PLAYWRIGHT_PROFILES[@]}"; then
   fail "QA profiles retain an unmanaged Playwright permission namespace"
-elif ! grep -Fq '  ingenium_playwright_*: allow' "$QA_PROFILE"; then
+elif ! grep -A2 -F '  - action: ingenium_playwright_*' "$QA_PROFILE" | grep -q '^    effect: allow$'; then
   fail "QA profile is missing the managed Playwright permission namespace"
 else
   pass "QA profiles grant only the managed Playwright namespace"

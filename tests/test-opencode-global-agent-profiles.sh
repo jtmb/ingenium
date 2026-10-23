@@ -41,13 +41,13 @@ OUTSIDE_HARDLINK_PROFILE="$TEMP_ROOT/outside-hardlink-profile.md"
 RETIRED_OUTSIDE_HARDLINK_PROFILE="$TEMP_ROOT/retired-outside-hardlink-profile.md"
 GLOBAL_RETIRED_PROFILE="$GLOBAL_AGENTS_DIR/browser-agent.md"
 WORKSPACE_RETIRED_PROFILE="$WORKSPACE_AGENTS_DIR/execution/browser-agent.md"
-mkdir -p "$SOURCE_AGENTS_DIR/chat" "$SOURCE_AGENTS_DIR/primary" "$SOURCE_AGENTS_DIR/execution" "$SOURCE_AGENTS_DIR/research" \
+mkdir -p "$SOURCE_AGENTS_DIR/chat" "$SOURCE_AGENTS_DIR/execution" "$SOURCE_AGENTS_DIR/research" \
   "$GLOBAL_AGENTS_DIR" "$WORKSPACE_AGENTS_DIR/execution"
 
 [[ -f "$PROJECTOR" ]] || fail "descriptor-safe projector is missing"
 
 cp "$REPO_ROOT/.opencode/agents/chat/ingenium-chat.md" "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
-cp "$REPO_ROOT/.opencode/agents/primary/plan.md" "$SOURCE_AGENTS_DIR/primary/plan.md"
+cp "$REPO_ROOT/.opencode/agents/plan.md" "$SOURCE_AGENTS_DIR/plan.md"
 cp "$REPO_ROOT/.opencode/agents/execution/ingenium-llm-broker.md" \
   "$SOURCE_AGENTS_DIR/execution/ingenium-llm-broker.md"
 printf '%s\n' 'unowned source profile' > "$SOURCE_AGENTS_DIR/research/unowned.md"
@@ -72,7 +72,7 @@ sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR
 
 cmp -s "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md" "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
   || fail 'global chat profile differs from the server-owned source'
-cmp -s "$SOURCE_AGENTS_DIR/primary/plan.md" "$GLOBAL_AGENTS_DIR/plan.md" \
+cmp -s "$SOURCE_AGENTS_DIR/plan.md" "$GLOBAL_AGENTS_DIR/plan.md" \
   || fail 'global Plan profile differs from the server-owned source'
 require_mode "$GLOBAL_AGENTS_DIR/plan.md" 644
 require_link_count "$GLOBAL_AGENTS_DIR/plan.md" 1
@@ -91,14 +91,27 @@ require_mode "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 600
 require_link_count "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 1
 require_link_count "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 1
 
-grep -q '^  edit: deny$' "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
-  || fail 'global chat profile lost its edit denial'
-grep -q '^  write: deny$' "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
-  || fail 'global chat profile lost its write denial'
-grep -q '^  bash: deny$' "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
-  || fail 'global chat profile lost its shell denial'
-grep -q '^  "\*": deny$' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" \
-  || fail 'global broker profile lost its wildcard denial'
+node - "$GLOBAL_AGENTS_DIR/ingenium-chat.md" "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" <<'NODE'
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+function permissions(path) {
+  const frontmatter = fs.readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---/);
+  assert.ok(frontmatter, `${path} must have YAML frontmatter`);
+  const section = frontmatter[1].match(/^permissions:\n((?:  .*(?:\n|$)|    .*(?:\n|$))*)/m);
+  assert.ok(section, `${path} must have V2 permissions`);
+  return [...section[1].matchAll(/^  - action: (.+)\n    resource: (.+)\n    effect: (allow|deny)$/gm)]
+    .map(([, action, resource, effect]) => ({ action: action.replaceAll('"', ''), resource: resource.replaceAll('"', ''), effect }));
+}
+
+const chat = permissions(process.argv[2]);
+const broker = permissions(process.argv[3]);
+assert.deepEqual(chat[0], { action: '*', resource: '*', effect: 'deny' }, 'chat must default-deny tools');
+for (const action of ['*', 'edit', 'write', 'shell', 'bash']) {
+  assert.ok(!chat.some((permission) => permission.action === action && permission.effect === 'allow'), `chat must deny ${action}`);
+}
+assert.deepEqual(broker, [{ action: '*', resource: '*', effect: 'deny' }], 'broker must deny every tool without exceptions');
+NODE
 
 chat_metadata_before="$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-chat.md")"
 plan_metadata_before="$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/plan.md")"

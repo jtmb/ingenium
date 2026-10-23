@@ -25,18 +25,28 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 
 ## Agent Profiles and Model Authority
 
-- **Runtime mapping** — Root `opencode.json` contains case-sensitive
-  `agent.<name>` entries for `model` and `variant`; the built-in Plan entry's
-  inline permission block is the sole root-mapping permission exception. The
+- **Runtime mapping** — Root `opencode.json` contains case-sensitive native
+  `agents.<id>` entries containing only `provider/model#variant` model references.
+  Built-in Plan uses `plan`; custom IDs include their profile category. The
   canonical profile path in documentation is a cross-reference, not another
   root mapping field.
 - **Profile authority** — Repository profiles live under one categorized path,
   `.opencode/agents/<category>/<name>.md`. Their frontmatter owns the prompt,
-  description, mode, `disable`/`hidden` lifecycle metadata, named skills, and
+  description, mode, `disabled`/`hidden` lifecycle metadata and
   tool permissions. Resource sync requires the first permission entry to be
   wildcard `deny`, explicit boolean lifecycle metadata, and exactly one
   categorized profile for each discovered name; orphan and duplicate profiles
   are rejected.
+- **Native identity** — Agent identity comes from its path; omit legacy `name:`
+  and repository-only `skills:` frontmatter, which can select V1 normalization
+  and prevent native V2 permission enforcement. Writers preserve skill metadata
+  as YAML comments; skill loading uses ordered `skill` rules.
+- **Harness controls** — Executing profiles explicitly permit task/status reads,
+  rule reconciliation and error triage; only the primary permits task declaration,
+  completion and child follow-up. Children inherit its declared task. Code Mode's
+  `execute` allowance does not grant nested tools. Assigned evidence access is
+  bounded to `/tmp/opencode/*`; Premium's current recovery assignment additionally
+  permits its exact isolated checkout.
 - **Preflight** — Every user-facing active profile loads `@ponytail` and the
   task-matching allowed skills before acting. Ponytail's adapter changes the
   prompt/commands, not tool permissions. Scout is limited to genuine Docs RAG
@@ -136,9 +146,9 @@ See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the 
 
 ## Plugin Auto-Config Sync
 
-Every plugin lifecycle operation (create, enable, disable, delete, seed, update) MUST also sync `.opencode/plugins/<file>.ts` on disk AND update `opencode.json`'s `plugin` array.
+Every plugin lifecycle operation (create, enable, disable, delete, seed, update) MUST also sync `.opencode/plugins/<file>.ts` on disk AND update `opencode.json`'s native V2 `plugins` array.
 
-- `addPluginToConfig()` appends `.opencode/plugins/<file>` to `opencode.json`'s `plugin` array.
+- `addPluginToConfig()` appends `.opencode/plugins/<file>` to `opencode.json`'s `plugins` array and migrates any retained legacy entries.
 - `removePluginFromConfig()` removes it.
 - All path resolution uses `getProjectRoot()` which resolves from `INGENIUM_CORE_DB_PATH` (`../../`) — never `process.cwd()`.
 - This prevents the "disconnected config" bug where the DB shows a plugin as enabled but OpenCode can't load it because the file or config entry is missing.

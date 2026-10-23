@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TRANSPORT_REGISTRATION_PATTERN = /(?:server\.registerTool|registerProjectTool)\(\s*"([^"]+)"\s*,/g;
@@ -154,9 +154,20 @@ export function assertMcpTransportParity(repositoryRoot, distributionRoot) {
   };
 }
 
+export function parseMcpTransportParityArguments(args) {
+  if (args.length === 0) return undefined;
+  if (args.length !== 2 || args[0] !== "--distribution-root"
+    || !isAbsolute(args[1]) || normalize(args[1]) !== args[1]) {
+    throw new Error("Expected --distribution-root <absolute normalized path>");
+  }
+  return args[1];
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const result = assertMcpTransportParity();
+    const distributionRoot = parseMcpTransportParityArguments(process.argv.slice(2));
+    const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+    const result = assertMcpTransportParity(repositoryRoot, distributionRoot);
     console.log(
       `MCP transport parity verified: ${result.packagedToolCount} registrations, `
       + `${result.contextUploadCatalogName}, schema ${result.contextUploadSchemaMarker}; `

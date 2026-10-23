@@ -10806,3 +10806,308 @@ follow-up task is requested by this record.
   sequential shell verification was the distinct successful path.
 - **Boundary:** No deployment, parent restart, MCP repair, commit, or model/session
   acceptance was performed. The broader shared migration diff was preserved.
+
+### Codex release continuation — 2026-10-23
+
+The user requests full Ingenium completion, a plan and goal, and development only
+in this Codex window, never through OpenCode. This replaces historical executor
+and successor-chat routing for the current work, while preserving acceptance,
+production data, manual edits, rollback sources, and cancelled OpenRig scope.
+The active plan is [release-2026-10-23](../operations/release-2026-10-23.md).
+
+R23/source settlement is IN PROGRESS. A private verified snapshot preserves all
+106 changed/untracked source paths at HEAD 057b6ae2; no blanket staging or reset.
+The existing branch is 16 commits ahead of its remote. Actual compatibility
+container is stopped with exit 1; old rollback and 057b6ae candidate images remain.
+The current API clean-core typecheck completed with exit 0 through installed Linux
+Node. This is source evidence only. R09/R19 deployment, R12 installed profiles,
+R15/R21 real memory/model/session acceptance, R22 UI/containment, publication and
+preservation-first retirement remain OPEN. Current Codex tools are assessed on
+their actual behavior; the historical D193 OpenCode-provider failure is preserved
+without claiming it repaired or treating it as proof this executor is unavailable.
+Codex source-validation progress: canonical root discovery now excludes retained
+build/protection copies (56 containment tests PASS). Five workspace compiler gates,
+133 API/client and 71 dashboard tests PASS. The native lifecycle tool classification
+repair passes 57 agent-validator tests without widening runtime grants. Static
+deployment, API, gateway and documentation contracts pass. Chat-upload expiry is
+now isolated by the runtime temp root (61 upload/route tests PASS); fixture children
+also have run-owned global config. Browser run31d447a1 built but failed API readiness;
+strict containment exited0. Bounded startup diagnostics were repaired and a causal
+attempt is active. No deployed/browser/model acceptance or publication claimed.
+AUTH-111/112 and the original follow-up contracts remain in the full completion
+scope alongside R12/R15/R21/R22. Continue in this chat only.
+
+## Preservation and native chat progress — 2026-10-23
+
+- Reviewed test-isolation checkpoint `de332ed9f34a6212c464f2ef20f11c9d93ed11b8`
+  is pushed to the existing branch; remote readback matches. Production remains
+  stopped. No OpenCode development, successor chat, or live model call was used.
+- The missing host broker-fixture prerequisite was diagnosed from captured
+  readiness output. The three non-secret managed files were installed with
+  root-owned read-only permissions and passed the actual runtime validator.
+- The browser fixture now speaks the pinned native OpenCode 2.0.11 protocol.
+  Native prompt admission exposed a real duplicate-user-message defect: the API
+  discarded the assigned message ID. The API now returns it and the dashboard
+  correlates the exact optimistic turn. API contracts (58), hook regressions
+  (69), and the API/dashboard compiler checks passed.
+- Fixture sessions now retain unique IDs across resets, preventing accidental
+  reuse of persistent context checkpoint receipts. The real-login reload test
+  enrolls its owner in the isolated organization and checks an actual saved turn.
+- Browser run `c60ba323-4608-4fe8-8217-eea68abdca83`: all ten selected chat,
+  provider-state and task-capture tests passed; strict containment exit 0,
+  active handles 0. Visual review found a missing fixture title PATCH and mobile
+  header overlap. Both are repaired; final screenshot validation is in progress.
+- Additional source checks: core agents 42 passed; extension coordination/reset,
+  current-parent recovery, pre-admission and recovery snapshot suites 357 passed.
+  These are synthetic source checks, not installed runtime acceptance.
+- Private preservation root:
+  `/home/brajam/.local/state/ingenium-release/20261023-volumes-104241`.
+  All four original volume archives were extracted and compared against stable
+  source inventories: bytes, modes, ownership, nanosecond modification times,
+  xattrs/ACLs, hardlink counts and symlink targets match. Eight persistent bind
+  files, including credential/config files, passed the same checks. Secret
+  contents remain private. Originals and prior preservation sources are retained.
+- The copied SQLite database passed integrity and foreign-key checks before and
+  after migration. All 220 tables retained identical row counts, identifiers and
+  per-column hashes. This qualifies a database rehearsal, not the complete
+  production restore/restart gate. Reports and archive hashes are in the private
+  preservation manifest and migration-rehearsal directory.
+
+Remaining: finish visual/checkpoint review, separate dated session-specific
+lifecycle helpers from release code while retaining their historical tests,
+settle the remaining source/build/profile changes, build the exact release
+inputs, capture current repository ACL rollback metadata, and verify deployment
+bindings before startup. Then run the real installed-profile, memory,
+simultaneous-session/restart, identity/tenancy, UI and publication gates. The full
+release goal remains active.
+
+
+## Native release source audit — 2026-10-23 follow-up
+
+- Native chat checkpoint `d5c165d39026b04d39d901209a025456c9bb42fd` is pushed
+  and remote-verified. Final browser run `b5d79353-66cf-4d94-a642-e0d9e2711394`
+  passed; desktop/mobile screenshots were inspected and strict containment
+  exited 0 with zero active handles. This completes that source/fixture feature,
+  not production or real-model acceptance.
+- The dated lifecycle diagnostic harness and inventory helpers are retained under
+  `packages/ingenium-extension/tests/historical/`. The runtime lifecycle registers
+  only the general parent recovery publisher. Its exact grant replaces the dated
+  utility grant on the orchestrator; other roles remain denied. Six focused
+  suites passed 97 tests. Root-level test typechecking is preserved separately
+  while the production compiler excludes test files.
+- Thirteen additional affected installer/config/recovery suites now pass 365
+  tests in aggregate. The first selection had 29 failures: 24 needed a dated
+  temporary parent directory, three expected the retired admission contract,
+  and two hit timing limits under parallel load. Fixtures now allocate their
+  own bounded synthetic paths and validate native preparation receipts; retired
+  admission still fails closed. The two timing cases passed serially without
+  changing their timeouts or runtime rules. Full reruns of the three affected
+  suites passed; a typo in the new fallback-config test was corrected and its
+  entire 16-test suite plus test TypeScript check passed.
+- Docker's generated fallback MCP config still used the pre-native schema.
+  It now uses `mcp.servers` and `disabled: false`, preserving its configured
+  service and environment. The new regression checks that generated fallback.
+- Canonical distribution build correctly refused its existing group-writable
+  build directory. No permission normalization or deletion was performed.
+  Private staged compiler output at
+  `/home/brajam/.local/state/ingenium-release/distribution-stage-k73x58we`
+  contains 263 extension files, no test artifacts or dated lifecycle tools, and
+  the general publisher. MCP parity verified all 284 registrations. This is
+  compiler/package-content proof; actual image build remains pending.
+- Core API Plan handling now uses native ID `plan` and root `plan.md`, matching
+  repository sync and the global projection. Create/edit/enable/disable/delete
+  and import retain this identity; old nested config overrides migrate without
+  losing the selected model/variant. Root-path symlinks are rejected. Core agent
+  regression suite: 44 passed; core TypeScript passed.
+
+All preservation sources remain retained. No production startup, live provider
+call, OpenCode development, successor chat, or final main/release publication has
+occurred. The source audit still needs to settle the remaining pre-existing
+recovery/build/profile changes before an exact-source image and live acceptance.
+The canonical release plan retains the full goal and original gates.
+
+
+## Deployment candidate follow-up — 2026-10-23
+
+- API clean-core passed after the 44-test Plan lifecycle suite. Supervisor process
+  isolation, scheduler policy, and global profile projection checks passed.
+- The older candidate image failed the current ACL fixture because it lacks root
+  `plan.md`; failure project `ingenium-compatibility-acl-pusfo3` is retained. Source
+  review also found startup omitted root Plan from the workspace copy. It now
+  copies Plan explicitly, with both global and workspace readback assertions.
+- The current-source image build passed deployment checks, all six workspace
+  builds, the distribution adopter, and native plugin-loading smoke. It then spent
+  over five minutes in recursive ownership normalization, writing over a gigabyte
+  of unchanged root-owned content into an overlay layer. That isolated build was
+  deliberately cancelled (exit 130); its full logs and source snapshot remain in
+  the private `image-source-dbf7qa0p` stage. It is not a successful image.
+- Docker hardening now repairs only non-root ownership and group/world write bits,
+  without following symlinks. The same root-entrypoint and protected broker checks
+  remain mandatory. Validated provenance is applied after runtime dependency
+  layers so changing a revision does not invalidate those layers.
+- A separate container-config projection excludes host-only MCP commands/plugins
+  while preserving model choices and leaving the original config untouched.
+  Compose accepts `INGENIUM_OPENCODE_CONFIG_FILE` for this explicit deployment
+  copy. The 17-test projection suite, deployment validator, image-provenance
+  contracts, and documentation/config audit passed.
+- Recovery acknowledgement now restores `primary/ingenium-orchestrator`, matching
+  native profile identity. All 21 native HTTP recovery tests passed.
+- Fresh copies of all four volume archives and the eight persistent bind files
+  are extracted for a full-stack, network-disabled restore rehearsal under
+  `/home/brajam/.local/state/ingenium-release/runtime-restore-20261023-075614`.
+  The original archives and verified extraction are unchanged. Startup is pending.
+
+The recovery audit still needs real native-session verification: the bootstrap
+live summary retains old HTTP paths, process admission assumes a session argument
+that native `serve` does not carry, and clean-source versus snapshot admission
+needs reconciliation. These are unresolved migration work, not runtime passes.
+The next image must include the later source fixes and pass the isolated startup
+fixture before any production use. Production remains stopped; full installed
+behavior, restore/restart, browser review and final publication remain open.
+
+
+## Compatibility startup verification follow-up — 2026-10-23
+
+The candidate `ingenium-ingenium:release-20261023-eb9bc7e2adb4` built successfully
+(image `sha256:5607f6acbef985ce798277fa074725e90ca39ef84764fef6b16ec9bca7406225`).
+Its revision label is `d5c165d39026b04d39d901209a025456c9bb42fd`; its exact source
+inventory digest is `eb9bc7e2adb43787742fe6fd20a9558bdf29a3e71ce0a655bbc9c1c2e7f141a3`.
+This is a candidate built from the retained working-tree snapshot, not final release publication.
+
+The current ACL fixture first had an incorrect Plan assertion at `/workspace/.opencode`
+instead of `/workspace/ingenium/.opencode`. After correcting the assertion, its strict
+repository scan exposed a real startup defect: ordinary categorized profiles were
+copied to root-level duplicates. Startup now seeds missing profiles at their native
+relative paths and preserves existing workspace profile contents. The complete fixture
+passed with this source entrypoint, including all 11 mapped profiles, secret/process
+isolation, protected-file guards, canonical bind guards, and sibling preservation.
+Failed projects `ingenium-compatibility-acl-b6ices` and `ingenium-compatibility-acl-nlfe6t`
+remain retained. The passing fixture cleaned only its own generated resources.
+
+A new image build includes the profile-path fix under source inventory
+`fbb89a2b88938719bd909a704c88c86f6fc5aa95223c1cd9517097dc823d8689`.
+Full restored-stack startup, production adoption and real-model acceptance remain open.
+The host ACL utilities were installed to enable exact ACL preservation and the separate
+UID-1105-readable container config; no production workspace ACLs were changed.
+
+
+## Isolated restore startup and credential-expiry diagnosis — 2026-10-23
+
+The rebuilt profile-path candidate `ingenium-ingenium:release-20261023-fbb89a2b8893`
+completed in 218.3 seconds with image ID
+`sha256:890ae27ceb63943d3ba7674e5191df6407be367ea4fa3a99a216b7ecbb7422c8`.
+The restored-stack Compose project started with network disabled, no published ports,
+and only private copied data/config/workspace inputs. It has never mounted the
+production volumes or canonical workspace. The legacy read-only host OpenCode bridge
+is represented by an empty directory, so that bridge is not covered by this rehearsal.
+
+The first start rejected the restored learning credential's mode 0660. Its copied
+metadata was saved; only the rehearsal copy was hardened to 0600, and its bytes were
+verified unchanged. The next start reached all primary supervised processes, API,
+dashboard and gateway. OpenCode remained in its bounded MCP-credential startup wait.
+The API bootstrap returned `MCP_BOOTSTRAP_UNAVAILABLE` (503). Read-only API checks
+confirmed the installation is claimed and the Ingenium project remains present.
+An additional offline copy of the preserved database showed that the fixed startup
+credential expired on 2026-10-19 while its workspace, owner, principal and epoch still
+matched. The receipt replay path refuses expiry without issuing a replacement.
+The rehearsal has been stopped through Compose, retaining every copy and failure log.
+Production remains stopped and unchanged.
+
+A source repair adds explicit expired-receipt renewal only at the authenticated
+compatibility bootstrap caller. It creates a fresh token and immutable credential
+row, retains the expired row, preserves scope/binding checks, and keeps replay of the
+new receipt idempotent. The generic issuance path still rejects expired receipts
+unless explicitly opted in. Runtime capability renewal rules are unchanged.
+Tests and fresh-image restore verification are pending; this is not a healthy restore.
+
+Native restart admission now carries the admitted session identity independently
+of a server command line, with unchanged process nonce, owner, publication, source,
+HTTP binding and typed-work checks. The native-parent and HTTP suites passed 67 tests,
+including a parent without a session argument and a rejected foreign session.
+Extension source/test typechecking passed after correcting the full project binding.
+The raw bootstrap's legacy live-summary paths and clean-source admission remain open.
+
+
+## Production dependency audit gate — 2026-10-23
+
+A read-only `npm audit --omit=dev --json` reported 73 production dependency findings:
+47 moderate, 23 high and 3 critical. The full advisory/path report and compact
+summary are retained privately. Critical package reports include DOMPurify, Next.js
+and proxy-addr; additional direct findings include MCP SDK, OpenCode packages,
+Tiptap and Nodemailer. These are audit reports, not established exploitability of
+Ingenium routes. Reachability, supported fixed versions and focused regressions
+must be reviewed before release publication. No automatic `npm audit fix`, forced
+upgrade, downgrade, or dependency mutation has been performed. Current images
+remain isolated restore candidates while this gate is open.
+
+
+## Release scope supersession — 2026-10-23, direct user instruction
+
+The user cancelled multichat orchestration and requested immediate focus on
+plain-English release blockers. Coordinated parent/child recovery, replacement
+attestation, simultaneous A/B/C orchestration and their R21 acceptance gates are
+retired from the release scope. Preserve their historical evidence and saved
+sessions. Normal single-chat use, memory, authentication, ordinary restart,
+security and preservation-safe publication remain required.
+
+The expired startup credential repair is verified in a restored full stack: the
+current candidate reaches healthy composite health and OpenCode is listening.
+Production remains untouched. Remaining work is dependency security triage,
+retirement of obsolete entry points, retained-function runtime acceptance and
+final reviewed rollout/publication. See the current scope section in
+`docs/operations/release-2026-10-23.md`; older orchestration gates no longer block
+this release. No OpenCode development or successor chat was used.
+
+
+## Restored installation and ordinary restart acceptance — 2026-10-23
+
+The candidate with source digest `143bd2ff1f540d13cae6367361279f9b06581bc9a80f61ba2762e602cb6842c3`
+built and passed native plugin loading after preserving workspace-local
+production dependencies in the image. The restored full stack reached healthy
+composite health and `MCP_BOOTSTRAP_READY`. A synthetic memory item written
+through installed MCP survived image replacement and an ordinary Compose
+restart; installed MCP readback matched its exact content and version after
+both transitions. This is installed transport/API/persistence proof; actual
+model behavior and production rollout remain open. Production is untouched.
+Runtime credential renewal checkpoint `71b7552a1a122a87d34a4379362076ae2e18dfc5`
+is pushed and remote-verified. Dependency npm audit: zero critical, zero high,
+21 moderate. The browser fixture build failed under host pressure before tests;
+strict containment recheck passed with zero active handles. The bounded-CPU
+browser rerun is pending. Multichat/coordinated recovery gates remain cancelled.
+
+
+## Renamed-chat reconnect and bounded browser acceptance — 2026-10-23
+
+A real browser reload returned `IDEMPOTENCY_KEY_REUSED` after the native session
+title changed. Exact private identity lookup now reconnects to the original
+conversation without mutating its title or adding checkpoints. Four API tests
+and API clean-core TypeScript validation passed. Browser run
+`a7f9819d-cf52-49ea-80f1-82cb5b501716` passed send/receive, persisted-session
+desktop/mobile rendering and authenticated reload with no duplicate checkpoints.
+Screenshots were inspected and strict containment passed with zero active handles.
+Fixture-only Next.js page workers are bounded to two after measured memory
+pressure; production config and test timeouts are unchanged.
+Checkpoint `31ae49668842b3cbca7ebf787f3ac852af33396f` is pushed and remote-verified.
+Restored auth-encryption, backup-signing and email-encryption keys match the
+originals byte for byte after restart. Production rollout, settled-source final
+build, actual model behavior and release publication remain open.
+
+
+## Release native discovery checkpoint - 2026-10-23
+
+The cancelled multichat gates remain retired. The curated source passed clean
+install/typechecking and focused core/extension/API checks. Chat browser acceptance
+passed all three desktop/mobile/reload cases. Installed memory survived image
+replacement and an ordinary restart; persistent keys matched the preserved originals.
+
+Native runtime acceptance found an empty global configuration root and an
+undiscovered managed broker policy. Launchers, isolated profile projection and API
+location forwarding are repaired. The broker enforcer recreates missing entries,
+reapplies after native activation and independently denies broker tool authorization.
+A copied project override attempting disable/model/permission changes was restored
+to the protected native registry shape after activation. Retired session-coordinator
+projection is removed. See docs/operations/native-config-discovery-2026-10-23.md.
+
+Revised clean source/image acceptance, legacy session/auth continuity, reversible
+production adoption, real browser/model acceptance and final publication remain.
+Production is still stopped and preserved. The full release goal is not complete.

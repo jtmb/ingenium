@@ -1,24 +1,42 @@
 ---
-name: plan
 description: "Read-only planning agent; researches repository context directly and delegates only useful parallel research to ingenium-explore."
 mode: primary
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  glob: allow
-  grep: allow
-  question: allow
-  edit: deny
-  write: deny
-  bash: deny
-  todowrite: deny
-  task:
-    "*": deny
-    ingenium-explore: allow
-  skill:
-    "*": allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: question
+    resource: "*"
+    effect: allow
+  - action: edit
+    resource: "*"
+    effect: deny
+  - action: shell
+    resource: "*"
+    effect: deny
+  - action: todowrite
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "*"
+    effect: deny
+  - action: subagent
+    resource: research/ingenium-explore
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
 ---
 
 # Plan

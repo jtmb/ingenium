@@ -94,13 +94,17 @@ require_literal "$dockerfile" "ARG NEXT_PUBLIC_RUNTIME_SCHEME=\"\""
 # these values as runtime environment variables to application processes.
 require_literal "$dockerfile" "ARG IMAGE_REVISION"
 require_literal "$dockerfile" "ARG IMAGE_SOURCE=\"https://github.com/jtmb/ingenium\""
+require_literal "$dockerfile" 'ARG IMAGE_SOURCE_SHA256=""'
+require_literal "$dockerfile" "test -z \"\$IMAGE_SOURCE_SHA256\" || { test \"\${#IMAGE_SOURCE_SHA256}\" -eq 64 && printf '%s' \"\$IMAGE_SOURCE_SHA256\" | grep -Eq '^[0-9a-f]{64}\$'; }"
 require_literal "$dockerfile" "grep -Eq '^[0-9a-f]{40}\$'"
 require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac'
 require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac'
 require_literal "$dockerfile" "org.opencontainers.image.revision=\"\${IMAGE_REVISION}\""
 require_literal "$dockerfile" "org.opencontainers.image.source=\"\${IMAGE_SOURCE}\""
+require_literal "$dockerfile" 'org.ingenium.source.sha256="${IMAGE_SOURCE_SHA256}"'
 reject_literal "$dockerfile" "ENV IMAGE_REVISION"
 reject_literal "$dockerfile" "ENV IMAGE_SOURCE"
+reject_literal "$dockerfile" "ENV IMAGE_SOURCE_SHA256"
 reject_literal "$dockerfile" "/usr/local/bin/xdg-open"
 require_literal "$dockerfile" "FROM node:22-slim AS builder"
 require_literal "$dockerfile" "FROM node:22-slim AS runtime-base"
@@ -189,6 +193,9 @@ require_literal "$compose_file" "INGENIUM_RUNTIME_GATEWAY_HOST_PORT=\${INGENIUM_
 reject_literal "$compose_file" '"443:8443"'
 require_literal "$compose_file" "IMAGE_REVISION: \"\${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}\""
 require_literal "$compose_file" "IMAGE_SOURCE: \"\${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}\""
+require_literal "$compose_file" 'IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"'
+source_sha256_wires="$(grep -F -c 'IMAGE_SOURCE_SHA256: "${IMAGE_SOURCE_SHA256:-}"' "$compose_file")"
+[ "$source_sha256_wires" -eq 5 ] || { echo "ERROR: every Compose image target must receive the optional source SHA-256 input"; exit 1; }
 require_literal "$compose_file" '"127.0.0.1:3000:3000"'
 reject_literal "$compose_file" '"3000:3000"'
 gateway_binding_count="$(grep -F -c '"127.0.0.1:3000:3000"' "$compose_file")"
@@ -415,10 +422,17 @@ require_literal "$entrypoint" '"file://{env:PWD}/packages/ingenium-extension/plu
 require_literal "$entrypoint" 'secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups'
 require_literal "$entrypoint" 'fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW'
 require_literal "$entrypoint" 'setfacl -m u:ingenium-api:--x,u:ingenium-restore:--x /home/ingenium-opencode /home/ingenium-opencode/.local /home/ingenium-opencode/.local/share'
-require_line_before "$entrypoint" 'secure_persistent_path file "$credential_path" - - 0600' '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
-require_literal "$entrypoint" 'for workspace_root in /workspace /workspace/*; do'
+require_line_before "$entrypoint" 'secure_persistent_path private-credential "$credential_path" - - 0600' '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
+require_literal "$entrypoint" 'workspace_root=/workspace/ingenium'
+require_literal "$entrypoint" 'workspace_alias=/home/brajam/repos/ingenium'
+require_literal "$entrypoint" 'workspace_identity=$(stat -Lc '\''%d:%i'\'' "$workspace_root")'
+require_literal "$entrypoint" 'if [ "$workspace_identity" != "$alias_identity" ]; then'
+reject_literal "$entrypoint" 'for workspace_root in /workspace /workspace/*; do'
+require_line_before "$entrypoint" 'if [ "$workspace_identity" != "$alias_identity" ]; then' 'WORKSPACE_OPENCODE_DIR="$workspace_root/.opencode"'
+reject_literal "$entrypoint" 'WORKSPACE_OPENCODE_DIR="/workspace/.opencode"'
+require_line_before "$entrypoint" 'WORKSPACE_OPENCODE_DIR="$workspace_root/.opencode"' 'WORKSPACE_AGENTS_DIR="${WORKSPACE_OPENCODE_DIR}/agents"'
 recovery_normalization='/app/scripts/normalize-agent-profiles.sh --normalize-recovery-bootstrap "$workspace_root/packages/ingenium-extension/scripts/recovery-bootstrap.js"'
-require_line_before "$entrypoint" 'secure_persistent_path file "$credential_path" - - 0600' "$recovery_normalization"
+require_line_before "$entrypoint" 'secure_persistent_path private-credential "$credential_path" - - 0600' "$recovery_normalization"
 require_line_before "$entrypoint" "$recovery_normalization" '/app/scripts/normalize-agent-profiles.sh --remove-workspace-acls "$opencode_root/agents"'
 require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'const suffix = "/packages/ingenium-extension/scripts/recovery-bootstrap.js";'
 require_literal "${repo_root}/scripts/project-agent-profiles.mjs" 'fail("recovery bootstrap path is not allowlisted");'
@@ -436,7 +450,11 @@ for identity in PROJECT_ID ORGANIZATION_ID RUNTIME_ID RUNTIME_OWNER_ID STORAGE_M
   require_literal "${repo_root}/scripts/start-opencode-web.sh" "INGENIUM_${identity}=\"\$INGENIUM_${identity}\""
 done
 require_literal "${repo_root}/scripts/start-opencode-web.sh" '"$@"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode/runtime"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'OPENCODE_CONFIG_DIR="/home/ingenium-opencode/.config/opencode"'
+for launcher in start-opencode-web.sh start-runtime-opencode-web.sh; do
+  require_literal "${repo_root}/scripts/$launcher" 'OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/opencode.json"'
+done
+require_literal "$runtime_entrypoint" '--project-server-owned /app/.opencode/agents /home/appuser/.config/opencode/runtime/agents'
 require_literal "$entrypoint" 'install -d -o ingenium-opencode -g ingenium-opencode -m 0700 /run/ingenium-runtime'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" '. /run/ingenium-runtime/environment'
 require_literal "${repo_root}/scripts/provision-opencode-mcp-credential.mjs" 'const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();'

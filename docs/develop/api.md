@@ -865,12 +865,12 @@ tools are defined here.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/v1/settings/provider-configs` | Read the ordered managed provider collection. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. Falls back to legacy primary/backup settings until the collection is first saved. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
+| GET | `/api/v1/settings/provider-configs` | Read only the explicitly saved ordered managed provider collection; legacy primary/backup settings do not synthesize provider blocks. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
 | PUT | `/api/v1/settings/provider-configs` | Atomically save any number of provider blocks. Accepts `roles` array and/or legacy `role` scalar (`available`\|`primary`\|`backup`) for backwards compatibility. `roles` supports multi-role: `["available", "primary"]` or `["available", "backup"]`. Also accepts an optional `synthesis` body field with `{ primary?: SynthesisSelection, secondary?: SynthesisSelection }` to override the role-derived synthesis provider selections — enabling same-provider different-model configurations. Validates exclusivity (at most one primary, at most one backup), synthesis selection constraints (cannot select the same provider+model for both primary and secondary), endpoint SSRF policy via `validateEndpointUrl`, and `allowPrivateNetwork` flag. Projects into OpenCode global config and mirrors synthesis selections into synthesis settings. API keys are stored in the encrypted vault (`vault_items` table, AES-256-GCM). |
 | GET | `/api/v1/settings/llm-config` | Read atomic primary+backup LLM config. Returns provider, model, endpoint, `allowPrivateNetwork`, and `apiKeySet: boolean` — **the actual API key is never exposed**. API keys are stored in the vault, never in plaintext settings. Legacy `synthesis_api_key`/`synthesis_backup_api_key`/`llm_provider_api_keys` settings are auto-migrated into the vault on first read and then deleted from the settings table. |
 | GET | `/api/v1/settings?key=oauth_gmail_client_secret` (or Outlook) | Return only `{ key, isSet, masked }` for a protected OAuth client secret. The value is never returned. The key is resolved against the sole active global project, regardless of the selected `project` query parameter. Sealed/unavailable vaults fail closed; unresolved legacy conflicts return `409 SECRET_MIGRATION_CONFLICT`. Duplicate active globals return `503 GLOBAL_PROJECT_UNAVAILABLE`. |
 | POST | `/api/v1/settings` with `key` plus `action: preserve\|replace\|clear` | Manage a protected OAuth client secret in the active global project. `replace` requires a non-empty `value`; `clear` is explicit; `preserve` leaves the saved value unchanged. A blank implicit value is preserve. The vault must be initialized and unsealed for writes. |
-| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. |
+| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. Legacy saves do not publish synthetic providers into OpenCode global config. |
 | POST | `/api/v1/settings/test-llm` | Test an LLM connection. Accepts `allowPrivateNetwork` boolean body field. Rejects unsafe/internal endpoint addresses (same `validateEndpointUrl` guard as provider-configs save). On transport failure, returns `{ ok: false, status: 0, message: "Unable to reach LLM endpoint" }` — the endpoint URL is never reflected in error messages. |
 
 #### Managed provider credential desired state
@@ -1296,7 +1296,7 @@ Core performs an allocation-light structural walk before canonical map/sort/join
 hashing. It does not serialize or copy the untrusted structure during this
 preflight. The limits are depth 16, 196,608 visited nodes, 512 own entries per
 object/array, 512-character object keys/paths/bounded string-array values,
-at most 256 documentation files (each at most 2 MiB and 2 MiB in aggregate),
+at most 256 documentation files (each at most 2 MiB and 3 MiB in aggregate),
 at most 512 resource items (1,500 KiB in aggregate), 256 KiB resource
 text/record fields, a 1,536,768-byte resource envelope, and a 4 MiB estimated
 canonical envelope. Structural-limit failures return sanitized
@@ -1500,12 +1500,12 @@ mode omits the runtime binding and uses the fixed local path.
 | DELETE | `/api/v1/opencode/sessions/:id` | Delete session |
 | GET | `/api/v1/opencode/sessions/:id/messages` | Get messages (with optional `limit` and `before` pagination) |
 | GET | `/api/v1/opencode/sessions/:id/messages/:msgId` | Get a single message |
-| DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Delete a message |
-| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the current OpenCode 1.18.31 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
+| DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Retained wrapper path; OpenCode V2 does not expose per-message deletion, so the route returns `OPENCODE_V2_MESSAGE_DELETE_UNAVAILABLE`. |
+| POST | `/api/v1/opencode/sessions/:id/prompt` | Requires a `parts` array and adapts it to the OpenCode V2 session-prompt route. Success returns HTTP `202` with `{ data: { accepted: true } }`; this is only an acknowledgement and does not contain the assistant response. |
 | POST | `/api/v1/opencode/sessions/:id/abort` | Abort session |
 | POST | `/api/v1/opencode/sessions/:id/fork` | Fork session |
-| POST | `/api/v1/opencode/sessions/:id/share` | Share session |
-| DELETE | `/api/v1/opencode/sessions/:id/share` | Unshare session |
+| POST | `/api/v1/opencode/sessions/:id/share` | Retained wrapper path; new OpenCode V2 sharing returns `OPENCODE_V2_SHARE_UNAVAILABLE` (an existing share URL may be returned). |
+| DELETE | `/api/v1/opencode/sessions/:id/share` | Retained wrapper path; OpenCode V2 unsharing returns `OPENCODE_V2_SHARE_UNAVAILABLE`. |
 | POST | `/api/v1/opencode/sessions/:id/compact` | Compact session |
 | POST | `/api/v1/opencode/sessions/:id/revert` | Revert session to a message/part checkpoint |
 | POST | `/api/v1/opencode/sessions/:id/unrevert` | Unrevert session |
@@ -1526,7 +1526,8 @@ mode omits the runtime binding and uses the fixed local path.
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | Accepts one MIME-allowlisted multipart file, maximum 5 MiB, stores it temporarily in `/tmp/ingenium-chat-uploads/`, and schedules deletion after one hour. This endpoint is not the Chat composer multi-file path. |
-| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in the retained OpenCode 1.18.31 surface) |
+| GET | `/api/v1/opencode/questions` | Pending OpenCode V2 location forms projected into the retained question shape (read-only list) |
+| POST | `/api/v1/opencode/sessions/:id/questions/:questionId` | Reply to a session-scoped V2 form; `:questionId` is the form ID and the body requires a bounded `{ answer: { ... } }` object. |
 
 ### Chat Context project authority
 
@@ -1578,7 +1579,49 @@ values, endpoints, headers, cookies, sessions, or other credentials. Unsafe
 scalars are rejected or replaced with a safe fallback; they are never partially
 redacted and returned as opaque identifiers.
 
-> **Known gap**: Questions cannot be replied to via the REST API in OpenCode 1.18.31. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
+> **V2 form bridge:** `GET /api/v1/opencode/questions` projects location forms
+> into the retained question shape. `POST
+> /api/v1/opencode/sessions/:id/questions/:questionId` accepts a bounded answer
+> object and maps it to OpenCode V2
+> `POST /api/session/{sessionID}/form/{formID}/reply`; there is no standalone
+> `/questions/:id/reply` route.
+
+## Explicit runtime automation authorization
+
+### POST `/api/v1/runtimes/browser/workspaces/:workspaceId/automation`
+
+The authenticated workspace owner can enable background learning for the current
+compatibility runtime. This browser-session-only operation requires recent
+step-up authentication and the normal cross-site request forgery (CSRF) header;
+an installation bearer or runtime credential is not a substitute for the owner.
+
+**Path parameter:** `workspaceId`, an authorized workspace owned by the caller.
+**Query parameters:** none. **JSON body:** exactly `{}`. Principal, project,
+credential, token and expiry overrides are rejected.
+
+On success, HTTP `200` returns
+`{ "data": { "status": "ready", "runtimeId": "<runtime-id>" } }`.
+The API attests the compatibility binding; core checks the active project,
+organization, owner access, workspace/security epoch, runtime lifetime,
+capability, immutable runtime credential and principal. It grants `execute` to
+that bound principal only and requires exactly one eligible project runtime.
+An idempotent retry preserves the grant and credential identity/expiry. Merely
+listing a READY runtime never grants automation permission.
+
+Authentication/step-up failures retain the shared authentication middleware's
+error contract. Route errors use `{ "error": { "code", "message" } }`:
+
+| Status | Code | Meaning |
+|---|---|---|
+| `404` | `SCOPE_UNAVAILABLE` | Owner/workspace/runtime binding or eligibility unavailable. |
+| `422` | `VALIDATION_ERROR` | Body or query includes overrides. |
+| `503` | `RUNTIME_UNAVAILABLE` | Runtime authorization service failed. |
+
+For example, an ineligible binding returns
+`{ "error": { "code": "SCOPE_UNAVAILABLE", "message": "Runtime request rejected" } }`.
+This operation authorizes an executor; it does not select a provider, extract an
+observation, run synthesis or prove a successful model call. The Dashboard control
+is described in [OpenCode usage](../usage/opencode.md#background-learning-authorization).
 
 ## Data Flow
 

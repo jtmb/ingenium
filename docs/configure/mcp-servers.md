@@ -78,7 +78,7 @@ agent's profile permissions or exposes child stderr. The optional description is
 accepted by `POST /api/v1/mcp-servers/presets/playwright` and is shown as
 metadata in the Servers tab.
 
-Do not add a root `mcp.playwright` server or run `npx -y @playwright/mcp` from
+Do not add a root `mcp.servers.playwright` server or run `npx -y @playwright/mcp` from
 OpenCode configuration. The tracked root configuration exposes the canonical
 `ingenium` MCP server; Playwright is a project child preset and must use the
 fixed executable, browser path, arguments, and namespace above.

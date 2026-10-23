@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error The Docker closure utility is intentionally runtime JavaScript.
 import { createCanonicalPluginClosure, materializePluginClosure, resolvePluginSourceClosure } from "./scripts/plugin-source-closure.mjs";
 // @ts-expect-error This runtime ESM manifest intentionally has no TypeScript declaration file.
-import { CANONICAL_PLUGIN_RUNTIME_ASSETS, CANONICAL_PLUGIN_SPECS } from "./plugin-specs.mjs";
+import { CANONICAL_PLUGIN_RUNTIME_ASSETS, CANONICAL_PLUGIN_RUNTIME_ASSETS_V2, CANONICAL_PLUGIN_SPECS, CANONICAL_PLUGIN_SPECS_V2 } from "./plugin-specs.mjs";
 
 const extensionRoot = resolve(import.meta.dirname);
 const temporaryDirectories: string[] = [];
@@ -91,6 +91,30 @@ describe("canonical plugin source closure", () => {
     for (const path of closure.files) {
       expect(readFileSync(join(destination, path))).toEqual(readFileSync(join(extensionRoot, path)));
     }
+  });
+
+  it("materializes the pinned V2 recovery helper when loading source plugins", () => {
+    const closure = createCanonicalPluginClosure(extensionRoot, CANONICAL_PLUGIN_SPECS_V2,
+      [...CANONICAL_PLUGIN_RUNTIME_ASSETS, ...CANONICAL_PLUGIN_RUNTIME_ASSETS_V2]);
+    expect(closure.assets).toContain("scripts/source-snapshot.mjs");
+    expect(closure.files.every((path: string) => !/(^|\/)tests(\/|$)|\.(?:test|spec)\./i.test(path))).toBe(true);
+    expect(closure.files).not.toContain("tests/historical/lifecycle-20261008.ts");
+    expect(closure.files).not.toContain("tests/historical/source-inventory-evidence.ts");
+    const destination = join(temporaryDirectory("ingenium-v2-plugin-closure-"), "runtime");
+    materializePluginClosure(extensionRoot, destination, closure);
+    expect(readFileSync(join(destination, "scripts/source-snapshot.mjs")))
+      .toEqual(readFileSync(join(extensionRoot, "scripts/source-snapshot.mjs")));
+  });
+
+  it("checks the pinned V2 helper's image ownership and mode before plugin smoke", () => {
+    const dockerfile = readFileSync(resolve(extensionRoot, "../..", "Dockerfile"), "utf8");
+    const closure = dockerfile.indexOf("COPY --from=builder --chown=root:root /tmp/ingenium-extension-plugin-sources ./packages/ingenium-extension");
+    const mode = dockerfile.indexOf("RUN chmod 0444 /app/packages/ingenium-extension/scripts/source-snapshot.mjs", closure);
+    const smoke = dockerfile.indexOf("COPY --from=builder --chown=root:root /app/packages/ingenium-extension/scripts/smoke-opencode-plugin-load.mjs", closure);
+    expect(closure).toBeGreaterThan(-1);
+    expect(mode).toBeGreaterThan(closure);
+    expect(smoke).toBeGreaterThan(mode);
+    expect(dockerfile).toContain("stat -c '%u:%g:%a' /app/packages/ingenium-extension/scripts/source-snapshot.mjs)\" = \"0:0:444\"");
   });
 
   it("reports the importing file and exact unresolved path", () => {

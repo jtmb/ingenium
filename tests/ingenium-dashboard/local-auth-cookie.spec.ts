@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./fixture";
 import {
   FIXTURE_OWNER_EMAIL,
   FIXTURE_OWNER_PASSWORD,

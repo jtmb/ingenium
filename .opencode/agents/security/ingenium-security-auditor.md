@@ -1,62 +1,81 @@
 ---
-name: ingenium-security-auditor
 description: "Security review agent. Performs a bounded current-diff and relevant dependency review; history scans require a confirmed secret or critical explicit trigger."
 mode: subagent
-disable: false
+disabled: false
 hidden: false
-permission:
-  "*": deny
-  read: allow
-  question: deny
-  edit: deny
-  write: deny
-  bash: allow
-  glob: allow
-  grep: allow
-  playwright_*: deny
-  playwright_browser_press_sequentially: deny
-  playwright_browser_check: deny
-  playwright_browser_uncheck: deny
-  playwright_browser_keydown: deny
-  playwright_browser_keyup: deny
-  playwright_browser_cookie_clear: deny
-  playwright_browser_cookie_delete: deny
-  playwright_browser_cookie_set: deny
-  playwright_browser_cookie_get: deny
-  playwright_browser_cookie_list: deny
-  playwright_browser_localstorage_clear: deny
-  playwright_browser_localstorage_delete: deny
-  playwright_browser_localstorage_set: deny
-  playwright_browser_localstorage_get: deny
-  playwright_browser_localstorage_list: deny
-  playwright_browser_sessionstorage_clear: deny
-  playwright_browser_sessionstorage_delete: deny
-  playwright_browser_sessionstorage_set: deny
-  playwright_browser_sessionstorage_get: deny
-  playwright_browser_sessionstorage_list: deny
-  playwright_browser_set_storage_state: deny
-  playwright_browser_storage_state: deny
-  playwright_browser_route: deny
-  playwright_browser_reload: deny
-  playwright_browser_network_state_set: deny
-  playwright_browser_pdf_save: deny
-  playwright_browser_annotate: deny
-  playwright_browser_navigate_forward: deny
-  task:
-    "*": "deny"
-  ingenium_docs_search: allow
-  ingenium_docs_get_page: allow
-  ingenium_docs_list_comments: allow
-  skill:
-    development-conventions: allow
-    devops-conventions: allow
-    database-conventions: allow
-    mcp-tooling: allow
-    security-audit: allow
-    documentation: allow
-    self-learning: allow
-    skill-maintenance: allow
-    ponytail: allow
+permissions:
+  - action: "*"
+    resource: "*"
+    effect: deny
+  - action: read
+    resource: "*"
+    effect: allow
+  - action: shell
+    resource: "*"
+    effect: allow
+  - action: glob
+    resource: "*"
+    effect: allow
+  - action: grep
+    resource: "*"
+    effect: allow
+  - action: execute
+    resource: "*"
+    effect: allow
+  - action: task_status
+    resource: "*"
+    effect: allow
+  - action: todoread
+    resource: "*"
+    effect: allow
+  - action: rule_reconciliation
+    resource: "*"
+    effect: allow
+  - action: tool_error_ack
+    resource: "*"
+    effect: allow
+  - action: external_directory
+    resource: "/tmp/opencode/*"
+    effect: allow
+  - action: ingenium_docs_search
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_get_page
+    resource: "*"
+    effect: allow
+  - action: ingenium_docs_list_comments
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: "*"
+    effect: allow
+  - action: skill
+    resource: development-conventions
+    effect: allow
+  - action: skill
+    resource: devops-conventions
+    effect: allow
+  - action: skill
+    resource: database-conventions
+    effect: allow
+  - action: skill
+    resource: mcp-tooling
+    effect: allow
+  - action: skill
+    resource: security-audit
+    effect: allow
+  - action: skill
+    resource: documentation
+    effect: allow
+  - action: skill
+    resource: self-learning
+    effect: allow
+  - action: skill
+    resource: skill-maintenance
+    effect: allow
+  - action: skill
+    resource: ponytail
+    effect: allow
 ---
 
 # Security Auditor

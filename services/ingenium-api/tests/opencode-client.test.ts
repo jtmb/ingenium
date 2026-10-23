@@ -919,6 +919,7 @@ describe("opencodeClient — method routing", () => {
 
       expect(result).toMatchObject({ error: { code: "EXTERNAL_OBSERVATION_BINDING_REJECTED", status: 404 } });
       expect(fetchSpy.mock.calls.map(([, init]) => init.method)).toEqual(["GET"]);
+      expect(fetchSpy.mock.calls[0][1].headers["x-opencode-directory"]).toBe("%2Fworkspace");
     }
   });
 
@@ -1194,6 +1195,31 @@ describe("opencodeClient — method routing", () => {
     expect(urls[3]).toContain("location%5Bdirectory%5D=%2Fworkspace");
     expect(urls[4]).toContain("location%5Bdirectory%5D=%2Fworkspace");
     expect(JSON.parse(String((fetchSpy.mock.calls[8][1] as RequestInit).body))).toEqual({ answer: { branch: "main" } });
+  });
+
+  it.each([true, false])("waits for a cold agent registry with a bounded startup failure (ready=%s)", async (ready) => {
+    vi.useFakeTimers();
+    try {
+      const agent = { id: "plan", name: "Plan", mode: "primary", permissions: [] };
+      const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: [] }));
+      if (ready) {
+        fetchSpy.mockResolvedValueOnce(mockResponse(200, { data: [] }))
+          .mockResolvedValueOnce(mockResponse(200, { data: [agent] }));
+      }
+      vi.stubGlobal("fetch", fetchSpy);
+      const pending = opencodeClient.listAgents();
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      if (ready) {
+        expect(result).toEqual([expect.objectContaining({ id: "plan" })]);
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+      } else {
+        expect(result).toMatchObject({ error: { code: "OPENCODE_STARTING" } });
+        expect(fetchSpy).toHaveBeenCalledTimes(6);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("documents removed v1 surfaces with typed errors", async () => {
