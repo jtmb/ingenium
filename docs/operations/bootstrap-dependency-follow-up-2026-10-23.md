@@ -22,3 +22,9 @@ Source validation complete; image build and deployed acceptance are next. Prior 
 - The installed-image cold-start test deliberately withholds loopback API readiness for 75 seconds and fails the first credential POST. It requires the actual bootstrap CLI to recover without operator intervention and checks private installed capability/environment files. This is synthetic startup evidence, not a production model call.
 
 Advisory sources: [Zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5), [body-parser](https://github.com/advisories/GHSA-27r3-jxmh-p828), [OpenTelemetry](https://github.com/advisories/GHSA-8988-4f7v-96qf), [UUID](https://github.com/advisories/GHSA-w5hq-g745-h8pq), [selector parser](https://github.com/advisories/GHSA-rj75-hqrm-r3gf), and [qs](https://github.com/advisories/GHSA-4mjr-xmp4-gh2g). The [Zod migration guide](https://zod.dev/v4/changelog) describes the compatibility changes.
+
+## Refreshed Undici advisory
+
+The publication audit was refreshed after deployed verification and identified a newly updated [Undici EventSource advisory](https://github.com/advisories/GHSA-4qv8-2p9j-2685). The lock now uses compatible releases 6.29.1, 7.30.1 and 8.12.3, covering the additional [integrity-token advisory](https://github.com/advisories/GHSA-f72v-6w45-q472). The refreshed production audit is again zero. Models, native OpenCode and source behavior are unchanged. A replacement image and final deployed acceptance remain pending for this additional dependency patch.
+
+After this patch, 104 HTTP client tests and 53 plugin/MCP client tests pass. The initial bootstrap image already passed automatic cold start, restart, key/history/memory continuity, the unchanged nine-model free catalog, and 24-page browser review; that evidence is retained separately from the replacement image acceptance.
