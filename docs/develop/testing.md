@@ -116,6 +116,14 @@ cleans up the exact manifest-owned run directory. This is the verified Phase 5E
 behavior: the run manifest is the source of truth for process identity, ports,
 paths, and cleanup ownership.
 
+On a Linux host, the production-mode API also requires the protected broker
+artifacts installed by the Dockerfile at `/usr/local/share/ingenium/opencode-managed`.
+The root and parent directories must be owned by another user with mode `0555`,
+and the canonical files must have mode `0444`. Provision this non-secret test
+prerequisite before running the fixture; the runner does not install system
+files or bypass the production validator. A missing deployment root causes API
+startup to fail before browser tests can run.
+
 ```bash
 npx playwright test --config=tests/playwright.config.ts
 ```
@@ -159,7 +167,12 @@ identity, run nonce, ports, database, project, and temporary directory in a
 manifest. Child environments are built from an explicit allowlist of safe
 runtime variables plus service-specific values; parent credentials and
 unrelated secrets are not inherited. The API child alone receives the test
-bearer. The API and dashboard receive `INGENIUM_API_TEST_MODE=1`; background
+bearer. Each child gets `TMPDIR`, `TMP`, and `TEMP` bound to the run directory,
+so temporary uploads and their startup cleanup cannot touch another runtime.
+The global configuration path is also bound below the run-owned home. Failed
+readiness checks retain the service's bounded startup output in their diagnostics.
+Chat uploads use the operating system temporary root and return the actual
+uploaded file URL. The API and dashboard receive `INGENIUM_API_TEST_MODE=1`; background
 schedulers and mail maintenance remain disabled. Dashboard and fixture
 readiness/preflight requests receive no API bearer header; the dashboard's
 server-side credential is kept separate in its protected token-file path.

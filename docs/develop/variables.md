@@ -94,6 +94,12 @@ nonce values.
 
 ## API (`services/ingenium-api`)
 
+Chat uploads are stored in `ingenium-chat-uploads` below Node's `os.tmpdir()`.
+`TMPDIR` (Linux) or `TEMP`/`TMP` (Windows) select that root; the system default
+remains `/tmp` in the Linux container. The API and its OpenCode runtime must see
+the same upload path. Fixture children bind all three variables to their owned
+run directory, isolating upload creation, expiry cleanup, and returned file URLs.
+
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `INGENIUM_API_PORT` | `4096` in Docker (`4097` standalone) | `config/index.ts` | Private Express API listen port in the container; public host bearer boundary remains `127.0.0.1:4097`. |

@@ -3,6 +3,8 @@ import formidable from "formidable";
 import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { logger, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
@@ -36,7 +38,7 @@ import { currentOpenCodeRuntimeTarget } from "../runtime-opencode-context.js";
 
 /* ── File upload configuration ── */
 
-const UPLOAD_DIR = "/tmp/ingenium-chat-uploads";
+const UPLOAD_DIR = path.join(tmpdir(), "ingenium-chat-uploads");
 mkdirSync(UPLOAD_DIR, { recursive: true });
 
 /* ── Startup cleanup: remove uploads older than 1 hour ── */
@@ -513,7 +515,7 @@ opencodeRouter.post("/upload", async (req, res) => {
 
     res.json({
       data: {
-        url: `file:///tmp/ingenium-chat-uploads/${path.basename(uploadedFile.filepath)}`,
+        url: pathToFileURL(uploadedFile.filepath).href,
         filename: uploadedFile.originalFilename,
         mime,
         size: uploadedFile.size,
