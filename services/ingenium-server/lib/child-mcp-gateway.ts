@@ -473,7 +473,7 @@ export class ChildMcpGateway {
           description: tool.description,
           inputSchema: {
             project: z.string().min(1).max(MAX_PROJECT_NAME_LENGTH),
-            arguments: z.record(z.unknown()).default({}),
+            arguments: z.record(z.string(), z.unknown()).default({}),
           },
         },
         async (args) => this.forward(definition.name, tool.name, name, generation, args),

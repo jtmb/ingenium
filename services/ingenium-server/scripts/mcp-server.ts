@@ -201,10 +201,10 @@ const repositoryDocsManifestParam = z.object({
 }).strict();
 const repositoryResourcesManifestParam = z.object({
   version: z.literal(2),
-  skills: z.array(z.record(z.unknown())).max(512),
-  agents: z.array(z.record(z.unknown())).max(512),
-  plugins: z.array(z.record(z.unknown())).max(512),
-  commands: z.array(z.record(z.unknown())).max(512).optional(),
+  skills: z.array(z.record(z.string(), z.unknown())).max(512),
+  agents: z.array(z.record(z.string(), z.unknown())).max(512),
+  plugins: z.array(z.record(z.string(), z.unknown())).max(512),
+  commands: z.array(z.record(z.string(), z.unknown())).max(512).optional(),
 }).strict().superRefine((manifest, context) => {
   if (manifest.skills.length + manifest.agents.length + manifest.plugins.length + (manifest.commands?.length ?? 0) > 512) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "At most 512 repository resources may be synchronized" });
@@ -216,7 +216,7 @@ const jobVaultItemIdsParam = z.array(z.string().uuid()).max(16).refine(
 );
 const projectRetentionDaysParam = z.number().finite().int().min(0).max(3_650);
 const jobTimeoutMinutesParam = z.number().finite().int().min(1).max(1_440);
-const jobUpdateFieldsParam = z.record(z.unknown()).superRefine((fields, context) => {
+const jobUpdateFieldsParam = z.record(z.string(), z.unknown()).superRefine((fields, context) => {
   if ("vault_item_ids" in fields) {
     const result = jobVaultItemIdsParam.safeParse(fields.vault_item_ids);
     if (!result.success) context.addIssue({ code: z.ZodIssueCode.custom, message: "vault_item_ids must be an array of up to 16 unique UUIDs" });
@@ -880,7 +880,7 @@ server.registerTool(
     inputSchema: {
       project: projectParam,
       task_id: z.string(),
-      fields: z.record(z.unknown()),
+      fields: z.record(z.string(), z.unknown()),
       expected_revision: taskRevisionParam.optional(),
       idempotency_key: taskIdempotencyKeyParam.optional(),
     },
@@ -1120,7 +1120,7 @@ server.registerTool(
     inputSchema: {
       project: projectParam,
       task_ids: z.array(z.string()),
-      fields: z.record(z.unknown()),
+      fields: z.record(z.string(), z.unknown()),
       expected_revision: taskRevisionParam.optional(),
       expected_revisions: taskExpectedRevisionsParam.optional(),
       idempotency_key: taskIdempotencyKeyParam.optional(),
@@ -1153,13 +1153,13 @@ server.registerTool(
 
 // Explicit canonical context memory surface. plan_* remains supported above.
 server.registerTool("context_get", { description: "Get a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_get"), async ({ project, id }) => contextTools.contextGet(project, id)));
-server.registerTool("context_update", { description: "Update a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive(), fields: z.record(z.unknown()) } }, wrapHandler(C("context_update"), async ({ project, id, fields }) => contextTools.contextUpdate(project, id, fields)));
+server.registerTool("context_update", { description: "Update a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive(), fields: z.record(z.string(), z.unknown()) } }, wrapHandler(C("context_update"), async ({ project, id, fields }) => contextTools.contextUpdate(project, id, fields)));
 server.registerTool("context_delete", { description: "Delete a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_delete"), async ({ project, id }) => contextTools.contextDelete(project, id)));
 server.registerTool("context_batch_get", { description: "Retrieve a batch of canonical context entries.", inputSchema: { project: projectParam, ids: z.array(z.number().int().positive()).max(100) } }, wrapHandler(C("context_batch_get"), async ({ project, ids }) => contextTools.contextBatch(project, ids)));
 
 // Immutable conversation context. List/search tools return summaries only;
 // content is exposed only by the deliberate message-retrieve operations.
-const contextMetadataParam = z.record(z.unknown());
+const contextMetadataParam = z.record(z.string(), z.unknown());
 const contextTagsParam = z.array(z.string().trim().min(1).max(64)).max(64);
 const contextIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const contextRevisionParam = z.number().int().nonnegative();
@@ -2927,7 +2927,7 @@ server.registerTool(
   "backup_schedule_set",
   {
     description: "Set/update the backup schedule configuration.",
-    inputSchema: { project: projectParam, config: z.record(z.unknown()) },
+    inputSchema: { project: projectParam, config: z.record(z.string(), z.unknown()) },
   },
   wrapHandler(C("backup_schedule_set"), async ({ project, config }) =>
     backupTools.backupScheduleSet(project, config)),

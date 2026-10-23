@@ -110,7 +110,7 @@ export function errorHandler(
       error: {
         code: "VALIDATION_ERROR",
         message: "Input validation failed",
-        details: err.errors.map((e) => ({
+        details: err.issues.map((e) => ({
           field: e.path.join("."),
           reason: e.message,
         })),
