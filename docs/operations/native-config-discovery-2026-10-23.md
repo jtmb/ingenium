@@ -52,3 +52,15 @@ and translates current execution completion, interruption and failure. Focused
 contract tests and API typechecking passed. Rebuilt-image adoption, live browser
 stream completion, authenticated reload and final ordinary restart acceptance
 remain separate gates until verified.
+
+## Cold provider registry follow-up
+
+The rebuilt stream adapter passed real Zen browser send/receive/completion,
+authenticated reload, and the mobile overflow check without request errors.
+The first cold browser load also exposed a separate catalog race: provider and
+model snapshots can be empty while native location plugins are activating.
+The API now retries both snapshots together with bounded backoff, reports a
+startup diagnostic if they never settle, and preserves explicitly disabled
+providers. It does not replace models, enable disabled providers, or change
+defaults. Five new client regressions and API typechecking passed. Final image
+adoption and cold restart acceptance remain due for this catalog follow-up.

@@ -1222,6 +1222,56 @@ describe("opencodeClient — method routing", () => {
     }
   });
 
+  it.each(["providers", "models", "both"])("waits for a cold %s catalog without replacing model choices", async (missing) => {
+    vi.useFakeTimers();
+    try {
+      let attempt = 0;
+      const model = { id: "flint-40b-free", modelID: "flint-40b-free", providerID: "opencode", name: "Flint Free" };
+      const provider = { id: "opencode", name: "OpenCode", activation: "enabled" };
+      const fetchSpy = vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/api/provider") {
+          attempt += 1;
+          return mockResponse(200, { data: attempt === 1 && missing !== "models" ? [] : [provider] });
+        }
+        if (path === "/api/model") return mockResponse(200, { data: attempt === 1 && missing !== "providers" ? [] : [model] });
+        if (path === "/api/model/default") return mockResponse(200, { data: model });
+        throw new Error("Unexpected catalog route");
+      });
+      vi.stubGlobal("fetch", fetchSpy);
+      const pending = opencodeClient.listProviders();
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      expect(result).toMatchObject({
+        connected: ["opencode"], default: { opencode: "flint-40b-free" },
+        all: [{ id: "opencode", models: { "flint-40b-free": { id: "flint-40b-free" } } }],
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(5);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("bounds catalog startup retries instead of returning a false no-provider result", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { data: [] }));
+      vi.stubGlobal("fetch", fetchSpy);
+      const pending = opencodeClient.listProviders();
+      await vi.runAllTimersAsync();
+      expect(await pending).toMatchObject({ error: { code: "OPENCODE_STARTING" } });
+      expect(fetchSpy).toHaveBeenCalledTimes(12);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("preserves an explicitly disabled catalog as a settled empty selection", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: [{ id: "opencode", activation: "disabled" }] }))
+      .mockResolvedValueOnce(mockResponse(200, { data: [] }))
+      .mockResolvedValueOnce(mockResponse(200, { data: null }));
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await opencodeClient.listProviders()).toMatchObject({ connected: [], default: {}, all: [{ id: "opencode", models: {} }] });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
   it("documents removed v1 surfaces with typed errors", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, {}));
     vi.stubGlobal("fetch", fetchSpy);

@@ -1873,16 +1873,33 @@ export const opencodeClient = {
    * because v2 no longer reports an auth-derived connection list here.
    */
   listProviders: async (_directory?: string): Promise<OpenCodeResult<ProvidersResponse>> => {
-    const providersResult = await v2Data<V2ProviderInfo[]>("/api/provider", {
-      // Provider errors commonly contain opaque vendor diagnostics. This
-      // catalog is browser-facing, so no upstream code or message may escape.
-      sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
-    });
-    if (isOpenCodeError(providersResult)) return providersResult;
-    const modelsResult = await v2Data<V2ModelInfo[]>("/api/model", {
-      sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
-    });
-    if (isOpenCodeError(modelsResult)) return modelsResult;
+    let providersResult: V2ProviderInfo[] = [];
+    let modelsResult: V2ModelInfo[] = [];
+    const startupDelays = [100, 250, 500, 1000, 2000];
+    for (let attempt = 0; ; attempt += 1) {
+      // A cold V2 location returns empty registries while plugins activate.
+      // Read both snapshots again rather than caching a false empty catalog.
+      const providers = await v2Data<V2ProviderInfo[]>("/api/provider", {
+        sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
+      });
+      if (isOpenCodeError(providers)) return providers;
+      const models = await v2Data<V2ModelInfo[]>("/api/model", {
+        sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
+      });
+      if (isOpenCodeError(models)) return models;
+      if (!Array.isArray(providers) || !Array.isArray(models)) {
+        return { error: { ...PROVIDER_CATALOG_ERROR } };
+      }
+      providersResult = providers;
+      modelsResult = models;
+      if (providers.length > 0 && (models.length > 0
+        || providers.every((provider) => provider.activation === "disabled"))) break;
+      const delay = startupDelays[attempt];
+      if (delay === undefined) {
+        return { error: { code: "OPENCODE_STARTING", message: "OpenCode provider registry is still starting" } };
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
     const defaultResult = await v2Data<V2ModelInfo | null>("/api/model/default", {
       sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
     });
