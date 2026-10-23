@@ -64,3 +64,22 @@ startup diagnostic if they never settle, and preserves explicitly disabled
 providers. It does not replace models, enable disabled providers, or change
 defaults. Five new client regressions and API typechecking passed. Final image
 adoption and cold restart acceptance remain due for this catalog follow-up.
+
+## Embedded workspace readiness follow-up
+
+The catalog image passed real free-Zen Beam chat, authenticated reload and a
+normal Compose restart without changing model configuration. The passive page
+sweep then found the embedded OpenCode workspace incorrectly unavailable: its
+readiness probe still requested the native root without the HTTP Basic identity
+now required by V2. The CLI readiness probe likewise bypassed ttyd's gateway
+identity. Web readiness now reuses the protected native API credential against
+`/api/info`; CLI readiness uses the loopback-only gateway health route. Credentials
+are not sent to CLI or VS Code, redirects are not followed, and missing native
+credentials fail closed. Focused regression checks and rebuilt-image acceptance
+remain separate gates for this follow-up.
+
+The affected runtime suite also retained two cancelled coordination expectations:
+coordination scopes on a new capability and successful renewal through the removed
+peer-registration API. Expected scopes now match the retired coordinator policy;
+activity authentication, binding and inactive-runtime denials remain covered.
+The previous assertions remain in Git history at `445eda062cea4eff68acf20b30587ee6c5b296e2`.

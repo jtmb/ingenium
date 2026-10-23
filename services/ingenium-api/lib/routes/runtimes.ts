@@ -4,6 +4,7 @@ import { z } from "zod";
 import { inspectManagedRuntime, removeManagedRuntime, stopManagedRuntime } from "../runtime-manager-client.js";
 import { deploymentMode } from "../runtime-mode.js";
 import { ensureRuntime, isLocalRuntimeBinding, runtimeNumberSetting } from "../runtime-provisioner.js";
+import { buildAuthHeader } from "../opencode-client.js";
 
 export const runtimesRouter = Router();
 
@@ -130,8 +131,8 @@ function runtimeScheme(): runtimes.RuntimeTransportScheme {
 }
 
 export function compatibilityRuntimeTarget(audience: "web" | "cli" | "vscode"): string {
-  if (audience === "web") return "http://127.0.0.1:4098/";
-  if (audience === "cli") return "http://127.0.0.1:4099/";
+  if (audience === "web") return "http://127.0.0.1:4098/api/info";
+  if (audience === "cli") return "http://127.0.0.1:3000/_ingenium/health";
   return "http://127.0.0.1:4100/?folder=/workspace";
 }
 
@@ -140,9 +141,20 @@ export async function compatibilityRuntimeReady(
   probe: typeof fetch = fetch,
 ): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {};
+    if (audience === "web") {
+      const authorization = buildAuthHeader();
+      if (!authorization) return false;
+      headers.authorization = authorization;
+    } else if (audience === "cli") {
+      // ttyd only accepts the gateway's fixed identity. Use its loopback-only
+      // health route rather than bypassing that boundary at the private port.
+      headers.host = "cli.localhost";
+    }
     const response = await probe(compatibilityRuntimeTarget(audience), {
       method: "GET",
       redirect: "manual",
+      headers,
       signal: AbortSignal.timeout(2_000),
     });
     await response.body?.cancel().catch(() => undefined);

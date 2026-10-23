@@ -1,11 +1,11 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { authentication, coordination, explicitMemory, getDb, identity, mcpCredentials, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
+import { authentication, explicitMemory, getDb, identity, mcpCredentials, organizations, projects, resetDbForTest, runtimes } from "ingenium-core";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -64,14 +64,14 @@ function authorizeAdditionalWorkspace(scope: ReturnType<typeof createWorkspace>,
   });
 }
 
-function createRuntimeCapability(id: string, registerPeer = true) {
+function createRuntimeCapability(id: string) {
   const scope = createWorkspace(id);
   const workspace = runtimes.getAuthorizedWorkspace(id)!;
   const credential = mcpCredentials.createMcpCredential({
     kind: "runtime",
     audience: "runtime",
     name: id,
-    scopes: ["child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
+    scopes: ["child-mcp:runtime", "memory:read", "projects:read", "runtime:activity"],
     organizationId: scope.organizationId,
     projectId: scope.project.id,
     workspaceId: workspace.id,
@@ -99,16 +99,6 @@ function createRuntimeCapability(id: string, registerPeer = true) {
   });
   runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "STARTING", actorType: "manager", actorId: "manager", backendContainerId: "a".repeat(64) });
   runtime = runtimes.transitionRuntime({ id: runtime.id, expectedRevision: runtime.revision, toState: "READY", actorType: "system", actorId: "test" });
-  if (registerPeer) {
-    coordination.registerCoordinationSession(scope.project.id, {
-      worktreeId: coordination.coordinationWorktreeId(workspace.id, workspace.storageMappingHash),
-      sessionId: `session-${id}`,
-      incarnation: 1,
-      ownershipToken: "o".repeat(32),
-      ttlMs: 60_000,
-      idempotencyKey: `register-${id}`,
-    });
-  }
   return { credential, now, runtime, scope, workspace };
 }
 
@@ -173,6 +163,8 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.stubEnv("OPENCODE_SERVER_PASSWORD", "health-probe-test-password");
+  vi.stubEnv("OPENCODE_SERVER_PASSWORD_FILE", "");
   managerFailure = false;
   managerRuntimeState = "running";
   managerRuntimeHealth = "starting";
@@ -189,6 +181,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   releaseManagerStop?.();
   resetDbForTest();
   delete process.env.INGENIUM_CORE_DB_PATH;
@@ -239,7 +232,7 @@ describe("AUTH-108 runtime routes", () => {
     await expect(first.json()).resolves.toMatchObject({ data: { state: "STARTING", backendContainerId: "a".repeat(64) } });
     expect(mcpCredentials.listMcpCredentials(user.id).filter((credential) => credential.kind === "runtime")
       .map((credential) => credential.scopes)).toEqual([
-      ["child-mcp:execute", "child-mcp:runtime", "coordination:read", "coordination:write", "memory:read", "projects:read", "runtime:activity"],
+      ["child-mcp:execute", "child-mcp:runtime", "memory:read", "projects:read", "runtime:activity"],
     ]);
 
     const duplicate = await fetch(`${apiBase}/api/v1/runtimes`, {
@@ -251,7 +244,7 @@ describe("AUTH-108 runtime routes", () => {
     expect(managerRequests.filter((request) => request === "POST /v1/runtimes")).toHaveLength(1);
   });
 
-  it("renews only the capability-bound runtime with a live peer and rejects replay expansion or identity mismatch", async () => {
+  it("rejects activity identity mismatch and does not renew a runtime without an active peer", async () => {
     const active = createRuntimeCapability("runtime-route-capability");
     const observedAt = new Date();
     const request = (body: object, headers = runtimeHeaders(active.credential.token, active.workspace.id)) => fetch(
@@ -274,13 +267,10 @@ describe("AUTH-108 runtime routes", () => {
     )).status).toBe(404);
     expect((await request({ runtimeId: crypto.randomUUID(), observedAt: observedAt.toISOString() })).status).toBe(404);
 
-    const accepted = await request({ runtimeId: active.runtime.id, observedAt: observedAt.toISOString() });
-    expect(accepted.status).toBe(200);
-    await expect(accepted.json()).resolves.toEqual({ data: { accepted: true, renewed: true } });
+    // Live coordination-peer renewal was retired with multichat orchestration.
+    // Keep the capability and authentication denials without reviving that API.
     const revision = runtimes.getRuntimeInstance(active.runtime.id)!.revision;
-    const replayed = await request({ runtimeId: active.runtime.id, observedAt: observedAt.toISOString() });
-    expect(replayed.status).toBe(200);
-    await expect(replayed.json()).resolves.toEqual({ data: { accepted: true, renewed: false } });
+    expect((await request({ runtimeId: active.runtime.id, observedAt: observedAt.toISOString() })).status).toBe(409);
     expect(runtimes.getRuntimeInstance(active.runtime.id)!.revision).toBe(revision);
 
     mcpCredentials.revokeMcpCredential(active.credential.id, active.scope.user.id);
@@ -288,7 +278,7 @@ describe("AUTH-108 runtime routes", () => {
   });
 
   it("does not renew or preserve an inactive runtime", async () => {
-    const inactive = createRuntimeCapability("runtime-route-inactive", false);
+    const inactive = createRuntimeCapability("runtime-route-inactive");
     const response = await fetch(`${apiBase}/api/v1/runtimes/activity`, {
       method: "POST",
       headers: runtimeHeaders(inactive.credential.token, inactive.workspace.id),
@@ -692,19 +682,42 @@ describe("AUTH-108 runtime routes", () => {
   });
 
   it.each([
-    ["web", "http://127.0.0.1:4098/"],
-    ["cli", "http://127.0.0.1:4099/"],
+    ["web", "http://127.0.0.1:4098/api/info"],
+    ["cli", "http://127.0.0.1:3000/_ingenium/health"],
     ["vscode", "http://127.0.0.1:4100/?folder=/workspace"],
   ] as const)("health-checks the exact compatibility %s backend without returning its target", async (audience, target) => {
     const requests: string[] = [];
-    const probe = (async (input: string | URL | Request) => {
+    const probe = (async (input: string | URL | Request, init?: RequestInit) => {
       requests.push(String(input));
+      const headers = new Headers(init?.headers);
+      expect(headers.get("authorization")).toBe(audience === "web"
+        ? `Basic ${Buffer.from("opencode:health-probe-test-password").toString("base64")}` : null);
+      expect(headers.get("host")).toBe(audience === "cli" ? "cli.localhost" : null);
+      expect(headers.get("x-ingenium-authenticated-user")).toBeNull();
+      expect(init?.redirect).toBe("manual");
       return new Response(null, { status: 302 });
     }) as typeof fetch;
 
     expect(compatibilityRuntimeTarget(audience)).toBe(target);
     expect(await compatibilityRuntimeReady(audience, probe)).toBe(true);
     expect(requests).toEqual([target]);
+  });
+
+  it("does not send an unauthenticated native Web readiness probe", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "");
+    const probe = vi.fn();
+    expect(await compatibilityRuntimeReady("web", probe)).toBe(false);
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403, 500, 503])("rejects unsuccessful native readiness status %s", async (status) => {
+    const probe = vi.fn(async () => new Response(null, { status }));
+    expect(await compatibilityRuntimeReady("web", probe)).toBe(false);
+  });
+
+  it("keeps native readiness failures private", async () => {
+    const probe = vi.fn(async () => { throw new Error("private readiness credential diagnostic"); });
+    expect(await compatibilityRuntimeReady("web", probe)).toBe(false);
   });
 
   it("rejects compatibility health access in isolated mode without exposing a backend", async () => {
