@@ -83,3 +83,22 @@ coordination scopes on a new capability and successful renewal through the remov
 peer-registration API. Expected scopes now match the retired coordinator policy;
 activity authentication, binding and inactive-runtime denials remain covered.
 The previous assertions remain in Git history at `445eda062cea4eff68acf20b30587ee6c5b296e2`.
+
+
+## Final runtime release acceptance - 2026-10-23
+
+The final catalog/stream image passed a fresh real free-Zen reply and its
+persistence across an ordinary Compose restart, authenticated reload, desktop/mobile review and a
+24-route browser sweep without unexpected request errors. Configured models are unchanged.
+Installed memory save/update/restart/read/forget, three historical sessions and
+three encryption/signing keys passed preservation checks. Composite health and
+all 13 mounts passed. The owned rehearsal is stopped with its data retained.
+
+Source/runtime provenance, remaining moderate advisories, retained failure and
+rollback evidence, and the PR #4 publication record are documented in
+[release-acceptance-2026-10-23.md](release-acceptance-2026-10-23.md).
+Earlier pending statements above are historical checkpoints superseded here.
+Multichat orchestration and coordinated recovery remain cancelled.
+Zen's extra final post-restart inference attempt hit its free quota; no successful
+new reply is claimed for that attempt. Earlier catalog-image fresh post-restart
+inference passed with identical chat/native/frontend source inputs.

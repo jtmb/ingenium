@@ -11111,3 +11111,23 @@ projection is removed. See docs/operations/native-config-discovery-2026-10-23.md
 Revised clean source/image acceptance, legacy session/auth continuity, reversible
 production adoption, real browser/model acceptance and final publication remain.
 Production is still stopped and preserved. The full release goal is not complete.
+
+
+## Release acceptance and publication record - 2026-10-23
+
+Final runtime acceptance passed: unchanged configured models; a fresh real free-Zen
+reply and its persistence after normal restart; authenticated reload and
+desktop/mobile rendering; 24 actual routes without unexpected HTTP/page errors; installed
+memory save/update/restart/read/forget; three historical sessions and three
+persistent keys preserved; healthy image and all existing mounts retained.
+Multichat R21, simultaneous A/B/C and coordinated replacement-parent recovery
+are cancelled and do not gate this release. Original failure evidence, rollback
+images, migration archives and unrelated manual work remain preserved. The owned
+restore rehearsal is stopped without removing data.
+
+The portable acceptance ledger is docs/operations/release-acceptance-2026-10-23.md.
+Publication is recorded by https://github.com/jtmb/ingenium/pull/4 and its merge
+commit; historical pending checkpoint entries above are superseded by this row.
+The extra final fresh inference after restart reached Zen's free usage limit.
+Earlier fresh post-restart inference passed on the catalog image; relevant chat,
+native and frontend source inputs are unchanged. This constraint is retained.
