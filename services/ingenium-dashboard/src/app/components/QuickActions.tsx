@@ -30,7 +30,7 @@ export default function QuickActions({ project }: { project: string }) {
         method: "POST",
       });
       if (res.ok) {
-        showToast("Synthesis completed", "success");
+        showToast("Synthesis started. Check Pipeline for results.", "success");
       } else {
         showToast("Synthesis failed", "error");
       }

@@ -419,10 +419,13 @@ export function createSkill(
     // - FTS5 sync (migration 024 triggers)
     // - version snapshot (migration 042 triggers, only when revision changes)
 
-    return getSkill(projectId, name)!;
+    const stored = getSkill(projectId, name)!;
+    // Do not acknowledge an upload whose required disk projection failed.
+    // Let the transaction roll back instead of retaining a phantom skill row.
+    writeSkillToDisk(stored);
+    return stored;
   });
   checkpointAfterWrite();
-  if (skill) writeSkillToDisk(skill);
   return skill;
 }
 
@@ -466,11 +469,12 @@ export function updateSkill(
       newRevision, now, projectId, name,
     );
 
-    return db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")
+    const stored = db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")
       .get(projectId, name) as Skill | undefined;
+    if (stored) writeSkillToDisk(stored);
+    return stored;
   });
   checkpointAfterWrite();
-  if (skill) writeSkillToDisk(skill);
   return skill;
 }
 

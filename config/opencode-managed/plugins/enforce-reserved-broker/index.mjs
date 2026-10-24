@@ -9,7 +9,8 @@ import { readFile } from "node:fs/promises";
  *
  *  - any agent whose `name` is the broker but whose `id` is not is removed;
  *  - the canonical broker id is rewritten to the protected profile, `subagent`
- *    mode, hidden, and a terminal wildcard deny.
+ *    mode and hidden. The native catalog uses approval-only permissions, while
+ *    protected permission and pre-execution hooks deny every broker operation.
  *
  * V1 shipped this as a `config` hook. V2 has no mutable global config object, so
  * the equivalent is an `agent.transform`, which replays onto the merged agent
@@ -28,7 +29,7 @@ function profileBody(profile) {
 
 function brokerPermissions() {
   return [
-    { action: "*", resource: "*", effect: "deny" },
+    { action: "*", resource: "*", effect: "ask" },
     {
       action: "external_directory",
       resource: "/home/appuser/.local/share/opencode/tool-output/*",
@@ -78,6 +79,14 @@ export default {
     await ctx.permission.hook("evaluate", (evaluation) => {
       if (evaluation.agent === BROKER || evaluation.agent?.endsWith(`/${BROKER}`)) {
         evaluation.effect = "deny";
+      }
+    });
+    // Keep native tool definitions available to OpenCode's provider flow without
+    // granting execution. This also blocks plugin tools that do not perform a
+    // permission assertion themselves, before their implementation can run.
+    await ctx.tool.hook("execute.before", (execution) => {
+      if (execution.agent === BROKER || execution.agent?.endsWith(`/${BROKER}`)) {
+        throw new Error("INGENIUM_BROKER_TOOLS_DENIED");
       }
     });
     let registration = await ctx.agent.transform(enforce);

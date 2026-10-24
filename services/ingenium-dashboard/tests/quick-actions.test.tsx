@@ -29,7 +29,8 @@ describe("QuickActions synthesis", () => {
       "/api/v1/synthesis/run?project=team%20%2F%20project",
       { method: "POST" },
     ));
-    expect((await screen.findByRole("status")).textContent).toContain("Synthesis completed");
+    expect((await screen.findByRole("status")).textContent).toContain("Synthesis started. Check Pipeline for results.");
+    expect(screen.queryByText("Synthesis completed")).toBeNull();
   });
 
   it("does not report success for a non-OK response", async () => {
