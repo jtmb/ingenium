@@ -10,6 +10,33 @@ const api = "http://127.0.0.1:4097/api/v1";
 const scopes = ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"].sort();
 const runtimeScopes = ["child-mcp:runtime", "child-mcp:execute", "mcp-servers:write", "projects:read", "documentation:read", "rag:read", "memory:write"].sort();
 
+export class BootstrapUnavailableError extends Error {}
+
+// Wait through cold starts without a tight retry loop. Authentication, binding
+// and filesystem failures are permanent and must never be retried here.
+async function retryAvailability(operation, { wait, report, stage, attempts = Infinity }) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await operation(); }
+    catch (error) {
+      if (!(error instanceof BootstrapUnavailableError) || attempt >= attempts) throw error;
+      const delay = Math.min(1_000 * 2 ** Math.min(attempt - 1, 4), 15_000);
+      report(`MCP_BOOTSTRAP_WAIT stage=${stage} attempt=${attempt} retryInMs=${delay}`);
+      await wait(delay);
+    }
+  }
+}
+
+async function bootstrapFetch(fetcher, url, options) {
+  let response;
+  try { response = await fetcher(url, options); }
+  catch { throw new BootstrapUnavailableError("Bootstrap API unavailable"); }
+  if (response.status === 408 || response.status === 429 || response.status >= 500) {
+    await response.body?.cancel().catch(() => {});
+    throw new BootstrapUnavailableError("Bootstrap API unavailable");
+  }
+  return response;
+}
+
 function openPrivateDirectory(path, uid, gid) {
   const fd = openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   const metadata = fstatSync(fd);
@@ -43,7 +70,7 @@ export async function provisionMcpCredential({
     bootstrapParent = openPrivateDirectory(dirname(source), bootstrapUid, bootstrapGid);
     const token = readPrivateFile(`/proc/self/fd/${bootstrapParent}/${basename(source)}`, sourceUid, sourceGid, 129);
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error("Invalid installation credential");
-    const response = await fetcher(`${api}/auth/${runtime ? "bootstrap-local-runtime" : "bootstrap-mcp-credential"}`, {
+    const response = await bootstrapFetch(fetcher, `${api}/auth/${runtime ? "bootstrap-local-runtime" : "bootstrap-mcp-credential"}`, {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
       headers: { authorization: `Bearer ${token}`, "x-ingenium-internal-service": "1", "content-type": "application/json" }, body: "{}",
     });
@@ -121,18 +148,35 @@ export async function provisionStartupCredentials(provision = provisionMcpCreden
   }
 }
 
+export async function runStartupBootstrap({
+  fetcher = fetch, provision = options => provisionMcpCredential({ ...options, fetcher }),
+  wait = setTimeout, report = line => process.stdout.write(`${line}\n`),
+  runtimeDirectory = "/run/ingenium-runtime",
+} = {}) {
+  // provisionStartupCredentials invalidates stale runtime identity synchronously,
+  // before even waiting for API readiness. General credentials remain required.
+  await provisionStartupCredentials(async options => {
+    if (!options?.runtime) {
+      await retryAvailability(async () => {
+        const response = await bootstrapFetch(fetcher, `${api}/health`, {
+          redirect: "error", signal: AbortSignal.timeout(1_000),
+        });
+        if (!response.ok) throw new Error("Bootstrap API readiness rejected");
+        await response.body?.cancel();
+      }, { wait, report, stage: "api" });
+    }
+    await retryAvailability(() => provision(options), {
+      wait, report, stage: options?.runtime ? "local-runtime" : "general",
+      // The optional runtime retains its existing degraded fallback. A slow API
+      // must not permanently strand the required general credential bootstrap.
+      attempts: options?.runtime ? 3 : Infinity,
+    });
+  }, report, runtimeDirectory);
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    let ready = false;
-    for (let attempt = 0; attempt < 60; attempt++) {
-      try {
-        ready = (await fetch(`${api}/health`, { redirect: "error", signal: AbortSignal.timeout(1_000) })).ok;
-      } catch { /* Cold-start connection refusal is expected until the API listens. */ }
-      if (ready) break;
-      await setTimeout(1_000);
-    }
-    if (!ready) throw new Error("API readiness timeout");
-    await provisionStartupCredentials();
+    await runStartupBootstrap();
   } catch {
     process.stderr.write("MCP_BOOTSTRAP_PROVISION_FAILED\n");
     process.exitCode = 1;

@@ -4,7 +4,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, chmodSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { provisionMcpCredential, provisionStartupCredentials } from "../scripts/provision-opencode-mcp-credential.mjs";
+import { createServer } from "node:http";
+import { BootstrapUnavailableError, provisionMcpCredential, provisionStartupCredentials, runStartupBootstrap } from "../scripts/provision-opencode-mcp-credential.mjs";
 import { projectOpenCodeGlobalConfig } from "../scripts/project-opencode-global-config.mjs";
 
 const token = `ing_${"a".repeat(12)}_${"b".repeat(43)}`;
@@ -14,6 +15,98 @@ const binding = {
   scopes: ["projects:read", "repository:sync", "documentation:read", "rag:read", "memory:read", "memory:write"],
   expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
 };
+
+test("cold bootstrap survives the former readiness deadline and a transient provisioning failure automatically", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ingenium-cold-bootstrap-test-"));
+  const runtimeDirectory = join(root, "runtime");
+  mkdirSync(runtimeDirectory, { mode: 0o700 });
+  mkdirSync(join(root, "bootstrap"), { mode: 0o700 });
+  mkdirSync(join(root, "general"), { mode: 0o700 });
+  const source = join(root, "bootstrap", "token"), destination = join(root, "general", "credential");
+  writeFileSync(source, "c".repeat(64), { mode: 0o600 });
+  for (const name of ["environment", "capability"]) writeFileSync(join(runtimeDirectory, name), "stale", { mode: 0o600 });
+  let healthRequests = 0, generalRequests = 0;
+  const delays = [], diagnostics = [];
+  const server = createServer((request, response) => {
+    assert.equal(existsSync(join(runtimeDirectory, "environment")), false);
+    if (request.url === "/api/v1/health") {
+      response.writeHead(++healthRequests <= 65 ? 503 : 200).end();
+    } else {
+      assert.equal(request.url, "/api/v1/auth/bootstrap-mcp-credential");
+      assert.equal(request.headers.authorization, `Bearer ${"c".repeat(64)}`);
+      response.writeHead(++generalRequests === 1 ? 503 : 201, { "content-type": "application/json" })
+        .end(JSON.stringify({ data: binding }));
+    }
+  });
+  try {
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    const fetcher = (url, options) => fetch(url.replace("127.0.0.1:4097", `127.0.0.1:${server.address().port}`), options);
+    const uid = process.getuid(), gid = process.getgid();
+    await runStartupBootstrap({
+      runtimeDirectory, fetcher, wait: async delay => { delays.push(delay); }, report: line => diagnostics.push(line),
+      provision: options => {
+        if (options?.runtime) throw new Error("secret-runtime-response");
+        return provisionMcpCredential({ source, destination, uid, gid, sourceUid: uid, sourceGid: gid, bootstrapUid: uid, bootstrapGid: gid, fetcher });
+      },
+    });
+    assert.equal(healthRequests, 66);
+    assert.equal(generalRequests, 2);
+    assert.equal(readFileSync(destination, "utf8").trim(), token);
+    assert.equal(statSync(destination).mode & 0o777, 0o600);
+    assert.deepEqual(delays.slice(0, 6), [1000, 2000, 4000, 8000, 15000, 15000]);
+    assert.equal(Math.max(...delays), 15000);
+    assert.equal(diagnostics.some(line => line.includes("secret")), false);
+    assert.equal(diagnostics.at(-1), "MCP_BOOTSTRAP_DEGRADED stage=local-runtime code=PROVISION_FAILED");
+  } finally {
+    await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("bootstrap retries network errors but stops on readiness authorization failure", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ingenium-bootstrap-auth-test-"));
+  try {
+    let probes = 0, provisions = 0;
+    const delays = [], diagnostics = [];
+    await assert.rejects(runStartupBootstrap({
+      runtimeDirectory: root,
+      fetcher: async () => { if (++probes === 1) throw new Error("secret-network-detail"); return new Response(null, { status: 403 }); },
+      provision: async () => { provisions++; }, wait: async delay => { delays.push(delay); }, report: line => diagnostics.push(line),
+    }), /readiness rejected/);
+    assert.equal(probes, 2);
+    assert.equal(provisions, 0);
+    assert.deepEqual(delays, [1000]);
+    assert.deepEqual(diagnostics, ["MCP_BOOTSTRAP_WAIT stage=api attempt=1 retryInMs=1000"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("permanent general failures are not retried and optional runtime availability has a bounded fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ingenium-bootstrap-retry-test-"));
+  try {
+    let calls = 0;
+    const options = { runtimeDirectory: root, fetcher: async () => new Response(null, { status: 200 }), wait: async () => { throw new Error("Unexpected retry"); }, report: () => {} };
+    await assert.rejects(runStartupBootstrap({ ...options, provision: async () => { calls++; throw new Error("Binding mismatch"); } }), /Binding mismatch/);
+    assert.equal(calls, 1);
+    const delays = [], diagnostics = [];
+    calls = 0;
+    await runStartupBootstrap({ ...options,
+      wait: async delay => { delays.push(delay); }, report: line => diagnostics.push(line),
+      provision: async value => {
+        calls++;
+        if (value?.runtime) {
+          writeFileSync(join(root, "capability"), token, { mode: 0o600 });
+          throw new BootstrapUnavailableError("secret-upstream-detail");
+        }
+      },
+    });
+    assert.equal(calls, 4);
+    assert.deepEqual(delays, [1000, 2000]);
+    assert.equal(existsSync(join(root, "capability")), false);
+    assert.equal(existsSync(join(root, "environment")), false);
+    assert.equal(diagnostics.at(-1), "MCP_BOOTSTRAP_DEGRADED stage=local-runtime code=PROVISION_FAILED");
+    assert.equal(diagnostics.some(line => line.includes("secret")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("private, atomic, idempotent provisioning rejects unsafe files and mismatched bindings", async () => {
   const root = mkdtempSync(join(tmpdir(), "ingenium-mcp-provision-test-"));
@@ -41,6 +134,12 @@ test("private, atomic, idempotent provisioning rejects unsafe files and mismatch
     assert.equal(readFileSync(destination, "utf8").trim(), token);
     await provisionMcpCredential(options);
     assert.equal(statSync(destination).ino, first.ino);
+    for (const status of [408, 429, 500, 503]) {
+      await assert.rejects(provisionMcpCredential({ ...options, fetcher: async () => new Response(null, { status }) }), BootstrapUnavailableError);
+    }
+    for (const status of [400, 401, 403, 404]) {
+      await assert.rejects(provisionMcpCredential({ ...options, fetcher: async () => new Response(null, { status }) }), error => !(error instanceof BootstrapUnavailableError));
+    }
     await assert.rejects(provisionMcpCredential({ ...options, fetcher: async () => Response.json({ data: { ...binding, launcherWorktree: "/workspace" } }, { status: 201 }) }));
     chmodSync(destination, 0o644);
     await assert.rejects(provisionMcpCredential(options));

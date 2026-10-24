@@ -22,7 +22,7 @@ export function validate(schema: ZodSchema, source: "body" | "query" | "params" 
         "Input validation failed",
         "VALIDATION_ERROR",
         422,
-        result.error.errors.map((e) => ({
+        result.error.issues.map((e) => ({
           field: e.path.join("."),
           reason: e.message,
         })),

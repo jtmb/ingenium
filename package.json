@@ -29,6 +29,19 @@
     "toml": "5.0.1",
     "imapflow@1.4.7": {
       "nodemailer": "10.2.1"
+    },
+    "zod": "^4.6.7",
+    "@opentelemetry/core": "2.8.0",
+    "@tailwindcss/typography@0.5.20": {
+      "postcss-selector-parser": "7.1.6"
+    },
+    "qs@6.15.3": "6.16.1",
+    "@hono/node-server": "1.19.15",
+    "@azure/msal-node": {
+      "uuid": "11.1.1"
+    },
+    "gaxios": {
+      "uuid": "11.1.1"
     }
   }
 }
