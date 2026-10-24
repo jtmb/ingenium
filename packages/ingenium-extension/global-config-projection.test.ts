@@ -173,9 +173,13 @@ describe("container OpenCode global-config projection", () => {
     };
 
     let evaluate: (evaluation: { agent: string; effect: string }) => void = () => {};
+    let beforeExecute: (execution: { agent: string; tool: string }) => void = () => {};
     const cleanup = await ProtectedBrokerPlugin.setup({
       options: { profilePath: new URL("../../.opencode/agents/execution/ingenium-llm-broker.md", import.meta.url).pathname },
       permission: { hook: async (_name: string, callback: typeof evaluate) => { evaluate = callback; } },
+      tool: { hook: async (name: string, callback: typeof beforeExecute) => {
+        expect(name).toBe("execute.before"); beforeExecute = callback;
+      } },
       agent: { transform: async (callback: (value: typeof editor) => void) => {
         callback(editor);
         return { dispose: async () => {} };
@@ -193,10 +197,14 @@ describe("container OpenCode global-config projection", () => {
       const evaluation = { agent, effect: "allow" };
       evaluate(evaluation);
       expect(evaluation.effect).toBe("deny");
+      for (const tool of ["read", "bash", "edit", "task", "skill", "mcp", "execute", "untrusted-plugin"]) {
+        expect(() => beforeExecute({ agent, tool })).toThrow("INGENIUM_BROKER_TOOLS_DENIED");
+      }
     }
     const ordinary = { agent: "plan", effect: "allow" };
     evaluate(ordinary);
     expect(ordinary.effect).toBe("allow");
+    expect(() => beforeExecute({ agent: "plan", tool: "read" })).not.toThrow();
 
     expect(registry.get("alias")).toBeUndefined();
     expect(registry.get("execution/ingenium-llm-broker")).toBeUndefined();
@@ -220,7 +228,7 @@ describe("container OpenCode global-config projection", () => {
     });
     expect(broker?.model).toBeUndefined();
     expect(broker?.permissions).toEqual([
-      { action: "*", resource: "*", effect: "deny" },
+      { action: "*", resource: "*", effect: "ask" },
       { action: "external_directory", resource: "/home/appuser/.local/share/opencode/tool-output/*", effect: "deny" },
       { action: "external_directory", resource: "/home/ingenium-opencode/.local/share/opencode/tool-output/*", effect: "deny" },
     ]);

@@ -2380,11 +2380,23 @@ export async function brokerExecute(params: {
       }
 
       const lastMessage = messages[messages.length - 1];
+      if (lastMessage?.info.role === "assistant" && lastMessage.parts.some(part => part.type === "tool")) {
+        logger.warn(source, `Tool request rejected in broker session ${sessionId}`);
+        return { ok: false, content: "", error: "broker tool use denied" };
+      }
       if (lastMessage?.info.role === "assistant" && lastMessage.info.finish) {
+        if (lastMessage.info.error || lastMessage.info.finish === "error") {
+          const error = lastMessage.info.error;
+          const status = typeof error === "object" && error !== null && "status" in error
+            && typeof error.status === "number" ? error.status : undefined;
+          logger.warn(source, `Provider failed in broker session ${sessionId}`, { status });
+          return { ok: false, content: "", error: "broker provider failed" };
+        }
         const content = lastMessage.parts
           .filter(part => part.type === "text")
           .map(part => part.text ?? "")
           .join("");
+        if (!content.trim()) return { ok: false, content: "", error: "broker response empty" };
         return { ok: true, content };
       }
 

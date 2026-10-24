@@ -120,7 +120,7 @@ docker exec "$CONTAINER" node --input-type=module -e '
     const body = await (await nativeFetch("/api/agent")).json();
     const broker = body.data?.find((agent) => agent.id === "ingenium-llm-broker");
     if (broker?.hidden === true && broker.mode === "subagent" && broker.model === undefined
-      && broker.permissions?.length === 3 && broker.permissions[0]?.effect === "deny") break;
+      && broker.permissions?.length === 3 && broker.permissions[0]?.effect === "ask") break;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   const [infoResponse, configResponse, pluginResponse, agentResponse] = await Promise.all([
@@ -143,8 +143,20 @@ docker exec "$CONTAINER" node --input-type=module -e '
   assert(brokers.length === 1, "single broker");
   const broker = brokers[0];
   assert(broker.hidden === true && broker.mode === "subagent" && broker.model === undefined && broker.disabled !== true, "broker shape");
-  const wildcardDeny = broker.permissions?.findLast((rule) => rule.action === "*" && rule.resource === "*" && rule.effect === "deny");
-  assert(wildcardDeny !== undefined, "broker wildcard deny");
+  const wildcardAsk = broker.permissions?.findLast((rule) => rule.action === "*" && rule.resource === "*" && rule.effect === "ask");
+  assert(wildcardAsk !== undefined, "broker catalog cannot grant automatic execution");
+  const created = await fetch("http://127.0.0.1:4098/api/session", {
+    method: "POST", headers: { authorization: `Basic ${Buffer.from("opencode:ingenium-protected-test-only").toString("base64")}`, "content-type": "application/json" }, body: JSON.stringify({ title: "protected permission probe" }),
+  });
+  assert(created.ok, "permission probe session created");
+  const session = (await created.json()).data;
+  for (const action of ["read", "shell", "edit", "subagent", "skill", "mcp", "external_directory", "arbitrary-plugin-tool"]) {
+    const response = await fetch(`http://127.0.0.1:4098/api/session/${session.id}/permission`, {
+      method: "POST", headers: { authorization: `Basic ${Buffer.from("opencode:ingenium-protected-test-only").toString("base64")}`, "content-type": "application/json" },
+      body: JSON.stringify({ action, resources: ["*"], agent: "ingenium-llm-broker" }),
+    });
+    assert(response.ok && (await response.json()).data.effect === "deny", `protected broker denies ${action}`);
+  }
   const event = await nativeFetch("/api/event");
   assert(event.status === 200 && event.headers.get("content-type")?.startsWith("text/event-stream"), "event stream");
   await event.body?.cancel();

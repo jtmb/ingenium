@@ -241,8 +241,26 @@ describe("brokerExecute — auth guard", () => {
 
 describe("brokerExecute — mocked lifecycle", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { finish: "error", error: { type: "provider.auth", status: 403, message: "private upstream error" }, parts: [], expected: "broker provider failed" },
+    { finish: "stop", error: undefined, parts: [{ type: "text", text: "  " }], expected: "broker response empty" },
+    { finish: "stop", error: undefined, parts: [{ type: "tool" }, { type: "text", text: "pretend success" }], expected: "broker tool use denied" },
+  ])("does not accept $expected as usable synthesis output", async ({ finish, error, parts, expected }) => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(204, "", {})));
+    vi.spyOn(opencodeClient, "createSession").mockResolvedValue({ id: "ses_failed" } as never);
+    vi.spyOn(opencodeClient, "sendPrompt").mockResolvedValue({} as never);
+    vi.spyOn(opencodeClient, "getMessages").mockResolvedValue([{ info: { role: "assistant", finish, error }, parts }] as never);
+    const deleted = vi.spyOn(opencodeClient, "deleteSession").mockResolvedValue(true);
+    const result = await brokerExecute({ providerID: "opencode", modelID: "beam-free", system: "JSON only", user: "controlled fixture" });
+    expect(result).toEqual({ ok: false, content: "", error: expected });
+    expect(deleted).toHaveBeenCalledWith("ses_failed");
+    expect(JSON.stringify(result)).not.toContain("private upstream error");
   });
 
   it("attaches native instructions, executes the broker turn, and removes both instructions and session", async () => {
