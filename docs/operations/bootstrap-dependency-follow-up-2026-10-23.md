@@ -10,7 +10,7 @@ Scope: repair automatic cold-start credential bootstrap and resolve the producti
 
 Stop only for a concrete unsupported dependency or failed preservation/security gate; report the evidence and continue independent work. Do not weaken acceptance, revive retired orchestration, manipulate unrelated applications or use OpenCode for development.
 
-Source validation complete; image build and deployed acceptance are next. Prior release acceptance and evidence remain historical records.
+Complete: automatic bootstrap recovery and the production dependency findings are fixed. The rebuilt image passes the deployed acceptance below; earlier evidence remains historical.
 
 ## Source results
 
@@ -25,6 +25,20 @@ Advisory sources: [Zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5), [bod
 
 ## Refreshed Undici advisory
 
-The publication audit was refreshed after deployed verification and identified a newly updated [Undici EventSource advisory](https://github.com/advisories/GHSA-4qv8-2p9j-2685). The lock now uses compatible releases 6.29.1, 7.30.1 and 8.12.3, covering the additional [integrity-token advisory](https://github.com/advisories/GHSA-f72v-6w45-q472). The refreshed production audit is again zero. Models, native OpenCode and source behavior are unchanged. A replacement image and final deployed acceptance remain pending for this additional dependency patch.
+The publication audit was refreshed after deployed verification and identified a newly updated [Undici EventSource advisory](https://github.com/advisories/GHSA-4qv8-2p9j-2685). The lock now uses compatible releases 6.29.1, 7.30.1 and 8.12.3, covering the additional [integrity-token advisory](https://github.com/advisories/GHSA-f72v-6w45-q472). The refreshed production audit is again zero. Models, native OpenCode and source behavior are unchanged. The replacement image passed the deployed acceptance below.
 
 After this patch, 104 HTTP client tests and 53 plugin/MCP client tests pass. The initial bootstrap image already passed automatic cold start, restart, key/history/memory continuity, the unchanged nine-model free catalog, and 24-page browser review; that evidence is retained separately from the replacement image acceptance.
+
+## Final deployed acceptance
+
+- Runtime source: `2650fd24a4efdab9e63a4ab3af93bca9b235f1e5`; image `ingenium-ingenium:release-20261023-82f4119cfe53`; image ID `sha256:243778dc80fea189b6607c9c13fa94d3888b8f2a5488bebddae9a7a0c1bb7eb5`.
+- Curated source SHA-256: `82f4119cfe533ddb6da39bdb186714b07c47ab9e6f5a3f1fa3fcb71b8234d5f6`.
+- The installed CLI recovered after a deliberately unavailable API for 75 seconds and a failed first credential POST, without operator intervention. Reproduce with `bash tests/test-opencode-cold-start.sh <image>`; this uses only synthetic credentials in a disposable network-isolated container.
+- Deployed cold start completed automatically in 42 seconds with zero manual bootstrap retries. Ordinary restart passed in 26.4 seconds after the restart command. These are observations, not a startup-performance guarantee.
+- All original mounts and ports, three key byte sequences, three historical session sentinels, and the owned saved-memory save/update/read/forget cycle passed continuity checks. Original data and rollback images remain preserved.
+- All nine free Zen model identities, enabled states and costs match the pre-change catalog. The first raw snapshot preceded plugin settlement; after normal browser initialization the catalog matches exactly. No model configuration, variants, defaults, native binary or aligned native client/plugin version changed.
+- Production `npm audit --omit=dev --json` reports zero findings. The installed runtime package scan includes the patched Undici copies; required dependencies are present. This is the production npm dependency audit, not a blanket claim about development tools or bundled third-party applications.
+- The 24-route browser sweep and desktop/mobile stored-chat review passed without new page/HTTP errors, overflow or account failures. Native OpenCode and VS Code load. The existing stale-telemetry indicator and the known optional upstream VSDA/Open VSX 404s are unchanged. The browser runner was paced after its initial request burst reached the existing rate limit; that failure evidence is retained and server limits are unchanged.
+- Existing free-Zen replies survive reload. This follow-up performs no new model inference. The earlier release run reached the free Zen usage limit; stored-reply checks do not claim a new provider completion.
+
+All development stayed in this Codex window. No OpenCode development, successor chat, retired multichat gate, unrelated application shutdown, data-volume removal or broad cleanup was used.

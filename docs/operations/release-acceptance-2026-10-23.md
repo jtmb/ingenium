@@ -91,3 +91,7 @@ acceptance. No fast-start or resource-capacity guarantee is claimed.
 The free provider's availability and capacity remain external service behavior.
 Rollback images and preserved original data remain available; no broad cleanup,
 volume removal or unrelated application shutdown was performed.
+
+## Bootstrap and dependency follow-up closure
+
+The operator-bootstrap-retry and production dependency caveats above are resolved by the [verified follow-up](bootstrap-dependency-follow-up-2026-10-23.md). Its final image passes automatic cold startup, restart, preservation and browser acceptance with an unchanged model configuration and a zero-finding production npm audit. Earlier observations remain historical evidence.

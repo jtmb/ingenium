@@ -11131,3 +11131,7 @@ commit; historical pending checkpoint entries above are superseded by this row.
 The extra final fresh inference after restart reached Zen's free usage limit.
 Earlier fresh post-restart inference passed on the catalog image; relevant chat,
 native and frontend source inputs are unchanged. This constraint is retained.
+
+### Release follow-up: cold bootstrap and dependency closure — 2026-10-23
+
+Closed the cold-start bootstrap retry defect and the earlier 21 moderate production advisories, including the subsequently refreshed Zod/body-parser/Undici findings. The rebuilt image passes automatic startup, ordinary restart, key/session/memory continuity and 24-route visual/browser acceptance. Production npm audit: zero. Models and native version unchanged; all development remained in this Codex window. Evidence: [bootstrap and dependency follow-up](../operations/bootstrap-dependency-follow-up-2026-10-23.md). Retired multichat gates remain out of scope; unrelated working changes and rollback sources are preserved.
