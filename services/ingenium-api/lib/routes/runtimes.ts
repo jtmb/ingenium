@@ -235,7 +235,9 @@ runtimesRouter.post("/browser/workspaces/:workspaceId/automation", (req, res) =>
       throw new runtimes.RuntimeConflictError("SCOPE_UNAVAILABLE");
     }
     try {
-      const runtime = runtimes.authorizeRuntimeAutomation(workspace.id, principal.id);
+      const runtime = runtimes.authorizeRuntimeAutomation(workspace.id, principal.id, {
+        idleLeaseMs: runtimeNumberSetting("INGENIUM_RUNTIME_IDLE_LEASE_MS", 1_800_000, 60_000),
+      });
       browserRuntimeAudit(principal.id, "runtime.automation.authorize", "success", workspace);
       res.json({ data: { status: "ready", runtimeId: runtime.id } });
     } catch (error) {

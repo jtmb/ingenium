@@ -146,6 +146,25 @@ describe("explicit runtime automation owner authorization", () => {
     expect(runtimes.getReadyRuntimeForProject(projectId)).toBeUndefined();
   });
 
+  it("renews an idle-only expired lease after explicit owner confirmation without changing the capability or absolute lifetime", async () => {
+    runtime = runtimes.transitionRuntime({
+      id: runtime.id, expectedRevision: runtime.revision, toState: "IDLE", actorType: "system", actorId: "test",
+      idleExpiresAt: new Date(Date.now() - 1_000),
+    });
+    const before = runtimes.getRuntimeInstance(runtime.id)!;
+    const capability = credentialRow();
+    expect(() => runtimes.authorizeRuntimeAutomation(workspaceId, ownerUserId)).toThrow();
+    expect((await post("stale")).status).toBe(403);
+    expect(runtimes.getRuntimeInstance(runtime.id)).toEqual(before);
+    expect((await post("owner")).status).toBe(200);
+    const renewed = runtimes.getRuntimeInstance(runtime.id)!;
+    expect(Date.parse(renewed.idleExpiresAt!)).toBeGreaterThan(Date.now());
+    expect(Date.parse(renewed.idleExpiresAt!)).toBeLessThanOrEqual(Date.parse(before.absoluteExpiresAt!));
+    expect(renewed.absoluteExpiresAt).toBe(before.absoluteExpiresAt);
+    expect(credentialRow()).toEqual(capability);
+    expect(runtimes.getReadyRuntimeForProject(projectId)?.id).toBe(runtime.id);
+  });
+
   it.each(["automation/", "AUTOMATION", "AUTOMATION/"])("requires step-up for handler-matching %s", async (suffix) => {
     const denied = await post("stale", workspaceId, "{}", true, suffix);
     expect(denied.status).toBe(403);
@@ -164,7 +183,7 @@ describe("explicit runtime automation owner authorization", () => {
       ).run(workspaceId);
       if (reason === "expired lifetime") runtime = runtimes.transitionRuntime({
         id: runtime.id, expectedRevision: runtime.revision, toState: "IDLE", actorType: "system", actorId: "test",
-        idleExpiresAt: new Date(Date.now() - 1_000),
+        idleExpiresAt: new Date(Date.now() - 1_000), absoluteExpiresAt: new Date(Date.now() - 1_000),
       });
       if (reason === "inactive principal") getDb().prepare("UPDATE service_principals SET status = 'revoked' WHERE id = ?")
         .run(credential.servicePrincipalId);
@@ -176,10 +195,12 @@ describe("explicit runtime automation owner authorization", () => {
       );
       if (reason === "control plane") vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "control-plane");
       const before = credentialRow();
+      const runtimeBefore = runtimes.getRuntimeInstance(runtime.id);
 
       expect((await post("owner")).status).toBe(404);
       expect(runtimes.getReadyRuntimeForProject(projectId)).toBeUndefined();
       expect(credentialRow()).toEqual(before);
+      expect(runtimes.getRuntimeInstance(runtime.id)).toEqual(runtimeBefore);
       expect(getDb().prepare("SELECT count(*) AS count FROM automation_principal_grants WHERE project_id = ? AND status = 'active'").get(projectId))
         .toEqual({ count: 0 });
     },
