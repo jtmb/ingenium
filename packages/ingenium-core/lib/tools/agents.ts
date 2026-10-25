@@ -19,7 +19,7 @@ export const LLM_BROKER_DEPLOYMENT_ROOT = "/usr/local/share/ingenium/opencode-ma
 export const LLM_BROKER_CONFIG_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/opencode.json`;
 export const LLM_BROKER_ENFORCER_PATH = `${LLM_BROKER_DEPLOYMENT_ROOT}/plugins/enforce-reserved-broker/index.mjs`;
 const LLM_BROKER_CONFIG_SHA256 = "cd261d375d30b8f09cbdbf6ec435798358719a31f9b1c156dd1a35fe085aa1b0";
-const LLM_BROKER_ENFORCER_SHA256 = "13b2ad8ba5de618e28197b361b21fc76adbb4b3fded4082e3288fa68eb62e13a";
+const LLM_BROKER_ENFORCER_SHA256 = "d26faf67b82152bbbf9ba6d0a2591b8ecc8fee18ec1af357ed00302c2a91ac95";
 export const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
 
 Its wildcard-deny permission boundary intentionally has no exceptions: it has no

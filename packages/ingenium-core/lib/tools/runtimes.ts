@@ -418,11 +418,14 @@ export function getReadyRuntimeForProject(projectId: string): RuntimeInstance | 
   return rows.length === 1 ? runtimeDto(rows[0]!) : undefined;
 }
 
-export function authorizeRuntimeAutomation(workspaceId: string, ownerUserId: string): RuntimeInstance {
+export function authorizeRuntimeAutomation(workspaceId: string, ownerUserId: string, options?: { idleLeaseMs: number }): RuntimeInstance {
+  if (options && (!Number.isSafeInteger(options.idleLeaseMs) || options.idleLeaseMs < 60_000)) {
+    throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+  }
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
     const now = new Date().toISOString();
-    const candidates = db.prepare(`SELECT runtime.id, runtime.project_id AS projectId,
+    const candidates = db.prepare(`SELECT runtime.id, runtime.project_id AS projectId, runtime.idle_expires_at AS idleExpiresAt,
         runtime.organization_id AS organizationId, credential.service_principal_id AS principalId
       FROM runtime_instances runtime
       JOIN authorized_workspaces workspace ON workspace.id = runtime.workspace_id
@@ -450,10 +453,10 @@ export function authorizeRuntimeAutomation(workspaceId: string, ownerUserId: str
         AND principal.organization_id = runtime.organization_id AND principal.security_epoch = runtime.security_epoch
         AND principal.status = 'active'
       WHERE runtime.workspace_id = ? AND runtime.owner_user_id = ? AND runtime.state IN ('READY', 'IDLE')
-        AND runtime.absolute_expires_at > ? AND runtime.idle_expires_at > ?
+        AND runtime.absolute_expires_at > ? AND (runtime.idle_expires_at > ? OR ? = 1)
         AND (member.role IN ('owner', 'admin') OR project_member.user_id IS NOT NULL)
-      LIMIT 2`).all(now, now, workspaceId, ownerUserId, now, now) as Array<{
-      id: string; projectId: string; organizationId: string; principalId: string;
+      LIMIT 2`).all(now, now, workspaceId, ownerUserId, now, now, options ? 1 : 0) as Array<{
+      id: string; projectId: string; organizationId: string; principalId: string; idleExpiresAt: string | null;
     }>;
     if (candidates.length !== 1) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
     const candidate = candidates[0]!;
@@ -461,13 +464,20 @@ export function authorizeRuntimeAutomation(workspaceId: string, ownerUserId: str
       WHERE project_id = ? AND service_principal_id = ? AND permission = 'execute'`)
       .get(candidate.projectId, candidate.principalId) as { status: string } | undefined;
     if (prior && prior.status !== "active") throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
+    // A stepped-up owner action is fresh activity. Renew only an expired idle lease;
+    // all capability, membership, epoch, revocation and absolute expiry checks
+    // above still apply, and the credential itself is never changed.
+    const renewIdle = !!options && (!candidate.idleExpiresAt || Date.parse(candidate.idleExpiresAt) <= Date.parse(now));
+    if (renewIdle) db.prepare(`UPDATE runtime_instances SET
+      idle_expires_at = MIN(absolute_expires_at, ?), updated_at = ?, revision = revision + 1
+      WHERE id = ?`).run(new Date(Date.parse(now) + options!.idleLeaseMs).toISOString(), now, candidate.id);
     if (!prior) db.prepare(`INSERT INTO automation_principal_grants
       (id, organization_id, project_id, service_principal_id, permission, granted_by_actor_type,
         granted_by_actor_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'execute', 'user', ?, ?, ?)`)
       .run(randomUUID(), candidate.organizationId, candidate.projectId, candidate.principalId, ownerUserId, now, now);
     const ready = getReadyRuntimeForProject(candidate.projectId);
     if (ready?.id !== candidate.id) throw new RuntimeConflictError("SCOPE_UNAVAILABLE");
-    return { ready, wrote: !prior };
+    return { ready, wrote: !prior || renewIdle };
   });
   if (result.wrote) checkpointAfterWrite();
   return result.ready;

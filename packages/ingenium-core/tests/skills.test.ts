@@ -662,7 +662,7 @@ describe("writeSkillToDisk round-trip idempotency", () => {
     const n = uname("rt");
     createSkill(projectId, n, "RT", "# Original body\n\nMore text.");
     const dbPath = process.env.INGENIUM_CORE_DB_PATH!;
-    const skillsBase = resolve(dbPath, "..", "..", ".opencode", "skills");
+    const skillsBase = getSkillsBase(projectId);
     const fp = resolve(skillsBase, n, "SKILL.md");
     const first = readFileSync(fp, "utf-8");
     syncSkillFromDisk(projectId, n);
@@ -680,7 +680,7 @@ describe("writeSkillToDisk round-trip idempotency", () => {
     const bodyWithFm = "---\nname: x\ndescription: \"x\"\n---\n\n# Body";
     createSkill(projectId, n, "Corr", bodyWithFm);
     const dbPath = process.env.INGENIUM_CORE_DB_PATH!;
-    const skillsBase = resolve(dbPath, "..", "..", ".opencode", "skills");
+    const skillsBase = getSkillsBase(projectId);
     const fp = resolve(skillsBase, n, "SKILL.md");
     const first = readFileSync(fp, "utf-8");
     for (let i = 0; i < 3; i++) {

@@ -40,9 +40,18 @@ export function isGlobal(projectId?: string): boolean {
 
 /**
  * Resolve the skills directory for a project.
- * Global: <config>/skills/  |  Normal: <project>/.opencode/skills/
+ * Global: <config>/skills/ | Normal: <registered project path>/.opencode/skills/.
+ * Skill projections belong to API-owned project data, never the packaged code
+ * root inferred from the database location. Config/model paths stay separate.
  */
 export function getSkillsBase(projectId?: string): string {
+  if (projectId) {
+    const project = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data").prepare(
+      "SELECT path, is_global FROM projects WHERE id = ? AND archived_at IS NULL",
+    ).get(projectId) as { path: string; is_global: number } | undefined;
+    if (!project) throw new Error("Active project required for skill storage");
+    if (!project.is_global) return resolve(project.path, ".opencode", "skills");
+  }
   const base = resolveProjectBase(projectId);
   if (isGlobal(projectId)) return resolve(base, "skills");
   return resolve(base, ".opencode", "skills");
