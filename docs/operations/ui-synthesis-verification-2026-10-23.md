@@ -2,7 +2,7 @@
 
 This follow-up checks a genuinely new free Zen chat and independent UI workflows. Model mappings, variants and saved defaults remain unchanged. All development stays in the current Codex window.
 
-Current follow-up: [skill/Zen recovery results](skill-zen-recovery-2026-10-23.md) supersede the upload-permission blocker below. Upload/edit/reload, migration and restart persistence now pass. The updated native broker receives HTTP 429 from free Zen; completed synthesis remains unverified while that quota gate is active. The original verification evidence below is retained as history.
+Current follow-up, October 25: [skill/Zen recovery results](skill-zen-recovery-2026-10-23.md) supersede the upload-permission and synthesis blockers below. Upload/edit/reload passes, and the unchanged Beam Free model completed the retained batch, generated a grounded proposal, and passed UI approval/activation and persistence checks. A separate fresh chat also passed. The original verification evidence below is retained as history; broader integration coverage is unchanged.
 
 ## Verified before the follow-up build
 
