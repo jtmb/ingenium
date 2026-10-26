@@ -95,3 +95,7 @@ volume removal or unrelated application shutdown was performed.
 ## Bootstrap and dependency follow-up closure
 
 The operator-bootstrap-retry and production dependency caveats above are resolved by the [verified follow-up](bootstrap-dependency-follow-up-2026-10-23.md). Its final image passes automatic cold startup, restart, preservation and browser acceptance with an unchanged model configuration and a zero-finding production npm audit. Earlier observations remain historical evidence.
+
+## October 25 release completion
+
+The [final acceptance ledger](release-completion-2026-10-25.md) records the configured Mail/vault integrations, independent UI workflows, usage mapping migration, final deployed image, unchanged models and cleanup. It supersedes the earlier integration and telemetry limits within its stated scope.
