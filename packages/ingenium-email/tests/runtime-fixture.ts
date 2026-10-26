@@ -45,6 +45,7 @@ export function createMemoryEmailRuntime(
       getCachedEmailBody: () => undefined,
       getCachedSuggestions: () => undefined,
       getSyncState: () => ({ last_synced_at: null }),
+      clearFolderCache: () => ({ listings: 0, bodies: 0 }),
       getAccountCursor: () => ({ historyId: null, provider: "imap" }),
       getUidsMissingBodies: () => [],
       getCachedEmails: () => ({ emails: [], total: 0 }),

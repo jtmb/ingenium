@@ -1,7 +1,7 @@
 /**
  * Mail Sync Engine — Outlook Cached-Mode background synchronization.
  *
- * One background engine owns Gmail mailbox I/O with a priority queue:
+ * One background engine owns provider-specific mailbox I/O with a priority queue:
  *   P0: Gmail delta poll (cheap historyId check, 30s interval)
  *   P1: boostFolder'd folders (user is viewing)
  *   P2: Full resync (all folders) or INBOX if stale
@@ -11,7 +11,7 @@
  *
  * Per-account serialization: one worker per account, sequential tasks.
  * Body fetches: batch of 5, 200ms yield between batches (rate limit safe).
- * Provider is stateless HTTPS — no persistent connection needed.
+ * Gmail uses HTTPS; IMAP workers own isolated, serialized connections.
  *
  * 🔴 Every error is logged before returning (Lesson 14). Silent deaths are invisible.
  * 🔴 Concurrent operations are SERIALIZED per account (Lesson 25).
@@ -19,8 +19,8 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
-import { GmailProvider } from "./providers/gmail.js";
+import { listAccounts, getAccount, getCredentials, getGlobalProjectId, setAccountConnected } from "./accounts.js";
+import { createSyncProvider, type SyncProvider } from "./sync-provider.js";
 import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
 import {
   isAuthenticationProviderError,
@@ -102,8 +102,8 @@ interface AccountWorker {
   email: string;
   projectId: string;
   running: boolean;
-  /** Gmail REST provider (stateless HTTPS, no connection needed). */
-  provider: typeof GmailProvider;
+  /** Provider adapter; each IMAP worker owns its connection lifetime. */
+  provider: SyncProvider;
   /** Priority-ordered task queue (lowest priority number = highest priority). */
   taskQueue: EngineTask[];
   /** Per-folder engine state. */
@@ -472,13 +472,14 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       }
       return;
     }
-    const tokens = creds!.tokens!;
+    const auth = creds!;
 
     // Discover folders via provider (already assigned in spawnWorkers)
     let folders: string[] = [];
     try {
-      const folderList = await worker.provider.listFolders(account, tokens);
+      const folderList = await worker.provider.listFolders(account, auth);
       folders = folderList.map(f => f.path);
+      setAccountConnected(account.id, true, account.organizationId);
 
       // Initialize folder states for all discovered folders
       for (const f of folders) {
@@ -506,11 +507,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       tickHeartbeat();
 
       // ── P0: Gmail delta poll (every GMAIL_POLL_INTERVAL_MS) ──────────
-      if (Date.now() - lastDeltaPoll >= GMAIL_POLL_INTERVAL_MS) {
+      if (worker.provider.kind === "gmail" && Date.now() - lastDeltaPoll >= GMAIL_POLL_INTERVAL_MS) {
         lastDeltaPoll = Date.now();
         try {
           const { historyId } = emailCache.getAccountCursor(worker.accountId);
-          const delta = await worker.provider.changesSince(account, tokens, historyId || null);
+          const delta = await worker.provider.changesSince(account, auth, historyId || null);
 
           if (delta.fullResyncRequired) {
             logger.info("sync-engine",
@@ -711,6 +712,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       ...providerErrorDiagnostic(error, "sync"),
     });
   } finally {
+    await worker.provider.close().catch(() => {});
     logger.info("sync-engine", `Worker stopped for ${worker.email}`);
   }
 }
@@ -750,18 +752,34 @@ async function executeSyncFolder(
       return;
     }
     const creds = getCredentials(accountId);
-    if (!creds?.tokens) {
-      logger.warn("sync-engine", `executeSyncFolder: no tokens for ${worker.email}`);
-      setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
+    if (!(account.authType === "oauth2" ? creds?.tokens : creds?.password)) {
+      logger.warn("sync-engine", "Account credentials unavailable", { accountId });
+      setFolderState(worker, folder, { state: "error", lastError: "Account credentials unavailable" });
       return;
     }
 
     const offlineWindow = getOfflineWindow();
     const messages = await withWatchdog(
-      worker.provider.listMessages(account, creds.tokens, folder, offlineWindow),
+      worker.provider.listMessages(account, creds!, folder, offlineWindow),
       TASK_WATCHDOG_MS,
       `listMessages ${worker.email}/${folder}`,
     );
+
+    if (!worker.running || worker.abortController?.signal.aborted) return;
+
+    // An IMAP UID is meaningful only within its folder's UIDVALIDITY.
+    const snapshot = worker.provider.folderSnapshot?.(folder);
+    if (snapshot) {
+      const previous = emailCache.getSyncState(accountId, folder);
+      if (previous.uidvalidity !== snapshot.uidValidity) {
+        emailCache.clearFolderCache(accountId, folder);
+      }
+      const live = new Set(messages.map(m => m.id));
+      const minimum = messages.length ? Math.min(...messages.map(m => Number(m.id))) : 0;
+      const stale = emailCache.getCachedEmails(accountId, folder, 1, offlineWindow).emails
+        .filter(m => !live.has(m.uid) && (messages.length < offlineWindow || Number(m.uid) >= minimum));
+      if (stale.length) emailCache.applyEmailCacheDelta(accountId, { upserts: [], deletes: stale.map(m => ({ folder, uid: m.uid })), historyId: "", provider: "imap" });
+    }
 
     // Upsert each message into the cache
     for (const msg of messages) {
@@ -803,7 +821,7 @@ async function executeSyncFolder(
     // pass dummy values for those fields — isFolderFresh() only reads
     // last_synced_at.
     try {
-      emailCache.updateSyncState(accountId, folder, "0", 0);
+      emailCache.updateSyncState(accountId, folder, snapshot?.lastUid ?? "0", snapshot?.uidValidity ?? 0);
     } catch { /* non-fatal — don't abort sync over DB write failure */ }
 
     commitFullResyncCursor(worker, folder, fullResyncGeneration);
@@ -861,12 +879,15 @@ async function executeBackfillBodies(
       return;
     }
     const creds = getCredentials(accountId);
-    if (!creds?.tokens) {
-      logger.warn("sync-engine", `executeBackfillBodies: no tokens for ${worker.email}`);
-      setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
+    if (!(account.authType === "oauth2" ? creds?.tokens : creds?.password)) {
+      logger.warn("sync-engine", "Account credentials unavailable", { accountId });
+      setFolderState(worker, folder, { state: "error", lastError: "Account credentials unavailable" });
       return;
     }
 
+    if (worker.provider.kind === "imap" && !worker.provider.folderSnapshot?.(folder)) {
+      await executeSyncFolder(worker, accountId, folder);
+    }
     const bodyWindow = getBodyWindow();
 
     // Check how many bodies we still need
@@ -907,7 +928,8 @@ async function executeBackfillBodies(
       // Fetch each body in the batch sequentially (provider.getBody rate-limit safe)
       for (const uid of batch) {
         try {
-          const body = await worker.provider.getBody(account, creds.tokens, uid);
+          const body = await worker.provider.getBody(account, creds!, uid, folder);
+          if (!worker.running || worker.abortController?.signal.aborted) return;
           emailCache.upsertEmailBody(
             accountId, folder, uid,
             body.html ?? null,
@@ -958,7 +980,8 @@ async function executeBackfillBodies(
 
     // 🔴 L16: Persist last_synced_at to DB so isFolderFresh() survives restarts.
     try {
-      emailCache.updateSyncState(accountId, folder, "0", 0);
+      const snapshot = worker.provider.folderSnapshot?.(folder);
+      emailCache.updateSyncState(accountId, folder, snapshot?.lastUid ?? "0", snapshot?.uidValidity ?? 0);
     } catch { /* non-fatal */ }
   } catch (error: unknown) {
     const safe = sanitizeProviderError(error, "sync");
@@ -1037,7 +1060,7 @@ async function spawnWorkers(): Promise<void> {
       email: acct.email,
       projectId: pid,
       running: true,
-      provider: GmailProvider,
+      provider: createSyncProvider(acct),
       taskQueue: [],
       folderStates: new Map(),
       boostedFolders: new Set(),
