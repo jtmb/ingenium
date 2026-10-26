@@ -16,3 +16,7 @@ IMAP/SMTP email client for the Ingenium MCP Server.
 ### Background Suggestion Queue (`email_suggestion_queue`)
 
 New messages detected by the sync engine's delta poll are enqueued into the durable `email_suggestion_queue` table (survives container restarts). A dedicated worker processes the queue sequentially per account: for each message it calls the Synthesis LLM to generate 3 tone-diverse reply suggestions and caches them in `email_suggestions`. Retry with exponential backoff (30s → 1m → 2m → 5m → 10m, max 5 attempts) handles LLM failures. The worker respects `mail_smart_replies_enabled` and noreply-sender skip gates. Each generation uses `max_tokens: 8192` with LLM timeout safety — reasoning traces are never exposed to users.
+
+### Private mail server certificates
+
+Set the API service environment variable `INGENIUM_EMAIL_CA_FILE` to a PEM CA bundle mounted read-only by the operator. IMAP and SMTP add these certificates to the public trust roots and continue to verify certificate chains and hostnames. Missing or malformed configured bundles fail closed; no insecure TLS option is exposed. Leave it unset for public providers. The compatibility API launcher forwards this setting explicitly.

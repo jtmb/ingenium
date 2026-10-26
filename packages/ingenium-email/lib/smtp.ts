@@ -10,6 +10,7 @@
  * and non-Gmail accounts.
  */
 
+import { mailTlsOptions } from "./tls.js";
 import nodemailer, { type Transporter, type SMTPTransportOptions, type SendMailOptions } from "nodemailer";
 import { simpleParser } from "mailparser";
 import type { EmailAccount, OAuthToken, EmailAddress } from "./types.js";
@@ -61,6 +62,7 @@ export async function createTransport(
     port,
     // Only use secure (implicit TLS) on port 465 — port 587 uses STARTTLS
     secure: config.smtp.tls && port === 465,
+    tls: mailTlsOptions(),
   };
 
   // 🔴 OAuth fallthrough guard: if authType is "oauth2" but accessToken is
