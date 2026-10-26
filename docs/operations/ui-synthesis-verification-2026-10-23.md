@@ -1,5 +1,7 @@
 # Independent UI and synthesis verification
 
+Current release closure: [October 25 acceptance](release-completion-2026-10-25.md) supersedes the historical blockers below. Mail and the vault are now configured and tested; usage is migrated and fresh.
+
 This follow-up checks a genuinely new free Zen chat and independent UI workflows. Model mappings, variants and saved defaults remain unchanged. All development stays in the current Codex window.
 
 Current follow-up, October 25: [skill/Zen recovery results](skill-zen-recovery-2026-10-23.md) supersede the upload-permission and synthesis blockers below. Upload/edit/reload passes, and the unchanged Beam Free model completed the retained batch, generated a grounded proposal, and passed UI approval/activation and persistence checks. A separate fresh chat also passed. The original verification evidence below is retained as history; broader integration coverage is unchanged.
@@ -66,7 +68,7 @@ Each area was opened in a separate authenticated browser context with its projec
 
 The initial rapid inventory hit rate limits. Functional checks were paced and the affected controls retested; server limits were preserved. Test selector mismatches for the home toggle, status overlay and plugin input were corrected and retested successfully. The optional missing Docs draft returns 404 and did not prevent save/reload/search.
 
-## Remaining release blockers
+## Historical release blockers (resolved by October 25 closure)
 
 1. Free Zen currently limits new chat use, and rejects the tested hidden synthesis-agent request with HTTP 403. A completed batch, generated proposal and approval/activation are **not verified**.
 2. Non-global skill upload commits its database row and then fails to project files into the root-owned `/app/.opencode/skills` directory. This is a real functional defect; changing the protected directory's ownership would weaken the deployed trust boundary. A writable, persistent resource projection needs a scoped fix and end-to-end validation.

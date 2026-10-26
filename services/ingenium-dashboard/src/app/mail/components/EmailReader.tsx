@@ -345,7 +345,7 @@ export default function EmailReader({
   return (
     <div data-testid="email-reader-content" className="flex-1 min-h-0 min-w-0 md:min-w-[400px] flex flex-col">
       <div className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] px-4 py-3 space-y-1">
-        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)] [overflow-wrap:anywhere]">
           {email.subject || "(No subject)"}
         </h2>
         <div className="flex items-center gap-2">

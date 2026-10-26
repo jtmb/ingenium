@@ -90,6 +90,7 @@ export default function MailPage() {
   const [composeInitialData] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const cacheRevisionRef = useRef({ scope: "", revision: "" });
   const [folders, setFolders] = useState<any[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
@@ -345,7 +346,7 @@ export default function MailPage() {
       controller.abort();
       requestControllersRef.current.delete(controller);
     };
-  }, [selectedAccount, project, selectedFolder, renderedSelectedUid, projectLoading, accountsProject, captureRequestKey, isCurrentRequest]);
+  }, [selectedAccount, project, selectedFolder, renderedSelectedUid, refreshKey, projectLoading, accountsProject, captureRequestKey, isCurrentRequest]);
 
   useEffect(() => {
     if (!taskCaptureNotice) return;
@@ -405,14 +406,18 @@ export default function MailPage() {
     };
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project, projectLoading, accountsProject, renderedSelectedUid, captureRequestKey, isCurrentRequest]);
 
-  // Re-fetch emails when sync status shows selected folder transitioned from syncing → done/error
+  // Refresh the cached listing when the selected folder's background snapshot
+  // changes. A stable snapshot causes no extra reads or remote resyncs.
   useEffect(() => {
-    const status = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
-    if (!status) return;
-    if (emailSource === "pending" && !status.syncing) {
-      setRefreshKey(k => k + 1);
-    }
-  }, [syncStatus, selectedFolder, emailSource]);
+    if (!project || !selectedAccount || accountsProject !== project || syncStatus?.account !== selectedAccount) return;
+    const status = syncStatus.folders?.find((f: any) => f.folder === selectedFolder);
+    if (!status || status.syncing) return;
+    const scope = JSON.stringify([project, selectedAccount, selectedFolder]);
+    const revision = JSON.stringify([status.lastSyncedAt, status.cachedCount, status.bodyCount, status.engineState]);
+    if (cacheRevisionRef.current.scope === scope && cacheRevisionRef.current.revision === revision) return;
+    cacheRevisionRef.current = { scope, revision };
+    setRefreshKey(k => k + 1);
+  }, [syncStatus, project, selectedAccount, selectedFolder, accountsProject]);
 
   // Load the selected body and keep the existing 202 cache-warming poll.
   useEffect(() => {
@@ -511,7 +516,7 @@ export default function MailPage() {
       controller.abort();
       requestControllersRef.current.delete(controller);
     };
-  }, [pendingEmailUid, messageRequestKey, project, projectLoading, selectedAccount, selectedFolder, accountsProject, captureRequestKey, isCurrentRequest]);
+  }, [pendingEmailUid, messageRequestKey, refreshKey, project, projectLoading, selectedAccount, selectedFolder, accountsProject, captureRequestKey, isCurrentRequest]);
 
   const handleSelectEmail = useCallback((uid: string) => {
     // Re-clicking the already-open email must not reset state or flash the reader.
@@ -846,6 +851,13 @@ export default function MailPage() {
     const requestKey = captureRequestKey();
     setLoading(true);
     try {
+      // Explicit refresh queues only the selected folder; cache reads stay fast.
+      await dashboardFetch(`${API_BASE}/emails/sync?project=${project}`, {
+        method: "POST",
+        body: JSON.stringify({ account: selectedAccount, folder: selectedFolder }),
+        signal: controller.signal,
+      });
+      if (!isCurrentRequest(requestKey)) return;
       const url = searchQuery
         ? `${API_BASE}/emails/search?project=${project}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}&refresh=true`
         : `${API_BASE}/emails?project=${project}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50&refresh=true`;

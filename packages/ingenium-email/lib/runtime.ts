@@ -117,7 +117,8 @@ export interface EmailRuntime {
     getCachedEmail(accountId: string, folder: string, uid: string, organizationId?: string): CachedEmail | undefined;
     getCachedEmailBody(accountId: string, folder: string, uid: string): CachedEmailBody | undefined;
     getCachedSuggestions(accountId: string, folder: string, uid: string): { suggestions_json: string } | undefined;
-    getSyncState(accountId: string, folder: string): { last_synced_at: string | null };
+    getSyncState(accountId: string, folder: string): { last_synced_at: string | null; uidvalidity?: number };
+    clearFolderCache(accountId: string, folder: string): { listings: number; bodies: number };
     getAccountCursor(accountId: string): { historyId: string | null; provider: string };
     getUidsMissingBodies(accountId: string, folder: string, limit: number): string[];
     getCachedEmails(accountId: string, folder: string, page: number, limit: number): { emails: CachedEmail[]; total: number };

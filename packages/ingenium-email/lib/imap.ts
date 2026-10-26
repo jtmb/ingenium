@@ -14,6 +14,7 @@
  *    connections (leaking one with no error handler).
  */
 
+import { mailTlsOptions } from "./tls.js";
 import { ImapFlow } from "imapflow";
 import type {
   EmailAccount,
@@ -134,6 +135,7 @@ export async function connectAccount(
         host,
         port,
         secure: config.imap.tls,
+        tls: mailTlsOptions(),
         auth: buildAuth(account, auth),
         logger: false,
         connectionTimeout: 15000,   // 15s connect timeout

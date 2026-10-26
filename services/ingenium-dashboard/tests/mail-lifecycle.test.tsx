@@ -47,11 +47,14 @@ vi.mock("../src/app/mail/components/EmailList", () => ({
   default: ({
     emails,
     onSelect,
+    onRefresh,
   }: {
     emails: Array<{ uid: string; subject: string }>;
     onSelect: (uid: string) => void;
+    onRefresh: () => void;
   }) => (
     <section>
+      <button type="button" onClick={onRefresh}>Refresh messages</button>
       {emails.map((email) => (
         <button key={email.uid} type="button" onClick={() => onSelect(email.uid)}>
           {email.subject}
@@ -367,4 +370,54 @@ describe("Mail project lifecycle", () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/emails/folders?")).length).toBe(0);
     expect(fetchMock.mock.calls.filter(([input]) => String(input).includes("/emails/sync-status?")).length).toBe(0);
   });
+  it("updates a cached folder after background sync and avoids repeated reads for a stable revision", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let revision = 1;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(input => {
+      if (String(input).includes("/emails/sync-status?")) return Promise.resolve(jsonResponse({ data: {
+        overall: "done", account: "account-a", totalFolders: 1, syncingFolders: 0,
+        folders: [{ folder: "INBOX", lastSyncedAt: String(revision), cachedCount: revision, bodyCount: revision, syncing: false }],
+      } }));
+      if (String(input).includes("/emails?")) return Promise.resolve(jsonResponse({ data: [{ uid: "1", subject: revision === 1 ? "Old cached message" : "New background message" }], total: 1, source: "cache" }));
+      return baseFetch(input);
+    });
+    render(<MailPage />);
+    await waitFor(() => expect(screen.getByText("Old cached message")).toBeTruthy());
+    await flushAsyncWork(); revision = 2;
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    await flushAsyncWork(); expect(screen.getByText("New background message")).toBeTruthy();
+    const reads = () => fetchMock.mock.calls.filter(([input]) => String(input).includes("/emails?")).length;
+    const afterUpdate = reads();
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    await flushAsyncWork(); expect(reads()).toBe(afterUpdate);
+  });
+
+  it("keeps status polling alive after Refresh and queues only the selected folder", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(baseFetch);
+    render(<MailPage />); await waitFor(() => expect(screen.getByText("List message")).toBeTruthy());
+    vi.useFakeTimers(); fireEvent.click(screen.getByRole("button", { name: "Refresh messages" }));
+    await flushAsyncWork(); await flushAsyncWork();
+    const hints = fetchMock.mock.calls.filter(([input, init]) => String(input).includes("/emails/sync?") && init?.method === "POST");
+    expect(hints).toHaveLength(1); expect(JSON.parse(String(hints[0][1]?.body))).toEqual({ account: "account-a", folder: "INBOX" });
+    const polls = () => fetchMock.mock.calls.filter(([input]) => String(input).includes("/emails/sync-status?")).length;
+    const before = polls(); await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+    await flushAsyncWork(); expect(polls()).toBeGreaterThan(before);
+  });
+
+  it("continues a pending body download after the user refreshes", async () => {
+    let bodies = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(input => {
+      if (String(input).includes("/emails/1?")) {
+        bodies++;
+        return Promise.resolve(bodies === 1 ? new Response(null, { status: 202 }) : jsonResponse({ data: { uid: "1", subject: "Body recovered after Refresh" } }));
+      }
+      return baseFetch(input);
+    });
+    render(<MailPage />); await waitFor(() => expect(screen.getByText("List message")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "List message" }));
+    await waitFor(() => expect(screen.getByText("Downloading body")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh messages" }));
+    await waitFor(() => expect(screen.getByText("Body recovered after Refresh")).toBeTruthy());
+  });
+
 });
