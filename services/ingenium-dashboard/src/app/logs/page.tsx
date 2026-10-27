@@ -85,7 +85,6 @@ export default function LogsPage() {
   const project = useProject();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [sources, setSources] = useState<string[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -168,7 +167,6 @@ export default function LogsPage() {
         }
 
         setSources(newSources);
-        setTotal(data.total ?? 0);
         setLastUpdate(new Date().toISOString());
         setError(null);
         setLoading(false);
@@ -296,7 +294,7 @@ export default function LogsPage() {
         </div>
         <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--color-text-secondary)] sm:w-auto sm:justify-end">
           <span>
-            Total: <strong>{total}</strong>
+            Buffered: <strong>{entries.length}</strong>
           </span>
           <span>
             Sources:{" "}
@@ -319,7 +317,7 @@ export default function LogsPage() {
                 : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
-            {paused ? "▶ Resume" : "⏸ Paused"} —{" "}
+            {paused ? "▶ Resume" : "⏸ Pause"} —{" "}
             {paused ? "PAUSED" : "LIVE"}
           </button>
         </div>
