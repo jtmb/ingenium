@@ -48,7 +48,6 @@ import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } f
 import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
-import { migrationRouter } from "../lib/routes/migration.js";
 import { cloudflareRouter } from "../lib/routes/cloudflare.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
 import { vaultRouter } from "../lib/routes/vault.js";
@@ -206,7 +205,6 @@ app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
 
 app.use("/api/v1/services/cloudflare", cloudflareRouter);
-app.use("/api/v1/services/migration", migrationRouter);
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);

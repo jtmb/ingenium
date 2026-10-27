@@ -326,19 +326,6 @@ main().catch(fail);
 NODE
 }
 
-# The plan is API-owned administrative state. Check links before the broad data
-# normalization and restore its private mode after that normalization.
-secure_migration_plan() {
-  if [ -L "$1" ] || { [ -e "$1" ] && [ ! -f "$1" ]; }; then
-    echo "ERROR: PRD migration plan must be a regular non-symlink file"
-    exit 1
-  fi
-  if [ -e "$1" ]; then
-    secure_persistent_path private-credential "$1" - - 0600
-    secure_persistent_path file "$1" "$2" "$3" 0600
-  fi
-}
-
 DEPLOYMENT_MODE="${INGENIUM_DEPLOYMENT_MODE:-compatibility}"
 case "$DEPLOYMENT_MODE" in
   compatibility|control-plane) ;;
@@ -410,11 +397,9 @@ if [ "$BACKUP_SIGNING_KEY_PARENT" != "/app/.ingenium" ] || [ "$BACKUP_SIGNING_KE
   exit 1
 fi
 secure_persistent_path directory /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770
-secure_migration_plan /app/.ingenium/prd-migration-plan.json "$API_UID" "$API_GID"
 secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" - -
 # Signed bundles enforce stricter per-artifact modes and must survive restarts unchanged.
 secure_persistent_path tree /app/.ingenium "$API_UID" "$RESTORE_DATA_GID" 2770 0660 backups
-secure_migration_plan /app/.ingenium/prd-migration-plan.json "$API_UID" "$API_GID"
 secure_persistent_path directory /app/.ingenium "$RESTORE_UID" "$RESTORE_DATA_GID" 3770
 # A fresh named volume contains no SQLite file, while the API starts as appuser
 # after this parent becomes root-owned and non-writable. Publish the fixed file

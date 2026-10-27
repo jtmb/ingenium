@@ -11,7 +11,6 @@ import GeneralPanel from "./panels/GeneralPanel";
 import MailPanel from "./panels/MailPanel";
 import PipelinePanel from "./panels/PipelinePanel";
 import ConfigPanel from "./panels/ConfigPanel";
-import MigrationPanel from "./panels/MigrationPanel";
 import CloudflarePanel from "./panels/CloudflarePanel";
 import type { ComponentType } from "react";
 import RouteLinkedPanel from "./RouteLinkedPanel";
@@ -82,7 +81,6 @@ const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
   },
   providers: PipelinePanel,
   cloudflare: CloudflarePanel,
-  migration: MigrationPanel,
   config: ConfigPanel,
   logs: {
     destination: "/logs",

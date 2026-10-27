@@ -1517,23 +1517,6 @@ export interface AuditEntry {
 /** A backup file with metadata. */
 export type BackupType = "manual" | "hourly" | "daily";
 
-export interface MigrationPlan {
-  revision: number;
-  target: { platform: "compose" | "kubernetes"; origin: string };
-  confirmed: string[];
-  updatedAt: string | null;
-}
-export interface MigrationStatus {
-  plan: MigrationPlan;
-  inventory: {
-    sourceMode: "compatibility" | "control-plane";
-    backup: { id: string; createdAt: string; verified: boolean; fresh: boolean } | null;
-    requiredTransfers: Array<{ id: string; label: string; contents: string }>;
-    automaticTransferSupported: false;
-    cutoverPerformed: false;
-  };
-}
-
 export interface Backup {
   id: string;
   filename: string;
@@ -3369,10 +3352,6 @@ export const api = {
           },
         ),
     },
-  },
-  migration: {
-    get: () => request<{ data: MigrationStatus }>("/services/migration"),
-    save: (plan: MigrationPlan) => request<{ data: MigrationStatus }>("/services/migration", { method: "PUT", body: JSON.stringify({ expectedRevision: plan.revision, target: plan.target, confirmed: plan.confirmed }) }),
   },
   backups: {
     /** GET /backups — list all backups */
