@@ -14,6 +14,9 @@ import ReviewActionForm from "./ReviewActionForm";
 /** Enriched observation data from the API when `enrich=true` is requested. */
 export type EnrichedObservation = {
   id: number;
+  type?: string;
+  contentPreview?: string;
+  /** Legacy enrichment aliases retained for older responses. */
   observation_type?: string;
   content_preview?: string;
   content?: string;
@@ -288,8 +291,8 @@ export default function ProposalReviewOverlay({
                   <ObservationSourceCard
                     key={obs.id}
                     id={obs.id}
-                    type={obs.observation_type}
-                    contentPreview={obs.content_preview ?? obs.content}
+                    type={obs.type ?? obs.observation_type}
+                    contentPreview={obs.contentPreview ?? obs.content_preview ?? obs.content}
                     importance={obs.importance}
                     source={obs.source}
                     project={project}
