@@ -266,6 +266,7 @@ format; approval applies the skill change.
 **How to use**:
 - Observations are automatically processed via the scheduled synthesis pipeline (every 15 minutes)
 - Trigger manual synthesis via `ingenium_synthesis_run` for the current project
+- On Home, **Run Synthesis** uses the configured synthesis models. **Choose synthesis model** lets the signed-in runtime owner select an already connected model for that run only, for example when the free provider is temporarily at quota. The choice resets after submission and does not change Chat defaults, saved model settings, credentials or scheduled synthesis. The server validates the current catalog again before starting work; unavailable choices are rejected. The existing automation authorization, private-observation checks and tool-denied broker still apply.
 - Use `ingenium_synthesis_cross_project` to evaluate observations and skills across all active projects
 - Cross-project skill changes are submitted as proposals in `global-default`; approved
   proposals apply the shared skill change for all projects.
