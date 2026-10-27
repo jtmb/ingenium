@@ -6,6 +6,7 @@
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/goal",
     "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker"
   ],
   "mcp": {

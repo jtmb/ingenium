@@ -15,7 +15,7 @@ Ingenium connects one **existing named** Cloudflare tunnel. Before using the
 Cloudflare Settings tab, an operator must provide:
 
 1. An existing named tunnel and a token that can run that tunnel.
-2. DNS and Cloudflare ingress routes for the five supported audiences.
+2. DNS and Cloudflare ingress routes for the required audiences. The five workspace audiences remain authenticated; the optional information-site audience serves only static public app information.
 3. A trusted ingress inventory file mounted at
    `/etc/ingenium/cloudflare-routes.json`.
 4. An initialized, unsealed Ingenium vault and a browser installation
@@ -36,7 +36,7 @@ other-writable. Missing, unreadable, or invalid inventory blocks configuration
 and connection.
 
 The JSON object must contain only `tunnelName` and `routes`. `routes` must
-contain exactly `dashboard`, `opencode`, `cli`, `vscode`, and `api`; each value
+contain `dashboard`, `opencode`, `cli`, `vscode`, and `api`, plus optional `info`; each value
 is an array of at most 16 entries. Each entry contains only `publicUrl` and
 `target`. The following uses documentation-only hostnames:
 
@@ -48,7 +48,8 @@ is an array of at most 16 entries. Each entry contains only `publicUrl` and
     "opencode": [{ "publicUrl": "https://opencode.example.com/", "target": "authenticated-production-opencode-audience-gateway" }],
     "cli": [{ "publicUrl": "https://cli.example.com/", "target": "authenticated-production-cli-audience-gateway" }],
     "vscode": [{ "publicUrl": "https://vscode.example.com/", "target": "authenticated-production-vscode-audience-gateway" }],
-    "api": [{ "publicUrl": "https://api.example.com/", "target": "authenticated-https-api-boundary" }]
+    "api": [{ "publicUrl": "https://api.example.com/", "target": "authenticated-https-api-boundary" }],
+    "info": []
   }
 }
 ```
@@ -64,7 +65,7 @@ list. Local compatibility aliases and unauthenticated upstreams are rejected.
 
 Open `/?settings=cloudflare` and use the **Cloudflare** tab. The panel exposes
 the existing tunnel name, independent enable/URL selections for Dashboard,
-OpenCode, CLI, VS Code, and API, connector status, inventory status, and
+OpenCode, CLI, VS Code, API and Public information pages, connector status, inventory status, and
 write-only token state. The tunnel name is displayed from the trusted
 inventory and is not an arbitrary tunnel-creation field.
 
@@ -114,6 +115,16 @@ authenticated production target:
 Do not expose compatibility HTTP or `auth-none` routes through the tunnel, and
 do not publish the private OpenCode, ttyd, or runtime upstream ports as a
 workaround.
+
+## Public application information
+
+The optional `info` inventory entry uses target `public-application-information-site`.
+Point that Cloudflare public hostname to `http://127.0.0.1:4170` inside the Ingenium
+container. The dedicated loopback listener serves only `/`, `/index.html`,
+`/privacy.html`, and `/terms.html` from the reviewed application information files.
+It rejects other paths and write methods and never proxies to the workspace or API.
+Its origin is excluded from launcher, runtime, CORS and authenticated API trust.
+Older five-service inventories/configurations continue to load with `info` disabled.
 
 ## External MCP boundary
 

@@ -190,7 +190,7 @@ function isManagedPlugin(value) {
     // Retire the cancelled multichat coordinator from persistent installations.
     /(?:^|\/)plugins\/session-coordinator(?:\.ts|\.js)?$/.test(value)
     // V2 adapter directories.
-    || /(?:^|\/)plugins\/v2\/(?:auto-observer|observer|resource-sync|lifecycle|ponytail)(?:\/|$)/.test(value)
+    || /(?:^|\/)plugins\/v2\/(?:auto-observer|observer|resource-sync|lifecycle|ponytail|goal)(?:\/|$)/.test(value)
     // Legacy V1 file entries retained in persistent configs.
     || /(?:^|\/)(?:auto-observer|observer|resource-sync|lifecycle)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
     || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)

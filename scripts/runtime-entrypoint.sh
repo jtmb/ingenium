@@ -95,7 +95,8 @@ cat > "$config_file" <<EOF
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/observer",
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
     "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
-    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail"
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail",
+    "file://{env:PWD}/packages/ingenium-extension/plugins/v2/goal"
   ]
 }
 EOF

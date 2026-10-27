@@ -1,0 +1,9 @@
+{
+  "package": "@prevalentware/opencode-goal-plugin",
+  "version": "0.1.67",
+  "sourceRepository": "https://github.com/jtmb/computer-use",
+  "upstreamRepository": "https://github.com/prevalentWare/opencode-goal-plugin",
+  "registryIntegrity": "sha512-2PY3kq3pHM4ZOSLuVtsMzND4B6F7JUShbIymt2esVr8cY/UGZazG+YBI4tUZ2zTQX+9b5IKQnh3ruMeyGDSU8g==",
+  "serverSha256": "f52d17c013b3d2f2c35bbf7dca4387d4928faf5b8cef8b9d7df5d4132bda55ad",
+  "changes": "None. Exact dist/server.js, renamed server.mjs. Server-only integration avoids unused TUI peer dependencies."
+}

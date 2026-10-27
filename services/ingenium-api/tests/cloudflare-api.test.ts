@@ -62,6 +62,7 @@ function validConfig(enabled = true): core.cloudflareTunnel.CloudflareTunnelConf
       cli: { enabled: true, publicUrl: "https://cli.example.com/" },
       vscode: { enabled: true, publicUrl: "https://vscode.example.com/" },
       api: { enabled: true, publicUrl: "https://api.example.com/" },
+      info: { enabled: true, publicUrl: "https://info.example.com/" },
     },
   };
 }
@@ -319,7 +320,7 @@ describe("Cloudflare API source boundary", () => {
     });
   });
 
-  it("probes all five selected public HTTPS origins without credentials or redirects", async () => {
+  it("probes all six selected public HTTPS origins without credentials or redirects", async () => {
     await request("", { method: "PUT", principal: "recent", body: JSON.stringify({
       config: validConfig(), token: { action: "replace", value: TOKEN },
     }) });
@@ -334,9 +335,9 @@ describe("Cloudflare API source boundary", () => {
     const response = await request("", { principal: "recent" });
     const { data } = await response.json();
     expect(data.routes.map(({ health }: { health: string }) => health)).toEqual([
-      "reachable", "reachable", "unavailable", "unavailable", "reachable",
+      "reachable", "reachable", "unavailable", "unavailable", "reachable", "reachable",
     ]);
-    expect(core.safeEndpointFetch).toHaveBeenCalledTimes(5);
+    expect(core.safeEndpointFetch).toHaveBeenCalledTimes(6);
     for (const service of core.cloudflareTunnel.CLOUDFLARE_SERVICE_IDS) {
       expect(core.safeEndpointFetch).toHaveBeenCalledWith(`https://${service}.example.com/`, {
         method: "HEAD", credentials: "omit", redirect: "error",
@@ -360,7 +361,7 @@ describe("Cloudflare API source boundary", () => {
     try {
       const response = await request("", { principal: "recent" });
       expect((await response.json()).data.routes[0].health).toBe(state === "disabled" ? "disabled" : "blocked");
-      expect(core.safeEndpointFetch).toHaveBeenCalledTimes(state === "disabled" ? 4 : 0);
+      expect(core.safeEndpointFetch).toHaveBeenCalledTimes(state === "disabled" ? 5 : 0);
     } finally {
       chmodSync(routesFile, 0o600);
     }
@@ -385,7 +386,7 @@ describe("Cloudflare API source boundary", () => {
     expect(connected.status).toBe(200);
     const connectedData = (await connected.json()).data;
     expect(connectedData).toMatchObject({ connector: { state: "running" } });
-    expect(connectedData.routes.map(({ health }: { health: string }) => health)).toEqual(Array(5).fill("reachable"));
+    expect(connectedData.routes.map(({ health }: { health: string }) => health)).toEqual(Array(6).fill("reachable"));
     expect(supervisorRequests).toContainEqual(expect.stringContaining("<string>cloudflare-tunnel</string>"));
     expect(supervisorRequests.join("\n")).not.toContain(TOKEN);
     expect(existsSync(credentialHandoffFile)).toBe(false);

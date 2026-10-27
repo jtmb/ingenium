@@ -23,6 +23,7 @@ const EXPECTED_PLUGINS = [
   "ingenium-lifecycle",
   "ingenium-observer",
   "ingenium-resource-sync",
+  "ingenium.goal-mode",
   "ponytail",
 ];
 

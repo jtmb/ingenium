@@ -16,6 +16,9 @@ export function cloudflareIngressForHost(
 ): { service: cloudflareTunnel.CloudflareServiceId; origin: string; audience?: CloudflareRuntimeAudience } | undefined {
   if (!host || ingress.status !== "ready") return undefined;
   for (const service of cloudflareTunnel.CLOUDFLARE_SERVICE_IDS) {
+    // The public information listener never participates in authenticated API,
+    // launcher, CORS or runtime audience trust.
+    if (service === "info") continue;
     for (const route of ingress.inventory.routes[service]) {
       const url = new URL(route.publicUrl);
       if (url.host !== host.toLowerCase()) continue;

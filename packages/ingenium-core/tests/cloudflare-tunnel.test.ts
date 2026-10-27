@@ -18,6 +18,7 @@ const inventory: cloudflareTunnel.CloudflareTrustedIngressInventory = {
     cli: [{ publicUrl: "https://cli.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.cli }],
     vscode: [{ publicUrl: "https://vscode.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.vscode }],
     api: [{ publicUrl: "https://api.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.api }],
+    info: [],
   },
 };
 let tempDir = "";
@@ -53,6 +54,32 @@ afterEach(() => {
 });
 
 describe("Cloudflare tunnel core boundary", () => {
+  it("accepts legacy five-service inventories and configurations with info disabled", () => {
+    const { info: _infoRoutes, ...legacyRoutes } = inventory.routes;
+    const trusted = cloudflareTunnel.validateCloudflareTrustedIngressInventory({ ...inventory, routes: legacyRoutes });
+    expect(trusted.ok).toBe(true);
+    if (!trusted.ok) throw new Error(trusted.error);
+    expect(trusted.inventory.routes.info).toEqual([]);
+    const current = config();
+    const { info: _infoMapping, ...legacyServices } = current.services;
+    const normalized = cloudflareTunnel.validateCloudflareTunnelConfig({ ...current, services: legacyServices }, trusted.inventory);
+    expect(normalized).toMatchObject({ ok: true, config: { services: { info: { enabled: false, publicUrl: "" } } } });
+  });
+
+  it("permits the static information target only for its own inventory audience", () => {
+    const trusted = { ...inventory, routes: { ...inventory.routes, info: [{ publicUrl: "https://info.example.com/", target: cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.info }] } };
+    expect(cloudflareTunnel.validateCloudflareTrustedIngressInventory(trusted).ok).toBe(true);
+    const candidate = cloudflareTunnel.defaultCloudflareTunnelConfig();
+    candidate.enabled = true;
+    candidate.tunnelName = trusted.tunnelName;
+    candidate.services.info = { enabled: true, publicUrl: "https://info.example.com/" };
+    expect(cloudflareTunnel.validateCloudflareTunnelConfig(candidate, trusted).ok).toBe(true);
+    candidate.services.dashboard = { enabled: true, publicUrl: "https://info.example.com/" };
+    expect(cloudflareTunnel.validateCloudflareTunnelConfig(candidate, trusted).ok).toBe(false);
+    trusted.routes.info[0]!.target = cloudflareTunnel.CLOUDFLARE_SERVICE_TARGETS.dashboard;
+    expect(cloudflareTunnel.validateCloudflareTrustedIngressInventory(trusted).ok).toBe(false);
+  });
+
   it("defaults disabled and persists only exact public service mappings", () => {
     expect(cloudflareTunnel.getCloudflareTunnelConfig()).toEqual({
       status: "ok",

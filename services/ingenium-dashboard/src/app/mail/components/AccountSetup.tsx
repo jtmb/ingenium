@@ -30,7 +30,7 @@ export default function AccountSetup({
   reconnectAccount?: { id: string; email: string; provider: string; authType?: string; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number };
 }) {
   const [mode, setMode] = useState<"select" | "manual">("select");
-  const [ownerKind, setOwnerKind] = useState<"user" | "organization">("organization");
+  const [ownerKind, setOwnerKind] = useState<"user" | "organization">("user");
 
   const [email, setEmail] = useState("");
   const [imapHost, setImapHost] = useState("");
@@ -218,6 +218,16 @@ export default function AccountSetup({
     }
   };
 
+  const ownerControl = !reconnectAccount && (
+    <label htmlFor="mail-account-owner" className="block text-sm font-medium text-[var(--color-text-primary)]">
+      Owner
+      <Select id="mail-account-owner" value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} wrapperClassName="mt-1 w-full" className="w-full text-sm">
+        <option value="organization">Organization</option>
+        <option value="user">Private to me</option>
+      </Select>
+    </label>
+  );
+
   // Provider selection grid
   if (mode === "select") {
     if (reconnectAccount) {
@@ -262,6 +272,7 @@ export default function AccountSetup({
     return (
       <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-6 max-w-xl mx-auto">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Add Email Account</h2>
+        {ownerControl}
 
         {/* OAuth not configured warning */}
         {credsConfigured === false && (
@@ -328,15 +339,7 @@ export default function AccountSetup({
     <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-4 max-w-xl mx-auto">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{reconnectAccount ? "Update Email Credentials" : "Manual Setup"}</h2>
 
-      {!reconnectAccount && (
-        <label htmlFor="mail-account-owner" className="block text-sm font-medium text-[var(--color-text-primary)]">
-          Owner
-          <Select id="mail-account-owner" value={ownerKind} onChange={(event) => setOwnerKind(event.target.value as "user" | "organization")} wrapperClassName="mt-1 w-full" className="w-full text-sm">
-            <option value="organization">Organization</option>
-            <option value="user">Private to me</option>
-          </Select>
-        </label>
-      )}
+      {ownerControl}
 
       <div>
         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Email</label>

@@ -226,7 +226,7 @@ COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh sc
 COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
-COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
+COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
 # Validate the rendered Nginx configuration as its production user. Runtime
 # startup recreates these ephemeral directories before Nginx starts.
 RUN install -d -o ingenium-gateway -g ingenium-gateway -m 0700 \
@@ -283,7 +283,7 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail","/app/packages/ingenium-extension/plugins/v2/goal"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json

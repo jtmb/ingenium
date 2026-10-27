@@ -95,7 +95,9 @@ export const opencodeRouter = Router();
 const SOURCE = "opencode-routes";
 const OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_OAUTH_ATTEMPTS = 100;
-const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://localhost:1455/auth/callback";
+// OpenCode v2 binds its PKCE callback listener to IPv6 loopback. Docker may
+// resolve localhost to IPv4 only, leaving a successful browser consent pending.
+const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://[::1]:1455/auth/callback";
 const pendingOAuthAttempts = new Map<string, {
   attemptID: string;
   state: string | null;

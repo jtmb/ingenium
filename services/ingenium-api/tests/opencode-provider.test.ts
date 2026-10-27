@@ -18,8 +18,10 @@ const guardedUploadCalls = vi.hoisted(() => [] as string[]);
 
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
+  const { tmpdir } = await import("node:os");
+  const uploadRoot = `${tmpdir()}/ingenium-chat-uploads`;
   const isSharedUpload = (path: string | Buffer | URL) =>
-    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+    String(path) === uploadRoot || String(path).startsWith(`${uploadRoot}/`);
   const guard = (operation: string, path: string | Buffer | URL) => {
     if (!isSharedUpload(path)) return false;
     guardedUploadCalls.push(operation);
@@ -600,6 +602,21 @@ describe("Native provider integrations", () => {
     } finally {
       await new Promise<void>((resolve, reject) => nativeListener.close((error) => error ? reject(error) : resolve()));
     }
+  });
+
+  it("defaults to the native IPv6-only PKCE listener instead of ambiguous localhost DNS", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-ipv6-default", url: "https://auth.openai.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=ipv6-default-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    await beginOAuth({ methodID: "chatgpt-browser", inputs: {} });
+    const originalFetch = globalThis.fetch;
+    const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const response = await originalFetch(`${baseUrl}/auth/callback?state=ipv6-default-state&code=oauth-code`);
+    expect(response.status).toBe(200);
+    expect(forward).toHaveBeenCalledWith("http://[::1]:1455/auth/callback?code=oauth-code&state=ipv6-default-state");
   });
 
   it("uses a validated configured auto OAuth callback forward URL", async () => {

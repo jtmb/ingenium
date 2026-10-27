@@ -75,6 +75,7 @@
     "./packages/ingenium-extension/plugins/v2/observer",
     "./packages/ingenium-extension/plugins/v2/resource-sync",
     "./packages/ingenium-extension/plugins/v2/lifecycle",
-    "./packages/ingenium-extension/plugins/v2/ponytail"
+    "./packages/ingenium-extension/plugins/v2/ponytail",
+    "./packages/ingenium-extension/plugins/v2/goal"
   ]
 }

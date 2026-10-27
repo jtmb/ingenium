@@ -15,6 +15,7 @@ describe("Cloudflare dashboard API contract", () => {
         cli: { enabled: false, publicUrl: "" },
         vscode: { enabled: false, publicUrl: "" },
         api: { enabled: false, publicUrl: "" },
+        info: { enabled: false, publicUrl: "" },
       },
     };
     const status = {
