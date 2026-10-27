@@ -412,8 +412,8 @@ export default function LogsPage() {
 
       {!loading && !error && filteredEntries.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
-          <p className="text-lg font-medium mb-1">No log entries yet.</p>
-          <p className="text-sm">System is running. Logs will appear here as events occur.</p>
+          <p className="text-lg font-medium mb-1">No log entries to display.</p>
+          <p className="text-sm">Try adjusting the filters, or wait for new events.</p>
         </div>
       )}
 
