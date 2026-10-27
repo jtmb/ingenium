@@ -118,11 +118,11 @@ beforeEach(() => {
 });
 
 describe("executeSynthesisBroker", () => {
-  it("returns an actionable unavailable result without probing providers when no authorized executor exists", async () => {
+  it.each([undefined, { providerID: "openai", modelID: "gpt-6-luna" }])("returns unavailable without transport or provider probes when no authorized executor exists (choice %j)", async (selection) => {
     const projectId = configuredProject();
     const providers = vi.spyOn(opencodeClient, "listProviders");
 
-    await expect(createBackgroundSynthesisBrokerExecutor(projectId)({
+    await expect(createBackgroundSynthesisBrokerExecutor(projectId, selection ? { ...selection, runtimeId: "missing-runtime", ownerUserId: "missing-owner" } : undefined)({
       system: "system",
       user: "user",
       timeoutMs: 1_000,
@@ -134,14 +134,14 @@ describe("executeSynthesisBroker", () => {
     expect(providers).not.toHaveBeenCalled();
   });
 
-  it("never sends a victim-private observation to another member's runtime or the global OpenCode target", async () => {
+  it.each([undefined, { providerID: "openai", modelID: "gpt-6-luna" }])("never sends a victim-private observation to another member's runtime or global target (choice %j)", async (selection) => {
     const canary = "VICTIM_PRIVATE_SYNTHESIS_CANARY";
     const projectId = configuredProject(["custom", "model-a"]);
     const project = projects.listProjects().find((candidate) => candidate.id === projectId)!;
     const victim = identity.createUser(`victim-${crypto.randomUUID()}@example.test`, "Victim");
     const attacker = identity.createUser(`attacker-${crypto.randomUUID()}@example.test`, "Attacker");
     organizations.addOrganizationMember(project.organization_id, victim.id, "member");
-    activateRuntime(projectId, attacker);
+    const runtime = activateRuntime(projectId, attacker);
     observations.storeObservation(projectId, "preference", canary, 10, "manual", undefined, undefined, {
       organizationId: project.organization_id,
       ownerUserId: victim.id,
@@ -152,7 +152,7 @@ describe("executeSynthesisBroker", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await synthesis.runSynthesis(projectId, undefined, {
-      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId, selection ? { ...selection, runtimeId: runtime.id, ownerUserId: runtime.ownerUserId } : undefined),
     });
 
     expect(result.summary).toContain("unavailable");
@@ -160,7 +160,7 @@ describe("executeSynthesisBroker", () => {
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain(canary);
   });
 
-  it("executes background synthesis through an explicitly authorized automation runtime", async () => {
+  it.each([undefined, { providerID: "openai", modelID: "gpt-6-luna" }])("executes synthesis through an explicitly authorized automation runtime (choice %j)", async (selection) => {
     const projectId = configuredProject(["custom", "model-a"], undefined, true);
     const runtime = activateRuntime(projectId, undefined, true, true);
     vi.stubEnv("INGENIUM_DEPLOYMENT_MODE", "compatibility");
@@ -198,7 +198,7 @@ describe("executeSynthesisBroker", () => {
         cursor: { next: null },
       });
       if (url.pathname.endsWith("/model")) {
-        expect(JSON.parse(String(init?.body))).toEqual({ model: { id: "model-a", providerID: "custom" } });
+        expect(JSON.parse(String(init?.body))).toEqual({ model: { id: selection?.modelID ?? "model-a", providerID: selection?.providerID ?? "custom" } });
       }
       if (url.pathname.endsWith("/agent")) {
         expect(JSON.parse(String(init?.body))).toEqual({ agent: "ingenium-llm-broker" });
@@ -213,8 +213,15 @@ describe("executeSynthesisBroker", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
+    if (selection) {
+      for (const fence of [{ runtimeId: "replaced-runtime", ownerUserId: runtime.ownerUserId }, { runtimeId: runtime.id, ownerUserId: "another-owner" }]) {
+        await expect(createBackgroundSynthesisBrokerExecutor(projectId, { ...selection, ...fence })({ system: "system", user: "must-not-leave", timeoutMs: 1_000 }))
+          .resolves.toMatchObject({ ok: false, error: "no authorized synthesis automation executor configured" });
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    }
     const result = await withOpenCodeRuntimeTarget({ baseUrl: "http://foreign.test:4098", password: "foreign-password", directory: "/foreign" }, () =>
-      createBackgroundSynthesisBrokerExecutor(projectId)({
+      createBackgroundSynthesisBrokerExecutor(projectId, selection ? { ...selection, runtimeId: runtime.id, ownerUserId: runtime.ownerUserId } : undefined)({
         system: "system",
         user: "user",
         timeoutMs: 1_000,

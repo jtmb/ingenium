@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { dashboardFetch, getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase, type ChatProviderInfo } from "@/lib/api";
 
 /**
  * Quick action buttons for the operational cockpit.
@@ -9,17 +9,58 @@ import { dashboardFetch, getApiBase } from "@/lib/api";
  */
 export default function QuickActions({ project }: { project: string }) {
   const [synthesisLoading, setSynthesisLoading] = useState(false);
+  const [showModels, setShowModels] = useState(false);
+  const [providers, setProviders] = useState<ChatProviderInfo[]>([]);
+  const [model, setModel] = useState("");
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const catalogRequestRef = useRef(0);
   const [toast, setToast] = useState<{ message: string; tone: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    catalogRequestRef.current++;
   }, []);
+
+  useEffect(() => {
+    catalogRequestRef.current++;
+    setShowModels(false);
+    setModel("");
+    setProviders([]);
+    setCatalogLoading(false);
+  }, [project]);
 
   const showToast = (message: string, tone: "success" | "error") => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ message, tone });
     toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  };
+
+  const chooseModel = async () => {
+    if (showModels) {
+      setShowModels(false);
+      setModel("");
+      catalogRequestRef.current++;
+      setCatalogLoading(false);
+      return;
+    }
+    setShowModels(true);
+    setCatalogLoading(true);
+    const requestId = ++catalogRequestRef.current;
+    try {
+      const response = await dashboardFetch(`${getApiBase()}/synthesis/models?project=${encodeURIComponent(project)}`);
+      if (!response.ok) throw new Error("catalog unavailable");
+      const catalog: { data: { providers: ChatProviderInfo[] } } = await response.json();
+      if (requestId !== catalogRequestRef.current) return;
+      setProviders(catalog.data.providers);
+    } catch {
+      if (requestId === catalogRequestRef.current) {
+        setProviders([]);
+        showToast("The model catalog is temporarily unavailable.", "error");
+      }
+    } finally {
+      if (requestId === catalogRequestRef.current) setCatalogLoading(false);
+    }
   };
 
   /** Trigger synthesis for the validated project selected by the dashboard. */
@@ -28,11 +69,15 @@ export default function QuickActions({ project }: { project: string }) {
     try {
       const res = await dashboardFetch(`${getApiBase()}/synthesis/run?project=${encodeURIComponent(project)}`, {
         method: "POST",
+        ...(model ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: JSON.parse(model) }) } : {}),
       });
       if (res.ok) {
+        setModel("");
+        setShowModels(false);
         showToast("Synthesis started. Check Pipeline for results.", "success");
       } else {
-        showToast("Synthesis failed", "error");
+        const failure = await res.json().catch(() => null);
+        showToast(failure?.error?.message ?? "Synthesis failed", "error");
       }
     } catch {
       showToast("Synthesis failed", "error");
@@ -80,7 +125,41 @@ export default function QuickActions({ project }: { project: string }) {
           )}
           {synthesisLoading ? "Running..." : "Run Synthesis"}
         </button>
+        <button
+          type="button"
+          onClick={chooseModel}
+          disabled={synthesisLoading}
+          aria-expanded={showModels}
+          className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm disabled:opacity-50"
+        >
+          Choose synthesis model
+        </button>
       </div>
+
+      {showModels && (
+        <label className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+          Model for this run
+          <select
+            aria-label="Synthesis model for this run"
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            disabled={catalogLoading || synthesisLoading}
+            className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1"
+          >
+            <option value="">Configured synthesis models</option>
+            {providers.map((provider) => (
+              <optgroup key={provider.providerId} label={provider.label}>
+                {provider.models.map((entry) => (
+                  <option key={entry.id} value={JSON.stringify({ providerId: provider.providerId, modelId: entry.id })}>
+                    {provider.label}: {entry.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="text-[var(--color-text-secondary)]">Applies to this run only. Saved defaults stay unchanged.</span>
+        </label>
+      )}
 
       {/* Operation feedback */}
       {toast && (

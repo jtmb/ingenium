@@ -2450,14 +2450,27 @@ export type SynthesisBrokerExecutor = (params: {
  * and response parsing; the API retains provider resolution and the only path
  * that can select the tool-denied OpenCode broker agent.
  */
-export function createBackgroundSynthesisBrokerExecutor(projectId: string): (params: {
+export interface ManualSynthesisSelection {
+  providerID: string;
+  modelID: string;
+  runtimeId: string;
+  ownerUserId: string;
+}
+
+export function createBackgroundSynthesisBrokerExecutor(projectId: string, selection?: ManualSynthesisSelection): (params: {
   system: string;
   user: string;
   timeoutMs: number;
 }) => Promise<{ ok: boolean; content: string; error?: string }> {
+  // Only the manual API route supplies a catalog-validated one-run selection.
+  // Copy it before async work; this never changes persisted model settings.
+  const runSelection = selection ? { ...selection } : undefined;
   return async ({ system, user, timeoutMs }) => {
     const runtime = runtimes.getReadyRuntimeForProject(projectId);
     if (runtime && isLocalRuntimeBinding(runtime, projectId)) {
+      if (runSelection && (runtime.id !== runSelection.runtimeId || runtime.ownerUserId !== runSelection.ownerUserId)) {
+        return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };
+      }
       const foreignPrivate = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
         "SELECT 1 FROM observations WHERE project_id = ? AND status = 'pending' AND visibility = 'private' AND owner_user_id IS NOT ? LIMIT 1",
       ).get(projectId, runtime.ownerUserId);
@@ -2479,6 +2492,7 @@ export function createBackgroundSynthesisBrokerExecutor(projectId: string): (par
         user,
         timeoutMs,
         timeoutPolicy: "background",
+        selection: runSelection ? { providerID: runSelection.providerID, modelID: runSelection.modelID } : undefined,
       }));
     }
     return { ok: false, content: "", error: "no authorized synthesis automation executor configured" };

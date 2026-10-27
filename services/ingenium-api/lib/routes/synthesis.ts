@@ -1,8 +1,10 @@
 import { Router } from "express";
-import { synthesis, logger, maintenanceLocks } from "ingenium-core";
+import { synthesis, logger, maintenanceLocks, runtimes } from "ingenium-core";
 import { z } from "zod";
 import { requireProject } from "../helpers.js";
-import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
+import { createBackgroundSynthesisBrokerExecutor, type ManualSynthesisSelection } from "../opencode-client.js";
+import { isAllowedChatSelection } from "../chat-provider-catalog.js";
+import { getManualSynthesisModels } from "../manual-synthesis-models.js";
 
 /** Handles /api/v1/synthesis — triggers the self-learning pipeline (per-project and cross-project). */
 export const synthesisRouter = Router();
@@ -11,6 +13,23 @@ const LOCK_RESOURCE = "skills";
 const SYNTHESIS_LOCK_MS = 120_000; // 2 minutes
 const RENEW_INTERVAL_MS = 60_000; // Renew every 60s
 export const SynthesisSessionIdSchema = z.string().min(1).max(256).regex(/^[A-Za-z0-9_-]+$/);
+const ManualModelSchema = z.object({
+  providerId: z.string().min(1).max(256),
+  modelId: z.string().min(1).max(256),
+}).strict();
+
+synthesisRouter.get("/models", async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const catalog = await getManualSynthesisModels(projectId);
+    if (!catalog.unavailable) {
+      res.json({ data: { providers: catalog.providers } });
+      return;
+    }
+  } catch { /* Return only the sanitized dependency error below. */ }
+  res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The model catalog is temporarily unavailable." } });
+});
 
 /**
  * POST /synthesis/run — trigger synthesis for a project.
@@ -19,11 +38,50 @@ export const SynthesisSessionIdSchema = z.string().min(1).max(256).regex(/^[A-Za
  * The lock is held for the full async duration via renewal every 60s.
  * Returns 423 if another owner already holds the lock.
  */
-synthesisRouter.post("/run", (req, res) => {
+synthesisRouter.post("/run", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sessionId = SynthesisSessionIdSchema.optional().parse(req.query.session_id);
+  const session = SynthesisSessionIdSchema.optional().safeParse(req.query.session_id);
+  if (!session.success) {
+    res.status(422).json({ error: { code: "INVALID_SESSION_ID", message: "session_id must be a valid session identifier." } });
+    return;
+  }
+  const sessionId = session.data;
+  let selection: ManualSynthesisSelection | undefined;
+  if (req.body?.model !== undefined) {
+    // A manual choice belongs to this browser action only. Service credentials
+    // and scheduled synthesis keep their server-owned provider resolution.
+    if (req.principal?.type !== "user" || !req.principal.session) {
+      res.status(403).json({ error: { code: "BROWSER_SESSION_REQUIRED", message: "Choose a synthesis model from a signed-in browser session." } });
+      return;
+    }
+    const runtime = runtimes.getReadyRuntimeForProject(projectId);
+    if (!runtime || runtime.ownerUserId !== req.principal.id) {
+      res.status(403).json({ error: { code: "RUNTIME_OWNER_REQUIRED", message: "Only the authorized runtime owner can choose a model for this run." } });
+      return;
+    }
+    const parsed = ManualModelSchema.safeParse(req.body.model);
+    if (!parsed.success) {
+      res.status(422).json({ error: { code: "INVALID_SYNTHESIS_MODEL", message: "Choose an available provider and model." } });
+      return;
+    }
+    try {
+      const catalog = await getManualSynthesisModels(projectId);
+      if (catalog.unavailable) {
+        res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The model catalog is temporarily unavailable." } });
+        return;
+      }
+      if (!isAllowedChatSelection(catalog.providers, parsed.data)) {
+        res.status(422).json({ error: { code: "INVALID_SYNTHESIS_MODEL", message: "The selected provider and model are no longer available." } });
+        return;
+      }
+    } catch {
+      res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The model catalog is temporarily unavailable." } });
+      return;
+    }
+    selection = { providerID: parsed.data.providerId, modelID: parsed.data.modelId, runtimeId: runtime.id, ownerUserId: req.principal.id };
+  }
 
   // Acquire project-lifetime lock
   const ownerToken = maintenanceLocks.generateOwnerToken();
@@ -52,10 +110,10 @@ synthesisRouter.post("/run", (req, res) => {
   const token = ownerToken;
 
   // Schedule async work with lock renewal
-  scheduleAsync(pid, sid, token);
+  scheduleAsync(pid, sid, token, selection);
 });
 
-async function scheduleAsync(projectId: string, sessionId: string | undefined, ownerToken: string): Promise<void> {
+async function scheduleAsync(projectId: string, sessionId: string | undefined, ownerToken: string, selection?: ManualSynthesisSelection): Promise<void> {
   let heartbeat: ReturnType<typeof setInterval> | null = null;
   try {
     heartbeat = setInterval(() => {
@@ -68,7 +126,7 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
     }, RENEW_INTERVAL_MS);
 
     const result = await synthesis.runSynthesis(projectId, sessionId, {
-      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId, selection),
       ownerToken,
     });
     logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
