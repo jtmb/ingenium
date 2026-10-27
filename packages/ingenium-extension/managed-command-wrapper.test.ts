@@ -883,6 +883,9 @@ describe("staged_distribution_build", () => {
     const root = mkdtempSync(join(tmpdir(), "ingenium-staged-distribution-"));
     const server = join(root, "services/ingenium-server");
     const extension = join(root, "packages/ingenium-extension");
+    mkdirSync(join(extension, "scripts"), { recursive: true });
+    writeFileSync(join(extension, "scripts/source-snapshot.mjs"),
+      readFileSync(join(repositoryRoot, "packages/ingenium-extension/scripts/source-snapshot.mjs")), { mode: 0o555 });
     for (const directory of [server, extension]) {
       mkdirSync(join(directory, "dist"), { recursive: true, mode: 0o700 });
       writeFileSync(join(directory, "dist/previous.txt"), directory);

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import StepUpDialog from "../../auth/StepUpDialog";
+import Select from "../../Select";
 import { api, type MigrationPlan, type MigrationStatus } from "../../../../lib/api";
 
 export const CHECKS = [
@@ -54,7 +55,7 @@ export default function MigrationPanel() {
     {message && <p role="status" className="text-sm">{message}</p>}
     {!status || !plan ? <button className={button} disabled={busy} onClick={() => void run(async () => apply((await api.migration.get()).data))}>Retry loading migration preparation</button> : <>
       <div className="space-y-3">
-        <label className="block text-sm">PRD platform<select aria-label="PRD platform" value={plan.target.platform} onChange={(event) => changeTarget({ ...plan.target, platform: event.target.value as "compose" | "kubernetes" })} className="ml-3 rounded border bg-[var(--color-surface)] p-2"><option value="compose">Docker Compose on another host</option><option value="kubernetes">Kubernetes</option></select></label>
+        <label className="block text-sm">PRD platform<Select aria-label="PRD platform" value={plan.target.platform} onChange={(event) => changeTarget({ ...plan.target, platform: event.target.value as "compose" | "kubernetes" })} className="ml-3 rounded border bg-[var(--color-surface)] p-2"><option value="compose">Docker Compose on another host</option><option value="kubernetes">Kubernetes</option></Select></label>
         <label className="block text-sm">PRD HTTPS origin<input aria-label="PRD HTTPS origin" type="url" placeholder="https://ingenium.your-domain.com" value={plan.target.origin} onChange={(event) => changeTarget({ ...plan.target, origin: event.target.value })} className="mt-1 block w-full rounded border bg-[var(--color-surface)] p-2" /></label>
         <p className="text-xs text-[var(--color-text-muted)]">Changing the target clears preparation confirmations. No connection is made to this address.</p>
       </div>

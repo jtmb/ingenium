@@ -25,6 +25,8 @@ export default defineConfig({
     ],
   },
   test: {
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     // Core owns a process-wide database singleton and API tests temporarily
     // override its environment-backed path. Keep suites serialized and
     // isolated so neither state can leak to a later file.

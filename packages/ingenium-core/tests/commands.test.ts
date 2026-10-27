@@ -231,6 +231,7 @@ describe("commands CRUD", () => {
 
   it("rejects directories, FIFOs, sockets, and hard links as command destinations", async () => {
     const base = getCommandsBase(projectId);
+    mkdirSync(base, { recursive: true });
     const directoryName = `directory-${Date.now()}.md`;
     mkdirSync(join(base, directoryName));
     expect(() => createCommand(projectId, `directory-${Date.now()}`, directoryName, "bad")).toThrow();

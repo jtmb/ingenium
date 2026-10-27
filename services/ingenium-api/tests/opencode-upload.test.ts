@@ -2,11 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { closeHttpServer, listenOnLoopback } from "./http-fixtures.js";
 
 const originalPassword = process.env.OPENCODE_SERVER_PASSWORD;
-const uploadDirectory = "/tmp/ingenium-chat-uploads";
+const uploadDirectory = join(tmpdir(), "ingenium-chat-uploads");
 const uploadedPaths = new Set<string>();
 let server: Server;
 let baseUrl = "";
@@ -49,9 +52,9 @@ describe("OpenCode chat uploads", () => {
       mime: "text/plain",
       size: 12,
     });
-    expect(body.data.url).toMatch(/^file:\/\/\/tmp\/ingenium-chat-uploads\/[0-9a-f-]{36}-unsafe_name_\.txt$/);
-
-    const filepath = new URL(body.data.url).pathname;
+    const filepath = fileURLToPath(body.data.url);
+    expect(dirname(filepath)).toBe(uploadDirectory);
+    expect(basename(filepath)).toMatch(/^[0-9a-f-]{36}-unsafe_name_\.txt$/);
     uploadedPaths.add(filepath);
     expect(existsSync(filepath)).toBe(true);
   });

@@ -65,7 +65,8 @@ describe("dashboard deployment static contract", () => {
   });
 
   it("starts with the protected token-file and local gateway contract", () => {
-    expect(compose).toContain('- "3000:3000"');
+    expect(compose).toContain('- "127.0.0.1:3000:3000"');
+    expect(compose).not.toContain('- "3000:3000"');
     expect(compose).toContain('- "127.0.0.1:4097:4097"');
     expect(compose).not.toContain("3002");
     expect(compose).not.toMatch(/(?:^|\n)\s*-\s*"?(?:127\.0\.0\.1:)?409[89]:409[89]/);

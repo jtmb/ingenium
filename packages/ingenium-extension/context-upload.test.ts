@@ -18,7 +18,7 @@ function v2Message(id: string, text = "visible") {
 }
 function v2Client(worktree: string, messages: ReturnType<typeof v2Message>[]) {
   const session = {
-    get: vi.fn(async () => ({ data: { id: "ses_exact", location: { directory: worktree } } })),
+    get: vi.fn(async () => ({ data: { data: { id: "ses_exact", location: { directory: worktree } } } })),
     messages: vi.fn(async () => ({ data: { data: messages, cursor: {} } })),
   };
   return { client: { session } as unknown as OpenCodeV2Client, session };
@@ -145,7 +145,7 @@ describe("Context upload boundary", () => {
     const messages = vi.fn(async (args: { cursor?: string }) => ({
       data: { data: args.cursor ? [v2Message("m100")] : latest, cursor: args.cursor ? {} : { next: "page-2" } },
     }));
-    const session = { get: async () => ({ data: { id: "ses_exact", location: { directory: worktree } } }), messages };
+    const session = { get: async () => ({ data: { data: { id: "ses_exact", location: { directory: worktree } } } }), messages };
     const client = { session } as unknown as OpenCodeV2Client;
     const invoke = vi.fn(async (name: string, args: Record<string, unknown>) => {
       if (name === "setting_get") return { value: "true" };

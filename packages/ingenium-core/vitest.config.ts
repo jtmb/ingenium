@@ -2,6 +2,9 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // Migration, snapshot and compiler fixtures perform real disk/process work.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     env: {
       NODE_ENV: "production",
     },

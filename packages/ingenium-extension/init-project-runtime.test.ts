@@ -8,6 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { INIT_PROJECT_VERSION, parseInitProjectArgs } from "./scripts/init-project.js";
 import { resolveExtensionProject } from "./project-resolver.js";
+import { linkRuntimeDependencyFixture } from "./tests/runtime-dependency-fixture.js";
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
@@ -22,7 +23,7 @@ const originalTokenFile = process.env.INGENIUM_MCP_CREDENTIAL_FILE;
 const originalAudience = process.env.INGENIUM_MCP_AUDIENCE;
 const originalWorkspace = process.env.INGENIUM_WORKSPACE_ID;
 const storageMappingHash = "a".repeat(64);
-const extensionPluginPaths = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"]
+const extensionPluginPaths = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail", "goal"]
   .map((name) => `packages/ingenium-extension/plugins/v2/${name}`);
 const manifestHash = "b".repeat(64);
 
@@ -54,7 +55,16 @@ function buildCliDistribution(): string {
   cpSync(join(transportDirectory, "config"), join(outputDirectory, "config"), { recursive: true });
   cpSync(join(transportDirectory, "lib"), join(outputDirectory, "lib"), { recursive: true });
   copyFileSync(join(transportDirectory, "scripts", "mcp-server.js"), join(outputDirectory, "scripts", "mcp-transport.js"));
-  symlinkSync(join(repositoryRoot, "node_modules"), join(outputDirectory, "node_modules"), "dir");
+  linkRuntimeDependencyFixture([extensionRoot, serverRoot], outputDirectory);
+  // The transport imports the compiled extension scanner through its package export.
+  const extensionPackage = join(outputDirectory, "node_modules", "@ingenium", "extension");
+  mkdirSync(extensionPackage, { recursive: true });
+  copyFileSync(join(extensionRoot, "package.json"), join(extensionPackage, "package.json"));
+  symlinkSync(outputDirectory, join(extensionPackage, "dist"), "dir");
+  for (const file of readdirSync(extensionRoot).filter((name) => name.endsWith(".mjs"))) {
+    copyFileSync(join(extensionRoot, file), join(outputDirectory, file));
+    copyFileSync(join(extensionRoot, file), join(extensionPackage, file));
+  }
   return outputDirectory;
 }
 
@@ -141,6 +151,9 @@ function createRuntimeWorktree(): string {
     expect(readFileSync(join(target, "index.ts"), "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath, "index.ts"), "utf8"));
   }
   cpSync(join(repositoryRoot, "packages", "ingenium-extension", "ponytail"), join(worktree, "packages", "ingenium-extension", "ponytail"), { recursive: true });
+  for (const source of ["goal-plugin-scope.mjs", "goal-plugin-scope.d.mts", "vendor/opencode-goal-plugin"]) {
+    cpSync(join(extensionRoot, source), join(worktree, "packages", "ingenium-extension", source), { recursive: true });
+  }
   initializeGitWorktree(worktree);
   return worktree;
 }
@@ -218,6 +231,7 @@ describe("ingenium-init-project production runtime contract", () => {
       "resource-sync",
       "lifecycle",
       "ponytail",
+      "goal",
     ].map((name) => `/app/packages/ingenium-extension/plugins/v2/${name}`);
     expect(dockerfile).toContain(`"plugins":${JSON.stringify(configuredV2PluginPaths)}`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");

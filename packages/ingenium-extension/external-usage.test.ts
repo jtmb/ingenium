@@ -14,7 +14,7 @@ function v2Assistant(id = "msg-usage") {
 }
 function v2Session(worktree: string, messages: unknown[]) {
   const session = {
-    get: vi.fn(async () => ({ data: { id: "ses-usage", location: { directory: worktree } } })),
+    get: vi.fn(async () => ({ data: { data: { id: "ses-usage", location: { directory: worktree } } } })),
     messages: vi.fn(async () => ({ data: { data: messages, cursor: {} } })),
   };
   return { client: { session } as unknown as OpenCodeV2Client, session };
@@ -49,7 +49,7 @@ describe("external completed assistant usage", () => {
     expect(invoke.mock.calls[0]).toEqual(invoke.mock.calls[2]);
     expect(fixture.session.messages).toHaveBeenCalledWith({ sessionID: "ses-usage", limit: 100, order: "asc" });
     expect(JSON.stringify(invoke.mock.calls)).not.toContain("secret-canary");
-    fixture.session.get.mockResolvedValue({ data: { id: "foreign", location: { directory: worktree } } });
+    fixture.session.get.mockResolvedValue({ data: { data: { id: "foreign", location: { directory: worktree } } } });
     await expect(collector.sync("ses-usage")).rejects.toThrow("SESSION_UNAVAILABLE");
     expect(invoke).toHaveBeenCalledTimes(4);
   });
@@ -70,7 +70,7 @@ describe("external completed assistant usage", () => {
     });
     const messages = vi.fn().mockResolvedValueOnce({ data: { data: page, cursor: { next: "older" } } })
       .mockResolvedValueOnce({ data: { data: [v2Assistant("msg-100")], cursor: {} } });
-    const session = { get: async () => ({ data: { id: "ses-usage", location: { directory: worktree } } }), messages };
+    const session = { get: async () => ({ data: { data: { id: "ses-usage", location: { directory: worktree } } } }), messages };
     const client = { session } as unknown as OpenCodeV2Client;
     const invoke = vi.fn(async () => ({ created: false }));
     const collector = new ExternalUsageCollector("ingenium", worktree, client, invoke);
