@@ -174,9 +174,9 @@ function protectDashboardPage(request: NextRequest): NextResponse | null {
     login.searchParams.set("returnTo", safeReturnTo(`${pathname}${request.nextUrl.search}`));
     return NextResponse.redirect(login);
   }
-  if (authenticated && (pathname === "/login" || pathname === "/bootstrap")) {
-    return NextResponse.redirect(new URL(safeReturnTo(request.nextUrl.searchParams.get("returnTo")), request.url));
-  }
+  // Cookie presence cannot prove a live session. Keep sign-in reachable when
+  // the API rejects an expired/revoked cookie; redirecting here would bounce
+  // the browser between home and login until the gateway throttles it.
   return NextResponse.next();
 }
 

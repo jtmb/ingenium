@@ -36,6 +36,14 @@ describe("AUTH-103 dashboard boundary", () => {
     expect(proxy(request).headers.get("x-middleware-next")).toBe("1");
   });
 
+  it.each(["/login", "/login?reason=session-expired&returnTo=%2Fchat", "/bootstrap"])("keeps %s reachable with a stale session cookie", (path) => {
+    const request = new NextRequest(`http://dashboard.test${path}`, { headers: { cookie: `${AUTH_SESSION_COOKIE}=expired-or-revoked` } });
+    const response = proxy(request);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it("maps stable authentication errors", () => {
     expect(classifyAuthFailure(401, "UNAUTHORIZED")).toBe("session-expired");
     expect(classifyAuthFailure(403, "CSRF_REJECTED")).toBe("csrf");
