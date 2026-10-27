@@ -45,6 +45,32 @@ Job editing uses an exact Select containing **No event** and the three cataloged
 - From the **Detail View**, click the **Edit** button to open the form overlay
 - Change any field and click **Update Job** to save
 
+### Free Zen provider access
+
+Open a job's Detail View and use **Provider for this job**. An administrator can
+select an active free Zen model and authorize it after normal step-up
+sign-in. This creates an organization-owned connection and explicit service
+grant bound to that job. It does not change saved model defaults, mappings,
+variants or credentials. Existing managed provider connections are preserved.
+
+Use **Revoke provider access** to remove that job's authorization. Revocation
+works while the catalog or vault is unavailable. Provider changes require the
+current job revision and no queued/running job; reload after a revision conflict.
+The selected project agent must exist and be enabled. Usage limits still apply.
+
+Each run projects that agent's current prompt and permissions into its private
+runtime, with an explicit granted model. Anonymous Zen uses an empty private
+auth file; it does not inherit shared account sign-ins, plugins or API keys.
+After asynchronous catalog validation, the runner rechecks current run/job and
+provider authorization before creating credential files. A cancelled run stays
+cancelled. Exit code zero alone does not prove a response: completed native JSON
+response events are required. Raw model output remains redacted from run logs.
+
+Private memory-backed run storage remains mandatory. Cleanup recognizes the
+qualified SDK's databases, logs, caches and native libraries after process-group
+ownership is fenced; unexpected paths, links, modes or size limits retain the
+runtime for recovery rather than deleting an unrecognized tree.
+
 ### Optional vault item references (VAULT-100)
 
 Jobs can opt in to references for up to 16 active vault item IDs in the same
@@ -109,6 +135,8 @@ not changed by this ordinary-run recovery path.
 - `GET /api/v1/jobs/event-deliveries/:deliveryId?project=<name>` — get one delivery
 - `POST /api/v1/jobs/runs/:runId/cancel?project=<name>` — cancel a project-owned run
 - `GET /api/v1/jobs/runs/:runId/logs?project=<name>&after=` — read redacted project-owned logs
+- `GET /api/v1/jobs/:id/provider?project=<name>` — provider authorization metadata and current free catalog
+- `PUT /api/v1/jobs/:id/provider?project=<name>` — browser administrator/step-up mutation with `{expected_revision, model_id}`; `null` model revokes
 - `GET /api/v1/jobs/:id/vault-audit?project=<name>&limit=&cursor=` — bounded job-scoped vault authorization/runtime audit metadata
 
 ## Trusted Events and Delivery (JOB-100/JOB-101)

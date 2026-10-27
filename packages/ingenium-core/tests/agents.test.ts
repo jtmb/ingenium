@@ -7,7 +7,7 @@ import { resetDbForTest } from "../lib/db.js";
 import { createProject } from "../lib/tools/projects.js";
 import { getDb } from "../lib/db.js";
 import { saveConfig } from "../lib/tools/configs.js";
-import { bootstrapReservedBroker as bootstrapReservedBrokerRuntime, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DEPLOYMENT_ROOT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent, validateProtectedOpenCodeDeployment } from "../lib/tools/agents.js";
+import { bootstrapReservedBroker as bootstrapReservedBrokerRuntime, createAgent, deleteAgent, disableAgent, enableAgent, getAgent, getJobAgentConfig, isAgentCategory, isSafeAgentName, LLM_BROKER_CONTENT, LLM_BROKER_DEPLOYMENT_ROOT, LLM_BROKER_DESCRIPTION, LLM_BROKER_METADATA, LLM_BROKER_PERMISSIONS, LLM_BROKER_SKILLS, syncAgentFromDisk, updateAgent, validateProtectedOpenCodeDeployment } from "../lib/tools/agents.js";
 import { deleteProject } from "../lib/tools/projects.js";
 
 const installedRootOpen = vi.hoisted(() => ({ intercept: false, attempted: [] as string[] }));
@@ -124,6 +124,27 @@ afterEach(() => {
 });
 
 describe("centralized agent runtime configuration", () => {
+  it("projects one enabled job agent without model changes, preserving scoped permissions and default deny", () => {
+    createAgent(projectId, "job-profile", "# Exact job instructions", "Job profile", "execution", "subagent", "openai/retained#high", true,
+      JSON.stringify({ "*": "allow", bash: { "git status": "allow" }, write: { "src/*": "ask" } }));
+    const configBefore = readFileSync(join(root, "opencode.json"), "utf8");
+    const projected = getJobAgentConfig(projectId, "job-profile");
+    expect(projected).toMatchObject({ system: "# Exact job instructions", mode: "subagent",
+      permissions: expect.arrayContaining([
+        { action: "*", resource: "*", effect: "deny" },
+        { action: "shell", resource: "git status", effect: "allow" },
+        { action: "edit", resource: "src/*", effect: "ask" },
+      ]) });
+    expect(projected).not.toHaveProperty("model");
+    expect(readFileSync(join(root, "opencode.json"), "utf8")).toBe(configBefore);
+    expect(getAgent(projectId, "job-profile")?.model).toBe("openai/retained#high");
+    expect(() => getJobAgentConfig("foreign-project", "job-profile")).toThrow("unavailable");
+    disableAgent(projectId, "job-profile");
+    expect(() => getJobAgentConfig(projectId, "job-profile")).toThrow("unavailable");
+    expect(() => getJobAgentConfig(projectId, "ingenium-llm-broker")).toThrow("Reserved");
+    expect(() => getJobAgentConfig(projectId, "../escape")).toThrow();
+  });
+
   it("keeps built-in Plan at its native root path throughout the API lifecycle", () => {
     const configPath = join(root, "opencode.json");
     const planPath = join(root, ".opencode", "agents", "plan.md");

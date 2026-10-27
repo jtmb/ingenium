@@ -1,5 +1,7 @@
 "use client";
 
+import JobProviderPanel from "./JobProviderPanel";
+
 export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
@@ -579,6 +581,7 @@ function JobDetailView({
   onToggleEnabled,
   onDelete,
   onError,
+  onProviderUpdated,
 }: {
   job: Job;
   project: string;
@@ -589,6 +592,7 @@ function JobDetailView({
   onToggleEnabled: () => Promise<void>;
   onDelete: () => Promise<void>;
   onError: (message: string) => void;
+  onProviderUpdated: (job: Job) => void;
 }) {
   const [runs, setRuns] = useState<JobRun[]>([]);
   const [selectedRun, setSelectedRun] = useState<JobRun | null>(null);
@@ -677,6 +681,7 @@ function JobDetailView({
           {job.vault_references.some((reference) => reference.status === "unavailable") && <p className="mt-2 text-[var(--color-error-text)]">A reference is unavailable. Remove or replace it explicitly.</p>}
         </div>
       </section>
+      <JobProviderPanel job={job} project={project} onUpdated={onProviderUpdated} busy={runs.some((run) => run.status === "running" || run.status === "queued")} />
       <VaultReferenceAudit job={job} project={project} />
       {activeRun && <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -1014,7 +1019,7 @@ export default function JobsPage() {
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Jobs</h1><p className="mt-1 text-sm text-[var(--color-text-secondary)]">Scheduled jobs, trusted event delivery visibility, and run history for {project}.</p></div>{tab === "jobs" && !selectedJob && <button type="button" onClick={() => { setEditingJob(undefined); setShowForm(true); }} className="w-full shrink-0 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 sm:w-auto">Create Job</button>}</header>
       <div role="tablist" aria-label="Jobs workspace views" className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-1">{TABS.map((item) => <button key={item} ref={(element) => { tabRefs.current[item] = element; }} type="button" id={`jobs-tab-${item}`} role="tab" aria-selected={tab === item} aria-controls={`jobs-panel-${item}`} tabIndex={tab === item ? 0 : -1} onClick={() => selectTab(item)} onKeyDown={(event) => onTabKeyDown(event, item)} className={`shrink-0 rounded px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] ${tab === item ? "bg-blue-600 text-white" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"}`}>{tabLabel[item]}</button>)}</div>
       {error && <Alert>{error}</Alert>}
-      {tab === "jobs" && <section id="jobs-panel-jobs" role="tabpanel" aria-labelledby="jobs-tab-jobs">{selectedJob ? <JobDetailView key={selectedJob.id} job={selectedJob} project={project} refreshToken={detailRefreshToken.current} onBack={() => setSelectedJob(null)} onEdit={() => { setEditingJob(selectedJob); setShowForm(true); }} onRun={() => runJob(selectedJob)} onToggleEnabled={() => toggleJob(selectedJob)} onDelete={() => deleteJob(selectedJob)} onError={reportError} /> : loadingJobs ? <p role="status" className="text-sm text-[var(--color-text-muted)]">Loading jobs…</p> : sortedJobs.length === 0 ? <div className="py-12 text-center text-[var(--color-text-muted)]"><p className="text-lg font-semibold">No jobs yet</p><p className="mt-1 text-sm">Create a job to schedule agent runs.</p></div> : <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">{sortedJobs.map((job) => <JobCard key={job.id} job={job} onOpen={() => setSelectedJob(job)} onRun={() => void runJob(job)} onToggleEnabled={() => void toggleJob(job)} getLastRunStatus={getLastRunStatus} />)}</div>}</section>}
+      {tab === "jobs" && <section id="jobs-panel-jobs" role="tabpanel" aria-labelledby="jobs-tab-jobs">{selectedJob ? <JobDetailView key={selectedJob.id} job={selectedJob} project={project} refreshToken={detailRefreshToken.current} onBack={() => setSelectedJob(null)} onEdit={() => { setEditingJob(selectedJob); setShowForm(true); }} onRun={() => runJob(selectedJob)} onToggleEnabled={() => toggleJob(selectedJob)} onDelete={() => deleteJob(selectedJob)} onError={reportError} onProviderUpdated={(updated) => { setSelectedJob(updated); void fetchJobs(); }} /> : loadingJobs ? <p role="status" className="text-sm text-[var(--color-text-muted)]">Loading jobs…</p> : sortedJobs.length === 0 ? <div className="py-12 text-center text-[var(--color-text-muted)]"><p className="text-lg font-semibold">No jobs yet</p><p className="mt-1 text-sm">Create a job to schedule agent runs.</p></div> : <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">{sortedJobs.map((job) => <JobCard key={job.id} job={job} onOpen={() => setSelectedJob(job)} onRun={() => void runJob(job)} onToggleEnabled={() => void toggleJob(job)} getLastRunStatus={getLastRunStatus} />)}</div>}</section>}
       {tab === "queue" && <section id="jobs-panel-queue" role="tabpanel" aria-labelledby="jobs-tab-queue"><EventQueueTab project={project} refreshToken={deliveryRefreshToken} /></section>}
       {tab === "events" && <section id="jobs-panel-events" role="tabpanel" aria-labelledby="jobs-tab-events"><TrustedEventsTab project={project} /></section>}
       {showForm && <JobFormOverlay isOpen={showForm} onClose={() => { setShowForm(false); setEditingJob(undefined); }} initial={editingJob} agents={agents} project={project} onSaved={(saved) => { if (editingJob && saved) setSelectedJob(saved); void fetchJobs(); }} />}

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   api,
+  resetAuthClientForTest,
   normalizeJobEventDelivery,
   normalizeJob,
   normalizeJobVaultAuditEntry,
@@ -35,7 +36,7 @@ const delivery = {
   updated_at: timestamp,
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); resetAuthClientForTest(); });
 
 describe("Jobs response allowlisting", () => {
   it("normalizes revisioned vault references and drops malicious job/audit fields", () => {
@@ -170,6 +171,29 @@ describe("Jobs response allowlisting", () => {
     }
     expect(redacted).toContain("[REDACTED]");
     expect(sanitizeJobDisplayText("worker failed after 3 attempts for queue-item-7", "fallback")).toBe("worker failed after 3 attempts for queue-item-7");
+  });
+
+  it("normalizes the revisioned provider result and scopes the mutation to one job", async () => {
+    const rawJob = {
+      id: "job-00000000-0000-0000-0000-000000000001", project_id: "fixture-project",
+      name: "Free response", agent: "ingenium-chat", prompt_template: "Response only",
+      enabled: 1, timeout_minutes: 1, revision: 3, vault_references: [],
+      created_at: timestamp, updated_at: timestamp, environment: { TOKEN: "must-not-survive" },
+    };
+    const connection = { kind: "anonymous", providerId: "opencode", modelId: "beam-free", authorized: true };
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { csrfToken: "fixture-csrf" } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { job: rawJob, connection } }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await api.jobs.configureProvider(rawJob.id, "beam-free", 2, "fixture project");
+    expect(result.data.job).toMatchObject({ enabled: true, revision: 3 });
+    expect(result.data.connection).toEqual(connection);
+    expect(JSON.stringify(result)).not.toContain("must-not-survive");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/auth/session/csrf");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/jobs/" + rawJob.id + "/provider?project=fixture%20project");
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: "PUT", headers: expect.objectContaining({ "X-CSRF-Token": "fixture-csrf" }), body: JSON.stringify({ model_id: "beam-free", expected_revision: 2 }) });
   });
 
   it("normalizes opaque server responses through the Jobs client before returning them", async () => {
