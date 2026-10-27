@@ -226,7 +226,7 @@ COPY --chown=root:root --chmod=0555 scripts/validate-vault-job-secret-root.sh sc
 COPY --chown=root:root --chmod=0555 scripts/provision-auth-encryption-key.sh ./scripts/provision-auth-encryption-key.sh
 # Nginx resolves includes from `/app/nginx` during build validation and runtime
 # startup, so copy its primary configuration and declared include set together.
-COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
+COPY --chown=root:root nginx/dashboard-safe-reads-map.conf nginx/gateway.conf nginx/public-information.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf nginx/proxy-vscode.conf nginx/runtime-aliases-compatibility.conf nginx/runtime-aliases-production.conf nginx/runtime-alias-unavailable-location.conf ./nginx/
 # Validate the rendered Nginx configuration as its production user. Runtime
 # startup recreates these ephemeral directories before Nginx starts.
 RUN install -d -o ingenium-gateway -g ingenium-gateway -m 0700 \
