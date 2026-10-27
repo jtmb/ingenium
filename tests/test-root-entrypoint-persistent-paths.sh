@@ -24,6 +24,9 @@ fs.writeFileSync(helperPath, `${source.slice(0, boundary)}
 if [ \"\${1:-}\" = \"--remove-stale-socket\" ]; then
   shift
   remove_verified_stale_socket \"$@\"
+elif [ \"\${1:-}\" = \"--migration-plan\" ]; then
+  shift
+  secure_migration_plan \"$@\"
 else
   secure_persistent_path \"$@\"
 fi
@@ -47,6 +50,25 @@ for candidate in $(id -G); do
     break
   fi
 done
+# A saved plan must remain readable by the strict API reader after every start.
+mkdir -p "$RUN_ROOT/migration-data"
+plan="$RUN_ROOT/migration-data/prd-migration-plan.json"
+printf '%s\n' '{"revision":1,"target":{"platform":"kubernetes","origin":""},"confirmed":[],"updatedAt":null}' > "$plan"
+chmod 0600 "$plan"
+plan_before="$(sha256sum "$plan" | cut -d ' ' -f 1)"
+for restart in 1 2 3; do
+  helper --migration-plan "$plan" "$uid" "$gid"
+  helper tree "$RUN_ROOT/migration-data" "$uid" "$gid" 2770 0660 backups
+  helper --migration-plan "$plan" "$uid" "$gid"
+  [[ "$(stat -c '%a:%u:%g' "$plan")" == "600:$uid:$gid" ]] || fail 'restart widened migration plan permissions'
+  [[ "$(sha256sum "$plan" | cut -d ' ' -f 1)" == "$plan_before" ]] || fail 'restart changed saved migration plan bytes'
+done
+ln "$plan" "$RUN_ROOT/plan-hardlink"
+if helper --migration-plan "$plan" "$uid" "$gid"; then fail 'hardlinked migration plan accepted'; fi
+rm "$RUN_ROOT/plan-hardlink"
+ln -s "$plan" "$RUN_ROOT/plan-symlink"
+if helper --migration-plan "$RUN_ROOT/plan-symlink" "$uid" "$gid"; then fail 'symlinked migration plan accepted'; fi
+
 protected="$RUN_ROOT/protected"
 mkdir -p "$protected"
 chgrp "$runtime_gid" "$protected"
