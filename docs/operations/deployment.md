@@ -42,6 +42,10 @@ The compatibility container runs:
 
 ---
 
+## Kubernetes operator deployment
+
+For migration to James's existing production cluster, use the external [Kubernetes operator runbook](kubernetes.md) and the `ingenium-kubernetes-deploy` agent skill. Deployment is performed through the private charts/local validation/Flux workflow, not through controls inside Ingenium. Preserve the installation data, model settings and native Secrets; verify redundant storage before cutover.
+
 ## Quick Start
 
 ```bash

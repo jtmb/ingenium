@@ -59,11 +59,17 @@ FROM node:22-slim AS runtime-base
 
 ARG OPENCODE_VERSION=2.0.11
 ARG OPENCODE_SHA256=59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13
-ARG CLOUDFLARED_VERSION=2026.8.3
-ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e
+ARG CLOUDFLARED_VERSION=2026.10.4
+ARG CLOUDFLARED_SHA256=ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor nginx curl ca-certificates tzdata git acl libcap2-bin && \
+    supervisor nginx curl ca-certificates tzdata git acl libcap2-bin libssl3 openssl && \
     rm -rf /var/lib/apt/lists/*
+# Patch the image's standalone npm tooling without changing application locks.
+RUN NPM_CONFIG_CACHE=/tmp/ingenium-runtime-npm-cache NPM_CONFIG_LOGS_DIR=/tmp/ingenium-runtime-npm-logs \
+    APPDATA=/tmp/ingenium-runtime-build-appdata LOCALAPPDATA=/tmp/ingenium-runtime-build-localappdata \
+    npm install --global --ignore-scripts npm@12.2.1 && \
+    test "$(npm --version)" = "12.2.1" && \
+    rm -rf /tmp/ingenium-runtime-npm-cache /tmp/ingenium-runtime-npm-logs /tmp/ingenium-runtime-build-appdata /tmp/ingenium-runtime-build-localappdata
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://opencode.ai/files/bin/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
@@ -76,12 +82,12 @@ RUN curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/cloudflared "https://github.co
     install -o root -g root -m 0555 /tmp/cloudflared /usr/local/bin/cloudflared && \
     cloudflared --version | grep -F "cloudflared version ${CLOUDFLARED_VERSION}" && \
     rm /tmp/cloudflared
-RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/releases/download/v4.131.0/code-server-4.131.0-linux-amd64.tar.gz" && \
-    echo "f6316f0b14ef5c12ed6e67e0154dd02ccf5e66112064687d7e93c51763105361  /tmp/code-server.tar.gz" | sha256sum -c - && \
+RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/releases/download/v4.143.1/code-server-4.143.1-linux-amd64.tar.gz" && \
+    echo "614877cf71005f14ea252bd2d9b1c12237cf7d73681ef150f0dff7f13849fdb5  /tmp/code-server.tar.gz" | sha256sum -c - && \
     mkdir -p /usr/local/lib/code-server && \
     tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1 && \
     ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server && \
-    code-server --version | grep -Eq '^4\.131\.0([[:space:]]|$)' && \
+    code-server --version | grep -Eq '^4\.143\.1([[:space:]]|$)' && \
     rm /tmp/code-server.tar.gz
 COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
 COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs

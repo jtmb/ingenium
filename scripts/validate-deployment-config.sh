@@ -117,15 +117,15 @@ reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
 require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
-require_literal "$dockerfile" "ARG CLOUDFLARED_VERSION=2026.8.3"
-require_literal "$dockerfile" "ARG CLOUDFLARED_SHA256=f29324fe934d1e100617484c78deef803c4dc2cd351d645bbde42e96b4fccc5e"
+require_literal "$dockerfile" "ARG CLOUDFLARED_VERSION=2026.10.4"
+require_literal "$dockerfile" "ARG CLOUDFLARED_SHA256=ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42"
 require_literal "$dockerfile" 'install -d -o root -g root -m 0555 /etc/ingenium'
 require_literal "$dockerfile" 'PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers'
 require_literal "$dockerfile" 'ln -s "$browser_path" /opt/ingenium-playwright/chromium'
 reject_literal "$dockerfile" '"mcp":{"playwright"'
 reject_literal "$dockerfile" '"command":["npx","-y","@playwright/mcp'
-require_literal "$dockerfile" "https://github.com/coder/code-server/releases/download/v4.131.0/code-server-4.131.0-linux-amd64.tar.gz"
-require_literal "$dockerfile" "f6316f0b14ef5c12ed6e67e0154dd02ccf5e66112064687d7e93c51763105361"
+require_literal "$dockerfile" "https://github.com/coder/code-server/releases/download/v4.143.1/code-server-4.143.1-linux-amd64.tar.gz"
+require_literal "$dockerfile" "614877cf71005f14ea252bd2d9b1c12237cf7d73681ef150f0dff7f13849fdb5"
 require_literal "$dockerfile" "tar -xzf /tmp/code-server.tar.gz -C /usr/local/lib/code-server --strip-components=1"
 require_literal "$dockerfile" "code-server --version | grep -Eq"
 require_literal "$dockerfile" "https://open-vsx.org/api/sst-dev/opencode/0.0.13/file/sst-dev.opencode-0.0.13.vsix"
