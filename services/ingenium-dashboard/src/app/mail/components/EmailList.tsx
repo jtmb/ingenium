@@ -20,6 +20,7 @@ export default function EmailList({
   page,
   loading,
   onSearch,
+  searchQuery,
   error,
   onRefresh,
   source,
@@ -33,6 +34,7 @@ export default function EmailList({
   page: number;
   loading: boolean;
   onSearch: (q: string) => void;
+  searchQuery?: string;
   error?: string | null;
   onRefresh?: () => void;
   source?: string;
@@ -70,9 +72,21 @@ export default function EmailList({
         <input
           type="text"
           placeholder="Search emails..."
-          className="flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
+          aria-label="Search emails"
+          value={searchQuery}
+          className="min-w-0 flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
           onChange={(e) => onSearch(e.target.value)}
         />
+        {searchQuery && (
+          <button
+            type="button"
+            aria-label="Clear email search"
+            onClick={() => onSearch("")}
+            className="shrink-0 rounded border border-[var(--color-border)] px-2 py-1.5 text-sm"
+          >
+            Clear
+          </button>
+        )}
         {onRefresh && (
           <button
             onClick={onRefresh}
@@ -85,6 +99,12 @@ export default function EmailList({
           </button>
         )}
       </div>
+
+      {searchQuery && (
+        <p role="status" className="px-4 py-2 text-xs text-[var(--color-text-muted)]">
+          Showing search results across all folders
+        </p>
+      )}
 
       {/* Error banner */}
       {error && (

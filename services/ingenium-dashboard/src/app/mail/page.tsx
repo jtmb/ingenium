@@ -1062,8 +1062,8 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      {/* Show progress view until cache has data, then show mail UI */}
-      {syncStatus && syncStatus.totalCached === 0 ? (
+      {/* Empty mailboxes are usable once synchronization is no longer active. */}
+      {syncStatus && syncStatus.totalCached === 0 && (syncStatus.syncingFolders > 0 || hasAuthError) ? (
         <SyncProgress
           folders={syncStatus.folders.map((f: any) => ({
             folder: f.folder,
@@ -1145,6 +1145,7 @@ export default function MailPage() {
                   page={page}
                   loading={loading}
                   onSearch={handleSearch}
+                  searchQuery={searchQuery}
                   error={emailError}
                   onRefresh={handleRefresh}
                   source={emailSource}

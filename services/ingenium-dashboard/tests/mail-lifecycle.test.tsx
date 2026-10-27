@@ -421,3 +421,22 @@ describe("Mail project lifecycle", () => {
   });
 
 });
+
+
+describe("empty mailbox acceptance", () => {
+  it("shows the mailbox controls after a successful sync with zero messages", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes("/emails/sync-status?")) return Promise.resolve(jsonResponse({ data: {
+        overall: "done", account: "account-a", totalFolders: 1, syncingFolders: 0,
+        totalCached: 0, totalBodies: 0,
+        folders: [{ folder: "INBOX", syncing: false, cachedCount: 0, bodyCount: 0, engineState: { state: "complete" } }],
+      } }));
+      if (url.includes("/emails?")) return Promise.resolve(jsonResponse({ data: [], total: 0, source: "cache" }));
+      return baseFetch(input);
+    });
+    render(<MailPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh messages" })).toBeTruthy());
+    expect(screen.getByTestId("mail-sidebar")).toBeTruthy();
+  });
+});
