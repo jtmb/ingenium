@@ -408,3 +408,9 @@ curl --config "${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf" \
    and preserve the paired-file contract
 4. **Run `PRAGMA integrity_check` after any restore** to verify the database is healthy
 5. **Keep at least 3 backup rotations** — daily snapshots for the last week, weekly for the last month
+
+### Sizing verified downloads
+
+The API admits one verified backup download at a time per process. A second request receives `429 BACKUP_DOWNLOAD_BUSY` with `Retry-After: 1` before any component buffer is allocated. Completion, client disconnection and verification failure release admission; the verified buffer is wiped when its response finishes or closes.
+
+For an installation whose core database exceeds the default 256 MiB limit, size `INGENIUM_BACKUP_DOWNLOAD_MAX_BYTES` above the measured component size and within the API container memory budget. For example, a 942,026,752-byte component fits a 1,073,741,824-byte limit in the qualified 4 GiB Ingenium container. Leave room for its other services and verification work. The default limit and signed-bundle/content verification remain unchanged. Restore handoff has a separate combined-size limit and requires independent sizing; changing the download limit does not authorize a restore.
