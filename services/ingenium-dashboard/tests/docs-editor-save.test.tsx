@@ -74,6 +74,30 @@ describe("DocsEditor save behavior", () => {
     expect(screen.queryByText("Saved")).toBeNull();
   });
 
+  it("saves a new page before an autosave draft exists", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    dashboardFetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ error: { code: "NOT_FOUND", message: "No draft found for page 7" } }),
+    });
+    render(<DocsEditor page={page} mode="edit" onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved")).not.toBeNull();
+    expect(screen.queryByText("Draft delete failed (404)")).toBeNull();
+  });
+
+  it.each([
+    { code: "NOT_FOUND", message: "Page not found" },
+    { code: "FORBIDDEN", message: "Not authorized" },
+  ])("keeps an unexpected draft cleanup failure visible: $code", async (error) => {
+    dashboardFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({ error }) });
+    render(<DocsEditor page={page} mode="edit" onSave={vi.fn().mockResolvedValue(undefined)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Draft delete failed (404)")).not.toBeNull();
+    expect(screen.queryByText("Saved")).toBeNull();
+  });
+
   it("reports an autosave failure when the draft endpoint returns a non-OK response", async () => {
     vi.useFakeTimers();
     dashboardFetch.mockResolvedValue({ ok: false, status: 500 });

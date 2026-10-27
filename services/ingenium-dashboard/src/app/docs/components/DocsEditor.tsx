@@ -110,6 +110,11 @@ async function deleteDraft(pageId: number): Promise<void> {
   const res = await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
     method: "DELETE",
   });
+  if (res.status === 404) {
+    const payload = await res.json().catch(() => null);
+    if (payload?.error?.code === "NOT_FOUND"
+      && payload.error.message === `No draft found for page ${pageId}`) return;
+  }
   if (!res.ok) throw new Error(`Draft delete failed (${res.status})`);
 }
 
