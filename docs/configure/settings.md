@@ -49,3 +49,10 @@ the stored token; clearing it requires an explicit confirmation. Connect is
 disabled until the trusted route inventory is ready. See the [Cloudflare Tunnel
 guide](cloudflare.md) for the inventory schema, fixed authenticated targets,
 lifecycle preconditions, and current unverified status.
+
+## Move to PRD
+
+Use **Move to PRD** to save a destination, create a paired database checkpoint,
+review required full-installation transfers and download a preparation runbook.
+See [PRD migration](../operations/prd-migration.md) for destination verification
+and rollback requirements. The controls do not transfer files or perform cutover.

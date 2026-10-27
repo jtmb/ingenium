@@ -919,7 +919,9 @@ export default function MailPage() {
     syncStatus.folders!.every((f: any) => f.cachedCount === 0)
   );
 
+  const [reconnecting, setReconnecting] = useState(false);
   const handleReconnect = useCallback(() => {
+    setReconnecting(true);
     setShowAccountSetup(true);
   }, []);
 
@@ -937,6 +939,7 @@ export default function MailPage() {
   const handleAccountSetupComplete = useCallback(async () => {
     const requestKey = captureRequestKey();
     setShowAccountSetup(false);
+    setReconnecting(false);
     const accts = await refreshAccountList();
     if (!accts || !isCurrentRequest(requestKey)) return;
     const firstVisible = accts.find((a: any) => !a.hidden);
@@ -1050,9 +1053,9 @@ export default function MailPage() {
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
         <AccountSetup
           project={project}
-          reconnectAccount={hasAuthError ? selectedAccountDetails : undefined}
+          reconnectAccount={reconnecting || hasAuthError ? selectedAccountDetails : undefined}
           onComplete={handleAccountSetupComplete}
-          onCancel={() => setShowAccountSetup(false)}
+          onCancel={() => { setReconnecting(false); setShowAccountSetup(false); }}
         />
       </div>
     );
@@ -1060,7 +1063,10 @@ export default function MailPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+        {selectedAccountDetails?.authType === "oauth2" && <button type="button" onClick={handleReconnect} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm">Reconnect email account</button>}
+      </div>
 
       {/* Empty mailboxes are usable once synchronization is no longer active. */}
       {syncStatus && syncStatus.totalCached === 0 && (syncStatus.syncingFolders > 0 || hasAuthError) ? (
@@ -1120,7 +1126,7 @@ export default function MailPage() {
               onSelectFolder={handleSelectFolder}
               onSelectAccount={handleSelectAccount}
               onCompose={handleCompose}
-              onAddAccount={() => setShowAccountSetup(true)}
+              onAddAccount={() => { setReconnecting(false); setShowAccountSetup(true); }}
               onDeleteAccount={handleDeleteAccount}
               onHideAccount={handleHideAccount}
               onShowAccount={handleShowAccount}

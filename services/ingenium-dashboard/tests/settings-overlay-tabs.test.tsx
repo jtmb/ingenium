@@ -34,6 +34,8 @@ vi.mock("../src/app/components/settings/panels/CloudflarePanel", () => ({
   default: () => <div>Cloudflare panel</div>,
 }));
 
+vi.mock("../src/app/components/settings/panels/MigrationPanel", () => ({ default: () => <div>Migration panel</div> }));
+
 import SettingsOverlay from "../src/app/components/settings/SettingsOverlay";
 
 const ROUTE_LINKS: Record<string, string> = {
@@ -74,6 +76,7 @@ const SETTINGS_TABS = [
   ["personality", "Personality"],
   ["providers", "Providers"],
   ["cloudflare", "Cloudflare"],
+  ["migration", "Move to PRD"],
   ["logs", "Logs"],
 ] as const;
 
