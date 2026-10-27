@@ -81,7 +81,7 @@ def main():
     root = args.output_root
     need(root.is_absolute() and root == root.resolve() and root.is_dir() and not root.is_symlink(), "owned_existing_root_required")
     need(root.stat().st_uid == os.getuid() and not root.stat().st_mode & 0o077, "owner_private_root_required")
-    free = int(command(["/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe", "-NoProfile", "-Command", "(Get-PSDrive C).Free"]).decode().strip())
+    free = int(command([PYTHON, "-I", "-B", "-c", "import shutil; print(shutil.disk_usage('C:/').free)"]).decode().strip())
     need(free >= 15 * GIB and shutil.disk_usage(root).free >= 15 * GIB, "storage_reserve_failed")
     repo = Path(__file__).resolve().parent.parent
     git = ["git", "-c", "safe.directory=" + str(repo), "-C", str(repo)]
