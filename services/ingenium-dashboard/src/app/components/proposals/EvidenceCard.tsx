@@ -2,6 +2,8 @@
 
 type ObservationSource = {
   id: number;
+  type?: string;
+  contentPreview?: string;
   observation_type?: string;
   content_preview?: string;
   content?: string;
@@ -10,6 +12,7 @@ type ObservationSource = {
 };
 
 type EvidenceEntry = {
+  trigger?: string;
   trigger_type?: string;
   trigger_label?: string;
   model?: string;
@@ -32,24 +35,29 @@ type EvidenceCardProps = {
  * - Contributing observation summaries
  * - Clickable observation source links
  *
- * If observations are enriched from the API, renders `ObservationSourceCard`
- * widgets with content previews. Otherwise shows placeholder text.
+ * Enriched observations provide source previews and link tooltips. Missing
+ * enrichment still retains each source link without inventing content.
  */
 export default function EvidenceCard({ evidence, observations, project }: EvidenceCardProps) {
-  const triggerLabel = evidence.trigger_label ?? evidence.trigger_type ?? evidence.source_label ?? evidence.source_type ?? "Unknown";
+  const triggerLabel = evidence.trigger_label ?? evidence.trigger_type ?? evidence.trigger ?? evidence.source_label ?? evidence.source_type ?? "Unknown";
   const model = evidence.model;
 
-  // Match evidence observation_ids to our enriched observations array
-  const matchedObs = (evidence.observation_ids ?? []).map((oid) =>
-    observations.find((o) => o.id === oid)
-  );
-
-  // Compute a content preview from observation content
-  const preview = (o: ObservationSource): string => {
-    if (o.content_preview) return o.content_preview;
-    if (o.content) return o.content.length > 100 ? o.content.slice(0, 100) + "..." : o.content;
-    return "No preview available";
+  const observationIds = evidence.observation_ids ?? [];
+  const matchedObs = observationIds.map((id) => ({
+    id,
+    observation: observations.find((observation) => observation.id === id),
+  }));
+  const content = (observation: ObservationSource): string | undefined =>
+    observation.contentPreview ?? observation.content_preview ?? observation.content;
+  const preview = (observation: ObservationSource): string => {
+    const text = content(observation);
+    return text ? (text.length > 100 ? text.slice(0, 100) + "..." : text) : "No preview available";
   };
+  const summaries = evidence.observation_summaries ?? [];
+  const sourcePreviews = matchedObs.flatMap(({ observation }) =>
+    observation && content(observation) ? [preview(observation)] : []
+  );
+  const supportingText = summaries.length > 0 ? summaries : sourcePreviews;
 
   return (
     <div className="border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
@@ -69,12 +77,17 @@ export default function EvidenceCard({ evidence, observations, project }: Eviden
 
       {/* Observation summaries */}
       <div className="px-4 py-3 space-y-2">
-        {evidence.observation_summaries && evidence.observation_summaries.length > 0 ? (
-          <ul className="list-disc list-inside text-xs text-[var(--color-text-secondary)] space-y-1">
-            {evidence.observation_summaries.map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
-          </ul>
+        {supportingText.length > 0 ? (
+          <div>
+            {summaries.length === 0 && (
+              <p className="text-[10px] font-medium text-[var(--color-text-muted)] uppercase tracking-wide mb-1">
+                Source previews
+              </p>
+            )}
+            <ul className="list-disc list-inside text-xs text-[var(--color-text-secondary)] space-y-1">
+              {supportingText.map((text, index) => <li key={index}>{text}</li>)}
+            </ul>
+          </div>
         ) : (
           <p className="text-xs text-[var(--color-text-muted)] italic">
             No supporting summaries available.
@@ -84,32 +97,22 @@ export default function EvidenceCard({ evidence, observations, project }: Eviden
         {/* Observation links */}
         <div className="flex flex-wrap gap-1.5 pt-1">
           {matchedObs.length > 0 ? (
-            matchedObs.map((obs) => {
-              if (!obs) return null;
+            matchedObs.map(({ id, observation }) => {
+              const type = observation?.type ?? observation?.observation_type;
               return (
                 <a
-                  key={obs.id}
-                  href={`/observations/${obs.id}?project=${encodeURIComponent(project)}`}
+                  key={id}
+                  href={`/observations/${id}?project=${encodeURIComponent(project)}`}
                   className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-[var(--color-surface-hover)] hover:bg-[var(--color-selection-bg)] text-[var(--color-text-link)] transition-colors cursor-pointer"
-                  title={`${obs.observation_type ?? "Observation"} #${obs.id}: ${preview(obs)}`}
+                  title={observation
+                    ? `${type ?? "Observation"} #${id}: ${preview(observation)}`
+                    : `Observation #${id} — Source chat unavailable (not enriched)`}
                 >
-                  <ObsTypeIcon type={obs.observation_type} />
-                  <span>#{obs.id}</span>
+                  <ObsTypeIcon type={type} />
+                  <span>#{id}</span>
                 </a>
               );
             })
-          ) : (evidence.observation_ids ?? []).length > 0 ? (
-            (evidence.observation_ids ?? []).map((oid: number) => (
-              <a
-                key={oid}
-                href={`/observations/${oid}?project=${encodeURIComponent(project)}`}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-full bg-[var(--color-surface-hover)] hover:bg-[var(--color-selection-bg)] text-[var(--color-text-link)] transition-colors cursor-pointer"
-                title={`Observation #${oid} — Source chat unavailable (not enriched)`}
-              >
-                <ObsTypeIcon type={undefined} />
-                <span>#{oid}</span>
-              </a>
-            ))
           ) : (
             <span className="text-[11px] text-[var(--color-text-muted)] italic">
               Source chat unavailable
