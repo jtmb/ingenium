@@ -16,6 +16,7 @@ const SERVICES: Array<{ id: CloudflareServiceId; label: string }> = [
   { id: "cli", label: "CLI" },
   { id: "vscode", label: "VS Code" },
   { id: "api", label: "API" },
+  { id: "info", label: "Public information pages" },
 ];
 
 function statusLabel(value: string): string {
@@ -138,7 +139,7 @@ export default function CloudflarePanel() {
       <fieldset className="space-y-3">
         <legend className="text-sm font-semibold text-[var(--color-text-primary)]">Public service mappings</legend>
         <p className="text-xs text-[var(--color-text-muted)]">
-          Each service is gated separately. OpenCode, CLI, and VS Code target authenticated production audience gateways; local compatibility upstreams are rejected.
+          Public information pages expose only the homepage, privacy notice and terms. The workspace services require authentication.
         </p>
         {SERVICES.map(({ id, label }) => {
           const route = status.routes.find((candidate) => candidate.service === id);

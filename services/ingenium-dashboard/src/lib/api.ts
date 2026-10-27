@@ -980,7 +980,7 @@ export interface SettingResponse {
   masked?: boolean;
 }
 
-export type CloudflareServiceId = "dashboard" | "opencode" | "cli" | "vscode" | "api";
+export type CloudflareServiceId = "dashboard" | "opencode" | "cli" | "vscode" | "api" | "info";
 export type CloudflareTokenOperation =
   | { action: "preserve" }
   | { action: "replace"; value: string }

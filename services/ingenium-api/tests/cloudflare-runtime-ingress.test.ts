@@ -58,14 +58,16 @@ function ingressRequest(host: string, path = `/?runtimeId=${runtimeId}`, headers
 }
 
 describe("CLOUDFLARE-100 GAP 1 label ingress", () => {
-  it("consumes all five inventory targets without treating dashboard or API roots as runtime hosts", async () => {
-    for (const service of cloudflareTunnel.CLOUDFLARE_SERVICE_IDS) {
+  it("keeps public information origins outside authenticated runtime trust", async () => {
+    for (const service of cloudflareTunnel.CLOUDFLARE_SERVICE_IDS.filter((id) => id !== "info")) {
       expect(cloudflareIngressForHost(`${service}.example.com`)).toMatchObject({ service, origin: `https://${service}.example.com` });
       expect(runtimeScope({ headers: { host: `${service}.example.com` } })).toBeUndefined();
     }
     expect(cloudflareLauncherOriginAllowed("https://dashboard.example.com", "web")).toBe(true);
     expect(cloudflareLauncherOriginAllowed("https://api.example.com", "web")).toBe(false);
-    for (const service of ["dashboard", "api"]) {
+    expect(cloudflareIngressForHost("info.example.com")).toBeUndefined();
+    expect(cloudflareLauncherOriginAllowed("https://info.example.com", "web")).toBe(false);
+    for (const service of ["dashboard", "api", "info"]) {
       expect((await ingressRequest(`${service}.example.com`)).status).toBe(421);
     }
     expect(validate).not.toHaveBeenCalled();
@@ -126,7 +128,7 @@ describe("CLOUDFLARE-100 GAP 1 label ingress", () => {
       expect(response.headers["access-control-allow-origin"]).toBe(origin);
       expect(proxyResponseHeaders({}, scope, origin)["content-security-policy"]).toEqual([`frame-ancestors ${origin}`]);
     }
-    for (const origin of ["https://cli.example.com", "https://vscode.example.com", "https://api.example.com", "https://opencode.example.com.evil.com"]) {
+    for (const origin of ["https://cli.example.com", "https://vscode.example.com", "https://api.example.com", "https://info.example.com", "https://opencode.example.com.evil.com"]) {
       expect((await ingressRequest(host, "/__ingenium/health", { origin }, "OPTIONS")).status).toBe(403);
       expect(() => proxyResponseHeaders({}, scope, origin)).toThrow("Dashboard origin is not allowed");
     }

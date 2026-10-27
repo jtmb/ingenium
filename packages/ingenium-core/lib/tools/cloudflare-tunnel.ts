@@ -9,7 +9,7 @@ export const CLOUDFLARE_TUNNEL_TOKEN_SETTING_KEY = "cloudflare_tunnel_token";
 const TOKEN_ITEM_NAME = "Cloudflare Tunnel Token";
 const DELETED_VAULT_POLICY = '{"mode":"deleted"}';
 
-export const CLOUDFLARE_SERVICE_IDS = ["dashboard", "opencode", "cli", "vscode", "api"] as const;
+export const CLOUDFLARE_SERVICE_IDS = ["dashboard", "opencode", "cli", "vscode", "api", "info"] as const;
 export type CloudflareServiceId = (typeof CLOUDFLARE_SERVICE_IDS)[number];
 
 export const CLOUDFLARE_SERVICE_TARGETS: Readonly<Record<CloudflareServiceId, string>> = Object.freeze({
@@ -18,6 +18,7 @@ export const CLOUDFLARE_SERVICE_TARGETS: Readonly<Record<CloudflareServiceId, st
   cli: "authenticated-production-cli-audience-gateway",
   vscode: "authenticated-production-vscode-audience-gateway",
   api: "authenticated-https-api-boundary",
+  info: "public-application-information-site",
 });
 
 export interface CloudflareServiceMapping {
@@ -105,16 +106,18 @@ export function validateCloudflareTrustedIngressInventory(value: unknown):
   const tunnelName = value.tunnelName.trim();
   const tunnelNameError = validateTunnelName(tunnelName);
   if (tunnelNameError) return { ok: false, error: tunnelNameError };
-  if (!hasOnlyKeys(value.routes, CLOUDFLARE_SERVICE_IDS)) {
-    return { ok: false, error: "trusted ingress routes must contain exactly dashboard, opencode, cli, vscode, and api" };
+  // The information site is optional in older operator inventories.
+  const routeInput: Record<string, unknown> = { info: [], ...value.routes };
+  if (!hasOnlyKeys(routeInput, CLOUDFLARE_SERVICE_IDS)) {
+    return { ok: false, error: "trusted ingress routes must contain dashboard, opencode, cli, vscode, api, and optional info" };
   }
 
   const routes: Record<CloudflareServiceId, CloudflareTrustedIngressRoute[]> = {
-    dashboard: [], opencode: [], cli: [], vscode: [], api: [],
+    dashboard: [], opencode: [], cli: [], vscode: [], api: [], info: [],
   };
   const assignedOrigins = new Set<string>();
   for (const service of CLOUDFLARE_SERVICE_IDS) {
-    const candidates = value.routes[service];
+    const candidates = routeInput[service];
     if (!Array.isArray(candidates) || candidates.length > 16) {
       return { ok: false, error: `${service} trusted ingress routes must be an array of at most 16 entries` };
     }
@@ -128,7 +131,7 @@ export function validateCloudflareTrustedIngressInventory(value: unknown):
       const publicUrlError = validatePublicOrigin(publicUrl);
       if (publicUrlError) return { ok: false, error: `${service}.${publicUrlError}` };
       if (candidate.target !== CLOUDFLARE_SERVICE_TARGETS[service]) {
-        return { ok: false, error: `${service} trusted ingress route must use its authenticated production target` };
+        return { ok: false, error: `${service} trusted ingress route must use its ${service === "info" ? "public information" : "authenticated production"} target` };
       }
       if (assignedOrigins.has(publicUrl)) {
         return { ok: false, error: "trusted ingress origins must be assigned to only one audience" };
@@ -152,14 +155,15 @@ export function validateCloudflareTunnelConfig(value: unknown, inventory?: Cloud
   const tunnelName = value.tunnelName.trim();
   if (tunnelName && validateTunnelName(tunnelName)) return { ok: false, error: validateTunnelName(tunnelName)! };
   if (value.enabled && !tunnelName) return { ok: false, error: "tunnelName is required when the connector is enabled" };
-  if (!hasOnlyKeys(value.services, CLOUDFLARE_SERVICE_IDS)) {
-    return { ok: false, error: "services must contain exactly dashboard, opencode, cli, vscode, and api" };
+  const serviceInput: Record<string, unknown> = { info: { enabled: false, publicUrl: "" }, ...value.services };
+  if (!hasOnlyKeys(serviceInput, CLOUDFLARE_SERVICE_IDS)) {
+    return { ok: false, error: "services must contain dashboard, opencode, cli, vscode, api, and optional info" };
   }
 
   const services = emptyServices();
   const enabledUrls = new Set<string>();
   for (const service of CLOUDFLARE_SERVICE_IDS) {
-    const mapping = value.services[service];
+    const mapping = serviceInput[service];
     if (!isRecord(mapping) || !hasOnlyKeys(mapping, ["enabled", "publicUrl"])
       || typeof mapping.enabled !== "boolean" || typeof mapping.publicUrl !== "string") {
       return { ok: false, error: `${service} must contain only enabled and publicUrl` };
