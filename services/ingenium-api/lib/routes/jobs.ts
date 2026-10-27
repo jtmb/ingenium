@@ -1,10 +1,12 @@
-import { Router } from "express";
-import { authorization, getDb, jobs, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
+import { Router, type Request, type Response, type RequestHandler } from "express";
+import { agents, authentication, authorization, getDb, jobs, jobProviders, jobEventDeliveries, jobSuggestLlm, synthesisLlm, trustedJobEvents } from "ingenium-core";
 import { requireProject, requestAuthorizationPrincipal, requestContentActor } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { resolveSynthesisProviderSelections } from "../synthesis-provider-resolution.js";
 import { toAuthorizationPrincipal } from "../authorization-policy.js";
+import { getNativeJobProviderCatalog } from "../job-native-provider.js";
+import { AppError } from "../middleware/errors.js";
 
 /**
  * CRUD + execution routes for per-project scheduled jobs.
@@ -15,6 +17,11 @@ import { toAuthorizationPrincipal } from "../authorization-policy.js";
  * /:id to prevent Express from capturing "runs" or "suggest" as the :id param.
  */
 export const jobsRouter = Router();
+
+// Express4 does not forward rejected async handlers to its error middleware.
+function asyncJobRoute(handler: (req: Request, res: Response) => Promise<void>): RequestHandler {
+  return (req, res, next) => { void handler(req, res).catch(next); };
+}
 
 function sendUnknownTriggerEvent(res: import("express").Response): void {
   res.status(400).json({
@@ -425,6 +432,74 @@ jobsRouter.get("/:id/vault-audit", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "cursor is invalid" } });
   }
 });
+
+// Provider setup is job-scoped and never changes global model/provider settings.
+jobsRouter.get("/:id/provider", asyncJobRoute(async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const job = jobs.getJob(projectId, req.params.id!);
+  if (!job || !visibleJob(req, job)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } }); return;
+  }
+  let agentAvailable = false;
+  try { agents.getJobAgentConfig(projectId, job.agent); agentAvailable = true; } catch { /* metadata only */ }
+  let catalog: Awaited<ReturnType<typeof getNativeJobProviderCatalog>> = null;
+  try { catalog = await getNativeJobProviderCatalog(); } catch { /* connection metadata remains readable */ }
+  res.json({ data: { connection: jobProviders.getJobProvider(projectId, job.id),
+    models: catalog?.models ?? [], defaultModel: catalog?.defaultModel ?? null,
+    catalogAvailable: catalog !== null, agentAvailable } });
+}));
+
+jobsRouter.put("/:id/provider", asyncJobRoute(async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  if (req.principal?.type !== "user" || !req.principal.session) {
+    throw new AppError("A signed-in administrator is required", "FORBIDDEN", 403);
+  }
+  if (!authentication.hasRecentStepUp(req.principal.session)) {
+    throw new AppError("Recent step-up authentication is required", "STEP_UP_REQUIRED", 403);
+  }
+  if (!authorization.requireProjectPermission(toAuthorizationPrincipal(req.principal), projectId, "jobs", "admin").allowed) {
+    throw new AppError("Project administrator permission is required", "FORBIDDEN", 403);
+  }
+  const job = jobs.getJob(projectId, req.params.id!);
+  if (!job || !visibleJob(req, job)) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Job not found" } }); return;
+  }
+  const body = req.body;
+  const expectedRevision = parseExpectedRevision(body);
+  if (!body || typeof body !== "object" || Array.isArray(body) || expectedRevision === null
+    || Object.keys(body).some((key) => key !== "expected_revision" && key !== "model_id")
+    || !(body.model_id === null || typeof body.model_id === "string" && body.model_id.length > 0 && body.model_id.length <= 256)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expected_revision and a free Zen model_id (or null to revoke) are required" } }); return;
+  }
+  if (body.model_id !== null) {
+    try { agents.getJobAgentConfig(projectId, job.agent); } catch {
+      res.status(422).json({ error: { code: "JOB_AGENT_UNAVAILABLE", message: "The selected project agent is unavailable" } }); return;
+    }
+    let catalog: Awaited<ReturnType<typeof getNativeJobProviderCatalog>> = null;
+    try { catalog = await getNativeJobProviderCatalog(); } catch { /* fail closed */ }
+    if (!catalog) {
+      res.status(503).json({ error: { code: "JOB_PROVIDER_UNAVAILABLE", message: "The free Zen catalog is unavailable. Try again shortly." } }); return;
+    }
+    if (!catalog.models.some((model) => model.id === body.model_id)) {
+      res.status(422).json({ error: { code: "INVALID_JOB_PROVIDER", message: "Select an active free Zen model" } }); return;
+    }
+  }
+  try {
+    const result = jobProviders.configureAnonymousJobProvider(projectId, job.id, expectedRevision, body.model_id,
+      { type: "user", id: req.principal.id });
+    res.json({ data: result });
+  } catch (error) {
+    if (!(error instanceof jobProviders.JobProviderConfigurationError)) throw error;
+    if (error.code === "JOB_REVISION_CONFLICT") { sendRevisionConflict(res, error.currentRevision!); return; }
+    const status = error.code === "JOB_NOT_FOUND" ? 404 : error.code === "INVALID_JOB_PROVIDER" ? 422 : 409;
+    const message = error.code === "JOB_PROVIDER_BUSY" ? "Cancel or finish the active run before changing its provider."
+      : error.code === "JOB_PROVIDER_CONFLICT" ? "Provider setup conflicts with the current job authorization."
+      : error.code === "JOB_NOT_FOUND" ? "Job not found" : "Invalid job provider";
+    res.status(status).json({ error: { code: error.code, message } });
+  }
+}));
 
 // PATCH /:id — update a job
 // SECURITY: explicit field allowlist prevents mass-assignment attacks.

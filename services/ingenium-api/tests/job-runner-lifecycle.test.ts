@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { resolveJobProviderModel } from "../lib/job-native-provider.js";
 import { EventEmitter } from "node:events";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,9 +54,11 @@ const core = vi.hoisted(() => ({
     markVaultJobRunCleaned: vi.fn(),
     markVaultJobRunFailed: vi.fn(),
   },
+  agents: { getJobAgentConfig: vi.fn(() => ({ system: "Exact test agent prompt", mode: "primary", permissions: [{ action: "*", resource: "*", effect: "deny" }] })) },
   vault: {
     resolveJobVaultSecrets: vi.fn(() => null),
     resolveJobProviderRuntime: vi.fn(() => ({
+      authentication: "api" as const,
       connectionId: "provider-connection",
       providerKey: "test-provider",
       config: { name: "Test Provider", npm: "@ai-sdk/openai-compatible", models: ["test-model"] },
@@ -74,6 +77,8 @@ const core = vi.hoisted(() => ({
 }));
 
 vi.mock("ingenium-core", () => core);
+
+vi.mock("../lib/job-native-provider.js", () => ({ resolveJobProviderModel: vi.fn(async () => "test-provider/test-model") }));
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(() => {
@@ -225,6 +230,7 @@ beforeEach(() => {
   core.jobs.getJobRun.mockReturnValue({ status: "running" });
   core.vault.resolveJobVaultSecrets.mockReturnValue(null);
   core.vault.resolveJobProviderRuntime.mockImplementation(() => ({
+    authentication: "api" as const,
     connectionId: "provider-connection",
     providerKey: "test-provider",
     config: { name: "Test Provider", npm: "@ai-sdk/openai-compatible", models: ["test-model"] },
@@ -614,11 +620,12 @@ describe("job-runner process lifecycle", () => {
     try {
       await executeJobRun("45444444-4444-4444-8444-444444444444", job, job.prompt_template);
       expect(vi.mocked(spawn)).not.toHaveBeenCalled();
-      expect(resolved.secrets[0].value.every((byte: number) => byte === 0)).toBe(true);
+      expect(core.vault.resolveJobVaultSecrets).not.toHaveBeenCalled();
       expect(core.jobs.appendRunLog).toHaveBeenCalledWith(
         "project-id", "45444444-4444-4444-8444-444444444444", "stderr", "Vault job output redacted.",
       );
     } finally {
+      resolved.release();
       rmSync(root, { recursive: true, force: true });
     }
   });
@@ -1179,5 +1186,72 @@ describe("job-runner process lifecycle", () => {
 
     expect(runningProcesses.has(runId)).toBe(false);
     expect(getOwnedDetachedRunDiagnosticForTesting(runId)).toBeUndefined();
+  });
+});
+
+
+describe("native Job admission and response outcomes", () => {
+  it("projects the selected agent and anonymous model without a credential or inherited plugins", async () => {
+    const child = fakeChild(); const proc = processHarness([identity(101, "leader-start")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
+    const anonymous = { authentication: "anonymous", connectionId: "job-native:job-id",
+      providerKey: "opencode", modelId: "beam-free", config: {}, release: vi.fn() } as never;
+    core.vault.resolveJobProviderRuntime.mockReturnValueOnce(anonymous).mockReturnValueOnce(anonymous);
+    vi.mocked(resolveJobProviderModel).mockResolvedValueOnce("opencode/beam-free");
+    const runId = "10000000-0000-4000-8000-000000000991";
+    await startRun(runId, child);
+    expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).toEqual(expect.arrayContaining(["--model", "opencode/beam-free", "--format", "json"]));
+    const config = JSON.parse(readFileSync(join(runtimeRoot, runId, "config", "opencode", "opencode.jsonc"), "utf8"));
+    expect(config).toEqual({ agents: { "test-agent": core.agents.getJobAgentConfig() } });
+    expect(JSON.parse(readFileSync(join(runtimeRoot, runId, "data", "opencode", "auth.json"), "utf8"))).toEqual({});
+    (child.stdout as EventEmitter).emit("data", Buffer.from(JSON.stringify({ type: "text", part: { type: "text", text: "private-response-canary", time: { start: 1, end: 2 } } }) + "\n"));
+    proc.members.clear(); closeChild(child, 0, null);
+    expect(core.jobs.finishJobRun).toHaveBeenCalledWith("project-id", runId, "success", 0);
+    expect(JSON.stringify(core.jobs.appendRunLog.mock.calls)).not.toContain("private-response-canary");
+    expect(core.jobs.appendRunLog).toHaveBeenCalledWith("project-id", runId, "stderr", "Job completed with a verified model response. Raw output remains redacted.");
+  });
+  it.each(["empty", "provider-error"])("does not call an exit-zero run successful for %s output", async (kind) => {
+    const child = fakeChild(); const proc = processHarness([identity(101, "leader-start")]);
+    restoreRuntime = configureJobRunnerRuntimeForTesting({ processInspector: proc.inspector, createRunNonce: () => "run-nonce" });
+    const runId = "10000000-0000-4000-8000-000000000992";
+    await startRun(runId, child);
+    if (kind === "provider-error") (child.stdout as EventEmitter).emit("data", Buffer.from(JSON.stringify({ type: "error", error: { type: "provider.quota", message: "quota-private-canary" } }) + "\n"));
+    proc.members.clear(); closeChild(child, 0, null);
+    expect(core.jobs.finishJobRun).toHaveBeenCalledWith("project-id", runId, "failed", 0);
+    expect(JSON.stringify(core.jobs.appendRunLog.mock.calls)).not.toContain("quota-private-canary");
+  });
+  it.each(["revoked", "changed-binding"])("rechecks %s after the asynchronous catalog lookup", async (kind) => {
+    vi.mocked(resolveJobProviderModel).mockImplementationOnce(async () => {
+      expect(core.vault.resolveJobVaultSecrets).not.toHaveBeenCalled();
+      if (kind === "revoked") core.vault.resolveJobProviderRuntime.mockImplementationOnce(() => { throw new Error("revoked"); });
+      else core.vault.resolveJobProviderRuntime.mockReturnValueOnce({ authentication: "anonymous", connectionId: "changed",
+        providerKey: "opencode", modelId: "beam-free", config: {}, release: vi.fn() } as never);
+      return "test-provider/test-model";
+    });
+    const runId = "10000000-0000-4000-8000-000000000994";
+    await startRun(runId, fakeChild());
+    expect(core.vault.resolveJobProviderRuntime).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+    expect(core.vault.resolveJobVaultSecrets).not.toHaveBeenCalled();
+    expect(core.jobs.finishJobRun).toHaveBeenCalledWith("project-id", runId, "failed", -1);
+    expect(existsSync(join(runtimeRoot, runId))).toBe(false);
+  });
+  it("preserves cancellation completed during catalog lookup", async () => {
+    vi.mocked(resolveJobProviderModel).mockImplementationOnce(async () => {
+      core.jobs.getJobRun.mockReturnValueOnce({ status: "cancelled" });
+      core.vault.resolveJobProviderRuntime.mockImplementationOnce(() => { throw new Error("run no longer active"); });
+      return "test-provider/test-model";
+    });
+    await startRun("10000000-0000-4000-8000-000000000995", fakeChild());
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+    expect(core.jobs.finishJobRun).not.toHaveBeenCalled();
+  });
+  it("does not spawn when current provider qualification fails", async () => {
+    vi.mocked(resolveJobProviderModel).mockRejectedValueOnce(new Error("provider unavailable"));
+    const child = fakeChild(); const runId = "10000000-0000-4000-8000-000000000993";
+    await startRun(runId, child);
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+    expect(core.jobs.finishJobRun).toHaveBeenCalledWith("project-id", runId, "failed", -1);
+    expect(existsSync(join(runtimeRoot, runId))).toBe(false);
   });
 });

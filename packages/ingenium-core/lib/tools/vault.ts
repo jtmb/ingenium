@@ -12,7 +12,8 @@ import {
   wrapKey,
 } from "./vault-crypto.js";
 import { migrateLegacyOAuthClientSecretsForActiveGlobalProject } from "./protected-settings.js";
-import { insertJobVaultRuntimeAudit } from "./jobs.js";
+import { insertJobVaultRuntimeAudit, isJobRunAuthorizationCurrent } from "./jobs.js";
+import { JOB_NATIVE_PROVIDER_ID, nativeJobConnectionId, parseAnonymousJobProvider } from "./job-providers.js";
 import { insertResourceAuditEvent } from "./authorization.js";
 
 const VERIFY_DATA = Buffer.from("ingenium-vault-v1");
@@ -51,13 +52,13 @@ export interface VaultJobSecretsResolution {
   release(): void;
 }
 
-export interface JobProviderRuntimeResolution {
+export type JobProviderRuntimeResolution = {
   readonly connectionId: string;
   readonly providerKey: string;
   readonly config: Readonly<Record<string, unknown>>;
-  readonly credential: Buffer;
   release(): void;
-}
+} & ({ readonly authentication: "api"; readonly credential: Buffer }
+  | { readonly authentication: "anonymous"; readonly modelId: string });
 
 type VaultJobSecretBufferObserver = (kind: "dek" | "plaintext", buffer: Buffer) => void;
 let vaultJobSecretBufferObserver: VaultJobSecretBufferObserver | undefined;
@@ -595,55 +596,53 @@ export function resolveJobVaultSecrets(
   }
 }
 
-/** Resolve the single provider connection explicitly granted to this run's service principal. */
-export function resolveJobProviderRuntime(
-  projectId: string,
-  jobId: string,
-  runId: string,
-): JobProviderRuntimeResolution {
-  const key = masterKey;
-  if (!key) unavailableProviderRuntime();
+/** Resolve exactly one explicitly service-granted provider for this current run. */
+export function resolveJobProviderRuntime(projectId: string, jobId: string, runId: string): JobProviderRuntimeResolution {
+  if (!isJobRunAuthorizationCurrent(projectId, runId)) unavailableProviderRuntime();
   const now = new Date().toISOString();
-  const rows = getDb(dbPath()).prepare(
-    `SELECT connection.id, connection.provider_key, connection.config_json,
-            item.encrypted, item.wrapped_kek
-     FROM job_runs run
-     JOIN jobs job ON job.project_id = run.project_id AND job.id = run.job_id
-     JOIN resource_grants grant_row ON grant_row.organization_id = run.organization_id
-       AND grant_row.resource_type = 'provider_connection'
-       AND grant_row.grantee_kind = 'service' AND grant_row.grantee_id = run.effective_service_principal_id
-       AND grant_row.revoked_at IS NULL AND (grant_row.expires_at IS NULL OR grant_row.expires_at > ?)
-       AND EXISTS (SELECT 1 FROM json_each(grant_row.permissions_json) permission
-                   WHERE permission.value IN ('*', 'read', 'execute', 'admin'))
-      JOIN provider_connections connection ON connection.id = grant_row.resource_id AND connection.enabled = 1
-        AND connection.owner_kind IN ('organization', 'installation')
-      JOIN vault_items item ON item.id = connection.credential_item_id
-        AND item.access_policy <> ?
-      JOIN projects credential_project ON credential_project.id = item.project_id AND credential_project.archived_at IS NULL
-      WHERE run.id = ? AND run.project_id = ? AND run.job_id = ?
-        AND run.organization_id = job.organization_id
-        AND run.effective_service_principal_id = job.service_principal_id
-        AND ((connection.owner_kind = 'organization' AND connection.organization_id = run.organization_id
-              AND item.organization_id = run.organization_id AND item.owner_kind = 'organization')
-          OR (connection.owner_kind = 'installation' AND connection.organization_id IS NULL
-              AND credential_project.is_global = 1 AND item.owner_kind = 'organization'))
-      ORDER BY connection.id LIMIT 2`,
-  ).all(now, DELETED_POLICY, runId, projectId, jobId) as Array<{
-    id: string;
-    provider_key: string;
-    config_json: string;
-    encrypted: Buffer;
-    wrapped_kek: Buffer;
+  const rows = getDb(dbPath()).prepare(`
+    SELECT connection.id, connection.provider_key, connection.provider_type, connection.config_json,
+           connection.credential_item_id, item.encrypted, item.wrapped_kek
+    FROM job_runs run
+    JOIN jobs job ON job.project_id = run.project_id AND job.id = run.job_id
+    JOIN resource_grants grant_row ON grant_row.organization_id = run.organization_id
+      AND grant_row.resource_type = 'provider_connection'
+      AND grant_row.grantee_kind = 'service' AND grant_row.grantee_id = run.effective_service_principal_id
+      AND grant_row.revoked_at IS NULL AND (grant_row.expires_at IS NULL OR grant_row.expires_at > ?)
+      AND EXISTS (SELECT 1 FROM json_each(grant_row.permissions_json) permission
+                  WHERE permission.value IN ('*', 'read', 'execute', 'admin'))
+    JOIN provider_connections connection ON connection.id = grant_row.resource_id AND connection.enabled = 1
+      AND connection.owner_kind IN ('organization', 'installation')
+    LEFT JOIN vault_items item ON item.id = connection.credential_item_id AND item.access_policy <> ?
+    LEFT JOIN projects credential_project ON credential_project.id = item.project_id AND credential_project.archived_at IS NULL
+    WHERE run.id = ? AND run.project_id = ? AND run.job_id = ? AND run.status = 'running'
+      AND job.enabled = 1 AND job.deleted_at IS NULL
+      AND run.organization_id = job.organization_id
+      AND run.effective_service_principal_id = job.service_principal_id
+      AND ((connection.owner_kind = 'organization' AND connection.organization_id = run.organization_id
+            AND ((connection.provider_type = 'native' AND connection.id = ?)
+              OR (credential_project.id IS NOT NULL AND item.organization_id = run.organization_id AND item.owner_kind = 'organization')))
+        OR (connection.owner_kind = 'installation' AND connection.organization_id IS NULL
+            AND credential_project.is_global = 1 AND item.owner_kind = 'organization'))
+    ORDER BY connection.id LIMIT 2
+  `).all(now, DELETED_POLICY, runId, projectId, jobId, nativeJobConnectionId(jobId)) as Array<{
+    id: string; provider_key: string; provider_type: string; config_json: string;
+    credential_item_id: string | null; encrypted: Buffer | null; wrapped_kek: Buffer | null;
   }>;
   if (rows.length !== 1) unavailableProviderRuntime();
   const row = rows[0]!;
   let config: unknown;
-  try {
-    config = JSON.parse(row.config_json);
-  } catch {
-    unavailableProviderRuntime();
-  }
+  try { config = JSON.parse(row.config_json); } catch { unavailableProviderRuntime(); }
   if (!config || typeof config !== "object" || Array.isArray(config)) unavailableProviderRuntime();
+  if (row.provider_type === "native") {
+    const native = parseAnonymousJobProvider(config, jobId);
+    if (row.id !== nativeJobConnectionId(jobId) || row.provider_key !== JOB_NATIVE_PROVIDER_ID
+      || row.credential_item_id !== null || !native) unavailableProviderRuntime();
+    return { authentication: "anonymous", connectionId: row.id, providerKey: JOB_NATIVE_PROVIDER_ID,
+      modelId: native.modelId, config: native, release: () => undefined };
+  }
+  const key = masterKey;
+  if (row.provider_type !== "managed" || !key || !row.encrypted || !row.wrapped_kek) unavailableProviderRuntime();
   let dek: Buffer | undefined;
   let credential: Buffer | undefined;
   try {
@@ -654,17 +653,9 @@ export function resolveJobProviderRuntime(
   }
   const value = credential!;
   let released = false;
-  return {
-    connectionId: row.id,
-    providerKey: row.provider_key,
-    config: config as Record<string, unknown>,
-    credential: value,
-    release: () => {
-      if (released) return;
-      released = true;
-      zeroJobSecretBuffer("plaintext", value);
-    },
-  };
+  return { authentication: "api", connectionId: row.id, providerKey: row.provider_key,
+    config: config as Record<string, unknown>, credential: value,
+    release: () => { if (!released) { released = true; zeroJobSecretBuffer("plaintext", value); } } };
 }
 
 /** Encrypt and store a vault item with a unique data encryption key. */

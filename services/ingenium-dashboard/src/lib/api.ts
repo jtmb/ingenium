@@ -1048,6 +1048,14 @@ export type Job = {
   updated_at: string;
 };
 
+export type JobProviderState = {
+  connection: { kind: "anonymous" | "managed"; providerId: string; modelId?: string; authorized: boolean } | null;
+  models: Array<{ id: string; label: string }>;
+  defaultModel: string | null;
+  catalogAvailable: boolean;
+  agentAvailable: boolean;
+};
+
 export type JobVaultReferenceStatus = "authorized" | "version_stale" | "unavailable";
 
 /** Safe job authorization projection: no item names, values, or current versions. */
@@ -2844,6 +2852,14 @@ export const api = {
       }),
   },
   jobs: {
+    provider: (id: string, project = DEFAULT_PROJECT, signal?: AbortSignal) =>
+      request<{ data: JobProviderState }>(`/jobs/${encodeURIComponent(id)}/provider?project=${encodeURIComponent(project)}`, { signal }),
+    configureProvider: async (id: string, modelId: string | null, expectedRevision: number, project = DEFAULT_PROJECT) => {
+      const response = await request<{ data: { job: unknown; connection: JobProviderState["connection"] } }>(`/jobs/${encodeURIComponent(id)}/provider?project=${encodeURIComponent(project)}`, {
+        method: "PUT", body: JSON.stringify({ model_id: modelId, expected_revision: expectedRevision }),
+      });
+      return { data: { job: normalizeJob(response.data.job), connection: response.data.connection } };
+    },
     list: (project: string) =>
       normalizedJobsRequest(`/jobs?${jobsQuery(project)}`, (value) => normalizeJobCollection(value, normalizeJob)),
     get: (jobId: string, project: string) =>

@@ -46,6 +46,7 @@ export type {
   OpenCodeMessagesFailure,
 } from "./tools/extraction.js";
 export * as jobs from "./tools/jobs.js";
+export * as jobProviders from "./tools/job-providers.js";
 export * as jobEventDeliveries from "./tools/job-event-deliveries.js";
 export * as jobSuggestLlm from "./tools/job-suggest-llm.js";
 export * as trustedJobEvents from "./tools/trusted-job-events.js";

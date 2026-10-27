@@ -105,6 +105,9 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
   }
   if (req.path.startsWith("/api/v1/synthesis/cross-project")) return { action: "synthesis.execute", resource: "synthesis", permission: "execute", target: "installation", sensitive: true };
+  if (req.method === "PUT" && /^\/api\/v1\/jobs\/[^/]+\/provider\/?$/i.test(req.path)) {
+    return { action: "jobs.provider.configure", resource: "jobs", permission: "admin", target: "project", sensitive: true, browserSessionOnly: true, stepUp: true };
+  }
   if (/^\/api\/v1\/jobs\/runs\/[^/]+\/logs$/.test(req.path)) {
     return { action: "jobs.raw-logs.read", resource: "jobs", permission: "read", target: "installation", sensitive: true };
   }

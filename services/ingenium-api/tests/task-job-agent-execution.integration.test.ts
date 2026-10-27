@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { getDb, resetDbForTest, vault } from "ingenium-core";
+import { agents, getDb, resetDbForTest, vault } from "ingenium-core";
 import { configureJobRunnerRuntimeForTesting, runningProcesses } from "../lib/job-runner.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { projectsRouter } from "../lib/routes/projects.js";
@@ -107,7 +107,7 @@ describe("caller-orchestrated task job execution", () => {
       mkdirSync(fakeBin, { recursive: true });
       writeFileSync(fakeOpenCode, `#!/bin/sh
 set -eu
-if [ "$#" -ne 6 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ] || [ "$6" != "--standalone" ]; then
+if [ "$#" -ne 10 ] || [ "$1" != "run" ] || [ "$2" != "${prompt}" ] || [ "$3" != "--agent" ] || [ "$4" != "fixture-agent" ] || [ "$5" != "--auto" ] || [ "$6" != "--standalone" ] || [ "$7" != "--format" ] || [ "$8" != "json" ] || [ "$9" != "--model" ] || [ "\${10}" != "fixture-provider/fixture-model" ]; then
   printf '%s\\n' 'fixture-argv-mismatch' >&2
   exit 64
 fi
@@ -122,7 +122,7 @@ case "$*" in
     ;;
 esac
 sleep 1
-printf '%s\\n' '${marker}'
+printf '%s\\n' '{"type":"text","part":{"type":"text","text":"${marker}","time":{"end":1}}}'
 `);
       chmodSync(fakeOpenCode, 0o700);
       expect(fixturePath.split(delimiter)[0]).toBe(fakeBin);
@@ -148,6 +148,7 @@ printf '%s\\n' '${marker}'
       expect(projectResponse.status).toBe(201);
       const project = (await projectResponse.json()).data as { id: string; organization_id: string };
       projectCreated = true;
+      agents.createAgent(project.id, "fixture-agent", "Response only", "Fixture", "execution", "primary");
 
       const taskResponse = await fetch(projectUrl(baseUrl, "/api/v1/tasks"), json({
         title: "Execute the referenced fixture job",
@@ -245,7 +246,11 @@ printf '%s\\n' '${marker}'
       expect(logsResponse.status).toBe(200);
       const logsText = await logsResponse.text();
       const logs = JSON.parse(logsText).data as Array<{ stream: string; line: string }>;
-      expect(logs).toEqual([expect.objectContaining({ stream: "stderr", line: "Vault job output redacted." })]);
+      expect(logs).toEqual([
+        expect.objectContaining({ stream: "stderr", line: "Vault job output redacted." }),
+        expect.objectContaining({ stream: "stderr", line: "Job completed with a verified model response. Raw output remains redacted." }),
+      ]);
+      expect(logsText).not.toContain(marker);
 
       for (const text of [triggerText, logsText]) {
         expect(text).not.toContain(taskBodyCanary);

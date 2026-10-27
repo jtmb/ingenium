@@ -19,7 +19,10 @@ import {
   writeSync,
 } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
-import { jobEventDeliveries, jobs, logger, vault } from "ingenium-core";
+import { agents, jobEventDeliveries, jobs, logger, vault } from "ingenium-core";
+import { resolveJobProviderModel } from "./job-native-provider.js";
+import { JobResponseVerification } from "./job-response-verification.js";
+import { inspectJobRuntimeTree, removeJobRuntimeTree } from "./job-runtime-artifacts.js";
 
 let activeRunCount = 0;
 
@@ -559,6 +562,7 @@ function createVaultOpenCodeRuntime(
   runDir: string,
   owner: number,
   provider: vault.JobProviderRuntimeResolution,
+  agent: { name: string; config: ReturnType<typeof agents.getJobAgentConfig> },
 ): VaultOpenCodeRuntime {
   const runtime: VaultOpenCodeRuntime = {
     home: join(runDir, "home"),
@@ -583,10 +587,14 @@ function createVaultOpenCodeRuntime(
         : {}),
       models,
     };
-    isolatedConfig = Buffer.from(`${JSON.stringify({ provider: { [provider.providerKey]: providerConfig } })}\n`, "utf8");
-    authSource = Buffer.from(JSON.stringify({
+    isolatedConfig = Buffer.from(JSON.stringify({
+      ...(provider.authentication === "api" ? { provider: { [provider.providerKey]: providerConfig } } : {}),
+      agents: { [agent.name]: agent.config },
+    }) + "\n", "utf8");
+    authSource = Buffer.from(JSON.stringify(provider.authentication === "api" ? {
       [provider.providerKey]: { type: "api", key: provider.credential.toString("utf8") },
-    }), "utf8");
+    } : {}), "utf8");
+    if (isolatedConfig.length > VAULT_CONFIG_MAX_BYTES || authSource.length > VAULT_AUTH_MAX_BYTES) throw new VaultSecretStorageError();
     for (const directory of VAULT_RUNTIME_DIRECTORIES) createPrivateDirectory(join(runDir, directory), owner);
     const configDirectory = join(runtime.config, "opencode");
     const dataDirectory = join(runtime.data, "opencode");
@@ -647,37 +655,6 @@ function isExpectedPrivateFile(path: string, owner: number, minBytes: number, ma
   }
 }
 
-/** Validate only the known pre-spawn XDG subtree; missing materialization is safe. */
-function inspectVaultRuntimeDirectory(runDir: string, name: string, owner: number): boolean | null {
-  const directory = vaultRunChild(runDir, name);
-  if (!isExpectedPrivateDirectory(directory, owner)) return null;
-  let entries: string[];
-  try {
-    entries = readdirSync(directory);
-  } catch {
-    return null;
-  }
-  if (entries.length !== new Set(entries).size) return null;
-
-  if (name !== "config" && name !== "data") return entries.length === 0;
-  if (entries.some((entry) => entry !== "opencode")) return null;
-  if (entries.length === 0) return false;
-
-  const opencodeDirectory = vaultRunChild(directory, "opencode");
-  if (!isExpectedPrivateDirectory(opencodeDirectory, owner)) return null;
-  let nestedEntries: string[];
-  try {
-    nestedEntries = readdirSync(opencodeDirectory);
-  } catch {
-    return null;
-  }
-  if (nestedEntries.some((entry) => entry !== (name === "config" ? "opencode.jsonc" : "auth.json"))) return null;
-  if (nestedEntries.length === 0) return false;
-  const fileName = name === "config" ? "opencode.jsonc" : "auth.json";
-  const maxBytes = name === "config" ? VAULT_CONFIG_MAX_BYTES : VAULT_AUTH_MAX_BYTES;
-  return isExpectedPrivateFile(vaultRunChild(opencodeDirectory, fileName), owner, 1, maxBytes);
-}
-
 function inspectVaultSecretDirectory(
   root: string,
   runId: string,
@@ -706,15 +683,9 @@ function inspectVaultSecretDirectory(
       itemIds.push(entry.name);
     }
     if (itemIds.length !== allowedItemIds.size) complete = false;
-    for (const directoryName of VAULT_RUNTIME_DIRECTORIES) {
-      if (!entries.some((entry) => entry.name === directoryName)) {
-        complete = false;
-        continue;
-      }
-      const runtimeComplete = inspectVaultRuntimeDirectory(runDir, directoryName, owner);
-      if (runtimeComplete === null) return { state: "unsafe", itemIds: [] };
-      complete &&= runtimeComplete;
-    }
+    const runtime = inspectJobRuntimeTree(runDir, owner);
+    if (!runtime) return { state: "unsafe", itemIds: [] };
+    complete &&= runtime.complete;
     return { state: complete ? "complete" : "safe_partial", itemIds };
   } catch (error) {
     if (isProcfsRace(error)) return { state: "absent", itemIds: [] };
@@ -775,18 +746,7 @@ function removeSafeVaultSecretDirectory(
     for (const itemId of confirmed.itemIds) {
       if (!removeExpectedPrivateFile(vaultRunChild(runDir, itemId), owner, 0, VAULT_SECRET_MAX_BYTES)) return false;
     }
-    for (const [directoryName, fileName, maxBytes] of [
-      ["config", "opencode.jsonc", VAULT_CONFIG_MAX_BYTES],
-      ["data", "auth.json", VAULT_AUTH_MAX_BYTES],
-    ] as const) {
-      const runtimeDirectory = vaultRunChild(runDir, directoryName);
-      const opencodeDirectory = vaultRunChild(runtimeDirectory, "opencode");
-      if (!removeExpectedPrivateFile(vaultRunChild(opencodeDirectory, fileName), owner, 1, maxBytes)) return false;
-      if (!removeExpectedPrivateDirectory(opencodeDirectory, owner)) return false;
-    }
-    for (const directoryName of VAULT_RUNTIME_DIRECTORIES) {
-      if (!removeExpectedPrivateDirectory(vaultRunChild(runDir, directoryName), owner)) return false;
-    }
+    if (!removeJobRuntimeTree(runDir, owner, verifyBeforeDelete)) return false;
     return removeExpectedPrivateDirectory(runDir, owner);
   } catch {
     return false;
@@ -802,6 +762,7 @@ function createVaultSecretRunFiles(
   runId: string,
   resolution: vault.VaultJobSecretsResolution,
   provider: vault.JobProviderRuntimeResolution,
+  agent: { name: string; config: ReturnType<typeof agents.getJobAgentConfig> },
 ): VaultSecretRunFiles {
   let root: string | undefined;
   let runDir: string | undefined;
@@ -820,7 +781,7 @@ function createVaultSecretRunFiles(
       throw new VaultSecretStorageError();
     }
 
-    const runtime = createVaultOpenCodeRuntime(runDir, owner, provider);
+    const runtime = createVaultOpenCodeRuntime(runDir, owner, provider, agent);
 
     for (const secret of resolution.secrets) {
       if (!RUN_UUID_PATTERN.test(secret.itemId) || itemIds.includes(secret.itemId)
@@ -1602,11 +1563,23 @@ export async function executeJobRun(
   let providerResolution: vault.JobProviderRuntimeResolution | undefined;
   const runNonce = jobRunnerRuntime.createRunNonce();
   const runNonceHash = hashNonce(runNonce);
+  let explicitModel: string | undefined;
   try {
     // Authorization, freshness, version matching, decryption, and expiry are
     // resolved in core immediately before this process can be spawned.
-    vaultResolution = vault.resolveJobVaultSecrets(job.project_id, job.id, runId);
     providerResolution = vault.resolveJobProviderRuntime(job.project_id, job.id, runId);
+    const providerBinding = JSON.stringify([providerResolution.connectionId, providerResolution.providerKey,
+      providerResolution.authentication, providerResolution.config]);
+    explicitModel = await resolveJobProviderModel(providerResolution);
+    providerResolution.release();
+    providerResolution = undefined;
+    // Catalog lookup yields to other requests: recheck grants, job/run revision and
+    // provider binding afterwards, before materializing any runtime credentials.
+    providerResolution = vault.resolveJobProviderRuntime(job.project_id, job.id, runId);
+    if (providerBinding !== JSON.stringify([providerResolution.connectionId, providerResolution.providerKey,
+      providerResolution.authentication, providerResolution.config])) throw new VaultSecretStorageError();
+    vaultResolution = vault.resolveJobVaultSecrets(job.project_id, job.id, runId);
+    const agent = { name: job.agent, config: agents.getJobAgentConfig(job.project_id, job.agent) };
     const runtimeResolution = vaultResolution ?? {
       secrets: [],
       deadlineAt: Date.now() + timeoutMinutes * 60_000,
@@ -1631,7 +1604,7 @@ export async function executeJobRun(
       throw new VaultSecretStorageError();
     }
     vaultRunFiles = createVaultSecretRunFiles(
-      job.project_id, runId, runtimeResolution, providerResolution,
+      job.project_id, runId, runtimeResolution, providerResolution, agent,
     );
     providerResolution = undefined;
     if (runtimeResolution.deadlineAt <= Date.now()) {
@@ -1642,7 +1615,8 @@ export async function executeJobRun(
     providerResolution?.release();
     vaultResolution?.release();
     jobs.appendRunLog(job.project_id, runId, "stderr", VAULT_OUTPUT_REDACTION);
-    if (eventContext) {
+    const stillRunning = jobs.getJobRun(job.project_id, runId)?.status === "running";
+    if (stillRunning && eventContext) {
       jobEventDeliveries.completeJobEventDelivery(job.project_id, {
         ...eventContext,
         runId,
@@ -1651,7 +1625,7 @@ export async function executeJobRun(
         errorCode: VAULT_UNAVAILABLE_CODE,
         errorMessage: VAULT_UNAVAILABLE_MESSAGE,
       });
-    } else {
+    } else if (stillRunning) {
       jobs.finishJobRun(job.project_id, runId, "failed", -1);
     }
     activeRunCount = Math.max(0, activeRunCount - 1);
@@ -1663,7 +1637,8 @@ export async function executeJobRun(
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
-  const args = ["run", prompt, "--agent", job.agent, "--auto", "--standalone"];
+  const args = ["run", prompt, "--agent", job.agent, "--auto", "--standalone", "--format", "json"];
+  if (explicitModel) args.push("--model", explicitModel);
 
   // Prompts are user-authored and can contain credentials. Do not log the CLI
   // arguments or rendered template, even at debug level.
@@ -1671,8 +1646,8 @@ export async function executeJobRun(
 
   // v2 resolves the workspace from the process cwd; the vault runtime still
   // supplies the private HOME/XDG directories through the environment.
-  // OPENCODE_DISABLE_PROJECT_CONFIG is deliberately not set: job agents are
-  // project-scoped, so the workspace project config is the agent authority.
+  // The selected project agent is explicitly projected into the private config;
+  // it does not depend on the shared workspace parent discovering that profile.
   let proc: ChildProcess;
   try {
     proc = spawn("opencode", args, {
@@ -1843,7 +1818,9 @@ export async function executeJobRun(
     }
   }, timeoutMs);
 
-  proc.stdout?.on("data", () => {
+  const responseVerification = new JobResponseVerification();
+  proc.stdout?.on("data", (chunk: Buffer | string) => {
+    responseVerification.accept(chunk);
     recordVaultRedaction();
   });
 
@@ -1854,16 +1831,21 @@ export async function executeJobRun(
   proc.on("close", (code) => {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     recordVaultRedaction();
+    const response = responseVerification.finish();
 
     const wasTerminated = terminationCompletions.has(runId);
     if (!timedOut && !wasTerminated && finalize()) {
       const exitCode = code ?? -1;
-      const status = exitCode === 0 ? "success" : "failed";
+      const verified = exitCode === 0 && response.verified;
+      const status = verified ? "success" : "failed";
+      jobs.appendRunLog(job.project_id, runId, "stderr", verified
+        ? "Job completed with a verified model response. Raw output remains redacted."
+        : "Job did not complete with a verified model response. Raw output remains redacted.");
       logger.info("job-runner", `Run ${runId} finished: status=${status}, exitCode=${exitCode}`);
       if (eventContext) {
-        completeEvent(exitCode === 0 ? "success" : "failed", exitCode,
-          exitCode === 0 ? undefined : "nonzero_exit",
-          exitCode === 0 ? undefined : "Job process exited with a non-zero status.");
+        completeEvent(verified ? "success" : "failed", exitCode,
+          verified ? undefined : exitCode === 0 ? "provider_response_failed" : "nonzero_exit",
+          verified ? undefined : "Job did not complete with a verified model response.");
       } else {
         jobs.finishJobRun(job.project_id, runId, status, exitCode);
       }

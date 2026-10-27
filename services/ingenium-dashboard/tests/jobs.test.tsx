@@ -25,6 +25,8 @@ const { listJobs, listRuns, updateJob, listAgents, getSetting, runJob, cancelRun
 vi.mock("../src/lib/api", () => ({
   api: {
     jobs: {
+      provider: vi.fn(async () => ({ data: { connection: null, models: [], defaultModel: null, catalogAvailable: false, agentAvailable: true } })),
+      configureProvider: vi.fn(),
       list: listJobs,
       runs: listRuns,
       update: updateJob,

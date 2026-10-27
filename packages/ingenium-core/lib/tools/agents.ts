@@ -816,6 +816,22 @@ function prepareReservedBrokerRuntimeConfig(projectId: string): ReservedBrokerCo
   return { content, storedId: stored?.id };
 }
 
+/** A read-only native V2 projection for one enabled project agent in an isolated Job. */
+export function getJobAgentConfig(projectId: string, name: string) {
+  assertSafeAgentName(name);
+  if (isReservedAgentName(name)) throw new Error("Reserved agent cannot execute Jobs");
+  const agent = getAgent(projectId, name);
+  if (!agent || !agent.enabled) throw new Error("Job agent is unavailable");
+  const metadata = canonicalMetadataForDisk(name, parseSerializedAgentObject(agent.metadata));
+  return {
+    description: agent.description,
+    mode: agent.mode,
+    system: agent.content,
+    hidden: metadata.hidden === true,
+    permissions: permissionRules(defaultPermissionsForAgent(name, parseSerializedAgentObject(agent.permissions))),
+  };
+}
+
 /**
  * Write an agent definition to `.opencode/agents/<category>/<name>.md` as a YAML-frontmatter markdown file.
  *
