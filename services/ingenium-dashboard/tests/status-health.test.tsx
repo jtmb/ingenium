@@ -5,6 +5,8 @@ import HealthStrip from "../src/app/components/HealthStrip";
 import type { HealthData } from "../src/lib/api";
 
 const fetchMock = vi.fn();
+const projectContext = vi.hoisted(() => ({ project: "fixture-project" }));
+vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => projectContext.project }));
 
 vi.mock("../src/app/status/ServiceOverlay", () => ({
   default: () => null,
@@ -44,6 +46,7 @@ function statusResponse({
 }
 
 beforeEach(() => {
+  projectContext.project = "fixture-project";
   fetchMock.mockReset();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -208,5 +211,31 @@ describe("HealthStrip optional services", () => {
 
     expect(screen.getByText("All systems operational")).toBeTruthy();
     expect(screen.queryByText(/service.*degraded/)).toBeNull();
+  });
+});
+
+
+describe("Status selected project requests", () => {
+  it("includes the selected project when fetching mixed-scope service status", async () => {
+    fetchMock.mockResolvedValue(statusResponse());
+    render(<StatusPage />);
+    await screen.findByText("All healthy");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/services/status?project=fixture-project");
+    expect(screen.getByText(/synthesis and task activity for fixture-project/)).toBeTruthy();
+  });
+
+  it("aborts the old project request and ignores its late response after project selection changes", async () => {
+    let oldResponse!: (value: ReturnType<typeof statusResponse>) => void;
+    fetchMock.mockReturnValueOnce(new Promise((resolve) => { oldResponse = resolve; }));
+    const view = render(<StatusPage />);
+    const oldSignal = fetchMock.mock.calls[0]?.[1].signal as AbortSignal;
+    projectContext.project = "new-project";
+    fetchMock.mockResolvedValueOnce(statusResponse({ emailDetail: "Current installation status" }));
+    view.rerender(<StatusPage />);
+    await screen.findByText("Current installation status");
+    expect(oldSignal.aborted).toBe(true);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/services/status?project=new-project");
+    await act(async () => oldResponse(statusResponse({ emailDetail: "Stale old project data" })));
+    expect(screen.queryByText("Stale old project data")).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
-import { pipelineEvents, settings, synthesis } from "ingenium-core";
+import { projects, synthesis } from "ingenium-core";
+import { getSynthesisInterval } from "./synthesis-cadence.js";
 
 export type ApplicationState =
   | "healthy"
@@ -10,7 +11,10 @@ export type ApplicationState =
   | "error"
   | "unknown";
 
+export type ApplicationScope = { kind: "installation" } | { kind: "project"; projectId: string; projectName: string };
+
 export interface ApplicationHealth {
+  scope?: ApplicationScope;
   name: string;
   state: ApplicationState;
   description: string;
@@ -110,71 +114,46 @@ export async function getEmailClientStatus(): Promise<ApplicationHealth> {
   }
 }
 
-/** Synthesis-engine health based on configured cadence and last completed run. */
-export function getSynthesisStatus(): ApplicationHealth {
+export interface SynthesisHealthSnapshot {
+  application: ApplicationHealth;
+  intervalMs: number;
+  /** Compatibility alias: this timestamp records an observation being processed. */
+  lastRunAt: string | null;
+  lastProcessedAt: string | null;
+  /** Processing timestamps do not establish the scheduler's next check time. */
+  nextEstimate: null;
+  stats: { totalObservations: number; pendingCount: number; processedCount: number; traitCount: number } | null;
+}
+
+/** Read activity once, using a real project ID and the scheduler's configured cadence. */
+export function getSynthesisHealthSnapshot(projectId?: string): SynthesisHealthSnapshot {
+  const intervalMs = getSynthesisInterval();
+  const base = { intervalMs, lastRunAt: null, lastProcessedAt: null, nextEstimate: null, stats: null };
   try {
-    const intervalMs = parseInt(
-      settings.getSetting("global-default", "synthesis_interval_ms") ?? "900000",
-      10,
-    );
-    if (intervalMs === 0) {
-      return {
-        name: "synthesis-engine",
-        state: "disabled",
-        description: "Synthesis pipeline",
-        detail: "Interval set to 0 (disabled)",
-        required: false,
-      };
-    }
-
-    let lastRun: number | null = null;
-    try {
-      const status = synthesis.getSynthesisStatus("global-default");
-      lastRun = status.last_synthesis_at ? new Date(status.last_synthesis_at).getTime() : null;
-    } catch {
-      try {
-        const events = pipelineEvents.getEvents("global-default", {
-          type: "synthesis_completed",
-          limit: 1,
-        });
-        if (events.length > 0) lastRun = new Date(events[0]!.created_at).getTime();
-      } catch {
-        // No status source is available; the pipeline has not yet run.
-      }
-    }
-
-    if (!lastRun) {
-      return {
-        name: "synthesis-engine",
-        state: "healthy",
-        description: "Synthesis pipeline",
-        detail: `No runs yet — checks every ${Math.round(intervalMs / 60000)}m`,
-        required: true,
-      };
-    }
-
-    const age = Date.now() - lastRun;
-    const detail = `Last run: ${Math.round(age / 60000)}m ago (interval: ${Math.round(intervalMs / 60000)}m)`;
-    if (age <= intervalMs * 1.5) {
-      return { name: "synthesis-engine", state: "healthy", description: "Synthesis pipeline", detail, required: true };
-    }
-    if (age <= intervalMs * 3) {
-      return { name: "synthesis-engine", state: "degraded", description: "Synthesis pipeline", detail, required: true };
-    }
-    return {
-      name: "synthesis-engine",
-      state: "error",
-      description: "Synthesis pipeline",
-      detail: `Last run: ${Math.round(age / 60000)}m ago — may be stuck`,
-      required: true,
-    };
-  } catch (err) {
-    return {
-      name: "synthesis-engine",
-      state: "error",
-      description: "Synthesis pipeline",
-      detail: (err as Error).message,
-      required: true,
-    };
+    const id = projectId ?? projects.getGlobalProject()?.id;
+    if (!id) return { ...base, application: { name: "synthesis-engine", state: "idle",
+      description: "Synthesis pipeline", detail: "No global project configured", required: false } };
+    const status = synthesis.getSynthesisStatus(id);
+    const lastProcessedAt = status.last_synthesis_at;
+    const snapshot = { intervalMs, lastRunAt: lastProcessedAt, lastProcessedAt, nextEstimate: null,
+      stats: { totalObservations: status.total_observations, pendingCount: status.pending_count,
+        processedCount: status.processed_count, traitCount: status.trait_count } };
+    const common = { name: "synthesis-engine", description: "Synthesis pipeline" };
+    if (intervalMs === 0) return { ...snapshot, application: { ...common, state: "disabled",
+      detail: "Automatic checks disabled", required: false } };
+    const cadence = `checks every ${Math.round(intervalMs / 60000)}m`;
+    if (status.pending_count === 0) return { ...snapshot, application: { ...common, state: "idle",
+      detail: `No pending observations — ${cadence}`, required: false } };
+    // Observation processing can be old while a scheduler is healthy (for example,
+    // newly queued work after an idle period). It is not a scheduler heartbeat.
+    return { ...snapshot, application: { ...common, state: "unknown",
+      detail: `${status.pending_count} pending observations — ${cadence}; scheduler heartbeat unavailable`, required: false } };
+  } catch {
+    return { ...base, application: { name: "synthesis-engine", state: "error",
+      description: "Synthesis pipeline", detail: "Synthesis activity is unavailable", required: true } };
   }
+}
+
+export function getSynthesisStatus(projectId?: string): ApplicationHealth {
+  return getSynthesisHealthSnapshot(projectId).application;
 }

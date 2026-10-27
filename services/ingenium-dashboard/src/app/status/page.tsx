@@ -4,6 +4,7 @@ import ServiceOverlay from "./ServiceOverlay";
 import { badgeTones } from "../../lib/badgeTones";
 import { getApiBase } from "@/lib/api";
 import { formatUptime } from "@/lib/time";
+import { useProject } from "@/lib/ProjectContext";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ interface Service {
 }
 
 interface ApplicationInfo {
+  scope?: { kind: "installation" } | { kind: "project"; projectId: string; projectName: string };
   name: string;
   state: ApplicationState;
   description: string;
@@ -234,6 +236,7 @@ function healthBanner(
  * spawn error details, and recent log tail.
  */
 export default function StatusPage() {
+  const project = useProject();
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -259,7 +262,7 @@ export default function StatusPage() {
     const requestId = ++statusRequestIdRef.current;
     statusRequestRef.current = controller;
     try {
-      const res = await fetch(`${API_URL}/services/status`, { signal: controller.signal });
+      const res = await fetch(`${API_URL}/services/status?project=${encodeURIComponent(project)}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: StatusResponse = await res.json();
       if (controller.signal.aborted || requestId !== statusRequestIdRef.current) return;
@@ -272,9 +275,11 @@ export default function StatusPage() {
       if (requestId === statusRequestIdRef.current) setLoading(false);
       if (statusRequestRef.current === controller) statusRequestRef.current = null;
     }
-  }, []);
+  }, [project]);
 
   useEffect(() => {
+    setStatus(null); setError(null); setLoading(true);
+    setSelectedService(null); setSelectedCardType(null);
     void fetchStatus();
     const interval = setInterval(() => void fetchStatus(), POLL_INTERVAL);
     return () => {
@@ -334,7 +339,7 @@ export default function StatusPage() {
       <div>
         <h1 className="text-3xl font-bold">Service Status</h1>
         <p className="text-[var(--color-text-muted)] mt-1">
-          Real-time process monitoring via supervisord
+          Installation process health; synthesis and task activity for {project}
           <span className="ml-2 text-xs">(updates every 2s)</span>
         </p>
       </div>
@@ -404,6 +409,7 @@ export default function StatusPage() {
                   onClick={() => handleServiceClick(app.name)}
                   aria-label={`View ${app.name} application details`}
                 >
+                  {app.scope && <span className="mb-1 block text-xs text-[var(--color-text-muted)]">{app.scope.kind === "project" ? `Project: ${app.scope.projectName}` : "Installation"}</span>}
                   <span className="mb-1 block text-sm font-semibold text-[var(--color-text-primary)]">{app.name}</span>
                   <span className="mb-3 block min-h-[1.5rem] text-xs text-[var(--color-text-muted)]">{app.description}</span>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${badge.bg} ${badge.text}`}>
@@ -438,6 +444,8 @@ export default function StatusPage() {
       {/* Service detail overlay */}
       {selectedService && selectedCardType && (
         <ServiceOverlay
+          key={`${project}:${selectedService}`}
+          project={project}
           name={selectedService}
           type={selectedCardType}
           onClose={() => { setSelectedService(null); setSelectedCardType(null); }}

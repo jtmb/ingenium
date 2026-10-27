@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import ChatMarkdown from "./ChatMarkdown";
 import ToolCallCard from "./ToolCallCard";
 import PermissionPrompt from "./PermissionPrompt";
@@ -395,7 +395,7 @@ function CopyButton({ text }: { text: string }) {
  * - Auto-scroll to bottom
  */
 export default function ChatMessages({
-  messages,
+  messages: nativeMessages,
   isLoading,
   isStreaming,
   streamActivity,
@@ -411,6 +411,9 @@ export default function ChatMessages({
   activitySelection,
   mcpProject,
 }: ChatMessagesProps) {
+  // Native system messages configure the model; they are not conversation turns.
+  // Keep them in the underlying history and never filter by user-visible text.
+  const messages = useMemo(() => nativeMessages.filter((message) => message.role !== "system"), [nativeMessages]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
 

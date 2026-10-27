@@ -1,11 +1,13 @@
-import { Router } from "express";
-import { logger, settings, synthesis, docs, tasks, projects, runtimes } from "ingenium-core";
+import { Router, type RequestHandler } from "express";
+import { logger, docs, tasks, projects, runtimes } from "ingenium-core";
 import {
   getEmailClientStatus,
   getSynthesisStatus,
+  getSynthesisHealthSnapshot,
   hasRequiredApplicationIssue,
   type ApplicationHealth,
 } from "../application-health.js";
+import { requireProject } from "../helpers.js";
 import { runtimeManagerHealth } from "../runtime-manager-client.js";
 import { isControlPlaneMode } from "../runtime-mode.js";
 import {
@@ -114,19 +116,24 @@ function sendServiceError(
   res.status(status).json({ error: { code, message } });
 }
 
-/**
- * Resolve the UUID for the global-default project.
- * Falls back to the literal string "global-default" if the project doesn't exist.
- */
-function resolveGlobalProjectId(): string {
-  try {
-    const p = projects.getProject("global-default");
-    return p?.id ?? "global-default";
-  } catch {
-    return "global-default";
-  }
-}
+const INSTALLATION_SCOPE = { kind: "installation" } as const;
+type ActivityProject = NonNullable<ReturnType<typeof projects.getGlobalProject>>;
 
+// Resolve before entering async Express4 handlers so failures reach middleware.
+const resolveActivityProject: RequestHandler = (req, res, next) => {
+  try {
+    if (req.query.project !== undefined) {
+      if (!requireProject(req, res)) return;
+      res.locals.serviceActivityProject = projects.getProject(req.query.project as string);
+    } else {
+      res.locals.serviceActivityProject = projects.getGlobalProject();
+    }
+    next();
+  } catch (error) { next(error); }
+};
+function activityScope(project?: ActivityProject): ApplicationHealth["scope"] {
+  return project ? { kind: "project", projectId: project.id, projectName: project.name } : INSTALLATION_SCOPE;
+}
 
 async function resolveSupervisorProcessName(name: string): Promise<string | undefined> {
   const processName = Object.entries(DISPLAY_NAME_MAP).find(
@@ -189,10 +196,10 @@ async function getDocsStatus(): Promise<AppInfo> {
  * Tasks-board health: checks task counts by column.
  * Returns idle when no tasks exist yet.
  */
-async function getTasksStatus(): Promise<AppInfo> {
+async function getTasksStatus(projectId?: string): Promise<AppInfo> {
   try {
-    const globalId = resolveGlobalProjectId();
-    const allTasks = tasks.listTasks(globalId);
+    const id = projectId ?? projects.getGlobalProject()?.id;
+    const allTasks = id ? tasks.listTasks(id) : [];
     const byColumn: Record<string, number> = {};
     for (const t of allTasks) {
       byColumn[t.column_id] = (byColumn[t.column_id] || 0) + 1;
@@ -231,17 +238,19 @@ async function getRuntimeFleetStatus(): Promise<AppInfo> {
 }
 
 /** GET /api/v1/services/status — live supervisord process states + application health */
-servicesRouter.get("/status", async (_req, res): Promise<void> => {
+servicesRouter.get("/status", resolveActivityProject, async (_req, res): Promise<void> => {
+  const activityProject = res.locals.serviceActivityProject as ActivityProject | undefined;
   // Always fetch application health checks (independent from supervisord)
   let applications: AppInfo[] = [];
   try {
-    applications = await Promise.all([
+    applications = (await Promise.all([
       getEmailClientStatus(),
-      getSynthesisStatus(),
+      getSynthesisStatus(activityProject?.id),
       getDocsStatus(),
-      getTasksStatus(),
+      getTasksStatus(activityProject?.id),
       ...(isControlPlaneMode() ? [getRuntimeFleetStatus()] : []),
-    ]);
+    ])).map((application) => ({ ...application, scope: ["synthesis-engine", "tasks-board"].includes(application.name)
+      ? activityScope(activityProject) : INSTALLATION_SCOPE }));
   } catch {
     // Individual errors are caught inside each function; this is defense-in-depth
   }
@@ -325,7 +334,8 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
 });
 
 /** GET /api/v1/applications/:name — detailed status for a specific application */
-servicesRouter.get("/applications/:name", async (req, res): Promise<void> => {
+servicesRouter.get("/applications/:name", resolveActivityProject, async (req, res): Promise<void> => {
+  const activityProject = res.locals.serviceActivityProject as ActivityProject | undefined;
   const { name } = req.params;
 
   try {
@@ -343,6 +353,7 @@ servicesRouter.get("/applications/:name", async (req, res): Promise<void> => {
         res.json({
           data: {
             ...app,
+            scope: INSTALLATION_SCOPE,
             engine: engineStatus
               ? {
                   running: engineStatus.running,
@@ -369,54 +380,23 @@ servicesRouter.get("/applications/:name", async (req, res): Promise<void> => {
       }
 
       case "synthesis-engine": {
-        const app = await getSynthesisStatus();
-        const intervalMs = parseInt(settings.getSetting("global-default", "synthesis_interval_ms") ?? "900000", 10);
-
-        let status = null;
-        try {
-          status = synthesis.getSynthesisStatus("global-default");
-        } catch {
-          // Status unavailable
-        }
-
-        let nextEstimate: string | null = null;
-        if (status?.last_synthesis_at && intervalMs > 0) {
-          const lastTime = new Date(status.last_synthesis_at).getTime();
-          nextEstimate = new Date(lastTime + intervalMs).toISOString();
-        }
-
-        res.json({
-          data: {
-            ...app,
-            intervalMs,
-            lastRunAt: status?.last_synthesis_at ?? null,
-            nextEstimate,
-            stats: status
-              ? {
-                  totalObservations: status.total_observations,
-                  pendingCount: status.pending_count,
-                  processedCount: status.processed_count,
-                  traitCount: status.trait_count,
-                }
-              : null,
-          },
-        });
+        const { application, ...metrics } = getSynthesisHealthSnapshot(activityProject?.id);
+        res.json({ data: { ...application, scope: activityScope(activityProject), ...metrics } });
         return;
       }
 
       case "docs-workspace": {
         const app = await getDocsStatus();
         const stats = docs.getDocStats();
-        res.json({ data: { ...app, stats } });
+        res.json({ data: { ...app, scope: INSTALLATION_SCOPE, stats } });
         return;
       }
       case "tasks-board": {
-        const app = await getTasksStatus();
-        const globalId = resolveGlobalProjectId();
-        const allTasks = tasks.listTasks(globalId);
+        const app = await getTasksStatus(activityProject?.id);
+        const allTasks = activityProject ? tasks.listTasks(activityProject.id) : [];
         const byColumn: Record<string, number> = {};
         for (const t of allTasks) { byColumn[t.column_id] = (byColumn[t.column_id] || 0) + 1; }
-        res.json({ data: { ...app, stats: { total: allTasks.length, byColumn } } });
+        res.json({ data: { ...app, scope: activityScope(activityProject), stats: { total: allTasks.length, byColumn } } });
         return;
       }
       default:

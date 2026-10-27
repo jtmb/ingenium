@@ -5,7 +5,7 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, docs, tasks } from "ingenium-core";
+import { projects, docs, tasks, observations, settings, getDb } from "ingenium-core";
 import { servicesRouter } from "../lib/routes/services.js";
 
 const emailMocks = vi.hoisted(() => ({
@@ -76,7 +76,7 @@ beforeAll(async () => {
   // getTasksStatus() calls tasks.listTasks("global-default"), but the FK
   // constraint on tasks.project_id REFERENCES projects(id) requires a UUID.
   // We create the project and store its UUID for creating test tasks.
-  const project = projects.createProject("global-default");
+  const project = projects.createProject("global-default", true);
   globalProjectId = project.id;
 
   const socketPath = join(tempDir, "supervisor.sock");
@@ -399,5 +399,57 @@ describe("GET /api/v1/services/:name", () => {
     const request = supervisorRequests.find((candidate) => candidate.includes("supervisor.getProcessInfo"));
     expect(request).toContain(`<string>${escapeXml(name)}</string>`);
     expect(request).not.toContain(`<string>${name}</string>`);
+  });
+});
+
+
+describe("Status activity project identity and scope", () => {
+  it("reads real global-project IDs and cadence, and keeps completed idle activity healthy", async () => {
+    const observation = observations.storeObservation(globalProjectId, "preference", "Global fixture observation");
+    observations.updateObservation(globalProjectId, observation.id, { status: "processed" });
+    getDb().prepare("UPDATE observations SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").run(observation.id);
+    settings.setSetting(globalProjectId, "synthesis_interval_ms", "600000");
+    const response = await fetch(`${baseUrl}/api/v1/services/applications/synthesis-engine`);
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data.stats).toMatchObject({ totalObservations: 1, processedCount: 1, pendingCount: 0 });
+    expect(data).toMatchObject({ intervalMs: 600000, state: "idle", required: false,
+      lastProcessedAt: "2000-01-01T00:00:00.000Z", nextEstimate: null,
+      scope: { kind: "project", projectId: globalProjectId, projectName: "global-default" } });
+    expect(data.detail).not.toContain("stuck");
+  });
+
+  it("uses the selected project for synthesis activity and labels installation-wide services", async () => {
+    const selected = projects.createProject("status-selected");
+    const done = observations.storeObservation(selected.id, "preference", "Selected completed fixture");
+    observations.updateObservation(selected.id, done.id, { status: "processed" });
+    observations.storeObservation(selected.id, "preference", "Selected pending fixture");
+    const detail = await fetch(`${baseUrl}/api/v1/services/applications/synthesis-engine?project=status-selected`);
+    expect(detail.status).toBe(200);
+    const { data } = await detail.json();
+    expect(data.stats).toMatchObject({ totalObservations: 2, processedCount: 1, pendingCount: 1 });
+    expect(data.scope).toEqual({ kind: "project", projectId: selected.id, projectName: "status-selected" });
+    const listing = await fetch(`${baseUrl}/api/v1/services/status?project=status-selected`);
+    const body = await listing.json();
+    expect(body.data.applications.find((a: { name: string }) => a.name === "synthesis-engine").scope).toEqual(data.scope);
+    expect(body.data.applications.find((a: { name: string }) => a.name === "email-client").scope).toEqual({ kind: "installation" });
+    expect(body.data.applications.find((a: { name: string }) => a.name === "docs-workspace").scope).toEqual({ kind: "installation" });
+  });
+
+  it("keeps task counts in the selected project", async () => {
+    const selected = projects.createProject("status-selected");
+    tasks.createTask(selected.id, "Selected fixture task");
+    const response = await fetch(`${baseUrl}/api/v1/services/applications/tasks-board?project=status-selected`);
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data.stats.total).toBe(1);
+    expect(data.scope.projectId).toBe(selected.id);
+  });
+
+  it("rejects an invalid or missing selected project instead of reporting global counts", async () => {
+    for (const endpoint of ["status", "applications/synthesis-engine"]) {
+      expect((await fetch(`${baseUrl}/api/v1/services/${endpoint}?project=does-not-exist`)).status).toBe(404);
+      expect((await fetch(`${baseUrl}/api/v1/services/${endpoint}?project=bad%2Fproject`)).status).toBe(400);
+    }
   });
 });
