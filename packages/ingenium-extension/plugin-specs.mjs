@@ -18,6 +18,7 @@ export const CANONICAL_PLUGIN_SPECS_V2 = Object.freeze([
   "file://{env:PWD}/packages/ingenium-extension/plugins/v2/resource-sync",
   "file://{env:PWD}/packages/ingenium-extension/plugins/v2/lifecycle",
   "file://{env:PWD}/packages/ingenium-extension/plugins/v2/ponytail",
+  "file://{env:PWD}/packages/ingenium-extension/plugins/v2/goal",
 ]);
 
 export const CANONICAL_PROJECT_PLUGIN_PREFIX = "file://{env:PWD}/";
@@ -36,6 +37,8 @@ export const CANONICAL_PLUGIN_RUNTIME_ASSETS = Object.freeze([
  */
 export const CANONICAL_PLUGIN_RUNTIME_ASSETS_V2 = Object.freeze([
   "scripts/source-snapshot.mjs",
+  "vendor/opencode-goal-plugin/LICENSE",
+  "vendor/opencode-goal-plugin/provenance.json",
   "ponytail/hooks",
   "ponytail/.opencode/plugins/ponytail-frontmatter.cjs",
 ]);

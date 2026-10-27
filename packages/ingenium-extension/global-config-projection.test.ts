@@ -11,10 +11,10 @@ import { CANONICAL_PLUGIN_SPECS_V2 } from "./plugin-specs.mjs";
 import ProtectedBrokerPlugin from "../../config/opencode-managed/plugins/enforce-reserved-broker/index.mjs";
 
 const directories: string[] = [];
-const canonicalPluginOrder = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail"];
+const canonicalPluginOrder = ["auto-observer", "observer", "resource-sync", "lifecycle", "ponytail", "goal"];
 
 function pluginName(path: string): string | undefined {
-  const v2 = path.match(/\/plugins\/v2\/(auto-observer|observer|resource-sync|lifecycle|ponytail)$/);
+  const v2 = path.match(/\/plugins\/v2\/(auto-observer|observer|resource-sync|lifecycle|ponytail|goal)$/);
   if (v2) return v2[1];
   if (path.includes("ponytail")) return "ponytail";
   return path.match(/([^/]+)\.(?:ts|mjs)$/)?.[1];
