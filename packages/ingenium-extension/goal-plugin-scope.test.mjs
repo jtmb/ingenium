@@ -88,10 +88,16 @@ test("native goals persist; Chat receives no tools, reminders, commands or conti
       assert.deepEqual(Object.keys(chat.tools), ["read"]);
     }
     await call("update_goal_status", { status: "active" }, "native");
+    sendEvent({ type: "session.idle", created: Date.now(), data: { sessionID: "native" } });
+    for (let attempt = 0; attempt < 20 && prompts.length === 0; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(prompts.length, 1, "native goal must actually auto-continue before testing Chat exclusion");
+    prompts.length = 0;
     // A goal created in OpenCode must not follow the session into Chat mode.
     sessions.get("native").agent = "ingenium-chat";
     await assert.rejects(call("get_goal", {}, "native"), /GOALS_UNAVAILABLE/);
-    sendEvent({ type: "session.idle", data: { sessionID: "native" } });
+    sendEvent({ type: "session.idle", created: Date.now(), data: { sessionID: "native" } });
     await new Promise((resolve) => setTimeout(resolve, 25));
     assert.equal(prompts.length, 0);
     let denials = 0;
