@@ -18,7 +18,6 @@ export type SettingsTabId =
   | "observations"
   | "personality"
   | "providers"
-  | "migration"
   | "cloudflare"
   | "logs";
 
@@ -49,7 +48,6 @@ export const ALL_TABS: SettingsTab[] = [
   { id: "observations", label: "Observations", icon: "eye" },
   { id: "personality", label: "Personality", icon: "user" },
   { id: "providers", label: "Providers", icon: "sparkle" },
-  { id: "migration", label: "Move to PRD", icon: "server" },
   { id: "cloudflare", label: "Cloudflare", icon: "server" },
   { id: "logs", label: "Logs", icon: "terminal" },
 ];
