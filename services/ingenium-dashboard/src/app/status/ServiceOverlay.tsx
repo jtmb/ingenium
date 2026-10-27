@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { getApiBase } from "@/lib/api";
 import { formatUptime } from "@/lib/time";
@@ -49,13 +49,20 @@ interface AppEngine {
 }
 
 interface AppStats {
-  totalObservations: number;
-  pendingCount: number;
-  processedCount: number;
-  traitCount: number;
+  totalObservations?: number;
+  pendingCount?: number;
+  processedCount?: number;
+  traitCount?: number;
+  spaces?: number;
+  pages?: number;
+  drafts?: number;
+  total?: number;
+  byColumn?: Record<string, number>;
 }
 
 interface AppDetail {
+  scope?: { kind: "installation" } | { kind: "project"; projectId: string; projectName: string };
+  lastProcessedAt?: string | null;
   name: string;
   state: string;
   description: string;
@@ -68,6 +75,7 @@ interface AppDetail {
 }
 
 interface ServiceOverlayProps {
+  project?: string;
   name: string;
   type: "service" | "application";
   onClose: () => void;
@@ -136,7 +144,7 @@ function formatTimestamp(seconds?: number): string {
  * - "service" → fetches supervisord process info + stderr logs
  * - "application" → fetches in-process engine state (pipeline stats, email accounts)
  */
-export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayProps) {
+export default function ServiceOverlay({ name, type, project, onClose }: ServiceOverlayProps) {
   // SSR guard: `createPortal(..., document.body)` cannot run during SSR because
   // `document` is undefined on the server. Defer rendering until after hydration.
   const [mounted, setMounted] = useState(false);
@@ -151,6 +159,8 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
 
   const [appDetail, setAppDetail] = useState<AppDetail | null>(null);
   const [appDetailError, setAppDetailError] = useState<string | null>(null);
+  const appRequestRef = useRef<AbortController | null>(null);
+  const appRequestId = useRef(0);
 
   // Fetch functions wrapped in useCallback so they can be safely included
   // in the useEffect dependency array without causing infinite loops.
@@ -167,16 +177,22 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
   }, [name]);
 
   const fetchAppDetail = useCallback(async () => {
+    appRequestRef.current?.abort();
+    const controller = new AbortController();
+    appRequestRef.current = controller;
+    const requestId = ++appRequestId.current;
+    setAppDetail(null); setAppDetailError(null);
     try {
-      const res = await fetch(`${API_URL}/services/applications/${encodeURIComponent(name)}`);
+      const query = project ? `?project=${encodeURIComponent(project)}` : "";
+      const res = await fetch(`${API_URL}/services/applications/${encodeURIComponent(name)}${query}`, { signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
+      if (controller.signal.aborted || requestId !== appRequestId.current) return;
       setAppDetail(d.data);
-      setAppDetailError(null);
-    } catch (err: any) {
-      setAppDetailError(err.message);
-    }
-  }, [name]);
+    } catch (err: unknown) {
+      if (!controller.signal.aborted && requestId === appRequestId.current) setAppDetailError(err instanceof Error ? err.message : "Application status unavailable");
+    } finally { if (appRequestRef.current === controller) appRequestRef.current = null; }
+  }, [name, project]);
 
   const fetchLogs = useCallback(async () => {
     if (type !== "service") return;
@@ -203,6 +219,7 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
     } else {
       fetchAppDetail();
     }
+    return () => { appRequestId.current++; appRequestRef.current?.abort(); appRequestRef.current = null; };
   }, [type, fetchServiceDetail, fetchAppDetail, fetchLogs]);
 
   useEffect(() => {
@@ -222,6 +239,14 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
   const displayState = type === "service"
     ? detail?.state ?? ""
     : appDetail?.state ?? "";
+
+  const stats = appDetail?.stats;
+  const statsTitle = appDetail?.name === "synthesis-engine" ? "Pipeline Stats"
+    : appDetail?.name === "docs-workspace" ? "Documentation Stats" : "Task Stats";
+  const statsRows: Array<[string, number | undefined]> = !stats ? []
+    : appDetail?.name === "synthesis-engine" ? [["Total Observations", stats.totalObservations], ["Pending", stats.pendingCount], ["Processed", stats.processedCount], ["Traits", stats.traitCount]]
+    : appDetail?.name === "docs-workspace" ? [["Spaces", stats.spaces], ["Pages", stats.pages], ["Drafts", stats.drafts]]
+    : appDetail?.name === "tasks-board" ? [["Total tasks", stats.total], ["To do", stats.byColumn?.todo ?? 0], ["In progress", stats.byColumn?.in_progress ?? 0], ["In review", stats.byColumn?.review ?? 0], ["Done", stats.byColumn?.done ?? 0]] : [];
 
   const badge = stateBadgeStyle(displayState);
 
@@ -359,9 +384,9 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 )}
                 {appDetail.lastRunAt !== undefined && (
                   <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Last Run</span>
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Last observation processed</span>
                     <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                      {appDetail.lastRunAt ? new Date(appDetail.lastRunAt).toLocaleString() : "—"}
+                      {(appDetail.lastProcessedAt ?? appDetail.lastRunAt) ? new Date((appDetail.lastProcessedAt ?? appDetail.lastRunAt)!).toLocaleString() : "—"}
                     </span>
                   </div>
                 )}
@@ -383,26 +408,16 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 )}
               </div>
 
-              {appDetail.stats && (
+              {appDetail.scope && <p className="mb-3 text-sm text-[var(--color-text-muted)]">{appDetail.scope.kind === "project" ? `Project: ${appDetail.scope.projectName}` : "Installation"}</p>}
+
+              {statsRows.length > 0 && (
                 <div className="mb-6">
-                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">Pipeline Stats</h3>
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">{statsTitle}</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Total Observations</span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.totalObservations}</span>
-                    </div>
-                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Pending</span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.pendingCount}</span>
-                    </div>
-                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Processed</span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.processedCount}</span>
-                    </div>
-                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Traits</span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.traitCount}</span>
-                    </div>
+                    {statsRows.map(([label, value]) => <div key={label} className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">{label}</span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : "—"}</span>
+                    </div>)}
                   </div>
                 </div>
               )}

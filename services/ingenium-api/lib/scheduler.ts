@@ -12,6 +12,7 @@ import {
 import { loadApiToken } from "./middleware/api-token.js";
 import { createBackgroundSynthesisBrokerExecutor } from "./opencode-client.js";
 import { createOpenCodeMessagesClient } from "./opencode-messages-client.js";
+import { getSynthesisInterval, SYNTHESIS_DEFAULT_MS } from "./synthesis-cadence.js";
 
 /**
  * Default synthesis interval: 15 minutes (900,000ms).
@@ -27,25 +28,6 @@ import { createOpenCodeMessagesClient } from "./opencode-messages-client.js";
  * SYNTHESIS_INTERVAL_MS env var or the `synthesis_interval_ms` setting in the
  * global-default project (which takes precedence once configured via Settings UI).
  */
-const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
-
-/** Read the synthesis interval from the global-default project's settings. Falls back to env var default. */
-function getSynthesisInterval(): number {
-  try {
-    const gid = projects.getGlobalProject()?.id;
-    if (gid) {
-      const val = settings.getSetting(gid, "synthesis_interval_ms");
-      if (val !== undefined) {
-        const n = parseInt(val, 10);
-        if (!isNaN(n) && n >= 0) return n;
-      }
-    }
-  } catch {
-    // fall through to default
-  }
-  return SYNTHESIS_DEFAULT_MS;
-}
-
 /** TTL for per-project skill locks during scheduled synthesis cycles (2 min). */
 const SYNTHESIS_LOCK_TTL_MS = 120_000;
 /** Interval between lock renewals during synthesis (every 60s). */

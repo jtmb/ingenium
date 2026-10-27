@@ -253,16 +253,29 @@ export function dashboardFetch(
   input: RequestInfo | URL,
   options?: RequestInit,
 ): Promise<Response> {
-  return (async () => fetch(input, {
-    ...options,
-    credentials: "same-origin",
-    headers: buildRequestHeaders(
-      options,
-      isUnsafeMethod(options?.method) && !PRE_AUTH_CSRF_PATHS.has(requestPath(input))
-        ? await bootstrapSessionCsrf()
-        : null,
-    ),
-  }))();
+  return (async () => {
+    const path = requestPath(input);
+    const method = options?.method ?? (input instanceof Request ? input.method : "GET");
+    const needsSessionCsrf = isUnsafeMethod(method) && !PRE_AUTH_CSRF_PATHS.has(path);
+    const csrfToken = needsSessionCsrf ? await bootstrapSessionCsrf() : null;
+    const send = (token: string | null) => fetch(input, {
+      ...options,
+      credentials: "same-origin",
+      headers: buildRequestHeaders(options, token),
+    });
+    const response = await send(csrfToken);
+    // Session grants expire while a dashboard tab can remain open. Only this
+    // middleware rejection proves that no mutation handler has executed.
+    const replayable = !(input instanceof Request && input.body !== null)
+      && !(typeof ReadableStream !== "undefined" && options?.body instanceof ReadableStream);
+    if (!needsSessionCsrf || response.status !== 403 || !replayable || options?.signal?.aborted) return response;
+    const rejected = await response.clone().json().catch(() => null);
+    if (rejected?.error?.code !== "CSRF_REJECTED") return response;
+    if (sessionCsrfToken === csrfToken) sessionCsrfToken = null;
+    // A concurrent renewal or step-up may already have supplied a newer grant.
+    // Replay once only; authorization failures and further CSRF failures surface.
+    return send(await bootstrapSessionCsrf());
+  })();
 }
 
 /**
