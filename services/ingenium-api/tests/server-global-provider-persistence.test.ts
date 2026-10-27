@@ -803,7 +803,7 @@ describe("server-global provider persistence", () => {
       }
     });
 
-    it("aborts a stalled global config reload and releases the provider lock for a retry", async () => {
+    it("aborts a stalled native integration request and releases the provider lock for a retry", async () => {
       vi.useFakeTimers();
       const firstCredential = "stalled-reload-credential";
       const retryCredential = "reload-retry-credential";
@@ -820,7 +820,7 @@ describe("server-global provider persistence", () => {
         }, { once: true });
       }));
       const apply = vi.fn((_key: string, signal: AbortSignal) =>
-        opencodeClient.updateGlobalConfig({ provider: { openai: { models: {} } } }, signal));
+        opencodeClient.addAuth("openai", { type: "api", key: _key }, undefined, signal));
 
       try {
         vi.stubGlobal("fetch", stalledFetch);

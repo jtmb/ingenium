@@ -105,7 +105,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
     const user = { id: "msg-user", type: "user" as const, time: { created: 1 },
       text: "I prefer concise answers. Bearer secret-canary" };
     const client = { app: { log: vi.fn() }, v2: { session: {
-      get: vi.fn().mockResolvedValue({ data: { id: "ses-external", location: { directory: "/worktree" } } }),
+      get: vi.fn().mockResolvedValue({ data: { data: { id: "ses-external", location: { directory: "/worktree" } } } }),
       messages: vi.fn().mockResolvedValue({ data: { data: [user,
         { id: "msg-assistant", type: "assistant", agent: "engineer", model: { id: "model", providerID: "openai" }, time: { created: 1, completed: 1 }, content: [{ type: "text", id: "part", text: "assistant-canary" }] },
         { id: "msg-hidden", type: "user", metadata: { hidden: true }, time: { created: 1 }, text: "hidden-canary" },
@@ -146,7 +146,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
   it("does not let unfinished assistant/tool payloads suppress a later user preference", async () => {
     mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: true }) }] });
     const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { v2: { session: {
-      get: vi.fn().mockResolvedValue({ data: { id: "ses-external", location: { directory: "/worktree" } } }),
+      get: vi.fn().mockResolvedValue({ data: { data: { id: "ses-external", location: { directory: "/worktree" } } } }),
       messages: vi.fn().mockResolvedValue({ data: { data: [
         { id: "msg-assistant", type: "assistant", agent: "engineer", model: { id: "model", providerID: "openai" }, time: { created: 1 }, content: [{ type: "tool", id: "tool", text: "x".repeat(1024 * 1024) }] },
         { id: "msg-user", type: "user", time: { created: 1 }, text: "I prefer concise replies." },
@@ -159,7 +159,7 @@ describe("AutoObserverPlugin lifecycle output", () => {
   it("rejects foreign SDK session/worktree identity before transmitting text", async () => {
     mockCallMcpTool.mockResolvedValue({ content: [{ text: JSON.stringify({ enabled: true }) }] });
     const plugin = await AutoObserverPlugin({ worktree: "/worktree", client: { v2: { session: {
-      get: vi.fn().mockResolvedValue({ data: { id: "foreign", location: { directory: "/foreign" } } }),
+      get: vi.fn().mockResolvedValue({ data: { data: { id: "foreign", location: { directory: "/foreign" } } } }),
       messages: vi.fn().mockResolvedValue({ data: { data: [], cursor: {} } }),
     } } } });
     await plugin.event({ event: { type: "session.idle", properties: { sessionID: "ses-external" } } });

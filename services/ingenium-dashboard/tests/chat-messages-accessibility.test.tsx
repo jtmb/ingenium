@@ -31,7 +31,7 @@ it("supports keyboard image disclosure and announces only initial loading/error 
     jsx: "automatic",
     define: { "process.env.NODE_ENV": '"production"', "process.env": "{}" },
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, ...(process.env.INGENIUM_TEST_BROWSER_EXECUTABLE_PATH ? { executablePath: process.env.INGENIUM_TEST_BROWSER_EXECUTABLE_PATH } : {}) });
   try {
     const page = await browser.newPage();
     await page.setContent('<div id="root"></div>');

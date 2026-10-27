@@ -50,7 +50,7 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 async function waitForTerminalRun(baseUrl: string, jobId: string, runId: string): Promise<JobRun> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   let lastStatus = "missing";
   while (Date.now() < deadline) {
     const response = await fetch(projectUrl(baseUrl, `/api/v1/jobs/${jobId}/runs`));

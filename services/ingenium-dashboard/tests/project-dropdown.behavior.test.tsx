@@ -67,7 +67,8 @@ describe("ProjectDropdown lazy loading", () => {
     const trigger = screen.getByRole("button", { name: "Context project: global-default" });
     expect(trigger.textContent).toContain("global-default");
     expect(trigger.className).toContain("min-w-0");
-    expect(trigger.className).toContain("max-w-[calc(100vw-8rem)]");
+    expect(trigger.className).toContain("max-w-full");
+    expect(trigger.className).toContain("sm:max-w-sm");
     expect(trigger.parentElement?.className).toContain("min-w-0");
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
     expect(trigger.getAttribute("aria-expanded")).toBe("false");

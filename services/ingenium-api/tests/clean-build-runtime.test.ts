@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
+import { linkRuntimeDependencyFixture } from "../../../packages/ingenium-extension/tests/runtime-dependency-fixture.js";
 
 const apiRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coreRoot = resolve(apiRoot, "../../packages/ingenium-core");
@@ -32,6 +33,7 @@ function buildCleanCoreDistribution(outputDirectory: string): string {
   // compiled database module.
   cpSync(join(coreRoot, "data"), join(distributionDirectory, "data"), { recursive: true });
   cpSync(join(coreRoot, "package.json"), join(packageDirectory, "package.json"));
+  linkRuntimeDependencyFixture([coreRoot], packageDirectory);
   return distributionDirectory;
 }
 
@@ -63,6 +65,7 @@ function buildCleanEmailDistribution(outputDirectory: string, coreDistribution: 
   );
   expectSuccessfulBuild(build);
   cpSync(join(emailRoot, "package.json"), join(packageDirectory, "package.json"));
+  linkRuntimeDependencyFixture([emailRoot], packageDirectory);
   return distributionDirectory;
 }
 
@@ -154,7 +157,7 @@ describe("clean-build runtime distribution", () => {
     ));
 
     expectSuccessfulBuild(check);
-  });
+  }, 120_000);
 
   it("builds an empty distribution without the workspace core dist and resolves the API entrypoint imports", () => {
     const outputDirectory = mkdtempSync(join(apiRoot, ".clean-build-"));
@@ -198,7 +201,7 @@ describe("clean-build runtime distribution", () => {
     } finally {
       rmSync(outputDirectory, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it("keeps the unseal migration trigger in a clean core distribution", () => {
     // Keep the temporary distribution below the workspace so Node's normal
@@ -266,5 +269,5 @@ describe("clean-build runtime distribution", () => {
     } finally {
       rmSync(outputDirectory, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 });

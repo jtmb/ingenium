@@ -9,10 +9,12 @@ import { fileURLToPath } from "node:url";
 // A regression must fail before touching the historical shared upload directory.
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
+  const { tmpdir } = await import("node:os");
+  const historicalUploadRoot = `${tmpdir()}/ingenium-chat-uploads`;
   return {
     ...fs,
     mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) => {
-      if (String(args[0]) === "/tmp/ingenium-chat-uploads") throw new Error("Shared upload directory accessed");
+      if (String(args[0]) === historicalUploadRoot) throw new Error("Shared upload directory accessed");
       return fs.mkdirSync(...args);
     },
   };

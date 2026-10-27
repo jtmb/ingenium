@@ -25,8 +25,10 @@ const guardedUploadCalls = vi.hoisted(() => [] as string[]);
 
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
+  const { tmpdir } = await import("node:os");
+  const uploadRoot = `${tmpdir()}/ingenium-chat-uploads`;
   const isSharedUpload = (path: string | Buffer | URL) =>
-    String(path) === "/tmp/ingenium-chat-uploads" || String(path).startsWith("/tmp/ingenium-chat-uploads/");
+    String(path) === uploadRoot || String(path).startsWith(`${uploadRoot}/`);
   const guard = (operation: string, path: string | Buffer | URL) => {
     if (!isSharedUpload(path)) return false;
     guardedUploadCalls.push(operation);

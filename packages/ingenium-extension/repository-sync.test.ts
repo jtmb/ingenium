@@ -110,7 +110,7 @@ function fixture(): void {
   }));
 }
 
-function successfulMcp(): ReturnType<typeof vi.fn> {
+function successfulMcp() {
   const call = vi.fn(async (_worktree: string, name: string, args: Record<string, unknown>) => {
     expect(name).toBe("repository_sync");
     return {
@@ -706,7 +706,7 @@ describe("repository-authoritative manifest v2", () => {
     const successfulCall = successfulMcp();
     let release!: () => void;
     const pending = new Promise<void>((resolve) => { release = resolve; });
-    mockCallMcpTool.mockImplementation(async (...args) => {
+    mockCallMcpTool.mockImplementation(async (...args: Parameters<typeof successfulCall>) => {
       await pending;
       return successfulCall(...args);
     });

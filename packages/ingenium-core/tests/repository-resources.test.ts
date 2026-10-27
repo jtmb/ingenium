@@ -323,7 +323,7 @@ describe("repository resource sync", () => {
       { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: Array(513).fill(null), agents: [], plugins: [] } },
       { docsManifest: { files: [{ path: "x".repeat(513), content: "", sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
       { docsManifest: { files: [{ path: "docs/large.md", content: "x".repeat(2 * 1024 * 1024 + 1), sha256: "a".repeat(64), fileType: "regular", isSymlink: false }] } },
-      { docsManifest: { files: Array.from({ length: 3 }, (_, index) => ({ path: `docs/${index}.md`, content: "x".repeat(700 * 1024) })) } },
+      { docsManifest: { files: Array.from({ length: 5 }, (_, index) => ({ path: `docs/${index}.md`, content: "x".repeat(700 * 1024) })) } },
       { docsManifest: { files: [] }, resourcesManifest: {
         version: 2, skills: [], agents: [], plugins: [{ source: "x".repeat(256 * 1024 + 1) }],
       } },
@@ -337,8 +337,8 @@ describe("repository resource sync", () => {
       { docsManifest: { files: [] }, resourcesManifest: { version: 2, skills: [], agents: [], plugins: [], nested } },
     ];
 
-    for (const candidate of candidates) {
-      expect(() => repositorySync.assertRepositorySyncStructure(candidate)).toThrow(expect.objectContaining({
+    for (const [index, candidate] of candidates.entries()) {
+      expect(() => repositorySync.assertRepositorySyncStructure(candidate), `structure limit candidate ${index}`).toThrow(expect.objectContaining({
         code: "REPOSITORY_SYNC_STRUCTURE_LIMIT",
       }));
     }
