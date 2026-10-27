@@ -64,6 +64,10 @@ function isGatewayMode() {
 const nextConfig = {
   output: "standalone",
 
+  // Signed backup verification can exceed Next's 30-second rewrite timeout.
+  // Keep the wait bounded while the API admits only one download buffer.
+  experimental: { proxyTimeout: 180_000 },
+
   // Next.js inlines only non-secret CSP inputs. Never add server credentials or
   // OPENCODE_SERVER_PASSWORD here.
   env: {
