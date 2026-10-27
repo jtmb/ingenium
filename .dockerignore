@@ -85,6 +85,15 @@ node_modules/
 .opencode/node_modules/
 vendor/
 **/vendor/
+# Pinned upstream goal server is reviewed runtime source, not installed dependencies.
+!packages/ingenium-extension/vendor/
+!packages/ingenium-extension/vendor/opencode-goal-plugin/
+!packages/ingenium-extension/vendor/opencode-goal-plugin/server.mjs
+!packages/ingenium-extension/vendor/opencode-goal-plugin/server.d.mts
+!packages/ingenium-extension/vendor/opencode-goal-plugin/LICENSE
+!packages/ingenium-extension/vendor/opencode-goal-plugin/README.md
+!packages/ingenium-extension/vendor/opencode-goal-plugin/provenance.json
+
 __pycache__/
 **/__pycache__/
 .venv/
