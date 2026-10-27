@@ -49,19 +49,19 @@ class PackagePreparationTests(unittest.TestCase):
         self.run_preparation(self.archive())
 
     def test_corrupt_archive_is_rejected_before_extraction(self):
-        with self.assertRaisesRegex(AssertionError, 'integrity mismatch'):
+        with self.assertRaisesRegex(ValueError, 'integrity mismatch'):
             self.run_preparation(self.archive(), 'sha512-' + base64.b64encode(bytes(64)).decode())
 
     def test_parent_traversal_is_rejected(self):
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             self.run_preparation(self.archive('package/../../outside.json'))
 
     def test_symbolic_links_are_rejected(self):
-        with self.assertRaisesRegex(AssertionError, 'links and special'):
+        with self.assertRaisesRegex(ValueError, 'links and special'):
             self.run_preparation(self.archive(link=True))
 
     def test_redirect_to_other_host_is_rejected(self):
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ValueError):
             self.run_preparation(self.archive(), response_url='https://example.org/package.tgz')
 
 if __name__ == '__main__':
