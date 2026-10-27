@@ -1,8 +1,8 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), create: vi.fn() }));
-vi.mock("../src/lib/api", () => ({ api: { migration: { get: mocks.get, save: mocks.save }, backups: { create: mocks.create } } }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn(), create: vi.fn(), stepUp: vi.fn() }));
+vi.mock("../src/lib/api", () => ({ api: { migration: { get: mocks.get, save: mocks.save }, backups: { create: mocks.create }, auth: { stepUp: mocks.stepUp } } }));
 import MigrationPanel, { migrationRunbook } from "../src/app/components/settings/panels/MigrationPanel";
 const status = () => ({ plan: { revision: 1, target: { platform: "kubernetes" as const, origin: "https://prd.example.com" }, confirmed: ["models"], updatedAt: "2026-10-26T00:00:00Z" }, inventory: { sourceMode: "compatibility" as const, backup: null, requiredTransfers: [{ id: "bootstrap", label: "Protected deployment files", contents: "Original keys" }], automaticTransferSupported: false as const, cutoverPerformed: false as const } });
 beforeEach(() => { vi.clearAllMocks(); mocks.get.mockResolvedValue({ data: status() }); mocks.save.mockImplementation(async (plan) => ({ data: { ...status(), plan: { ...plan, revision: plan.revision + 1 } } })); mocks.create.mockResolvedValue({}); });
@@ -28,6 +28,18 @@ describe("PRD migration controls", () => {
     render(<MigrationPanel />); fireEvent.click(await screen.findByRole("button", { name: "Create database checkpoint" }));
     expect((await screen.findByRole("alert")).textContent).toContain("step-up");
     expect(screen.queryByText(/snapshot of both databases was created/)).toBeNull();
+  });
+  it("can verify the administrator in place without losing an unsaved target", async () => {
+    mocks.stepUp.mockResolvedValue({});
+    render(<MigrationPanel />); await screen.findByLabelText("PRD HTTPS origin");
+    fireEvent.change(screen.getByLabelText("PRD HTTPS origin"), { target: { value: "https://pending.example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verify administrator session" }));
+    fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "test-only-password" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByText(/Administrator session verified/);
+    expect(mocks.stepUp).toHaveBeenCalledWith("test-only-password");
+    expect((screen.getByLabelText("PRD HTTPS origin") as HTMLInputElement).value).toBe("https://pending.example.com");
+    expect(screen.queryByLabelText("Credential")).toBeNull();
   });
   it("exports an honest full-installation runbook without calling transfer or cutover APIs", () => {
     const text = migrationRunbook(status());

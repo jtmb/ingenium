@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import StepUpDialog from "../../auth/StepUpDialog";
 import { api, type MigrationPlan, type MigrationStatus } from "../../../../lib/api";
 
 export const CHECKS = [
@@ -21,6 +22,7 @@ export function migrationRunbook(status: MigrationStatus): string {
 export default function MigrationPanel() {
   const [status, setStatus] = useState<MigrationStatus | null>(null);
   const [plan, setPlan] = useState<MigrationPlan | null>(null);
+  const [stepUp, setStepUp] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -46,6 +48,7 @@ export default function MigrationPanel() {
   };
   const button = "rounded border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-surface-hover)] disabled:opacity-50";
   return <div className="space-y-6">
+    <StepUpDialog open={stepUp} onClose={() => setStepUp(false)} onComplete={() => { setStepUp(false); setError(""); setMessage("Administrator session verified. You can save the migration plan."); }} />
     <div><h2 className="text-lg font-semibold">Move Ingenium to PRD</h2><p className="mt-2 text-sm text-[var(--color-text-muted)]">Prepare the full installation for another machine. These controls save a plan and create database checkpoints. Secure file transfer, destination verification and cutover remain separate operator steps.</p></div>
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     {message && <p role="status" className="text-sm">{message}</p>}
@@ -62,11 +65,12 @@ export default function MigrationPanel() {
       <fieldset disabled={busy || !plan.target.origin} className="space-y-3"><legend className="mb-2 font-medium">Operator-confirmed preparation</legend><p className="text-xs text-[var(--color-text-muted)]">Confirm only after checking the destination. These are your confirmations, not automated PRD tests.</p>{CHECKS.map(([id, label, detail]) => <label key={id} className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={plan.confirmed.includes(id)} onChange={(event) => setPlan({ ...plan, confirmed: event.target.checked ? [...plan.confirmed, id] : plan.confirmed.filter((value) => value !== id) })} /><span><strong>{label}</strong><span className="mt-1 block text-[var(--color-text-muted)]">{detail}</span></span></label>)}</fieldset>
       <p className="text-sm" role="status">{plan.confirmed.length} of {CHECKS.length} operator confirmations. {dirty ? "Unsaved changes." : `Saved revision ${plan.revision}.`} Automatic transfer and cutover are unavailable.</p>
       <div className="flex flex-wrap gap-2">
+        <button className={button} disabled={busy} onClick={() => setStepUp(true)}>Verify administrator session</button>
         <button className={button} disabled={busy || !dirty} onClick={() => void run(async () => { apply((await api.migration.save(plan)).data); setMessage("Migration plan saved. Models and the running installation are unchanged."); })}>Save migration plan</button>
         <button className={button} disabled={busy || dirty} onClick={() => void run(async () => { apply((await api.migration.get()).data); setMessage("Source backup inventory refreshed."); })}>Refresh readiness</button>
         <button className={button} disabled={busy || dirty} onClick={download}>Download preparation runbook</button>
       </div>
-      <p className="text-xs text-[var(--color-text-muted)]">Saving and creating checkpoints require a recently verified administrator session. <Link className="underline" href="/account#security">Verify your session</Link> if prompted. Preserve the original computer until the destination passes verification and cutover is approved.</p>
+      <p className="text-xs text-[var(--color-text-muted)]">Saving requires a recently verified administrator session. Database checkpoints use the existing backup permissions. Use “Verify administrator session” if prompted. Preserve the original computer until the destination passes verification and cutover is approved.</p>
     </>}
   </div>;
 }

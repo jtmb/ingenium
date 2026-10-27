@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Select from "../../Select";
+import StepUpDialog from "../../auth/StepUpDialog";
 import {
   api,
   type CloudflareServiceId,
@@ -27,6 +28,7 @@ export default function CloudflarePanel() {
   const [status, setStatus] = useState<CloudflareTunnelStatus | null>(null);
   const [config, setConfig] = useState<CloudflareTunnelConfig | null>(null);
   const [token, setToken] = useState("");
+  const [stepUp, setStepUp] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -90,6 +92,8 @@ export default function CloudflarePanel() {
 
   return (
     <div className="space-y-5 px-6 py-5">
+      <StepUpDialog open={stepUp} onClose={() => setStepUp(false)} onComplete={() => { setStepUp(false); setError(""); setMessage("Administrator session verified. Retry the Cloudflare action."); }} />
+      <button type="button" disabled={Boolean(busy)} onClick={() => setStepUp(true)} className="rounded border border-[var(--color-border)] px-4 py-2 text-sm disabled:opacity-50">Verify administrator session</button>
       <div>
         <h3 className="text-base font-semibold text-[var(--color-text-primary)]">Cloudflare Tunnel</h3>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">
