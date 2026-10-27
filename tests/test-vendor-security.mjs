@@ -48,6 +48,21 @@ test('body-parser rejects malformed compressed bodies and survives a subsequent 
   } finally { await close(server); }
 });
 
+test('body-parser survives trailing frames after a completed gzip body', async () => {
+  const parse = require('body-parser').json();
+  const {server, url} = await listening((req, res) => parse(req, res, error => {
+    res.statusCode = error ? 400 : 200;res.end(error ? 'rejected' : JSON.stringify(req.body));
+  }));
+  try {
+    const payload = Buffer.concat([gzipSync(Buffer.from('{"ok":true}')), Buffer.from([0]), Buffer.alloc(128 * 1024, 0x58)]);
+    const response = await request(url, {method:'POST', agent:false, headers:{'content-type':'application/json','content-encoding':'gzip','content-length':payload.length}}, payload);
+    assert.equal(response.status, 200);assert.deepEqual(JSON.parse(response.text), {ok:true});
+    await new Promise(resolve => setTimeout(resolve, 200));
+    const after = await request(url, {method:'POST',headers:{'content-type':'application/json'}}, '{"after":true}');
+    assert.equal(after.status, 200);
+  } finally { await close(server); }
+});
+
 for (const directory of ['/usr/local/lib/node_modules/npm/node_modules/undici', vendor + '/lib/vscode/node_modules/undici']) {
   test(`undici survives excessive response encodings: ${directory}`, async () => {
     const client = require(directory);

@@ -6,7 +6,7 @@ WORKDIR /app
 # Native modules such as better-sqlite3 can fall back to node-gyp when a
 # prebuilt binary is unavailable. These build-only tools never enter runtime.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 make g++ && \
+    python3 make g++ ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
