@@ -55,6 +55,10 @@ RUN mkdir -p /tmp/ingenium-workspace-dependencies && \
       fi; \
     done
 
+# Build-only package extraction: no install scripts or unpinned dependency resolution.
+FROM builder AS vendor-security
+RUN python3 scripts/prepare-vendor-security.py --manifest config/vendor-security.json --output /vendor-security
+
 FROM node:22-slim AS runtime-base
 
 ARG OPENCODE_VERSION=2.0.11
@@ -89,6 +93,12 @@ RUN curl -fsSL -o /tmp/code-server.tar.gz "https://github.com/coder/code-server/
     ln -s /usr/local/lib/code-server/bin/code-server /usr/local/bin/code-server && \
     code-server --version | grep -Eq '^4\.143\.1([[:space:]]|$)' && \
     rm /tmp/code-server.tar.gz
+# Upstream vendor bundles can lag compatible security patches. Verify expected old
+# identities, registry integrity and all resolved dependency ranges before overlaying.
+COPY --from=vendor-security /vendor-security/ /tmp/ingenium-vendor-security/
+COPY --chown=root:root --chmod=0444 scripts/install-vendor-security.mjs /tmp/install-vendor-security.mjs
+RUN node /tmp/install-vendor-security.mjs /tmp/ingenium-vendor-security && \
+    rm -rf /tmp/ingenium-vendor-security /tmp/install-vendor-security.mjs
 COPY --chown=root:root --chmod=0444 config/vscode-extensions/ingenium.system-theme-defaults/package.json /usr/local/lib/code-server/lib/vscode/extensions/ingenium.system-theme-defaults/package.json
 COPY --chown=root:root --chmod=0444 scripts/validate-vscode-theme-manifest.mjs /tmp/validate-vscode-theme-manifest.mjs
 RUN set -eu; \
