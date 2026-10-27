@@ -148,6 +148,10 @@ function parseLimit(value: unknown): number | null {
 
 export const backupsRouter = Router();
 
+// A verified download retains its buffer until the client finishes or disconnects.
+// Bound aggregate memory even when this installation raises the component limit.
+let downloadInFlight = false;
+
 backupsRouter.post("/", async (req, res) => {
   const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
@@ -340,6 +344,12 @@ backupsRouter.get("/:id", (req, res) => {
 backupsRouter.get("/:id/download", (req, res) => {
   const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
+  if (downloadInFlight) {
+    res.setHeader("Retry-After", "1");
+    res.status(429).json({ error: { code: "BACKUP_DOWNLOAD_BUSY", message: "Another backup download is in progress. Retry shortly." } });
+    return;
+  }
+  downloadInFlight = true;
   try {
     const download = backups.readVerifiedBackupComponent(projectId, req.params.id!);
     res.setHeader("Content-Type", "application/vnd.sqlite3");
@@ -350,7 +360,11 @@ backupsRouter.get("/:id/download", (req, res) => {
     const wipe = () => {
       if (wiped) return;
       wiped = true;
-      backups.wipeBackupDownloadBuffer(download.bytes);
+      try {
+        backups.wipeBackupDownloadBuffer(download.bytes);
+      } finally {
+        downloadInFlight = false;
+      }
     };
     res.once("finish", wipe);
     res.once("close", wipe);
@@ -362,6 +376,7 @@ backupsRouter.get("/:id/download", (req, res) => {
       throw error;
     }
   } catch (error) {
+    downloadInFlight = false;
     if (restoreError(res, error)) return;
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Backup file not found" } });
   }
