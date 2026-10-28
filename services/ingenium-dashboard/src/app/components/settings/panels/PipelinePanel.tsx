@@ -417,8 +417,16 @@ export default function PipelinePanel() {
   const actionableMethods = (selectedIntegration?.methods ?? []).filter((method) => method.type === "key" || method.type === "oauth");
   const selectedNativeProvider = nativeProviders.find((provider) => provider.id === connectProviderId);
 
-  const selectedPrimaryProvider = providers.find((provider) => provider.id === primaryProviderId);
-  const selectedBackupProvider = providers.find((provider) => provider.id === backupProviderId);
+  const synthesisProviders = [
+    ...providers.filter((provider) => provider.enabled),
+    ...connectedNativeProviders.map((provider) => ({
+      id: provider.id, name: provider.label,
+      models: provider.models.map((model) => model.id),
+      defaultModel: provider.defaultModel ?? provider.models[0]?.id ?? "",
+    })),
+  ];
+  const selectedPrimaryProvider = synthesisProviders.find((provider) => provider.id === primaryProviderId);
+  const selectedBackupProvider = synthesisProviders.find((provider) => provider.id === backupProviderId);
 
   if (globalProjectLoading) {
     return <div className="px-6 py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Resolving global provider project...</div>;
@@ -663,7 +671,7 @@ export default function PipelinePanel() {
               Primary
               <Select value={primaryProviderId} onChange={(event) => {
                 setPrimaryProviderId(event.target.value);
-                const model = providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? "";
+                const model = synthesisProviders.find((provider) => provider.id === event.target.value)?.defaultModel ?? "";
                 setPrimaryModelId(model);
                 if (backupProviderId === event.target.value && (!backupModelId || backupModelId === model)) {
                   setBackupProviderId("");
@@ -671,7 +679,7 @@ export default function PipelinePanel() {
                 }
               }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
-                {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
+                {synthesisProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
               </Select>
               <Select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
                 <option value="">Select model</option>
@@ -680,9 +688,9 @@ export default function PipelinePanel() {
             </label>
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Secondary
-              <Select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <Select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(synthesisProviders.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
-                {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
+                {synthesisProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
               </Select>
               <Select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
                 <option value="">Select model</option>

@@ -380,3 +380,28 @@ describe("provider block panel", () => {
     resolveConnect();
   });
 });
+
+describe("native synthesis provider selection", () => {
+  it("selects connected ChatGPT Luna without creating a custom provider or copying credentials", async () => {
+    getProviderConfigs.mockResolvedValue({ data: { providers: [], synthesis: {
+      primary: { providerId: "", modelId: "" }, secondary: { providerId: "", modelId: "" },
+    } } });
+    listProviders.mockResolvedValue({ providers: [{
+      id: "openai", label: "OpenAI", models: [{ id: "gpt-6-luna", label: "GPT-6 Luna" }],
+      defaultModel: "gpt-6-luna", connected: true,
+    }] });
+    listIntegrations.mockResolvedValue({ data: [{
+      id: "openai", name: "OpenAI", methods: [{ id: "chatgpt-browser", type: "oauth" }],
+      connections: [{ type: "credential", label: "ChatGPT" }],
+    }] });
+    render(<PipelinePanel />);
+    await vi.waitFor(() => expect(within(screen.getByLabelText("Primary")).getByRole("option", { name: "OpenAI (openai)" })).toBeTruthy());
+    fireEvent.change(screen.getByLabelText("Primary"), { target: { value: "openai" } });
+    expect((screen.getByLabelText("Primary model") as HTMLSelectElement).value).toBe("gpt-6-luna");
+    fireEvent.click(screen.getByRole("button", { name: "Save providers" }));
+    await vi.waitFor(() => expect(saveProviderConfigs).toHaveBeenCalledTimes(1));
+    expect(saveProviderConfigs).toHaveBeenCalledWith([], "global-default", {
+      primary: { providerId: "openai", modelId: "gpt-6-luna" }, secondary: { providerId: "", modelId: "" },
+    });
+  });
+});

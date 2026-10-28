@@ -12,7 +12,7 @@ export interface ExpandedChatProviderInfo {
   label: string;
   models: ChatModelInfo[];
   defaultModel: string;
-  source: "managed" | "builtin";
+  source: "managed" | "builtin" | "native";
 }
 
 interface ManagedProviderConfig {
@@ -183,6 +183,31 @@ export function getBuiltinChatProvider(result: unknown): ExpandedChatProviderInf
   };
 }
 
+
+/** Project only active, authenticated native provider metadata into browser catalogs. */
+export function getConnectedNativeChatProviders(result: unknown): ExpandedChatProviderInfo[] {
+  if (!isRecord(result) || !Array.isArray(result.all) || !Array.isArray(result.connected)) return [];
+  const connected = new Set(result.connected.filter(isValidChatSelectionIdentifier));
+  return result.all.flatMap((provider): ExpandedChatProviderInfo[] => {
+    if (!isRecord(provider) || provider.id === BUILTIN_CHAT_PROVIDER_ID
+      || !isValidChatSelectionIdentifier(provider.id) || !connected.has(provider.id)
+      || !isRecord(provider.models)) return [];
+    const models = Object.values(provider.models).flatMap((model): ChatModelInfo[] => {
+      if (!isRecord(model) || model.status !== "active" || !isValidChatSelectionIdentifier(model.id)) return [];
+      return [{ id: model.id, label: isSafeChatLabel(model.name) ? model.name : model.id }];
+    });
+    if (!models.length) return [];
+    const selected = isRecord(result.default) ? result.default[provider.id] : null;
+    return [{
+      providerId: provider.id,
+      label: isSafeChatLabel(provider.name) ? provider.name : provider.id,
+      models,
+      defaultModel: models.some((model) => model.id === selected) ? String(selected) : models[0]!.id,
+      source: "native",
+    }];
+  });
+}
+
 export function getManagedPrimaryProvider(
   projectId: string,
   providers: ExpandedChatProviderInfo[],
@@ -277,8 +302,19 @@ export async function getChatProviderCatalog(projectId: string): Promise<{
     };
   }
   const builtinProvider = getBuiltinChatProvider(builtinResult);
+  const nativeProviders = getConnectedNativeChatProviders(builtinResult);
+  // Once a native account is connected, its live catalog replaces legacy
+  // single-model metadata; stale legacy pairs cannot fabricate native models.
+  const configured = configuredProviders.map((provider) => (
+    managedProviders.some((managed) => managed.providerId === provider.providerId)
+      ? provider
+      : nativeProviders.find((native) => native.providerId === provider.providerId) ?? provider
+  ));
   return {
-    providers: builtinProvider ? [...configuredProviders, builtinProvider] : configuredProviders,
+    providers: [
+      ...mergeConfiguredChatProviders(configured, nativeProviders),
+      ...(builtinProvider ? [builtinProvider] : []),
+    ],
     unavailable: null,
   };
 }

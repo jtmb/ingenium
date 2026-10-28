@@ -1,3 +1,4 @@
+import { isAuthenticatedCompatibilityRuntimeAccess } from "../compatibility-runtime-access.js";
 import { Request, Response, NextFunction } from "express";
 import { createHash } from "node:crypto";
 import { authentication } from "ingenium-core";
@@ -201,7 +202,7 @@ export const rateLimit = Object.assign(
       next();
       return;
     }
-    if (isBoundaryAttestedRuntimeGatewayRequest(req)) {
+    if (isBoundaryAttestedRuntimeGatewayRequest(req) || isAuthenticatedCompatibilityRuntimeAccess(req)) {
       runtimeGatewayRateLimiter(req, res, next);
       return;
     }

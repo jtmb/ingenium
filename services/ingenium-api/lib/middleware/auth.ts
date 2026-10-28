@@ -48,6 +48,8 @@ export function isPublicOAuthCallbackRequest(req: Request): boolean {
 }
 
 const PUBLIC_LOCAL_AUTH = new Set([
+  "POST /api/v1/auth/lan-runtime/exchange",
+  "GET /api/v1/auth/lan-runtime/access",
   "GET /api/v1/auth/csrf",
   "HEAD /api/v1/auth/csrf",
   "POST /api/v1/auth/login",

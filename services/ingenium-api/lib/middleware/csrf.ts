@@ -6,6 +6,7 @@ import { AppError } from "./errors.js";
 const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const DASHBOARD_REQUEST_MARKER = "dashboard";
 const PRE_AUTH_PATHS = new Set([
+  "/api/v1/auth/lan-runtime/exchange",
   "/api/v1/auth/login",
   "/api/v1/auth/mfa/challenge",
   "/api/v1/auth/password/forgot",

@@ -1,3 +1,4 @@
+import { issueCompatibilityLaunch } from "../compatibility-runtime-access.js";
 import { Router } from "express";
 import { getDb, runtimes, securityAudit } from "ingenium-core";
 import { z } from "zod";
@@ -293,6 +294,8 @@ runtimesRouter.post("/browser/workspaces/:workspaceId/start", async (req, res) =
     runtimeError(res, error);
   }
 });
+
+runtimesRouter.post("/browser/compatibility-launch", issueCompatibilityLaunch);
 
 runtimesRouter.post("/browser/launch", (req, res) => {
   const parsed = browserLaunchInput.safeParse(req.body);

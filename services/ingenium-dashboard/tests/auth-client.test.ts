@@ -1,5 +1,6 @@
+import { registerSessionReauthentication } from "../src/lib/session-reauthentication";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, dashboardFetch, resetAuthClientForTest } from "../src/lib/api";
+import { api, dashboardFetch, resetAuthClientForTest, setSessionCsrfToken } from "../src/lib/api";
 
 describe("AUTH-103 browser API client", () => {
   beforeEach(() => { resetAuthClientForTest(); vi.restoreAllMocks(); });
@@ -87,5 +88,64 @@ describe("AUTH-103 browser API client", () => {
       "/api/v1/auth/session/csrf",
       "/api/v1/auth/session",
     ]);
+  });
+});
+
+describe("expired step-up recovery", () => {
+  beforeEach(() => { resetAuthClientForTest(); vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
+  it("shows one confirmation for concurrent rejected actions and retries with the rotated CSRF grant", async () => {
+    resetAuthClientForTest();
+    setSessionCsrfToken("before-confirmation");
+    let confirm!: (value: boolean) => void;
+    const prompt = vi.fn(() => new Promise<boolean>((resolve) => { confirm = resolve; }));
+    const unregister = registerSessionReauthentication(prompt);
+    const response = (code?: string) => new Response(JSON.stringify(code ? { error: { code } } : {}), { status: code ? 403 : 200 });
+    const mock = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(response("STEP_UP_REQUIRED"))
+      .mockResolvedValueOnce(response("STEP_UP_REQUIRED"))
+      .mockImplementation(async () => response());
+    try {
+      const first = dashboardFetch("/api/v1/projects/a", { method: "DELETE" });
+      const second = dashboardFetch("/api/v1/projects/b", { method: "DELETE" });
+      await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+      setSessionCsrfToken("after-confirmation");
+      confirm(true);
+      await expect(Promise.all([first, second])).resolves.toMatchObject([{ status: 200 }, { status: 200 }]);
+      expect(mock).toHaveBeenCalledTimes(4);
+      for (const call of mock.mock.calls.slice(2)) expect(call[1]?.headers).toMatchObject({ "X-CSRF-Token": "after-confirmation" });
+    } finally { unregister(); }
+  });
+
+  it("does not replay cancelled confirmation or unrelated authorization failures", async () => {
+    resetAuthClientForTest();
+    setSessionCsrfToken("fixture");
+    const prompt = vi.fn(async () => false);
+    const unregister = registerSessionReauthentication(prompt);
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ error: { code: "STEP_UP_REQUIRED" } }), { status: 403 },
+    ));
+    try {
+      await expect(dashboardFetch("/api/v1/projects/a", { method: "DELETE" })).rejects.toMatchObject({ name: "AbortError" });
+      expect(mock).toHaveBeenCalledTimes(1);
+      mock.mockImplementation(async () => new Response(JSON.stringify({ error: { code: "FORBIDDEN" } }), { status: 403 }));
+      expect((await dashboardFetch("/api/v1/projects/a", { method: "DELETE" })).status).toBe(403);
+      expect(mock).toHaveBeenCalledTimes(2);
+      expect(prompt).toHaveBeenCalledTimes(1);
+    } finally { unregister(); }
+  });
+
+  it("surfaces a second step-up rejection without looping", async () => {
+    resetAuthClientForTest();
+    const prompt = vi.fn(async () => true);
+    const unregister = registerSessionReauthentication(prompt);
+    const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ error: { code: "STEP_UP_REQUIRED" } }), { status: 403 },
+    ));
+    try {
+      expect((await dashboardFetch("/api/v1/opencode/sessions")).status).toBe(403);
+      expect(mock).toHaveBeenCalledTimes(2);
+      expect(prompt).toHaveBeenCalledTimes(1);
+    } finally { unregister(); }
   });
 });

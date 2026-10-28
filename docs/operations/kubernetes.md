@@ -57,3 +57,39 @@ The complete workspace inventory is 79,895,206,614 apparent bytes across 114 ent
 ### Expired browser sessions
 
 The page proxy no longer treats a cookie's presence as proof of a live session when visiting login or bootstrap. A revoked/expired cookie previously redirected login back to a protected page; the API then sent the browser back to login, eventually producing gateway 429 responses. Public authentication pages now remain reachable, while API session validation, CSRF, login throttles and return-target validation remain authoritative. The focused dashboard proxy/authentication suite passes 52 tests, including stale-cookie recovery; verify real HTTP 200 on login and 401 on protected API requests with an invalid cookie after adoption.
+
+## Production LAN feature audit
+
+A connected native ChatGPT account must appear in the Chat catalog and the synthesis
+provider selector. Native selections use the existing OpenCode credential, not a
+custom endpoint or copied API key. The requested saved model is openai/gpt-6-luna;
+the operator must verify a new response and a complete proposal/approval/activation
+cycle before recording acceptance.
+
+The browser shell handles STEP_UP_REQUIRED through one confirmation dialog shared
+by concurrent requests. It retries once only after confirmation with the rotated
+CSRF grant; cancellation, aborted streams and unrelated authorization failures do
+not replay protected actions.
+
+The compatibility deployment can opt into separate HTTPS editor origins with
+NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN at build time and
+INGENIUM_COMPATIBILITY_RUNTIME_ROOT_DOMAIN at runtime. The dashboard issues a
+60-second, single-use proof bound to an administrator session and one exact
+audience. The child origin exchanges that proof for a host-only HttpOnly cookie;
+its 30-minute grant never authenticates dashboard APIs. Every HTTP request and
+WebSocket upgrade validates the parent session, security epoch, administrator role
+and audience. Revocation and process restart invalidate grants. Nginx strips all
+cookies before forwarding to the editors, validates browser origins and preserves
+the upstream VS Code workbench CSP. These are opt-in operator routes, independent
+of the public information tunnel; never expose the raw editor or API ports.
+
+Production acceptance requires the full sidebar feature matrix, ordinary login,
+fresh Chat inference, saved model persistence, full synthesis lifecycle, real Gmail
+send/receive, editor file and terminal checks, and independent backup verification.
+An HTTP200, a page load or an All healthy banner alone does not establish these
+requirements. Record partial and failed checks honestly.
+
+The retired Windows/WSL source container is removed without --force or --volumes.
+Its named volumes, bind-mounted data and exact rollback image remain preserved;
+unique writable settings were authenticated-encrypted and independently read back
+before removal. No original workstation files or installation keys are deleted.

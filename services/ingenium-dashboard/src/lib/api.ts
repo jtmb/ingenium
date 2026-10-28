@@ -1,3 +1,4 @@
+import { requestSessionReauthentication } from "./session-reauthentication";
 import {
   DASHBOARD_MARKER_HEADER,
   DASHBOARD_MARKER_VALUE,
@@ -268,9 +269,17 @@ export function dashboardFetch(
     // middleware rejection proves that no mutation handler has executed.
     const replayable = !(input instanceof Request && input.body !== null)
       && !(typeof ReadableStream !== "undefined" && options?.body instanceof ReadableStream);
-    if (!needsSessionCsrf || response.status !== 403 || !replayable || options?.signal?.aborted) return response;
+    if (response.status !== 403 || !replayable || options?.signal?.aborted) return response;
     const rejected = await response.clone().json().catch(() => null);
-    if (rejected?.error?.code !== "CSRF_REJECTED") return response;
+    if (rejected?.error?.code === "STEP_UP_REQUIRED" && path !== "/api/v1/auth/step-up") {
+      // This rejection precedes the protected handler. Retry exactly once after
+      // explicit reauthentication, using the rotated session CSRF grant.
+      const confirmed = await requestSessionReauthentication();
+      if (confirmed === null || options?.signal?.aborted) return response;
+      if (!confirmed) throw new DOMException("Authentication confirmation was cancelled.", "AbortError");
+      return send(needsSessionCsrf ? await bootstrapSessionCsrf() : null);
+    }
+    if (!needsSessionCsrf || rejected?.error?.code !== "CSRF_REJECTED") return response;
     if (sessionCsrfToken === csrfToken) sessionCsrfToken = null;
     // A concurrent renewal or step-up may already have supplied a newer grant.
     // Replay once only; authorization failures and further CSRF failures surface.
@@ -1592,7 +1601,7 @@ export interface ChatProviderInfo {
   label: string;
   models: ChatProviderModel[];
   defaultModel: string;
-  source: "managed" | "builtin";
+  source: "managed" | "builtin" | "native";
 }
 
 export interface ChatConfigResponse {
@@ -1774,7 +1783,7 @@ function normalizeChatProvider(value: unknown): ChatProviderInfo | null {
     label: apiString(value.label ?? value.name, providerId),
     models,
     defaultModel: apiString(value.defaultModel, models[0]?.id ?? ""),
-    source: value.source === "builtin" ? "builtin" : "managed",
+    source: value.source === "builtin" ? "builtin" : value.source === "native" ? "native" : "managed",
   };
 }
 

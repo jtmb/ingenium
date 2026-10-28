@@ -463,3 +463,24 @@ describe("RUNTIME-100 dashboard runtime selection", () => {
     expect(document.body.innerHTML).not.toMatch(/backend|storagePath|ownerUserId|projectId|\/srv\//i);
   });
 });
+
+describe("HTTPS LAN compatibility launch", () => {
+  afterEach(() => { vi.unstubAllEnvs(); });
+  it("exchanges a proof for the exact audience before exposing the iframe URL", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RUNTIME_ROOT_DOMAIN", "ingenium.example.test");
+    vi.stubGlobal("window", new Proxy(window, { get: (target, key) => key === "location" ? { protocol: "https:", hostname: "ingenium.example.test" } : Reflect.get(target, key, target) }));
+    const exchange = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", exchange);
+    apiRequest
+      .mockResolvedValueOnce({ data: { mode: "compatibility", status: "ready", reason: null } })
+      .mockResolvedValueOnce({ data: { status: "ready" } })
+      .mockResolvedValueOnce({ data: { status: "ready", launchUrl: "https://vscode.ingenium.example.test/__ingenium/exchange" } });
+    const { result } = renderRuntime("vscode");
+    await waitFor(() => expect(result.current.launch.status).toBe("ready"));
+    expect(apiRequest).toHaveBeenCalledWith("/runtimes/browser/compatibility-launch", expect.objectContaining({ method: "POST" }));
+    expect(exchange).toHaveBeenCalledWith("https://vscode.ingenium.example.test/__ingenium/exchange", expect.objectContaining({
+      method: "POST", credentials: "include",
+    }));
+    expect(result.current.launch.url).toBe("https://vscode.ingenium.example.test/");
+  });
+});
