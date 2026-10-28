@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "revision": "b47765e4a9f5c124c4716deb52962e17d7fb4a2a",
+  "lockSha256": "fcd849d70385cfacfc8310d978ebd1c30453c8df029928ec906fe54605dcb0e7",
+  "skills": [
+    {
+      "name": "agent-orchestration",
+      "path": ".opencode/skills/agent-orchestration/SKILL.md",
+      "description": "Coordinate mandatory bounded subagents for repository change, review, correction, and release work while preserving parent ownership, independent verification, and separate commit and push approvals.",
+      "contentSha256": "dabb124cdb717d8ba0d4fa6292966fae100022d020c5861c44330bd16115fb23"
+    },
+    {
+      "name": "app-setup",
+      "path": ".opencode/skills/app-setup/SKILL.md",
+      "description": "Install, configure, update, verify, and safely remove desktop or CLI applications on Ubuntu. Use when the user asks to install, set up, update, configure, uninstall, or make an application work. Treat acceptance tests, preserved settings, and rollback as part of completion.",
+      "contentSha256": "1f6b6e7c8adf9d6c5031630fab4fa63249938b107edaa288fc161ec1fbdebf0b"
+    },
+    {
+      "name": "blender",
+      "path": ".opencode/skills/blender/SKILL.md",
+      "description": "Operate Blender 5.0 on Ubuntu for safe scene inspection, scripted edits, versioned saves, rendering, and import or export verification. Use when the user asks to inspect or modify a .blend file, run Blender Python, render a scene, automate Blender from the shell, or verify a 3D export.",
+      "contentSha256": "a0d84348e87ed770a4667c56f2f7fd392188d6a9e421f1a384e6dafab595a2a8"
+    },
+    {
+      "name": "browser-assistant",
+      "path": ".opencode/skills/browser-assistant/SKILL.md",
+      "description": "Interact with the user's visible browser. On native Ubuntu, launch the browser the user names (for example Chrome) explicitly and verify it; on WSL, use the bounded Windows UI Automation bridge. Use for live interactive browser work; fail closed if the requested browser or bridge is unavailable. Prefer webfetch/websearch for read-only research.",
+      "contentSha256": "cb799f8ab92b2c9ded40dba8eac168bed54487a1f4e010cbf013e99ad29c3a4b"
+    },
+    {
+      "name": "browser-headless",
+      "path": ".opencode/skills/browser-headless/SKILL.md",
+      "description": "Run isolated browser tasks through headless Playwright Firefox with no visible window. Use ONLY when the user explicitly asks for headless browsing, background browser automation, or a non-interactive Playwright task. Use browser-assistant for visible work on native Ubuntu or over the WSL bridge; fail closed if the requested path is unavailable.",
+      "contentSha256": "5a05c1817814aa884e290706e1213beb02021c07be96c9c7367fede19f3153b9"
+    },
+    {
+      "name": "desktop-control",
+      "path": ".opencode/skills/desktop-control/SKILL.md",
+      "description": "Inspect and operate non-browser GNOME desktop applications through AT-SPI, using desktop screenshots to verify each GUI action. Use when the user asks to click, type, open, close, configure, or otherwise interact with a desktop application or dialog.",
+      "contentSha256": "7016c018081cc8bce1cbcd396bb6d962e445a71ccc78141ddc54ce822484aa91"
+    },
+    {
+      "name": "desktop-vision",
+      "path": ".opencode/skills/desktop-vision/SKILL.md",
+      "description": "Let the assistant see a GNOME or WSL/Windows desktop through the bounded vision_capture tool. Native GNOME uses its trusted screenshot shortcut; WSL uses an in-memory PNG from the checked-in Windows host. Use when the user says see the screen, screenshot, look at my display, what's on my screen, verify visually, or when GUI work needs eyes on the result.",
+      "contentSha256": "2cd1e744ed7975f019e87f4c4191b28deeb1c9b57e1bce8ee1894543ed0476a7"
+    },
+    {
+      "name": "development-conventions",
+      "path": ".opencode/skills/development-conventions/SKILL.md",
+      "description": "Apply action-oriented conventions for source code, tests, documentation, APIs, Next.js, Python, Go/Rust, regex, Mermaid, gitignore, web/UI, and OpenCode v2 operations. Use for implementation or review in those domains.",
+      "contentSha256": "4517df68b4fa8c4837a3c92c63d5876ed64e2cb349e7f8a67207379ac653d7b8"
+    },
+    {
+      "name": "fanduel-parlay-research",
+      "path": ".opencode/skills/fanduel-parlay-research/SKILL.md",
+      "description": "Research FanDuel NHL and NBA game lines and player props, compare them with injuries, goalies, and team stats, and build a payout-versus-probability parlay with prices verified in the betslip. Use when the user asks for a FanDuel parlay, sportsbook odds research, player-prop comparison, or a same-game parlay ticket.",
+      "contentSha256": "37eed5fd38743d2bb553e50640efb1714751ae589b3b13d2be86a22d34d565c8"
+    },
+    {
+      "name": "files-and-documents",
+      "path": ".opencode/skills/files-and-documents/SKILL.md",
+      "description": "Find, inspect, organize, rename, summarize, and export local files and documents while preserving originals. Use when the user asks to find a file, organize Downloads, summarize a PDF, rename files, create notes, or prepare a document/export.",
+      "contentSha256": "58b848c0789c28594067648a3df4bb518f3bdd25b2dcc1f5638eecaa088013da"
+    },
+    {
+      "name": "game-playtest",
+      "path": ".opencode/skills/game-playtest/SKILL.md",
+      "description": "Playtest browser games with accessibility-first inspection, bounded input, mandatory canvas or WebGL screenshots, representative state coverage, console review, responsive checks, and severity-ordered findings. Use when the user asks for a browser-game smoke test, gameplay QA, visual verification, HUD review, or reproducible bug report.",
+      "contentSha256": "23f4ec8272384ed1e2b70f5571b03e15b2d0f9e09c622330050306ee05a0b175"
+    },
+    {
+      "name": "github-operations",
+      "path": ".opencode/skills/github-operations/SKILL.md",
+      "description": "Inspect GitHub repositories, code, issues, pull requests, checks, and releases, and perform explicitly approved remote changes. Use when the user mentions GitHub, a GitHub URL, repository, issue, pull request, review, release, or GitHub Actions.",
+      "contentSha256": "e43298c74b270087426933d9afe06c7b5024440b45734176d9ee051e0450e019"
+    },
+    {
+      "name": "handoff",
+      "path": ".opencode/skills/handoff/SKILL.md",
+      "description": "Refresh the HANDOFF.md in the current working directory so a new OpenCode v2 session can continue safely. Use when the user asks to update the handoff, finish a session handoff, preserve live state, or carry cluster/backup work into a fresh chat.",
+      "contentSha256": "dbd75159f38bec076f2f2e27e866601ad4c612e0a3330d2f3e9536786156843e"
+    },
+    {
+      "name": "opencode-db-maintenance",
+      "path": ".opencode/skills/opencode-db-maintenance/SKILL.md",
+      "description": "Diagnose and reclaim opencode.db SQLite disk usage when the database fills the disk (event-table bloat, freelist pages, VACUUM, prune); back up chats to opencode-backups and manage the weekly maintenance cron job. Use ONLY when the user mentions opencode database size, opencode.db disk space, opencode.db, VACUUM, prune, chat backup, opencode-backups, maintenance cron, or DB maintenance.",
+      "contentSha256": "747a4154062974fd30fbb351ec28ed5382e1917ff1772f4cbd6ddc13c8a956a4"
+    },
+    {
+      "name": "repo-onboarding",
+      "path": ".opencode/skills/repo-onboarding/SKILL.md",
+      "description": "The repo-onboarding skill helps agents onboard downstream consumer repositories: OpenCode v2, opencode.json, MCP servers, Basic Memory, and set up a safe integration. Use for consumer-repository migration, agent/model setup, or verification against the computer-use harness.",
+      "contentSha256": "4fcb9be988fb0bae0a284f730e1a7f0030c2dcffa6265af01d349fa8e172ae6c"
+    },
+    {
+      "name": "routine-automation",
+      "path": ".opencode/skills/routine-automation/SKILL.md",
+      "description": "Turn a confirmed recurring computer task into an idempotent script and optional schedule with logs, locking, dry-run behavior, verification, and rollback. Use when the user asks to automate, schedule, run regularly, create a cron job, timer, recurring backup, or reusable setup procedure.",
+      "contentSha256": "626c3a73110c4760885cf8db088664e496ffa9385f8a49e8863fd80286300b21"
+    },
+    {
+      "name": "session-context",
+      "path": ".opencode/skills/session-context/SKILL.md",
+      "description": "Retrieve bounded, read-only context from other OpenCode sessions in the current project. Use when the user asks to continue, compare, align, or recover work across sessions, or mentions another session by title or ID.",
+      "contentSha256": "5dabb587b75e3725f7553d2e36d4101acc475ce8f910be1b374bdd434e68ea5f"
+    },
+    {
+      "name": "skill-maintenance",
+      "path": ".opencode/skills/skill-maintenance/SKILL.md",
+      "description": "Create, update, audit, catalog, deploy, rename, or retire OpenCode skills in this repository. Use when skill coverage is missing or stale, a SKILL.md or reference bundle changes, skills/README.md drifts, deployment needs verification, or the user requests skill maintenance.",
+      "contentSha256": "7fa5cf1a3aeef69174082380e34cbd2eeb2da5adab92c19217cd9b7494a7e31c"
+    },
+    {
+      "name": "system-troubleshooting",
+      "path": ".opencode/skills/system-troubleshooting/SKILL.md",
+      "description": "Diagnose Ubuntu desktop problems such as slowness, crashes, failed services, audio, networking, storage, permissions, and application launch failures. Use when the user says fix, broken, slow, crash, no sound, network issue, service failed, or provides an error report.",
+      "contentSha256": "f30f6892f8cb69ab193b18603d359aecc4b49693ac1e330acca438aaae094774"
+    },
+    {
+      "name": "task-memory",
+      "path": ".opencode/skills/task-memory/SKILL.md",
+      "description": "Store and retrieve durable user preferences, verified computer facts, workflow decisions, and pending tasks in the local Basic Memory knowledge base. Use when the user says remember, forget, continue later, what did we decide, or when durable context would prevent repeated setup. Never store credentials or full private conversations.",
+      "contentSha256": "382f9805bf3506718d84107de6490b28a82a5661e0af43046a7b1a5ea269ff72"
+    },
+    {
+      "name": "vscode-management",
+      "path": ".opencode/skills/vscode-management/SKILL.md",
+      "description": "Install, update, configure, operate, test with the integrated browser, and troubleshoot Microsoft Visual Studio Code on Ubuntu. Use when the user mentions VS Code, Visual Studio Code, the code command, editor settings, profiles, workspaces, extensions, the integrated terminal or browser, in-editor web testing, or VS Code startup and performance problems.",
+      "contentSha256": "48dd7541b6bf5ff1dcf496a73db1becf2ad6433c0c4ec9d86cb710af8e96f528"
+    },
+    {
+      "name": "web-3d-asset-pipeline",
+      "path": ".opencode/skills/web-3d-asset-pipeline/SKILL.md",
+      "description": "Prepare and verify runtime-ready 3D assets for browser projects, including pivots, units, transforms, hierarchy, naming, materials, textures, GLB export, clean reimport, optional approved compression, and browser load checks. Use when the user asks to clean, optimize, export, or validate a web 3D asset.",
+      "contentSha256": "a639a7d9f9dc4a1cd4fc435864c04dcb71fa82b3146c0f9e69ca4a43d68c922f"
+    },
+    {
+      "name": "websearch",
+      "path": ".opencode/skills/websearch/SKILL.md",
+      "description": "Configure, verify, and troubleshoot OpenCode v2 web search across the Exa, Firecrawl, Parallel, Tavily, and TinyFish providers, and use websearch/webfetch for current-information research. Use when the user asks for web search, current information, provider setup, missing search tools, or search failures.",
+      "contentSha256": "bb0aaa99fbea68f1ed5e8a8f5f0b81f102f3ba9e441a6086abfb631fcd6f9bd7"
+    }
+  ]
+}

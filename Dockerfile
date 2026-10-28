@@ -268,6 +268,8 @@ COPY --chown=root:root .opencode/agents ./.opencode/agents
 COPY --chown=root:root .opencode/commands ./.opencode/commands
 COPY --chown=root:root .opencode/skills ./.opencode/skills
 COPY --from=computer-use --chown=root:root /external/computer-use /usr/local/share/veyra/computer-use
+COPY --chown=root:root config/computer-use-plugin /usr/local/share/veyra/computer-use-plugin
+COPY --chown=root:root config/computer-use.lock.json /usr/local/share/veyra/computer-use.lock.json
 COPY --chown=root:root config/opencode-managed ./config/opencode-managed
 # Copy database migrations (needed for incremental DB upgrades)
 COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
@@ -304,7 +306,7 @@ RUN mkdir -p /home/ingenium-vscode/vscode-data/user-data /home/ingenium-vscode/v
     chown -R ingenium-vscode:ingenium-vscode /home/ingenium-vscode/vscode-data
 # Compose overlays `/app/opencode.json` with repository configuration. Keep the
 # generated image fallback under `/app/config` when that mount hides the root copy.
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":[".opencode/skills","/usr/local/share/veyra/computer-use/.opencode/skills"],"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail","/app/packages/ingenium-extension/plugins/v2/goal"]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":[".opencode/skills"],"mcp":{"servers":{"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"},"disabled":false}}},"plugins":["/usr/local/share/veyra/computer-use-plugin","/app/packages/ingenium-extension/plugins/v2/auto-observer","/app/packages/ingenium-extension/plugins/v2/observer","/app/packages/ingenium-extension/plugins/v2/resource-sync","/app/packages/ingenium-extension/plugins/v2/lifecycle","/app/packages/ingenium-extension/plugins/v2/ponytail","/app/packages/ingenium-extension/plugins/v2/goal"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown root:root /app/config/opencode.container.json /app/opencode.json && \
   chmod 0444 /app/config/opencode.container.json /app/opencode.json

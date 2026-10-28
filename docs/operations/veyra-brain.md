@@ -13,7 +13,7 @@ python3 -B scripts/prepare-computer-use.py \
 
 For a previously fetched source checkout, add `--source /chosen/computer-use-checkout`. Every installed file is checked against the pinned Git blob and size. An altered reference, incomplete skill catalog or existing output directory fails before installation. The source checkout is never patched. The image packages the result at `/usr/local/share/veyra/computer-use`.
 
-Veyra's managed OpenCode configuration includes the external `.opencode/skills` path alongside its own skills. The pinned `@opencode/schema` 2.0.11 defines `skills` as an array of strings; validate configuration against that installed schema, rather than another OpenCode version's `skills.paths` format. Windows and WSL consumers must use their actual dependency paths. Do not apply the dependency's global deployment/onboarding scripts to a Veyra installation.
+Veyra's managed OpenCode configuration retains its own skills and loads the portable `veyra.computer-use` consumer plugin. The consumer registers all 23 external skills with `computer-use:` IDs and names, preserving the original files, bodies and reference trees. This prevents collisions with Veyra's own `development-conventions` and `skill-maintenance`. It verifies the entire pinned file closure before registering any skill and refuses a conflicting namespaced owner. The pinned `@opencode/schema` 2.0.11 defines `skills` as an array of strings; validate configuration against that installed schema, rather than another OpenCode version's `skills.paths` format. Windows and WSL consumers must use their actual dependency paths. Do not apply the dependency's global deployment/onboarding scripts to a Veyra installation.
 
 ## Runtime acceptance
 
@@ -21,7 +21,7 @@ Restart the parent OpenCode process after configuration changes. Verify discover
 
 Keep the existing Goal integration once, outside ordinary Chat. Retain the protected broker and existing model/profile credentials. Skill discovery does not install browser/GitHub tools, grant credentials or qualify their capabilities. Some pinned setup/reference instructions describe older bootstrap/browser paths; check the actual pinned launchers and Veyra's platform adapters before following them.
 
-Current status: package closure and rejection checks pass; fresh runtime discovery/loading remains pending in both editions.
+Current status: package closure, collision preservation and modified-reference/symlink rejection checks pass. A fresh WSL OpenCode 2.0.11 process discovered all 23 namespaced skills alongside all eight Veyra skills and activated the exact pinned development-conventions body with resume disabled and no inference. Native persistent-profile and cluster-image qualification remain open.
 
 ## Rollback
 

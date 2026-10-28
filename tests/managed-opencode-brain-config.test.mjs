@@ -13,7 +13,9 @@ test('managed and image fallback configuration use the pinned OpenCode schema', 
   const fallback = JSON.parse(match[1]);
   for (const configuration of [managed, fallback]) {
     Schema.decodeUnknownSync(Config.Info)(configuration);
-    assert.ok(configuration.skills.includes('/usr/local/share/veyra/computer-use/.opencode/skills'));
+    assert.ok(configuration.skills.includes('.opencode/skills'));
+    assert.ok(!configuration.skills.some(path => path.includes('/computer-use/')));
+    assert.equal(configuration.plugins.filter(plugin => plugin === '/usr/local/share/veyra/computer-use-plugin').length, 1);
     assert.equal(configuration.plugins.filter(plugin => typeof plugin === 'string' && plugin.endsWith('/goal')).length, 1);
   }
   assert.throws(() => Schema.decodeUnknownSync(Config.Info)({ skills: { paths: ['/external/skills'] } }));
