@@ -1,0 +1,745 @@
+{
+  "schemaVersion": 1,
+  "status": "User-directed screenshot acceptance contract; implementation acceptance pending",
+  "sourceRevision": "a1f5bfed98832bc09341c193f60ee02468fde8f5",
+  "routeCount": 38,
+  "settingsCount": 20,
+  "viewCount": 47,
+  "brand": {
+    "asset": "brand/veyra-blue.png",
+    "sha256": "32ceafc18f6e9a1174c5340eb396c686c296e1998a816b0d1acce010e9a98d92",
+    "override": "Replace temporary V/flower/text-only mascot marks; upstream OpenCode branding remains unchanged"
+  },
+  "settingsSections": {
+    "General": "settings-general-v2",
+    "Account": "settings-account",
+    "Security": "settings-security",
+    "Sessions": "settings-sessions",
+    "API tokens": "settings-api-tokens",
+    "Organizations": "organizations",
+    "Projects": "projects",
+    "Skills": "skills",
+    "Tasks": "tasks",
+    "Jobs": "jobs",
+    "Plugins": "plugins",
+    "Mail": "settings-mail",
+    "Agents": "agents",
+    "MCP": "mcp-current-v2",
+    "Config": "config-current-v2",
+    "Observations": "observations",
+    "Personality": "personality",
+    "Providers": "settings-providers-schedule-v2",
+    "Cloudflare": "settings-cloudflare",
+    "Logs": "logs"
+  },
+  "views": [
+    {
+      "id": "home",
+      "title": "Home",
+      "route": "/",
+      "asset": "screens/home.png",
+      "sha256": "37a86b1f1522033a5ecc79dc25d94499845ef7e43fe21073b7ac86658d0c5bc3",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "chat-reference-v3",
+      "title": "Chat — reference standard",
+      "route": "/chat",
+      "asset": "screens/chat-reference-v3.png",
+      "sha256": "897a197af01e26e835e8b52c57e75782640c74c5a23a359f4bb3f910587efd4e",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "opencode-upstream-actual",
+      "title": "OpenCode — actual unchanged upstream UI",
+      "route": "/opencode",
+      "asset": "screens/opencode-upstream-actual.png",
+      "sha256": "7abcf0df1c20706af1e3bc349efe630e1dcfde49ddef99a7aaa6f8d27a76b606",
+      "width": 1280,
+      "height": 720,
+      "kind": "unchanged upstream reference",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "vscode",
+      "title": "VS Code",
+      "route": "/vscode",
+      "asset": "screens/vscode.png",
+      "sha256": "78fa4a1e60fc6676e2c2c788b1a543d3192e691c1de1beebc15aecd27bf93fa9",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "mail",
+      "title": "Mail",
+      "route": "/mail",
+      "asset": "screens/mail.png",
+      "sha256": "c3e33c2be287117c0ad43d17c62e8d00a23e304274799affb636b0338268ae2f",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "tasks",
+      "title": "Tasks",
+      "route": "/tasks",
+      "asset": "screens/tasks.png",
+      "sha256": "5c6006ec6d50a404f442fc412de27ad17a737295fcc1c7007f23e6eb990065fc",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "docs",
+      "title": "Docs",
+      "route": "/docs",
+      "asset": "screens/docs.png",
+      "sha256": "ef474ca02d5ca91f5d16336e4f4007f4d4e5bc22e60c699d8a5c70df5f1fb484",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "skills",
+      "title": "Skills",
+      "route": "/skills",
+      "asset": "screens/skills.png",
+      "sha256": "f2d2cb18adc83b0db79aee67d7434cfe83ea69199d3917bd2a0d3a47a4bbaa82",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "agents",
+      "title": "Agents",
+      "route": "/agents",
+      "asset": "screens/agents.png",
+      "sha256": "639e866e630022b6cf0ea557713c9f8a55ff17193c07a5009ddfb532b534243b",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "observations",
+      "title": "Observations",
+      "route": "/observations",
+      "asset": "screens/observations.png",
+      "sha256": "033a35d0cc77ec668d0ce97da1e20d2317102d8359fdb5f52db389437830bef9",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "personality",
+      "title": "Personality",
+      "route": "/personality",
+      "asset": "screens/personality.png",
+      "sha256": "be51e882f04f86d7b541c7673b79fb16af725c7a47c716478ab001dc0210d647",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "context-current-v2",
+      "title": "Context — conversations, saved memory and checkpoints",
+      "route": "/context",
+      "asset": "screens/context-current-v2.png",
+      "sha256": "bdd41487903e0d2904e0c826a0ea764c6d2a5cbf676206ce63ae4de59da5da83",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "pipeline",
+      "title": "Pipeline",
+      "route": "/pipeline",
+      "asset": "screens/pipeline.png",
+      "sha256": "f8dfcb140666462d4a59323d46e593fda7452d6bc593a67b16aa67b70c56ed58",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "jobs",
+      "title": "Jobs",
+      "route": "/jobs",
+      "asset": "screens/jobs.png",
+      "sha256": "f1166e40b694d5e52926db8dac620a0686203c88d6ee304c2dfffaf5e75762d4",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "backups-current-v2",
+      "title": "Backups — existing create, download, delete and schedules",
+      "route": "/backups",
+      "asset": "screens/backups-current-v2.png",
+      "sha256": "92006bebe69902febed29ae3c99338419a8f1fd03eea799ee6fab8d2f6056479",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "logs",
+      "title": "Logs",
+      "route": "/logs",
+      "asset": "screens/logs.png",
+      "sha256": "310445f52979a1365c78114549b2ac9b641304b2d8c38a61c7bfe3a5f30e483a",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "usage",
+      "title": "Usage",
+      "route": "/usage",
+      "asset": "screens/usage.png",
+      "sha256": "6f6c0967131f1254fb8dabeaba5b59ce0f142fa6aed249aa2b34495a865223fc",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "status-current-v2",
+      "title": "Status — full service and application health",
+      "route": "/status",
+      "asset": "screens/status-current-v2.png",
+      "sha256": "fe7030bdff9bf3435c04ec9b4584b1f0b1a57be1743079507187e52f1e9bd5a3",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "projects",
+      "title": "Projects",
+      "route": "/projects",
+      "asset": "screens/projects.png",
+      "sha256": "75e0cf1ab252af45203adf967d6d79591cea7b7cbd7daa34f1b6ca74d9ae7812",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "organizations",
+      "title": "Organizations",
+      "route": "/organizations",
+      "asset": "screens/organizations.png",
+      "sha256": "865c2a11a988603e6e415c2f83a60d3c28669c15fb960f04107827ef13e28e14",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "plugins",
+      "title": "Plugins",
+      "route": "/plugins",
+      "asset": "screens/plugins.png",
+      "sha256": "1965b5e709efd087848d0edf919e89707add6e4018d7b985d235304504307bbc",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "mcp-current-v2",
+      "title": "MCP — child servers and full tool catalog",
+      "route": "/mcp-servers",
+      "asset": "screens/mcp-current-v2.png",
+      "sha256": "d0c90510c06d88715a03dc7315995ea5574a34f1be281173deb569ca56f6b170",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "config-current-v2",
+      "title": "Config — project and global OpenCode settings",
+      "route": "/config",
+      "asset": "screens/config-current-v2.png",
+      "sha256": "d974f5004093a693b8a96b8d4db9a2e727e3e153882eabcb0dff6f567ba9a51f",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "secrets",
+      "title": "Secrets",
+      "route": "/secrets",
+      "asset": "screens/secrets.png",
+      "sha256": "24893ced47c3e68821f1e0ee97dd157c5852080028fb231be38a79c316365fcf",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-account",
+      "title": "Settings — Account",
+      "route": "/account",
+      "asset": "screens/settings-account.png",
+      "sha256": "3c6ecbb0d41bda92317c57478be1808066ff4f814ff97a94d52a71c90654c612",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-general-v2",
+      "title": "Settings — corrected archive-retention meaning",
+      "route": "/settings",
+      "asset": "screens/settings-general-v2.png",
+      "sha256": "cc96b55f8e735de3b4c54bcfcbb7a49904cec74b282dda4e638310c54d574255",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "standalone-doc",
+      "title": "Standalone document preview",
+      "route": "/standalone",
+      "asset": "screens/standalone-doc.png",
+      "sha256": "4627159502dc8ffc2a90941340cb093afb95a1be99e3216ee154ea4ab93dd841",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "mail-detail",
+      "title": "Mail — full message detail",
+      "route": "/mail/[id]",
+      "asset": "screens/mail-detail.png",
+      "sha256": "b02c9c9de40891bdd0d165a0eb5e7520779f37f44aa56016d8a1f40abedd46f4",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "mail-oauth-callback",
+      "title": "Email connection callback",
+      "route": "/mail/oauth/callback",
+      "asset": "screens/mail-oauth-callback.png",
+      "sha256": "6961545e2475d719c868bac2def1444d17eb2975375dbdcebb4680cb57cd88d7",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "observation-detail",
+      "title": "Observation — full detail and provenance",
+      "route": "/observations/[id]",
+      "asset": "screens/observation-detail.png",
+      "sha256": "c7e69e384510fd2dfffeaffa89ecf7ef47d8df8d23d4755ebabe8cac8309009d",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "oidc-callback",
+      "title": "Identity-provider sign-in callback",
+      "route": "/auth/oidc/callback",
+      "asset": "screens/oidc-callback.png",
+      "sha256": "7885658fcdb437182c972edc16fca59579c05b2efa1be4221facd1c9d0766165",
+      "width": 1584,
+      "height": 993,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "bootstrap",
+      "title": "First-run account setup",
+      "route": "/bootstrap",
+      "asset": "screens/bootstrap.png",
+      "sha256": "01d917ddb9d0209c4dcef4fcdf394db88e44b0497bc2ec172af0b4f0170e7827",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "forgot-password",
+      "title": "Password recovery request",
+      "route": "/forgot-password",
+      "asset": "screens/forgot-password.png",
+      "sha256": "8012381dc82b20e25e6fcf9d768814a93e6be66932202c73cae24428c0c77ebc",
+      "width": 1584,
+      "height": 993,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "invitation",
+      "title": "Organization invitation",
+      "route": "/invitation",
+      "asset": "screens/invitation.png",
+      "sha256": "c08100128d69533a6d795d64674cf26f584c3f68a368505dcd6b50cbcb352b66",
+      "width": 1672,
+      "height": 940,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "login",
+      "title": "Sign in",
+      "route": "/login",
+      "asset": "screens/login.png",
+      "sha256": "6a7d64841600a16bb3e12d77a911705d697a066db0f8934033562a592b139060",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "mfa-clean-v2",
+      "title": "Authenticator verification — no private navigation",
+      "route": "/mfa",
+      "asset": "screens/mfa-clean-v2.png",
+      "sha256": "4a2563012199ff26d76ac516f38a92b6e003afcef9c1f42bee265c273ecfdfec",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "reset-password",
+      "title": "Set a new password",
+      "route": "/reset-password",
+      "asset": "screens/reset-password.png",
+      "sha256": "b6fbd9a1680070f45762ae142c6e27df6b484735e999e910159d72696e0e44f4",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "verify-email",
+      "title": "Email verification",
+      "route": "/verify-email",
+      "asset": "screens/verify-email.png",
+      "sha256": "017a5d95e20a03fe44ae8fa4ecb2ea4051de3daf21649563e7015a3a913b4492",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "chat-conversation-v3",
+      "title": "Chat — conversation",
+      "route": "additional state",
+      "asset": "screens/chat-conversation-v3.png",
+      "sha256": "80b08e72f21b0cc5a04bf012064b7b85631735fda208311ab4fb8d80c7ebb3a2",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "navigation-all-features-v4",
+      "title": "Expanded navigation — corrected model label",
+      "route": "additional state",
+      "asset": "screens/navigation-all-features-v4.png",
+      "sha256": "849a4ee4518396a7c8cf364ab2a94d3d0745635c088ee9f72ce7a7388c0ee4c9",
+      "width": 1672,
+      "height": 941,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "context-saved-memory",
+      "title": "Context — saved memory editing",
+      "route": "additional state",
+      "asset": "screens/context-saved-memory.png",
+      "sha256": "e9cf6fdf04072c19b9a00485a8556cd88ca68a6f31646f46179e5ed627d8d776",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-security",
+      "title": "Settings — Security and recent authentication",
+      "route": "additional state",
+      "asset": "screens/settings-security.png",
+      "sha256": "bc63d110b26aa55ec989cd0a9805aed4d8bc4feca826f6537bbb7577c38963d1",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-sessions",
+      "title": "Settings — Sessions and devices",
+      "route": "additional state",
+      "asset": "screens/settings-sessions.png",
+      "sha256": "c60f18cef6f44a930d92a9fb9e0ae6a6085985ceeeb849bb0dd8434c2ba04505",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-api-tokens",
+      "title": "Settings — scoped API tokens",
+      "route": "additional state",
+      "asset": "screens/settings-api-tokens.png",
+      "sha256": "a6fa5f40d0eeca46605583e3135746dbf6494e8c1d2bb3eed51fc81fa9b5351a",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-providers-schedule-v2",
+      "title": "Settings — providers and synthesis schedule",
+      "route": "additional state",
+      "asset": "screens/settings-providers-schedule-v2.png",
+      "sha256": "d73a45a37e4afacb25188f5ee3110b8ab2dc834c1cdc76868d947b8ef823ef94",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-cloudflare",
+      "title": "Settings — Cloudflare public information tunnel",
+      "route": "additional state",
+      "asset": "screens/settings-cloudflare.png",
+      "sha256": "3b594003c91611f8deb3874eaa80f59c24cb0c3ec950a923742351a2cf940533",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    },
+    {
+      "id": "settings-mail",
+      "title": "Settings — mail credentials, sync and smart replies",
+      "route": "additional state",
+      "asset": "screens/settings-mail.png",
+      "sha256": "01ab1fd09f640ee1d49a8fb37854c7e6fbd5e00304acb2458bf9ce8ae96aa8f2",
+      "width": 1586,
+      "height": 992,
+      "kind": "visual acceptance baseline",
+      "platforms": [
+        "Windows desktop",
+        "Linux web/Docker"
+      ],
+      "controlInventoryGate": "Phase 1 must reconcile every visible control with an existing API or explicit added implementation requirement; no silent omission."
+    }
+  ],
+  "sharedRules": "veyra-visual-contract.md",
+  "excluded": "Rejected/superseded image drafts",
+  "pixelConsistencyStatus": "Intrinsic dimensions and header/sidebar/fixture differences recorded; Phase 1 normalization and comparison required"
+}

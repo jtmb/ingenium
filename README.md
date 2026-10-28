@@ -390,3 +390,7 @@ Ingenium is an evolving local-first developer workspace in active development. T
 - **Observations**: Extractions run automatically on the server side. Manual `ingenium_observe` calls are only needed for exceptional cases.
 
 See the [documentation](#documentation) map above for in-depth guides on each subsystem.
+
+## Veyra transition plan
+
+The planned Windows desktop and Linux Docker editions, screenshot acceptance contract, legacy reuse review and phased Rust direction are documented in the [Veyra delivery plan](docs/plans/veyra-phased-delivery.md). The UI MVP and later migration are not reported as released.

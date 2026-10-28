@@ -50,3 +50,10 @@ docker compose --profile compatibility -p ingenium exec ingenium bash -c "sqlite
 ## Related Documents
 
 - [Database Migrations](../develop/database.md) — Migration file list, WAL safety, manual repair
+
+## Veyra delivery workflow
+
+- [Phased delivery plan](../plans/veyra-phased-delivery.md)
+- [Phase handoff workflow](veyra-phase-workflow.md)
+- [Documentation deliverables](veyra-documentation-plan.md)
+- [Visual contract](../design/veyra-visual-contract.md)

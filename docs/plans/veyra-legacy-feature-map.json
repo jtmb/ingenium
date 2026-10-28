@@ -1,0 +1,742 @@
+[
+  {
+    "id": "F01",
+    "feature": "Windows EXE, installer/portable use, single instance, tray, load/unload/exit",
+    "owner": "V + existing lifecycle extraction",
+    "acceptance": "**A-F01:** Install/launch EXE, restore second instance, close to tray, unload and guarded exit; preserve unrelated processes.",
+    "recommendation": "Reuse Windows",
+    "phases": "1,6",
+    "rationale": "Tauri single-instance/tray/service shell is a better desktop foundation than wrapping a browser tab; installer/runtime lifecycle still needs fresh Windows checks.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F02",
+    "feature": "Codex-style rail, sidebar, task header, composer and polished states",
+    "owner": "V",
+    "acceptance": "**A-F02:** Compare actual workspace screenshots to approved concepts; verify every normal and exceptional interaction state.",
+    "recommendation": "Adopt shared design",
+    "phases": "1",
+    "rationale": "Legacy rail/workspace organization improves Ingenium's dense utility navigation; apply the screenshot contract while retaining every current feature.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F03",
+    "feature": "Keyboard commands, global search, menus, navigation history",
+    "owner": "V",
+    "acceptance": "**A-F03:** Operate commands/search/history through keyboard; retain correct project/task focus after navigation.",
+    "recommendation": "Reuse after testing",
+    "phases": "1",
+    "rationale": "Keyboard palette/search/history work is worth extracting; verify focus, shortcuts and project scope rather than copying test counts.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F04",
+    "feature": "Theme, accent/font customization, scaling and accessibility",
+    "owner": "V",
+    "acceptance": "**A-F04:** Dark/light/system themes, editable fonts, screen-reader navigation and 100–200% scaling pass.",
+    "recommendation": "Reuse appearance/accessibility",
+    "phases": "1,6",
+    "rationale": "Legacy appearance and accessibility UI is broader than current General settings; unify tokens, scaling and keyboard behavior across both builds.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F05",
+    "feature": "Docked/movable tabs, split panes, pop-out and always-on-top windows",
+    "owner": "V",
+    "acceptance": "**A-F05:** Resize/move/split/collapse panes, pop out a view and restore layouts without losing task state.",
+    "recommendation": "Selective desktop reuse",
+    "phases": "6",
+    "rationale": "Tabs/splits/layout recovery are useful; native pop-outs/always-on-top are Windows-specific and should not burden the Linux web MVP.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F06",
+    "feature": "Local projects, projectless tasks, multiple roots and sources",
+    "owner": "O + V",
+    "acceptance": "**A-F06:** Create/open multi-root and projectless tasks; tools and references resolve within recorded roots.",
+    "recommendation": "Combine strengths",
+    "phases": "1,4",
+    "rationale": "Keep Ingenium project/org identity and permissions; reuse richer local multi-root/projectless workspace selection where contracts fit.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F07",
+    "feature": "Pin, rename, archive/restore, read/unread, sections and sorting",
+    "owner": "O + V",
+    "acceptance": "**A-F07:** Pin/rename/archive/restore/read/unread/reorder items; persist and recover sidebar organization.",
+    "recommendation": "Adopt sidebar organization",
+    "phases": "1,6",
+    "rationale": "Pin/rename/archive/read state/sections are more useful than a fixed feature list alone. Preserve the structured Tasks board as a different entity.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F08",
+    "feature": "Import/export chats and project configuration without corrupting originals",
+    "owner": "O + V",
+    "acceptance": "**A-F08:** Round-trip import/export through a new destination; preserve original sessions and reject corrupt formats.",
+    "recommendation": "Combine with preservation",
+    "phases": "2,4",
+    "rationale": "Reuse explicit import/export safety; keep Ingenium's existing data contracts and validate originals survive a new-destination round trip.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F09",
+    "feature": "Native Windows V2 tools and project-scoped terminals",
+    "owner": "O + V; native build gate",
+    "acceptance": "**A-F09:** Complete an actual read/edit/test task and PTY workflow on Windows with WSL unavailable.",
+    "recommendation": "Reuse native adapter",
+    "phases": "1",
+    "rationale": "Native Windows execution/terminal is a real desktop advantage over Linux-only Ingenium; it must work without silently choosing WSL.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F10",
+    "feature": "WSL distro selection, attach/reconnect, Linux tools and terminals",
+    "owner": "O + V",
+    "acceptance": "**A-F10:** Complete an Ubuntu task/terminal; disconnect/reconnect retains distro, user, directory and session.",
+    "recommendation": "High-priority reuse",
+    "phases": "1",
+    "rationale": "Distro/user/workdir-aware WSL workspace and command-journal source is substantial and valuable; latest whole-service/WSL gates are still open.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F11",
+    "feature": "Per-project/per-task environment and shell selection",
+    "owner": "O + V",
+    "acceptance": "**A-F11:** Project defaults and task overrides execute the chosen shell/environment without silently moving active work.",
+    "recommendation": "Adopt explicit environment",
+    "phases": "1",
+    "rationale": "Windows/WSL/cluster selection and task overrides should be visible and stable; Ingenium's current embedded surfaces obscure these distinctions.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F12",
+    "feature": "Safe session/worktree handoff between execution locations",
+    "owner": "O + V",
+    "acceptance": "**A-F12:** Handoff preserves source snapshot and files; verify destination; fail conflicts without source deletion.",
+    "recommendation": "Selective reuse",
+    "phases": "6",
+    "rationale": "Verified snapshot handoff can improve portability, but build on qualified worktree primitives; do not revive discarded multichat orchestration.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F13",
+    "feature": "Streaming chat, Markdown/code, progress and collapsible tool activity",
+    "owner": "O + V",
+    "acceptance": "**A-F13:** Stream real messages/tools, expand details, render Markdown/code safely, recover long history.",
+    "recommendation": "Combine upstream and Veyra",
+    "phases": "1,2",
+    "rationale": "Use the accepted simple Chat design and actual streaming/tool activity; keep upstream OpenCode Web instead of rebuilding its conversation UI.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F14",
+    "feature": "File/folder/image attachments, drag/drop, paste and references",
+    "owner": "O + V",
+    "acceptance": "**A-F14:** Attach/paste/drop files, folders and images; show scope/size errors and preserve attachment identity.",
+    "recommendation": "Reuse integrity/UX",
+    "phases": "1,6",
+    "rationale": "Legacy attachment identity, drag/drop and save/recovery controls improve usability; current skill-upload auth/network errors need specific reporting.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F15",
+    "feature": "Model/provider, agent mode, reasoning and sampling controls",
+    "owner": "O + V; show actual supported options",
+    "acceptance": "**A-F15:** Persist supported model/reasoning/sampling controls; unsupported capabilities stay accurately labelled.",
+    "recommendation": "Keep actual catalog",
+    "phases": "1,2",
+    "rationale": "Current Ingenium native provider/model catalog and explicit Luna target are preferable to copying legacy or computer-use model settings.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F16",
+    "feature": "Plan/build/review modes and custom agents",
+    "owner": "O + V",
+    "acceptance": "**A-F16:** Plan is non-mutating; build edits; review reports findings; configured custom agents route correctly.",
+    "recommendation": "Retain permission distinction",
+    "phases": "2,4",
+    "rationale": "Keep Ingenium agent management and upstream mode semantics. Verify read-only plan/review vs build; model labels in images are fixtures.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F17",
+    "feature": "Interrupt, steer, queue/edit/cancel follow-ups and resume work",
+    "owner": "O + V",
+    "acceptance": "**A-F17:** Steer/interrupt/queue/edit/cancel/resume at supported boundaries without duplicated prompt admission.",
+    "recommendation": "Reuse recovery patterns",
+    "phases": "1,6",
+    "rationale": "Steering/queued follow-up state and uncertain-submit recovery are stronger UX than generic retry. Avoid duplicate admission after disconnect.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F18",
+    "feature": "Interactive questions, forms and approval decisions",
+    "owner": "O + V",
+    "acceptance": "**A-F18:** Restore and answer questions/forms/permissions once; stale replies cannot grant broader access.",
+    "recommendation": "Combine auth/approval work",
+    "phases": "1,2",
+    "rationale": "Legacy retained decisions are useful; preserve Ingenium step-up/broker/RBAC enforcement. A blocked screen needs a visible recovery route.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F19",
+    "feature": "Context usage, output reservation, compaction and visible provenance",
+    "owner": "O + V",
+    "acceptance": "**A-F19:** Show effective context/output reservation; compact with visible provenance and preserve pinned facts.",
+    "recommendation": "Adopt provenance visibility",
+    "phases": "4,6",
+    "rationale": "Visible effective context/compaction provenance improves opaque status; preserve existing saved memory/checkpoints and provider-specific limits.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F20",
+    "feature": "Slash commands, instruction hierarchy and AGENTS.md editing",
+    "owner": "O + V",
+    "acceptance": "**A-F20:** Execute commands and edit instruction sources; expose precedence and actual loaded scope.",
+    "recommendation": "Reuse scoped configuration",
+    "phases": "1,4",
+    "rationale": "WSL/global JSONC and instruction editing are useful, but show actual source/precedence and preserve current validated schema.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F21",
+    "feature": "Goals, pause/resume, budgets, milestones and completion verification",
+    "owner": "V supervisor + O sessions",
+    "acceptance": "**A-F21:** Pause/resume goals, enforce budgets, record milestones; completion requires configured verification.",
+    "recommendation": "Reuse existing Goal plugin",
+    "phases": "1,2",
+    "rationale": "Keep one existing upstream-compatible OpenCode Goal integration. Do not add a competing supervisor or put Goal tools in ordinary Chat.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F22",
+    "feature": "Parallel tasks, subagents, task forks and coordinated progress",
+    "owner": "O + V; serialized model work where required",
+    "acceptance": "**A-F22:** Parallel tasks/subagents use isolated workspaces and shared-model slots without parent/child deadlock.",
+    "recommendation": "Exclude custom multichat",
+    "phases": "1",
+    "rationale": "User removed custom multichat orchestration. Keep upstream capabilities only where already supported; development uses no subagents.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F23",
+    "feature": "Retry/error UX and recovery from engine, model or transport failure",
+    "owner": "O + V",
+    "acceptance": "**A-F23:** Inject engine/model/network failures; reconcile actual state and never blindly resend uncertain work.",
+    "recommendation": "High-priority improvement",
+    "phases": "1,2",
+    "rationale": "Adopt explicit recovery states and operation identity. Current step-up dead ends and generic upload errors are user-facing failures.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F24",
+    "feature": "Local model inventory and one consistent model lifecycle authority",
+    "owner": "V + existing engines",
+    "acceptance": "**A-F24:** One service reconciles all launch paths; duplicate start and conflicting ownership are rejected.",
+    "recommendation": "Preserve Windows only",
+    "phases": "1,6",
+    "rationale": "Do not restart model lifecycle/engine development. Keep existing Windows behavior intact; exclude custom manager/engine from Linux.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F25",
+    "feature": "Six current profiles and accurate quantization/vision/tool labels",
+    "owner": "V + runtime evidence",
+    "acceptance": "**A-F25:** Import all six profiles; labels match real quantization and declared/verified vision/tool capabilities.",
+    "recommendation": "Preserve Windows only",
+    "phases": "1,6",
+    "rationale": "Keep six existing profiles and labels unchanged. Do not migrate their weights/runtime registry into Linux or mistake source capability labels for evidence.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F26",
+    "feature": "Per-profile context sizes through 131072; no silent reductions",
+    "owner": "V + runtime verification",
+    "acceptance": "**A-F26:** Persist 8K/16K/32K/64K/128K per profile; a clamped allocation fails instead of reporting Ready.",
+    "recommendation": "Preserve Windows only",
+    "phases": "1,6",
+    "rationale": "Keep exact context settings; no silent reductions. New custom-engine qualification/development is outside the revised direction.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F27",
+    "feature": "RAM, GPU allocations, CPU and measured inference timing",
+    "owner": "V",
+    "acceptance": "**A-F27:** Display measured resource/timing values with source/scope; unavailable measurements stay unavailable.",
+    "recommendation": "Selective telemetry reuse",
+    "phases": "2,5",
+    "rationale": "Measured process/resource provenance is useful across editions. Local inference telemetry belongs only to preserved Windows capability.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F28",
+    "feature": "Endpoint copying, native/WSL provider routing, logs and diagnostics",
+    "owner": "V + O",
+    "acceptance": "**A-F28:** Copy correct endpoints, route Windows/WSL provider requests and export redacted diagnostics.",
+    "recommendation": "Combine routing/diagnostics",
+    "phases": "1,5",
+    "rationale": "Reuse Windows/WSL endpoint-scope and redaction ideas; retain Ingenium authenticated cluster gateway and existing credential boundaries.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F29",
+    "feature": "File tree/search, code viewer/editor, symbol/diagnostic support",
+    "owner": "O + V",
+    "acceptance": "**A-F29:** Search/view/edit files and symbols; diagnostics and save conflicts point to correct environment.",
+    "recommendation": "Prefer upstream editors",
+    "phases": "1,6",
+    "rationale": "Keep upstream OpenCode/VS Code interfaces. Reuse shell-level file/save-conflict affordances where helpful rather than inventing a new OpenCode frontend.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F30",
+    "feature": "Terminal tabs, PTY resize/input, persistent sessions and output limits",
+    "owner": "O + V; prototype APIs gated",
+    "acceptance": "**A-F30:** Create/resize/input/close PTYs; reconnect supported terminals with bounded output and exit status.",
+    "recommendation": "Reuse native/WSL terminal",
+    "phases": "1,6",
+    "rationale": "Legacy interactive terminal/session-cache/ConPTY source is valuable; verify resize, input, exit, reconnect and bounded output on actual hosts.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F31",
+    "feature": "Project run/build/test actions and environment setup scripts",
+    "owner": "O + V",
+    "acceptance": "**A-F31:** Run project setup/build/test commands with visible scope, cwd and failure output.",
+    "recommendation": "Reuse scoped actions",
+    "phases": "1,6",
+    "rationale": "Visible cwd/environment/run controls are useful; preserve approvals and use project scripts instead of hidden automatic setup.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F32",
+    "feature": "Git status, branch selection, unified/split diffs and review scopes",
+    "owner": "O + V",
+    "acceptance": "**A-F32:** Show correct repo status/branches and unified/split diffs against selected review base.",
+    "recommendation": "Selective review reuse",
+    "phases": "6",
+    "rationale": "Legacy diff/review panels may improve desktop integration; first compare against upstream OpenCode/VS Code and avoid duplicate implementations.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F33",
+    "feature": "Stage/revert file or hunk, commit/push and pull requests",
+    "owner": "V + Git/GitHub integration",
+    "acceptance": "**A-F33:** Stage/revert a hunk, commit/push/create a PR under explicit action; preserve other edits.",
+    "recommendation": "Keep existing Git behavior",
+    "phases": "2,6",
+    "rationale": "Safe file/hunk actions are valuable but destructive/publish actions need correct scope. Reuse current upstream functionality before adding custom UI.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F34",
+    "feature": "Inline review comments, findings and links back to chat",
+    "owner": "O + V",
+    "acceptance": "**A-F34:** Attach inline findings to exact file/revision; send selected feedback to the correct task.",
+    "recommendation": "Selective reuse",
+    "phases": "6",
+    "rationale": "Revision-bound inline findings and task links improve review; retain exact file/revision identity and test cross-task routing.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F35",
+    "feature": "Worktree creation, isolation, setup, inventory and conflict handling",
+    "owner": "O + V",
+    "acceptance": "**A-F35:** Create/setup/list isolated worktrees and handle conflicts/failed setup without modifying other tasks.",
+    "recommendation": "Selective reuse",
+    "phases": "6",
+    "rationale": "Legacy worktree inventory/isolation controls are useful if actual OpenCode lacks equivalent behavior; qualify setup/conflict recovery.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F36",
+    "feature": "Recoverable worktree archive/restore and cleanup",
+    "owner": "V + Git; snapshots first",
+    "acceptance": "**A-F36:** Archive/restore recoverable Git and required non-Git content; cleanup follows verified preservation.",
+    "recommendation": "Adopt preservation rules",
+    "phases": "6",
+    "rationale": "Recoverable archive/restore beats deletion-only cleanup. Require snapshots/non-Git preservation and no unrelated checkout cleanup.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F37",
+    "feature": "Workspace/read-only/full-access profiles and granular approvals",
+    "owner": "O + V",
+    "acceptance": "**A-F37:** Effective permission rules enforce read-only/workspace/full-access modes with granular grants.",
+    "recommendation": "Retain Ingenium security",
+    "phases": "2,3",
+    "rationale": "API/capability/org/project enforcement is a strength. Legacy UI permission profiles can improve clarity but cannot replace server authorization.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F38",
+    "feature": "Genuine native Windows sandbox and WSL execution isolation",
+    "owner": "V/E; separate isolation qualification",
+    "acceptance": "**A-F38:** Real filesystem/network/process escape tests pass before OS isolation is labelled available.",
+    "recommendation": "Do not claim sandbox parity",
+    "phases": "6",
+    "rationale": "A permission UI is not an OS sandbox. Keep native/WSL isolation qualification explicit; do not advertise unavailable sandboxing.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F39",
+    "feature": "Model/provider credentials, OAuth and account switching",
+    "owner": "O + V/E",
+    "acceptance": "**A-F39:** Connect/switch/revoke accounts and secrets; credentials never enter renderer state or diagnostic exports.",
+    "recommendation": "Retain current integrations",
+    "phases": "1,2,5",
+    "rationale": "Ingenium already has provider/OAuth and encrypted stores. Reuse desktop proxy/account UX without duplicating secrets into the renderer.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F40",
+    "feature": "Plugin discovery/install/update/remove, local/private catalogs",
+    "owner": "O + V/E",
+    "acceptance": "**A-F40:** Discover/install/update/remove a real plugin; trust, permission and failure states are visible.",
+    "recommendation": "Keep management + external source",
+    "phases": "1,2,5",
+    "rationale": "Retain Ingenium plugin lifecycle UI and consume the separate brain by pin. Do not vendor a changed fork or auto-update a moving branch.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F41",
+    "feature": "Skill discovery, install/edit, per-session access and instructions",
+    "owner": "O + V",
+    "acceptance": "**A-F41:** Discover/install/edit/load skills on demand; preserve instruction hierarchy and avoid duplicate overrides.",
+    "recommendation": "Combine catalogs/storage",
+    "phases": "1,2,4",
+    "rationale": "Computer-use supplies reusable skill instructions; Ingenium API-owned active/proposal/history lifecycle stays authoritative for user edits.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F42",
+    "feature": "MCP local/remote servers, status, auth and tool visibility",
+    "owner": "O + V",
+    "acceptance": "**A-F42:** Connect/authenticate local/remote MCP, list tools/resources and enforce per-session tool visibility.",
+    "recommendation": "Retain MCP management",
+    "phases": "1,2,5",
+    "rationale": "Ingenium Servers/Tools/scope/Vault lifecycle is richer than a raw config. Brain skills do not prove GitHub/browser binaries or authentication work.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F43",
+    "feature": "Hooks, references and project/global configuration editor",
+    "owner": "O + V",
+    "acceptance": "**A-F43:** Run configured hooks/references with scoped settings; preserve JSONC comments and user configuration.",
+    "recommendation": "Combine config strengths",
+    "phases": "1,4",
+    "rationale": "Reuse JSONC/comment-preserving scoped editing; retain current API schema and actual hooks. Never implement sample mockup JSON literally.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F44",
+    "feature": "GitHub/GitLab, research, office, mail/calendar and other connectors",
+    "owner": "E; credentials and supported APIs per connector",
+    "acceptance": "**A-F44:** Every installed connector executes a real account-scoped workflow and respects tool permissions.",
+    "recommendation": "Retain working connectors",
+    "phases": "2,5",
+    "rationale": "Keep real Gmail and current tools. Qualify each additional provider by an actual account workflow; catalog entries are not connected integrations.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F45",
+    "feature": "Context-aware suggested prompts and continuation suggestions",
+    "owner": "V + O",
+    "acceptance": "**A-F45:** Suggest context-appropriate work using permitted sources; suggestions do not execute themselves.",
+    "recommendation": "Selective suggestion UX",
+    "phases": "6",
+    "rationale": "Useful contextual suggestions can improve home/chat; must respect source permissions and never execute by themselves.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F46",
+    "feature": "Scheduled tasks, templates, local/worktree jobs and run history",
+    "owner": "V + O",
+    "acceptance": "**A-F46:** Schedule a local/worktree job; persist occurrence/run history and restore it after restart.",
+    "recommendation": "Keep Ingenium scheduler",
+    "phases": "2,5",
+    "rationale": "Jobs/event queue/trusted events/history already form a richer foundation. Avoid building a second Windows-only scheduler.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F47",
+    "feature": "Thread follow-ups/heartbeats, proactive assistant/dot workflow",
+    "owner": "V + O/E",
+    "acceptance": "**A-F47:** Thread heartbeat/proactive task resumes correct context; unchanged state stays quiet by default.",
+    "recommendation": "Defer expansion",
+    "phases": "6",
+    "rationale": "Quiet thread-specific follow-ups may be useful, but reuse one scheduler and do not recreate custom multi-chat orchestration.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F48",
+    "feature": "Timezone/DST, missed runs, notifications and task interruption",
+    "owner": "V",
+    "acceptance": "**A-F48:** Timezone/DST/missed-run/overlap policies and notifications pass restart and clock-boundary tests.",
+    "recommendation": "Adopt scheduler tests",
+    "phases": "2,5",
+    "rationale": "Timezone/DST/missed-run/overlap semantics are worth explicit checks; a pretty schedule form is not reliability.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F49",
+    "feature": "Local/project memory, inspect/edit/delete, per-task control",
+    "owner": "V + O integration",
+    "acceptance": "**A-F49:** Inspect/edit/delete local/project memory; disabling or deleting memory removes its future injection.",
+    "recommendation": "Keep Ingenium memory",
+    "phases": "2,4",
+    "rationale": "Existing inspect/edit/forget + checkpoints/sources is a strength. Borrow clearer scope/provenance UX; avoid a competing unscoped memory store.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F50",
+    "feature": "Session statistics, profile/activity, usage and budget displays",
+    "owner": "O + V; provider-reported limits only",
+    "acceptance": "**A-F50:** Show local usage/activity/budgets with provenance; absent hosted entitlements are not invented.",
+    "recommendation": "Combine honest telemetry",
+    "phases": "2,5",
+    "rationale": "Keep usage attribution and legacy source/scope conventions; never fabricate subscription limits, costs or percent-complete.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F51",
+    "feature": "Shared browser tabs, navigation, history, downloads and sessions",
+    "owner": "V/E; isolated WebView2/CDP architecture",
+    "acceptance": "**A-F51:** Navigate/manage browser tabs/history/downloads with isolated sessions and origin boundaries.",
+    "recommendation": "Selective desktop browser",
+    "phases": "6",
+    "rationale": "WebView2/session-isolated browser code is promising for Windows. Prefer the existing headless/remote browser route on Linux; no desktop requirement in Docker.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F52",
+    "feature": "Browser automation, DOM/screenshots and regular-browser attachment",
+    "owner": "V/E; scoped tools + extension",
+    "acceptance": "**A-F52:** Execute DOM/screenshot automation on the selected tab and attach an explicitly paired browser.",
+    "recommendation": "Qualify external capability",
+    "phases": "1,6",
+    "rationale": "Computer-use skill loading is only the brain connection. Browser attachment/control needs real platform tools/auth and selected-tab verification.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F53",
+    "feature": "Browser preview annotations, styling feedback and developer tools",
+    "owner": "V/E",
+    "acceptance": "**A-F53:** Annotate preview regions and inspect styles/devtools; feedback references the correct tab/revision.",
+    "recommendation": "Defer richer preview tools",
+    "phases": "6",
+    "rationale": "Annotations/devtools are useful but not necessary for the two-build MVP unless already proven. Keep them a visible reviewed requirement.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F54",
+    "feature": "Windows computer use and Appshots/screenshot attachments",
+    "owner": "V/E; accessibility/capture adapters",
+    "acceptance": "**A-F54:** Capture selected Windows apps and perform scoped native UI actions; cancellation stops automation.",
+    "recommendation": "Selective Windows reuse",
+    "phases": "6",
+    "rationale": "Native capture/accessibility adapters can be valuable. Loading a skill is not proof the Windows host bridge exists or operates safely.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F55",
+    "feature": "Voice dictation, spoken task steering and realtime voice",
+    "owner": "V/E; local/provider capabilities qualified separately",
+    "acceptance": "**A-F55:** Dictate/steer/read replies and run a locally processed voice exchange with visible mic/session controls.",
+    "recommendation": "Qualify voice separately",
+    "phases": "6",
+    "rationale": "Mic controls are in the visual target. Provider dictation/steering is useful; no fake mic success or implicit restart of local inference-engine work.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F56",
+    "feature": "Image inputs and image generation/editing",
+    "owner": "O/V/E; suitable multimodal model/provider",
+    "acceptance": "**A-F56:** Route image input only to capable models; locally generate/edit images and retain source/provenance.",
+    "recommendation": "Provider-capability gate",
+    "phases": "6",
+    "rationale": "Preserve image attachments and supported provider routing. Local image generation must not drag the excluded custom engine into Linux.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F57",
+    "feature": "PDF, document, spreadsheet, slide and LaTeX viewing/editing/export",
+    "owner": "V/E; independent artifact adapters",
+    "acceptance": "**A-F57:** Create/open/edit/export each artifact family; independently inspect output, persistence and permissions.",
+    "recommendation": "Keep Docs, qualify artifacts",
+    "phases": "2,6",
+    "rationale": "Ingenium Docs is a strong existing feature. Reuse legacy artifact work only after real open/edit/export checks for each format.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F58",
+    "feature": "Interactive visualizations, diagrams and artifact previews",
+    "owner": "V/E; isolated renderer",
+    "acceptance": "**A-F58:** Render interactive visualization/diagram; inputs and artifacts persist without privileged preview IPC.",
+    "recommendation": "Selective artifact reuse",
+    "phases": "6",
+    "rationale": "Isolated visualizations/previews are useful; retain persistence and origin/IPC isolation. A rendered card alone is insufficient.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F59",
+    "feature": "Sites creation, preview, deployment, access controls and versions",
+    "owner": "V/E; hosting integration or separate service",
+    "acceptance": "**A-F59:** Create/preview/publish/version/rollback a self-hosted Site with tested access controls.",
+    "recommendation": "Recommend later expansion",
+    "phases": "6",
+    "rationale": "Sites/hosting is a separate product surface and not a reason to delay core Windows/Linux workspace readiness; retain as an explicit pending disposition.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F60",
+    "feature": "Maps, custom assistant/GPT-style catalog and discoverable utilities",
+    "owner": "V/E; supported equivalents",
+    "acceptance": "**A-F60:** Use real regional Maps/search/routing and create/run/export a custom-assistant catalog entry.",
+    "recommendation": "Recommend later expansion",
+    "phases": "6",
+    "rationale": "Maps/utilities/full GPT catalog have weaker value than workspace reliability. Reuse actual agents first; do not claim deferred features done.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F61",
+    "feature": "Code-review service and security scan/workbench/findings workflows",
+    "owner": "V/E; scanner and hosting adapters",
+    "acceptance": "**A-F61:** Run review/security scans, triage findings and verify fixes; report actual scanner coverage.",
+    "recommendation": "Reuse proven tooling",
+    "phases": "2,6",
+    "rationale": "Real code/security review is valuable. Prefer upstream tools/adapters and report scanner coverage; do not build a branded empty workbench.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F62",
+    "feature": "Remote host connections, pairing, project/task control and reconnect",
+    "owner": "V/E; own authenticated host protocol",
+    "acceptance": "**A-F62:** Pair/revoke a worker, control tasks/projects and reconnect without identity or permission widening.",
+    "recommendation": "Prioritize authenticated reconnect",
+    "phases": "1,6",
+    "rationale": "Explicit remote host/backend identity is useful for Windows + cluster. Rich host pairing can follow the MVP with proper revocation checks.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F63",
+    "feature": "Mobile/web task steering, approvals, review and attachments",
+    "owner": "V/E; client development required",
+    "acceptance": "**A-F63:** Mobile/web client steers tasks, answers approvals, reviews changes and attaches files over authenticated TLS.",
+    "recommendation": "Responsive web first",
+    "phases": "6",
+    "rationale": "Linux web should remain usable on smaller screens; full mobile steering/approval parity needs separate real-client checks.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F64",
+    "feature": "Cloud tasks, hosted execution and environment management",
+    "owner": "E + service infrastructure",
+    "acceptance": "**A-F64:** Run a task on an owned remote worker while local UI is closed; preserve environment and evidence.",
+    "recommendation": "Reuse cluster execution",
+    "phases": "1,6",
+    "rationale": "Existing Kubernetes/runtime architecture is a better starting point than a second hosted execution system; verify jobs survive desktop closure.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F65",
+    "feature": "Shared task links, immutable snapshots and collaborative projects/pages",
+    "owner": "V/E + hosted storage/identity",
+    "acceptance": "**A-F65:** Share an immutable secret-free snapshot and collaborate on project/pages with enforced ACLs and revisions.",
+    "recommendation": "Recommend later collaboration",
+    "phases": "6",
+    "rationale": "Immutable redacted snapshots are useful, but shared pages/collaboration need real identity/storage. Keep the pending scope separate from ordinary links.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F66",
+    "feature": "Optional pets/Mini overlays, quick chat and activity notifications",
+    "owner": "V/E",
+    "acceptance": "**A-F66:** Install/activate an optional pet/mini overlay and quick chat; bounded idle cost and hide/exit controls work.",
+    "recommendation": "Recommend defer decoration",
+    "phases": "6",
+    "rationale": "Pets/mini overlays are lower priority than reliable chat, WSL and integrations. No silent scope deletion; seek explicit final disposition.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F67",
+    "feature": "Privacy, export/delete, retention, account and relevant family/trusted-contact controls",
+    "owner": "V/E; real enforcement, not UI-only",
+    "acceptance": "**A-F67:** Export/delete/retain data; enforce account/family/trusted-contact controls through service authorization.",
+    "recommendation": "Keep privacy enforcement",
+    "phases": "2,5,6",
+    "rationale": "Retain actual export/delete/retention/RBAC. Family/trusted-contact controls need real authorization semantics before exposing them as working.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "F68",
+    "feature": "Updates, rollback, licences, signed packages and diagnostics export",
+    "owner": "V",
+    "acceptance": "**A-F68:** Verify installer/updates/rollback/licences/hashes; export diagnostics without private payloads by default.",
+    "recommendation": "Combine packaging discipline",
+    "phases": "1,6,7",
+    "rationale": "Reuse exact package/provenance/redaction/update/rollback work; verify signatures honestly and keep recovery consumers until replacements pass.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H01",
+    "feature": "Frozen fixture suites and independent verifier/holdout isolation",
+    "owner": "V harness + O execution",
+    "acceptance": "**A-H01:** Frozen suite hashes match; agent cannot read private verifiers/holdouts; fixture mutation invalidates run.",
+    "recommendation": "Retain independent evidence",
+    "phases": "1-7",
+    "rationale": "Preserve frozen/holdout evidence without repeatedly copying historical graphs or treating metadata as live qualification.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H02",
+    "feature": "Exact runtime/model/context lock and protected hashes",
+    "owner": "V harness",
+    "acceptance": "**A-H02:** Record exact model/quant/runtime/context/settings/environment and reject mismatched qualification inputs.",
+    "recommendation": "Keep scope-appropriate locks",
+    "phases": "1-7",
+    "rationale": "Record exact provider/runtime/context/settings. Preserve Windows engine locks; do not force obsolete local-engine workloads on Linux.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H03",
+    "feature": "Tool traces, actual patches, test artifacts and first-edit latency",
+    "owner": "V harness + O",
+    "acceptance": "**A-H03:** Retain actual patch/tool/test evidence and first accepted edit timing; no fabricated trace or operator repair.",
+    "recommendation": "Retain real traces",
+    "phases": "1-7",
+    "rationale": "Keep actual source diff/tool/test evidence with timings; do not accept invented outputs or unseen operator repairs.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H04",
+    "feature": "Separate functional, context, coding-quality and performance gates",
+    "owner": "V harness",
+    "acceptance": "**A-H04:** Functional, coding, context, usability and performance gates remain separate; each records pass/fail/incomplete.",
+    "recommendation": "Mandatory separate gates",
+    "phases": "1-7",
+    "rationale": "Visual, functional, coding, context, recovery and performance remain separate pass/fail/incomplete results.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H05",
+    "feature": "Filled-context/compaction, vision and Windows/WSL qualification suites",
+    "owner": "V harness + O",
+    "acceptance": "**A-H05:** Run filled-context/compaction, vision and Windows/WSL suites with independently verified effective context.",
+    "recommendation": "Platform-appropriate checks",
+    "phases": "1,2,6,7",
+    "rationale": "Native Windows and WSL checks matter. Provider/vision/context tests apply only to real supported configurations; no unauthorized GPU loads.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  },
+  {
+    "id": "H06",
+    "feature": "Comparable runs, cancellation, redacted export and evidence provenance",
+    "owner": "V harness",
+    "acceptance": "**A-H06:** Compare compatible runs, cancel honestly and export redacted provenance; missing evidence never becomes pass.",
+    "recommendation": "Retain reproducible provenance",
+    "phases": "1-7",
+    "rationale": "Comparable runs, cancellation and redacted exports are useful; missing evidence stays missing, not pass.",
+    "evidenceStatus": "Reviewed source/specification; runtime acceptance not newly performed"
+  }
+]
