@@ -93,3 +93,22 @@ describe("server-owned synthesis provider resolution", () => {
     });
   });
 });
+
+describe("native synthesis selection", () => {
+  it("honors globally selected ChatGPT Luna for external projects independently of the chat default", async () => {
+    const { globalId, externalId } = freshProjects();
+    settings.setSetting(globalId, "synthesis_provider", "openai");
+    settings.setSetting(globalId, "synthesis_model", "gpt-6-luna");
+    settings.setSetting(globalId, "chat_selection", JSON.stringify({ providerId: "opencode", modelId: "opencode/zen-free" }));
+    const zen = runtimeZenCatalog();
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      ...zen, connected: ["openai"], all: [...zen.all, {
+        id: "openai", name: "OpenAI", models: {
+          luna: { id: "gpt-6-luna", name: "GPT-6 Luna", status: "active" },
+        },
+      }],
+    });
+    const result = await resolveSynthesisProviderSelections(externalId);
+    expect(result.selections[0]).toEqual({ providerID: "openai", modelID: "gpt-6-luna" });
+  });
+});

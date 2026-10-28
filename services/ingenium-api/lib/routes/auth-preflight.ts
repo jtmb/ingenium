@@ -1,3 +1,4 @@
+import { exchangeCompatibilityLaunch, validateCompatibilityAccess } from "../compatibility-runtime-access.js";
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { authentication, authorization, getDb, identity, invitations, mcpCredentials, oidcAuthentication, organizations, projects, runtimes, securityAudit, securityTokens } from "ingenium-core";
@@ -188,6 +189,9 @@ authPreflightRouter.get("/session", (req, res) => {
     installationAdmin: authorization.isInstallationAdmin(principal.id),
   } });
 });
+authPreflightRouter.post("/lan-runtime/exchange", exchangeCompatibilityLaunch);
+authPreflightRouter.get("/lan-runtime/access", validateCompatibilityAccess);
+
 authPreflightRouter.post("/session/csrf", (req, res) => {
   const principal = currentUser(req);
   const csrfToken = authentication.issueSessionCsrfGrant(principal.session!);

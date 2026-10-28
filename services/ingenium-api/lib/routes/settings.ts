@@ -1,3 +1,4 @@
+import { getConnectedNativeChatProviders } from "../chat-provider-catalog.js";
 import { Router } from "express";
 import { settings, logger, projects, configs, getDb, execTransaction, checkpointAfterWrite, protectedSettings, validateEndpointUrl, safeLlmFetch } from "ingenium-core";
 import * as core from "ingenium-core";
@@ -1007,15 +1008,23 @@ settingsRouter.put("/provider-configs", async (req, res) => {
 
   const primary = metadata.find((provider) => provider.enabled && provider.roles.includes("primary"));
   const backup = metadata.find((provider) => provider.enabled && provider.roles.includes("backup"));
+  // Credentials remain native; choosing synthesis never creates a custom provider.
+  const wantsNative = [requestedSynthesis?.primary, requestedSynthesis?.secondary].some(
+    (selection) => selection?.providerId && !metadata.some((provider) => provider.id === selection.providerId),
+  );
+  const nativeProviders = wantsNative ? getConnectedNativeChatProviders(await opencodeClient.listProviders()) : [];
   const select = (value: SynthesisSelection | undefined, fallback: typeof primary): SynthesisSelection | null => {
     if (!value?.providerId && !value?.modelId) return fallback ? { providerId: fallback.id, modelId: fallback.defaultModel } : { providerId: "", modelId: "" };
     const provider = metadata.find((candidate) => candidate.id === value?.providerId && candidate.enabled);
-    return provider && provider.models.includes(value!.modelId) ? { providerId: provider.id, modelId: value!.modelId } : null;
+    if (provider && provider.models.includes(value!.modelId)) return { providerId: provider.id, modelId: value!.modelId };
+    const native = nativeProviders.find((candidate) => candidate.providerId === value?.providerId
+      && candidate.models.some((model) => model.id === value?.modelId));
+    return native ? { providerId: native.providerId, modelId: value!.modelId } : null;
   };
   const primarySelection = select(requestedSynthesis?.primary, primary);
   const secondarySelection = select(requestedSynthesis?.secondary, backup);
   if (!primarySelection || !secondarySelection || (primarySelection.providerId && primarySelection.providerId === secondarySelection.providerId && primarySelection.modelId === secondarySelection.modelId)) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Synthesis selections must reference enabled custom models and cannot be identical" } });
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Synthesis selections must reference enabled custom or connected native models and cannot be identical" } });
     return;
   }
   const values: Array<[string, string]> = [

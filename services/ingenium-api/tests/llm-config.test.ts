@@ -1705,3 +1705,33 @@ describe("POST /settings/test-llm — requires project context", () => {
     }
   });
 });
+
+describe("connected native synthesis configuration", () => {
+  it("saves ChatGPT Luna using its native connection without inventing a custom endpoint or credential", async () => {
+    projects.setProjectGlobal("global-default", true);
+    setManagedChatCatalog([]);
+    vault.unsealVault(projects.getGlobalProject()!.id, "test-vault-passphrase");
+    vi.mocked(opencodeClient.updateGlobalConfig).mockReset().mockResolvedValue({});
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      connected: ["openai"], all: [{
+        id: "openai", name: "OpenAI", models: { luna: { id: "gpt-6-luna", status: "active" } },
+      }],
+    });
+    const response = await fetch(`${baseUrl}/api/v1/settings/provider-configs${projectQ()}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providers: [], synthesis: {
+        primary: { providerId: "openai", modelId: "gpt-6-luna" },
+        secondary: { providerId: "", modelId: "" },
+      } }),
+    });
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200);
+    const saved = await getProviderConfigs();
+    expect(saved.body.data.providers).toEqual([]);
+    expect(saved.body.data.synthesis.primary).toEqual({ providerId: "openai", modelId: "gpt-6-luna" });
+    expect(opencodeClient.addAuth).not.toHaveBeenCalled();
+    const catalog = await getChatConfig();
+    expect(catalog.body.data.providers).toContainEqual(expect.objectContaining({
+      providerId: "openai", source: "native", models: [{ id: "gpt-6-luna", label: "gpt-6-luna" }],
+    }));
+  });
+});

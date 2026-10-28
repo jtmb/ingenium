@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { settings } from "ingenium-core";
 import {
   getBuiltinChatProvider,
+  getConnectedNativeChatProviders,
   getChatProviderCatalog,
   getPersistedChatSelection,
   getStoredOrDefaultChatSelection,
@@ -308,5 +309,43 @@ describe("Chat provider catalog runtime guards", () => {
       providerId: "opencode",
       modelId: "free-model",
     });
+  });
+});
+
+
+describe("authenticated native model catalogs", () => {
+  it("projects only safe active models for connected accounts and drops credentials", () => {
+    const catalog = getConnectedNativeChatProviders({
+      connected: ["openai"],
+      all: [
+        { id: "disconnected", models: { model: { id: "model", status: "active" } } },
+        { id: "openai", name: "OpenAI", apiKey: "never-visible", models: {
+          luna: { id: "gpt-6-luna", name: "GPT-6 Luna", status: "active", headers: { secret: "never-visible" } },
+          old: { id: "retired-model", status: "deprecated" },
+          unsafe: { id: "model-secret-canary", status: "active" },
+        } },
+      ],
+      default: { openai: "gpt-6-luna" },
+    });
+    expect(catalog).toEqual([{
+      providerId: "openai", label: "OpenAI", source: "native",
+      defaultModel: "gpt-6-luna", models: [{ id: "gpt-6-luna", label: "GPT-6 Luna" }],
+    }]);
+    expect(JSON.stringify(catalog)).not.toContain("never-visible");
+    expect(getConnectedNativeChatProviders({ all: [], connected: null })).toEqual([]);
+  });
+
+  it("uses the connected live catalog instead of fabricating stale legacy native models", async () => {
+    vi.spyOn(settings, "getSetting").mockImplementation((_id, key) => ({
+      synthesis_provider: "openai", synthesis_model: "retired-model",
+    })[key]);
+    vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      connected: ["openai"], all: [{ id: "openai", models: {
+        luna: { id: "gpt-6-luna", status: "active" },
+      } }],
+    });
+    const catalog = await getChatProviderCatalog("project");
+    expect(catalog.providers[0]?.source).toBe("native");
+    expect(isAllowedChatSelection(catalog.providers, { providerId: "openai", modelId: "retired-model" })).toBe(false);
   });
 });

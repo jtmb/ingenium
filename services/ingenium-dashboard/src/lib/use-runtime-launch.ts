@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, request } from "./api";
-import {
-  OPENCODE_CLI_GATEWAY_URL,
-  OPENCODE_WEB_GATEWAY_URL,
-  VSCODE_GATEWAY_URL,
-} from "./runtime-urls";
+import { compatibilityGatewayUrl } from "./runtime-urls";
 
 export type RuntimeAudience = "web" | "cli" | "vscode";
 export type RuntimeLaunchStatus = "loading" | "starting" | "ready" | "expired" | "unavailable";
@@ -50,9 +46,7 @@ export function runtimeWorkspacePreferenceKey(scope: RuntimeWorkspaceScope): str
 }
 
 function compatibilityUrl(audience: RuntimeAudience): string {
-  if (audience === "web") return OPENCODE_WEB_GATEWAY_URL;
-  if (audience === "cli") return OPENCODE_CLI_GATEWAY_URL;
-  return VSCODE_GATEWAY_URL;
+  return compatibilityGatewayUrl(audience);
 }
 
 function createExchangeProof(): string {
@@ -312,7 +306,26 @@ export function useRuntimeLaunch(audience: RuntimeAudience, workspace: RuntimeWo
           setError("The local runtime audience is unavailable. Check the service status and retry.");
           return;
         }
-        setUrl(compatibilityUrl(audience));
+        const target = compatibilityUrl(audience);
+        if (target.startsWith("https://")) {
+          try {
+            const exchangeProof = createExchangeProof();
+            const launched = await request<{ data: RuntimeLaunch }>("/runtimes/browser/compatibility-launch", {
+              method: "POST", body: JSON.stringify({ audience, exchangeProof }),
+            });
+            if (launched.data.launchUrl !== `${target}__ingenium/exchange`) throw new Error("Unexpected runtime origin");
+            const exchanged = await fetch(launched.data.launchUrl, {
+              method: "POST", credentials: "include",
+              headers: { "Content-Type": "application/json" }, body: JSON.stringify({ proof: exchangeProof }),
+            });
+            if (!exchanged.ok) throw new Error("Runtime authorization expired");
+            if (!active) return;
+          } catch {
+            if (active) { setStatus("unavailable"); setError("Workspace authorization failed. Retry to open a fresh session."); }
+            return;
+          }
+        }
+        setUrl(target);
         setStatus("ready");
         return;
       }

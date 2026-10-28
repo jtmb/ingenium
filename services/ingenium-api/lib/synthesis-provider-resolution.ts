@@ -43,7 +43,9 @@ function getManagedSynthesisSelection(
   if (!selection) return null;
 
   const provider = providers.find((candidate) => candidate.providerId === selection.providerId);
-  if (!provider || provider.source !== "managed") return null;
+  if (!provider) return null;
+  if (provider.source === "native") return { providerID: selection.providerId, modelID: selection.modelId };
+  if (provider.source !== "managed") return null;
 
   try {
     const stored = settings.getSetting(projectId, "llm_provider_configs");
