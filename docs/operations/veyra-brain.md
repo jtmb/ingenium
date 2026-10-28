@@ -13,7 +13,7 @@ python3 -B scripts/prepare-computer-use.py \
 
 For a previously fetched source checkout, add `--source /chosen/computer-use-checkout`. Every installed file is checked against the pinned Git blob and size. An altered reference, incomplete skill catalog or existing output directory fails before installation. The source checkout is never patched. The image packages the result at `/usr/local/share/veyra/computer-use`.
 
-Veyra's managed OpenCode configuration includes the external `.opencode/skills` path alongside its own skills. Use the native OpenCode 2 schema (`skills.paths`); the dependency's older array example is not applied. Windows and WSL consumers must use their actual dependency paths. Do not apply the dependency's global deployment/onboarding scripts to a Veyra installation.
+Veyra's managed OpenCode configuration includes the external `.opencode/skills` path alongside its own skills. The pinned `@opencode/schema` 2.0.11 defines `skills` as an array of strings; validate configuration against that installed schema, rather than another OpenCode version's `skills.paths` format. Windows and WSL consumers must use their actual dependency paths. Do not apply the dependency's global deployment/onboarding scripts to a Veyra installation.
 
 ## Runtime acceptance
 
