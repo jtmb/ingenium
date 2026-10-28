@@ -33,3 +33,7 @@ The user explicitly made the screenshots the acceptance contract. The selected s
 For every selected view, record baseline hash, route/state, platform, viewport/DPI/theme/font, deterministic fixture or redacted live state, actual capture, comparison and reviewer disposition. Keep normal, loading, empty, failure, auth-expired/step-up recovery, keyboard/focus and 100–200% scaling checks. Selected screen controls need independent behavior/persistence checks as well as image matching.
 
 The Phase 1 Windows and Linux builds must both render the agreed shell/screens. A static fixture screenshot can qualify only the presentation slice, never live mail, tool execution, provider auth or synthesis. The full release needs those workflows. No stage is complete by changing an acceptance screenshot to resemble unfinished code.
+
+## Windows-specific contract coverage
+
+The 47 views cover the current Ingenium routes/states; they do not yet depict every Windows-only flow. Phase 1 must inventory the old approved Windows concepts and source for native/WSL environment selection, distro/user/shell/workdir controls, terminal/reconnect, single-instance/tray/exit and desktop service recovery. Reuse matching concepts where compatible with the new Chat/branding requirements; present any missing targeted Windows views for review and add their selected hashes before declaring Windows visual acceptance. Do not claim the Linux-route image set alone proves complete Windows coverage, and do not regenerate every existing image for this addition.

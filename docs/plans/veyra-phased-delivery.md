@@ -39,6 +39,8 @@ At phase end: finish the actual phase gates; update docs and the acceptance matr
 7. Produce an MVP evidence report: exact source revisions/image digest/package hashes; fresh screenshots against each relevant baseline; working navigation and new Chat; OpenCode skill discovery; Windows/native/WSL checks; cluster ingress/auth/persistence/restart checks; gaps identified separately.
 8. Update README, platform quickstarts, screenshots/tour, brain integration/rollback, WSL guidance and known limitations. Follow the computer-use README's concise navigation/setup/verification/rollback style, using Veyra's actual commands.
 
+**Windows visual coverage:** the existing 47-view set covers Ingenium routes. Inventory/reuse the old Windows concepts for WSL selection, terminals, tray and desktop lifecycle; add targeted missing Windows states to the contract for review. Do not claim those flows already have acceptance images.
+
 **Exit:** both Windows and Linux MVPs run and have been exercised; all screenshot views map to implemented UI or explicitly tracked unfinished functional gates; no claim of full feature acceptance based on UI rendering. Present visual deviations for approval instead of rewriting baselines. This MVP is a phase milestone; all remaining feature gates stay in the full goal.
 
 ## Phase 2 — Complete existing feature workflows and reliability
