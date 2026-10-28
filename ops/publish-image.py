@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
+from oci_image import Archive, Registry
 
 REPOSITORY = "jtmb92/ingenium"
 SOURCE = "https://github.com/jtmb/ingenium"
@@ -72,7 +73,9 @@ def document(token, name, kind="manifests", missing=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--image", required=True)
+    artifact = parser.add_mutually_exclusive_group(required=True)
+    artifact.add_argument("--image")
+    artifact.add_argument("--oci-archive", type=Path)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--probe", action="store_true")
@@ -87,7 +90,13 @@ def main():
     git = ["git", "-c", "safe.directory=" + str(repo), "-C", str(repo)]
     need(command(git + ["remote", "get-url", "origin"]).decode().strip().removesuffix(".git") == SOURCE, "owned_source_required")
     need(command(git + ["rev-parse", args.revision + "^{commit}"]).decode().strip() == args.revision, "source_commit_missing")
-    image = json.loads(command(["docker", "image", "inspect", args.image]))[0]
+    candidate = None
+    if args.oci_archive:
+        need(args.oci_archive.is_absolute() and args.oci_archive.resolve() == args.oci_archive and args.oci_archive.is_relative_to(root), "oci_archive_must_stay_in_owned_output_root")
+        candidate = Archive(args.oci_archive)
+        image = {"Id": candidate.digest, "Config": {"Labels": candidate.labels}}
+    else:
+        image = json.loads(command(["docker", "image", "inspect", args.image]))[0]
     labels = image["Config"].get("Labels", {})
     source_hash = labels.get("org.ingenium.source.sha256", "")
     need(labels.get("org.opencontainers.image.revision") == args.revision and labels.get("org.opencontainers.image.source") == SOURCE and re.fullmatch(r"[a-f0-9]{64}", source_hash), "image_provenance_mismatch")
@@ -108,19 +117,23 @@ def main():
             need(previous["digest"] == image["Id"], "existing_tag_differs_no_overwrite")
             record.update(state="existing-exact-image", digest=previous["digest"])
         else:
-            need(not client.exists(), "client_scratch_already_exists")
-            (client / "bin").mkdir(parents=True, mode=0o700)
-            (client / "config").mkdir(mode=0o700)
-            windows = "\\\\wsl.localhost\\Ubuntu" + str(helper).replace("/", "\\")
-            launcher = client / "bin/docker-credential-ingenium-windows"
-            launcher.write_text("#!/usr/bin/python3\nimport subprocess,sys\np=subprocess.run(" + repr([PYTHON, "-I", "-B", windows]) + "+sys.argv[1:],input=sys.stdin.buffer.read(4097),stdout=sys.stdout.buffer,stderr=subprocess.DEVNULL)\nraise SystemExit(p.returncode)\n")
-            launcher.chmod(0o700)
-            write(client / "config/config.json", {"credsStore": "ingenium-windows"})
-            env = {**os.environ, "DOCKER_CONFIG": str(client / "config"), "PATH": str(client / "bin") + ":/usr/local/bin:/usr/bin:/bin"}
-            command(["docker", "tag", args.image, target], env=env)
-            with (root / "push.log").open("xb") as log:
-                pushed = subprocess.run(["docker", "push", target], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=1200)
-            need(pushed.returncode == 0, "push_failed_no_deployment")
+            if candidate:
+                record.update(inputMode="verified-oci-archive", globalDockerStoreUsed=False)
+                Registry(token, REPOSITORY).upload(candidate, name, lambda: document(token, name, missing=True))
+            else:
+                need(not client.exists(), "client_scratch_already_exists")
+                (client / "bin").mkdir(parents=True, mode=0o700)
+                (client / "config").mkdir(mode=0o700)
+                windows = "\\\\wsl.localhost\\Ubuntu" + str(helper).replace("/", "\\")
+                launcher = client / "bin/docker-credential-ingenium-windows"
+                launcher.write_text("#!/usr/bin/python3\nimport subprocess,sys\np=subprocess.run(" + repr([PYTHON, "-I", "-B", windows]) + "+sys.argv[1:],input=sys.stdin.buffer.read(4097),stdout=sys.stdout.buffer,stderr=subprocess.DEVNULL)\nraise SystemExit(p.returncode)\n")
+                launcher.chmod(0o700)
+                write(client / "config/config.json", {"credsStore": "ingenium-windows"})
+                env = {**os.environ, "DOCKER_CONFIG": str(client / "config"), "PATH": str(client / "bin") + ":/usr/local/bin:/usr/bin:/bin"}
+                command(["docker", "tag", args.image, target], env=env)
+                with (root / "push.log").open("xb") as log:
+                    pushed = subprocess.run(["docker", "push", target], env=env, stdout=log, stderr=subprocess.STDOUT, timeout=1200)
+                need(pushed.returncode == 0, "push_failed_no_deployment")
             token = registry_token(helper)
             remote = document(token, name)
             need(remote["digest"] == image["Id"], "published_root_digest_differs")
@@ -137,6 +150,8 @@ def main():
         record.update(state="failed-no-deployment", errorType=type(error).__name__, errorCode=str(error) if isinstance(error, RuntimeError) else "details-withheld")
         return 1
     finally:
+        if candidate:
+            candidate.close()
         if client.exists():
             need(client.resolve().parent == root and not client.is_symlink(), "client_cleanup_containment")
             shutil.rmtree(client)
