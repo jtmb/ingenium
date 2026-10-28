@@ -1,0 +1,1002 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/jtmb/computer-use",
+  "revision": "b47765e4a9f5c124c4716deb52962e17d7fb4a2a",
+  "skills": [
+    "agent-orchestration",
+    "app-setup",
+    "blender",
+    "browser-assistant",
+    "browser-headless",
+    "desktop-control",
+    "desktop-vision",
+    "development-conventions",
+    "fanduel-parlay-research",
+    "files-and-documents",
+    "game-playtest",
+    "github-operations",
+    "handoff",
+    "opencode-db-maintenance",
+    "repo-onboarding",
+    "routine-automation",
+    "session-context",
+    "skill-maintenance",
+    "system-troubleshooting",
+    "task-memory",
+    "vscode-management",
+    "web-3d-asset-pipeline",
+    "websearch"
+  ],
+  "files": [
+    {
+      "path": ".opencode/skills/README.md",
+      "gitBlob": "3535f7d9c61dcb4c583529002e8a0a11709a5451",
+      "bytes": 27043,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/agent-orchestration/README.md",
+      "gitBlob": "2749f4633b63cb2dd9880df84eda1e5f023b614d",
+      "bytes": 11185,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/agent-orchestration/SKILL.md",
+      "gitBlob": "38e5fe759ee9b22a523353cce77d55d42d5fe8a1",
+      "bytes": 9456,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/app-setup/README.md",
+      "gitBlob": "a288fb234ddb73d9d834dd98b32c0b71dfd7e089",
+      "bytes": 5871,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/app-setup/SKILL.md",
+      "gitBlob": "b2854052415680be02748ee82381615517339fe0",
+      "bytes": 3083,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/blender/README.md",
+      "gitBlob": "68e6c569e80047c853d5833991899f4acda8e01c",
+      "bytes": 7052,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/blender/SKILL.md",
+      "gitBlob": "24dc932f3a941bdc3de0cad3e8e8883247a8c8ca",
+      "bytes": 7050,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/blender/references/background-workflows.md",
+      "gitBlob": "ee74a48286b77198d6b2f1d400b75b2cffd1339f",
+      "bytes": 4464,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/blender/references/verification-and-export.md",
+      "gitBlob": "ab94cf277bd675aba06d1b4bb1477256c79ffe43",
+      "bytes": 5208,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/blender/scripts/scene_probe.py",
+      "gitBlob": "c555d41ff3c09329f28470f58c3c0dc468d558c9",
+      "bytes": 9436,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/browser-assistant/README.md",
+      "gitBlob": "1d953666c326a64eaaef59d027b9305d31b893bb",
+      "bytes": 6707,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/browser-assistant/SKILL.md",
+      "gitBlob": "6b100f979c35da49a6bd643dea291a307ed86e24",
+      "bytes": 5116,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/browser-headless/README.md",
+      "gitBlob": "1a1f402f8a0999dde87a62d99be1fa43ca2a0c92",
+      "bytes": 5226,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/browser-headless/SKILL.md",
+      "gitBlob": "faf4cc1ae9e65fc07e4a16521f9ee498db6c3f1d",
+      "bytes": 3462,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/desktop-control/README.md",
+      "gitBlob": "46ff9dd5abd2a93ae8347e4ffa6b92cb4214bcf6",
+      "bytes": 8088,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/desktop-control/SKILL.md",
+      "gitBlob": "4845c2b635acae20742257d60308d14b27b8970a",
+      "bytes": 5882,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/desktop-vision/README.md",
+      "gitBlob": "91c77ac2bd758d5d45515824133abbde128aacac",
+      "bytes": 5497,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/desktop-vision/SKILL.md",
+      "gitBlob": "cfd1f15c7a144523b4ffe17f851abc2b93880059",
+      "bytes": 5392,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/README.md",
+      "gitBlob": "40e75f32ad77dbe987bf7b5725a75b7d35e4ef94",
+      "bytes": 2531,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/SKILL.md",
+      "gitBlob": "374c74e1c3ac939d8c53180c64ef4ba3c6ccfc93",
+      "bytes": 17970,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/metadata.json",
+      "gitBlob": "c2d2abae47a90f43e2f0246e05c54dbfee80d1c4",
+      "bytes": 381,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/api-design/api-patterns.md",
+      "gitBlob": "332208fcf0db1686b034f88868d9e35ae6f00311",
+      "bytes": 2828,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/api-design/error-responses.md",
+      "gitBlob": "86f0eac43d16991dfe20589dec2a02364f6c3589",
+      "bytes": 1374,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/api-design/status-codes.md",
+      "gitBlob": "4d2292d0a9ff2e58a7b767e13bb65cdb51c408cb",
+      "bytes": 1751,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/create-readme/guidelines.md",
+      "gitBlob": "90075fb4e7a95b9382ca14372fc275df4c0769e8",
+      "bytes": 1025,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/gitignore/patterns.md",
+      "gitBlob": "5d19030b1f61a35ae7c28cbf57c37c623e3bfc82",
+      "bytes": 2993,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/mermaid/diagrams.md",
+      "gitBlob": "025ccc1ec3470d7a36d626e8fac799e716bbae80",
+      "bytes": 2804,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/_sections.md",
+      "gitBlob": "7eda18b5ea533a0e15089cd3f4a6d4e03b83a875",
+      "bytes": 557,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/action-optimistic-updates.md",
+      "gitBlob": "17605096d813d10035b6833bb649a13f156ec405",
+      "bytes": 13516,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/action-pending-states.md",
+      "gitBlob": "4083a3904a2bcd816692fa35d8baedf8aef3658c",
+      "bytes": 2794,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/action-revalidation.md",
+      "gitBlob": "abe7332087f3e65d2d72ffea39fff56d3e05fab8",
+      "bytes": 3188,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/action-server-action-forms.md",
+      "gitBlob": "10acdc77ea61db4d786f00876c73a17683501cd5",
+      "bytes": 3327,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/build-barrel-files.md",
+      "gitBlob": "32f9ac130d90272f23013e98699e04bee3a07124",
+      "bytes": 2953,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/build-dynamic-imports.md",
+      "gitBlob": "260ee241621f5abf5c273e73e068174debfdc0d1",
+      "bytes": 3023,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/build-external-packages.md",
+      "gitBlob": "7f513cfb4ba980aa0a0d543e3c3ef0fd6b106b51",
+      "bytes": 6603,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/build-optimize-package-imports.md",
+      "gitBlob": "2864470846b539b8e45c42dcc213659f2b3dbe41",
+      "bytes": 2640,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/build-turbopack-config.md",
+      "gitBlob": "d21fd9011a1e34a8e6ee5a48a81e5cf2ac40b08e",
+      "bytes": 4774,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-fetch-options.md",
+      "gitBlob": "f6117f9c2fbd9de98b346ab9bfab5304518444ba",
+      "bytes": 2487,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-react-cache.md",
+      "gitBlob": "7c88949ebec37dbba5099cfc17260febbc9dd08a",
+      "bytes": 2632,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-revalidate-path.md",
+      "gitBlob": "9957d42210e854fe7b0c6a66de452934b12156d9",
+      "bytes": 2754,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-revalidate-tag.md",
+      "gitBlob": "ccbe1c07b804be317d01017318cc5057f1d6222d",
+      "bytes": 3304,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-segment-config.md",
+      "gitBlob": "f34219d7e8e616e021dfe7a7f563fd9034c52696",
+      "bytes": 3115,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cache-use-cache-directive.md",
+      "gitBlob": "8e089498edeea7003495763834de75f8701dc8ed",
+      "bytes": 3173,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/client-children-pattern.md",
+      "gitBlob": "d45ff28027a1522cc3fc1ca10130301088709b11",
+      "bytes": 3004,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/client-hydration-mismatch.md",
+      "gitBlob": "6e18fe660c8ca66bd349989399f04d1c9e97aeea",
+      "bytes": 3269,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/client-third-party-scripts.md",
+      "gitBlob": "664d77077e1624919a9deb0d667f215ab7b42049",
+      "bytes": 4940,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/client-use-client-boundary.md",
+      "gitBlob": "78c8d52a5ec67084d6870459db862b0d25c33b18",
+      "bytes": 3365,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cross-boundary-coherence.md",
+      "gitBlob": "4cf0f012c617968ab5a5c966bbdc082d59b8770d",
+      "bytes": 3150,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cross-component-consolidation.md",
+      "gitBlob": "2c47e81cee26882c8de3140a3047292fbcb1c56d",
+      "bytes": 3435,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cross-dead-code.md",
+      "gitBlob": "11c001c6c52c2af05ee519910dcd9a87dc3fadbf",
+      "bytes": 6303,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cross-extract-shared-logic.md",
+      "gitBlob": "2b015193678aaabdb5fa4bf1068bd0192cd9557b",
+      "bytes": 6144,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/cross-prop-shape-drift.md",
+      "gitBlob": "8083856a203661073f536eef5839a438ceeedac8",
+      "bytes": 5361,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/meta-generate-metadata.md",
+      "gitBlob": "eaa34ccfc468fd50d62a4b7cdf4ac37326da7194",
+      "bytes": 5476,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/meta-opengraph-images.md",
+      "gitBlob": "ad24584bfd57a2ebe7d60c7de0545037d2efcd1e",
+      "bytes": 4977,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/meta-robots.md",
+      "gitBlob": "cf5b2dba38d25dc76ebc351a34c332288b00aaf7",
+      "bytes": 5598,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/meta-sitemap.md",
+      "gitBlob": "c6970c438b769c3209c53ea38c27b93a4ea6c3c5",
+      "bytes": 2991,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/route-intercepting-routes.md",
+      "gitBlob": "07a7aabb704867a5f2240655e56d774d4946c978",
+      "bytes": 3226,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/route-not-found.md",
+      "gitBlob": "599552017c974c0c05155cb82c60997294027d19",
+      "bytes": 2729,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/route-parallel-routes.md",
+      "gitBlob": "bda5da65a0325cf7e8d9c04c020ecafe61b8bd1d",
+      "bytes": 3064,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/route-prefetching.md",
+      "gitBlob": "e481c06fc6300ebb906c4964ec18318f1bcc7375",
+      "bytes": 3464,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/route-proxy-ts.md",
+      "gitBlob": "412aff6a7b5811943187253dda42c4f4aa56a852",
+      "bytes": 2886,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-avoid-client-fetching.md",
+      "gitBlob": "60dd2de4012b2049eb192fe967bbc3588cc025b1",
+      "bytes": 3350,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-component-streaming.md",
+      "gitBlob": "74436c10284b8c12940242f6fcac3395011dee84",
+      "bytes": 3147,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-data-colocation.md",
+      "gitBlob": "8d6205c3518e0d0edd6717b7c8d24fe1a2499355",
+      "bytes": 3030,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-error-handling.md",
+      "gitBlob": "92c0400731d9f1a61ee8ba5f87a15bd754f096cc",
+      "bytes": 5959,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-parallel-fetching.md",
+      "gitBlob": "abaeaab5f8cd76c808b9bfd97ff0dad08eca5464",
+      "bytes": 3073,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/server-preload-pattern.md",
+      "gitBlob": "3f51fa7c669a057458849e3b0eb0b6ad0247bf7a",
+      "bytes": 3103,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/stream-error-tsx.md",
+      "gitBlob": "712e83ccc28d4e3435817a2e7f85493545db660b",
+      "bytes": 2955,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/stream-loading-tsx.md",
+      "gitBlob": "aa3c709f1132062d18f0d377cf3d25051afce07c",
+      "bytes": 5512,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/stream-nested-suspense.md",
+      "gitBlob": "a52852f77f7f3835c8f38cfd812f26de095f8c17",
+      "bytes": 3273,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/stream-skeleton-matching.md",
+      "gitBlob": "996e6b64fb594d3999f8b63798c919e3c653e361",
+      "bytes": 3054,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/nextjs-conventions/stream-suspense-boundaries.md",
+      "gitBlob": "7c2e80cbd86cc3bf5a63ddf1b3a87d0f8078b62b",
+      "bytes": 2900,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/python-conventions/build-and-test.md",
+      "gitBlob": "561fdbc501744f9836b3725ba393b3a1e3cfe4c4",
+      "bytes": 633,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/python-conventions/style-and-security.md",
+      "gitBlob": "a0724bd2ee3dbbccae19ac78576f92346ae75a8a",
+      "bytes": 2710,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/python-conventions/testing-and-tools.md",
+      "gitBlob": "0de45d23d0e533fde0d7a982d5341fa0be1eaba6",
+      "bytes": 1966,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/python-conventions/typing-and-docs.md",
+      "gitBlob": "c5f79a1d9675844de771945f619da855b357f20f",
+      "bytes": 2251,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/regex-reference/patterns.md",
+      "gitBlob": "65869335a3cf1f8d9daad963192641a778abf478",
+      "bytes": 3580,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/api-aggregation-patterns/metadata.json",
+      "gitBlob": "a8fbdaafcb96eeb7ff71bd8160abece4bc962b19",
+      "bytes": 86,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/api-aggregation-patterns/references/detail-aggregation-pattern.md",
+      "gitBlob": "867293eadee5a4f8e45bac0ccd929e52cf91aeef",
+      "bytes": 746,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/api-aggregation-patterns/source-index.md",
+      "gitBlob": "1335abf49cd53bf092a9a7649e06152dcf711589",
+      "bytes": 1183,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/computer-use-operations/metadata.json",
+      "gitBlob": "83f1c05b270d7159a03bc5355abd929d5dbf5b4b",
+      "bytes": 81,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/computer-use-operations/references/dashboard-ui.md",
+      "gitBlob": "72871a65a0a3a07eeb3823f9247dbcf8d3d2121b",
+      "bytes": 1029,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/computer-use-operations/references/layered-crud.md",
+      "gitBlob": "db7e19d830ca94e9e1b10fd4a75454e48042e8e6",
+      "bytes": 1244,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/computer-use-operations/references/mcp-tool-parity.md",
+      "gitBlob": "7d2b56de8e0e4a4f4b17fad6c644b3421aa2dec6",
+      "bytes": 834,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/computer-use-operations/source-index.md",
+      "gitBlob": "2e8c546bb25293eb43395fcf8cd33c052aec1b75",
+      "bytes": 2323,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/language-conventions/metadata.json",
+      "gitBlob": "a6391e4d30397ec9cd755980d0480ef844d2ee70",
+      "bytes": 57,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/language-conventions/source-index.md",
+      "gitBlob": "cad50d89e3e174b561c7d9ec6ed948bb0547f51e",
+      "bytes": 1346,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/message-ui-conventions/metadata.json",
+      "gitBlob": "b0209c58ddfecac5488f06bf741a19d9cbf08b2d",
+      "bytes": 40,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/message-ui-conventions/source-index.md",
+      "gitBlob": "987721db3c3f55402d4dff5f495fa899a9cc3012",
+      "bytes": 942,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/visual-standards-conventions/metadata.json",
+      "gitBlob": "b0209c58ddfecac5488f06bf741a19d9cbf08b2d",
+      "bytes": 40,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/sources/visual-standards-conventions/source-index.md",
+      "gitBlob": "ac70572ed39e3f277c637ef5a02cc61ab7a7f657",
+      "bytes": 712,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/testing/patterns.md",
+      "gitBlob": "61d83626853e04f074b5459d4aa7db5412fcd163",
+      "bytes": 3415,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/useful-comments/guidelines.md",
+      "gitBlob": "e9d291d271d6353393c0743300b68978bb5af66d",
+      "bytes": 5040,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/web-design/reviewer.md",
+      "gitBlob": "0b0b2ae5df48007ed413a07b59369818be5ceaf8",
+      "bytes": 2671,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/development-conventions/references/write-docs/guide.md",
+      "gitBlob": "54bf94f19460a2a42debfe2707f127c30fd882cf",
+      "bytes": 3216,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/fanduel-parlay-research/README.md",
+      "gitBlob": "3f0f6d13575d7bd6b9aac97fa50b93b3786e4b4f",
+      "bytes": 10163,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/fanduel-parlay-research/SKILL.md",
+      "gitBlob": "27d8f397c25263ca0ca2aced63432e05cafc08bc",
+      "bytes": 7609,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/fanduel-parlay-research/references/fanduel-workflow.md",
+      "gitBlob": "c50e1da763e3f5897b11ca810a5e5f0f25c50ad8",
+      "bytes": 14019,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/fanduel-parlay-research/scripts/parlay_math.py",
+      "gitBlob": "085fb7fd34509a9d4488c1672446ae30931e4314",
+      "bytes": 7939,
+      "executable": true
+    },
+    {
+      "path": ".opencode/skills/files-and-documents/README.md",
+      "gitBlob": "8c3d6729a381af95fb61f0b4882a1b00a4e5f14a",
+      "bytes": 5130,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/files-and-documents/SKILL.md",
+      "gitBlob": "6f4f433a28c1f9e2e4596a2d738587872adeb859",
+      "bytes": 1826,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/game-playtest/LICENSE.txt",
+      "gitBlob": "689f9be2affd8582eced00c5688ffe7ae377ab49",
+      "bytes": 1080,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/game-playtest/PROVENANCE.md",
+      "gitBlob": "2ad57f5e553bf86c8fb7791b92962aac11527ec1",
+      "bytes": 2330,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/game-playtest/README.md",
+      "gitBlob": "ca3016cc3dbae168ea737b3b413f28d6ca18d416",
+      "bytes": 7560,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/game-playtest/SKILL.md",
+      "gitBlob": "9c489fe9fa4c54146df0e6c03448bb3545fbac00",
+      "bytes": 9726,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/github-operations/README.md",
+      "gitBlob": "2b3fdec57b68d602e5799c521c63e2958fc81403",
+      "bytes": 5842,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/github-operations/SKILL.md",
+      "gitBlob": "739cdf01cfd792bdee95631fb4f7130b0f823ae8",
+      "bytes": 5092,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/handoff/README.md",
+      "gitBlob": "2c06acb093ae7df9221ce14a2bdc81cf8a463f45",
+      "bytes": 1705,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/handoff/SKILL.md",
+      "gitBlob": "01cffc230586693999f67caf6c9af9dd7a06310e",
+      "bytes": 2959,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/opencode-db-maintenance/README.md",
+      "gitBlob": "ab6b4dad1adf46f9c5dbc66ecf169b0a778677fe",
+      "bytes": 6393,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/opencode-db-maintenance/SKILL.md",
+      "gitBlob": "1caa3a365328fbfc71feef3a5b256ce251e9d143",
+      "bytes": 6507,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/repo-onboarding/README.md",
+      "gitBlob": "517a7396626ad71d7440e3fe5fe3c2789632e020",
+      "bytes": 8226,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/repo-onboarding/SKILL.md",
+      "gitBlob": "0ea92b09651f44bfaa6166b5c7f1a375530dfd41",
+      "bytes": 9030,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/routine-automation/README.md",
+      "gitBlob": "99092ae309f5760bc0bad18ad04724c79c677904",
+      "bytes": 4973,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/routine-automation/SKILL.md",
+      "gitBlob": "cd689cfb1c54c261eeb21d302ac392268e9814cd",
+      "bytes": 1962,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/session-context/README.md",
+      "gitBlob": "578af77e8cf03eecfef227176c0d38677d08076b",
+      "bytes": 5623,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/session-context/SKILL.md",
+      "gitBlob": "51a18d2c421d5400888b0d554a2666b82fd4c882",
+      "bytes": 4063,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/PROVENANCE.md",
+      "gitBlob": "3b60fb6b51836cd319f09a231697dcb20ffac477",
+      "bytes": 600,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/README.md",
+      "gitBlob": "ce98df2098cf5a81c912aaa13e6d5a0c183d327c",
+      "bytes": 5697,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/SKILL.md",
+      "gitBlob": "9023d10a3172d87a96f4d8c7209cd9903abf2e94",
+      "bytes": 5688,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/audit.md",
+      "gitBlob": "2dc051d25d1c167d8d1f249451904c545fce99d5",
+      "bytes": 2242,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/creation.md",
+      "gitBlob": "fd180495a47eba6fdcc8641e7bf8a25fdc414d2b",
+      "bytes": 2947,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/detection.md",
+      "gitBlob": "2ec590c76bf440dae6fccbb910010dfef0e3692f",
+      "bytes": 2035,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/documentation-and-metadata.md",
+      "gitBlob": "d1942c0026dcbe746d9f25966510cd5cad7c88bc",
+      "bytes": 3412,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/index-regeneration.md",
+      "gitBlob": "177ad7a481f5bb57e41b6741086a54515c02a4b9",
+      "bytes": 1339,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/lifecycle.md",
+      "gitBlob": "7067a5028079fdd5522b187eb2ca0d668f108e9f",
+      "bytes": 2510,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/sources/local-persistence/metadata.json",
+      "gitBlob": "0f907b22730cd896e803e8f0c24401b8e2eb4c3e",
+      "bytes": 208,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/sources/local-persistence/source-index.md",
+      "gitBlob": "477c114252e3da856b2edf358f8776e05970ca27",
+      "bytes": 812,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/skill-maintenance/references/validation-checklist.md",
+      "gitBlob": "a8b5c2f5554547419e7c17dbe672b954bc7be2d1",
+      "bytes": 2399,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/system-troubleshooting/README.md",
+      "gitBlob": "7d967a3311a352dfd0f55479fb2971be6a547c7c",
+      "bytes": 4632,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/system-troubleshooting/SKILL.md",
+      "gitBlob": "c1cbec50b7761b582c0113d20aa364176abc63f3",
+      "bytes": 2291,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/task-memory/README.md",
+      "gitBlob": "63384a2849a0e9d6b98c54201d9c604564c1ed00",
+      "bytes": 5827,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/task-memory/SKILL.md",
+      "gitBlob": "7a9d3fd671e0be39798bdbc44bdb02b03b2d7238",
+      "bytes": 2671,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/vscode-management/README.md",
+      "gitBlob": "737f94fd1cb7ca7f5e1903ff068e8ebc4e217755",
+      "bytes": 8481,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/vscode-management/SKILL.md",
+      "gitBlob": "2670de987c8b08b83260e93e8690cc8054588a3c",
+      "bytes": 8132,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/web-3d-asset-pipeline/LICENSE.txt",
+      "gitBlob": "689f9be2affd8582eced00c5688ffe7ae377ab49",
+      "bytes": 1080,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/web-3d-asset-pipeline/PROVENANCE.md",
+      "gitBlob": "1578e2c33f42f74bd035c686cc030c610ead1581",
+      "bytes": 2378,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/web-3d-asset-pipeline/README.md",
+      "gitBlob": "95afa9d7b7e41d520d0575b0029459bb1d227b53",
+      "bytes": 7336,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/web-3d-asset-pipeline/SKILL.md",
+      "gitBlob": "a5ca52b4564ba9c5baad2b028ff08f823215fdf5",
+      "bytes": 8817,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/websearch/README.md",
+      "gitBlob": "ef8bca68dcf14f8822380a238dc66e9b4241b1d5",
+      "bytes": 5484,
+      "executable": false
+    },
+    {
+      "path": ".opencode/skills/websearch/SKILL.md",
+      "gitBlob": "5e7238c8892d848f2d449891193d6aa508bdb384",
+      "bytes": 5110,
+      "executable": false
+    },
+    {
+      "path": "README.md",
+      "gitBlob": "f3d24f63de9102a4d68c4e60f7b8959eec21b592",
+      "bytes": 2108,
+      "executable": false
+    },
+    {
+      "path": "config/mcp-versions.json",
+      "gitBlob": "5e4ed73f7d95a68ca450bdb1f7e6abc0de453c78",
+      "bytes": 596,
+      "executable": false
+    },
+    {
+      "path": "scripts/assistant-memory.py",
+      "gitBlob": "dd8f92a4a9745acb799dc87de9bbd80749cc8c4b",
+      "bytes": 12829,
+      "executable": true
+    },
+    {
+      "path": "scripts/deploy-global-config.sh",
+      "gitBlob": "9e3434c11c872d7208981a666ade872b184efdbc",
+      "bytes": 5382,
+      "executable": true
+    },
+    {
+      "path": "scripts/desktop-control.py",
+      "gitBlob": "9a0c4612f6eb4568b589e1c7a3fcc6e15e3f7d57",
+      "bytes": 17327,
+      "executable": true
+    },
+    {
+      "path": "scripts/github-mcp.sh",
+      "gitBlob": "5c6d32402ba7e89aa465020bdf21a6f077820c9b",
+      "bytes": 3349,
+      "executable": true
+    },
+    {
+      "path": "scripts/health-check.sh",
+      "gitBlob": "e899db6ea4f2b3a0d49e10461419f29362e2dd72",
+      "bytes": 2056,
+      "executable": true
+    },
+    {
+      "path": "scripts/jsonc_model.py",
+      "gitBlob": "8069c68bfdd7751a0470a7a60e8b289820d4618e",
+      "bytes": 5866,
+      "executable": true
+    },
+    {
+      "path": "scripts/mcp_runtime.py",
+      "gitBlob": "94a3042501ac1835917fe8590f8b450e75c0561d",
+      "bytes": 45885,
+      "executable": true
+    },
+    {
+      "path": "scripts/onboard.sh",
+      "gitBlob": "357af81a6c2b0b6c195960908efcd1f6c45ca8e0",
+      "bytes": 6212,
+      "executable": true
+    },
+    {
+      "path": "scripts/opencode-chat-backup.py",
+      "gitBlob": "86a59289c6176b3d75aa5444cdb7f4986f352ada",
+      "bytes": 10240,
+      "executable": true
+    },
+    {
+      "path": "scripts/opencode-db-maintain.py",
+      "gitBlob": "9302a8af50e2a900041ac17442af07fc9f460759",
+      "bytes": 24858,
+      "executable": true
+    },
+    {
+      "path": "scripts/opencode-maintenance-cron.sh",
+      "gitBlob": "ce298806880a69e7e5dcdcd88639c3e7510a917d",
+      "bytes": 3880,
+      "executable": true
+    },
+    {
+      "path": "scripts/playwright-headless-mcp.sh",
+      "gitBlob": "c0a661c31f01c7885ebf4bccdac13b3fc7f453e5",
+      "bytes": 925,
+      "executable": true
+    },
+    {
+      "path": "scripts/playwright-mcp.sh",
+      "gitBlob": "03506d76079fbbd949e577e95c8f00d5e8025838",
+      "bytes": 911,
+      "executable": true
+    },
+    {
+      "path": "scripts/setup-model.sh",
+      "gitBlob": "1c18425c9f1ef2fdf4a6bdbf7684b222bfcb8bca",
+      "bytes": 3890,
+      "executable": true
+    },
+    {
+      "path": "setup.md",
+      "gitBlob": "11b60cb7d105e9b9160473e5de5fe71fd19c5b44",
+      "bytes": 5121,
+      "executable": false
+    },
+    {
+      "path": "tools/browser/package-lock.json",
+      "gitBlob": "075bd2970bb0f13476590083cd59013517556f41",
+      "bytes": 1814,
+      "executable": false
+    },
+    {
+      "path": "tools/browser/package.json",
+      "gitBlob": "32f63444b231b3012048a1d23928b34eb4a6818b",
+      "bytes": 142,
+      "executable": false
+    }
+  ],
+  "goal": {
+    "dependencyProvenance": "@prevalentware/opencode-goal-plugin@0.1.67",
+    "integration": "Use the existing Veyra Goal integration once, outside ordinary Chat"
+  },
+  "excluded": [
+    "global/",
+    "opencode.json",
+    "AGENTS.md",
+    ".opencode/commands/"
+  ]
+}
