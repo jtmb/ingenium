@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import {
   api,
+  request,
   Skill,
   type SkillProposalCounts,
   type SkillProposalSummary,
@@ -17,6 +18,7 @@ import ProposalReviewOverlay, {
   ProposalDto as ProposalDetail,
 } from "../components/proposals/ProposalReviewOverlay";
 import Select from "../components/Select";
+import { runSkillSave, runSkillUpload, skillResourcePath, skillWriteBlocked, skillWriteFailure, verifySkillSave, verifySkillUpload, type SkillWriteResult } from "../components/customize-v2/skill-write-outcomes.mjs";
 
 type SkillsTab = "active" | "proposals" | "consolidated";
 type ActiveSkillsState = "loading" | "success" | "error";
@@ -127,14 +129,29 @@ function proposalTypeHue(type: string): string {
   }
 }
 
+function SkillSaveNotice({ result, busy, onVerify }: {
+  result: SkillWriteResult; busy: boolean; onVerify: () => void;
+}) {
+  return <div className="space-y-2 break-words rounded border border-[var(--color-border)] p-3"
+    role={result.status === "verified" ? "status" : "alert"} data-testid="skill-save-outcome" data-outcome={result.status}>
+    {result.attempt && <p className="text-xs text-[var(--color-text-muted)]">Save: {result.attempt.name} / {result.attempt.path}</p>}
+    <p className="text-sm">{result.message}</p>
+    {skillWriteBlocked(result) && <button type="button" onClick={onVerify} disabled={busy}
+      className="rounded border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Verify stored save</button>}
+  </div>;
+}
 export default function SkillsPage() {
   const project = useProject();
+  return <ProjectSkills key={project} project={project} />;
+}
 
+function ProjectSkills({ project }: { project: string }) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillsState, setSkillsState] = useState<ActiveSkillsState>("loading");
   const [skillsError, setSkillsError] = useState<string | null>(null);
   const [skillsProject, setSkillsProject] = useState<string | null>(null);
   const skillsRequestId = useRef(0);
+  const lastSkillsReadError = useRef<unknown>(null);
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<"alpha" | "newest">("alpha");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -143,7 +160,20 @@ export default function SkillsPage() {
   const [editMode, setEditMode] = useState(false);
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [uploadResult, setUploadResult] = useState<SkillWriteResult | null>(null);
+  const [saveResult, setSaveResult] = useState<SkillWriteResult | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const uploadBusyRef = useRef(false);
+  const saveBusyRef = useRef(false);
+  const mounted = useRef(true);
+  const detailRequest = useRef(0);
+  const detailSelection = useRef<string | null>(null);
+  const writeBlocked = skillWriteBlocked(uploadResult) || skillWriteBlocked(saveResult);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; detailRequest.current += 1; };
+  }, []);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [tab, setTab] = useState<SkillsTab>("active");
@@ -168,20 +198,22 @@ export default function SkillsPage() {
     const requestId = ++skillsRequestId.current;
     setSkillsState("loading");
     setSkillsError(null);
+    lastSkillsReadError.current = null;
     setSkills([]);
 
     try {
       const r = await api.skills.list(project);
-      if (requestId !== skillsRequestId.current) return true;
+      if (!mounted.current || requestId !== skillsRequestId.current) return false;
       setSkills(r.data ?? []);
       setSkillsProject(project);
       setSkillsState("success");
       return true;
     } catch (err: unknown) {
-      if (requestId !== skillsRequestId.current) return true;
+      if (!mounted.current || requestId !== skillsRequestId.current) return false;
       setSkills([]);
       setSkillsProject(project);
       setSkillsState("error");
+      lastSkillsReadError.current = err;
       setSkillsError(err instanceof Error && err.message ? err.message : "Failed to load active skills");
       return false;
     }
@@ -328,76 +360,139 @@ export default function SkillsPage() {
     void loadProposalPage("history", project, { generation: proposalGeneration.current });
   }, [historyProposalPage.project, historyProposalPage.state, loadProposalPage, project, proposalView, tab]);
 
+  const refreshAfterWrite = async (): Promise<boolean> => {
+    if (!mounted.current) return false;
+    const refreshed = await loadSkills();
+    if (!refreshed && lastSkillsReadError.current) throw lastSkillsReadError.current;
+    return refreshed;
+  };
+  const readSkillRecord = async (name: string, requestProject: string): Promise<Skill> => {
+    if (!mounted.current) throw new Error("This view changed before readback.");
+    const response = encodeURIComponent(name) === name
+      ? await api.skills.get(name, requestProject)
+      : await request<{ data: Skill }>(skillResourcePath(name, requestProject));
+    return response.data;
+  };
+
   const fetchSkill = async (name: string) => {
+    const requestId = ++detailRequest.current;
+    setDetailError(null);
     try {
-      const r = await api.skills.get(name, project);
-      setSelectedSkill(r.data);
+      const record = await readSkillRecord(name, project);
+      if (!mounted.current || requestId !== detailRequest.current) return;
+      if (record.name !== name) throw new Error("The returned skill does not match the requested resource.");
+      detailSelection.current = record.id;
+      setSelectedSkill(record);
       setSelectedFile("SKILL.md");
-      setFileContent(r.data.content);
+      setFileContent(record.content);
       setEditMode(false);
-    } catch {}
+    } catch (error) {
+      if (mounted.current && requestId === detailRequest.current) {
+        setDetailError("Skill could not be loaded: " + skillWriteFailure(error).message);
+      }
+    }
   };
 
   const handleSelectFile = (path: string, content: string) => {
+    if (saveBusyRef.current || skillWriteBlocked(saveResult)) return;
     setSelectedFile(path);
     setFileContent(content);
     setEditMode(false);
   };
 
   const handleEdit = () => {
+    if (uploadBusyRef.current || saveBusyRef.current || writeBlocked) return;
     setEditText(fileContent);
     setEditMode(true);
   };
 
-  const handleSave = async () => {
-    if (!selectedSkill) return;
-    setSaving(true);
-    try {
-      let fileTree = selectedSkill.file_tree;
-      if (selectedFile !== "SKILL.md" && fileTree) {
-        const tree = JSON.parse(fileTree);
-        tree[selectedFile] = editText;
-        fileTree = JSON.stringify(tree);
-      }
-      await api.skills.update(selectedSkill.name, selectedFile === "SKILL.md" ? editText : selectedSkill.content, {
-        tags: selectedSkill.tags ?? undefined,
-        always_apply: selectedSkill.always_apply,
-        files: fileTree ?? undefined,
-      }, project);
-      setFileContent(editText);
+  const applySaveResult = (result: SkillWriteResult) => {
+    if (!mounted.current) return;
+    setSaveResult(result);
+    if (result.status === "verified" && result.record && result.attempt &&
+        detailSelection.current === result.attempt.id) {
+      setSelectedSkill(result.record);
+      setSelectedFile(result.attempt.path ?? "SKILL.md");
+      setFileContent(result.attempt.text ?? result.record.content);
+      setEditText(result.attempt.text ?? result.record.content);
       setEditMode(false);
-      await fetchSkill(selectedSkill.name);
-    } catch {}
-    setSaving(false);
-  };
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadStatus("uploading");
-    try {
-      const text = await file.text();
-      const match = text.match(/^---\s*\nname:\s*(.+)\ndescription:\s*(.+)\n---\s*\n([\s\S]*)$/m);
-      if (!match) {
-        setUploadStatus("error");
-        setTimeout(() => setUploadStatus("idle"), 3000);
-        return;
-      }
-      await api.skills.create(match[1]!.trim(), match[2]!.trim(), match[3]!.trim(), project);
-      if (!await loadSkills()) {
-        setUploadStatus("error");
-        setTimeout(() => setUploadStatus("idle"), 3000);
-        return;
-      }
-      setUploadStatus("success");
-      setTimeout(() => setUploadStatus("idle"), 3000);
-    } catch {
-      setUploadStatus("error");
-      setTimeout(() => setUploadStatus("idle"), 3000);
     }
-    if (fileRef.current) fileRef.current.value = "";
   };
 
+  const handleSave = async () => {
+    if (!selectedSkill || saveBusyRef.current || uploadBusyRef.current || writeBlocked) return;
+    saveBusyRef.current = true;
+    setSaving(true);
+    setSaveResult(null);
+    try {
+      const result = await runSkillSave(selectedSkill, selectedFile, editText, project, {
+        write: (name, payload, requestProject) => api.skills.update(name, payload.content, payload.extra, requestProject),
+        read: readSkillRecord,
+      });
+      applySaveResult(result);
+    } finally {
+      saveBusyRef.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  };
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || uploadBusyRef.current || saveBusyRef.current || writeBlocked) return;
+    uploadBusyRef.current = true;
+    setUploadBusy(true);
+    setUploadResult(null);
+    try {
+      let text: string;
+      try { text = await file.text(); }
+      catch (error) {
+        if (mounted.current) setUploadResult({
+          status: "read-error", writeConfirmed: false, failure: skillWriteFailure(error),
+          message: "The selected file could not be read. No upload was submitted.",
+        });
+        return;
+      }
+      if (!mounted.current) return;
+      const result = await runSkillUpload(text, project, {
+        create: async (value, requestProject) => (await api.skills.create(value.name, value.description, value.content, requestProject)).data,
+        refresh: refreshAfterWrite,
+      });
+      if (mounted.current) setUploadResult(result);
+    } finally {
+      uploadBusyRef.current = false;
+      if (mounted.current) {
+        setUploadBusy(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }
+    }
+  };
+
+  const handleVerifyUpload = async () => {
+    if (!uploadResult || uploadBusyRef.current || saveBusyRef.current) return;
+    uploadBusyRef.current = true;
+    setUploadBusy(true);
+    try {
+      const result = await verifySkillUpload(uploadResult, {
+        read: readSkillRecord,
+        refresh: refreshAfterWrite,
+      });
+      if (mounted.current) setUploadResult(result);
+    } finally {
+      uploadBusyRef.current = false;
+      if (mounted.current) setUploadBusy(false);
+    }
+  };
+
+  const handleVerifySave = async () => {
+    if (!saveResult || uploadBusyRef.current || saveBusyRef.current) return;
+    saveBusyRef.current = true;
+    setSaving(true);
+    try { applySaveResult(await verifySkillSave(saveResult, { read: readSkillRecord })); }
+    finally {
+      saveBusyRef.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  };
   const openProposal = async (proposal: SkillProposalSummary) => {
     const requestId = ++proposalDetailRequestId.current;
     const requestProject = project;
@@ -602,6 +697,20 @@ export default function SkillsPage() {
         ))}
       </div>
 
+      <div className="space-y-3" aria-live="polite">
+        {detailError && <p role="alert" className="text-sm text-[var(--color-error-text)]">{detailError}</p>}
+        {uploadBusy && <p role="status" className="text-sm">Checking upload state…</p>}
+        {saving && <p role="status" className="text-sm">Saving or verifying skill…</p>}
+        {uploadResult && <div className="space-y-2 break-words rounded border border-[var(--color-border)] p-3"
+          role={["success", "verified"].includes(uploadResult.status) ? "status" : "alert"}
+          data-testid={["success", "verified"].includes(uploadResult.status) ? "upload-success" : "upload-error"}
+          data-outcome={uploadResult.status}>
+          <p className="text-sm">{uploadResult.message}</p>
+          {skillWriteBlocked(uploadResult) && <button type="button" onClick={() => void handleVerifyUpload()}
+            disabled={uploadBusy || saving} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Verify stored upload</button>}
+        </div>}
+        {saveResult && !selectedSkill && <SkillSaveNotice result={saveResult} busy={saving || uploadBusy} onVerify={() => void handleVerifySave()} />}
+      </div>
       {tab === "active" && (
         <>
           {activeSkillsLoading && (
@@ -639,14 +748,12 @@ export default function SkillsPage() {
             <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" data-testid="skills-upload-input" />
             <button
               onClick={() => fileRef.current?.click()}
-              disabled={uploadStatus === "uploading"}
+              disabled={uploadBusy || saving || writeBlocked}
               className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 w-full sm:w-auto shrink-0 h-10"
               data-testid="skills-upload-btn"
             >
-              {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
+              {uploadBusy ? "Uploading..." : "Upload Skill"}
             </button>
-            {uploadStatus === "success" && <span className="text-sm text-[var(--color-success-text)]" data-testid="upload-success">Uploaded!</span>}
-            {uploadStatus === "error" && <span className="text-sm text-[var(--color-error-text)]" data-testid="upload-error">Invalid file. Use a .md with name: and description: frontmatter.</span>}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4" data-testid="skills-grid">
@@ -678,7 +785,7 @@ export default function SkillsPage() {
           {selectedSkill && (
             <Overlay
               isOpen
-              onClose={() => setSelectedSkill(null)}
+              onClose={() => { detailSelection.current = null; setSelectedSkill(null); }}
               title={selectedSkill.name}
               subtitle={selectedSkill.description}
               panelClassName="mt-[5dvh] w-11/12 max-w-7xl h-[90dvh] min-h-0"
@@ -703,21 +810,24 @@ export default function SkillsPage() {
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text-muted)] font-mono" title={selectedFile}>{selectedFile}</span>
                     <div className="flex shrink-0 gap-2">
                       {!editMode && (
-                        <button onClick={handleEdit} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Edit</button>
+                        <button onClick={handleEdit} disabled={uploadBusy || saving || writeBlocked} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Edit</button>
                       )}
                       {editMode && (
                         <>
-                          <button onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Cancel</button>
-                          <button onClick={handleSave} disabled={saving} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
+                          <button disabled={saving} onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Cancel</button>
+                          <button onClick={handleSave} disabled={saving || uploadBusy || writeBlocked} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
                         </>
                       )}
                     </div>
                   </div>
+                  {saveResult && <SkillSaveNotice result={saveResult} busy={saving || uploadBusy} onVerify={() => void handleVerifySave()} />}
+                  {skillWriteBlocked(uploadResult) && <p role="status" className="p-3 text-sm">An upload needs verification. Close this preview to verify it before another write.</p>}
                   <div data-testid="skill-preview-content" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
                     {editMode ? (
                       <textarea
                         id="skill-editor"
                         aria-label={`Edit ${selectedFile}`}
+                        disabled={saving || writeBlocked}
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
                         className="h-full min-h-0 w-full p-4 border rounded font-mono text-sm resize-none"
