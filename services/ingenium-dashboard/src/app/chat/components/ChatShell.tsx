@@ -938,44 +938,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
           <button type="button" onClick={() => setCollapsed((value) => !value)} className="hidden md:inline-flex rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]" aria-expanded={!collapsed}>History</button>
           <button type="button" onClick={handleNew} disabled={isCreating || navigationPending} className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">New conversation</button>
         </div>
-        <details className="veyra-conversation-options">
-          <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">Conversation options</summary>
-        <ChatHeader
-          sessionTitle={activeSession?.title ?? "Chat"}
-          onRename={handleRename}
-          onFork={handleFork}
-          onShare={handleShare}
-          onCompact={handleCompact}
-          shareState={shareState}
-          compactState={compactState}
-          providerId={providerId}
-          modelId={modelId}
-          agentName={agentName}
-          onProviderChange={handleProviderChange}
-          onModelChange={handleModelChange}
-          onAgentChange={setAgentName}
-          providers={availableProviders}
-          agents={availableAgents}
-          availableModels={currentModels}
-          isBusy={chat.isStreaming || chat.isLoading}
-          disabled={selectorsDisabled}
-          modelDisabled={!hasSelectableModel}
-          onMobileMenuOpen={handleMobileMenuOpen}
-          onMcpOpen={handleMcpOpen}
-          permissionCount={chat.permissions.length}
-          onCreateTask={handleCreateTask}
-          createTaskDisabled={taskCaptureDisabled}
-        />
-        {chatConfigProject && (
-          <div
-            className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]"
-            data-testid="chat-global-project"
-          >
-            <span>Chat tools run through global project:</span>
-            <code className="truncate font-mono text-[var(--color-text-secondary)]">{chatConfigProject}</code>
-          </div>
-        )}
-        </details>
+
         {contextSearchError && (
           <div
             className="flex shrink-0 items-center gap-2 px-4 py-2 text-sm text-[var(--color-error-text)]"
@@ -1289,6 +1252,44 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               </p>
             ) : <fieldset disabled={isCreating || navigationPending} className="contents" aria-label="Chat composer">
             <ChatInput
+              projectControl={<ProjectDropdown placement="composer" />}
+              renderConversationOptions={close => <>
+                <ChatHeader presentation="menu" onAction={close}
+                  sessionTitle={activeSession?.title ?? "Chat"}
+                  onRename={handleRename}
+                  onFork={handleFork}
+                  onShare={handleShare}
+                  onCompact={handleCompact}
+                  shareState={shareState}
+                  compactState={compactState}
+                  providerId={providerId}
+                  modelId={modelId}
+                  agentName={agentName}
+                  onProviderChange={handleProviderChange}
+                  onModelChange={handleModelChange}
+                  onAgentChange={setAgentName}
+                  providers={availableProviders}
+                  agents={availableAgents}
+                  availableModels={currentModels}
+                  isBusy={chat.isStreaming || chat.isLoading}
+                  disabled={selectorsDisabled}
+                  modelDisabled={!hasSelectableModel}
+                  onMobileMenuOpen={handleMobileMenuOpen}
+                  onMcpOpen={handleMcpOpen}
+                  permissionCount={chat.permissions.length}
+                  onCreateTask={handleCreateTask}
+                  createTaskDisabled={taskCaptureDisabled}
+                />
+                {chatConfigProject && (
+                  <div
+                    className="flex shrink-0 items-center gap-1.5 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] px-4 py-1.5 text-xs text-[var(--color-text-muted)]"
+                    data-testid="chat-global-project"
+                  >
+                    <span>Chat tools run through global project:</span>
+                    <code className="truncate font-mono text-[var(--color-text-secondary)]">{chatConfigProject}</code>
+                  </div>
+                )}
+              </>}
               key={activeId}
               onSend={handleSend}
               onStop={handleStop}

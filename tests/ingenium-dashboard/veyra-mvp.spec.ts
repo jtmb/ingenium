@@ -163,7 +163,7 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   await expect(page.getByRole("navigation", { name: "Workspace mode" }).getByRole("link", { name: "Work" })).toHaveAttribute("href", "/opencode");
   const modelPicker = page.getByRole("combobox", { name: "Chat model", exact: true });
   await expect(modelPicker).toBeEnabled();
-  const controls = [page.getByRole("button", { name: "Attach files", exact: true }), composer, modelPicker,
+  const controls = [page.getByRole("button", { name: "Add to conversation", exact: true }), composer, modelPicker,
     modelPicker.locator("..").locator("svg"), page.getByRole("button", { name: "Dictation unavailable", exact: true }), page.getByTestId("chat-send-btn")];
   const centers = await Promise.all(controls.map(async control => {
     const box = await control.boundingBox();
@@ -181,6 +181,27 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   const artifacts = visualQaRunDirectory(runtime.context.runId);
   mkdirSync(artifacts, { recursive: true });
   await page.screenshot({ path: join(artifacts, "veyra-chat-empty-fixture.png"), fullPage: true });
+  await expect(page.locator("header").getByRole("button", { name: /^Context project:/ })).toHaveCount(0);
+  await expect(page.getByText("Conversation options", { exact: true })).toHaveCount(0);
+  const plus = page.getByRole("button", { name: "Add to conversation", exact: true });
+  await plus.click();
+  const options = page.getByRole("dialog", { name: "Add to conversation", exact: true });
+  await expect(options).toBeVisible();
+  for (const name of ["Add photos & files", "Rename conversation", "Fork conversation", "Share conversation", "Compact conversation", "Create task from conversation", "MCP servers"]) await expect(options.getByRole("button", { name, exact: true })).toBeVisible();
+  const projectChoice = options.getByRole("button", { name: `Context project: ${runtime.project}`, exact: true });
+  await projectChoice.click();
+  const projectMenu = options.getByRole("menu", { name: "Project menu", exact: true });
+  await expect(projectMenu.getByRole("menuitem").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(projectMenu).toHaveCount(0);
+  await expect(options).toBeVisible();
+  await expect(projectChoice).toBeFocused();
+  await options.getByText("Model and agent", { exact: true }).click();
+  await expect(options.getByTestId("chat-header-model")).toHaveValue(await modelPicker.inputValue());
+  await page.screenshot({ path: join(artifacts, "veyra-chat-plus-desktop-fixture.png"), fullPage: true });
+  await page.keyboard.press("Escape");
+  await expect(options).toHaveCount(0);
+  await expect(plus).toBeFocused();
   const desktopViewport = page.viewportSize()!;
   await page.setViewportSize({ width: 390, height: 844 });
   const shellBox = await page.getByTestId("chat-composer-shell").boundingBox();
@@ -195,6 +216,15 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   expect(Math.max(...mobileCenters) - Math.min(...mobileCenters), "Mobile model and action controls share one centerline").toBeLessThanOrEqual(1);
   expect(mobileBoxes[1]!.y + mobileBoxes[1]!.height).toBeLessThanOrEqual(mobileBoxes[0]!.y);
   await page.screenshot({ path: join(artifacts, "veyra-chat-mobile-fixture.png"), fullPage: true });
+  await plus.click();
+  await expect(options).toBeVisible();
+  const menuBox = await options.boundingBox();
+  expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(390);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(844);
+  await page.screenshot({ path: join(artifacts, "veyra-chat-plus-mobile-fixture.png"), fullPage: true });
+  await page.keyboard.press("Escape");
   await page.setViewportSize(desktopViewport);
   await composer.fill("Hello from E2E test");
   await composer.press("Enter");
@@ -249,10 +279,11 @@ test("Veyra settings and navigation remain discoverable and keyboard reachable",
   for (const name of ["Chat", "OpenCode", "VS Code", "Mail", "Tasks", "Docs", "Skills", "Agents", "Observations", "Personality", "Context", "Pipeline", "Jobs", "Backups", "Logs", "Usage", "Status", "Projects", "Organizations", "Plugins", "MCP Servers", "Config", "Secrets"]) {
     await expect(navigation.getByRole("link", { name, exact: true })).toHaveAttribute("href", /\//);
   }
+  await page.getByRole("button", { name: "Add to conversation", exact: true }).click();
   await page.getByText("Context and memory", { exact: true }).click();
   await expect(page.getByRole("button", { name: "Use saved memory", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Save this message to memory", exact: true })).toBeVisible();
-  await page.getByText("Conversation options", { exact: true }).click();
+  await page.getByText("Model and agent", { exact: true }).click();
   await expect(page.getByTestId("chat-header-provider")).toBeVisible();
   await expect(page.getByTestId("chat-header-model")).toBeVisible();
 });

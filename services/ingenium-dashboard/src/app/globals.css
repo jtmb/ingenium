@@ -45,9 +45,6 @@ body {
 .veyra-rail-link:hover, .veyra-rail-link.is-active { background: var(--color-surface-selected); color: var(--color-text-primary); }
 .veyra-rail-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .veyra-chat-main { position: relative; }
-.veyra-conversation-options { position: absolute; top: 8px; right: 12px; z-index: 20; }
-.veyra-conversation-options[open] { width: min(90%, 900px); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 12px 32px #0003; }
-.veyra-conversation-options summary { text-align: right; }
 .veyra-chat[data-empty="true"] [data-testid="chat-empty-state"] {
   flex: 0 0 auto;
   margin-top: auto;
@@ -153,7 +150,6 @@ body {
   .veyra-home-composer details.veyra-context-options { left: 10rem; }
   .veyra-home-model { max-width: min(100%, 20rem); }
 }
-.veyra-conversation-options[open], .veyra-context-options[open] { border-bottom: 1px solid var(--color-border); }
 .veyra-context-options:not([open]) { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); }
 .veyra-composer { position: relative; padding-bottom: 36px; }
 @media (min-width: 1200px) {
@@ -500,3 +496,28 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
 .veyra-home-quick-links a:hover { background: var(--color-surface-hover); }
 .veyra-home-quick-links a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
 @media (max-width: 640px) { .veyra-home-quick-links > div { grid-template-columns: 1fr; gap: .625rem; } }
+
+.veyra-composer-plus-trigger { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; flex-shrink: 0; border-radius: 50%; color: var(--color-text-secondary); }
+.veyra-composer-plus-trigger:hover, .veyra-composer-plus-trigger[aria-expanded="true"] { background: var(--color-surface-hover); color: var(--color-text-primary); }
+.veyra-composer-plus-trigger:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.veyra-chat-plus-panel { position: fixed; z-index: 60; width: min(22rem, calc(100vw - 24px)); overflow-y: auto; overscroll-behavior: contain; padding: 8px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-surface-raised); color: var(--color-text-primary); box-shadow: 0 12px 36px #0004; }
+.veyra-chat-plus-panel button, .veyra-chat-plus-panel summary { font-size: 13px; }
+.veyra-chat-plus-attach, .veyra-chat-menu-options [data-menu-section="title"] > button, .veyra-chat-menu-options [data-menu-section="actions"] > button { display: flex; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 38px; padding: 9px 10px; border-radius: 9px; text-align: left; color: var(--color-text-primary); }
+.veyra-chat-plus-attach:hover, .veyra-chat-menu-options button:hover { background: var(--color-surface-hover); }
+.veyra-chat-plus-panel button:disabled { opacity: .4; cursor: not-allowed; }
+.veyra-chat-menu-options header { display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0; border: 0; background: transparent; }
+.veyra-chat-menu-options [data-menu-section="title"] { flex: initial; margin: 0; }
+.veyra-chat-menu-options [data-menu-section="actions"] { order: 2; display: flex; flex-direction: column; align-items: stretch; gap: 0; }
+.veyra-chat-menu-models { order: 3; padding: 8px 10px; border-top: 1px solid var(--color-border); }
+.veyra-chat-menu-models summary { cursor: pointer; }
+.veyra-chat-menu-options [data-menu-section="selectors"] { display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin-top: 10px; }
+.veyra-chat-menu-options [data-menu-section="selectors"] > div, .veyra-chat-menu-options [data-menu-section="selectors"] select { width: 100%; max-width: 100%; }
+.veyra-chat-plus-panel .veyra-context-options { position: static; transform: none; margin-top: 4px; border-top: 1px solid var(--color-border); }
+.veyra-chat-plus-panel .veyra-context-options summary { padding: 10px; }
+.veyra-chat-plus-panel [data-testid="chat-global-project"] { margin-top: 8px; border: 0; border-radius: 8px; }
+.veyra-composer:not(.veyra-home-composer) { padding-bottom: 8px; }
+
+@media (max-width: 767px) {
+  .veyra-chat-plus-panel button, .veyra-chat-plus-panel summary { min-height: 44px; }
+  .veyra-chat-menu-options [data-testid="chat-header-hamburger"] { display: flex; align-items: center; gap: 10px; padding: 9px 10px; text-align: left; }
+}

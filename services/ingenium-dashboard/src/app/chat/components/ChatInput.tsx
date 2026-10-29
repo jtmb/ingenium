@@ -1,5 +1,6 @@
 "use client";
 
+import ComposerMenu from "./ComposerMenu";
 import { useState, useRef, useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
 
 export interface SendOptions {
@@ -45,6 +46,7 @@ interface ChatInputProps {
   variant?: "chat" | "home";
   projectControl?: ReactNode;
   onOpenTools?: () => void;
+  renderConversationOptions?: (close: () => HTMLButtonElement | null) => ReactNode;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -120,6 +122,7 @@ export default function ChatInput({
   variant = "chat",
   projectControl,
   onOpenTools,
+  renderConversationOptions,
 }: ChatInputProps) {
   const home = variant === "home";
   const [value, setValue] = useState("");
@@ -289,6 +292,85 @@ export default function ChatInput({
   const canAttachMore = attachments.length < MAX_FILES;
   const attachmentsBlocked = !!attachmentSelectionError || attachments.some(item => item.pending || item.error || !item.dataUrl);
 
+  const contextOptions = (
+        <details className="veyra-context-options">
+          <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">{home ? "Tools⌄" : "Context and memory"}</summary>
+        <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border-muted)] px-3 py-1.5">
+          <button
+            type="button"
+            onClick={() => setUseSavedMemory((value) => !value)}
+            disabled={!memoryWorkspaceId || !memoryCanRead || isLoading || sending}
+            className={[
+              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              useSavedMemory && memoryWorkspaceId && memoryCanRead
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+            ].join(" ")}
+            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory}
+            aria-label="Use saved memory"
+          >
+            Use memory
+          </button>
+          <button
+            type="button"
+            onClick={() => setSaveToMemory((value) => !value)}
+            disabled={!memoryWorkspaceId || !memoryCanSave || memorySavePending || isLoading || sending}
+            className={[
+              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              saveToMemory && memoryWorkspaceId && memoryCanSave
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+            ].join(" ")}
+            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanSave && saveToMemory}
+            aria-label="Save this message to memory"
+          >
+            Save message
+          </button>
+          <button
+            type="button"
+            onClick={() => setUseProjectContext((value) => !value)}
+            disabled={isLoading || sending}
+            className={[
+              "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
+              useProjectContext
+                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
+              "disabled:cursor-not-allowed disabled:opacity-40",
+            ].join(" ")}
+            aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
+            aria-pressed={useProjectContext}
+            title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
+            data-testid="chat-use-project-context"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
+              />
+            </svg>
+            <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
+            <span
+              className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
+              data-testid="chat-context-project"
+            >
+              {projectContextProject ?? "Unavailable"}
+            </span>
+          </button>
+        </div>
+        {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
+        {home && onOpenTools && <button type="button" onClick={onOpenTools} className="px-3 py-2 text-sm">Available tools</button>}
+        </details>
+  );
+
   return (
     <div className={`veyra-composer shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2${home ? " veyra-home-composer" : ""}`}>
       {/* Attachment preview pills */}
@@ -376,82 +458,8 @@ export default function ChatInput({
         onDrop={handleDrop}
       >
         {home && <div className="veyra-home-composer-controls">{projectControl}{modelControl}</div>}
-        <details className="veyra-context-options">
-          <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">{home ? "Tools⌄" : "Context and memory"}</summary>
-        <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border-muted)] px-3 py-1.5">
-          <button
-            type="button"
-            onClick={() => setUseSavedMemory((value) => !value)}
-            disabled={!memoryWorkspaceId || !memoryCanRead || isLoading || sending}
-            className={[
-              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-              useSavedMemory && memoryWorkspaceId && memoryCanRead
-                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-            ].join(" ")}
-            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory}
-            aria-label="Use saved memory"
-          >
-            Use memory
-          </button>
-          <button
-            type="button"
-            onClick={() => setSaveToMemory((value) => !value)}
-            disabled={!memoryWorkspaceId || !memoryCanSave || memorySavePending || isLoading || sending}
-            className={[
-              "rounded-md px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-              saveToMemory && memoryWorkspaceId && memoryCanSave
-                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-            ].join(" ")}
-            aria-pressed={Boolean(memoryWorkspaceId) && memoryCanSave && saveToMemory}
-            aria-label="Save this message to memory"
-          >
-            Save message
-          </button>
-          <button
-            type="button"
-            onClick={() => setUseProjectContext((value) => !value)}
-            disabled={isLoading || sending}
-            className={[
-              "inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1.5 py-1 text-xs transition-colors",
-              useProjectContext
-                ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
-                : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-              "disabled:cursor-not-allowed disabled:opacity-40",
-            ].join(" ")}
-            aria-label={projectContextProject ? `Use project context: ${projectContextProject}` : "Use project context: unavailable"}
-            aria-pressed={useProjectContext}
-            title={projectContextProject ? `Selected project: ${projectContextProject}` : "No project selected"}
-            data-testid="chat-use-project-context"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M2.33 4.08L7 2.33l4.67 1.75L7 5.83 2.33 4.08zM2.33 7L7 8.75 11.67 7M2.33 9.92L7 11.67l4.67-1.75"
-              />
-            </svg>
-            <span className="hidden shrink-0 sm:inline" data-testid="chat-context-prefix">Context project: </span>
-            <span
-              className="min-w-0 max-w-[32vw] truncate font-normal sm:max-w-48"
-              data-testid="chat-context-project"
-            >
-              {projectContextProject ?? "Unavailable"}
-            </span>
-          </button>
-        </div>
-        {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
-        {home && onOpenTools && <button type="button" onClick={onOpenTools} className="px-3 py-2 text-sm">Available tools</button>}
-        </details>
+        {home && contextOptions}
+
         <div className={`veyra-composer-row flex min-w-0 items-end gap-2 px-3 py-2${home ? " veyra-home-composer-body" : ""}`}>
           {/* Left buttons */}
           <div className="flex min-w-0 items-center gap-1 pb-0.5">
@@ -465,6 +473,7 @@ export default function ChatInput({
               className="hidden"
               aria-hidden="true"
             />
+            {home ? (
             <button
               type="button"
               onClick={() => {
@@ -499,6 +508,9 @@ export default function ChatInput({
               </svg>
               {home && <span>Attach</span>}
             </button>
+            ) : <ComposerMenu canAttach={canAttachMore && !isLoading && !sending} onAttach={() => fileInputRef.current?.click()} onFocusNext={() => textareaRef.current?.focus()}>
+              {close => <>{projectControl}{renderConversationOptions?.(close)}{contextOptions}</>}
+            </ComposerMenu>}
             {home && <details className="veyra-home-search">
               <summary>Search</summary>
               <div className="veyra-home-search-panel">

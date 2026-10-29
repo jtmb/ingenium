@@ -21,6 +21,8 @@ interface Agent {
 }
 
 interface ChatHeaderProps {
+  presentation?: "header" | "menu";
+  onAction?: () => HTMLButtonElement | null;
   sessionTitle: string;
   onRename: (title: string) => void;
   onFork: () => void;
@@ -63,6 +65,8 @@ interface ChatHeaderProps {
  * a hamburger to open the sidebar drawer.
  */
 export default function ChatHeader({
+  presentation = "header",
+  onAction,
   sessionTitle,
   onRename,
   onFork,
@@ -121,66 +125,8 @@ export default function ChatHeader({
   const variantKeys = Object.keys(modelVariants);
   const hasVariants = variantKeys.length > 0 && onVariantChange;
 
-  return (
-    <>
-      <header className="flex min-w-0 items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0 min-h-[48px]">
-      {/* Mobile hamburger — hidden from keyboard focus on desktop */}
-      <button
-        type="button"
-        onClick={(event) => onMobileMenuOpen(event.currentTarget)}
-        className="md:hidden p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors shrink-0"
-        aria-label="Open sessions"
-        data-testid="chat-header-hamburger"
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M2.67 4h10.66M2.67 8h10.66M2.67 12h10.66"
-          />
-        </svg>
-      </button>
-
-      {/* Session title */}
-      <div className="flex-1 min-w-0 mr-2">
-        {editing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={draftTitle}
-            onChange={(e) => setDraftTitle(e.target.value)}
-            onBlur={handleTitleSubmit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleTitleSubmit();
-              if (e.key === "Escape") {
-                setDraftTitle(sessionTitle);
-                setEditing(false);
-              }
-            }}
-            className="w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-blue-500"
-            aria-label="Session title"
-          />
-        ) : (
-          <h1
-            className="text-sm font-medium text-[var(--color-text-primary)] truncate cursor-pointer hover:text-[var(--color-text-link)] transition-colors"
-            onDoubleClick={() => setEditing(true)}
-            title="Double-click to rename"
-          >
-            {sessionTitle}
-          </h1>
-        )}
-      </div>
-
-      {/* Selectors */}
-      <div className="hidden sm:flex items-center gap-2">
+  const selectorControls = (
+<div data-menu-section="selectors" className="hidden sm:flex items-center gap-2">
         {/* Provider */}
         <Select
             wrapperClassName="shrink-0"
@@ -254,13 +200,78 @@ export default function ChatHeader({
             ))}
           </Select>
       </div>
+  );
+
+  return (
+    <div className={presentation === "menu" ? "veyra-chat-menu-options" : "contents"}>
+      <header className="flex min-w-0 items-center gap-2 px-4 py-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0 min-h-[48px]">
+      {/* Mobile hamburger — hidden from keyboard focus on desktop */}
+      <button
+        type="button"
+        onClick={(event) => { const trigger = onAction?.(); onMobileMenuOpen(trigger ?? event.currentTarget); }}
+        className="md:hidden p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors shrink-0"
+        aria-label="Open sessions"
+        data-testid="chat-header-hamburger"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M2.67 4h10.66M2.67 8h10.66M2.67 12h10.66"
+          />
+        </svg>
+        {presentation === "menu" && <span>Open sessions</span>}
+      </button>
+
+      {/* Session title */}
+      <div data-menu-section="title" className="flex-1 min-w-0 mr-2">
+        {editing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={draftTitle}
+            onChange={(e) => setDraftTitle(e.target.value)}
+            onBlur={handleTitleSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleTitleSubmit();
+              if (e.key === "Escape") {
+                setDraftTitle(sessionTitle);
+                setEditing(false);
+              }
+            }}
+            className="w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded px-2 py-1 text-sm text-[var(--color-text-primary)] outline-none focus:border-blue-500"
+            aria-label="Session title"
+          />
+        ) : presentation === "menu" ? (
+          <button type="button" onClick={() => setEditing(true)}>Rename conversation</button>
+        ) : (
+          <h1
+            className="text-sm font-medium text-[var(--color-text-primary)] truncate cursor-pointer hover:text-[var(--color-text-link)] transition-colors"
+            onDoubleClick={() => setEditing(true)}
+            title="Double-click to rename"
+          >
+            {sessionTitle}
+          </h1>
+        )}
+      </div>
+
+      {/* Selectors */}
+      {presentation === "menu" ? <details className="veyra-chat-menu-models"><summary>Model and agent</summary>{selectorControls}</details> : selectorControls}
 
       {/* Action buttons */}
-      <div className="flex items-center gap-1 shrink-0">
+      <div data-menu-section="actions" className="flex items-center gap-1 shrink-0">
         {/* Create task from the active conversation */}
         <button
           type="button"
-          onClick={onCreateTask}
+          onClick={() => { onAction?.(); onCreateTask?.(); }}
           disabled={!onCreateTask || createTaskDisabled || isBusy}
           className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md p-1.5 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Create task from conversation"
@@ -279,13 +290,14 @@ export default function ChatHeader({
             <path strokeLinecap="round" d="M8 3.33v9.34M3.33 8h9.34" />
             <rect x="2.33" y="2.33" width="11.34" height="11.34" rx="2" />
           </svg>
+        {presentation === "menu" && <span>Create task from conversation</span>}
         </button>
 
         {/* MCP servers */}
         {onMcpOpen && (
           <button
             type="button"
-            onClick={onMcpOpen}
+            onClick={() => { onAction?.(); onMcpOpen?.(); }}
             className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
             aria-label="MCP servers"
             title="MCP servers"
@@ -309,13 +321,14 @@ export default function ChatHeader({
                 {permissionCount > 9 ? "9+" : permissionCount}
               </span>
             )}
-          </button>
+          {presentation === "menu" && <span>MCP servers</span>}
+        </button>
         )}
 
         {/* Fork */}
         <button
           type="button"
-          onClick={onFork}
+          onClick={() => { onAction?.(); onFork(); }}
           disabled={isBusy}
           className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Fork conversation"
@@ -336,6 +349,7 @@ export default function ChatHeader({
               d="M3.33 6v4M6 3.33a2.67 2.67 0 100 5.34 2.67 2.67 0 000-5.34zM10 7.33a2.67 2.67 0 100 5.34 2.67 2.67 0 000-5.34zM12.67 6V4.67c0-.74-.6-1.34-1.34-1.34H7.67"
             />
           </svg>
+        {presentation === "menu" && <span>Fork conversation</span>}
         </button>
 
         {/* Share */}
@@ -414,6 +428,7 @@ export default function ChatHeader({
               />
             </svg>
           )}
+        {presentation === "menu" && <span>Share conversation</span>}
         </button>
 
         {/* Compact */}
@@ -496,11 +511,12 @@ export default function ChatHeader({
               />
             </svg>
           )}
+        {presentation === "menu" && <span>Compact conversation</span>}
         </button>
       </div>
     </header>
     {/* Mobile provider/model/agent selectors — horizontal scroll below header */}
-    <div data-testid="chat-header-mobile-selectors" className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
+    {presentation !== "menu" && <div data-testid="chat-header-mobile-selectors" className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
       {/* Provider */}
       <Select
         wrapperClassName="shrink-0 max-w-[120px]"
@@ -573,6 +589,6 @@ export default function ChatHeader({
             </option>
           ))}
         </Select>
-    </div>
-  </>);
+    </div>}
+  </div>);
 }

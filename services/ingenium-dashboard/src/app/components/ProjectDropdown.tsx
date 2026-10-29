@@ -10,15 +10,15 @@ import { Dropdown, DropdownItem, DropdownLabel, DropdownPanel, DropdownSeparator
  * Project switcher dropdown in the top navigation bar.
  *
  * Disabled on `/backups`, `/mail`, `/opencode`, and `/vscode` pages because those views operate on the
- * global project context. Chat keeps project switching available so its explicit Context project
- * follows the validated active project after a full reload.
+ * global project context. Chat exposes project switching through the composer plus menu, retaining
+ * the validated project and existing full-reload navigation semantics.
  */
 export function isProjectSwitchingDisabled(pathname: string | null): boolean {
   const globalOnlyRoutes = ["/backups", "/mail", "/opencode", "/vscode"];
   return pathname ? globalOnlyRoutes.some((route) => pathname.startsWith(route)) : false;
 }
 
-export default function ProjectDropdown() {
+export default function ProjectDropdown({ placement = "navigation" }: { placement?: "navigation" | "composer" } = {}) {
   const pathname = usePathname();
   const disabled = isProjectSwitchingDisabled(pathname);
   const isChatRoute = pathname === "/chat" || Boolean(pathname?.startsWith("/chat/"));
@@ -54,6 +54,8 @@ export default function ProjectDropdown() {
       window.location.hash,
     ));
   }
+
+  if (isChatRoute && placement === "navigation") return null;
 
   return (
     <Dropdown open={open} onOpenChange={handleOpenChange} className="relative min-w-0">

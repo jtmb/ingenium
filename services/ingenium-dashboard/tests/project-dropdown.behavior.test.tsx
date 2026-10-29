@@ -54,7 +54,7 @@ describe("ProjectDropdown lazy loading", () => {
     expect(mocks.listProjects).toHaveBeenCalledTimes(2);
   });
 
-  it("shows the selected project on desktop triggers and preserves the compact Chat label", () => {
+  it("keeps project choice in the Chat composer instead of the navigation header", () => {
     const ordinaryView = render(<ProjectDropdown />);
     const ordinaryTrigger = screen.getByRole("button", { name: "Active project: global-default" });
     expect(ordinaryTrigger.textContent).toContain("global-default");
@@ -62,7 +62,10 @@ describe("ProjectDropdown lazy loading", () => {
     ordinaryView.unmount();
 
     mocks.pathname = "/chat";
-    render(<ProjectDropdown />);
+    const chatNavigation = render(<ProjectDropdown />);
+    expect(screen.queryByRole("button")).toBeNull();
+    chatNavigation.unmount();
+    render(<ProjectDropdown placement="composer" />);
 
     const trigger = screen.getByRole("button", { name: "Context project: global-default" });
     expect(trigger.textContent).toContain("global-default");
@@ -80,7 +83,7 @@ describe("ProjectDropdown lazy loading", () => {
   it("keeps a long project name accessible while bounding its visible trigger label", () => {
     mocks.pathname = "/chat";
     mocks.activeProject = "a".repeat(64);
-    render(<ProjectDropdown />);
+    render(<ProjectDropdown placement="composer" />);
 
     const trigger = screen.getByRole("button", { name: `Context project: ${mocks.activeProject}` });
     expect(trigger.getAttribute("title")).toBe(`Context project: ${mocks.activeProject}`);

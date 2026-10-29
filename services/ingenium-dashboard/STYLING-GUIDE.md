@@ -1176,3 +1176,7 @@ Chat uses the same `--color-*` token system as the rest of the dashboard. No spe
 | Variant | When Used | Layout | Key Classes |
 |---------|-----------|--------|-------------|
 | **Reply cards** | Inside inline EmailComposer (reply/draft) | Collapsible `space-y-2` section with stacked cards | Header chevron, `border rounded p-3` cards, tone badge, subject line, `line-clamp-3` body preview, copy icon, card apply action. States: loading skeletons, error + retry, unconfigured + settings link, noreply info, and suggestion cards. |
+
+## Chat composer plus menu
+
+Chat keeps its title area free of project and conversation-options dropdowns. The composer + opens an anchored, viewport-constrained popover with attachments, project context selection, rename/fork/share/compact, task capture, MCP tools, model/agent settings and context/memory controls. All use the existing colour tokens and callbacks. The popover supports keyboard opening, Escape/outside dismissal, focus return and mobile sizing; its portal avoids clipping in the scrolling composer. The standard model picker remains inline.
