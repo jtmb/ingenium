@@ -1,0 +1,11 @@
+diff --git a/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx b/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx
+--- a/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx
++++ b/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx
+@@ -27,4 +27,5 @@
+-    fireEvent.click(screen.getByLabelText("Actions for Pinned Z"));
+-    expect(pins.getByRole("button", { name: "Unpin", exact: true })).toBeTruthy();
++    const selectedActions = screen.getByLabelText("Actions for Pinned Z");
++    fireEvent.click(selectedActions);
++    expect(within(selectedActions.closest("details")!).getByRole("button", { name: "Unpin", exact: true })).toBeTruthy();
+     fireEvent.click(screen.getByText("Conversation options"));
+     expect(screen.getByRole("button", { name: "Show archived" })).toBeTruthy();
