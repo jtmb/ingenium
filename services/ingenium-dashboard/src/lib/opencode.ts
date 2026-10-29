@@ -1,4 +1,4 @@
-import { getApiBase, normalizeChatConfigResponse, request, type ChatConfigResponse } from "./api";
+import { getApiBase, normalizeChatConfigResponse, request, type ChatSelection, type ChatConfigResponse } from "./api";
 
 /**
  * Thin wrapper that unwraps the `{ data: T }` envelope the proxy routes return.
@@ -610,7 +610,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
         `/opencode/sessions${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
       ),
 
-    create: (body: { title?: string; directory?: string }) =>
+    create: (body: { title?: string; directory?: string; chatDefaults?: boolean }) =>
       oc<OpenCodeSession>("/opencode/sessions", {
         method: "POST",
         body: JSON.stringify(body),
@@ -751,6 +751,7 @@ export function createOpenCodeClient(runtimeId: string | null) {
   },
 
   chat: {
+    saveDefaults: (selection: ChatSelection) => oc<ChatSelection>("/opencode/chat-defaults", { method: "PUT", body: JSON.stringify(selection) }),
     config: async (): Promise<ChatConfigResponse> => normalizeChatConfigResponse(await oc<unknown>("/opencode/chat-config")),
     saveSelection: (selection: { providerId: string; modelId: string }) =>
       oc<{ project: string; providerId: string; modelId: string }>("/opencode/chat-selection", {

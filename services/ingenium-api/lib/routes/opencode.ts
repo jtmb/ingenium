@@ -24,10 +24,11 @@ import {
 } from "../server-global-provider-persistence.js";
 import {
   CHAT_SELECTION_SETTING,
+  CHAT_DEFAULTS_SETTING,
+  getNewChatDefaults,
   getBuiltinChatProvider,
   getChatProviderCatalog,
   getAllowedLegacyChatSelection,
-  getStoredOrDefaultChatSelection,
   isAllowedChatSelection,
   isValidChatSelectionIdentifier,
   type ExpandedChatProviderInfo,
@@ -579,7 +580,7 @@ interface ChatConfigResponse {
   backup: ChatProviderInfo | null;
   providers: ExpandedChatProviderInfo[];
   agents: Array<{ name: string; label: string }>;
-  defaultSelection: { providerId: string; modelId: string } | null;
+  defaultSelection: { providerId: string; modelId: string; variant?: string } | null;
 }
 
 function legacyChatDto(
@@ -654,7 +655,7 @@ opencodeRouter.get("/chat-config", async (req, res) => {
     backup,
     providers,
     agents: [{ name: "ingenium-chat", label: "Ingenium Chat" }],
-    defaultSelection: getStoredOrDefaultChatSelection(projectId, providers),
+    defaultSelection: getNewChatDefaults(projectId, providers),
   };
 
   res.json({ data: response });
@@ -665,7 +666,8 @@ opencodeRouter.get("/chat-config", async (req, res) => {
  * behind the API auth and dashboard CSRF middleware; clients cannot choose a
  * project, and only an exact current global-catalog pair is saved.
  */
-opencodeRouter.put("/chat-selection", async (req, res) => {
+opencodeRouter.put(["/chat-selection", "/chat-defaults"], async (req, res) => {
+  const savingDefaults = req.path === "/chat-defaults";
   if (req.query.project !== undefined || req.body?.project !== undefined) {
     res.status(422).json({ error: { code: "CHAT_SELECTION_PROJECT_CONFLICT", message: "Chat model selection is owned by the active global project." } });
     return;
@@ -686,12 +688,18 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
       res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
       return;
     }
-    const selection = { providerId, modelId };
+    const variant = savingDefaults ? req.body?.variant : undefined;
+    const variants = catalog.providers.find(provider => provider.providerId === providerId)?.models.find(model => model.id === modelId)?.variants;
+    if (savingDefaults && variant !== undefined && (!isValidChatSelectionIdentifier(variant) || !Object.hasOwn(variants ?? {}, variant))) {
+      res.status(422).json({ error: { code: "CHAT_EFFORT_UNAVAILABLE", message: "The selected reasoning effort is not supported by this model." } });
+      return;
+    }
+    const selection = { providerId, modelId, ...(variant !== undefined ? { variant } : {}) };
     if (!isAllowedChatSelection(catalog.providers, selection)) {
       res.status(422).json({ error: { code: "CHAT_SELECTION_UNAVAILABLE", message: "The selected Chat provider or model is not currently available." } });
       return;
     }
-    settings.setSetting(projectId, CHAT_SELECTION_SETTING, JSON.stringify(selection));
+    settings.setSetting(projectId, savingDefaults ? CHAT_DEFAULTS_SETTING : CHAT_SELECTION_SETTING, JSON.stringify(selection));
     res.json({ data: { project: globalProject.name, ...selection } });
   } catch {
     logger.warn(SOURCE, "Chat selection validation failed while loading the global catalog");
@@ -729,7 +737,28 @@ opencodeRouter.get("/sessions", async (req, res) => {
 opencodeRouter.post("/sessions", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
+  let defaults: ReturnType<typeof getNewChatDefaults> = null;
+  if (req.body?.chatDefaults === true) {
+    const globalProject = requireActiveGlobalProject(req, res);
+    if (!globalProject) return;
+    try {
+      const catalog = await getChatProviderCatalog(globalProject.id);
+      if (catalog.unavailable) throw new Error("catalog unavailable");
+      defaults = getNewChatDefaults(globalProject.id, catalog.providers);
+    } catch {
+      res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "Chat defaults could not be loaded. Try again later." } });
+      return;
+    }
+  }
   const result = await opencodeClient.createSession(req.body, directory);
+  if (defaults && !isOpenCodeError(result)) {
+    const selected = await opencodeClient.selectSessionModel(result.id, { id: defaults.modelId, providerID: defaults.providerId, ...(defaults.variant ? { variant: defaults.variant } : {}) }, directory);
+    if (isOpenCodeError(selected)) {
+      res.status(503).json({ error: { code: "CHAT_DEFAULTS_APPLY_FAILED", message: "The conversation was created, but its defaults could not be applied. Reopen it from history before retrying.", sessionId: result.id } });
+      return;
+    }
+    sendResult(req, res, selected, 201); return;
+  }
   sendResult(req, res, result, 201);
 });
 

@@ -58,7 +58,7 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({
 
 vi.mock("../src/lib/use-opencode-chat", () => ({
   useOpenCodeChat: () => ({
-    messages: [], isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
+    messages: [], sessionReady: true, isStreaming: false, isLoading: false, error: null, streamActivity: "idle",
     permissions: [], questions: [], replyPermission: vi.fn(), send: vi.fn(), stop: vi.fn(), retry: vi.fn(), revert: vi.fn(),
   }),
 }));
@@ -140,7 +140,7 @@ describe("ChatShell chat-config readiness", () => {
     observer.observe(document.body, { childList: true, subtree: true });
 
     request.resolve({ data: validConfig });
-    await waitFor(() => expect(screen.getByTestId("chat-header-model")).toHaveProperty("value", "model"));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Chat model", exact: true })).toHaveProperty("value", "model"));
     observer.disconnect();
 
     expect(bannerInsertions).toHaveLength(0);

@@ -21,6 +21,8 @@ vi.mock("../src/app/components/ThemeProvider", () => ({
   useTheme: () => ({ theme: "system", setTheme: vi.fn() }),
 }));
 
+vi.mock("../src/app/components/settings/panels/ChatDefaults", () => ({ default: () => <section aria-label="Chat defaults" /> }));
+
 import GeneralPanel from "../src/app/components/settings/panels/GeneralPanel";
 
 beforeEach(() => {

@@ -1,3 +1,4 @@
+import { chatModelVariants } from "./chat-model-variants.js";
 import { getDb, logger, runtimes } from "ingenium-core";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
@@ -384,6 +385,7 @@ interface V2ModelCostTier {
 }
 
 interface V2ModelInfo {
+  variants?: unknown;
   id: string;
   modelID: string;
   providerID: string;
@@ -1473,6 +1475,21 @@ export const opencodeClient = {
     return validateV2Session(result, expectedOpenCodeDirectory(directory)) ? mapV2Session(result) : bindingError();
   },
 
+  /** Apply a validated consumer selection without sending a prompt. */
+  selectSessionModel: async (id: string, model: SessionModel, directory?: string): Promise<OpenCodeResult<SessionInfo>> => {
+    const session = await getV2Session(id, directory);
+    if (isOpenCodeError(session)) return session;
+    const switched = await request<unknown>("/api/session/" + pathSegment(session.id) + "/model", { method: "POST", body: { model } });
+    if (isOpenCodeError(switched)) return switched;
+    const result = await getV2Session(session.id, directory);
+    if (isOpenCodeError(result)) return result;
+    // Acknowledgement alone cannot prove that the new session holds the choice.
+    if (result.model?.id !== model.id || result.model?.providerID !== model.providerID || result.model?.variant !== model.variant) {
+      return { error: { code: "CHAT_MODEL_SELECTION_UNCONFIRMED", message: "The conversation model choice could not be confirmed." } };
+    }
+    return mapV2Session(result);
+  },
+
   /** GET /api/session/{sessionID} [session.get]. */
   getSession: async (
     id: string,
@@ -1929,7 +1946,7 @@ export const opencodeClient = {
         options: model.settings ?? {},
         headers: model.headers ?? {},
         release_date: model.time?.released === undefined ? "" : String(model.time.released),
-        variants: {},
+        variants: chatModelVariants(model.variants),
       };
       modelsByProvider.set(model.providerID, providerModels);
     }

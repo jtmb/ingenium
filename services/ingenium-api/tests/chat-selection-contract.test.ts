@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   isAllowedChatSelection: vi.fn(),
   getBuiltinChatProvider: vi.fn(),
   warn: vi.fn(),
+  createSession: vi.fn(),
+  selectSessionModel: vi.fn(),
 }));
 
 vi.mock("ingenium-core", () => ({
@@ -29,6 +31,8 @@ vi.mock("ingenium-core", () => ({
 
 vi.mock("../lib/chat-provider-catalog.js", () => ({
   CHAT_SELECTION_SETTING: "chat_selection",
+  CHAT_DEFAULTS_SETTING: "chat_defaults",
+  getNewChatDefaults: mocks.getStoredOrDefaultChatSelection,
   getBuiltinChatProvider: mocks.getBuiltinChatProvider,
   getChatProviderCatalog: mocks.getChatProviderCatalog,
   getAllowedLegacyChatSelection: mocks.getAllowedLegacyChatSelection,
@@ -39,7 +43,8 @@ vi.mock("../lib/chat-provider-catalog.js", () => ({
 }));
 
 vi.mock("../lib/opencode-client.js", () => ({
-  opencodeClient: {},
+  buildAuthHeader: () => "Basic fixture-only",
+  opencodeClient: { createSession: mocks.createSession, selectSessionModel: mocks.selectSessionModel },
   isOpenCodeError: (value: unknown) => typeof value === "object" && value !== null && "error" in value,
 }));
 
@@ -50,7 +55,7 @@ const catalog = {
   providers: [{
     providerId: "global-provider",
     label: "Global Provider",
-    models: [{ id: "global-model", label: "Global Model" }],
+    models: [{ id: "global-model", label: "Global Model", variants: { high: { reasoningEffort: "high" } } }],
     defaultModel: "global-model",
     source: "managed" as const,
   }],
@@ -78,6 +83,9 @@ beforeEach(() => {
   mocks.getAllowedLegacyChatSelection.mockReturnValue(null);
   mocks.isAllowedChatSelection.mockReturnValue(true);
   mocks.setSetting.mockReturnValue("");
+  mocks.getStoredOrDefaultChatSelection.mockReturnValue(null);
+  mocks.createSession.mockResolvedValue({ id: "new-session", title: "New conversation" });
+  mocks.selectSessionModel.mockResolvedValue({ id: "new-session", title: "New conversation", model: { id: "global-model", providerID: "global-provider", variant: "high" } });
 });
 
 afterEach(() => {
@@ -196,5 +204,57 @@ describe("GET /opencode/chat-config", () => {
     });
     expect(JSON.stringify(payload)).not.toContain("AUTH_NOT_CONFIGURED");
     expect(JSON.stringify(payload)).not.toContain("private provider configuration detail");
+  });
+});
+
+describe("Settings Chat defaults", () => {
+  const put = (body: unknown, query = "") => fetch(baseUrl + "/chat-defaults" + query, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  it("saves supported effort separately from legacy chat and synthesis selections", async () => {
+    const selection = { providerId: "global-provider", modelId: "global-model", variant: "high" };
+    expect((await put(selection)).status).toBe(200);
+    expect(mocks.setSetting).toHaveBeenCalledExactlyOnceWith("global-project", "chat_defaults", JSON.stringify(selection));
+  });
+  it.each(["max", "", null, { reasoningEffort: "high" }])("rejects unsupported or malformed effort %j without writes", async variant => {
+    expect((await put({ providerId: "global-provider", modelId: "global-model", variant })).status).toBe(422);
+    expect(mocks.setSetting).not.toHaveBeenCalled();
+  });
+  it("rejects caller project ownership and unavailable catalogs without writes", async () => {
+    const selection = { providerId: "global-provider", modelId: "global-model" };
+    expect((await put(selection, "?project=foreign")).status).toBe(422);
+    mocks.getChatProviderCatalog.mockResolvedValue({ providers: [], unavailable: "network" });
+    expect((await put(selection)).status).toBe(503);
+    expect(mocks.setSetting).not.toHaveBeenCalled();
+  });
+});
+
+describe("new conversation saved defaults", () => {
+  const create = (body: unknown) => fetch(baseUrl + "/sessions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  it("applies the persisted model and effort before returning the new session", async () => {
+    mocks.getStoredOrDefaultChatSelection.mockReturnValue({ providerId: "global-provider", modelId: "global-model", variant: "high" });
+    const response = await create({ title: "New conversation", chatDefaults: true });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ data: { id: "new-session", model: { id: "global-model", providerID: "global-provider", variant: "high" } } });
+    expect(mocks.selectSessionModel).toHaveBeenCalledExactlyOnceWith("new-session", { id: "global-model", providerID: "global-provider", variant: "high" }, undefined);
+    expect(mocks.createSession.mock.invocationCallOrder[0]).toBeLessThan(mocks.selectSessionModel.mock.invocationCallOrder[0]);
+  });
+  it("does not create a session when the catalog is unavailable", async () => {
+    mocks.getChatProviderCatalog.mockResolvedValue({ providers: [], unavailable: "network" });
+    expect((await create({ chatDefaults: true })).status).toBe(503);
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+  it("preserves the created identity and never blindly repeats creation if applying defaults fails", async () => {
+    mocks.getStoredOrDefaultChatSelection.mockReturnValue({ providerId: "global-provider", modelId: "global-model", variant: "high" });
+    mocks.selectSessionModel.mockResolvedValue({ error: { code: "NETWORK_ERROR", message: "private upstream detail" } });
+    const response = await create({ chatDefaults: true });
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.error).toMatchObject({ code: "CHAT_DEFAULTS_APPLY_FAILED", sessionId: "new-session" });
+    expect(JSON.stringify(body)).not.toContain("private upstream detail");
+    expect(mocks.createSession).toHaveBeenCalledTimes(1);
+  });
+  it("leaves ordinary upstream session creation unchanged when defaults are not requested", async () => {
+    expect((await create({ title: "Upstream session" })).status).toBe(201);
+    expect(mocks.getChatProviderCatalog).not.toHaveBeenCalled();
+    expect(mocks.selectSessionModel).not.toHaveBeenCalled();
   });
 });

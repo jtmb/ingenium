@@ -874,6 +874,36 @@ describe("opencodeClient — method routing", () => {
     });
   });
 
+  it("selectSessionModel() confirms the bound session model without prompting", async () => {
+    const model = { id: "model", providerID: "provider", variant: "high" };
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_new") }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}))
+      .mockResolvedValueOnce(mockResponse(200, { data: { ...v2Session("ses_new"), model } }));
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await opencodeClient.selectSessionModel("ses_new", model, "/workspace")).toMatchObject({ id: "ses_new", model });
+    expect(fetchSpy.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual([
+      ["/api/session/ses_new", "GET"], ["/api/session/ses_new/model", "POST"], ["/api/session/ses_new", "GET"],
+    ]);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1].body))).toEqual({ model });
+  });
+
+  it.each([
+    undefined,
+    { id: "other", providerID: "provider", variant: "high" },
+    { id: "model", providerID: "other", variant: "high" },
+    { id: "model", providerID: "provider", variant: "low" },
+  ])("selectSessionModel() rejects acknowledgement with a mismatched readback %j", async model => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_new") }))
+      .mockResolvedValueOnce(mockResponse(204, "", {}))
+      .mockResolvedValueOnce(mockResponse(200, { data: { ...v2Session("ses_new"), model } }));
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await opencodeClient.selectSessionModel("ses_new", { id: "model", providerID: "provider", variant: "high" }, "/workspace"))
+      .toMatchObject({ error: { code: "CHAT_MODEL_SELECTION_UNCONFIRMED" } });
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
   it("deleteSession() validates the session before DELETE /api/session/:id", async () => {
     const fetchSpy = vi.fn()
       .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses_abc") }))

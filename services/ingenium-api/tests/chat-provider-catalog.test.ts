@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { settings } from "ingenium-core";
 import {
   getBuiltinChatProvider,
+  getNewChatDefaults,
   getConnectedNativeChatProviders,
   getChatProviderCatalog,
   getPersistedChatSelection,
@@ -347,5 +348,19 @@ describe("authenticated native model catalogs", () => {
     const catalog = await getChatProviderCatalog("project");
     expect(catalog.providers[0]?.source).toBe("native");
     expect(isAllowedChatSelection(catalog.providers, { providerId: "openai", modelId: "retired-model" })).toBe(false);
+  });
+});
+
+describe("explicit global defaults", () => {
+  const providers = [{ providerId: "openai", label: "OpenAI", source: "native" as const, defaultModel: "gpt-6-luna",
+    models: [{ id: "gpt-6-luna", label: "Luna", variants: { high: {} } }, { id: "gpt-6-sol", label: "Sol" }] }];
+  it("retains saved defaults when per-chat legacy choices change", () => {
+    vi.spyOn(settings, "getSetting").mockImplementation((_project, key) => key === "chat_defaults"
+      ? JSON.stringify({ providerId: "openai", modelId: "gpt-6-luna", variant: "high" }) : JSON.stringify({ providerId: "openai", modelId: "gpt-6-sol" }));
+    expect(getNewChatDefaults("global", providers)).toEqual({ providerId: "openai", modelId: "gpt-6-luna", variant: "high" });
+  });
+  it("drops an unavailable effort without changing the chosen model or stored state", () => {
+    vi.spyOn(settings, "getSetting").mockReturnValue(JSON.stringify({ providerId: "openai", modelId: "gpt-6-luna", variant: "unsupported" }));
+    expect(getNewChatDefaults("global", providers)).toEqual({ providerId: "openai", modelId: "gpt-6-luna" });
   });
 });

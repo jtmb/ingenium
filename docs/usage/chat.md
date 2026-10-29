@@ -408,3 +408,19 @@ readable stream directly with `Cache-Control: no-cache, no-transform` and
 rewrite: that path can buffer or transform the persistent connection, delaying
 incremental frames until the stream closes. The messages endpoint is used only
 for history and best-effort reconciliation.
+
+## Saved Chat defaults
+
+In **Settings → General → Chat defaults**, select the provider, model and reasoning effort, then choose **Save Chat defaults**. The default is stored by the API for this installation and survives browser reloads and service replacement. New conversations use it; changing a conversation does not replace it. Reopening a conversation restores the model and effort held by its OpenCode session.
+
+Reasoning effort choices come from the selected model's live catalog. **Model default** leaves effort to the provider; **none**, when advertised, is an explicit supported choice. Models without advertised efforts disable the effort control. Changing provider or model clears the previous effort. If a saved effort disappears, new conversations use that model's default effort; an unavailable provider/model uses the existing validated fallback without rewriting the saved preference.
+
+The setting is separate from synthesis configuration and the legacy Chat selection used by Docs AI. No provider credentials or upstream OpenCode files are changed.
+
+The authenticated, CSRF-protected PUT /api/v1/opencode/chat-defaults accepts {"providerId":"openai","modelId":"gpt-6-luna","variant":"high"}. Omit variant for model default. The response wraps the same fields and the server global-project name in data. GET /api/v1/opencode/chat-config returns the effective defaultSelection with its supported optional variant and sanitized per-model variants.
+
+Caller-selected query/body projects return 422 CHAT_SELECTION_PROJECT_CONFLICT. Malformed/unavailable pairs return 422 INVALID_CHAT_SELECTION/CHAT_SELECTION_UNAVAILABLE. Unsupported efforts return 422 CHAT_EFFORT_UNAVAILABLE. Unavailable catalogs return 503 LLM_CATALOG_UNAVAILABLE. Existing authentication/CSRF errors remain unchanged.
+
+Implementation: API lib/chat-provider-catalog.ts, lib/chat-model-variants.ts, lib/routes/opencode.ts; dashboard ChatDefaults.tsx, ChatShell.tsx and the runtime client.
+
+If an existing conversation's provider/model disappears, sending stays unavailable until you explicitly select an available replacement. Saving a new-chat default never silently replaces that conversation's choice. New-session creation confirms the exact model/effort by reading the native session back before reporting success.

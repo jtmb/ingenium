@@ -1,3 +1,4 @@
+import { chatModelVariants, type ChatVariants } from "./chat-model-variants.js";
 import { settings } from "ingenium-core";
 import { isOpenCodeError, opencodeClient } from "./opencode-client.js";
 import { isSafeBrowserIdentifier, isSafeBrowserLabel } from "./browser-safe-scalars.js";
@@ -5,6 +6,7 @@ import { isSafeBrowserIdentifier, isSafeBrowserLabel } from "./browser-safe-scal
 export interface ChatModelInfo {
   id: string;
   label: string;
+  variants?: ChatVariants;
 }
 
 export interface ExpandedChatProviderInfo {
@@ -27,6 +29,8 @@ interface ManagedProviderConfig {
 
 const BUILTIN_CHAT_PROVIDER_ID = "opencode";
 export const CHAT_SELECTION_SETTING = "chat_selection";
+export const CHAT_DEFAULTS_SETTING = "chat_defaults";
+export interface ChatSelection { providerId: string; modelId: string; variant?: string }
 const LEGACY_LLM_PROVIDER_LABELS: Readonly<Record<string, string>> = {
   lmstudio: "LM Studio",
   deepseek: "DeepSeek",
@@ -167,6 +171,7 @@ export function getBuiltinChatProvider(result: unknown): ExpandedChatProviderInf
       return [{
         id: candidate.id,
         label: isSafeChatLabel(candidate.name) ? candidate.name : candidate.id,
+        ...(Object.keys(chatModelVariants(candidate.variants)).length ? { variants: chatModelVariants(candidate.variants) } : {}),
       }];
     });
   if (models.length === 0) return null;
@@ -194,7 +199,7 @@ export function getConnectedNativeChatProviders(result: unknown): ExpandedChatPr
       || !isRecord(provider.models)) return [];
     const models = Object.values(provider.models).flatMap((model): ChatModelInfo[] => {
       if (!isRecord(model) || model.status !== "active" || !isValidChatSelectionIdentifier(model.id)) return [];
-      return [{ id: model.id, label: isSafeChatLabel(model.name) ? model.name : model.id }];
+      return [{ id: model.id, label: isSafeChatLabel(model.name) ? model.name : model.id, ...(Object.keys(chatModelVariants(model.variants)).length ? { variants: chatModelVariants(model.variants) } : {}) }];
     });
     if (!models.length) return [];
     const selected = isRecord(result.default) ? result.default[provider.id] : null;
@@ -307,7 +312,10 @@ export async function getChatProviderCatalog(projectId: string): Promise<{
   // single-model metadata; stale legacy pairs cannot fabricate native models.
   const configured = configuredProviders.map((provider) => (
     managedProviders.some((managed) => managed.providerId === provider.providerId)
-      ? provider
+      ? { ...provider, models: provider.models.map(model => {
+          const nativeModel = nativeProviders.find(native => native.providerId === provider.providerId)?.models.find(candidate => candidate.id === model.id);
+          return nativeModel ? { ...model, variants: nativeModel.variants } : model;
+        }) }
       : nativeProviders.find((native) => native.providerId === provider.providerId) ?? provider
   ));
   return {
@@ -380,4 +388,24 @@ export function isAllowedChatSelection(
     && isValidChatSelectionIdentifier(selection.modelId)
     && providers.some((provider) => provider.providerId === selection.providerId
     && provider.models.some((model) => model.id === selection.modelId));
+}
+
+/** Explicit Settings defaults are separate from the last selection consumed by Docs. */
+export function getNewChatDefaults(projectId: string, providers: ExpandedChatProviderInfo[]): ChatSelection | null {
+  const stored = settings.getSetting(projectId, CHAT_DEFAULTS_SETTING);
+  if (stored) {
+    try {
+      const value = JSON.parse(stored);
+      if (isRecord(value) && isValidChatSelectionIdentifier(value.providerId)
+        && isValidChatSelectionIdentifier(value.modelId)) {
+        const pair = { providerId: value.providerId, modelId: value.modelId };
+        if (isAllowedChatSelection(providers, pair)) {
+          const variants = providers.find(p => p.providerId === pair.providerId)?.models.find(m => m.id === pair.modelId)?.variants;
+          return { ...pair, ...(isValidChatSelectionIdentifier(value.variant) && Object.hasOwn(variants ?? {}, value.variant)
+            ? { variant: value.variant } : {}) };
+        }
+      }
+    } catch { /* Stale defaults use the validated fallback without rewriting settings. */ }
+  }
+  return getStoredOrDefaultChatSelection(projectId, providers);
 }

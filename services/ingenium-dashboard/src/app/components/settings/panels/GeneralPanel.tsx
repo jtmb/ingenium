@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { api } from "../../../../lib/api";
 import { useGlobalProject } from "../../../../lib/ProjectContext";
 import { useTheme } from "../../ThemeProvider";
+import ChatDefaults from "./ChatDefaults";
 import SettingRow from "../SettingRow";
 import Select from "../../Select";
 
@@ -80,6 +81,8 @@ export default function GeneralPanel() {
           <option value="dark">Dark</option>
         </Select>
       </SettingRow>
+
+      <ChatDefaults />
 
       <SettingRow label="Archive retention" description="Days before archived projects are purged (1–365)">
         {globalProjectLoading || loadingRetention ? (

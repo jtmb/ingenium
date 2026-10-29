@@ -171,7 +171,7 @@ export function useOpenCodeSessions({ initialSelection = "recent", initialSessio
         setIsCreating(true);
         try {
           const createdSession = await opencode.sessions.create({
-            title: "New conversation",
+            title: "New conversation", chatDefaults: true,
             directory: "/workspace",
           });
           if (!mountedRef.current || refreshGeneration !== refreshGenerationRef.current) return;
@@ -246,7 +246,7 @@ export function useOpenCodeSessions({ initialSelection = "recent", initialSessio
     try {
       setError(null);
       const session = await opencode.sessions.create({
-        title,
+        title, chatDefaults: true,
         directory: "/workspace",
       });
       if (!mountedRef.current) return null;

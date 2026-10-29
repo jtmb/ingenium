@@ -98,6 +98,7 @@ const fixtureModel = {
   id: "fixture-model", modelID: "fixture-model", providerID: "opencode", name: "Fixture Model",
   capabilities: {}, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
   limit: { context: 4096, output: 1024 }, status: "active", settings: {},
+  variants: [{ id: "high", settings: { reasoningEffort: "high" } }, { id: "low", settings: { reasoningEffort: "low" } }],
 };
 
 function json(res: ServerResponse, status: number, body: unknown): void {

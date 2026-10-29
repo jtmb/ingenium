@@ -1594,7 +1594,10 @@ export interface ChatConfigProviderInfo {
 export interface ChatProviderModel {
   id: string;
   label: string;
+  variants?: Record<string, { reasoningEffort?: string }>;
 }
+
+export interface ChatSelection { providerId: string; modelId: string; variant?: string }
 
 /** Expanded provider info used in the providers[] array. */
 export interface ChatProviderInfo {
@@ -1612,7 +1615,7 @@ export interface ChatConfigResponse {
   backup: ChatConfigProviderInfo | null;
   agents: Array<{ name: string; label: string }>;
   providers: ChatProviderInfo[];
-  defaultSelection: { providerId: string; modelId: string } | null;
+  defaultSelection: ChatSelection | null;
 }
 
 /** POST /settings/llm-config request body — primary + backup LLM config. */
@@ -1777,7 +1780,11 @@ function normalizeChatProvider(value: unknown): ChatProviderInfo | null {
     if (typeof model === "string") return [{ id: model, label: model }];
     if (!isApiRecord(model)) return [];
     const id = apiString(model.id).trim();
-    return id ? [{ id, label: apiString(model.label ?? model.name, id) }] : [];
+    const variants = isApiRecord(model.variants) ? Object.fromEntries(Object.entries(model.variants)
+      .filter(([key]) => key.length > 0 && key.length <= 128)
+      .map(([key, metadata]) => [key, isApiRecord(metadata) && typeof metadata.reasoningEffort === "string"
+        ? { reasoningEffort: metadata.reasoningEffort } : {}])) : undefined;
+    return id ? [{ id, label: apiString(model.label ?? model.name, id), ...(variants ? { variants } : {}) }] : [];
   });
   return {
     providerId,
@@ -1822,7 +1829,8 @@ export function normalizeChatConfigResponse(value: unknown): ChatConfigResponse 
     agents,
     providers,
     defaultSelection: defaultSelection && (defaultSelection.providerId || defaultSelection.modelId)
-      ? defaultSelection
+      ? { ...defaultSelection, ...(isApiRecord(record.defaultSelection) && typeof record.defaultSelection.variant === "string"
+          ? { variant: record.defaultSelection.variant } : {}) }
       : null,
   };
 }

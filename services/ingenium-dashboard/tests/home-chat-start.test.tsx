@@ -221,4 +221,50 @@ describe("rendered Home composer with the real session and chat hooks", () => {
     expect(view.onStarted).toHaveBeenCalledExactlyOnceWith(newSession.id);
     expect(mocks.memorySave).toHaveBeenCalledTimes(1); expect(mocks.prompt).toHaveBeenCalledTimes(1); expect(mocks.create).toHaveBeenCalledTimes(1);
   });
+  it("uses the saved effort on the actual new-session prompt and preserves the explicit global default after local changes", async () => {
+    const config = await mocks.client.chat.config();
+    mocks.client.chat.config.mockResolvedValue({ ...config, providers: [{ ...config.providers[0], models: [{ id: "model", label: "Model", variants: { high: {}, low: {} } }, { id: "other", label: "Other" }] }],
+      defaultSelection: { providerId: "provider", modelId: "model", variant: "high" } });
+    await ready();
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toHaveValue("high");
+    send("Saved defaults prompt");
+    await waitFor(() => expect(mocks.prompt).toHaveBeenCalledWith(newSession.id, expect.objectContaining({ variant: "high", model: { providerID: "provider", modelID: "model" } })));
+  });
+  it("restores an existing conversation model and effort instead of applying the new-chat default", async () => {
+    const config = await mocks.client.chat.config();
+    mocks.client.chat.config.mockResolvedValue({ ...config, providers: [{ ...config.providers[0], models: [{ id: "model", label: "Model", variants: { high: {} } }, { id: "other", label: "Other", variants: { low: {} } }] }],
+      defaultSelection: { providerId: "provider", modelId: "model", variant: "high" } });
+    mocks.list.mockResolvedValue([{ ...oldSession, model: { providerID: "provider", id: "other", variant: "low" } }]);
+    render(<ChatShell />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Chat model", exact: true })).toHaveValue("other"));
+    expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toHaveValue("low");
+    expect(mocks.client.chat.saveSelection).not.toHaveBeenCalled();
+  });
+  it("applies the saved effort to New conversation even when the runtime creates a different effort", async () => {
+    const config = await mocks.client.chat.config();
+    mocks.client.chat.config.mockResolvedValue({ ...config, providers: [{ ...config.providers[0], models: [{ id: "model", label: "Model", variants: { high: {}, low: {} } }] }],
+      defaultSelection: { providerId: "provider", modelId: "model", variant: "high" } });
+    mocks.list.mockResolvedValue([{ ...oldSession, model: { providerID: "provider", id: "model", variant: "low" } }]);
+    mocks.create.mockResolvedValue({ ...newSession, model: { providerID: "provider", id: "model", variant: "low" } });
+    render(<ChatShell />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toHaveValue("low"));
+    fireEvent.click(screen.getAllByRole("button", { name: "New conversation", exact: true }).at(-1)!);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Reasoning effort" })).toHaveValue("high"));
+  });
+  it("does not replace an unavailable conversation model with the new-chat default before the user chooses", async () => {
+    mocks.list.mockResolvedValue([{ ...oldSession, model: { providerID: "provider", id: "removed-model", variant: "high" } }]);
+    render(<ChatShell />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Chat model", exact: true })).toHaveValue(""));
+    const model = screen.getByRole("combobox", { name: "Chat model", exact: true });
+    expect(model).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+    expect(mocks.prompt).not.toHaveBeenCalled();
+    expect(mocks.client.chat.saveSelection).not.toHaveBeenCalled();
+    fireEvent.change(model, { target: { value: "model" } });
+    await waitFor(() => expect(model).toHaveValue("model"));
+    expect(screen.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+    fireEvent.change(screen.getByTestId("chat-composer"), { target: { value: "Explicit recovered model" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message", exact: true }));
+    await waitFor(() => expect(mocks.prompt).toHaveBeenCalledWith(oldSession.id, expect.objectContaining({ model: { providerID: "provider", modelID: "model" }, variant: undefined })));
+  });
 });

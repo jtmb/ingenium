@@ -167,13 +167,14 @@ export default function ChatHeader({
         {hasVariants && (
           <Select
               wrapperClassName="shrink-0"
-              value={variant ?? variantKeys[0]}
+              value={variant && variantKeys.includes(variant) ? variant : ""}
               onChange={(e) => onVariantChange?.(e.target.value)}
               disabled={disabled}
               className="shrink-0 border border-[var(--color-border)] rounded-md text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label="Select variant"
               data-testid="chat-header-variant"
             >
+              <option value="">Model default</option>
               {variantKeys.map((key) => (
                 <option key={key} value={key}>
                   {key}
@@ -557,14 +558,15 @@ export default function ChatHeader({
       {hasVariants && (
         <Select
           wrapperClassName="shrink-0 max-w-[90px]"
-            value={variant ?? variantKeys[0]}
+            value={variant && variantKeys.includes(variant) ? variant : ""}
             onChange={(e) => onVariantChange?.(e.target.value)}
             disabled={disabled}
             className="w-full shrink-0 max-w-[90px] border border-[var(--color-border)] rounded-md text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 pr-7 disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Select variant"
             data-testid="chat-header-mobile-variant"
           >
-            {variantKeys.map((key) => (
+            <option value="">Model default</option>
+              {variantKeys.map((key) => (
               <option key={key} value={key}>
                 {key}
               </option>

@@ -17,7 +17,7 @@ import {
 } from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
-import { api, ApiError, type ChatConfigResponse, type ExplicitMemoryReceipt, type TaskCaptureResult } from "../../../lib/api";
+import { api, ApiError, type ChatSelection, type ChatConfigResponse, type ExplicitMemoryReceipt, type TaskCaptureResult } from "../../../lib/api";
 import { useProject } from "../../../lib/ProjectContext";
 import { useOpenCodeClient, useRuntime } from "../../../lib/RuntimeContext";
 import TaskCaptureModal from "../../tasks/components/TaskCaptureModal";
@@ -34,7 +34,7 @@ import Select from "../../components/Select";
 import ProjectDropdown from "../../components/ProjectDropdown";
 import { FreshConversationStart } from "../../../lib/fresh-conversation-start";
 
-type ComposerSnapshot = { attachments: Attachment[]; providerId: string; modelId: string; agentName: string };
+type ComposerSnapshot = { attachments: Attachment[]; providerId: string; modelId: string; variant?: string; agentName: string };
 type HomePrompt = { text: string; options?: SendOptions; draft: ComposerSnapshot };
 
 type MemorySaveInput = {
@@ -242,7 +242,12 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   }, []);
 
   /* ---- Provider / Model / Agent selection ---- */
-  const [selection, setSelection] = useState({ providerId: "", modelId: "" });
+  const [selection, setSelection] = useState<ChatSelection>({ providerId: "", modelId: "" });
+  const freshConversation = useRef(false);
+  const selectionScope = useRef<string | null>(null);
+  const conversationChoices = useRef(new Map<string, ChatSelection>());
+  const { variant } = selection;
+  const [unavailableConversationModel, setUnavailableConversationModel] = useState(false);
   const { providerId, modelId } = selection;
   const [agentName, setAgentName] = useState("ingenium-chat");
   // Server writes are serialized so a rapid A → B selection cannot arrive at
@@ -323,10 +328,40 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   // cannot render or persist a transient cross-provider model pairing.
   useEffect(() => {
     if (!chatConfig || chatConfigLoading || chatConfigError || rateLimitSeconds !== null) return;
+    const scope = presentation === "home" ? "home" : activeId;
+    const scopeChanged = selectionScope.current !== scope;
+    if (scopeChanged && selectionScope.current && providerId && modelId) conversationChoices.current.set(selectionScope.current, selection);
+    selectionScope.current = scope;
+    const savedChoice = scope ? conversationChoices.current.get(scope) : undefined;
+    const nativeChoice = activeSession?.model ? { providerId: activeSession.model.providerID, modelId: activeSession.model.id,
+      ...(activeSession.model.variant ? { variant: activeSession.model.variant } : {}) } : undefined;
+    const preferredChoice = scopeChanged ? savedChoice ?? (freshConversation.current ? undefined : nativeChoice) : undefined;
+    if (scopeChanged) freshConversation.current = false;
+    if (scopeChanged) {
+      const next = preferredChoice ?? chatConfig.defaultSelection;
+      const selectedModel = chatConfig.providers.find(p => p.providerId === next?.providerId)?.models.find(m => m.id === next?.modelId);
+      if (next && selectedModel) {
+        setUnavailableConversationModel(false);
+        setSelection({ providerId: next.providerId, modelId: next.modelId, ...(next.variant && Object.hasOwn(selectedModel.variants ?? {}, next.variant) ? { variant: next.variant } : {}) });
+        setChatConfigReady(true); return;
+      }
+      if (nativeChoice && preferredChoice === nativeChoice) {
+        setSelection(nativeChoice);
+        setUnavailableConversationModel(true);
+        setChatConfigReady(true); return;
+      }
+    }
     const currentProvider = chatConfig.providers.find((candidate) => candidate.providerId === providerId);
-    if (currentProvider?.models.some((model) => model.id === modelId)) {
+    const selectedModel = currentProvider?.models.find(model => model.id === modelId);
+    if (selectedModel) {
+      setUnavailableConversationModel(false);
+      if (variant && !Object.hasOwn(selectedModel.variants ?? {}, variant)) setSelection({ providerId, modelId });
       setChatConfigReady(true);
       return;
+    }
+    if (unavailableConversationModel || (presentation === "chat" && activeId && nativeChoice && providerId && modelId)) {
+      setUnavailableConversationModel(true);
+      setChatConfigReady(true); return;
     }
     const preferred = chatConfig.defaultSelection
       ?? (chatConfig.configured && chatConfig.primary
@@ -346,10 +381,20 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
         ? provider.defaultModel
         : provider.models[0]!.id;
     if (providerId !== provider.providerId || modelId !== nextModelId) {
-      setSelection({ providerId: provider.providerId, modelId: nextModelId });
+      setSelection({ providerId: provider.providerId, modelId: nextModelId,
+        ...(preferred && "variant" in preferred && typeof preferred.variant === "string" ? { variant: preferred.variant } : {}) });
     }
     setChatConfigReady(true);
-  }, [chatConfig, chatConfigError, chatConfigLoading, modelId, providerId, rateLimitSeconds]);
+  }, [chatConfig, chatConfigError, chatConfigLoading, modelId, providerId, rateLimitSeconds, activeId, activeSession?.model, presentation, selection, unavailableConversationModel, variant]);
+
+  useEffect(() => {
+    const refreshDefaults = () => {
+      if (presentation === "home") selectionScope.current = null;
+      void fetchChatConfig();
+    };
+    window.addEventListener("veyra-chat-defaults-changed", refreshDefaults);
+    return () => window.removeEventListener("veyra-chat-defaults-changed", refreshDefaults);
+  }, [fetchChatConfig, presentation]);
 
   /* ---- Attachment state ---- */
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -409,6 +454,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   }, [providerId, modelId, selectorsDisabled, hasSelectableModel]);
 
   const handleProviderChange = useCallback((nextProviderId: string) => {
+    setUnavailableConversationModel(false);
     const provider = (chatConfig?.providers ?? []).find((candidate) => candidate.providerId === nextProviderId);
     if (!provider || provider.models.length === 0) {
       setSelection({ providerId: nextProviderId, modelId: "" });
@@ -422,7 +468,8 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   }, [chatConfig, saveChatSelection]);
 
   const handleModelChange = useCallback((nextModelId: string) => {
-    setSelection((current) => ({ ...current, modelId: nextModelId }));
+    setUnavailableConversationModel(false);
+    setSelection((current) => ({ providerId: current.providerId, modelId: nextModelId }));
     saveChatSelection(providerId, nextModelId);
   }, [providerId, saveChatSelection]);
 
@@ -524,7 +571,9 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   const handleNew = useCallback(async () => {
     if (isCreating || navigationPending) return;
     closeActivity();
-    await create("New conversation");
+    freshConversation.current = true;
+    const id = await create("New conversation");
+    if (!id) freshConversation.current = false;
     setMobileDrawerOpen(false);
   }, [closeActivity, create, isCreating, navigationPending]);
 
@@ -629,6 +678,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
         const accepted = await chat.send(parts, {
           model: { providerID: sendProvider, modelID: sendModel },
           agent: sendAgent,
+          variant: draft ? draft.variant : variant,
           context,
           grounding,
         });
@@ -678,7 +728,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
 
       return true;
     },
-    [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel,
+    [activeId, activeSession, chat, rename, attachments, providerId, modelId, variant, agentName, hasSelectableModel,
       memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities, presentation, isCreating, navigationPending],
   );
 
@@ -700,7 +750,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
     try {
       const result = await homeStart.start(() => create("New conversation"), {
         text, options: options ? { ...options } : undefined,
-        draft: { attachments: attachments.map(item => ({ ...item })), providerId, modelId, agentName },
+        draft: { attachments: attachments.map(item => ({ ...item })), providerId, modelId, variant, agentName },
       }, [...sessions, ...archivedSessions].map(item => item.id));
       if (!homeStart.isActive()) return false;
       if (result.kind === "accepted") {
@@ -714,7 +764,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
       return false;
     } finally { setHomePending(false); }
   }, [homePending, homeReview, sessionsLoading, sessionsError, selectorsDisabled, hasSelectableModel,
-    homeStart, create, attachments, providerId, modelId, agentName, sessions, archivedSessions, onConversationStarted]);
+    homeStart, create, attachments, providerId, modelId, variant, agentName, sessions, archivedSessions, onConversationStarted]);
 
   const memorySavedNotice = useCallback((receipt: ExplicitMemoryReceipt): MemoryNotice => ({
     status: "saved",
@@ -836,6 +886,11 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
     [chat],
   );
 
+  const effortControl = <Select aria-label="Reasoning effort" value={variant ?? ""} disabled={selectorsDisabled || !Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {}).length}
+    onChange={event => setSelection(current => ({ ...current, variant: event.target.value || undefined }))} className="text-xs max-w-32">
+    <option value="">Model default</option>{Object.keys(currentModels.find(model => model.id === modelId)?.variants ?? {}).map(key => <option key={key} value={key}>{key}</option>)}
+  </Select>;
+
   /* ---- Rendering ---- */
 
   if (presentation === "home") return <section className="veyra-home-chat" aria-label="Start a new conversation">
@@ -848,7 +903,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
         memoryCanRead={memoryCapabilities.canRead} memoryCanSave={memoryCapabilities.canSave}
         memoryUnavailableReason={memoryCapabilities.reason} memorySavePending={memoryNotice?.status === "queued"}
         projectControl={<ProjectDropdown />} onOpenTools={() => setMcpDrawerOpen(true)}
-        modelControl={<Select aria-label="Home chat model" value={JSON.stringify([providerId, modelId])}
+        modelControl={<><Select aria-label="Home chat model" value={JSON.stringify([providerId, modelId])}
           disabled={selectorsDisabled}
           onChange={event => {
             const candidate = (chatConfig?.providers ?? []).flatMap(provider => provider.models.map(model => ({ provider, model })))
@@ -861,7 +916,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
           {(chatConfig?.providers ?? []).map(provider => <optgroup key={provider.providerId} label={provider.label}>
             {provider.models.map(model => <option key={model.id} value={JSON.stringify([provider.providerId, model.id])}>{provider.label} · {model.label}</option>)}
           </optgroup>)}
-        </Select>}/>
+        </Select>{effortControl}</>}/>
     </fieldset>
     {homePending && <p role="status">Preparing your new conversation…</p>}
     {homePending && chat.isStreaming && <button type="button" onClick={() => void handleStop()}>Stop generating</button>}
@@ -1265,6 +1320,8 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
                   providerId={providerId}
                   modelId={modelId}
                   agentName={agentName}
+                  variant={variant}
+                  onVariantChange={value => setSelection(current => ({ ...current, variant: value || undefined }))}
                   onProviderChange={handleProviderChange}
                   onModelChange={handleModelChange}
                   onAgentChange={setAgentName}
@@ -1273,7 +1330,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
                   availableModels={currentModels}
                   isBusy={chat.isStreaming || chat.isLoading}
                   disabled={selectorsDisabled}
-                  modelDisabled={!hasSelectableModel}
+                  modelDisabled={currentModels.length === 0}
                   onMobileMenuOpen={handleMobileMenuOpen}
                   onMcpOpen={handleMcpOpen}
                   permissionCount={chat.permissions.length}
@@ -1304,10 +1361,10 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               memoryUnavailableReason={memoryCapabilities.reason}
               memorySavePending={memoryNotice?.status === "queued"}
               showSuggestions={chat.messages.length === 0}
-              modelControl={<Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || !hasSelectableModel} wrapperClassName="veyra-composer-model-wrap" className="veyra-composer-model">
+              modelControl={<><Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || currentModels.length === 0} wrapperClassName="veyra-composer-model-wrap" className="veyra-composer-model">
                 {!hasSelectableModel && <option value="">No model available</option>}
                 {currentModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
-              </Select>}
+              </Select>{effortControl}</>}
             />
             </fieldset>}
           </>
