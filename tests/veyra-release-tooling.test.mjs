@@ -12,7 +12,7 @@ const acceptance = { featureDispositions: 74, views: 47, settings: 20, windowsRo
 const qualifiedRows = target => Object.entries(RELEASE_GATES).filter(([, rule]) => rule.platforms.includes(target.platform)).map(([gate, rule]) => ({ gate, status: 'pass', kind: rule.kind, subject: { ...target }, receiptSha256: sha }));
 const release = (evidence = [], target = candidate) => evaluateRelease({ candidate: target, evidence, acceptance });
 const payload = (names, platform = 'linux') => ({ platform, files: names.map(name => ({ path: name, kind: 'file', sha256: sha, bytes: 50 })), requiredPaths: [names[0]], approvedPaths: [...names] });
-const binding = { kind: 'windows-native', installationId: 'installation', accountId: 'account', projectId: 'project', runtimeId: 'runtime' };
+const binding = { kind: 'windows-native', installationId: 'installation', accountId: 'account', projectId: 'project', runtimeId: 'runtime', admission: { workspaceIdentity: 'workspace', workspaceHash: 'immutable-hash', workspaceEpoch: 1, hostId: 'host', canonicalDirectory: 'C:/workspace', serviceInstanceId: 'instance', projectRevision: 2 } };
 const request = () => ({ binding: { ...binding }, target: { kind: 'paired-tab', tabId: 'tab', sessionId: 'session' }, action: 'screenshot', grant: { ...binding, action: 'screenshot', tabId: 'tab', sessionId: 'session', expiresAt: Date.now() + 60000 } });
 
 test('source blob proof hashes raw bytes and rejects normalized or changed content', () => {
@@ -178,4 +178,12 @@ test('DOM query forwarding is bounded and drops unrecognized execution payloads'
   assert.deepEqual(planBrowserOperation(input).input, { selector: input.input.selector });
   input.input.selector = ''; assert.throws(() => planBrowserOperation(input));
   input.input.selector = 'x'.repeat(4097); assert.throws(() => planBrowserOperation(input), /bound/);
+});
+
+test('browser capability binds immutable workspace epoch, native instance and project revision', () => {
+  for (const key of ['workspaceIdentity', 'workspaceHash', 'hostId', 'canonicalDirectory', 'serviceInstanceId', 'workspaceEpoch', 'projectRevision']) {
+    const input = request(); input.grant.admission = { ...input.grant.admission, [key]: typeof input.grant.admission[key] === 'number' ? 999 : 'other' };
+    assert.throws(() => planBrowserOperation(input), /capability/);
+  }
+  const input = request(); delete input.binding.admission; assert.throws(() => planBrowserOperation(input), /admission/);
 });
