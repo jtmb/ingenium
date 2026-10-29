@@ -37,7 +37,7 @@ export interface SuppressionBundle { schemaVersion: 1; scopeHash: string; entrie
 export class MemoryLifecycle {
   constructor(adapter: { db: SqlConnection; authorize: (scope: MemoryScope, permission: MemoryPermission, chatId: string | null) => boolean;
     sources: (scope: MemoryScope, chatId: string, id: string) => SourceState | null; checkpoint: () => void; clock?: () => string });
-  policy(scope: MemoryScope, chatId: string): { schemaVersion: 1; policy: HostPolicy; chat: ChatPolicy; available: true };
+  policy(scope: MemoryScope, chatId: string): { schemaVersion: 1; scopeHash: string; chatId: string; bindingHash: string; bindingEpoch: number; policy: HostPolicy; chat: ChatPolicy; available: true };
   operation(scope: MemoryScope, operationId: string): MemoryReceipt | null;
   setPolicy(scope: MemoryScope, input: Omit<HostPolicy,"revision"> & { operationId: string; expectedRevision: number }): MutationResult;
   setChatPolicy(scope: MemoryScope, chatId: string, input: Omit<ChatPolicy,"revision"> & { operationId: string; expectedRevision: number }): MutationResult;

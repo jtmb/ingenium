@@ -59,7 +59,7 @@ export class MemoryLifecycle {
   }
   policy(scope, chatId) {
     const key = this.access(scope, 'read', chatId);
-    return { schemaVersion: 1, policy: this.policyAt(key), chat: this.chatAt(key, chatId), available: true };
+    return { schemaVersion: 1, scopeHash: digest(key), chatId, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, policy: this.policyAt(key), chat: this.chatAt(key, chatId), available: true };
   }
   operation(scope, operationId) {
     const key = this.access(scope, 'read');

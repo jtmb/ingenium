@@ -15,6 +15,7 @@ test('API facade resolves scope, returns real policy and rejects caller scope in
     const request = { action: 'policy', method: 'GET', chatId: 'chat-a' };
     const ok = memoryResponse(memory, () => scope, request);
     assert.equal(ok.status, 200); assert.equal(ok.body.data.policy.generate, false);
+    assert.equal(ok.body.data.bindingEpoch, scope.bindingEpoch); assert.equal(ok.body.data.bindingHash, scope.bindingHash); assert.equal(ok.body.data.chatId, request.chatId);
     assert.equal(ok.headers['Cache-Control'], 'no-store');
     assert.equal(memoryResponse(memory, () => null, request).status, 403);
     assert.equal(memoryResponse(memory, () => scope, { ...request, body: { ownerUserId: 'other' } }).status, 422);
