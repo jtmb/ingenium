@@ -1,14 +1,16 @@
 diff --git a/apps/web/src/app/App.tsx b/apps/web/src/app/App.tsx
-index 457b29fd..45a76977 100644
+index 457b29fd..b3595dec 100644
 --- a/apps/web/src/app/App.tsx
 +++ b/apps/web/src/app/App.tsx
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,7 @@
  import { useCollaborationRecovery } from "../features/remote-hosts/useCollaborationRecovery";
 +import { NativeWorkPresentation } from "../features/work-ui/NativeWorkPresentation";
++import { NativeWorkNoProjectActions } from "../features/work-ui/NativeWorkNoProjectActions";
++import { startScratchProject, type ScratchProjectIntent } from "../features/work-ui/scratchProjectStart";
  import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
  import "../features/artifacts/artifact-editor.css";
  import {
-@@ -194,7 +195,9 @@ function initialWorkspaceDestination(): { view: DockedView; selectionId: string
+@@ -194,7 +197,9 @@ function initialWorkspaceDestination(): { view: DockedView; selectionId: string
    return { view, selectionId: validSelection ? selection : null, sessionId: session && /^ses_[A-Za-z0-9_-]{1,128}$/.test(session) ? session : null };
  }
  
@@ -19,7 +21,25 @@ index 457b29fd..45a76977 100644
    const [initialDestination] = useState(initialWorkspaceDestination);
    const [collaborationHeld, setCollaborationHeld] = useState(false), collaborationHeldRef = useRef(false);
    const { snapshot, connected, error, checking, readerScope, refresh } =
-@@ -1150,7 +1153,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+@@ -481,7 +486,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+     markNavigation();
+     return catalog.select(...args);
+   } };
+-  const startScratchChat = async () => {
++  const startScratchChat = (intent: ScratchProjectIntent = "new-chat") => startScratchProject(workDefault, intent, async () => {
+     if (collaborationHeldRef.current || !connected || !projectsSupported || typeof gateway.workbench !== "function" || scratchBusy) return;
+     const authority = { gateway, connected, instance, readerScope };
+     const navigationAtStart = navigationVersionRef.current;
+@@ -529,7 +534,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+     } finally {
+       if (stillCurrent()) setScratchBusy(false);
+     }
+-  };
++  });
+   const taskNavigation = { ...taskCatalog, select: async (...args: Parameters<typeof taskCatalog.select>) => {
+     if (collaborationHeldRef.current || restoring.current) return null;
+     markNavigation();
+@@ -1150,7 +1155,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
      <>{collaborationRecovery.retained && <details open={collaborationHeld} className="collaboration-recovery-local"><summary>Private page and snapshot recovery</summary>{collaborationRecovery.panel}</details>}<div
        inert={collaborationHeld}
        ref={layout.desktopRef}
@@ -28,7 +48,7 @@ index 457b29fd..45a76977 100644
        style={{ "--sidebar-width": `${layout.width}px`, "--rail-width": `${layout.railWidth}px` } as CSSProperties}
      >
        <nav ref={layout.railRef} className="global-rail" aria-label="Main navigation">
-@@ -1173,6 +1176,8 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+@@ -1173,6 +1178,8 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
            ))}
          </div>
          <div className="rail-footer">
@@ -37,7 +57,38 @@ index 457b29fd..45a76977 100644
            <span className="local-avatar" title="Local workspace">
              L
            </span>
-@@ -1654,6 +1659,9 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+@@ -1255,7 +1262,10 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+             </>
+           ) : (
+             <>
+-              <button
++              {workDefault && !catalog.selected ? <NativeWorkNoProjectActions
++                scratchAvailable={connected && typeof gateway.workbench === "function" && projectsSupported}
++                creating={scratchBusy} resumable={!!scratchRequestId}
++                onCreateScratch={() => { void startScratchChat("explicit-scratch-project"); }} /> : <button
+                 className="button new-task"
+                 disabled={!connected || typeof gateway.workbench !== "function" || (!catalog.selected && !projectsSupported) || scratchBusy}
+                 title={!connected ? "Reconnect the local service before starting a coding session." : typeof gateway.workbench !== "function" ? "Coding sessions are unavailable in this service build." : !catalog.selected && !projectsSupported ? "Scratch chats are unavailable in this service build." : scratchBusy ? "Creating the private scratch workspace…" : undefined}
+@@ -1273,7 +1283,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+               >
+                 {scratchBusy ? <LoaderCircle size={17} className="spin" /> : <Plus size={17} />}
+                 {scratchBusy ? "Creating chat…" : !catalog.selected && scratchRequestId ? "Resume new chat" : "New chat"}
+-              </button>
++              </button>}
+               <LiveSessionSidebar gateway={gateway} projectId={catalog.selected?.id ?? null} project={catalog.selected} instance={instance} connected={connected}
+                 selectedId={liveSessionSelection?.projectId === catalog.selected?.id ? liveSessionSelection?.id ?? null : null}
+                 onDeleted={id => {
+@@ -1636,7 +1646,8 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+                     markNavigation();
+                     void taskCatalog.selectById(original.request.task_id);
+                   }}>Open submitted task record</button>}
+-                  <button type="button" className="button" disabled={!connected || !gateway.workbench || scratchBusy} onClick={() => {
++                  <button type="button" className="button" disabled={!connected || !gateway.workbench || scratchBusy || (workDefault && !catalog.selected)}
++                    title={workDefault && !catalog.selected ? "Choose a project before opening a project chat." : undefined} onClick={() => {
+                   if (!catalog.selected) { void startScratchChat(); return; }
+                   setCodingWorkspace(true); setArea("workspace"); setWorkspaceView("projects"); setLiveSessionSelection(null); setNewSessionVersion(value => value + 1);
+                 }}>Open project chat</button></div>}
+@@ -1654,6 +1665,9 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
              </PaneRenderBoundary>
            ) : view === "projects" && codingWorkspace && catalog.selected ? (
              <PaneRenderBoundary viewLabel="Coding workspace">
@@ -47,7 +98,7 @@ index 457b29fd..45a76977 100644
                <Workbench collaborationRecovery={collaborationRecovery} key={catalog.selected.id} gateway={gateway} project={catalog.selected}
                  onOpenFindings={() => setFindingsOpenRequest(value => value + 1)}
                  fileWorkspaceCache={fileWorkspaceCache.current}
-@@ -1675,7 +1683,21 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+@@ -1675,7 +1689,21 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
                    setScheduledThreadSeed({ request_id: crypto.randomUUID(), owner, session_id: sessionId });
                    setArea("scheduled");
                  }} />
@@ -58,12 +109,12 @@ index 457b29fd..45a76977 100644
 +              <section className="native-work-welcome">
 +                <img src="/veyra-blue.png" alt="" width="48" height="48" />
 +                <h1>What should we build?</h1>
-+                <p>Choose a project, or start a private scratch chat with the existing native workspace owner.</p>
-+                <div><button type="button" className="button" disabled={!connected || !gateway.workbench || !projectsSupported || scratchBusy}
-+                  onClick={() => void startScratchChat()}>{scratchBusy ? "Creating chat…" : scratchRequestId ? "Resume new chat" : "New chat"}</button>
-+                  <button type="button" className="button" onClick={() => setCodingWorkspace(false)}>Choose project</button></div>
-+                <p role="status">{!connected ? "Reconnect the native service before starting a chat." : !gateway.workbench || !projectsSupported
-+                  ? "Native chat creation is unavailable in this service build." : "Creating a chat does not start an engine or send a prompt."}</p>
++                <p>Choose an existing project, or explicitly create a scratch project. A scratch project has a real directory and project identity.</p>
++                <NativeWorkNoProjectActions scratchAvailable={connected && !!gateway.workbench && projectsSupported}
++                  creating={scratchBusy} resumable={!!scratchRequestId}
++                  onCreateScratch={() => { void startScratchChat("explicit-scratch-project"); }}
++                  onChooseProject={() => setCodingWorkspace(false)} />
++                {!connected && <p role="status">Reconnect the native service before creating a scratch project.</p>}
 +              </section>
 +            </NativeWorkPresentation>
            ) : view === "projects" && savedProjectPresentation && connected && readerScope === savedProjectPresentation.readerScope &&
@@ -171,6 +222,67 @@ index 00000000..c12593cb
 +      <header><h1>Connection and engine diagnostics</h1><button type="button" autoFocus onClick={() => setDiagnostics(false)}>Return to Work</button></header>
 +      <Suspense fallback={<p role="status">Opening diagnostics…</p>}><Diagnostics gateway={gateway} /></Suspense>
 +    </dialog>}
++  </div>;
++}
+diff --git a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx
+new file mode 100644
+index 00000000..dbe586ab
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx
+@@ -0,0 +1,33 @@
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { NativeWorkNoProjectActions } from "./NativeWorkNoProjectActions";
++import { startScratchProject } from "./scratchProjectStart";
++
++afterEach(cleanup);
++describe("Work without a qualified private project owner", () => {
++  it("does not allocate a project, engine or prompt for New chat, including a direct legacy fallback", async () => {
++    const gateway = { workbench: vi.fn().mockResolvedValue(undefined) };
++    const allocateProject = async () => { await gateway.workbench("POST", "/v1/scratch"); };
++    render(<NativeWorkNoProjectActions scratchAvailable creating={false} resumable={false}
++      onCreateScratch={() => { void startScratchProject(true, "explicit-scratch-project", allocateProject); }} />);
++    const newChat = screen.getByRole("button", { name: "New chat", exact: true });
++    expect(newChat.hasAttribute("disabled")).toBe(true);
++    fireEvent.click(newChat);
++    // The same guard wraps App's original no-selection rail and task-view
++    // fallbacks, even if a stale callback is invoked despite the disabled UI.
++    expect(await startScratchProject(true, "new-chat", allocateProject)).toBe(false);
++    expect(gateway.workbench).not.toHaveBeenCalled();
++    fireEvent.click(screen.getByRole("button", { name: "Create scratch project" }));
++    await waitFor(() => expect(gateway.workbench).toHaveBeenCalledTimes(1));
++    expect(gateway.workbench).toHaveBeenLastCalledWith("POST", "/v1/scratch");
++  });
++
++  it("preserves the legacy fallback outside workDefault and labels pending scratch-project recovery truthfully", async () => {
++    const originalOwner = vi.fn().mockResolvedValue(undefined);
++    expect(await startScratchProject(false, "new-chat", originalOwner)).toBe(true);
++    expect(originalOwner).toHaveBeenCalledTimes(1);
++    render(<NativeWorkNoProjectActions scratchAvailable creating={false} resumable onCreateScratch={originalOwner} />);
++    expect(screen.getByRole("button", { name: "Resume scratch project creation" })).toBeTruthy();
++    expect(screen.queryByRole("button", { name: "Resume new chat" })).toBeNull();
++  });
++});
+diff --git a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
+new file mode 100644
+index 00000000..712e64e9
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
+@@ -0,0 +1,16 @@
++import { useId } from "react";
++
++export function NativeWorkNoProjectActions({ scratchAvailable, creating, resumable, onCreateScratch, onChooseProject }: {
++  scratchAvailable: boolean; creating: boolean; resumable: boolean;
++  onCreateScratch: () => void; onChooseProject?: () => void;
++}) {
++  const reason = useId();
++  return <div className="native-work-no-project-actions" role="group" aria-label="No-project chat actions">
++    <button type="button" className="button new-task" disabled aria-describedby={reason}>New chat</button>
++    <p id={reason} role="status">New chat without a project is unavailable until the native service provides a private execution owner.</p>
++    <button type="button" className="button" disabled={!scratchAvailable || creating}
++      title="Creates an actual scratch project with its own directory; this is not a chat without a project."
++      onClick={onCreateScratch}>{creating ? "Creating scratch project…" : resumable ? "Resume scratch project creation" : "Create scratch project"}</button>
++    {onChooseProject && <button type="button" className="button" onClick={onChooseProject}>Choose project</button>}
 +  </div>;
 +}
 diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
@@ -281,10 +393,10 @@ index 00000000..b5742db3
 +}
 diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
 new file mode 100644
-index 00000000..5e7580e3
+index 00000000..8e72eede
 --- /dev/null
 +++ b/apps/web/src/features/work-ui/native-work.css
-@@ -0,0 +1,54 @@
+@@ -0,0 +1,57 @@
 +/* Native presentation only. All engine, transcript, file, review and admission
 +   behavior stays in the existing App / Workbench / platform gateway owners. */
 +.native-work-desktop, .native-work-app { height: 100%; min-height: 0; }
@@ -315,6 +427,9 @@ index 00000000..5e7580e3
 +.native-work-welcome h1 { font-size: 1.6rem; font-weight: 500; }
 +.native-work-welcome p { max-width: 52ch; color: var(--muted); line-height: 1.6; }
 +.native-work-welcome > div { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
++.native-work-no-project-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
++.native-work-no-project-actions p { flex-basis: 100%; color: var(--muted); line-height: 1.5; }
++.native-work-no-project-actions button:disabled { cursor: not-allowed; opacity: .55; }
 +.native-work-presentation .wb-toolbar { flex-wrap: wrap; padding: 8px 16px; gap: 8px; min-height: 40px; background: var(--canvas); border-bottom-color: transparent; }
 +.native-work-presentation .wb-sessionbar { flex-wrap: wrap; padding: 6px 16px; border-bottom-color: transparent; }
 +.native-work-presentation .wb-chat { border-right: 0; }
@@ -338,6 +453,26 @@ index 00000000..5e7580e3
 +  .native-work-presentation[data-tools=true] .wb-inspector { display: flex; min-height: 0; overflow: auto; }
 +  .native-work-presentation[data-tools=true] .wb-chat { display: none; }
 +  .native-work-presentation .wb-composer { width: calc(100% - 16px); margin: 8px auto; }
++}
+diff --git a/apps/web/src/features/work-ui/scratchProjectStart.ts b/apps/web/src/features/work-ui/scratchProjectStart.ts
+new file mode 100644
+index 00000000..9ba3cf59
+--- /dev/null
++++ b/apps/web/src/features/work-ui/scratchProjectStart.ts
+@@ -0,0 +1,14 @@
++export type ScratchProjectIntent = "new-chat" | "explicit-scratch-project";
++
++/**
++ * A scratch allocation creates a real Project. Work-default New chat may not
++ * substitute that effect for a missing private/null-project execution owner.
++ * Keep the legacy owner unchanged when called outside the Work-default facade.
++ */
++export async function startScratchProject(
++  workDefault: boolean, intent: ScratchProjectIntent, originalOwner: () => Promise<void>,
++): Promise<boolean> {
++  if (workDefault && intent !== "explicit-scratch-project") return false;
++  await originalOwner();
++  return true;
 +}
 diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
 index 6188627f..a8295c17 100644

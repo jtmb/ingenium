@@ -6,14 +6,16 @@ The actual native entry rendered MvpDesktop and therefore did not enter the revi
 
 - Native base: `61c99f8e649da85b600fccec93236b5d6b07f78b`.
 - Patch: [native-work-default.patch](native-work-default.patch).
-- SHA256: `b53c80a5ee3ff2f9a08f4e1acb306eb6e075eba76dcf2c5f4f1955c277a61795`.
-- Patch bytes: 24816.
-- Seven allowed frontend paths: main entry, App, and five new files under features/work-ui.
+- SHA256: `a5b40177407e46a7560b95f3581b9226db3ae0b961deefcc427b3ab17ed9f824`.
+- Patch bytes: 33789.
+- Ten allowed frontend paths: main entry, App, and eight new files under features/work-ui.
 - Native branch remains at the base. Exact frontend changes are staged, uncommitted pending the coordinator's normal web pre-commit gates; no hook was bypassed.
 
 NativeWorkDesktop opens Work by default. Existing connection/qualification/engine diagnostics are lazy and require the explicit rail action. The native App remains mounted, inert behind the modal, retaining its original draft/admission state. Returning closes diagnostics and restores focus. The diagnostic view retains its existing service URL validation and IPC owner; no new Tauri call or transport was added.
 
-App retains its existing Projects, tasks, native/WSL environment, profile, worktree, transcript, tools, permissions/forms, receipt recovery, scheduling, memory, artifacts, browser, image, office, Sites, maps and other feature owners. Existing settings, search, navigation history, panel layout and model actions stay reachable. The Work projectless landing invokes the original scratch-chat owner only on a user action; it never manufactures a second project/conversation ledger, loads a model or sends a prompt.
+App retains its existing Projects, tasks, native/WSL environment, profile, worktree, transcript, tools, permissions/forms, receipt recovery, scheduling, memory, artifacts, browser, image, office, Sites, maps and other feature owners. Existing settings, search, navigation history, panel layout and model actions stay reachable. No private/null-project execution owner has been qualified: Work-default New chat without a selected project is explicitly unavailable. Both the sidebar and landing disclose that state. The task-view Open project chat action also requires a selected project in Work-default mode.
+
+The existing scratch workflow creates a real Project, not a projectless conversation. It remains separately reachable through Create scratch project or Resume scratch project creation. A shared intent guard wraps the original scratch owner before UUID/storage/gateway effects; every existing unselected New-chat fallback is refused under workDefault, including a stale callback invoked despite the disabled UI. Only explicit scratch-project intent can enter that original owner. Legacy App behavior outside workDefault is preserved. No engine/model load or prompt is added, and no second project/conversation ledger is created.
 
 NativeWorkPresentation wraps the existing Workbench without keying or recreating that child on a Work/Web change. It retains the full viewport box with visibility plus inert/aria-hidden fencing. Native composer drafts, attachments, pending originals/outcomes, transcript and scroll remain within their existing owner. Inspector and terminal visibility are local presentation choices; the existing compact-review action can still open the inspector. Pending approvals/forms remain rendered by the original main conversation controller. All enabled operational actions remain original native controls.
 
@@ -29,7 +31,9 @@ The requested [minimal typed port proposal](native-web-port-proposal.md) maps cu
 
 ## Validation and remaining gates
 
-Source review traced the entry, DesktopEntry, App, Workbench, original scratch/admission owners, native Gateway and sidebar/layout owners. Native cached diff whitespace check passes. Four new semantic React cases cover retained mount/draft/scroll and unknown admission across Web return, scope-change return to Work, explicit optional panels, and lazy diagnostic open/return/focus with the App owner retained.
+Source review traced the entry, DesktopEntry, App, Workbench, original scratch/admission owners, native Gateway and sidebar/layout owners. Native cached diff whitespace check passes. Six new semantic React cases cover retained mount/draft/scroll and unknown admission across Web return, scope-change return to Work, explicit optional panels, lazy diagnostic open/return/focus with the App owner retained, and no-project allocation refusal versus explicit scratch-project/legacy actions.
+
+A dependency-free Node check of the actual scratch intent guard passes: Work-default New chat invokes the original owner zero times; explicit scratch-project intent invokes it once; legacy New chat remains permitted. The initial direct WSL env lookup could not find node; the check then used the existing absolute Node path with all task-scoped temp variables set. No installation occurred. This unit evidence does not establish native runtime admission or full App integration.
 
 The exact patch reverse-apply check with whitespace errors enabled passes against the staged native source. A raw APP documentation diff whitespace check flags patch line14: its one-space blank context-line marker is required unified-diff syntax, not native source trailing whitespace. The exact patch bytes/hash are preserved; the Markdown-only whitespace check passes. No blanket whitespace exception or hook bypass was introduced.
 
@@ -37,7 +41,7 @@ These React tests and native type/build checks have **not** been run by this wor
 
 ```sh
 npm run check --workspace=@veyra/web
-npm run test --workspace=@veyra/web -- src/features/work-ui/NativeWorkPresentation.test.tsx src/features/work-ui/NativeWorkDesktop.test.tsx
+npm run test --workspace=@veyra/web -- src/features/work-ui/NativeWorkPresentation.test.tsx src/features/work-ui/NativeWorkDesktop.test.tsx src/features/work-ui/NativeWorkNoProjectActions.test.tsx
 ```
 
 The coordinator must also run original App/Workbench/DesktopEntry regressions, normal web/native commit gates and its scheduled package check. Native window/DPI/keyboard/200% scaling, actual admission/engine/Stop/recovery, diagnostic access, screenshot comparison and qualified upstream binding remain unverified. Existing47 passing Next Work React tests do not prove this native patch.
