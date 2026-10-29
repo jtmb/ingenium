@@ -25,9 +25,13 @@ The native Gateway has a workbench request port and OpenCode configuration lifec
 
 Coordinator-owned contract work must supply a qualified exact native service-instance/actor/project-revision/environment/cwd/session binding and authorized upstream origin/protocol, with expiry, identity invalidation and history/approval synchronization behavior. It must preserve existing CSP/IPC restrictions and upstream source. No token, route, host, launch capability or successful Web handshake was fabricated. Actual Work/Web cross-view interoperability remains open.
 
+The requested [minimal typed port proposal](native-web-port-proposal.md) maps current App/Workbench/task ownership to the native engine conversation, including the distinction between a saved task ID and an actual returned session ID.
+
 ## Validation and remaining gates
 
 Source review traced the entry, DesktopEntry, App, Workbench, original scratch/admission owners, native Gateway and sidebar/layout owners. Native cached diff whitespace check passes. Four new semantic React cases cover retained mount/draft/scroll and unknown admission across Web return, scope-change return to Work, explicit optional panels, and lazy diagnostic open/return/focus with the App owner retained.
+
+The exact patch reverse-apply check with whitespace errors enabled passes against the staged native source. A raw APP documentation diff whitespace check flags patch line14: its one-space blank context-line marker is required unified-diff syntax, not native source trailing whitespace. The exact patch bytes/hash are preserved; the Markdown-only whitespace check passes. No blanket whitespace exception or hook bypass was introduced.
 
 These React tests and native type/build checks have **not** been run by this worker. Requested central checks use existing locked dependencies only:
 
