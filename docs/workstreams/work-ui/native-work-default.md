@@ -9,7 +9,7 @@ The actual native entry rendered MvpDesktop and therefore did not enter the revi
 - SHA256: `1294cbf1b5cf778cae5b08cc306583d8071f93e35d39451510af630af9c60672`.
 - Patch bytes: 33594.
 - Ten allowed frontend paths: main entry, App, and eight new files under features/work-ui.
-- Native branch remains at the base. Exact frontend changes are staged, uncommitted pending the coordinator's normal web pre-commit gates; no hook was bypassed.
+- Worker native branch remains at the base with its exact ten-file staged provenance preserved. Coordinator integration is committed separately as268962e20bef8c246fce332241c08c00c1fc2317 after the normal Windows web gate; no hook was bypassed.
 
 NativeWorkDesktop opens Work by default. Existing connection/qualification/engine diagnostics are lazy and require the explicit rail action. The native App remains mounted, inert behind the modal, retaining its original draft/admission state. Returning closes diagnostics and restores focus. The diagnostic view retains its existing service URL validation and IPC owner; no new Tauri call or transport was added.
 
@@ -48,7 +48,9 @@ npm run test --workspace=@veyra/web -- src/features/work-ui/NativeWorkPresentati
 
 Central source evidence now verifies this exact33594-byte patch: native-work-r1.json records the full native source typecheck passing under locked TypeScript7.0.2; native-work-r2.json and native-work-semantics-r2.log record all six new semantic React cases plus two preserved CreateProject cases passing (8/8, zero skips). The coordinator applied the patch over nativee8fb5caf. All ten source-file SHA256 values in its r2 receipt match the frozen worker source. The first semantic attempt failed on the coordinator's config import path before test execution; its original r1 log remains preserved. This result does not erase that failure or establish any browser/native runtime behavior.
 
-The coordinator must still run original App/Workbench/DesktopEntry browser/integration regressions, normal Windows/native commit gates and its scheduled package check. Native window/DPI/keyboard/200% scaling, actual admission/engine/Stop/recovery, diagnostic access, screenshot comparison, private/null-project owner and qualified upstream binding remain unverified. Existing47 passing Next Work React tests do not prove this native patch. Native source remains frozen for those coordinator checks.
+The normal Windows Git gate subsequently passed for exact native treef5101f35965c870306b8aec0600b6aff15a1eb71, committed as268962e20bef8c246fce332241c08c00c1fc2317. The authoritative evidence/native-work-source-checkpoint.json and native-work-windows-gate-r2.log record unchanged gate policy, web:true/rust:false, ten changed files and Source-only scope. The worker independently confirmed the commit's actual tree matches that gate. Initial Windows TypeScript7 UNC include-glob failure remains in native-work-windows-gate.log; the corrected gate used an existing identity-verified source alias without creating a mapping or skipping checks. This source/test/gate milestone is accepted by the coordinator.
+
+The coordinator must still run original App/Workbench/DesktopEntry browser/integration regressions and its scheduled native package/platform checks. Native window/DPI/keyboard/200% scaling, actual admission/engine/Stop/recovery, diagnostic access, screenshot comparison, private/null-project owner and qualified upstream binding remain unverified. Existing47 passing Next Work React tests do not prove this native patch. Native source and the original staged provenance remain frozen; no reset/clean or additional worker build is authorized.
 
 ## Storage and cleanup
 
