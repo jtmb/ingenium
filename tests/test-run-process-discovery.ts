@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
+import { isDeclaredProtectedForward } from "./protected-forward-discovery";
 import {
   TEST_RUN_PREEXISTING_PROCESS_BASELINE_LIMIT,
   TEST_RUN_PREEXISTING_PROCESS_PORT_LIMIT,
@@ -153,12 +154,13 @@ function repositoryProcessCandidate(
   const commandPathCandidate = commandLine
     .split("\u0000")
     .some((argument) => isAbsolute(argument) && pathIsInside(repoRoot, argument));
-  if (!pathIsInside(repoRoot, cwd)
+  const listeningPorts = listeningPortsForPid(pid, listeningInodes);
+  const protectedForward = isDeclaredProtectedForward(pid, identity.executable, commandLine, listeningPorts);
+  if (!protectedForward && !pathIsInside(repoRoot, cwd)
     && !pathIsInside(repoRoot, identity.executable)
     && !commandPathCandidate) {
     return undefined;
   }
-  const listeningPorts = listeningPortsForPid(pid, listeningInodes);
   if (listeningPorts.length === 0 && !identity.runNonce) return undefined;
   return {
     ...identity,

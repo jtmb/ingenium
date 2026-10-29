@@ -13,6 +13,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import EdgeDrawer from "./EdgeDrawer";
 import { useOptionalAuth } from "@/lib/AuthContext";
+import VeyraBrand from "./VeyraBrand";
 
 // ---------------------------------------------------------------------------
 // Inline SVG icon components (16×16 viewBox)
@@ -552,6 +553,7 @@ export default function Navigation() {
     desktopCompact,
     mobileTriggerRef,
     mobileCloseRestoresFocus,
+    toggleDesktopCompact,
   } = useNavContext();
   const pathname = usePathname();
   const installationAdmin = useOptionalAuth()?.installationAdmin ?? true;
@@ -660,7 +662,7 @@ export default function Navigation() {
       <>
         {mode === "mobile" && (
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-nav-border)]">
-            <span id="mobile-navigation-title" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</span>
+            <span id="mobile-navigation-title"><VeyraBrand /></span>
             <button
               type="button"
               data-nav-initial-focus
@@ -789,7 +791,7 @@ export default function Navigation() {
       <aside
         id={DESKTOP_NAV_ID}
         data-nav-mode="desktop"
-        className={`desktop-navigation relative hidden md:flex md:flex-col ${desktopCompact ? "w-14" : "w-56"} shrink-0
+        className={`desktop-navigation relative hidden md:flex md:flex-col ${desktopCompact ? "w-14" : "w-72"} shrink-0
            border-r border-[var(--color-nav-border)]
            bg-[var(--color-nav-bg)]
            nav-scroll-area
@@ -797,7 +799,12 @@ export default function Navigation() {
            transition-[width] motion-reduce:transition-none`}
         data-nav-compact={desktopCompact}
       >
-        {renderSidebarContent("desktop", desktopCompact)}
+        {desktopCompact ? <nav className="flex flex-1 flex-col items-center gap-2 py-3" aria-label="Compact navigation">
+          {[NAV_GROUPS[0]!.items[0]!, NAV_GROUPS[3]!.items[0]!, NAV_GROUPS[0]!.items[1]!].map((item) => <Link key={item.href} href={item.href} prefetch={false} aria-label={item.label} title={item.label} aria-current={isActive(item.href) ? "page" : undefined} className={`veyra-rail-link ${isActive(item.href) ? "is-active" : ""}`}>{item.icon}</Link>)}
+          <Link href="/settings" prefetch={false} aria-label="Settings" title="Settings" className="veyra-rail-link"><IconGear /></Link>
+          <button type="button" onClick={toggleDesktopCompact} aria-label="All features" title="All features" className="veyra-rail-link"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="13" cy="8" r="1"/></svg></button>
+          <Link href={HOME_ITEM.href} prefetch={false} aria-label="Home" title="Home" className="veyra-rail-link"><IconHome /></Link>
+        </nav> : renderSidebarContent("desktop", false)}
       </aside>
 
       <EdgeDrawer

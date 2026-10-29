@@ -665,7 +665,7 @@ export default function PipelinePanel() {
       <div className="mt-6 border-t border-[var(--color-border)] pt-5">
         <div className="mb-5">
           <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Synthesis providers</h4>
-          <p className="mt-1 text-xs text-[var(--color-text-muted)]">Choose the providers Ingenium uses for primary and secondary synthesis.</p>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">Choose the providers Veyra uses for primary and secondary synthesis.</p>
           <div className="mt-3 grid gap-4 md:grid-cols-2">
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Primary

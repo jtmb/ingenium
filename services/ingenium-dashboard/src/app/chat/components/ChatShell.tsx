@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useId } from "react";
+import { useState, useCallback, useEffect, useRef, useId, useMemo, useLayoutEffect } from "react";
 import Link from "next/link";
 import ChatSessionSidebar from "./ChatSessionSidebar";
 import ChatHeader from "./ChatHeader";
@@ -30,6 +30,12 @@ import {
 } from "../../../lib/chat-grounding";
 import { buildExplicitMemoryContext, memoryWorkspaceId, newExplicitMemoryOperationId } from "../../../lib/explicit-memory";
 import { useMemoryCapabilities } from "./use-memory-capabilities";
+import Select from "../../components/Select";
+import ProjectDropdown from "../../components/ProjectDropdown";
+import { FreshConversationStart } from "../../../lib/fresh-conversation-start";
+
+type ComposerSnapshot = { attachments: Attachment[]; providerId: string; modelId: string; agentName: string };
+type HomePrompt = { text: string; options?: SendOptions; draft: ComposerSnapshot };
 
 type MemorySaveInput = {
   operationId: string;
@@ -62,17 +68,28 @@ type MemoryNotice = {
  *
  * Responsive: on mobile (<768px) the sidebar becomes an overlay drawer.
  */
-export default function ChatShell() {
+export default function ChatShell({ presentation = "chat", onConversationStarted, initialSessionId }: {
+  presentation?: "chat" | "home";
+  onConversationStarted?: (sessionId: string) => void;
+  initialSessionId?: string | null;
+} = {}) {
   const opencode = useOpenCodeClient();
   const runtime = useRuntime();
   const selectedProject = useProject();
+  const homeStart = useMemo(() => new FreshConversationStart<HomePrompt>(), [opencode, selectedProject, runtime.runtimeId]);
+  const [homePending, setHomePending] = useState(false);
+  const [homeReview, setHomeReview] = useState<string | null>(null);
+  const [homeAccepted, setHomeAccepted] = useState(false);
+  const homeSelection = useRef({ providerId: "", modelId: "", allowed: false });
+  useLayoutEffect(() => homeStart.activate(), [homeStart]);
   /* ---- Layout state ---- */
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const mobileDrawerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [contextSearchError, setContextSearchError] = useState<string | null>(null);
   const [memoryNotice, setMemoryNotice] = useState<MemoryNotice | null>(null);
+  const homeMemoryOutcome = useRef<MemoryNotice | null>(null);
   const [memoryStatusPending, setMemoryStatusPending] = useState(false);
   const [shareState, setShareState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -86,8 +103,9 @@ export default function ChatShell() {
   /* ---- Auto-collapse sidebar on smaller screens ---- */
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1279px)");
-    const handler = (e: MediaQueryListEvent | MediaQueryList) =>
-      setCollapsed(e.matches);
+    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
+      if (e.matches) setCollapsed(true);
+    };
     handler(mq);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
@@ -131,6 +149,7 @@ export default function ChatShell() {
   /* ---- OpenCode hooks ---- */
   const {
     sessions,
+    archivedSessions = [],
     activeId,
     create,
     rename,
@@ -142,7 +161,8 @@ export default function ChatShell() {
     error: sessionsError,
     autoCreated = false,
     isCreating = false,
-  } = useOpenCodeSessions();
+    refresh: refreshSessions,
+  } = useOpenCodeSessions({ initialSelection: presentation === "home" ? "none" : "recent", initialSessionId });
 
   const activeSession = sessions.find((session) => session.id === activeId);
   const memoryProject = selectedProject;
@@ -324,6 +344,11 @@ export default function ChatShell() {
 
   /* ---- Attachment state ---- */
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const attachmentOwner = useRef(activeId);
+  useLayoutEffect(() => {
+    if (presentation !== "home" && attachmentOwner.current !== activeId) setAttachments([]);
+    attachmentOwner.current = activeId;
+  }, [activeId, presentation]);
 
   /* ---- Derived provider data from chat config ---- */
   const availableProviders = (chatConfig?.providers ?? []).map((p) => ({
@@ -370,6 +395,9 @@ export default function ChatShell() {
   // providers. Only an empty catalog disables the provider and agent selectors.
   const selectorsDisabled = !chatConfigReady || chatConfigLoading || !!chatConfigError
     || rateLimitSeconds !== null || availableProviders.length === 0;
+  useLayoutEffect(() => {
+    homeSelection.current = { providerId, modelId, allowed: !selectorsDisabled && hasSelectableModel };
+  }, [providerId, modelId, selectorsDisabled, hasSelectableModel]);
 
   const handleProviderChange = useCallback((nextProviderId: string) => {
     const provider = (chatConfig?.providers ?? []).find((candidate) => candidate.providerId === nextProviderId);
@@ -519,9 +547,15 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, options?: SendOptions): Promise<boolean> => {
+    async (text: string, options?: SendOptions, intentCurrent?: () => boolean, draft?: ComposerSnapshot): Promise<boolean> => {
+      if (intentCurrent && !intentCurrent()) return false;
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
+      const sendProvider = draft?.providerId ?? providerId;
+      const sendModel = draft?.modelId ?? modelId;
+      const sendAgent = draft?.agentName ?? agentName;
+      if (sendProvider !== providerId || sendModel !== modelId) return false;
+      homeMemoryOutcome.current = null;
 
       setContextSearchError(null);
       const shouldRename =
@@ -567,19 +601,24 @@ export default function ChatShell() {
         { type: "text", text },
       ];
 
-      for (const att of attachments) {
+      for (const att of draft?.attachments ?? attachments) {
+        if (att.pending || att.error || !att.dataUrl) {
+          setContextSearchError("Wait for attachments to finish reading, or remove an unreadable file before sending.");
+          return false;
+        }
         parts.push({
           type: "file",
           mime: att.mime,
-          url: att.dataUrl || `file:///workspace/uploads/${att.name}`,
+          url: att.dataUrl,
           filename: att.name,
         });
       }
 
       try {
+        if (intentCurrent && !intentCurrent()) return false;
         const accepted = await chat.send(parts, {
-          model: { providerID: providerId, modelID: modelId },
-          agent: agentName,
+          model: { providerID: sendProvider, modelID: sendModel },
+          agent: sendAgent,
           context,
           grounding,
         });
@@ -599,7 +638,7 @@ export default function ChatShell() {
             tags: ["chat"],
           };
           const result = await api.memory.save(memoryProject, input);
-          setMemoryNotice("status" in result.data
+          const nextNotice: MemoryNotice = "status" in result.data
             ? {
               status: "queued",
               message: `Memory save outcome is pending (${input.operationId}). Check its status before retrying.`,
@@ -607,9 +646,13 @@ export default function ChatShell() {
               project: memoryProject,
               input,
             }
-            : { status: "saved", message: `Saved to memory as version ${result.data.receipt.version}. Receipt ${result.data.receipt.receiptId}.` });
+            : { status: "saved", message: `Saved to memory as version ${result.data.receipt.version}. Receipt ${result.data.receipt.receiptId}.` };
+          homeMemoryOutcome.current = nextNotice;
+          setMemoryNotice(nextNotice);
         } catch {
-          setMemoryNotice({ status: "failed", message: "This message was not saved to memory. Try again." });
+          const failure: MemoryNotice = { status: "failed", message: "This message was not saved to memory. Try again." };
+          homeMemoryOutcome.current = failure;
+          setMemoryNotice(failure);
         }
       }
 
@@ -628,6 +671,40 @@ export default function ChatShell() {
     [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel,
       memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities],
   );
+
+  useLayoutEffect(() => {
+    homeStart.publish({
+      sessionId: activeId,
+      ready: chat.sessionReady === true && !chat.isLoading,
+      error: chat.error,
+      send: (input, current) => handleSend(input.text, input.options, () => current()
+        && homeSelection.current.allowed
+        && homeSelection.current.providerId === input.draft.providerId
+        && homeSelection.current.modelId === input.draft.modelId, input.draft),
+    });
+  }, [activeId, chat.sessionReady, chat.isLoading, chat.error, handleSend, homeStart]);
+
+  const handleHomeSend = useCallback(async (text: string, options?: SendOptions): Promise<boolean> => {
+    if (homePending || homeReview || sessionsLoading || sessionsError || selectorsDisabled || !hasSelectableModel) return false;
+    setHomePending(true);
+    try {
+      const result = await homeStart.start(() => create("New conversation"), {
+        text, options: options ? { ...options } : undefined,
+        draft: { attachments: attachments.map(item => ({ ...item })), providerId, modelId, agentName },
+      }, [...sessions, ...archivedSessions].map(item => item.id));
+      if (!homeStart.isActive()) return false;
+      if (result.kind === "accepted") {
+        if (homeMemoryOutcome.current?.status === "queued" || homeMemoryOutcome.current?.status === "failed") {
+          setHomeAccepted(true);
+          setHomeReview(result.sessionId);
+        } else onConversationStarted?.(result.sessionId);
+        return true;
+      }
+      if (result.kind === "review") setHomeReview(result.sessionId);
+      return false;
+    } finally { setHomePending(false); }
+  }, [homePending, homeReview, sessionsLoading, sessionsError, selectorsDisabled, hasSelectableModel,
+    homeStart, create, attachments, providerId, modelId, agentName, sessions, archivedSessions, onConversationStarted]);
 
   const memorySavedNotice = useCallback((receipt: ExplicitMemoryReceipt): MemoryNotice => ({
     status: "saved",
@@ -751,10 +828,55 @@ export default function ChatShell() {
 
   /* ---- Rendering ---- */
 
+  if (presentation === "home") return <section className="veyra-home-chat" aria-label="Start a new conversation">
+    <fieldset disabled={homePending || !!homeReview || sessionsLoading || !!sessionsError} className="min-w-0 border-0 p-0 m-0">
+      <ChatInput variant="home" onSend={handleHomeSend} onStop={handleStop} isLoading={false}
+        providerId={providerId} modelId={modelId} agentName={agentName}
+        attachments={attachments} onAttachmentsChange={setAttachments}
+        hasSelectableModel={!selectorsDisabled && hasSelectableModel}
+        projectContextProject={selectedProject} memoryWorkspaceId={savedMemoryWorkspaceId}
+        memoryCanRead={memoryCapabilities.canRead} memoryCanSave={memoryCapabilities.canSave}
+        memoryUnavailableReason={memoryCapabilities.reason} memorySavePending={memoryNotice?.status === "queued"}
+        projectControl={<ProjectDropdown />} onOpenTools={() => setMcpDrawerOpen(true)}
+        modelControl={<Select aria-label="Home chat model" value={JSON.stringify([providerId, modelId])}
+          disabled={selectorsDisabled}
+          onChange={event => {
+            const candidate = (chatConfig?.providers ?? []).flatMap(provider => provider.models.map(model => ({ provider, model })))
+              .find(({ provider, model }) => JSON.stringify([provider.providerId, model.id]) === event.target.value);
+            if (!candidate) return;
+            setSelection({ providerId: candidate.provider.providerId, modelId: candidate.model.id });
+            saveChatSelection(candidate.provider.providerId, candidate.model.id);
+          }} className="veyra-home-model text-sm">
+          {!hasSelectableModel && <option value={JSON.stringify([providerId, modelId])}>No model available</option>}
+          {(chatConfig?.providers ?? []).map(provider => <optgroup key={provider.providerId} label={provider.label}>
+            {provider.models.map(model => <option key={model.id} value={JSON.stringify([provider.providerId, model.id])}>{provider.label} · {model.label}</option>)}
+          </optgroup>)}
+        </Select>}/>
+    </fieldset>
+    {homePending && <p role="status">Preparing your new conversation…</p>}
+    {homePending && chat.isStreaming && <button type="button" onClick={() => void handleStop()}>Stop generating</button>}
+    {sessionsError && <div role="alert"><p>{sessionsError}</p><button type="button" onClick={() => void refreshSessions()}>Retry conversation catalog</button></div>}
+    {chatConfigError && <div role="alert"><p>{chatConfigError}</p><button type="button" onClick={() => void handleRateLimitRetry()}>Retry model catalog</button></div>}
+    {chat.error && <p role="alert">{chat.error}</p>}
+    {contextSearchError && <p role="alert">{contextSearchError}</p>}
+    {memoryNotice && <p role="status">{memoryNotice.message}</p>}
+    {memoryNotice?.status === "queued" && <div>
+      <button type="button" disabled={memoryStatusPending} onClick={() => void handleMemoryStatus()}>Check memory save</button>
+      {memoryNotice.checkedUnknown && <button type="button" disabled={memoryStatusPending} onClick={() => void handleMemoryReplay()}>Retry original memory save</button>}
+    </div>}
+    {homeReview && <div role="alert"><p>{homeAccepted
+      ? "Your message was sent. Review its memory-save result above before continuing."
+      : "Review this conversation before sending again. Your draft is retained here."}</p>
+      <button type="button" disabled={memoryNotice?.status === "queued"} onClick={() => onConversationStarted?.(homeReview)}>{homeAccepted ? "Open conversation" : "Review conversation"}</button></div>}
+    <MCPDrawer isOpen={mcpDrawerOpen} onClose={() => setMcpDrawerOpen(false)} servers={mcpServers} error={mcpError}
+      isRefreshing={mcpRefreshing} lastRefreshedAt={mcpLastRefreshedAt} project={chatConfigProject} pendingServerName={mcpActionPending}
+      onRefresh={handleMcpRefresh} onConnect={name => changeMcpConnection(name, "connect")} onDisconnect={name => changeMcpConnection(name, "disconnect")}/>
+  </section>;
+
   return (
-    <div className="flex h-full min-h-0">
+    <div className="veyra-chat flex h-full min-h-0" data-empty={chat.messages.length === 0 && !chat.isLoading && !chat.error}>
       {/* Sidebar — hidden on mobile, visible as drawer overlay instead */}
-      <div className="hidden md:flex">
+      <div className={collapsed ? "hidden" : "hidden md:flex"}>
         <ChatSessionSidebar
           sessions={sessions}
           activeId={activeId}
@@ -801,7 +923,13 @@ export default function ChatShell() {
       </EdgeDrawer>
 
       {/* Main chat area */}
-      <div className="flex-1 flex-col min-w-0 min-h-0 flex">
+      <div className="veyra-chat-main flex-1 flex-col min-w-0 min-h-0 flex">
+        <div className="flex items-center gap-2 px-4 py-2">
+          <button type="button" onClick={() => setCollapsed((value) => !value)} className="hidden md:inline-flex rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]" aria-expanded={!collapsed}>History</button>
+          <button type="button" onClick={handleNew} disabled={isCreating} className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">New conversation</button>
+        </div>
+        <details className="veyra-conversation-options">
+          <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">Conversation options</summary>
         <ChatHeader
           sessionTitle={activeSession?.title ?? "Chat"}
           onRename={handleRename}
@@ -837,6 +965,7 @@ export default function ChatShell() {
             <code className="truncate font-mono text-[var(--color-text-secondary)]">{chatConfigProject}</code>
           </div>
         )}
+        </details>
         {contextSearchError && (
           <div
             className="flex shrink-0 items-center gap-2 px-4 py-2 text-sm text-[var(--color-error-text)]"
@@ -1143,7 +1272,12 @@ export default function ChatShell() {
               activitySelection={activitySelection}
               mcpProject={chatConfigProject}
             />
-            <ChatInput
+            {!activeId || !chat.sessionReady ? (
+              <p role="status" className="px-4 pb-4 text-sm text-[var(--color-text-secondary)]">
+                {chat.error ? "Conversation could not be loaded. Reload or choose another conversation before sending."
+                  : sessionsLoading || isCreating || activeId ? "Loading conversation…" : "Choose or create a conversation to send a message."}
+              </p>
+            ) : <ChatInput
               key={activeId}
               onSend={handleSend}
               onStop={handleStop}
@@ -1157,7 +1291,12 @@ export default function ChatShell() {
               memoryCanSave={memoryCapabilities.canSave}
               memoryUnavailableReason={memoryCapabilities.reason}
               memorySavePending={memoryNotice?.status === "queued"}
-            />
+              showSuggestions={chat.messages.length === 0}
+              modelControl={<Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || !hasSelectableModel} className="veyra-composer-model max-w-36 text-xs !border-0 !bg-transparent !py-1">
+                {!hasSelectableModel && <option value="">No model available</option>}
+                {currentModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              </Select>}
+            />}
           </>
         )}
       </div>

@@ -27,7 +27,7 @@ export {
  * callback route without dashboard proxy authentication.
  */
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|navigation-prepaint.js).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|navigation-prepaint.js|veyra-blue\\.png$).*)"],
 };
 
 export const DASHBOARD_API_PROXY_ERROR_CODE = "DASHBOARD_API_PROXY_MISCONFIGURED";

@@ -1,12 +1,40 @@
 import { Router } from "express";
 import { synthesis, personality, tasks, jobs, settings, pipelineEvents, observations, getDb, logger } from "ingenium-core";
-import { requestContentActor, requireProject } from "../helpers.js";
+import { requestContentActor, requestAuthorizationPrincipal, requireProject } from "../helpers.js";
+import { readRecentWork, RecentWorkInputError } from "../dashboard-recent-work.js";
 import type { EngineStatus } from "ingenium-email";
 import { getEmailClientStatus, getSynthesisStatus } from "../application-health.js";
 import { isControlPlaneMode } from "../runtime-mode.js";
 import { GET_ALL_PROCESS_INFO_XML, parseSupervisorProcesses, supervisorRpc } from "../supervisor-client.js";
 
 export const dashboardRouter = Router();
+
+dashboardRouter.get("/recent-work", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    if ((req.query.cursor !== undefined && typeof req.query.cursor !== "string")
+      || (req.query.limit !== undefined && typeof req.query.limit !== "string")
+      || (req.query.direction !== undefined && req.query.direction !== "asc" && req.query.direction !== "desc")) throw new RecentWorkInputError("Invalid recent-work parameters");
+    const data = readRecentWork(projectId, requestAuthorizationPrincipal(req), {
+      ...(req.query.limit === undefined ? {} : { limit: Number(req.query.limit) }),
+      ...(req.query.cursor === undefined ? {} : { cursor: req.query.cursor as string }),
+      ...(req.query.direction === undefined ? {} : { direction: req.query.direction as "asc" | "desc" }),
+    });
+    const states = Object.values(data.sources).filter(state => state !== "denied");
+    if (states.length > 0 && states.every(state => state === "unavailable")) {
+      res.status(503).json({ error: { code: "RECENT_WORK_UNAVAILABLE", message: "Recent work is unavailable" } });
+      return;
+    }
+    res.json({ data });
+  } catch (error) {
+    if (error instanceof RecentWorkInputError) {
+      res.status(400).json({ error: { code: "INVALID_RECENT_WORK_REQUEST", message: error.message } });
+      return;
+    }
+    res.status(503).json({ error: { code: "RECENT_WORK_UNAVAILABLE", message: "Recent work is unavailable" } });
+  }
+});
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 

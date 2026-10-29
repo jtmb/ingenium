@@ -509,35 +509,12 @@ export default function ChatMessages({
               )}
             </div>
           ) : (
-            /* Welcome state */
-            <div className="flex flex-col items-center gap-3 max-w-sm text-center px-4">
-              {/* Chat icon */}
-              <div className="w-16 h-16 rounded-full bg-[var(--color-surface-selected)] flex items-center justify-center">
-                <svg
-                  width="28"
-                  height="28"
-                  viewBox="0 0 28 28"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  className="text-[var(--color-text-secondary)]"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4.67 5.83h18.66c1.29 0 2.34 1.05 2.34 2.34v11.66c0 1.29-1.05 2.34-2.34 2.34H9.63l-4.96 4.96V8.17c0-1.29 1.05-2.34 2.34-2.34z"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
-                How can I help you today?
+            /* Quiet first-conversation state; real loading/error states stay above. */
+            <div className="veyra-chat-welcome mx-auto text-center px-4">
+              <h2 className="text-2xl font-medium tracking-tight text-[var(--color-text-primary)]">
+                Where should we begin?
               </h2>
-              <p className="text-sm text-[var(--color-text-muted)]">
-                Ask me anything — code, research, writing, or analysis.
-              </p>
-            </div>
-          )}
+            </div>          )}
         </div>
       </div>
     );

@@ -9,8 +9,9 @@ import DashboardShell from "./components/DashboardShell";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
-  title: "Ingenium Dashboard",
-  description: "Manage your AI agent skill system",
+  title: "Veyra",
+  description: "Your AI workspace for conversations, code and projects",
+  icons: { icon: "/veyra-blue.png", apple: "/veyra-blue.png" },
 };
 
 /**
@@ -27,7 +28,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const themeCookie = cookieStore.get("theme")?.value;
-  const htmlClass = themeCookie === "dark" ? "dark" : "";
+  const htmlClass = themeCookie === "light" ? "" : "dark";
 
   return (
     <html lang="en" className={`${htmlClass} h-full`} data-nav-compact="false" suppressHydrationWarning>
@@ -35,7 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Script src="/navigation-prepaint.js" strategy="beforeInteractive" />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=([^;]*)/);var c=m?m[1]:null;if(c==='dark')document.documentElement.classList.add('dark');else if(!c){var t=localStorage.getItem('theme')||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}document.documentElement.style.colorScheme=document.documentElement.classList.contains('dark')?'dark':'light'}catch(e){}})()`,
+            __html: `(function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=([^;]*)/);var c=m?m[1]:null;if(c==='dark')document.documentElement.classList.add('dark');else if(!c){var t=localStorage.getItem('theme')||'dark';document.documentElement.classList.toggle('dark',t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))}document.documentElement.style.colorScheme=document.documentElement.classList.contains('dark')?'dark':'light'}catch(e){}})()`,
           }}
         />
       </head>

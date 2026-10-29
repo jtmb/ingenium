@@ -1,6 +1,6 @@
 # Veyra phased delivery plan
 
-Status: planning checkpoint, 2026-10-27. Phase 1 has not started. The screenshots are the visual acceptance contract. This plan does not report a finished product, a working computer-use connection, or an approved Rust production cutover.
+Status: Phase 1 implementation in progress, 2026-10-27. Both MVP runtime and visual exit gates remain open. The screenshots are the visual acceptance contract. This plan does not report a finished product, a working computer-use connection, or an approved Rust production cutover.
 
 ## Goal and boundaries
 
@@ -101,6 +101,6 @@ Before builds/downloads, measure Windows C and destination free space; retain th
 
 ## Current evidence and open gates
 
-Planning checkpoint only. No model settings or computer-use code changed. The external brain source was read at b47765e4a9f5c124c4716deb52962e17d7fb4a2a; the runtime connection is NOT installed yet. Its README describes current setup but some repo-onboarding references (bootstrap paths and browser integration) lag the actual tree; resolve against the pinned files rather than blindly running onboarding.
+Phase 1 is active. The pinned external brain at b47765e4a9f5c124c4716deb52962e17d7fb4a2a is materialized without editing its repository or applying its global configuration. The reviewed Veyra consumer registers all 23 external skills with computer-use: names and preserves all eight Veyra skills. Fresh WSL and native Windows processes passed discovery and exact-body activation without inference; the native proof used isolated persistent NTFS SQLite state. The Windows packaged launcher and same-profile restart also passed exact-body loading without inference; cluster runtime qualification remains open. All 47 fixture captures now return HTTP 200 without unhandled page errors; material layout differences, Home composition, live workflows and missing Windows-specific captures still require implementation/review. No model settings were changed in these checks.
 
 Existing Ingenium app baseline: a1f5bfed98832bc09341c193f60ee02468fde8f5. A qualified candidate image exists but was not published/deployed in the design round. Tasks/Docs workflows passed earlier; the comprehensive audit is open. The old Windows latest stopped checkpoint is fb608696f0cc4578ba877aa262c61b79d6beaafe; its canonical checkout is older and has a user documentation edit. The README reports a published Windows coding preview while the current implementation ledger still has native/whole-service/WSL gates open. Reuse is promising, not an automatic readiness claim.

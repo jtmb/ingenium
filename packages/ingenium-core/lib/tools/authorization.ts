@@ -108,7 +108,7 @@ export function requireOrganizationPermission(
 }
 
 function projectAccess(userId: string, projectId: string): { organizationId: string; organizationRole?: OrganizationRole; projectRole?: ProjectRole } | undefined {
-  return getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+  const access = getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
     `SELECT projects.organization_id AS organizationId, organization_memberships.role AS organizationRole,
             project_memberships.role AS projectRole
      FROM projects
@@ -116,7 +116,10 @@ function projectAccess(userId: string, projectId: string): { organizationId: str
        AND organization_memberships.user_id = ? AND organization_memberships.status = 'active'
      LEFT JOIN project_memberships ON project_memberships.project_id = projects.id AND project_memberships.user_id = ?
      WHERE projects.id = ? AND projects.archived_at IS NULL`,
-  ).get(userId, userId, projectId) as { organizationId: string; organizationRole?: OrganizationRole; projectRole?: ProjectRole } | undefined;
+  ).get(userId, userId, projectId) as { organizationId: string; organizationRole: OrganizationRole | null; projectRole: ProjectRole | null } | undefined;
+  // LEFT JOIN absence is SQL NULL. Keep the optional-role contract truthful so
+  // callers cannot mistake a missing membership for an explicit project role.
+  return access ? { ...access, organizationRole: access.organizationRole ?? undefined, projectRole: access.projectRole ?? undefined } : undefined;
 }
 
 export function requireProjectPermission(

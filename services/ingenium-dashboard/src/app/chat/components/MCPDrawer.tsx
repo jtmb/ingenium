@@ -285,7 +285,7 @@ export default function MCPDrawer({
                   No MCP servers configured
                 </p>
                 <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                  Add MCP server definitions in your Ingenium configuration
+                  Add MCP server definitions in your Veyra configuration
                   to connect external tools.
                 </p>
               </div>

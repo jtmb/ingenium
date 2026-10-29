@@ -83,7 +83,12 @@ function isArchived(session: OpenCodeSession): boolean {
  * - Client-side search filtering via `searchQuery` (case-insensitive title match)
  * - Archive/unarchive through the OpenCode session update contract
  */
-export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
+export function useOpenCodeSessions({ initialSelection = "recent", initialSessionId = null }: {
+  /** Home reads the catalog without selecting or creating a conversation on mount. */
+  initialSelection?: "recent" | "none";
+  /** An explicit link must resolve in this catalog; it never falls back to a different chat. */
+  initialSessionId?: string | null;
+} = {}): UseOpenCodeSessionsReturn {
   const opencode = useOpenCodeClient();
   const [allSessions, setAllSessions] = useState<OpenCodeSession[]>([]);
   // A persisted ID is untrusted until the current session list confirms it.
@@ -147,8 +152,14 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       setAllSessions(sorted);
       const active = sorted.filter((session) => !isArchived(session));
 
+      if (initialSessionId !== null && selectionIntent === 0) {
+        const requested = active.find(session => session.id === initialSessionId);
+        setActiveId(requested?.id ?? null);
+        if (requested) persistActive(requested.id);
+        else setError("The requested conversation is unavailable in this workspace.");
       // Auto-create session when the list is empty (once per mount)
-      if (
+      } else if (
+        initialSelection === "recent" &&
         active.length === 0 &&
         !autoCreatedRef.current &&
         !creationPendingRef.current &&
@@ -193,11 +204,11 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       } else {
         // Prefer the persisted session only after this response confirms it.
         // If it was removed elsewhere, select and persist the current fallback.
-        const persistedActive = readPersistedActive();
+        const persistedActive = initialSelection === "recent" ? readPersistedActive() : null;
         setActiveId((prev) => {
           const preferred = prev ?? persistedActive;
           if (preferred && active.some((s) => s.id === preferred)) return preferred;
-          const fallback = active[0]?.id ?? null;
+          const fallback = initialSelection === "recent" ? active[0]?.id ?? null : null;
           if (preferred) persistActive(fallback);
           return fallback;
         });
@@ -214,7 +225,7 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     } finally {
       if (mountedRef.current && refreshGeneration === refreshGenerationRef.current) setIsLoading(false);
     }
-  }, [opencode]);
+  }, [initialSelection, initialSessionId, opencode]);
 
   useEffect(() => {
     mountedRef.current = true;

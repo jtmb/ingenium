@@ -1922,6 +1922,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
 
   const sessionReady = scopeKey !== null && loadedScopeKey === scopeKey;
   return {
+    sessionReady,
     messages: sessionReady ? state.messages : [],
     isStreaming: sessionReady && state.isStreaming,
     isLoading: scopeKey !== null && (state.isLoading || !sessionReady),

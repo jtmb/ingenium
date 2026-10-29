@@ -78,6 +78,72 @@ describe("useOpenCodeSessions", () => {
     cleanup();
   });
 
+  it("leaves the previous conversation untouched when Home reads a populated catalog", async () => {
+    localStorage.setItem("opencode-chat-active-session", oldSession.id);
+    mocks.list.mockResolvedValue([oldSession]);
+    const { result } = renderHook(() => {
+      const sessions = useOpenCodeSessions({ initialSelection: "none" });
+      const chat = useOpenCodeChat(sessions.activeId);
+      return { sessions, chat };
+    });
+    await vi.waitFor(() => expect(result.current.sessions.isLoading).toBe(false));
+    expect(result.current.sessions.activeId).toBeNull();
+    expect(result.current.sessions.sessions).toEqual([oldSession]);
+    expect(localStorage.getItem("opencode-chat-active-session")).toBe(oldSession.id);
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(mocks.messages).not.toHaveBeenCalled();
+    expect(mocks.prompt).not.toHaveBeenCalled();
+  });
+
+  it("does not create an empty conversation just by opening Home", async () => {
+    mocks.list.mockResolvedValue([]);
+    const { result } = renderHook(() => useOpenCodeSessions({ initialSelection: "none" }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeId).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(localStorage.getItem("opencode-chat-active-session")).toBeNull();
+  });
+
+  it("opens an explicitly linked conversation instead of the persisted fallback", async () => {
+    localStorage.setItem("opencode-chat-active-session", oldSession.id);
+    mocks.list.mockResolvedValue([oldSession, newSession]);
+    const { result } = renderHook(() => useOpenCodeSessions({ initialSessionId: newSession.id }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeId).toBe(newSession.id);
+    expect(localStorage.getItem("opencode-chat-active-session")).toBe(newSession.id);
+    act(() => result.current.select(oldSession.id));
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.activeId).toBe(oldSession.id);
+  });
+
+  it("does not fall back or auto-create when the linked conversation is unavailable", async () => {
+    localStorage.setItem("opencode-chat-active-session", oldSession.id);
+    mocks.list.mockResolvedValue([]);
+    const { result } = renderHook(() => useOpenCodeSessions({ initialSessionId: "missing-session" }));
+    await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.activeId).toBeNull(); expect(result.current.error).toContain("requested conversation");
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.activeId).toBeNull(); expect(mocks.create).not.toHaveBeenCalled();
+    expect(localStorage.getItem("opencode-chat-active-session")).toBe(oldSession.id);
+  });
+
+  it.each([{ name: "empty", catalog: [] }, { name: "populated", catalog: [oldSession] }])("refuses an explicitly empty conversation ID with a $name catalog", async ({ catalog }) => {
+    localStorage.setItem("opencode-chat-active-session", oldSession.id);
+    mocks.list.mockResolvedValue(catalog);
+    mocks.create.mockResolvedValue(newSession);
+    const { result } = renderHook(() => {
+      const sessions = useOpenCodeSessions({ initialSessionId: "" });
+      const chat = useOpenCodeChat(sessions.activeId);
+      return { sessions, chat };
+    });
+    await vi.waitFor(() => expect(result.current.sessions.isLoading).toBe(false));
+    expect(result.current.sessions.activeId).toBeNull();
+    expect(mocks.create).not.toHaveBeenCalled();
+    expect(result.current.sessions.error).toContain("requested conversation");
+    expect(mocks.messages).not.toHaveBeenCalled();
+    expect(localStorage.getItem("opencode-chat-active-session")).toBe(oldSession.id);
+  });
+
   it("keeps a new session selected when an older refresh resolves and checkpoints its turn once", async () => {
     let resolveOlderRefresh!: (sessions: typeof oldSession[]) => void;
     let resolveCreate!: (session: typeof newSession) => void;

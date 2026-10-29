@@ -28,9 +28,12 @@ function setThemeCookie(value: "light" | "dark") {
  * OS-level changes (e.g. switching macOS between light/dark mode).
  */
 export default function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(() =>
-    typeof window === "undefined" ? "system"
-    : ((localStorage.getItem("theme") as Theme | null) ?? "system"));
+  const [theme, setThemeState] = useState<Theme>(() => {
+    try {
+      const saved = typeof window === "undefined" ? null : localStorage.getItem("theme");
+      return saved === "light" || saved === "system" || saved === "dark" ? saved : "dark";
+    } catch { return "dark"; }
+  });
   const [resolved, setResolved] = useState<"light" | "dark">(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light");
 

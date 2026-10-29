@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [csrf, setCsrf] = useState(""); const [providers, setProviders] = useState<Array<{ id: string; name: string }>>([]);
   const [error, setError] = useState<string | null>(null); const [busy, setBusy] = useState(false);
   useEffect(() => { void Promise.all([api.auth.csrf(), api.auth.oidcProviders()]).then(([c, p]) => { setCsrf(c.data.csrfToken); setProviders(p.data); }); }, []);
-  return <AuthCard title="Sign in to Ingenium" description="Use your local account or a configured identity provider.">
+  return <AuthCard title="Sign in to Veyra" description="Use your local account or a configured identity provider.">
     {params.get("reason") === "session-expired" && <p role="alert" className="mb-4 rounded bg-[var(--color-warning-bg)] p-3 text-sm">Your session expired. Sign in to continue.</p>}
     <form className="space-y-4" onSubmit={async (event) => {
       event.preventDefault(); setBusy(true); setError(null);

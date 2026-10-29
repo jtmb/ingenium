@@ -3,6 +3,7 @@
 import ChatShell from "./components/ChatShell";
 import RuntimeWorkspacePicker from "../components/RuntimeWorkspacePicker";
 import { useRuntime } from "@/lib/RuntimeContext";
+import { useSearchParams } from "next/navigation";
 
 /**
  * Ingenium Chat — standalone chat interface.
@@ -13,6 +14,13 @@ import { useRuntime } from "@/lib/RuntimeContext";
  */
 export default function ChatPage() {
   const runtime = useRuntime();
-  if (!runtime.client) return <RuntimeWorkspacePicker controller={runtime.workspace} product="Ingenium Chat" />;
-  return <ChatShell />;
+  const params = useSearchParams();
+  const requestedRuntime = params.get("runtime");
+  const sessionId = params.get("session");
+  if (!runtime.client) return <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Chat" />;
+  if (requestedRuntime !== null && requestedRuntime !== (runtime.runtimeId ?? "compatibility")) return <>
+    <p role="alert">This conversation belongs to a different runtime. Select its workspace before opening it.</p>
+    <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Chat" />
+  </>;
+  return <ChatShell key={JSON.stringify([runtime.projectName, runtime.runtimeId, sessionId])} initialSessionId={sessionId} />;
 }

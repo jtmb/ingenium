@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
+import { measureTestRunCleanup } from "../../../tests/test-run-cleanup-allocation.js";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import { createUser } from "../lib/tools/identity.js";
 import { addOrganizationMember, addProjectMember, BOOTSTRAP_ORGANIZATION_ID, createOrganization } from "../lib/tools/organizations.js";
@@ -20,12 +21,40 @@ beforeEach(() => {
 
 afterEach(() => {
   resetDbForTest();
-  rmSync(directory, { recursive: true, force: true });
+  if (realpathSync(directory) !== resolve(directory) || !directory.startsWith(resolve(tmpdir()) + sep + "ingenium-authorization-"))
+    throw new Error("Authorization fixture escaped its owned temporary leaf");
+  const allocation = measureTestRunCleanup([directory]);
+  if (allocation.sharedHardLinks.length) throw new Error("Authorization fixture has unaccounted hard links");
+  rmSync(directory, { recursive: true });
+  console.info("Authorization fixture removed", JSON.stringify(allocation));
   if (originalPath === undefined) delete process.env.INGENIUM_CORE_DB_PATH;
   else process.env.INGENIUM_CORE_DB_PATH = originalPath;
 });
 
 describe("AUTH-102 authorization matrix", () => {
+  it("denies project reads when an organization member has no project membership", () => {
+    const user = createUser("unassigned-authz@example.test", "Unassigned");
+    addOrganizationMember(BOOTSTRAP_ORGANIZATION_ID, user.id, "member");
+    const project = createProject("unassigned-project");
+    const principal = { type: "browser-user" as const, id: user.id, scopes: ["user:*"] };
+    for (const resource of ["dashboard", "tasks", "context"]) {
+      expect(requireProjectPermission(principal, project.id, resource, "read")).toMatchObject({ allowed: false, visible: false });
+    }
+    expect(listAuthorizedProjects(principal).some(item => item.id === project.id)).toBe(false);
+  });
+
+  it("preserves explicit viewer reads and organization administrator access", () => {
+    const viewer = createUser("explicit-viewer@example.test", "Project viewer");
+    const administrator = createUser("explicit-admin@example.test", "Organization administrator");
+    addOrganizationMember(BOOTSTRAP_ORGANIZATION_ID, viewer.id, "member");
+    addOrganizationMember(BOOTSTRAP_ORGANIZATION_ID, administrator.id, "admin");
+    const project = createProject("explicit-role-project");
+    addProjectMember(project.id, viewer.id, "viewer");
+    expect(requireProjectPermission({ type: "browser-user", id: viewer.id, scopes: ["user:*"] }, project.id, "tasks", "read").allowed).toBe(true);
+    expect(requireProjectPermission({ type: "browser-user", id: viewer.id, scopes: ["user:*"] }, project.id, "tasks", "write").allowed).toBe(false);
+    expect(requireProjectPermission({ type: "browser-user", id: administrator.id, scopes: ["user:*"] }, project.id, "tasks", "admin").allowed).toBe(true);
+  });
+
   it("intersects user role, project membership, token scope, and token bounds", () => {
     const owner = createUser("owner-authz@example.test", "Owner");
     const member = createUser("member-authz@example.test", "Member");

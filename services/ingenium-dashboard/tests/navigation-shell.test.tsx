@@ -110,12 +110,12 @@ describe("UI-103 application shell navigation", () => {
     expect(layout).toContain('className={`ml-auto flex min-w-0 items-center gap-2 ${isChatRoute ? "" : "shrink-0"}`}');
   });
 
-  it("uses a full 224px rail by default and persists a 56px compact rail", () => {
+  it("uses the screenshot's 288px rail by default and persists a 56px compact rail", () => {
     pathname.current = "/tasks";
     renderShell();
 
     const rail = screen.getByRole("complementary");
-    expect(rail.className).toContain("w-56");
+    expect(rail.className).toContain("w-72");
     expect(screen.getByRole("link", { name: "Tasks" }).className).toContain("bg-[var(--color-surface-selected)]");
 
     fireEvent.click(screen.getByLabelText("Collapse navigation"));
@@ -125,7 +125,7 @@ describe("UI-103 application shell navigation", () => {
     expect(localStorage.getItem("ingenium-nav-compact")).toBe("true");
     expect(screen.getByLabelText("Expand navigation").getAttribute("aria-expanded")).toBe("false");
 
-    for (const [label, href] of links) {
+    for (const [label, href] of [["Chat", "/chat"], ["Projects", "/projects"], ["OpenCode", "/opencode"], ["Settings", "/settings"], ["Home", "/"]]) {
       const link = screen.getByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
       expect(link.getAttribute("aria-label")).toBe(label);
@@ -139,8 +139,9 @@ describe("UI-103 application shell navigation", () => {
     expect(screen.getByRole("button", { name: "Intelligence" }).getAttribute("aria-expanded")).toBe("false");
 
     fireEvent.click(screen.getByLabelText("Collapse navigation"));
-    expect(screen.getByRole("button", { name: "Intelligence navigation group" }).getAttribute("aria-expanded")).toBe("false");
-    fireEvent.click(screen.getByLabelText("Expand navigation"));
+    expect(screen.queryByRole("button", { name: "Intelligence navigation group" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All features", exact: true }));
+    expect(screen.getByRole("button", { name: "Intelligence" }).getAttribute("aria-expanded")).toBe("false");
 
     const renderedLinks = Array.from(container.querySelectorAll("#nav-sidebar a")).map((link) => link.getAttribute("href"));
     expect(renderedLinks).toEqual(links.map(([, href]) => href));
@@ -157,7 +158,7 @@ describe("UI-103 application shell navigation", () => {
     expect(screen.queryByRole("link", { name: "Chat" })).toBeNull();
 
     fireEvent.click(screen.getByLabelText("Open navigation menu"));
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     const mobileGroup = dialog.querySelector("#mobile-nav-group-workspace")!;
     const hiddenChat = mobileGroup.querySelector<HTMLElement>("a[href='/chat']")!;
     const trapCandidates = Array.from(dialog.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")).filter(
@@ -177,7 +178,7 @@ describe("UI-103 application shell navigation", () => {
 
     expect(layout).toContain('<Script src="/navigation-prepaint.js" strategy="beforeInteractive" />');
     expect(layout).toContain('data-nav-compact="false"');
-    expect(prepaint).toContain('getItem("ingenium-nav-compact") === "true"');
+    expect(prepaint).toContain('getItem("ingenium-nav-compact")');
     expect(prepaint).toContain('data-nav-compact", "false"');
     expect(prepaint).not.toContain("innerHTML");
     expect(navigation).toContain("const [desktopCompact, setDesktopCompact] = useState(false)");
@@ -222,7 +223,7 @@ describe("UI-103 application shell navigation", () => {
     expect(screen.getByRole("complementary").className).toContain("hidden md:flex");
 
     fireEvent.click(mobileTrigger);
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     expect(dialog.getAttribute("id")).toBe("mobile-navigation-dialog");
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     expect(dialog.className).toContain("w-64");
@@ -266,7 +267,7 @@ describe("UI-103 application shell navigation", () => {
     background.inert = false;
 
     fireEvent.click(mobileTrigger);
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     expect(background.inert).toBe(true);
 
     fireEvent.click(within(dialog).getByRole("link", { name: "Tasks" }));
@@ -287,7 +288,7 @@ describe("UI-103 application shell navigation", () => {
     background.inert = false;
 
     fireEvent.click(mobileTrigger);
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     fireEvent.click(within(dialog).getByRole("link", { name: "Tasks" }));
     finishMobileDrawerExit(container);
 
@@ -316,7 +317,7 @@ describe("UI-103 application shell navigation", () => {
     preservedBackground.setAttribute("aria-hidden", "false");
 
     fireEvent.click(screen.getByLabelText("Open navigation menu"));
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     const closeButton = within(dialog).getByRole("button", { name: "Close navigation" });
     expect(defaultBackground.inert).toBe(true);
     expect(defaultBackground.getAttribute("aria-hidden")).toBe("true");
@@ -343,7 +344,7 @@ describe("UI-103 application shell navigation", () => {
     const { container, rerender } = renderShell();
     const mobileTrigger = screen.getByLabelText("Open navigation menu");
     fireEvent.click(mobileTrigger);
-    const dialog = await screen.findByRole("dialog", { name: "Ingenium" });
+    const dialog = await screen.findByRole("dialog", { name: "Veyra" });
     expect(dialog.querySelector("#mobile-nav-group-workspace")).not.toBeNull();
     expect(container.querySelector("#desktop-nav-group-workspace")).not.toBeNull();
     expect(container.querySelectorAll("[id]").length).toBe(new Set(Array.from(container.querySelectorAll("[id]"), (element) => element.id)).size);
@@ -372,7 +373,7 @@ describe("UI-103 application shell navigation", () => {
     const background = screen.getByTestId("nav-background-default");
     background.inert = false;
     fireEvent.click(mobileTrigger);
-    await screen.findByRole("dialog", { name: "Ingenium" });
+    await screen.findByRole("dialog", { name: "Veyra" });
     expect(background.inert).toBe(true);
 
     media.setDesktop(true);

@@ -43,7 +43,7 @@ export default function ActivityTimeline({ items, loading }: ActivityTimelinePro
           Activity Timeline
         </h2>
         <p className="text-sm text-[var(--color-text-muted)]">
-          Activity will appear here as you use Ingenium
+          Activity will appear here as you use Veyra
         </p>
       </div>
     );

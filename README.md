@@ -1,17 +1,17 @@
 <div align="center">
 
-<img src="docs/assets/logo.svg" alt="Ingenium" width="120" />
+<img src="services/ingenium-dashboard/public/veyra-blue.png" alt="Veyra" width="100" />
 
-# Ingenium
+# Veyra
 
 ### A local-first, self-hosted AI developer workspace built around OpenCode.
 
 Integrates native AI chat, embedded OpenCode Web/CLI, project management, Kanban tasks, email with AI drafting, documentation workspace with RAG, encrypted secrets vault, scheduled jobs, backup management, service observability, agent profiles, MCP tool management, and a self-learning pipeline — served through a single Docker container.
 
 <p>
-  <img src="https://img.shields.io/badge/MCP%20active%20tools-286-blue?style=flat-square" alt="286 active MCP tools" />
+  <img src="https://img.shields.io/badge/MCP-scoped%20tools-blue?style=flat-square" alt="Scoped MCP tools" />
   <img src="https://img.shields.io/badge/agents-11-orange?style=flat-square" alt="11 mapped agent entries" />
-  <img src="https://img.shields.io/badge/dashboard%20views-24-8A2BE2?style=flat-square" alt="24 dashboard views" />
+  <img src="https://img.shields.io/badge/Veyra-Phase%201%20in%20progress-8A2BE2?style=flat-square" alt="Phase 1 in progress" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -19,9 +19,15 @@ Integrates native AI chat, embedded OpenCode Web/CLI, project management, Kanban
 
 ---
 
-**Ingenium** packages a full AI-enhanced developer workspace into a single container. It combines a Next.js dashboard (24 primary navigation routes plus a 19-tab Settings overlay) with an Express API, an embedded OpenCode instance, and background services — all managed by supervisord. The MCP stdio server is bundled separately in the `@ingenium/extension` package and launched as a child process by the MCP client. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+**Veyra** retains Ingenium's application and service lineage. It packages a full AI-enhanced developer workspace into a single container. It combines a Next.js dashboard (the full existing page inventory and 20-section Settings overlay) with an Express API, an embedded OpenCode instance, and background services — all managed by supervisord. The MCP stdio server is bundled separately in the `@ingenium/extension` package and launched as a child process by the MCP client. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extension package and gain 286 active tools — 284 `ingenium_`-prefixed server registrations plus 2 extension-registered tools across 32 baseline categories. The six coordination entries are retired and excluded from the active catalog; only historical data and negative fixtures retain their names. The active surface covers projects, skills, tasks, memory, mail, secrets, backups, jobs, agents, MCP servers, config, observations, personality traits, the synthesis pipeline, and the documentation workspace.
+
+## Windows and Linux delivery status
+
+Veyra Phase 1 is in progress. The shared source builds, while acceptance of the new Windows desktop package and Linux cluster image is still pending. The existing Ingenium production installation remains the recovery baseline. A build or screenshot is not a completed workflow or release.
+
+Start with the [MVP status and verification guide](docs/operations/veyra-mvp.md), [external brain setup and rollback](docs/operations/veyra-brain.md), [visual contract](docs/design/veyra-visual-contract.md), and [full phased delivery plan](docs/plans/veyra-phased-delivery.md). Windows keeps its native/WSL adapters and existing inference engine; Linux excludes that custom engine. OpenCode Web stays upstream, and ordinary Chat excludes Goal.
 
 ## What It Brings Together
 

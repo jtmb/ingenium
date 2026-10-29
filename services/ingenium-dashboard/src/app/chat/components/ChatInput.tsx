@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, type ReactNode } from "react";
 
 export interface SendOptions {
   providerId?: string;
@@ -19,6 +19,8 @@ export interface Attachment {
   dataUrl?: string; // Base64 data URL for images
   content?: string; // Text content
   isImage: boolean;
+  pending?: boolean;
+  error?: string;
 }
 
 interface ChatInputProps {
@@ -38,6 +40,11 @@ interface ChatInputProps {
   memoryCanSave?: boolean;
   memoryUnavailableReason?: string | null;
   memorySavePending?: boolean;
+  modelControl?: ReactNode;
+  showSuggestions?: boolean;
+  variant?: "chat" | "home";
+  projectControl?: ReactNode;
+  onOpenTools?: () => void;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -108,7 +115,13 @@ export default function ChatInput({
   memoryCanSave = false,
   memoryUnavailableReason,
   memorySavePending = false,
+  modelControl,
+  showSuggestions = false,
+  variant = "chat",
+  projectControl,
+  onOpenTools,
 }: ChatInputProps) {
+  const home = variant === "home";
   const [value, setValue] = useState("");
   const [useProjectContext, setUseProjectContext] = useState(false);
   const [useSavedMemory, setUseSavedMemory] = useState(false);
@@ -117,6 +130,16 @@ export default function ChatInput({
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef(attachments);
+  const readers = useRef(new Map<string, FileReader>());
+  const mounted = useRef(true);
+  const [attachmentSelectionError, setAttachmentSelectionError] = useState<string | null>(null);
+  useLayoutEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
+  useEffect(() => {
+    mounted.current = true;
+    const activeReaders = readers.current;
+    return () => { mounted.current = false; for (const reader of activeReaders.values()) reader.abort(); activeReaders.clear(); };
+  }, []);
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -133,62 +156,39 @@ export default function ChatInput({
   /** Process selected files and add them as attachments. */
   const processFiles = useCallback(
     (files: FileList | File[]) => {
+      if (isLoading || sending) return;
       const fileArr = Array.from(files);
-      const available = MAX_FILES - attachments.length;
-      if (available <= 0) return;
-
-      const toProcess = fileArr.slice(0, available);
-
-      for (const file of toProcess) {
-        if (file.size > MAX_FILE_SIZE) continue;
-
-        const id = nextAttachId();
-        const isImg = isImageMime(file.type);
-
-        if (isImg) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            onAttachmentsChange([
-              ...attachments,
-              {
-                id,
-                name: file.name,
-                mime: file.type || "image/png",
-                size: file.size,
-                dataUrl: reader.result as string,
-                isImage: true,
-              },
-            ]);
-          };
-          reader.readAsDataURL(file);
-        } else if (isTextFile(file.name)) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            onAttachmentsChange([
-              ...attachments,
-              {
-                id,
-                name: file.name,
-                mime: file.type || "text/plain",
-                size: file.size,
-                content: reader.result as string,
-                isImage: false,
-              },
-            ]);
-          };
-          reader.readAsText(file);
-        } else {
-          onAttachmentsChange([
-            ...attachments,
-            {
-              id,
-              name: file.name,
-              mime: file.type || "application/octet-stream",
-              size: file.size,
-              isImage: false,
-            },
-          ]);
-        }
+      if (!fileArr.length) return;
+      if (fileArr.length > MAX_FILES - attachmentsRef.current.length) {
+        setAttachmentSelectionError(`Choose up to ${MAX_FILES} files in total. No files from this selection were added.`);
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      setAttachmentSelectionError(null);
+      const selected = fileArr.map(file => ({ file, attachment: {
+        id: nextAttachId(), name: file.name, mime: file.type || (isTextFile(file.name) ? "text/plain" : "application/octet-stream"),
+        size: file.size, isImage: isImageMime(file.type), pending: file.size <= MAX_FILE_SIZE,
+        ...(file.size > MAX_FILE_SIZE ? { error: "File exceeds the 10 MiB attachment limit." } : {}),
+      } satisfies Attachment }));
+      attachmentsRef.current = [...attachmentsRef.current, ...selected.map(item => item.attachment)];
+      onAttachmentsChange(attachmentsRef.current);
+      for (const { file, attachment } of selected) {
+        if (attachment.error) continue;
+        const reader = new FileReader();
+        readers.current.set(attachment.id, reader);
+        const finish = (error?: string) => {
+          if (!mounted.current || readers.current.get(attachment.id) !== reader) return;
+          readers.current.delete(attachment.id);
+          const payload = typeof reader.result === "string" ? reader.result.match(/^data:[^,]*;base64,([A-Za-z0-9+/=]*)$/)?.[1] : undefined;
+          const failure = error ?? (payload === undefined ? "The selected file could not be read." : undefined);
+          attachmentsRef.current = attachmentsRef.current.map(item => item.id !== attachment.id ? item : {
+            ...item, pending: false, ...(failure ? { error: failure } : { dataUrl: `data:${attachment.mime};base64,${payload}` }),
+          });
+          onAttachmentsChange(attachmentsRef.current);
+        };
+        reader.onload = () => finish();
+        reader.onerror = () => finish("The selected file could not be read. Remove it and choose the file again.");
+        try { reader.readAsDataURL(file); } catch { finish("The selected file could not be read."); }
       }
 
       // Reset file input so the same file can be re-selected
@@ -196,15 +196,19 @@ export default function ChatInput({
         fileInputRef.current.value = "";
       }
     },
-    [attachments, onAttachmentsChange],
+    [isLoading, sending, onAttachmentsChange],
   );
 
   /** Remove a single attachment by ID. */
   const removeAttachment = useCallback(
     (id: string) => {
-      onAttachmentsChange(attachments.filter((a) => a.id !== id));
+      const reader = readers.current.get(id);
+      readers.current.delete(id);
+      reader?.abort();
+      attachmentsRef.current = attachmentsRef.current.filter(item => item.id !== id);
+      onAttachmentsChange(attachmentsRef.current);
     },
-    [attachments, onAttachmentsChange],
+    [onAttachmentsChange],
   );
 
   /** File input change handler. */
@@ -242,9 +246,10 @@ export default function ChatInput({
     [processFiles],
   );
 
-  const handleSend = async () => {
+  const handleSend = async (overrides?: Pick<SendOptions, "useProjectContext" | "saveToMemory">) => {
     const trimmed = value.trim();
-    if (!trimmed || isLoading || sending || !hasSelectableModel) return;
+    if (!trimmed || isLoading || sending || !hasSelectableModel || attachmentSelectionError
+      || attachmentsRef.current.some(item => item.pending || item.error || !item.dataUrl)) return;
     setSending(true);
     try {
       const accepted = await onSend(trimmed, {
@@ -254,6 +259,7 @@ export default function ChatInput({
         useProjectContext,
         useSavedMemory: Boolean(memoryWorkspaceId) && memoryCanRead && useSavedMemory,
         saveToMemory: Boolean(memoryWorkspaceId) && memoryCanSave && !memorySavePending && saveToMemory,
+        ...overrides,
       });
       if (accepted) {
         setValue("");
@@ -281,9 +287,10 @@ export default function ChatInput({
 
   const hasText = value.trim().length > 0;
   const canAttachMore = attachments.length < MAX_FILES;
+  const attachmentsBlocked = !!attachmentSelectionError || attachments.some(item => item.pending || item.error || !item.dataUrl);
 
   return (
-    <div className="shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2">
+    <div className={`veyra-composer shrink-0 w-full overflow-y-auto [scrollbar-gutter:stable] px-4 pb-4 pt-2${home ? " veyra-home-composer" : ""}`}>
       {/* Attachment preview pills */}
       {attachments.length > 0 && (
         <div className="mb-2 mx-auto flex w-full max-w-3xl flex-wrap gap-1.5">
@@ -327,6 +334,8 @@ export default function ChatInput({
               <span className="text-[var(--color-text-muted)] shrink-0">
                 {formatSize(att.size)}
               </span>
+              {att.pending && <span role="status">Reading…</span>}
+              {att.error && <span role="alert">{att.error}</span>}
               <button
                 type="button"
                 onClick={() => removeAttachment(att.id)}
@@ -353,6 +362,7 @@ export default function ChatInput({
           ))}
         </div>
       )}
+      {attachmentSelectionError && <div role="alert"><p>{attachmentSelectionError}</p><button type="button" onClick={() => setAttachmentSelectionError(null)}>Dismiss attachment notice</button></div>}
 
       {/* Composer bar */}
       <div
@@ -365,6 +375,9 @@ export default function ChatInput({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {home && <div className="veyra-home-composer-controls">{projectControl}{modelControl}</div>}
+        <details className="veyra-context-options">
+          <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">{home ? "Tools⌄" : "Context and memory"}</summary>
         <div className="flex flex-wrap items-center gap-1 border-b border-[var(--color-border-muted)] px-3 py-1.5">
           <button
             type="button"
@@ -437,7 +450,9 @@ export default function ChatInput({
           </button>
         </div>
         {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
-        <div className="flex min-w-0 items-end gap-2 px-3 py-2">
+        {home && onOpenTools && <button type="button" onClick={onOpenTools} className="px-3 py-2 text-sm">Available tools</button>}
+        </details>
+        <div className={`flex min-w-0 items-end gap-2 px-3 py-2${home ? " veyra-home-composer-body" : ""}`}>
           {/* Left buttons */}
           <div className="flex min-w-0 items-center gap-1 pb-0.5">
             {/* Attachment button with file picker */}
@@ -465,7 +480,7 @@ export default function ChatInput({
               ].join(" ")}
               aria-label="Attach files"
               title={canAttachMore ? "Attach files" : `Max ${MAX_FILES} files`}
-              disabled={!canAttachMore}
+              disabled={!canAttachMore || isLoading || sending}
             >
               <svg
                 width="16"
@@ -482,8 +497,16 @@ export default function ChatInput({
                   d="M9.96 3.54L5.45 8.05a2 2 0 102.83 2.83L12.79 6.37a4 4 0 10-5.66-5.66L2.62 5.22a6 6 0 108.49 8.49"
                 />
               </svg>
+              {home && <span>Attach</span>}
             </button>
-
+            {home && <details className="veyra-home-search">
+              <summary>Search</summary>
+              <div className="veyra-home-search-panel">
+                <label><input type="checkbox" checked={useProjectContext} disabled={!projectContextProject || sending || isLoading}
+                  onChange={event => setUseProjectContext(event.target.checked)}/> Search project context</label>
+                <p>Uses indexed context from {projectContextProject ?? "the selected project"}.</p>
+              </div>
+            </details>}
           </div>
 
           {/* Textarea */}
@@ -492,7 +515,7 @@ export default function ChatInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Ingenium anything..."
+            placeholder={home ? "Ask anything…" : "Ask Veyra"}
             rows={1}
             disabled={isLoading || sending}
             className="min-w-0 flex-1 resize-none bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none py-1 min-h-[24px] max-h-[200px] disabled:opacity-50"
@@ -500,7 +523,12 @@ export default function ChatInput({
             data-testid="chat-composer"
           />
 
+          {!home && modelControl}
+          {!home && <button type="button" disabled title="Dictation is not configured for this edition" aria-label="Dictation unavailable" className="p-2 text-[var(--color-text-muted)] opacity-50">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true"><rect x="6" y="1" width="4" height="8" rx="2"/><path d="M3 6v1a5 5 0 0 0 10 0V6M8 12v3M5 15h6"/></svg>
+          </button>}
           {/* Send / Stop button */}
+          <div className="veyra-send-controls">
           {isLoading ? (
             <button
               type="button"
@@ -523,8 +551,8 @@ export default function ChatInput({
           ) : (
             <button
               type="button"
-              onClick={handleSend}
-              disabled={!hasText || !hasSelectableModel || sending}
+              onClick={() => void handleSend()}
+              disabled={!hasText || !hasSelectableModel || sending || attachmentsBlocked}
               className={[
                 "rounded-lg p-2 transition-colors shrink-0 flex items-center justify-center",
                 hasText && !sending
@@ -569,19 +597,29 @@ export default function ChatInput({
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    d="M14 2L7 9M14 2l-4.67 12L7 9l-3.33-1.33L14 2z"
+                    d="M8 13V3M3 8l5-5 5 5"
                   />
                 </svg>
               )}
+              {home && <span>Send</span>}
             </button>
           )}
+          {home && !isLoading && <details className="veyra-home-send-options">
+            <summary aria-label="Send options">⌄</summary>
+            <div>
+              <button type="button" disabled={!hasText || !hasSelectableModel || sending || attachmentsBlocked || !projectContextProject}
+                onClick={() => void handleSend({ useProjectContext: true })}>Send with project context</button>
+              <button type="button" disabled={!hasText || !hasSelectableModel || sending || attachmentsBlocked || !memoryWorkspaceId || !memoryCanSave || memorySavePending}
+                onClick={() => void handleSend({ saveToMemory: true })}>Send and save to memory</button>
+            </div>
+          </details>}
+          </div>
         </div>
       </div>
 
-      {/* Footer */}
-      <p className="max-w-3xl mx-auto text-center text-xs text-[var(--color-text-muted)] mt-2">
-        Ingenium Chat
-      </p>
+      {showSuggestions && <div className="veyra-chat-suggestions max-w-3xl mx-auto mt-5 flex flex-col items-start gap-1">
+        {["Draft release notes", "Summarize a document"].map((prompt) => <button key={prompt} type="button" disabled={isLoading || sending} onClick={() => { setValue(prompt); textareaRef.current?.focus(); }} className="rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]">{prompt}</button>)}
+      </div>}
     </div>
   );
 }

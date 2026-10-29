@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { measureTestRunCleanup } from "./test-run-cleanup-allocation";
 import {
   acquireTestRunArtifactWriterLock,
   releaseTestRunArtifactLock,
@@ -1984,6 +1985,15 @@ export function cleanupTestRun(manifestPath: string): void {
       if (!lstatSync(dashboardWorkspace).isDirectory()) {
         throw new Error("Test-run dashboard workspace is not a directory");
       }
+    }
+    const allocationPath = join(dirname(getTestRunTelemetryPath(manifest)), "cleanup-allocation.json");
+    const allocation = {
+      runId: manifest.runId, repoRoot: manifest.repoRoot, measuredAt: new Date().toISOString(), removed: false,
+      regeneration: "Run the same manifest-owned fixture from retained source and lockfiles; dependency trees are linked, not copied.",
+      ...measureTestRunCleanup([...(existsSync(dashboardWorkspace) ? [dashboardWorkspace] : []), manifest.runDir]),
+    };
+    writeOwnedJson(allocationPath, allocation, getTestRunArtifactRoot(manifest.repoRoot), "runner cleanup allocation");
+    if (existsSync(dashboardWorkspace)) {
       rmSync(dashboardWorkspace, { recursive: true, force: true });
     }
     releaseTestRunPortReservations(manifest, { allowMissing: true });
@@ -1993,6 +2003,8 @@ export function cleanupTestRun(manifestPath: string): void {
       manifest.tempRootIdentity,
       manifest.runDirIdentity,
     );
+    allocation.removed = true;
+    writeOwnedJson(allocationPath, allocation, getTestRunArtifactRoot(manifest.repoRoot), "runner cleanup allocation");
     const environment = {
       [TEST_RUN_MANIFEST_ENV]: manifest.manifestPath,
       [TEST_RUN_NONCE_ENV]: manifest.runNonce,

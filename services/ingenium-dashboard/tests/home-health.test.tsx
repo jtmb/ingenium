@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { AnchorHTMLAttributes } from "react";
-import Home from "../src/app/page";
+import { OperationalDashboard as Home } from "../src/app/page";
 import HealthStrip from "../src/app/components/HealthStrip";
 import { api, type DashboardSummary, type HealthData } from "../src/lib/api";
 
-vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "ingenium" }));
+const projectScope = vi.hoisted(() => ({ current: "ingenium" }));
+vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => projectScope.current }));
 vi.mock("next/link", () => ({
   default: ({ children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) => <a {...props}>{children}</a>,
 }));
@@ -36,6 +37,7 @@ const summary: DashboardSummary = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  projectScope.current = "ingenium";
 });
 
 describe("HealthStrip accessible service statuses", () => {
@@ -104,6 +106,21 @@ describe("HealthStrip accessible service statuses", () => {
 });
 
 describe("Home initial announcements", () => {
+  it("keeps a retired project's delayed summary out of the current project", async () => {
+    let resolveOld!: (response: Awaited<ReturnType<typeof api.home.summary>>) => void;
+    let resolveNext!: (response: Awaited<ReturnType<typeof api.home.summary>>) => void;
+    vi.spyOn(api.home, "summary")
+      .mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveNext = resolve; }));
+    const view = render(<Home />);
+    projectScope.current = "next-project";
+    view.rerender(<Home />);
+    await act(async () => resolveNext({ data: { ...summary, health: { ...healthyHealth, services: [{ name: "Next project service", status: "running" }] } }, unavailable: [] }));
+    expect(screen.getByText("Next project service: running")).toBeVisible();
+    await act(async () => resolveOld({ data: { ...summary, health: { ...healthyHealth, services: [{ name: "Retired project service", status: "running" }] } }, unavailable: [] }));
+    expect(screen.queryByText("Retired project service: running")).toBeNull();
+    expect(screen.getByText("Next project service: running")).toBeVisible();
+  });
   it("announces only a concise polite loading status, then removes it when content arrives", async () => {
     let resolveSummary!: (response: Awaited<ReturnType<typeof api.home.summary>>) => void;
     vi.spyOn(api.home, "summary").mockReturnValue(new Promise((resolve) => { resolveSummary = resolve; }));

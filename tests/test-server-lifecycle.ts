@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -11,7 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createConnection } from "node:net";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   cleanupTestRun,
   getPortEnvironment,
@@ -66,6 +67,9 @@ function ensureTestRunAuthEncryptionKey(context: TestRunContext): void {
 }
 
 function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildArtifacts: boolean): string {
+  if (includeBuildArtifacts) {
+    throw new Error("A prebuilt Next dashboard contains API-port rewrites from its build. Build the isolated fixture instead of copying .next into a retry workspace.");
+  }
   const source = join(context.repoRoot, "services", "ingenium-dashboard");
   const target = getTestRunDashboardWorkspace(context);
   rmSync(target, { recursive: true, force: true });
@@ -74,7 +78,7 @@ function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildA
     filter: (path) => {
       const name = basename(path);
       if (name === "node_modules") return false;
-      return includeBuildArtifacts || name !== ".next";
+      return name !== ".next";
     },
   });
   symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
@@ -85,7 +89,7 @@ function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildA
   const exportStatement = "export default nextConfig;";
   if (!config.includes(exportStatement)) throw new Error("Fixture Next.js config export is unsupported");
   writeFileSync(configPath, config.replace(exportStatement,
-    "export default { ...nextConfig, experimental: { ...nextConfig.experimental, cpus: 2 } };"));
+    "export default { ...nextConfig, output: undefined, experimental: { ...nextConfig.experimental, cpus: 2 } };"));
   return target;
 }
 
@@ -1158,6 +1162,28 @@ async function runBoundedCommand(
 }
 
 export async function buildProductionArtifacts(context: TestRunContext, timeoutMs = PRODUCTION_BUILD_TIMEOUT_MS): Promise<void> {
+  // npm creates logs before workspace scripts execute. Keep every build child
+  // scoped even when the caller did not provide an npm cache configuration.
+  const outputRoot = resolve(process.env.INGENIUM_TEST_GENERATED_OUTPUT_ROOT || context.runDir);
+  const stateRoot = join(context.runDir, "build-state");
+  const buildEnvironment: Record<string, string> = {};
+  for (const [name, suffix] of Object.entries({
+    NPM_CONFIG_CACHE: "npm-cache", NPM_CONFIG_LOGS_DIR: "npm-logs",
+    APPDATA: "appdata", LOCALAPPDATA: "localappdata", XDG_CACHE_HOME: "xdg-cache",
+    NODE_COMPILE_CACHE: "node-compile-cache",
+  })) {
+    const directory = process.env[name] || join(stateRoot, suffix);
+    const inside = relative(outputRoot, directory);
+    if (!isAbsolute(directory) || isAbsolute(inside) || inside === ".." || inside.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+      throw new Error(`${name} must stay in the declared test output root`);
+    }
+    mkdirSync(directory, { recursive: true });
+    const canonicalInside = relative(realpathSync(outputRoot), realpathSync(directory));
+    if (isAbsolute(canonicalInside) || canonicalInside === ".." || canonicalInside.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+      throw new Error(`${name} is redirected outside the declared test output root`);
+    }
+    buildEnvironment[name] = directory;
+  }
   const workspaces = [
     "packages/ingenium-core",
     "packages/ingenium-email",
@@ -1169,7 +1195,7 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
         context.repoRoot,
         ["run", "build", `--workspace=${workspace}`],
         timeoutMs,
-        {},
+        buildEnvironment,
         context.runNonce,
         context,
       );
@@ -1182,7 +1208,7 @@ export async function buildProductionArtifacts(context: TestRunContext, timeoutM
       context.repoRoot,
       ["--prefix", dashboardWorkspace, "run", "build"],
       timeoutMs,
-      { NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) },
+      { ...buildEnvironment, NODE_ENV: "production", INGENIUM_API_PORT: String(context.ports.api) },
       context.runNonce,
       context,
     );

@@ -1,4 +1,5 @@
 import { requestSessionReauthentication } from "./session-reauthentication";
+import { normalizeRecentWorkPage, type RecentWorkDirection } from "./recent-work";
 import {
   DASHBOARD_MARKER_HEADER,
   DASHBOARD_MARKER_VALUE,
@@ -3311,6 +3312,13 @@ export const api = {
       ),
   },
   home: {
+    recentWork: async (project: string, options: { limit?: number; cursor?: string; direction?: RecentWorkDirection; signal?: AbortSignal } = {}) => {
+      const direction = options.direction ?? "desc";
+      const query = new URLSearchParams({ project, direction, limit: String(options.limit ?? 20) });
+      if (options.cursor !== undefined) query.set("cursor", options.cursor);
+      const response = await request<{ data: unknown }>(`/dashboard/recent-work?${query}`, { signal: options.signal });
+      return { data: normalizeRecentWorkPage(response.data, project, direction) };
+    },
     summary: (project = DEFAULT_PROJECT) =>
       request<{ data: DashboardSummary; unavailable: string[] }>(
         `/dashboard/summary?project=${encodeURIComponent(project)}`,

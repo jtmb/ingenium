@@ -9,6 +9,142 @@
   color-scheme: dark;
 }
 
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.veyra-topbar { min-height: 48px; }
+.veyra-mode-switch {
+  display: flex;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface-hover);
+  margin-inline: auto;
+  flex-shrink: 0;
+}
+.veyra-mode-switch a {
+  padding: 5px 24px;
+  border-radius: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.veyra-mode-switch a[aria-current="page"] {
+  background: var(--color-surface-selected);
+  color: var(--color-text-primary);
+  box-shadow: 0 1px 3px #0002;
+}
+.veyra-mode-switch a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+.veyra-chat { background: var(--color-surface-muted); }
+.veyra-rail-link { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 9px; color: var(--color-text-secondary); }
+.veyra-rail-link:hover, .veyra-rail-link.is-active { background: var(--color-surface-selected); color: var(--color-text-primary); }
+.veyra-rail-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.veyra-chat-main { position: relative; }
+.veyra-conversation-options { position: absolute; top: 8px; right: 12px; z-index: 20; }
+.veyra-conversation-options[open] { width: min(90%, 900px); background: var(--color-surface-raised); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 12px 32px #0003; }
+.veyra-conversation-options summary { text-align: right; }
+.veyra-chat[data-empty="true"] [data-testid="chat-empty-state"] {
+  flex: 0 0 auto;
+  margin-top: auto;
+  margin-bottom: 24px;
+}
+.veyra-chat[data-empty="true"] .veyra-composer { margin-bottom: auto; }
+.veyra-composer [data-testid="chat-composer-shell"] {
+  background: var(--color-surface-raised);
+  border-radius: 24px;
+  max-width: 38rem;
+}
+.veyra-chat-suggestions { max-width: 38rem; }
+.veyra-composer [data-testid="chat-send-btn"][disabled] { background: var(--color-accent); color: white; opacity: .55; }
+.veyra-composer [data-testid="chat-send-btn"], .veyra-composer [data-testid="chat-stop-btn"] { border-radius: 50%; }
+.veyra-send-controls { display: contents; }
+.veyra-home-welcome { max-width: 55.5rem; margin: .5rem auto 1.75rem; }
+.veyra-home-welcome > h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.25rem); line-height: 1.2; font-weight: 650; letter-spacing: -.025em; }
+.veyra-home-welcome > p { margin: .5rem 0 1.5rem; color: var(--color-text-secondary); }
+.veyra-composer.veyra-home-composer { padding: 0; overflow: visible; }
+.veyra-home-composer [data-testid="chat-composer-shell"] { max-width: none; border-radius: 10px; padding: 12px; background: var(--color-surface); }
+.veyra-home-composer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 8px 0 12px; }
+.veyra-home-composer-controls > div { border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-raised); }
+.veyra-home-composer-controls button, .veyra-home-model { min-height: 36px; }
+.veyra-home-composer-body { display: grid; grid-template-columns: minmax(0, 1fr) auto; padding: 0; gap: 12px; }
+.veyra-home-composer [data-testid="chat-composer"] { grid-row: 1; grid-column: 1 / -1; width: 100%; min-height: 96px; padding: 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-raised); }
+.veyra-home-composer [data-testid="chat-composer"]:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.veyra-home-composer-body > div:first-child { grid-row: 2; gap: 16px; }
+.veyra-home-composer-body > div:first-child > button { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.veyra-home-composer details.veyra-context-options { position: absolute; z-index: 25; left: 12rem; bottom: 14px; transform: none; }
+.veyra-home-composer .veyra-context-options summary { font-size: 13px; padding: 6px; }
+.veyra-home-composer .veyra-context-options[open] { bottom: 3.5rem; width: min(26rem, 75vw); border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-raised); box-shadow: 0 8px 24px #0003; }
+.veyra-home-composer .veyra-send-controls { display: flex; grid-row: 2; align-items: stretch; justify-self: end; }
+.veyra-home-composer [data-testid="chat-send-btn"] { display: flex; gap: 8px; padding: 9px 14px; border-radius: 8px 0 0 8px; }
+.veyra-home-search, .veyra-home-send-options { position: relative; font-size: 13px; }
+.veyra-home-search > summary { padding: 6px; cursor: pointer; }
+.veyra-home-send-options > summary { display: flex; align-items: center; height: 100%; padding: 0 10px; border-radius: 0 8px 8px 0; border-left: 1px solid #ffffff3b; background: var(--color-accent); color: white; cursor: pointer; }
+.veyra-home-send-options > div, .veyra-home-search-panel { position: absolute; z-index: 30; bottom: calc(100% + 8px); min-width: 220px; padding: 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-raised); box-shadow: 0 8px 24px #0003; }
+.veyra-home-send-options > div { right: 0; }
+.veyra-home-send-options > div button { display: block; width: 100%; padding: 8px; text-align: left; border-radius: 5px; }
+.veyra-home-send-options > div button:hover { background: var(--color-surface-hover); }
+.veyra-home-send-options > div button:disabled { opacity: .5; cursor: not-allowed; }
+.veyra-home-search-panel p { margin: 8px 0 0; font-size: 12px; color: var(--color-text-muted); }
+.veyra-recent-work { margin: 0 0 1.75rem; min-width: 0; }
+.veyra-work-heading, .veyra-work-heading > div { display: flex; align-items: center; gap: 12px; }
+.veyra-work-heading { justify-content: space-between; margin-bottom: 10px; }
+.veyra-work-heading h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.veyra-work-heading button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 4px; }
+.veyra-work-heading .veyra-work-view-all { color: var(--color-text-link); font-size: 13px; }
+.veyra-work-refresh { color: var(--color-text-muted); }
+.veyra-work-refresh:disabled { opacity: .5; }
+.veyra-recent-work button:focus-visible, .veyra-recent-work a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+.veyra-work-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); }
+.veyra-work-table-wrap table { width: 100%; min-width: 640px; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.veyra-work-table-wrap th { background: var(--color-surface-raised); text-align: left; color: var(--color-text-secondary); font-size: 12px; font-weight: 500; }
+.veyra-work-table-wrap th, .veyra-work-table-wrap td { padding: 10px 12px; vertical-align: middle; }
+.veyra-work-table-wrap th button { display: inline-flex; align-items: center; gap: 4px; }
+.veyra-work-table-wrap tr { border-bottom: 1px solid var(--color-border); }
+.veyra-work-table-wrap tbody tr:last-child { border-bottom: 0; }
+.veyra-work-table-wrap tbody tr:hover { background: var(--color-surface-hover); }
+.veyra-work-table-wrap th:first-child { width: 49%; }
+.veyra-work-table-wrap th:nth-child(2) { width: 13%; }
+.veyra-work-table-wrap th:nth-child(3) { width: 15%; }
+.veyra-work-table-wrap th:nth-child(4) { width: 18%; }
+.veyra-work-table-wrap th:last-child { width: 5%; }
+.veyra-work-table-wrap td:last-child { text-align: right; }
+.veyra-work-table-wrap td:last-child button[aria-haspopup] { display: inline-flex; padding: 4px; }
+.veyra-work-item, .veyra-work-project { display: flex; align-items: center; gap: 12px; }
+.veyra-work-item { font-weight: 500; overflow-wrap: anywhere; }
+.veyra-work-item > span { display: flex; flex-direction: column; min-width: 0; }
+.veyra-work-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; color: var(--color-text-secondary); }
+.veyra-work-item svg, .veyra-work-project svg { flex-shrink: 0; }
+.veyra-work-item:hover { color: var(--color-text-link); }
+.veyra-work-project { gap: 7px; overflow-wrap: anywhere; }
+.veyra-work-table-wrap time { color: var(--color-text-secondary); white-space: nowrap; font-size: 12px; }
+.veyra-work-kind { display: inline-block; padding: 3px 9px; border-radius: 16px; background: var(--color-surface-raised); color: var(--color-text-secondary); font-size: 11px; white-space: nowrap; }
+.veyra-work-message { margin: 0; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-text-secondary); font-size: 13px; }
+.veyra-work-message button { margin-top: 8px; color: var(--color-text-link); }
+.veyra-work-load-more { margin-top: 12px; padding: 7px 12px; border: 1px solid var(--color-border); border-radius: 7px; font-size: 13px; }
+.veyra-work-load-more:disabled { opacity: .5; }
+@media (max-width: 600px) {
+  .veyra-home-welcome { margin-top: 1rem; }
+  .veyra-home-composer details.veyra-context-options { left: 10rem; }
+  .veyra-home-model { max-width: min(100%, 20rem); }
+}
+.veyra-conversation-options[open], .veyra-context-options[open] { border-bottom: 1px solid var(--color-border); }
+.veyra-context-options:not([open]) { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); }
+.veyra-composer { position: relative; padding-bottom: 36px; }
+@media (min-width: 1200px) {
+  .veyra-mode-switch { position: absolute; left: 50%; transform: translateX(-50%); }
+}
+@media (max-width: 767px) {
+  .veyra-mode-switch a { padding: 5px 12px; }
+  .veyra-topbar { flex-wrap: wrap; }
+  .veyra-chat-welcome h2 { font-size: 22px; }
+  .veyra-composer-model { max-width: 110px; }
+}
+
 @theme {
   /* Surface colors — cards, panels, containers */
   --color-surface: #ffffff;
@@ -66,11 +202,11 @@
 
 .dark {
   /* Surface colors — neutral charcoal matching OpenCode */
-  --color-surface: #171717;
-  --color-surface-muted: #0f0f0f;
+  --color-surface: #1d1c1b;
+  --color-surface-muted: #171615;
   --color-surface-hover: #262626;
   --color-surface-selected: #333333;
-  --color-surface-raised: #1f1f1f;
+  --color-surface-raised: #2b2a29;
 
   /* Selection states — for active/selected items in lists, trees, toggles */
   --color-selection-bg: #333333;
@@ -106,7 +242,7 @@
   --color-accent: #3b82f6;
 
   /* Navigation */
-  --color-nav-bg: #111111;
+  --color-nav-bg: #1d1c1b;
   --color-nav-border: #2a2a2a;
   --color-nav-text: #a0a0a0;
   --color-nav-text-hover: #e5e5e5;
@@ -144,12 +280,15 @@ html[data-nav-compact="true"] .desktop-navigation {
 }
 
 .desktop-navigation .desktop-nav-item {
+  padding-block: 0.25rem;
+  min-height: 1.75rem;
   transition-property: color, gap, padding-inline;
   transition-duration: var(--edge-drawer-duration);
   transition-timing-function: var(--edge-drawer-easing);
 }
 
 .desktop-navigation .desktop-nav-group-control {
+  padding-block: 0.25rem;
   transition-property: color, justify-content, padding-inline;
   transition-duration: var(--edge-drawer-duration);
   transition-timing-function: var(--edge-drawer-easing);
@@ -329,3 +468,14 @@ html[data-nav-compact="true"] .desktop-navigation .nav-divider {
 .chat-markdown :where(hr, table, th, td) {
   border: 0 !important;
 }
+
+.veyra-home-quick-links { margin: 2rem 0; }
+.veyra-home-quick-links h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: .875rem; }
+.veyra-home-quick-links > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.veyra-home-quick-links a { display: block; padding: 1rem 1.125rem; border: 1px solid var(--color-border); border-radius: .625rem; background: var(--color-surface); }
+.veyra-home-quick-links a > span { display: flex; align-items: center; justify-content: space-between; gap: .75rem; font-weight: 500; }
+.veyra-home-quick-links a > span > span { color: var(--color-text-muted); }
+.veyra-home-quick-links small { display: block; margin-top: .375rem; color: var(--color-text-secondary); font-size: .8125rem; }
+.veyra-home-quick-links a:hover { background: var(--color-surface-hover); }
+.veyra-home-quick-links a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+@media (max-width: 640px) { .veyra-home-quick-links > div { grid-template-columns: 1fr; gap: .625rem; } }

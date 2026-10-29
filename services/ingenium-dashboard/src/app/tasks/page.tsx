@@ -46,6 +46,10 @@ export default function TasksPage() {
 
 function TasksContent() {
   const project = useProject();
+  return <ProjectTasksContent key={project} project={project} />;
+}
+
+function ProjectTasksContent({ project }: { project: string }) {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -62,6 +66,28 @@ function TasksContent() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [detailTask, setDetailTask] = useState<Task | null>(null);
+  const requestedTaskId = searchParams.get("task");
+  const visibleDetail = requestedTaskId === null ? detailTask
+    : detailTask?.id === requestedTaskId ? detailTask
+    : tasks.find(task => task.id === requestedTaskId) ?? null;
+
+  const closeDetail = useCallback(() => {
+    setDetailTask(null);
+    if (requestedTaskId !== null) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("task");
+      router.replace(`?${params.toString()}`, { scroll: false });
+    }
+  }, [requestedTaskId, router, searchParams]);
+
+  const openDetail = useCallback((task: Task) => {
+    setDetailTask(task);
+    if (requestedTaskId !== null) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("task", task.id);
+      router.replace(`?${params.toString()}`, { scroll: false });
+    }
+  }, [requestedTaskId, router, searchParams]);
 
   const loadTasks = useCallback(async () => {
     setTasksState("loading");
@@ -103,13 +129,13 @@ function TasksContent() {
   }, [tasks, search]);
 
   const handleSpotlightSelect = useCallback((task: Task) => {
-    setDetailTask(task);
-  }, []);
+    openDetail(task);
+  }, [openDetail]);
 
   const handleNotificationClick = useCallback((taskId: string) => {
     const task = tasks.find((t) => t.id === taskId);
-    if (task) setDetailTask(task);
-  }, [tasks]);
+    if (task) openDetail(task);
+  }, [tasks, openDetail]);
 
   const handleTaskUpdated = useCallback((updated: Task) => {
     setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
@@ -156,6 +182,13 @@ function TasksContent() {
           </button>
         ))}
       </div>
+
+      {requestedTaskId !== null && tasksState === "success" && !visibleDetail && (
+        <div role="alert" className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4">
+          <p>That task is unavailable in this project.</p>
+          <button type="button" onClick={closeDetail} className="mt-2 text-sm text-[var(--color-text-link)]">Back to tasks</button>
+        </div>
+      )}
 
       {tasksState === "loading" ? (
         <div className="rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-8 text-center text-sm text-[var(--color-text-muted)]" aria-busy="true">
@@ -205,13 +238,13 @@ function TasksContent() {
         }}
       />
 
-      {detailTask && (
+      {visibleDetail && (
         <TaskDetail
-          task={detailTask}
+          task={visibleDetail}
           project={project}
-          onClose={() => setDetailTask(null)}
+          onClose={closeDetail}
           onTaskUpdated={handleTaskUpdated}
-          onTaskClick={setDetailTask}
+          onTaskClick={openDetail}
         />
       )}
     </div>

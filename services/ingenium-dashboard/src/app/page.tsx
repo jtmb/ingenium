@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import QuickActions from "./components/QuickActions";
 import AttentionQueue from "./components/AttentionQueue";
 import ResumeWork from "./components/ResumeWork";
@@ -7,9 +8,50 @@ import ActivityTimeline from "./components/ActivityTimeline";
 import HealthStrip from "./components/HealthStrip";
 import { useProject } from "../lib/ProjectContext";
 import { api, type DashboardSummary } from "../lib/api";
+import { useRouter } from "next/navigation";
+import { useRuntime } from "../lib/RuntimeContext";
+import { buildProjectNavigationHref } from "../lib/project-navigation";
+import ChatShell from "./chat/components/ChatShell";
+import RuntimeWorkspacePicker from "./components/RuntimeWorkspacePicker";
+import RecentWork from "./components/RecentWork";
 
 export default function Home() {
   const project = useProject();
+  const runtime = useRuntime();
+  const router = useRouter();
+  const openConversation = useCallback((sessionId: string) => {
+    const query = new URLSearchParams({ session: sessionId, runtime: runtime.runtimeId ?? "compatibility" });
+    router.push(buildProjectNavigationHref("/chat", project, query.toString()));
+  }, [project, router, runtime.runtimeId]);
+  return <div className="veyra-home">
+    <section className="veyra-home-welcome" aria-labelledby="home-welcome">
+      <h1 id="home-welcome">Welcome back</h1>
+      <p>Ask a question, draft a plan, analyze code, or pick up where you left off.</p>
+      {runtime.client
+        ? <ChatShell key={JSON.stringify([project, runtime.runtimeId])} presentation="home" onConversationStarted={openConversation}/>
+        : <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Chat" />}
+    </section>
+    <RecentWork />
+    <nav className="veyra-home-quick-links" aria-label="Quick links">
+      <h2>Quick links</h2>
+      <div>{[
+        { name: "Tasks", route: "/tasks", description: "Track and prioritize work" },
+        { name: "Mail", route: "/mail", description: "Read and compose messages" },
+        { name: "Pipeline", route: "/pipeline", description: "Review synthesis activity" },
+      ].map(link => <Link key={link.route} href={buildProjectNavigationHref(link.route, project)} prefetch={false}>
+        <span>{link.name}<span aria-hidden="true">↗</span></span><small>{link.description}</small>
+      </Link>)}</div>
+    </nav>
+    <OperationalDashboard />
+  </div>;
+}
+
+export function OperationalDashboard() {
+  const project = useProject();
+  return <ProjectOperationalDashboard key={project} project={project} />;
+}
+
+function ProjectOperationalDashboard({ project }: { project: string }) {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,9 +117,7 @@ export default function Home() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">
-              Ingenium
-            </h1>
+            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Workspace overview</h2>
             <p role="status" aria-live="polite" className="sr-only">Loading dashboard…</p>
           </div>
         </div>
@@ -123,9 +163,7 @@ export default function Home() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">
-            Ingenium
-          </h1>
+          <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">Workspace overview</h2>
           <p className="text-sm text-[var(--color-text-muted)]">
             Project: <span className="font-medium">{project}</span>
           </p>

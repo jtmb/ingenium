@@ -19,9 +19,8 @@ const PLAYWRIGHT_REPO_ROOT = getCanonicalRepoRoot(resolve(__dirname, ".."));
  * the chat fixture; global teardown stops exact manifest PIDs and removes only
  * the manifest's realpath-validated run directory.
  *
- * `INGENIUM_E2E_SKIP_BUILD=1` is an explicit local optimization for a caller
- * that has already built the production artifacts. It never changes the
- * server mode: the dashboard still runs `next start`, not `next dev`.
+ * The production fixture rebuilds Next with its allocated API port. A cached
+ * dashboard from another port cannot be reused by copying its build tree.
  */
 // `--list`, config errors, and worker bootstrap failures can exit before
 // Playwright invokes global teardown. The synchronous exit hook removes only
@@ -86,7 +85,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
-  outputDir: getPlaywrightOutputDirectory("default", PLAYWRIGHT_REPO_ROOT),
+  outputDir: getPlaywrightOutputDirectory(`default-${context.runId}`, PLAYWRIGHT_REPO_ROOT),
   globalSetup: "./playwright-global-setup.ts",
   globalTeardown: "./playwright-global-teardown.ts",
   use: {
