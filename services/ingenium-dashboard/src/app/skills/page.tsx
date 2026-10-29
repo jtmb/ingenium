@@ -143,10 +143,14 @@ function SkillSaveNotice({ result, busy, onVerify }: {
 export default function SkillsPage() {
   const project = useProject();
   const [tab, setTab] = useState<SkillsTab>("active");
-  return <ProjectSkills key={project} project={project} tab={tab} setTab={setTab} />;
+  const [proposalView, setProposalView] = useState<ProposalView>("open");
+  return <ProjectSkills key={project} project={project} tab={tab} setTab={setTab} proposalView={proposalView} setProposalView={setProposalView} />;
 }
 
-function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsTab; setTab: (tab: SkillsTab) => void }) {
+function ProjectSkills({ project, tab, setTab, proposalView, setProposalView }: {
+  project: string; tab: SkillsTab; setTab: (tab: SkillsTab) => void;
+  proposalView: ProposalView; setProposalView: (view: ProposalView) => void;
+}) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillsState, setSkillsState] = useState<ActiveSkillsState>("loading");
   const [skillsError, setSkillsError] = useState<string | null>(null);
@@ -180,7 +184,6 @@ function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsT
   const [proposalCounts, setProposalCounts] = useState<ProposalCountsState>(() => emptyProposalCounts(null));
   const [openProposalPage, setOpenProposalPage] = useState<ProposalPageState>(() => emptyProposalPage(null));
   const [historyProposalPage, setHistoryProposalPage] = useState<ProposalPageState>(() => emptyProposalPage(null));
-  const [proposalView, setProposalView] = useState<ProposalView>("open");
   const proposalGeneration = useRef(0);
   const proposalRequestControllers = useRef(new Set<AbortController>());
   const proposalDetailRequestId = useRef(0);
@@ -235,7 +238,6 @@ function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsT
     setProposalCounts(emptyProposalCounts(requestProject));
     setOpenProposalPage(emptyProposalPage(requestProject));
     setHistoryProposalPage(emptyProposalPage(requestProject));
-    setProposalView("open");
     setSelectedProposal(null);
     setProposalDetail(null);
     setDetailLoading(false);
@@ -338,10 +340,11 @@ function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsT
   }, [isCurrentProposalRequest]);
 
   const refreshProposalData = useCallback((requestProject: string) => {
+    setProposalView("open");
     const generation = resetProposalData(requestProject);
     void loadProposalCounts(requestProject, generation);
     void loadProposalPage("open", requestProject, { generation });
-  }, [loadProposalCounts, loadProposalPage, resetProposalData]);
+  }, [loadProposalCounts, loadProposalPage, resetProposalData, setProposalView]);
 
   useEffect(() => {
     const generation = resetProposalData(project);
@@ -620,10 +623,7 @@ function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsT
   const countsForProject = proposalCounts.project === project ? proposalCounts : emptyProposalCounts(null);
   const openPageForProject = openProposalPage.project === project ? openProposalPage : emptyProposalPage(null);
   const historyPageForProject = historyProposalPage.project === project ? historyProposalPage : emptyProposalPage(null);
-  const hasProposalDataForProject = countsForProject.project === project
-    || openPageForProject.project === project
-    || historyPageForProject.project === project;
-  const visibleProposalView = hasProposalDataForProject ? proposalView : "open";
+  const visibleProposalView = proposalView;
   const visibleProposalPage = visibleProposalView === "open" ? openPageForProject : historyPageForProject;
   const proposalTotal = countsForProject.state === "success" ? countsForProject.data?.[visibleProposalView] ?? null : null;
   const proposalViewLoading = visibleProposalPage.state === "idle" || visibleProposalPage.state === "loading";

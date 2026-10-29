@@ -3,14 +3,15 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import React from "react";
 import type { Skill } from "../src/lib/api";
 
-const { listSkills, getSkill, createSkill, updateSkill, request, active } = vi.hoisted(() => ({
+const { listSkills, getSkill, createSkill, updateSkill, request, proposalCounts, proposalPage, active } = vi.hoisted(() => ({
   listSkills: vi.fn(), getSkill: vi.fn(), createSkill: vi.fn(), updateSkill: vi.fn(), request: vi.fn(),
+  proposalCounts: vi.fn(), proposalPage: vi.fn(),
   active: { project: "test-project" },
 }));
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => active.project }));
 vi.mock("../src/lib/api", () => ({ request, api: { skills: {
   list: listSkills, get: getSkill, create: createSkill, update: updateSkill,
-  proposals: { counts: vi.fn(), page: vi.fn() },
+  proposals: { counts: proposalCounts, page: proposalPage },
 } } }));
 vi.mock("../src/app/components/Overlay", () => ({
   default: ({ isOpen, title, children }: { isOpen: boolean; title: string; children: React.ReactNode }) =>
@@ -48,6 +49,8 @@ beforeEach(() => {
   createSkill.mockReset().mockResolvedValue({ data: { ...base, content: "# Uploaded" } });
   updateSkill.mockReset().mockResolvedValue({ data: base });
   request.mockReset();
+  proposalCounts.mockReset().mockResolvedValue({data: {open: 0, history: 0, byStatus: {}}});
+  proposalPage.mockReset().mockResolvedValue({data: [], pagination: {nextCursor: null, hasMore: false}});
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
@@ -141,4 +144,33 @@ describe("Skills upload and save outcomes", () => {
     expect(screen.queryByTestId("upload-error")).toBeNull();
     expect(createSkill).toHaveBeenCalledWith("release-checks", "Verify release", "# Uploaded", "test-project");
   });
+});
+
+it("preserves History selection across project switches while fencing old rows and totals", async () => {
+  const page = (data: unknown[]) => ({data, pagination: {nextCursor: null, hasMore: false}});
+  const counts = (history: number) => ({data: {open: 0, history, byStatus: {}}});
+  const record = (id: string) => ({
+    id, targetName: id, status: "stale", proposalType: "update", projectId: "project-uuid",
+    qualityScore: 0.9, noveltyScore: 0.8, contradictionFlag: 0, createdAt: "2026-10-29",
+  });
+  let finishOldPage!: (value: ReturnType<typeof page>) => void;
+  let finishOldCounts!: (value: ReturnType<typeof counts>) => void;
+  const pendingPage = new Promise<ReturnType<typeof page>>(resolve => { finishOldPage = resolve; });
+  const pendingCounts = new Promise<ReturnType<typeof counts>>(resolve => { finishOldCounts = resolve; });
+  proposalCounts.mockImplementation((project: string) => project === "test-project" ? pendingCounts : Promise.resolve(counts(1)));
+  proposalPage.mockImplementation((view: string, project: string) => view !== "history" ? Promise.resolve(page([]))
+    : project === "test-project" ? pendingPage : Promise.resolve(page([record("new-history")])));
+  const view = render(<SkillsPage />);
+  await ready();
+  fireEvent.click(screen.getByTestId("tab-proposals"));
+  fireEvent.click(await screen.findByTestId("proposal-filter-history"));
+  await waitFor(() => expect(proposalPage).toHaveBeenCalledWith("history", "test-project", expect.anything()));
+  active.project = "other-project";
+  view.rerender(<SkillsPage />);
+  expect(await screen.findByTestId("proposal-card-new-history")).toBeVisible();
+  expect(screen.getByTestId("proposal-filter-history")).toHaveAttribute("aria-selected", "true");
+  await act(async () => { finishOldPage(page([record("old-history")])); finishOldCounts(counts(99)); });
+  expect(screen.queryByTestId("proposal-card-old-history")).toBeNull();
+  expect(screen.getByTestId("proposals-history-showing")).toHaveTextContent("Showing 1 of 1 history proposals.");
+  expect(screen.getByTestId("proposal-card-new-history")).toBeVisible();
 });
