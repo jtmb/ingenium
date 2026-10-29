@@ -26,3 +26,9 @@ Current status: package closure, collision preservation and modified-reference/s
 ## Rollback
 
 Use the previously verified application image/package and its managed configuration. Preserve installation data, credentials, user skills and Goal state. A dependency pin update is a reviewed Veyra change; never update a moving branch in place. Remove an obsolete materialized dependency only after no process/package still consumes it and its exact source, lock and regeneration command survive.
+
+## Protected deployment configuration
+
+The immutable managed OpenCode config includes the existing Veyra skills directory and the pinned computer-use consumer plugin. Its exact SHA-256 is `d769cbee281433d0a127bb47ebca4e1843e4423015218274bb025bb8891e137d`; `LLM_BROKER_CONFIG_SHA256` in `packages/ingenium-core/lib/tools/agents.ts` pins those approved bytes. Intentional managed-config changes must update this reviewed pin. Never calculate a replacement expected hash from the runtime file itself or weaken descriptor, owner, no-follow, read-only or identity checks.
+
+The first full Phase 1 image build correctly refused a stale config pin. The broker definition, wildcard-deny permissions, enforcer and MCP scope were unchanged by the brain integration. After aligning the pin, all 45 existing core agent/broker checks passed, including malformed/missing artifacts, writable or runtime-owned trust roots, canonical broker mutation denials and raw SQLite bypass attempts. The rebuilt image must still pass its actual protected-deployment check before image qualification.
