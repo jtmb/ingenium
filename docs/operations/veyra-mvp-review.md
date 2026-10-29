@@ -12,7 +12,7 @@ Use one dark shell, the selected blue mascot, centered Chat/Work toggle, quiet c
 
 The 2026-10-29 composer reference supersedes the earlier pending compact Chat direction. Use its wide rounded input, aligned attachment/model/microphone/send controls, centered welcome heading and quiet suggestion rows while keeping Veyra's existing charcoal surfaces, blue accent and colour tokens. The supplied reference's private email/task examples are not application content. Dictation remains visibly unavailable until implemented. Home keeps its separate composer.
 
-The standard and Fast native model selections must remain distinct even when OpenCode reports the same underlying API model ID. The saved standard openai/gpt-6-luna choice must display GPT-6 Luna; Fast remains an explicit alternative. This revision is pending review and does not accept the 47-view inventory or close unfinished functional gates.
+The standard and Fast native model selections must remain distinct even when OpenCode reports the same underlying API model ID. The saved standard openai/gpt-6-luna choice must display GPT-6 Luna; Fast remains an explicit alternative. The revision is deployed in source 5bb3755c37f741d855d082618ab58b375d063e0e. The live standard Luna selection, real response and normal reload passed. Desktop/mobile geometry and existing Home/Chat workflows passed in production browser fixtures. The current live capture is 1280x720; it does not replace the original contracted 1672x941 comparisons. This revision is pending user visual review and does not accept the 47-view inventory or close unfinished functional gates.
 
 ## Contracted views
 

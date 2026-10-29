@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "updated": "2026-10-29",
   "status": "MVP review candidate; visual approval and unfinished functional gates remain open",
-  "applicationRuntimeSource": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
-  "image": "docker.io/jtmb92/ingenium@sha256:b9484ea1ee956dd776200b8251886464364a6083b403b5d63447d736c94c5c64",
+  "applicationRuntimeSource": "5bb3755c37f741d855d082618ab58b375d063e0e",
+  "image": "docker.io/jtmb92/ingenium@sha256:1925d5695fba242f4990748473f72d847276c10ae721be13173e974dc404ec50",
   "baselineContractSha256": "e2c66fc40d8721bc2a54e8a6f11902fd18990cbbdd21d9cf7622f78cf832166e",
   "legacyFeatureMapSha256": "7d3775dcd07e75454f61e5ed8a3786243056fe24d189c38415888bb5305c3006",
   "visualApproval": false,
@@ -114,11 +114,22 @@
           "state": "compact-empty-session",
           "fullPageCapture": true,
           "presentationQualified": true
+        },
+        {
+          "file": "composer-live-standard-luna.png",
+          "sha256": "3716bffa398939612dc32829de0aa417d4638e3ffdbe8da8552011c5b5b13006",
+          "imageSize": {
+            "width": 1280,
+            "height": 720
+          },
+          "sourceCommit": "5bb3755c37f741d855d082618ab58b375d063e0e",
+          "state": "Existing controlled empty session; actual catalog standard GPT-6 Luna selected; Fast separately available",
+          "presentationQualified": true
         }
       ],
       "disposition": "Microphone, global search and full keyboard/scaling behavior remain open.",
       "visualAccepted": false,
-      "presentationReviewNote": "Baseline and actual compact empty Chat personally compared at 1672x941/DPR1. Quiet rail/composer retained; common top header, history/context controls and disabled dictation differ explicitly. One invalid-paint capture is diagnostic only."
+      "presentationReviewNote": "Baseline and actual compact empty Chat personally compared at 1672x941/DPR1. Quiet rail/composer retained; common top header, history/context controls and disabled dictation differ explicitly. One invalid-paint capture is diagnostic only. User-directed compact reference revision personally inspected in the live 5bb3755c service at 1280x720. Existing palette retained, controls aligned and standard Luna label corrected; this is a separate viewport from the original baseline."
     },
     {
       "id": "opencode-upstream-actual",
@@ -1816,7 +1827,7 @@
   ],
   "composerDirection": {
     "requested": "2026-10-29",
-    "status": "implemented-source-pending-final-runtime-review",
+    "status": "deployed-live-verified-pending-user-visual-review",
     "reference": "User-supplied compact Chat composer",
     "preserveColourScheme": true,
     "sharedControlCenterline": true,
@@ -1834,6 +1845,21 @@
     "mobileControlsWithinComposer": true,
     "keyboardModelFocusPassed": true,
     "emptyCaptureSha256": "316bde9b67f9ffd4987760756695ba3a2489af3152663a3413feefa0dc9d11ff",
-    "mobileCaptureSha256": "52a69f05e40d22b70b8b2c673dd6e8f4091d4118dc28c8ccc0f85d2bc4f95b80"
+    "mobileCaptureSha256": "52a69f05e40d22b70b8b2c673dd6e8f4091d4118dc28c8ccc0f85d2bc4f95b80",
+    "image": "docker.io/jtmb92/ingenium@sha256:1925d5695fba242f4990748473f72d847276c10ae721be13173e974dc404ec50",
+    "chartPromotion": "1c6f142493685676f9d8fee339400e0fe8d22ee5",
+    "liveStandardModelSelected": true,
+    "liveStandardModelResponsePassed": true,
+    "normalReloadPersistencePassed": true,
+    "liveCapture": {
+      "file": "composer-live-standard-luna.png",
+      "sha256": "3716bffa398939612dc32829de0aa417d4638e3ffdbe8da8552011c5b5b13006",
+      "imageSize": {
+        "width": 1280,
+        "height": 720
+      },
+      "sourceCommit": "5bb3755c37f741d855d082618ab58b375d063e0e",
+      "state": "Existing controlled empty session; actual catalog standard GPT-6 Luna selected; Fast separately available"
+    }
   }
 }

@@ -1,6 +1,6 @@
 # Linux Docker MVP quickstart
 
-The exercised candidate is docker.io/jtmb92/ingenium@sha256:b9484ea1ee956dd776200b8251886464364a6083b403b5d63447d736c94c5c64, built from source 42c4124bcc0a34cee5ab61ff998184b0e4211c7a. It runs on the existing cluster through chart 0.1.21 / promotion 334d9bba3359458fc52a0aac06afccaf0abbeb51. Visual and complete feature acceptance remain open.
+The exercised candidate is docker.io/jtmb92/ingenium@sha256:1925d5695fba242f4990748473f72d847276c10ae721be13173e974dc404ec50, built from source 5bb3755c37f741d855d082618ab58b375d063e0e. It runs on the existing cluster through chart 0.1.22 / promotion 1c6f142493685676f9d8fee339400e0fe8d22ee5. Visual and complete feature acceptance remain open.
 
 ## Existing cluster
 
