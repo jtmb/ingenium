@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "updated": "2026-10-29",
   "status": "MVP review candidate; visual approval and unfinished functional gates remain open",
-  "applicationRuntimeSource": "35e0465176b88727c1bc3616111f4a0ce18236ac",
-  "image": "docker.io/jtmb92/ingenium@sha256:4692f432f88d713d1e625abd189f1849e6afb715aa5544ebe39edaabefe36748",
+  "applicationRuntimeSource": "3336586e8f56ea69f8430fb60674dd2072467970",
+  "image": "docker.io/jtmb92/ingenium@sha256:792f18c3bece144028df8b79772b4928e73c4ff2e1ef625f20ce85ca796d9e8b",
   "baselineContractSha256": "e2c66fc40d8721bc2a54e8a6f11902fd18990cbbdd21d9cf7622f78cf832166e",
   "legacyFeatureMapSha256": "7d3775dcd07e75454f61e5ed8a3786243056fe24d189c38415888bb5305c3006",
   "visualApproval": false,
@@ -136,6 +136,48 @@
           "sourceCommit": "35e0465176b88727c1bc3616111f4a0ce18236ac",
           "state": "Actual Windows WebView: new empty conversation after reload, Back and Forward; standard GPT-6 Luna selected",
           "captureSurface": "Native window including title bar",
+          "visualAccepted": false
+        },
+        {
+          "file": "native-chat-plus-menu-live.png",
+          "state": "Composer plus menu open",
+          "sha256": "05b4c183133e854f60a6f37fe11a76a5d8280fe0e9918f8d49664251b6098887",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
+          "visualAccepted": false
+        },
+        {
+          "file": "native-chat-plus-project-menu-live.png",
+          "state": "Nested project menu open",
+          "sha256": "684ab0b9542d96fe20688f3f8950e5c2261e12e9b271ae2cc09a5292d0e3fede",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
+          "visualAccepted": false
+        },
+        {
+          "file": "native-chat-plus-menu-closed-live.png",
+          "state": "Menus closed after ordered Escape",
+          "sha256": "fca2c59498d530f69f4d656e15c6569d0d15aa29c42458f25855e2fe6642699e",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
           "visualAccepted": false
         }
       ],
@@ -1873,9 +1915,33 @@
       "sourceCommit": "5bb3755c37f741d855d082618ab58b375d063e0e",
       "state": "Existing controlled empty session; actual catalog standard GPT-6 Luna selected; Fast separately available"
     },
-    "currentRuntimeImage": "docker.io/jtmb92/ingenium@sha256:4692f432f88d713d1e625abd189f1849e6afb715aa5544ebe39edaabefe36748",
-    "currentChartPromotion": "152195523e6619fd4c70e32119257c2cf0b2778f",
+    "currentRuntimeImage": "docker.io/jtmb92/ingenium@sha256:792f18c3bece144028df8b79772b4928e73c4ff2e1ef625f20ce85ca796d9e8b",
+    "currentChartPromotion": "43b63fd2ee2e3f1c6d982ef9a891800e179ef976",
     "currentNativeCapture": {
+      "file": "native-chat-plus-menu-closed-live.png",
+      "state": "Menus closed after ordered Escape",
+      "sha256": "fca2c59498d530f69f4d656e15c6569d0d15aa29c42458f25855e2fe6642699e",
+      "imageSize": {
+        "width": 1362,
+        "height": 932
+      },
+      "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+      "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+      "captureSurface": "Actual Windows WebView including title bar",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    "currentNativeRouteVerification": {
+      "menuOpens": true,
+      "nestedThenOuterEscape": true,
+      "visibleFocusReturns": true,
+      "providerPromptRequested": false,
+      "savedSelectionObserved": "openai/gpt-6.1-terra",
+      "configuredPrimaryObserved": "openai/gpt-6-luna",
+      "selectionChanged": false,
+      "visualApproval": false
+    },
+    "previousNativeCapture": {
       "file": "native-new-conversation-reload-history-20261029.jpg",
       "sha256": "6a2c1c03e41645a875952965ada090cf8ec120ec6510cc6b9f900f7c405eca4a",
       "imageSize": {
@@ -1887,7 +1953,7 @@
       "captureSurface": "Native window including title bar",
       "visualAccepted": false
     },
-    "currentNativeRouteVerification": {
+    "previousNativeRouteVerification": {
       "newConversationURL": true,
       "reload": true,
       "back": true,
@@ -1897,5 +1963,24 @@
       "providerPromptRequested": false,
       "visualApproval": false
     }
+  },
+  "composerPlusMenu": {
+    "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+    "image": "docker.io/jtmb92/ingenium@sha256:792f18c3bece144028df8b79772b4928e73c4ff2e1ef625f20ce85ca796d9e8b",
+    "chartPromotion": "43b63fd2ee2e3f1c6d982ef9a891800e179ef976",
+    "chartVersion": "0.1.24",
+    "fixtureRun": "a1c3b8fa-441a-4c74-af94-86c280316549",
+    "fixtureSweepRun": "0c65cfca-70cc-49ab-9336-f02d035a0395",
+    "actualNativeMenuReviewed": true,
+    "nestedEscapeThenOuterEscape": true,
+    "existingColoursPreserved": true,
+    "headerProjectControlRemoved": true,
+    "providerPromptRequested": false,
+    "savedSelectionObserved": "openai/gpt-6.1-terra",
+    "configuredPrimaryObserved": "openai/gpt-6-luna",
+    "modelSelectionChanged": false,
+    "userPreferenceClarificationPending": true,
+    "fullVisualApproval": false,
+    "allExistingGatesRetained": true
   }
 }

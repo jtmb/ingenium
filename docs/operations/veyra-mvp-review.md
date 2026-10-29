@@ -73,3 +73,7 @@ Eleven hash-verified actual native states were personally reviewed: connection, 
 ## Approval boundaries
 
 Visual approval remains false for every view. Review the concrete shared-shell normalizations and proposed Windows states; retain all listed functional gates for subsequent phases. No baseline rewrite, page-load count or fixture success closes a workflow gate. Both source/runtime verification and platform limitations remain in [the MVP report](veyra-mvp.md).
+
+## Composer plus-menu deployment review
+
+Source `3336586e8f56ea69f8430fb60674dd2072467970` is deployed through chart 0.1.24 and PR 31. Actual native captures show the themed composer menu, nested project chooser and closed state. Ordered Escape closes the nested chooser before the outer menu and returns visible focus to each trigger. Existing colours and ordinary Chat boundaries remain. These three supplemental captures are indexed in the original Chat/Windows rows with their hashes; they do not replace baselines or imply visual approval. The observed saved Chat selection differs from the earlier Luna checkpoint and was left unchanged pending clarification.

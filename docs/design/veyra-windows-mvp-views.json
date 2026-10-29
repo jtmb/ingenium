@@ -126,7 +126,51 @@
       "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
       "applicationRuntimeSource": "35e0465176b88727c1bc3616111f4a0ce18236ac",
       "personallyReviewed": true,
-      "visualAccepted": false
+      "visualAccepted": false,
+      "supplementalCaptures": [
+        {
+          "file": "native-chat-plus-menu-live.png",
+          "state": "Composer plus menu open",
+          "sha256": "05b4c183133e854f60a6f37fe11a76a5d8280fe0e9918f8d49664251b6098887",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
+          "visualAccepted": false
+        },
+        {
+          "file": "native-chat-plus-project-menu-live.png",
+          "state": "Nested project menu open",
+          "sha256": "684ab0b9542d96fe20688f3f8950e5c2261e12e9b271ae2cc09a5292d0e3fede",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
+          "visualAccepted": false
+        },
+        {
+          "file": "native-chat-plus-menu-closed-live.png",
+          "state": "Menus closed after ordered Escape",
+          "sha256": "fca2c59498d530f69f4d656e15c6569d0d15aa29c42458f25855e2fe6642699e",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "3336586e8f56ea69f8430fb60674dd2072467970",
+          "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+          "captureSurface": "Actual Windows WebView including title bar",
+          "personallyReviewed": true,
+          "visualAccepted": false
+        }
+      ]
     }
   ],
   "remainingGates": [
