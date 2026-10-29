@@ -79,6 +79,8 @@ paths:
           description: Exact resource read capability denied.
         '409':
           description: Requested catalog scope is unavailable.
+        '502':
+          description: Catalog contains duplicate or inconsistent resource identities.
         '500':
           description: Catalog owner failed; internal details are redacted.
 components:

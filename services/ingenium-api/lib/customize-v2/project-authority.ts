@@ -7,9 +7,10 @@ import { CustomizeError, type CustomizeAuthority } from "./catalog-service.js";
  */
 export function createProjectCatalogAuthority(
   canRead: CustomizeAuthority["authorize"],
+  readSkillRecords: (projectId: string) => ReturnType<typeof skills.listSkills> = skills.listSkills,
 ): CustomizeAuthority {
   return {
-    authorize: (context, action, kind) => action === "read" && canRead(context, action, kind),
+    authorize: (context, action, kind, visibility, resourceId) => action === "read" && visibility === "project" && canRead(context, action, kind, visibility, resourceId),
     scopes: () => ["project"],
     installed(context, kind) {
       if (kind === "plugin") {
@@ -19,7 +20,7 @@ export function createProjectCatalogAuthority(
           category: "Local plugins", actions: [],
         }));
       }
-      return skills.listSkills(context.projectId).map((row) => ({
+      return readSkillRecords(context.projectId).map((row) => ({
         id: row.id, kind: "skill" as const, name: row.name,
         description: row.description ?? "", enabled: row.enabled,
         archived: Boolean(row.archived_at), revision: row.revision,

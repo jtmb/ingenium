@@ -118,5 +118,50 @@ test("authorization receives the exact resource kind rather than a generic proje
   const { service } = fixture({ authorize(ctx, action, kind) { decisions.push([ctx.projectId, action, kind]); return kind === "skill"; } });
   await service.list(context, { kind: "skill" });
   await assert.rejects(service.list(context, { kind: "plugin" }), { code: "FORBIDDEN" });
-  assert.deepEqual(decisions, [["project-a", "read", "skill"], ["project-a", "read", "plugin"]]);
+  assert.deepEqual(decisions, [["project-a", "read", "skill"], ["project-a", "read", "skill"], ["project-a", "activate", "skill"], ["project-a", "archive", "skill"], ["project-a", "restore", "skill"], ["project-a", "read", "plugin"]]);
+});
+
+test("discovery rechecks the exact requested catalog scope", async () => {
+  const calls = [];
+  const { service } = fixture({ authorize(ctx, action, kind, visibility) {
+    calls.push([ctx.projectId, action, kind, visibility]);
+    return visibility === "project";
+  } });
+  await assert.rejects(service.list(context, { kind: "skill", visibility: "public" }), { code: "FORBIDDEN" });
+  assert.deepEqual(calls, [["project-a", "read", "skill", "public"]]);
+});
+
+test("read-only users never receive actionable install/activation affordances", async () => {
+  const { service, calls } = fixture({ authorize: (_ctx, action) => action === "read" });
+  const list = await service.list(context, { kind: "skill" });
+  assert.deepEqual(list.data[0].actions, []);
+  await assert.rejects(service.mutate(context, { kind: "skill", id: "skill-1", action: "activate", operationId: "denied" }), { code: "FORBIDDEN" });
+  assert.equal(calls.length, 0);
+});
+test("resource-specific read and activation denials hide records and remove actions", async () => {
+  const entries = [
+    { id: "skill-1", kind: "skill", name: "Allowed", enabled: 1, actions: ["activate"] },
+    { id: "skill-2", kind: "skill", name: "Read only", enabled: 1, actions: ["activate"] },
+    { id: "private", kind: "skill", name: "Hidden", enabled: 1, actions: ["activate"] },
+  ];
+  const { service, calls } = fixture({
+    installed: () => entries,
+    authorize: (_ctx, action, _kind, _visibility, resourceId) => action === "read"
+      ? resourceId !== "private"
+      : resourceId === "skill-1",
+  });
+  const result = await service.list(context, { kind: "skill" });
+  assert.equal(result.pagination.total, 2);
+  assert.deepEqual(result.data.map((entry) => [entry.id, entry.actions]), [["skill-1", ["activate"]], ["skill-2", []]]);
+  await assert.rejects(service.mutate(context, { kind: "skill", id: "skill-2", action: "activate", operationId: "denied" }), { code: "FORBIDDEN" });
+  assert.equal(calls.length, 0);
+});
+
+test("inconsistent or duplicate catalog identity fails instead of mislabelling installed state", async () => {
+  const wrong = fixture({ discover: () => [{ id: "one", kind: "plugin", name: "Wrong kind" }] }).service;
+  await assert.rejects(wrong.list(context, { kind: "skill", visibility: "public" }), { code: "INVALID_CATALOG" });
+  const duplicate = fixture({ installed: () => [
+    { id: "same", kind: "skill", name: "First" }, { id: "same", kind: "skill", name: "Second" },
+  ] }).service;
+  await assert.rejects(duplicate.list(context, { kind: "skill" }), { code: "INVALID_CATALOG" });
 });

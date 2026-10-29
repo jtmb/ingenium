@@ -56,3 +56,23 @@ test("archive unknown outcome blocks further writes until authoritative refresh"
   await expect(page.getByRole("button", { name: "Restore", exact: true })).toBeEnabled();
   expect(writes).toBe(1);
 });
+
+test("System catalog reads the explicit installation mapping and keeps editor scope", async ({ page }) => {
+  const installation = { id: "installation-fixture", name: "explicit-installation", is_global: true };
+  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { data: [
+    { id: "current", name: project, is_global: false }, installation,
+  ] } }));
+  await page.route("**/api/v1/skills?**", (route) => {
+    const requested = new URL(route.request().url()).searchParams.get("project");
+    return route.fulfill({ json: { data: requested === installation.name ? [
+      { id: "orchestration-fixture", project_id: installation.id, name: "phased-checkout-orchestration", description: "Approved planning workflow", enabled: 1 },
+    ] : [] } });
+  });
+  await page.goto("/customize/skills?project=" + encodeURIComponent(project!));
+  const surface = page.getByTestId("customize-surface");
+  await surface.getByRole("button", { name: "System", exact: true }).click();
+  const row = surface.getByRole("button", { name: "phased-checkout-orchestration, Installed", exact: true });
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.getByRole("link", { name: "Open editor & lifecycle controls", exact: true })).toHaveAttribute("href", "/customize/skills/manage?project=explicit-installation");
+});
