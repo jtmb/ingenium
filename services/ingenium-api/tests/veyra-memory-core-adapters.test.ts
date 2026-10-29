@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { isAbsolute, join, parse, relative } from "node:path";
+import { basename, isAbsolute, join, parse, relative } from "node:path";
 import { mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   authentication, authorization, contextConversations, execTransaction,
   explicitMemory, getDb, identity, mcpCredentials, organizations, projects, resetDbForTest, runtimes,
 } from "ingenium-core";
-import { createCoreMemorySession } from "../lib/memory-v2/core-session.js";
+import { createCoreMemorySession, positionalCoreConnection } from "../lib/memory-v2/core-session.js";
 import { createApiMemorySession, explicitMemoryForChat, type MemoryActor, type MemoryApiPorts } from "../lib/memory-v2/adapters.mjs";
 import { memoryResponse } from "../lib/memory-v2/http.mjs";
 
@@ -77,10 +77,10 @@ afterAll(() => {
   vi.unstubAllEnvs();
   if (!directory) return;
   // Central ownership/handle checks reconcile this single fixture after the result is reviewed.
-  writeFileSync(join(root, "veyra-memory-core-fixture.json"), JSON.stringify({ directory, databasePath,
+  writeFileSync(join(root, `${basename(directory)}-fixture.json`), JSON.stringify({ directory, databasePath,
     generatedBy: "veyra-memory-core-adapters.test.ts", containsRealUserData: false,
     consumer: "coordinator reviews central test result and any first failure before safety-checked removal",
-    regeneration: "Run the scoped Vitest command with the same explicit owned root", databaseClosed: true }, null, 2) + "\n");
+    regeneration: "Run the scoped Vitest command with the same explicit owned root", databaseClosed: true }, null, 2) + "\n", { flag: "wx" });
 });
 
 function createFixture() {
@@ -95,7 +95,7 @@ function createFixture() {
   let runtime = runtimes.createRuntimeInstance(workspace.id, {
     cpuMillis: 1_000, memoryBytes: 536_870_912, pidsLimit: 128, diskBytes: 536_870_912, processLimit: 64,
   });
-  const runtimeCredential = mcpCredentials.createMcpCredential({ kind: "runtime", audience: "runtime", name: "Fixture runtime binding",
+  const runtimeCredential = mcpCredentials.createMcpCredential({ kind: "runtime", audience: "runtime", name: `Fixture runtime binding ${index}`, servicePrincipalName: `Memory runtime principal ${index}`,
     scopes: ["child-mcp:runtime", "projects:read"], organizationId: project.organization_id, projectId: project.id,
     workspaceId: workspace.id, launcherWorktree: workspace.storagePath, expiresAt: new Date(Date.now() + 600_000), createdByUserId: owner.id });
   runtimes.bindRuntimeCapability(runtime.id, runtimeCredential.id);
@@ -117,7 +117,7 @@ function createFixture() {
   const otherSession = authentication.createSession(other.id, new Date(), "Other fixture", true);
   const request: TestRequest = { kind: "browser", token: ownerSession.token, csrfToken: ownerSession.csrfToken,
     untrustedBody: { ownerUserId: other.id, organizationId: "forged", bindingHash: "forged" } };
-  const credential = mcpCredentials.createMcpCredential({ kind: "service", audience: "mcp", name: "Fixture memory delegation",
+  const credential = mcpCredentials.createMcpCredential({ kind: "service", audience: "mcp", name: `Fixture memory delegation ${index}`, servicePrincipalName: `Memory delegation principal ${index}`,
     scopes: ["memory:read", "memory:write", "projects:read"], organizationId: project.organization_id, projectId: project.id,
     workspaceId: workspace.id, launcherWorktree: workspace.storagePath, expiresAt: new Date(Date.now() + 600_000), createdByUserId: owner.id });
   const ports: Omit<MemoryApiPorts<TestRequest>, "core" | "resolveExistingScope"> = {
@@ -172,6 +172,28 @@ function createFixture() {
 }
 
 describe.sequential("Veyra memory adapter against actual core persistence and authorization", () => {
+  it("keeps positional null bindings and transaction state on the same actual SQLite handle", () => {
+    const native = getDb();
+    const connection = positionalCoreConnection(native);
+    expect(positionalCoreConnection(native)).toBe(connection);
+    expect(connection.inTransaction).toBe(false);
+    connection.exec("CREATE TEMP TABLE memory_positional_fixture (nullable_value TEXT, text_value TEXT, number_value INTEGER)");
+    try {
+      const insert = connection.prepare("INSERT INTO memory_positional_fixture VALUES (?,?,?)");
+      execTransaction(() => {
+        expect(connection.inTransaction).toBe(true);
+        insert.run(null, "bound text", 17);
+      }, 1);
+      expect(connection.inTransaction).toBe(false);
+      const rows = connection.prepare("SELECT nullable_value,text_value,number_value FROM memory_positional_fixture WHERE nullable_value IS ?");
+      expect(rows.get(null)).toEqual({ nullable_value: null, text_value: "bound text", number_value: 17 });
+      expect(rows.all(null)).toEqual([{ nullable_value: null, text_value: "bound text", number_value: 17 }]);
+      expect(() => execTransaction(() => { insert.run(null, "rolled back", 18); throw new Error("fixture rollback"); }, 1)).toThrowError("fixture rollback");
+      expect(rows.all(null)).toHaveLength(1);
+    } finally {
+      connection.exec("DROP TABLE memory_positional_fixture");
+    }
+  });
   it("denies the wrong authenticated actor and a revoked real browser session", () => {
     expect(fixture.response().status).toBe(200);
     expect(fixture.session.resolveScope("read", fixture.chatId).ownerUserId).toBe(fixture.owner.id);
@@ -226,7 +248,7 @@ describe.sequential("Veyra memory adapter against actual core persistence and au
   });
   it("preserves the original committed receipt after a controlled post-commit failure and reopening", () => {
     const fault = createApiMemorySession({ ...fixture.ports,
-      core: { getDb, execTransaction, checkpointAfterWrite: () => { throw new Error("fixture post-commit checkpoint fault"); } },
+      core: { getDb: () => positionalCoreConnection(getDb()), execTransaction, checkpointAfterWrite: () => { throw new Error("fixture post-commit checkpoint fault"); } },
       resolveExistingScope: explicitMemory.resolveExplicitMemoryScope });
     const scope = fault.resolveScope("write-policy", fixture.chatId);
     const input = { operationId: "original-request", expectedRevision: 0, useMemory: false, contribute: false };
