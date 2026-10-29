@@ -1,0 +1,21 @@
+# Work domain-controller integration surface
+
+The coordinator checkout now has Projects, Memory, Dot and Voice components. Work does not import their native contracts or copy their controllers into its source snapshot. `WorkRuntime` accepts `contextSlots` and an optional independent `projectPicker` so the coordinator can mount those domain owners above route/composer lifetimes.
+
+`WorkContextSlots.binding` carries exact `ownerId`, nullable `organizationId`, nullable raw `runtimeId`, nullable `workspaceId` and nullable engine `sessionId`. Work compares all five fields to the current authenticated/runtime state and catalog-confirmed active session before rendering any bound slot. Compatibility `runtimeId:null` is distinct from an isolated runtime, and a new conversation `sessionId:null` is distinct from an existing session. An unavailable/loading explicit session cannot qualify as a new-session null binding. While the URL/catalog changes, stale controls are removed and a waiting status is shown. This is a presentation fence, not server authorization or a substitute for immutable project/workspace revision/hash/epoch checks.
+
+| Work slot | Existing owner/controller | Integration constraint |
+| --- | --- | --- |
+| `projectControl`, `environmentControl` | Projects `ProjectExecutionPicker` and existing canonical selection controller | Keep project organization separate from admitted execution binding; no path-label matching or host fallback. A standalone `projectPicker` also appears beside the unavailable workspace picker. |
+| `permissionControl` | Existing runtime/native permission owner | Only real permissions/capabilities; a displayed selection grants no execution. |
+| `memoryControl`, `panels` | Memory `MemoryControls`/disclosure and API-owned CAS/receipt controller | Host policy and per-chat use/contribute remain separate; exact scope/revision callbacks stay with that owner. |
+| `voiceControl` | Voice `VoiceControls` and its qualified explicit-start controller | Work never starts microphone/model/audio activity itself. Mount global active-call/mute/end UI above Work so presentation or session changes cannot hide an ongoing call's controls. Voice owns cancellation/reconnect on scope changes. |
+| `dot` | Dot source/proactive-task controller | Suggestion display is not job admission; scheduler and operation state remain with Dot/API. |
+| `tools`, `panels` | Projects/native Git, files, terminal and review controllers | Work owns layout/display/action triggers only. Native `GitReviewPanel` and retained Git operation/finding controllers already exist in the protected source; do not derive mutation admission from an engine conversation diff. |
+| `status` | Current domain status summaries | Keep rich interactive forms in panels or the owner UI; this summary is announced by Work's live region. |
+
+Composer controls should be triggers or compact fields; do not inject a nested form into its message form. `panels` lives in the Work view and hides with it. Domain operations remain mounted/owned above this presentation and must fence callbacks on owner, revision, runtime and conversation changes. The shared pending-admission `admissionControl`/`submissionBlockedReason` props and Web qualification are independent of these slots and remain required.
+
+The coordinator must wire these slots from the actual controllers, not fixture callbacks. The initial Work route does not manufacture projects, memory policies, voice readiness, Dot successes or native Git authority when a binding is absent. Actual domain behavior, unavailable/revoked/unknown states, Windows/WSL/cluster qualification and final device/visual acceptance remain open until integrated.
+
+Navigation now preserves the current fragment and unrelated query values. Selecting the already-selected conversation does not add history. Binding canonicalization replaces only an exact matching session URL; a newer Back/Forward URL is never overwritten using an older server-rendered session prop. Empty/repeated explicit session/runtime/project parameters yield an error with an explicit recovery link before conversation hooks mount; they do not silently become a new conversation. Pure source tests cover the matching and navigation fences; React tests cover actual slot removal and selected-session history behavior.

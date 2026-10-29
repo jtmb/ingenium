@@ -250,4 +250,51 @@ describe("Work runtime boundary and conversation state", () => {
     expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("medium");
     expect(state.send).not.toHaveBeenCalled();
   });
+
+  it("renders only the parent controls matching the exact actor, workspace and selected conversation", async () => {
+    const binding = { ownerId: "owner-a", organizationId: "org-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: "ses-a" };
+    const startVoice = vi.fn();
+    const slots = { binding, voiceControl: <button type="button" onClick={startVoice}>Call selected agent</button>,
+      memoryControl: <button type="button">Memory policy</button>, dot: <button type="button">Your dot</button>, panels: <p>Bound domain panel</p> };
+    const view = render(<WorkRuntime {...props} contextSlots={slots} />);
+    await screen.findByRole("button", { name: "Call selected agent" });
+    fireEvent.click(screen.getByRole("button", { name: "Call selected agent" }));
+    expect(startVoice).toHaveBeenCalledTimes(1); expect(state.send).not.toHaveBeenCalled();
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-b" contextSlots={slots} />);
+    expect(screen.queryByRole("button", { name: "Call selected agent" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Memory policy" })).toBeNull();
+    expect(screen.queryByText("Bound domain panel")).toBeNull();
+    expect(screen.getByText(/Waiting for controls/)).toBeTruthy();
+  });
+
+  it("does not add history for the selected conversation or overwrite a newer Back/Forward URL", async () => {
+    state.query = "session=ses-a&runtime=runtime-a&project=project-a";
+    const view = render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.click(screen.getAllByRole("button", { name: "First task" })[0]!);
+    expect(state.push).not.toHaveBeenCalled(); expect(state.replace).not.toHaveBeenCalled();
+    state.query = "session=ses-b&runtime=runtime-a&project=project-a";
+    view.rerender(<WorkRuntime {...props} />);
+    expect(state.replace).not.toHaveBeenCalled();
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-b" />);
+    expect(state.replace).not.toHaveBeenCalled();
+    expect(state.chat).toHaveBeenLastCalledWith("ses-b");
+  });
+
+  it("keeps malformed route identity out of all conversation hooks and offers explicit navigation", () => {
+    render(<WorkRuntime {...props} routeError="The Work URL contains a repeated session value." />);
+    expect(screen.getByRole("alert").textContent).toContain("repeated session");
+    expect(screen.getByRole("link", { name: "Choose a conversation in Work" }).getAttribute("href")).toBe("/work");
+    expect(state.chat).not.toHaveBeenCalled(); expect(state.create).not.toHaveBeenCalled(); expect(state.config).not.toHaveBeenCalled();
+  });
+
+  it("does not reinterpret an unavailable explicit session as the new-session domain controls", async () => {
+    render(<WorkRuntime {...props} initialSessionId="ses-missing" contextSlots={{
+      binding: { ownerId: "owner-a", organizationId: "org-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: null },
+      voiceControl: <button type="button">Start a new voice session</button>,
+    }} />);
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("button", { name: "Start a new voice session" })).toBeNull();
+    expect(state.send).not.toHaveBeenCalled();
+  });
 });

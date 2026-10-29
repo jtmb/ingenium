@@ -19,6 +19,7 @@ The shell follows the approved Work reference (`8ae60026e2c79e07302a576d04d5c731
 - Settings uses the existing `SettingsLauncher` query overlay, preserving session/runtime/project query and the mounted draft. Customize targets `/customize/plugins`. Unbound, offline and mismatched workspaces retain the Work rail and feature directory around the authorized workspace picker.
 - **Files** derives a read-only panel from the selected conversation's native file parts. Bounded raster images, sandboxed PDF previews, text/code sources, explicit resource-free Markdown preview and JSON formatting are available. Image/PDF downloads retain native data references; text export is explicitly the displayed UTF-8 source. Remote URLs/local paths require an authorized domain reader and are not fetched. This is not office editing, image generation or interactive HTML execution.
 - Suggested next steps derive from observed session/files/changes/error state. Clicking fills an empty editable draft only; it never creates a session, sends a prompt, runs a tool or invokes a model. Existing text is not replaced.
+- Parent domain controllers can use binding-checked `contextSlots` for Projects/Memory/Voice/Dot/review UI and `projectPicker` for unbound navigation. See [context binding requirements](context-bindings.md). Work does not silently reassign controls from another owner/workspace/session.
 
 ## Web presentation
 

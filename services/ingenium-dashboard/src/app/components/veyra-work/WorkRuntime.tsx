@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRuntime } from "@/lib/RuntimeContext";
 import { useAuth } from "@/lib/AuthContext";
@@ -22,6 +23,8 @@ import { collectWorkArtifacts } from "./work-artifacts";
 import { workSuggestions } from "./work-suggestions";
 import { availableWorkSelection, canSendWork, currentWorkDraft, initialWorkDraft, newWorkDraft, workAttachmentError, workDraftKey, workModels, type WorkDraft } from "./work-state";
 import { useWorkChatConfig } from "./useWorkChatConfig";
+import { workControlBindingMatches, type WorkContextSlots } from "./work-context";
+import { workConversationNavigation } from "./work-navigation";
 
 function readAttachment(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -33,11 +36,14 @@ function readAttachment(file: File): Promise<string> {
   });
 }
 
-export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject, webQualification = null, admissionControl, submissionBlockedReason = null }: {
+export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject, webQualification = null, admissionControl, submissionBlockedReason = null, contextSlots = null, projectPicker, routeError = null }: {
   initialSessionId: string | null; requestedRuntime: string | null; requestedProject: string | null;
   webQualification?: WorkWebQualification | null;
   admissionControl?: ReactNode;
   submissionBlockedReason?: string | null;
+  contextSlots?: WorkContextSlots | null;
+  projectPicker?: ReactNode;
+  routeError?: string | null;
 }) {
   const runtime = useRuntime();
   const project = useProject();
@@ -47,20 +53,25 @@ export default function WorkRuntime({ initialSessionId, requestedRuntime, reques
     onSelect={() => undefined} onNew={() => undefined} newPending composer={null}
     web={<p role="status" className="p-6 text-sm">Connect the selected workspace before opening a Web conversation.</p>}>
     {notice && <p role="alert" className="p-4 text-sm">{notice}</p>}
+    {routeError && <Link href="/work" className="m-4 text-sm text-blue-300 underline">Choose a conversation in Work</Link>}
     {submissionBlockedReason && <p role="status" className="p-4 text-sm">{submissionBlockedReason}</p>}{admissionControl}
+    {projectPicker}
     <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Work" />
   </WorkShell>;
+  if (routeError) return unavailable(routeError);
   if (!runtime.client) return unavailable();
   if ((requestedRuntime !== null && requestedRuntime !== (runtime.runtimeId ?? "compatibility"))
     || (requestedProject !== null && requestedProject !== (runtime.projectName ?? project))) {
     return unavailable("This conversation belongs to another workspace. Select its project and runtime before opening it.");
   }
   return <BoundWorkRuntime key={JSON.stringify([runtime.runtimeId, runtime.projectName, runtime.workspace.confirmedWorkspaceId])}
-    initialSessionId={initialSessionId} webQualification={webQualification} admissionControl={admissionControl} submissionBlockedReason={submissionBlockedReason} />;
+    initialSessionId={initialSessionId} webQualification={webQualification} admissionControl={admissionControl} submissionBlockedReason={submissionBlockedReason}
+    contextSlots={contextSlots} projectPicker={projectPicker} />;
 }
 
-function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl, submissionBlockedReason }: {
+function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl, submissionBlockedReason, contextSlots, projectPicker }: {
   initialSessionId: string | null; webQualification: WorkWebQualification | null; admissionControl?: ReactNode; submissionBlockedReason: string | null;
+  contextSlots: WorkContextSlots | null; projectPicker?: ReactNode;
 }) {
   const runtime = useRuntime();
   const { user, installationAdmin } = useAuth();
@@ -102,6 +113,10 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: runtime.projectName ?? project,
     runtimeId: runtime.runtimeId ?? "compatibility", workspaceId: runtime.workspace.confirmedWorkspaceId ?? "", sessionId: initialSessionId };
   const draftKey = workDraftKey(identity);
+  const slotBinding = { ownerId: user.id, organizationId: organization.active?.id ?? null, runtimeId: runtime.runtimeId,
+    workspaceId: runtime.workspace.confirmedWorkspaceId, sessionId: activeId };
+  const slotSelectionResolved = initialSessionId === null || activeId !== null;
+  const slots = slotSelectionResolved && contextSlots && workControlBindingMatches(contextSlots.binding, slotBinding) ? contextSlots : null;
   const models = workModels(config?.providers ?? []);
   const freshDefault = newWorkDraft(config?.defaultSelection ?? null, models);
   const defaultDraft = initialSessionId === null ? freshDefault.draft : initialWorkDraft(initialSessionId, active?.model, null);
@@ -111,10 +126,21 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const createDraft = initialSessionId === null ? draft : freshDefault.draft;
   const creationAvailable = !submissionBlockedReason && !configLoading && !configError && availableWorkSelection(createDraft, models) && creationUnknown === null;
 
+  useEffect(() => {
+    if (!activeId || sessions.isLoading || navigationPending) return;
+    const navigation = workConversationNavigation({ search: params.toString(), hash: window.location.hash,
+      sessionId: activeId, runtimeId: identity.runtimeId, project: identity.projectId, intent: "canonicalize" });
+    if (navigation.action === "replace") router.replace(navigation.href, { scroll: false });
+  }, [activeId, identity.projectId, identity.runtimeId, navigationPending, params, router, sessions.isLoading]);
+
   const select = (id: string) => {
-    const next = new URLSearchParams(params.toString());
-    next.set("session", id); next.set("runtime", identity.runtimeId); next.set("project", identity.projectId);
-    startNavigation(() => router.push(`/work?${next.toString()}`, { scroll: false }));
+    const navigation = workConversationNavigation({ search: params.toString(), hash: window.location.hash,
+      sessionId: id, runtimeId: identity.runtimeId, project: identity.projectId, intent: "select" });
+    if (navigation.action === "none") return;
+    startNavigation(() => {
+      if (navigation.action === "replace") router.replace(navigation.href, { scroll: false });
+      else router.push(navigation.href, { scroll: false });
+    });
   };
   const create = async () => {
     if (sendLock.current || sessions.isCreating || navigationPending || !creationAvailable) return;
@@ -194,10 +220,11 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   return <WorkShell projectLabel={runtime.projectName ?? project} projects={[{ id: identity.projectId, label: identity.projectId, conversations }]}
     installationAdmin={installationAdmin}
     conversations={conversations} activeId={activeId} onSelect={select} onNew={() => { void create(); }}
+    dot={slots?.dot}
     onPresentationChange={(view) => { setPresentation(view); if (view === "work") setRehydrate(true); }}
     newPending={pending || sessions.isCreating || sessions.isLoading || navigationPending || !creationAvailable}
     tools={<><button type="button" disabled={!activeId} onClick={() => setFilesOpen(!filesOpen)} aria-expanded={filesOpen} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Files</button>
-      <button type="button" disabled={!activeId || diffPending} onClick={() => { void loadDiff(); }} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Review changes</button></>}
+      <button type="button" disabled={!activeId || diffPending} onClick={() => { void loadDiff(); }} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Review changes</button>{slots?.tools}</>}
     status={<div aria-live="polite" className="px-4 text-xs text-neutral-400">
       {sessions.isLoading && <p>Loading conversations…</p>}
       {navigationPending && <p>Opening the selected conversation…</p>}
@@ -206,6 +233,8 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       {configError && <button type="button" onClick={() => { void refreshConfig(); }} className="my-2 rounded border border-white/10 px-3 py-2">Reload model configuration</button>}
       {creationUnknown && <p role="alert">{creationUnknown}</p>}
       {submissionBlockedReason && <p role="status">{submissionBlockedReason}</p>}{admissionControl}
+      {contextSlots && !slots && <p role="status">Waiting for controls for the selected workspace and conversation.</p>}
+      {slots?.status}
       {attachmentError && <p role="alert">{attachmentError}</p>}
       {unconfirmed[draftKey] && <p role="alert">This submission was not confirmed: {unconfirmed[draftKey]} Inspect the conversation history before sending again. Veyra has retained the original and will not resend automatically.</p>}
       {configLoading && <p>Loading model configuration…</p>}
@@ -226,10 +255,12 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       onAttach={() => attachmentInput.current?.click()}
       onSend={() => { void send(); }} onStop={() => { void chat.stop(); }} models={models}
       ready={!submissionBlockedReason && !protectedDraft && !rehydrate && !configLoading && !configError && chat.sessionReady && !chat.error && modelAvailable} pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
-      projectControl={<span>▱ {runtime.projectName ?? project}</span>}
-      environmentControl={<span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
-      permissionControl={<span>Runtime permissions</span>} /></>}
+      projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {runtime.projectName ?? project}</span>}
+      environmentControl={slots?.environmentControl ?? <span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
+      permissionControl={slots?.permissionControl ?? <span>Runtime permissions</span>}
+      memoryControl={slots?.memoryControl} voiceControl={slots?.voiceControl} /></>}
   >
+    {slots?.panels}
     {filesOpen && <section aria-label="Conversation artifacts" className="m-4 rounded-xl border border-white/10 p-4">
       <div className="flex items-center justify-between"><h2 className="text-sm">Conversation files</h2><button type="button" onClick={() => setFilesOpen(false)} aria-label="Close files">×</button></div>
       <WorkArtifacts key={activeId} artifacts={artifacts} />
