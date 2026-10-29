@@ -50,6 +50,7 @@ The suite is opt-in; without `VEYRA_DOT_CORE_TEST_DB` it is skipped. Central acc
 - Uncertain launcher result preserves one real core run and cannot replay it.
 - Closing/reopening the actual core connection retains the same durable operation, rejects the old connection and recovers without another launch.
 - Actual owner/membership denial and no inferred external-message capability.
+- A previously revoked real scope remains denied and byte-for-byte unchanged while an unrelated authorized operation is recovered; no launcher replay or denied-scope notification bypass.
 
 The launcher is a spy that checks the real committed core/Dot rows; it never starts an agent process. Physical process cancellation/native/WSL/cluster/device acceptance remains a coordinator gate.
 

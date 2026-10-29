@@ -68,7 +68,7 @@ function verifyNestedCheckpointPrerequisite(db:ReturnType<typeof getDb>):void {
   }finally{wal.restore();}
 }
 
-function fixture(sourceKind:"user"|"memory"="user") {
+function fixture(sourceKind:"user"|"memory"="user",suggestionPrefix="") {
   const db=getDb();
   // beforeAll proves the real core prerequisite once; a failed prerequisite stops this suite.
   expect(checkpointPrerequisiteVerified).toBe(true);
@@ -109,7 +109,7 @@ function fixture(sourceKind:"user"|"memory"="user") {
   };
   const diagnostics:Parameters<CoreDotOptions["onDiagnostic"]>[0][]=[];
   const core:CoreDotPorts={getDb,execTransaction,checkpointAfterWrite(){checkpointAfterWrite();const hook=afterCommit;afterCommit=()=>{};hook();},jobs};
-  const options:CoreDotOptions={nestedCheckpointPolicy:"deferred-by-core-v1",now:()=>clock,id:randomUUID,onDiagnostic:event=>diagnostics.push(event)};
+  const options:CoreDotOptions={nestedCheckpointPolicy:"deferred-by-core-v1",now:()=>clock,id:()=>suggestionPrefix+randomUUID(),onDiagnostic:event=>diagnostics.push(event)};
   const createRuntime=()=>createCoreDotRuntime(core,auth,binding,execution,options),runtime=createRuntime();
   const suggestion=runtime.service.propose(actor,scope,{title:"Inspect task progress",prompt:job.prompt_template,source:{kind:sourceKind,reference:"fixture-message/revision-1"},capabilities:["read"],expiresAt:"2031-01-01T00:00:00.000Z"});
   const followup=runtime.service.approve(actor,scope,suggestion.id,0,{jobId:job.id,schedule:{kind:"interval",anchor:clock,minutes:60},missedPolicy:"latest",notificationPolicy:"meaningful"});
@@ -182,6 +182,38 @@ describe.runIf(Boolean(requestedDb))("Dot actual-core binding (central opt-in fi
   it("closes/reopens the genuine core singleton and recovers the same operation without another launch",async()=>{
     const f=fixture();f.tick();await f.runtime.dispatchJob(f.job.project_id,f.job.id,f.isActive);const original=jobs.listJobRuns(f.job.project_id,f.job.id)[0]!,connection=getDb();resetDbForTest();const reopened=getDb();expect(reopened).not.toBe(connection);expect(reopened.name).toBe(databasePath);expect(()=>f.runtime.ownsJob(f.job.project_id,f.job.id)).toThrow("DOT_DATABASE_REPLACED");
     const recovered=f.createRuntime();expect(recovered.recoverOperations()).toBeGreaterThan(0);expect(recovered.service.page(f.actor,f.scope,"operation").data[0]).toMatchObject({state:"unknown",runId:original.id});await recovered.dispatchJob(f.job.project_id,f.job.id,f.isActive);expect(f.launch).toHaveBeenCalledTimes(1);expect(jobs.listJobRuns(f.job.project_id,f.job.id)).toHaveLength(1);
+  });
+  it("isolates a genuinely revoked scope while recovering an unrelated authorized operation",async()=>{
+    const denied=fixture();denied.tick();await denied.runtime.dispatchJob(denied.job.project_id,denied.job.id,denied.isActive);
+    const deniedRun=jobs.listJobRuns(denied.job.project_id,denied.job.id)[0]!;
+    const before=getDb().prepare("SELECT body FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=?").get(deniedRun.id) as {body:string};
+    execTransaction(()=>{getDb().prepare("DELETE FROM project_memberships WHERE project_id=? AND user_id=?").run(denied.job.project_id,denied.actor.id);},1);
+    expect(authorization.requireProjectPermission(denied.principal(denied.actor),denied.job.project_id,"jobs","read").allowed).toBe(false);
+    const healthy=fixture();healthy.tick();await healthy.runtime.dispatchJob(healthy.job.project_id,healthy.job.id,healthy.isActive);const healthyRun=jobs.listJobRuns(healthy.job.project_id,healthy.job.id)[0]!;
+    expect(()=>healthy.runtime.recoverOperations(100)).not.toThrow();
+    expect(healthy.runtime.service.page(healthy.actor,healthy.scope,"operation").data[0]).toMatchObject({state:"unknown",runId:healthyRun.id});
+    expect(getDb().prepare("SELECT body FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=?").get(deniedRun.id)).toEqual(before);
+    expect(()=>denied.runtime.service.page(denied.actor,denied.scope,"operation")).toThrow("DOT_FORBIDDEN");
+    expect(healthy.diagnostics.some(event=>event.code==="DOT_RECOVERY_OPERATION_BLOCKED"&&event.runId===deniedRun.id)).toBe(true);
+    expect(healthy.launch).toHaveBeenCalledTimes(1);expect(denied.launch).toHaveBeenCalledTimes(1);
+  });
+  it("advances past a genuinely denied prefix longer than one recovery batch",async()=>{
+    const denied=[];
+    for(const prefix of ["!denied-a-","!denied-b-"]){
+      const f=fixture("user",prefix);f.tick();await f.runtime.dispatchJob(f.job.project_id,f.job.id,f.isActive);const run=jobs.listJobRuns(f.job.project_id,f.job.id)[0]!;
+      jobs.cancelJobRun(f.job.project_id,run.id);
+      execTransaction(()=>{getDb().prepare("DELETE FROM project_memberships WHERE project_id=? AND user_id=?").run(f.job.project_id,f.actor.id);},1);
+      const before=getDb().prepare("SELECT body FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=?").get(run.id) as {body:string};denied.push({f,run,before});
+    }
+    const healthy=fixture("user","~healthy-");healthy.tick();await healthy.runtime.dispatchJob(healthy.job.project_id,healthy.job.id,healthy.isActive);
+    const ownRun=jobs.listJobRuns(healthy.job.project_id,healthy.job.id)[0]!;
+    expect(healthy.runtime.recoverOperations(1)).toBe(1);expect(healthy.runtime.recoverOperations(1)).toBe(1);
+    expect(healthy.runtime.service.page(healthy.actor,healthy.scope,"operation").data[0]).toMatchObject({state:"claimed",runId:ownRun.id});
+    const total=(getDb().prepare("SELECT count(*) AS n FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown')").get() as {n:number}).n;
+    for(let i=0;i<total;i++){healthy.runtime.recoverOperations(1);if(healthy.runtime.service.page(healthy.actor,healthy.scope,"operation").data[0]?.state==="unknown")break;}
+    expect(healthy.runtime.service.page(healthy.actor,healthy.scope,"operation").data[0]).toMatchObject({state:"unknown",runId:ownRun.id});
+    for(const entry of denied){expect(getDb().prepare("SELECT body FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=?").get(entry.run.id)).toEqual(entry.before);expect(()=>entry.f.runtime.service.page(entry.f.actor,entry.f.scope,"operation")).toThrow("DOT_FORBIDDEN");expect(entry.f.launch).toHaveBeenCalledTimes(1);}
+    await healthy.runtime.dispatchJob(healthy.job.project_id,healthy.job.id,healthy.isActive);expect(healthy.launch).toHaveBeenCalledTimes(1);expect(jobs.listJobRuns(healthy.job.project_id,healthy.job.id)).toHaveLength(1);
   });
   it("retains actual owner-only access and does not infer external-message capabilities",()=>{
     const f=fixture(),outsider=identity.createUser(`outsider-${randomUUID()}@example.test`,"Outside fixture scope");expect(authorization.requireProjectPermission(f.principal({id:outsider.id,organizationId:f.actor.organizationId}),f.job.project_id,"jobs","read").allowed).toBe(false);

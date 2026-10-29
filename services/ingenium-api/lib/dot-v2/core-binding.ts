@@ -112,6 +112,9 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
     try{service.notify(actorFor(scope),scope,id,false);}
     catch(error){options.onDiagnostic({phase:"notify",code:"DOT_NOTIFICATION_BLOCKED",error});}
   };
+  let recoveryCursor="";
+  const recoveryDiagnostics=new Map<string,string>();
+  const recoverableDenials=new Set(["DOT_FORBIDDEN","DOT_MEMORY_DISABLED","DOT_SOURCE_REVOKED","DOT_RUN_AUTHORIZATION_REVOKED","DOT_JOB_BINDING_CHANGED","DOT_RUN_BINDING_CHANGED","DOT_PROJECTLESS_UNBOUND","DOT_NOT_FOUND"]);
   return {
     service,
     ownsJob:(projectId,id)=>!!followupForJob(projectId,id),
@@ -150,10 +153,26 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
     },
     recoverOperations(limit=100){
       sameConnection();if(!Number.isInteger(limit)||limit<1||limit>100)throw new DotError("DOT_VALIDATION");
-      const rows=db.prepare("SELECT body FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(limit) as {body:string}[];
-      const scopes=new Map<string,DotScope>();for(const row of rows){const op=JSON.parse(row.body) as Operation;scopes.set(scopeKey(op.scope),op.scope);}
-      for(const scope of scopes.values())service.recover(actorFor(scope),scope);
-      for(const row of rows){const op=JSON.parse(row.body) as Operation;notify(op.scope,op.id);}
+      const page=()=>db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind='operation' AND id>? AND json_extract(body,'$.runId') IS NOT NULL AND json_extract(body,'$.state') IN ('claimed','running','cancel_requested','unknown') ORDER BY id LIMIT ?").all(recoveryCursor,limit) as {id:string;body:string}[];
+      let rows=page();
+      if(!rows.length && recoveryCursor){recoveryCursor="";rows=page();}
+      if(rows.length)recoveryCursor=rows[rows.length-1]!.id;
+      for(const row of rows){
+        const op=JSON.parse(row.body) as Operation;
+        try{
+          service.recoverOperation(actorFor(op.scope),op.scope,op.id);
+          recoveryDiagnostics.delete(op.id);
+        }catch(error){
+          if(!(error instanceof DotError) || !recoverableDenials.has(error.code))throw error;
+          if(recoveryDiagnostics.get(op.id)!==error.code){
+            options.onDiagnostic({phase:"recovery",code:"DOT_RECOVERY_OPERATION_BLOCKED",runId:op.runId??undefined,error});
+            recoveryDiagnostics.delete(op.id);recoveryDiagnostics.set(op.id,error.code);
+            if(recoveryDiagnostics.size>100)recoveryDiagnostics.delete(recoveryDiagnostics.keys().next().value!);
+          }
+          continue;
+        }
+        notify(op.scope,op.id);
+      }
       return rows.length;
     },
   };

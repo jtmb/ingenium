@@ -224,3 +224,9 @@ test("missing nullable scope fields cannot alias explicit projectless or convers
  for(const invalid of [{...projectless,projectId:undefined},{...projectless,conversationId:undefined},{...projectless,projectId:""},{...projectless,conversationId:""}])assert.throws(()=>f.api.page(actor,invalid,"suggestion"),/FORBIDDEN/);
  assert.throws(()=>f.api.page(null,projectless,"suggestion"),/FORBIDDEN/);
 });
+
+test("selected-operation recovery is scoped, validates IDs and cannot inspect an unavailable record",t=>{
+ const f=fixture();t.after(()=>f.db.close());const follow=f.approve();f.tick("2026-10-29T01:00:00.000Z");const op=f.api.reconcile(actor,scope,follow.id).operations[0];let inspections=0;const inspect=f.jobs.inspect;f.jobs.inspect=(...args)=>{inspections++;return inspect(...args);};
+ f.api.recoverOperation(actor,scope,op.id);assert.equal(inspections,1);assert.equal(f.repo.get("operation",op.id,scope).state,"running");
+ assert.throws(()=>f.api.recoverOperation(actor,{...scope,projectId:"other"},op.id),/NOT_FOUND/);assert.throws(()=>f.api.recoverOperation(actor,scope,"missing"),/NOT_FOUND/);assert.throws(()=>f.api.recoverOperation(actor,scope,""),/VALIDATION/);assert.equal(inspections,1);
+});

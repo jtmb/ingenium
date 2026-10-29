@@ -4,6 +4,7 @@ import {DatabaseSync} from "node:sqlite";
 import {readFileSync} from "node:fs";
 import {createCoreDotRuntime} from "../lib/dot-v2/core-binding.ts";
 import {DotError} from "../lib/dot-v2/service.ts";
+import {scopeKey} from "../lib/dot-v2/repository.ts";
 
 function fixture(){
  const db=new DatabaseSync(":memory:");db.exec(readFileSync(new URL("../lib/dot-v2/schema.sql",import.meta.url),"utf8"));db.exec("CREATE TABLE fixture_core_runs(id TEXT PRIMARY KEY,body TEXT NOT NULL)");
@@ -76,5 +77,46 @@ test("organization jobs retain policy-authorized ownership; a foreign user job i
 });
 test("run/project identity drift is rejected before cancellation or process inspection",async t=>{
  const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);const run=f.readRun(f.launches[0]);f.db.prepare("UPDATE fixture_core_runs SET body=? WHERE id=?").run(JSON.stringify({...run,project_id:"other"}),run.id);
- assert.throws(()=>f.runtime.recoverOperations(),/RUN_BINDING_CHANGED/);assert.equal(f.cancellations.length,0);assert.equal(f.launches.length,1);
+ assert.equal(f.runtime.recoverOperations(),1);assert.equal(f.diagnostics[0].code,"DOT_RECOVERY_OPERATION_BLOCKED");assert.equal(f.diagnostics[0].error.code,"DOT_RUN_BINDING_CHANGED");assert.equal(f.cancellations.length,0);assert.equal(f.launches.length,1);
+});
+
+function insertOperation(f,op){f.db.prepare("INSERT INTO veyra_dot_records(kind,id,organization_id,owner_user_id,scope_key,revision,body) VALUES('operation',?,?,?,?,?,?)").run(op.id,op.scope.organizationId,op.scope.ownerUserId,scopeKey(op.scope),op.revision,JSON.stringify(op));}
+test("a denied prefix cannot starve later authorized recovery; only selected rows are inspected",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);const healthy=f.runtime.service.page(f.actor,f.scope,"operation").data[0];
+ const denied={...healthy,id:"000-denied",scope:{...f.scope,ownerUserId:"revoked-owner"},state:"cancel_requested",runId:"revoked-run"};insertOperation(f,denied);
+ const original=f.auth.require;f.auth.require=(a,s,...rest)=>{if(s.ownerUserId==="revoked-owner")throw new DotError("DOT_FORBIDDEN");return original(a,s,...rest);};
+ const inspect=f.execution.inspectOwnedRun;let inspections=0;f.execution.inspectOwnedRun=(...args)=>{inspections++;return inspect(...args);};
+ assert.equal(f.runtime.recoverOperations(1),1);assert.equal(inspections,0);assert.equal(f.diagnostics.length,1);assert.equal(f.diagnostics[0].error.code,"DOT_FORBIDDEN");
+ assert.equal(f.runtime.service.page(f.actor,f.scope,"operation").data[0].state,"claimed");
+ assert.equal(f.runtime.recoverOperations(1),1);assert.equal(inspections,1);assert.equal(f.runtime.service.page(f.actor,f.scope,"operation").data[0].state,"running");
+ assert.equal(f.runtime.recoverOperations(1),1);assert.equal(f.diagnostics.length,1);assert.equal(f.cancellations.length,0);assert.equal(f.launches.length,1);
+ const retained=JSON.parse(f.db.prepare("SELECT body FROM veyra_dot_records WHERE id=?").get(denied.id).body);assert.deepEqual(retained,denied);
+ assert.equal(f.db.prepare("SELECT count(*) AS n FROM veyra_dot_records WHERE kind='notification' AND scope_key=?").get(scopeKey(denied.scope)).n,0);
+});
+test("one unavailable run does not abort another operation in the same authorized scope",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);const healthy=f.runtime.service.page(f.actor,f.scope,"operation").data[0];
+ const unavailable={...healthy,id:"000-unavailable",runId:"missing-run"};insertOperation(f,unavailable);assert.equal(f.runtime.recoverOperations(),2);
+ assert.equal(f.runtime.service.get(f.actor,f.scope,"operation",healthy.id).state,"running");assert.deepEqual(f.runtime.service.get(f.actor,f.scope,"operation",unavailable.id),unavailable);assert.equal(f.diagnostics[0].error.code,"DOT_RUN_BINDING_CHANGED");assert.equal(f.launches.length,1);
+});
+test("recovery rechecks eligibility after denial and emits again only after a new denial transition",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);const original=f.auth.require;let denied=true;
+ f.auth.require=(...args)=>{if(denied)throw new DotError("DOT_FORBIDDEN");return original(...args);};
+ f.runtime.recoverOperations(1);f.runtime.recoverOperations(1);assert.equal(f.diagnostics.length,1);
+ denied=false;f.runtime.recoverOperations(1);assert.equal(f.runtime.service.page(f.actor,f.scope,"operation").data[0].state,"running");
+ denied=true;f.runtime.recoverOperations(1);assert.equal(f.diagnostics.length,2);assert.equal(f.launches.length,1);
+});
+test("unexpected core storage failures propagate without changing operation state or hiding the first failure",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);
+ f.core.jobs.getJobRun=()=>{throw Error("first fatal core read");};assert.throws(()=>f.runtime.recoverOperations(),/first fatal core read/);assert.equal(f.runtime.service.page(f.actor,f.scope,"operation").data[0].state,"claimed");assert.equal(f.diagnostics.length,0);assert.equal(f.launches.length,1);
+});
+
+test("a denied prefix longer than one batch remains fair and diagnostic retention is bounded",async t=>{
+ const f=fixture();t.after(()=>f.db.close());f.approve();f.tick();await f.runtime.dispatchJob("project","job",f.isActive);const healthy=f.runtime.service.page(f.actor,f.scope,"operation").data[0];
+ const denied=[];for(let i=0;i<110;i++){const op={...healthy,id:"000-denied-"+String(i).padStart(3,"0"),scope:{...f.scope,ownerUserId:"revoked-owner"},state:"cancel_requested",runId:"revoked-run-"+i};insertOperation(f,op);denied.push(op);}
+ let deniedChecks=0;const require=f.auth.require;f.auth.require=(a,s,...rest)=>{if(s.ownerUserId==="revoked-owner"){deniedChecks++;throw new DotError("DOT_FORBIDDEN");}return require(a,s,...rest);};
+ assert.equal(f.runtime.recoverOperations(100),100);assert.equal(f.diagnostics.length,100);assert.equal(f.runtime.service.get(f.actor,f.scope,"operation",healthy.id).state,"claimed");
+ assert.equal(f.runtime.recoverOperations(100),11);assert.equal(f.diagnostics.length,110);assert.equal(f.runtime.service.get(f.actor,f.scope,"operation",healthy.id).state,"running");
+ const emitted=f.diagnostics.length;assert.equal(f.runtime.recoverOperations(100),100);assert.ok(f.diagnostics.length>emitted,"old denial diagnostics must be evicted rather than retained without bound");assert.ok(f.diagnostics.length<=emitted+100);assert.equal(f.diagnostics[emitted].runId,denied[0].runId);assert.equal(deniedChecks,210);
+ for(const op of denied)assert.deepEqual(JSON.parse(f.db.prepare("SELECT body FROM veyra_dot_records WHERE id=?").get(op.id).body),op);
+ await f.runtime.dispatchJob("project","job",f.isActive);assert.equal(f.launches.length,1);assert.equal(f.cancellations.length,0);
 });

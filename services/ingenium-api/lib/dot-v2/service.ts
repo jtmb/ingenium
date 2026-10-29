@@ -212,21 +212,28 @@ export class DotService {
     // Persist intent before a runner signal. Recovery repeats only the idempotent cancellation request.
     this.recover(actor,scope);
   }
+  private recoverRecord(actor: Actor, scope: DotScope, op: Operation): void {
+    if (!op.runId || terminal.has(op.state)) return;
+    if (op.state === "cancel_requested") {
+      this.require(actor,scope,"cancel");
+      this.jobs.requestCancellation(scope,op.runId);
+    }
+    const state = this.jobs.inspect(scope,op.runId);
+    const next = op.state === "cancel_requested" && (state === "running" || state === "unknown") ? "cancel_requested" : state;
+    if (next !== op.state || (state === "unknown" && op.code !== "RUN_OUTCOME_UNKNOWN")) this.repository.put("operation",{...op,state:next,code:state === "unknown" ? "RUN_OUTCOME_UNKNOWN" : op.code,revision:op.revision+1,updatedAt:this.now()},op.revision);
+  }
+  recoverOperation(actor: Actor, scope: DotScope, id: string): void {
+    this.require(actor,scope,"read");text(id,512);
+    const op=this.repository.get<Operation>("operation",id,scope);
+    if(!op)throw new DotError("DOT_NOT_FOUND");
+    this.recoverRecord(actor,scope,op);
+  }
   recover(actor: Actor, scope: DotScope): void {
     this.require(actor,scope,"read");
     let cursor = "";
     do {
       const page = this.repository.page<Operation>("operation",scope,cursor,100);
-      for (const op of page.data) {
-        if (!op.runId || terminal.has(op.state)) continue;
-        if (op.state === "cancel_requested") {
-          this.require(actor,scope,"cancel");
-          this.jobs.requestCancellation(scope,op.runId);
-        }
-        const state = this.jobs.inspect(scope,op.runId);
-        const next = op.state === "cancel_requested" && (state === "running" || state === "unknown") ? "cancel_requested" : state;
-        if (next !== op.state || (state === "unknown" && op.code !== "RUN_OUTCOME_UNKNOWN")) this.repository.put("operation",{...op,state:next,code:state === "unknown" ? "RUN_OUTCOME_UNKNOWN" : op.code,revision:op.revision+1,updatedAt:this.now()},op.revision);
-      }
+      for (const op of page.data) this.recoverRecord(actor,scope,op);
       cursor = page.nextCursor ?? "";
     } while(cursor);
   }

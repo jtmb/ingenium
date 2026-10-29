@@ -16,35 +16,35 @@
   ],
   "exitCode": 0,
   "summary": [
-    "ok 32 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
-    "# tests 57",
-    "# pass 56",
+    "ok 37 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
+    "# tests 63",
+    "# pass 62",
     "# fail 0",
     "# skipped 1",
-    "# duration_ms 388.319276"
+    "# duration_ms 292.79655"
   ],
   "sourceSHA256": {
     "packages/veyra-automation/contracts.d.ts": "a72712535ce8974cab206aa0d7275ec46aa9f1eaad508868d418b167ed92198e",
     "services/ingenium-api/lib/dot-v2/commands.ts": "814807ce97b158c8d7a943239a58cab162ea76e99764fa162314d04740d47616",
-    "services/ingenium-api/lib/dot-v2/core-binding.ts": "05a79c858af344c7c6d77e687b0dc9868cd61f537b90338e6362fc9cc9f6e048",
+    "services/ingenium-api/lib/dot-v2/core-binding.ts": "ebc1fd969e4dbfc087cabdc56dc106b035e646bd39859e014cb4218b9916451c",
     "services/ingenium-api/lib/dot-v2/existing-jobs.ts": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
     "services/ingenium-api/lib/dot-v2/proactive.ts": "bb120999cd0d9c71758b8c2421cdc8756c89e842fc206fa4f4bfdc0b08bd741a",
     "services/ingenium-api/lib/dot-v2/repository.ts": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863",
     "services/ingenium-api/lib/dot-v2/router.ts": "005e75bf8ff6ea907f380da8cdf57196e1e33426359b0aa742dd164bf2ee5868",
     "services/ingenium-api/lib/dot-v2/schedule.ts": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
     "services/ingenium-api/lib/dot-v2/schema.sql": "5bcb2330eff3c679e544dd855718c1fb0853f2f3bff46158b2829c1fe6439e47",
-    "services/ingenium-api/lib/dot-v2/service.ts": "c0ff6cb873916c9dca379f7151958777e15c2d5e8883479e5a073d3738a609b4",
+    "services/ingenium-api/lib/dot-v2/service.ts": "bc8569253ec99d64afe4fef287451e5a72e789fe867affc34c048cc1854b5e49",
     "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "d669deb3fe718f4a254edd9ebbac9a57b4f393e100e561618641c01669377d60",
-    "services/ingenium-api/tests/veyra-dot-core-binding.cpu.mjs": "672b4945aae1150cafead7e497c4d359f6a9e13a7d4c9f13628bbfe37cdaf5ca",
+    "services/ingenium-api/tests/veyra-dot-core-binding.cpu.mjs": "161752f4cf9845c9f78f1f2e72b4b11dc4514f64d3f47fba0e0135fc5f132f73",
     "services/ingenium-api/tests/veyra-dot-loader.mjs": "8f1ea1b49de741f673ee35e69d1d88de9913be844f522c86f4f2fa22a448fac8",
     "services/ingenium-api/tests/veyra-dot-router-boundary.cpu.mjs": "ce86ccac6b6eda76bb7be7b14e40e3dbfe6e07202e302b301ba06574f9b9443e",
     "services/ingenium-api/tests/veyra-dot-router.test.ts": "5efdc482e99943330e9dc23d2db203e35288c2b8efc0fa60a5d3f79a01a17732",
     "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs": "6b15292b1f423664dce9e143d41e7ab1c079edebc964bf301753e1b0996eb510",
-    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "2cd65cdd3d174e8988e5f2fe44f89601b151e7db917fc90257a30de8b4e3a7bb",
+    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "747d571baa63e095cfd7ddf6a461e561de97121ab38947562704b18eae338e96",
     "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "75fab77030a2e48673f8e4c1a568e79a102083ac4b74396f60a3c857f9f3c0e5",
     "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "01423dd03b4682a729edabbba0b1660e296282a6ffbe832c2cff680bac5a3888",
     "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac",
-    "services/ingenium-api/tests/veyra-dot-actual-core.test.ts": "b1d35932c23c7ebbbd0be0f28ce50e7ffb16b418b217c0a0033d36a83916cb33"
+    "services/ingenium-api/tests/veyra-dot-actual-core.test.ts": "75726c301dd9c0fb912534470af050280375b0cfaa3935aad9e5e6710848d039"
   },
   "priorFailures": [
     {
@@ -58,6 +58,10 @@
     {
       "signature": "git diff --check flagged unified patch artifact blank context markers as trailing whitespace",
       "resolution": "Regenerated with two-line context and empty context-line spelling; source core/scheduler remain unchanged; apply check repeated"
+    },
+    {
+      "signature": "DOT_FORBIDDEN at actual-core test89 -> service.recover216 -> core-binding.recoverOperations155",
+      "resolution": "Scope-wide global recovery replaced by bounded selected-operation recovery; preserved denial isolated; central rerun pending"
     }
   ],
   "priorDiskProof": {
@@ -125,8 +129,8 @@
   },
   "coreBinding": {
     "method": "Real in-memory SQLite claim/Dot writes with injected core API/savepoint/checkpoint fixtures",
-    "tests": 12,
-    "proof": "Atomic rollback, post-commit launch, lifecycle/grant/source revocation, unknown identity/no replay, exact binding/database checks, checkpoint failures and cancellation reconstruction; organization ownership, grant denial and foreign run identity rejection",
+    "tests": 17,
+    "proof": "Atomic rollback, post-commit launch, lifecycle/grant/source revocation, unknown identity/no replay, exact binding/database checks, checkpoint failures and cancellation reconstruction; organization ownership, grant denial and foreign run identity rejection; bounded per-operation recovery, denied-prefix fairness and diagnostic eviction",
     "remaining": "Actual core 50-write threshold test after shared checkpoint deferral patch; qualified real runner and exact runtime bindings",
     "sharedPatch": "docs/workstreams/dot/core-scheduler-insertion.patch",
     "patchApplyCheck": "git apply --check passed against owned base without mutating shared files"
@@ -153,9 +157,9 @@
   },
   "actualCoreSuiteSource": {
     "path": "services/ingenium-api/tests/veyra-dot-actual-core.test.ts",
-    "status": "source-only; not executed by worker",
+    "status": "Revised source only; central rerun pending after r3 14/15 failure",
     "syntaxCheck": "node --experimental-strip-types --check: exit 0",
-    "runtimeCases": 15,
+    "runtimeCases": 17,
     "databaseAuthority": "Real ingenium-core getDb/execTransaction/jobs/authorization; no mock grant or startJobRun",
     "fixture": "Central-created empty mode-0600 core.sqlite + lease.json in mode-0700 actual-core-test-* under coordination/dot",
     "activationGuard": "beforeAll executes genuine nested/50-write checkpoint prerequisite; failed prerequisite stops suite before adapter construction",
@@ -163,5 +167,14 @@
     "centralCommand": "node node_modules/vitest/vitest.mjs run --config services/ingenium-api/vitest.config.ts services/ingenium-api/tests/veyra-dot-actual-core.test.ts --maxWorkers=1 --fileParallelism=false",
     "cleanup": "Central lease owner accepted allocation/measurement/cleanup; suite closes actual singleton and prints inventory/consumerDone",
     "remaining": "Central execution result, actual native/WSL/process lifecycle/production acceptance"
+  },
+  "recoveryIsolation": {
+    "firstFailureLog": "coordination/integration/dot-core-r3.log",
+    "originalCentralResult": "14/15 pass, zero skips; original close/reopen failed DOT_FORBIDDEN during global scope scan",
+    "repair": "Recover selected individual operations only; preserve known eligibility denial and skip notification; unexpected/system errors propagate; keyset scan advances past denied prefixes; at most 100 diagnostic suppression entries, never authorization cache",
+    "unitCoverage": "Denied prefix beyond batch limit, same-scope unavailable sibling, no duplicate dispatch, bounded diagnostic eviction, rechecking restored authorization, unexpected fatal storage error",
+    "centralCoveragePending": "Real revoked membership plus unrelated authorized recovery and denied prefix over 1-record batch",
+    "fixturePreservation": "Original actual-core-test-K4gOv9 untouched and not opened/deleted by worker",
+    "firstFailureLogSHA256": "f4058aadd1f81bd7ba3d888e3c722bc92b4f198a87574529dc32b7da4f59864a"
   }
 }
