@@ -7,6 +7,7 @@ import WorkComposer from "../src/app/components/veyra-work/WorkComposer";
 import { emptyWorkDraft } from "../src/app/components/veyra-work/work-state";
 
 vi.mock("next/image", () => ({ default: ({ alt }: { alt: string }) => <span role="img" aria-label={alt} /> }));
+vi.mock("../src/app/components/settings/SettingsLauncher", () => ({ default: () => <button type="button">Settings</button> }));
 vi.mock("next/link", () => ({ default: ({ children, href, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -83,5 +84,18 @@ describe("Work composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
     expect(stop).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+  });
+
+  it("shows the exact unavailable model/effort and blocks even an incorrectly ready caller", () => {
+    const send = vi.fn();
+    const view = render(<WorkComposer draft={{ ...draft, modelId: "retained-native", variant: "removed-effort" }} onChange={vi.fn()}
+      onSend={send} onStop={vi.fn()} ready pending={false} streaming={false} models={[model]} />);
+    expect(screen.getByRole("option", { name: "Unavailable: provider / retained-native" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Unavailable effort: removed-effort" })).toBeTruthy();
+    fireEvent.submit(screen.getByRole("form", { name: "Work composer" }));
+    expect(send).not.toHaveBeenCalled();
+    view.rerender(<WorkComposer draft={{ ...draft, variant: "removed-effort" }} onChange={vi.fn()} onSend={send} onStop={vi.fn()}
+      ready pending={false} streaming={false} models={[model]} />);
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

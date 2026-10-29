@@ -1,9 +1,8 @@
 "use client";
 
 import { useRef, type ReactNode } from "react";
-import { canSendWork, type WorkDraft } from "./work-state";
-
-export interface WorkModel { providerId: string; modelId: string; label: string; variants?: string[] }
+import { canSendWork, type WorkDraft, type WorkModel } from "./work-state";
+export type { WorkModel } from "./work-state";
 
 export default function WorkComposer({ draft, onChange, onSend, onStop, ready, pending, streaming,
   models, projectControl, environmentControl, permissionControl, memoryControl, voiceControl, onAttach,
@@ -16,7 +15,8 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
 }) {
   const input = useRef<HTMLTextAreaElement>(null);
   const selectedModel = models.find((model) => model.providerId === draft.providerId && model.modelId === draft.modelId);
-  const sendable = canSendWork({ ready, pending: pending || streaming, draft });
+  const selectionAvailable = Boolean(selectedModel && (!draft.variant || selectedModel.variants?.includes(draft.variant)));
+  const sendable = canSendWork({ ready: ready && selectionAvailable, pending: pending || streaming, draft });
   return <div className="mx-auto w-full max-w-[740px] px-3 pb-4">
     <div className="mx-3 flex flex-wrap items-center gap-3 rounded-t-xl bg-[#262424] px-3 py-2 text-xs text-neutral-300">
       {projectControl}{environmentControl}{memoryControl}
@@ -43,22 +43,24 @@ export default function WorkComposer({ draft, onChange, onSend, onStop, ready, p
           className="h-8 w-8 rounded-full text-lg hover:bg-white/10 disabled:opacity-40 focus-visible:outline-blue-400">＋</button>}
         {permissionControl}
         <label className="ml-auto"> <span className="sr-only">Model</span>
-          <select aria-label="Work model" value={selectedModel ? JSON.stringify([draft.providerId, draft.modelId]) : ""}
+          <select aria-label="Work model" value={draft.providerId && draft.modelId ? JSON.stringify([draft.providerId, draft.modelId]) : ""}
             disabled={pending || streaming} className="max-w-52 rounded bg-[#333131] p-1 focus-visible:outline-blue-400"
             onChange={(event) => {
               const model = models.find((item) => JSON.stringify([item.providerId, item.modelId]) === event.target.value);
-              if (model) onChange({ ...draft, providerId: model.providerId, modelId: model.modelId, variant: "" });
+              if (model) onChange({ ...draft, providerId: model.providerId, modelId: model.modelId, variant: "", selectionOrigin: "explicit" });
             }}>
             <option value="" disabled>Select model</option>
+            {!selectedModel && draft.providerId && draft.modelId && <option value={JSON.stringify([draft.providerId, draft.modelId])} disabled>Unavailable: {draft.providerId} / {draft.modelId}</option>}
             {models.map((model) => <option key={JSON.stringify([model.providerId, model.modelId])}
               value={JSON.stringify([model.providerId, model.modelId])}>{model.label}</option>)}
           </select>
         </label>
-        {selectedModel?.variants?.length ? <select aria-label="Reasoning effort" value={draft.variant} disabled={pending || streaming}
-          className="rounded bg-[#333131] p-1" onChange={(event) => onChange({ ...draft, variant: event.target.value })}>
+        {selectedModel?.variants?.length || draft.variant ? <select aria-label="Reasoning effort" value={draft.variant} disabled={pending || streaming}
+          className="rounded bg-[#333131] p-1" onChange={(event) => onChange({ ...draft, variant: event.target.value, selectionOrigin: "explicit" })}>
           <option value="">Default reasoning</option>
-          {selectedModel.variants.map((variant) => <option key={variant}>{variant}</option>)}
-        </select> : draft.variant ? <span>Reasoning: {draft.variant}</span> : null}
+          {draft.variant && !selectedModel?.variants?.includes(draft.variant) && <option value={draft.variant} disabled>Unavailable effort: {draft.variant}</option>}
+          {selectedModel?.variants?.map((variant) => <option key={variant}>{variant}</option>)}
+        </select> : null}
         {voiceControl}
         {streaming ? <button type="button" onClick={onStop} aria-label="Stop response" className="h-8 w-8 rounded-full bg-white text-black">■</button>
           : <button type="submit" disabled={!sendable} aria-label="Send message" className="h-8 w-8 rounded-full bg-blue-500 text-lg text-white disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-blue-300">↑</button>}

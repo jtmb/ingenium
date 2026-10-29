@@ -3,16 +3,24 @@
 import { useEffect, useState } from "react";
 import { useRuntime } from "@/lib/RuntimeContext";
 import { useRuntimeLaunch } from "@/lib/use-runtime-launch";
-import { workWebSessionUrl } from "./work-web";
+import { WORK_WEB_PROTOCOL, workWebSessionUrl } from "./work-web";
 
-export default function WorkWebFrame({ sessionId }: { sessionId: string | null }) {
-  const { workspace } = useRuntime();
-  const launch = useRuntimeLaunch("web", workspace, sessionId !== null);
+export interface WorkWebQualification {
+  protocol: typeof WORK_WEB_PROTOCOL;
+  runtimeId: string | null;
+  workspaceId: string | null;
+}
+
+export default function WorkWebFrame({ sessionId, qualification = null }: { sessionId: string | null; qualification?: WorkWebQualification | null }) {
+  const { workspace, runtimeId } = useRuntime();
+  const qualified = qualification?.protocol === WORK_WEB_PROTOCOL && qualification.runtimeId === runtimeId
+    && qualification.workspaceId === workspace.confirmedWorkspaceId;
+  const launch = useRuntimeLaunch("web", workspace, sessionId !== null && qualified);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   let url: string | null = null;
   let protocolError: string | null = null;
-  if (sessionId && launch.status === "ready" && launch.url) {
+  if (qualified && sessionId && launch.status === "ready" && launch.url) {
     try { url = workWebSessionUrl(launch.url, sessionId); }
     catch (error: unknown) { protocolError = error instanceof Error ? error.message : "Web session link is unavailable."; }
   }
@@ -25,6 +33,7 @@ export default function WorkWebFrame({ sessionId }: { sessionId: string | null }
 
   if (workspace.status !== "ready") return <p role="alert" className="p-6 text-sm">The selected runtime is unavailable. Reconnect its authorized workspace before opening Web.</p>;
   if (!sessionId) return <p role="status" className="p-6 text-sm text-neutral-400">Select a conversation in Work before opening its Web view.</p>;
+  if (!qualified) return <p role="status" className="p-6 text-sm text-neutral-400">The Web protocol is not yet qualified for this execution binding. Your Work conversation and draft remain available.</p>;
   if (protocolError || launch.status === "expired" || launch.status === "unavailable" || failedUrl === url && url !== null) {
     return <div role="alert" className="p-6 text-sm"><p>{protocolError ?? launch.error ?? "The Web session did not load in time."}</p>
       <p className="mt-2 text-neutral-400">The Work conversation and draft are retained. No replacement conversation was created.</p>

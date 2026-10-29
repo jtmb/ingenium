@@ -3,21 +3,25 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  push: vi.fn(), send: vi.fn(), chat: vi.fn(), config: vi.fn(), create: vi.fn(),
+  push: vi.fn(), replace: vi.fn(), query: "settings=general", send: vi.fn(), chat: vi.fn(), config: vi.fn(), create: vi.fn(),
   sessionReady: true, isStreaming: false, chatError: null as string | null,
+  nativeVariant: "", extraSessions: [] as Array<{ id: string; title: string }>,
+  connected: true,
 }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push }), useSearchParams: () => new URLSearchParams("settings=general") }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/work", useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
 vi.mock("../src/lib/AuthContext", () => ({ useAuth: () => ({ user: { id: "owner-a" } }) }));
 vi.mock("../src/lib/OrganizationContext", () => ({ useOrganization: () => ({ active: { id: "org-a" } }) }));
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "project-a" }));
-vi.mock("../src/lib/RuntimeContext", () => ({ useRuntime: () => ({
-  client: { chat: { config: state.config }, sessions: { diff: vi.fn() } },
+vi.mock("../src/lib/RuntimeContext", () => {
+  const client = { chat: { config: state.config }, sessions: { diff: vi.fn() } };
+  return { useRuntime: () => ({
+  client: state.connected ? client : null,
   runtimeId: "runtime-a", projectName: "project-a", workspace: { confirmedWorkspaceId: "workspace-a", mode: "isolated" },
-}) }));
+}) }; });
 vi.mock("../src/lib/use-opencode-sessions", () => ({ useOpenCodeSessions: () => ({
-  sessions: [{ id: "ses-a", title: "First task", model: { id: "model-a", providerID: "provider-a" } }, { id: "ses-b", title: "Second task", model: { id: "model-a", providerID: "provider-a" } }],
+  sessions: [{ id: "ses-a", title: "First task", model: { id: "model-a", providerID: "provider-a", variant: state.nativeVariant || undefined } }, { id: "ses-b", title: "Second task", model: { id: "model-a", providerID: "provider-a" } }, ...state.extraSessions],
   isLoading: false, isCreating: false, create: state.create,
 }) }));
 vi.mock("../src/lib/use-opencode-chat", () => ({ useOpenCodeChat: (id: string | null) => {
@@ -34,7 +38,9 @@ import WorkRuntime from "../src/app/components/veyra-work/WorkRuntime";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.sessionReady = true; state.isStreaming = false; state.chatError = null;
+  state.config.mockReset(); state.send.mockReset(); state.create.mockReset();
+  state.sessionReady = true; state.isStreaming = false; state.chatError = null; state.query = "settings=general";
+  state.nativeVariant = ""; state.extraSessions = []; state.connected = true;
   state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-a", modelId: "model-a" }, providers: [
     { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A" }] },
   ] });
@@ -73,28 +79,41 @@ describe("Work runtime boundary and conversation state", () => {
     expect(state.send).not.toHaveBeenCalled();
   });
 
-  it("retains failed sends without automatic replay and clears only acknowledged submissions", async () => {
-    state.send.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+  it("keeps an unknown admission blocked through Work/Web return without replay", async () => {
+    state.send.mockResolvedValueOnce(false);
     render(<WorkRuntime {...props} />);
     await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Exact original prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(state.send).toHaveBeenCalledTimes(1));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Exact original prompt");
-    await waitFor(() => expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
+    await waitFor(() => expect(screen.getByText(/This submission was not confirmed/)).toBeTruthy());
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(state.send).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Exact original prompt");
+  });
+
+  it("clears only a positively acknowledged prompt", async () => {
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Acknowledged exact prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""));
-    expect(state.send).toHaveBeenLastCalledWith([{ type: "text", text: "Exact original prompt" }], { model: { providerID: "provider-a", modelID: "model-a" } });
+    expect(state.send).toHaveBeenLastCalledWith([{ type: "text", text: "Acknowledged exact prompt" }], { model: { providerID: "provider-a", modelID: "model-a" } });
   });
 
   it("moves the pre-session draft only after New chat returns a confirmed identity", async () => {
-    state.create.mockResolvedValue("ses-a");
+    state.create.mockImplementation(async () => { state.extraSessions.push({ id: "ses-new", title: "Created task" }); return "ses-new"; });
     const view = render(<WorkRuntime {...props} initialSessionId={null} />);
     await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Draft before session creation" } });
     fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
-    await waitFor(() => expect(state.push).toHaveBeenCalledWith("/work?settings=general&session=ses-a&runtime=runtime-a&project=project-a", { scroll: false }));
-    view.rerender(<WorkRuntime {...props} />);
+    await waitFor(() => expect(state.push).toHaveBeenCalledWith("/work?settings=general&session=ses-new&runtime=runtime-a&project=project-a", { scroll: false }));
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-new" />);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Draft before session creation");
     expect(state.send).not.toHaveBeenCalled();
   });
@@ -117,5 +136,118 @@ describe("Work runtime boundary and conversation state", () => {
     await screen.findByText(/Connection lost before acknowledgement/);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Do not replay this prompt");
     expect(state.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("fills a contextual suggestion only into the draft, without admission or replacing existing text", async () => {
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.click(screen.getByRole("button", { name: "Assess the next step" }));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toContain("Assess the current task");
+    expect(state.send).not.toHaveBeenCalled();
+    expect(screen.queryByRole("navigation", { name: "Suggested next steps" })).toBeNull();
+  });
+
+  it("opens Settings in place with the existing scoped query and retains the Work draft", async () => {
+    state.query = "session=ses-a&runtime=runtime-a&project=project-a";
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Retain draft while configuring" } });
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(state.replace).toHaveBeenCalledWith("/work?session=ses-a&runtime=runtime-a&project=project-a&settings=general", { scroll: false });
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Retain draft while configuring");
+    expect(screen.getByRole("link", { name: "Customize" }).getAttribute("href")).toBe("/customize/plugins");
+  });
+
+  it("refreshes fresh defaults without losing draft text or changing an existing unavailable native model", async () => {
+    const nextConfig = { defaultSelection: { providerId: "provider-b", modelId: "model-b", variant: "medium" }, providers: [
+      { providerId: "provider-b", label: "Provider B", models: [{ id: "model-b", label: "Model B", variants: { medium: {} } }] },
+    ] };
+    const view = render(<WorkRuntime {...props} initialSessionId={null} />);
+    await waitFor(() => expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-a","model-a"]'));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep this unsent draft" } });
+    state.config.mockResolvedValue(nextConfig);
+    fireEvent(window, new Event("veyra-chat-defaults-changed"));
+    await waitFor(() => expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-b","model-b"]'));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Keep this unsent draft");
+    expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("medium");
+    view.rerender(<WorkRuntime {...props} />);
+    expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-a","model-a"]');
+    expect(screen.getByRole("option", { name: "Unavailable: provider-a / model-a" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("retains native effort and refreshes supported choices, without applying new default effort", async () => {
+    state.nativeVariant = "high";
+    state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-a", modelId: "model-a", variant: "medium" }, providers: [
+      { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A", variants: { high: {}, medium: {} } }] },
+    ] });
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByRole("option", { name: "high" })).toBeTruthy());
+    expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("high");
+    fireEvent(window, new Event("veyra-chat-defaults-changed"));
+    await waitFor(() => expect(state.config).toHaveBeenCalledTimes(2));
+    expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("high");
+  });
+
+  it("recovers unknown defaults by a read without creating or selecting a substitute session", async () => {
+    state.config.mockRejectedValueOnce(new Error("Defaults unavailable"));
+    render(<WorkRuntime {...props} initialSessionId={null} />);
+    await screen.findByRole("button", { name: "Reload model configuration" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Preserve before recovery" } });
+    expect((screen.getByRole("button", { name: /New chat/ }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Reload model configuration" }));
+    await waitFor(() => expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-a","model-a"]'));
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Preserve before recovery");
+    expect(state.create).not.toHaveBeenCalled(); expect(state.push).not.toHaveBeenCalled(); expect(state.send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reused creation identity and retains the original without a second creation", async () => {
+    state.create.mockResolvedValue("ses-a");
+    render(<WorkRuntime {...props} initialSessionId={null} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: /New chat/ }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Do not overwrite an existing task" } });
+    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    await screen.findByText(/Creation returned an existing conversation identity/);
+    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    expect(state.create).toHaveBeenCalledTimes(1); expect(state.push).not.toHaveBeenCalled(); expect(state.send).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Do not overwrite an existing task");
+  });
+
+  it("honors a parent pending-admission block and renders its existing controller without sending", async () => {
+    render(<WorkRuntime {...props} submissionBlockedReason="Resolve the retained native original first." admissionControl={<button type="button">Read native admission</button>} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Retain while native controller checks" } });
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /New chat/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Read native admission" })).toBeTruthy();
+    expect(state.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps navigation and the parent admission witness available when disconnected", () => {
+    state.connected = false;
+    render(<WorkRuntime {...props} admissionControl={<p>Retained native original</p>} />);
+    expect(screen.getByText("Workspace picker")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Chat" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Customize" }).getAttribute("href")).toBe("/customize/plugins");
+    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
+    expect(screen.getByText("Retained native original")).toBeTruthy();
+    expect(state.config).not.toHaveBeenCalled(); expect(state.chat).not.toHaveBeenCalled();
+  });
+
+  it("seeds a newly created session from installation defaults rather than the prior chat choice", async () => {
+    state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-b", modelId: "model-b", variant: "medium" }, providers: [
+      { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A" }] },
+      { providerId: "provider-b", label: "Provider B", models: [{ id: "model-b", label: "Model B", variants: { medium: {} } }] },
+    ] });
+    state.create.mockImplementation(async () => { state.extraSessions.push({ id: "ses-new", title: "Created task" }); return "ses-new"; });
+    const view = render(<WorkRuntime {...props} />);
+    await waitFor(() => expect((screen.getByRole("button", { name: /New chat/ }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-a","model-a"]');
+    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    await waitFor(() => expect(state.push).toHaveBeenCalled());
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-new" />);
+    expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-b","model-b"]');
+    expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("medium");
+    expect(state.send).not.toHaveBeenCalled();
   });
 });

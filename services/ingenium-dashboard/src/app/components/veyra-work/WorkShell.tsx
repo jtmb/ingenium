@@ -3,7 +3,8 @@
 import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { workFeatures } from "./work-state";
+import { visibleWorkFeatures } from "./work-state";
+import SettingsLauncher from "../settings/SettingsLauncher";
 
 export interface WorkConversation { id: string; title: string; pinned?: boolean; busy?: boolean }
 export interface WorkProject { id: string; label: string; conversations: WorkConversation[] }
@@ -19,12 +20,13 @@ function narrowScreen() { return typeof window.matchMedia === "function" && wind
 function serverScreen() { return false; }
 
 export default function WorkShell({ projectLabel, projects, conversations, activeId, onSelect, onNew,
-  children, composer, web, status, tools, dot, newPending = false, onPresentationChange,
+  children, composer, web, status, tools, dot, newPending = false, onPresentationChange, installationAdmin = false,
 }: {
   projectLabel: string; projects: WorkProject[]; conversations: WorkConversation[]; activeId: string | null;
   onSelect: (id: string) => void; onNew: () => void; children: ReactNode; composer: ReactNode;
   web: ReactNode; status?: ReactNode; tools?: ReactNode; dot?: ReactNode; newPending?: boolean;
   onPresentationChange?: (view: "work" | "web") => void;
+  installationAdmin?: boolean;
 }) {
   const [view, setView] = useState<"work" | "web">("work");
   const [webVisited, setWebVisited] = useState(false);
@@ -49,11 +51,12 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
         onClick={() => setSidebar(!sidebar)} className="rounded-lg p-2 hover:bg-white/10 focus-visible:outline-blue-400">
         <Image src="/veyra-blue.png" alt="Veyra" width={24} height={24} />
       </button>
+      <Link href="/chat" aria-label="Chat" className="rounded p-2 hover:bg-white/10">◧</Link>
       <Link href="/tasks" aria-label="Tasks" className="rounded p-2 hover:bg-white/10">▤</Link>
       <Link href="/jobs" aria-label="Jobs" className="rounded p-2 hover:bg-white/10">◷</Link>
-      <Link href="/plugins" aria-label="Customize" className="rounded p-2 hover:bg-white/10">⊞</Link>
+      <Link href="/customize/plugins" aria-label="Customize" className="rounded p-2 hover:bg-white/10">⊞</Link>
       <button type="button" aria-label="Browse features" aria-expanded={features} onClick={() => setFeatures(!features)} className="rounded p-2 hover:bg-white/10">•••</button>
-      <Link href="/settings" aria-label="Settings" className="mt-auto rounded p-2 hover:bg-white/10">⚙</Link>
+      <div className="mt-auto"><SettingsLauncher /></div>
     </nav>
     {sidebar && <aside id="veyra-work-sidebar" aria-label="Projects and conversations" className={`flex ${selectedSize.className} max-w-[40vw] shrink-0 flex-col border-r border-white/5 bg-[#1c1a1a] p-2 max-sm:max-w-[45vw]`}>
       <div className="px-2 py-2 text-sm font-semibold">Veyra</div>
@@ -103,7 +106,7 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
       </header>
       {status}
       {features && <section aria-label="Feature directory" className="max-h-64 overflow-auto border-y border-white/10 bg-[#242222] p-4">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{workFeatures.map((feature) => <Link key={feature.href} href={feature.href} className="rounded-lg p-2 hover:bg-white/5 focus-visible:outline-blue-400">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{visibleWorkFeatures(installationAdmin).map((feature) => feature.href === "/settings" ? <div key={feature.href} className="rounded-lg p-2"><SettingsLauncher /><p className="text-xs text-neutral-400">{feature.description}</p></div> : <Link key={feature.href} href={feature.href} className="rounded-lg p-2 hover:bg-white/5 focus-visible:outline-blue-400">
           <strong className="text-sm">{feature.label}</strong><p className="text-xs text-neutral-400">{feature.description}</p>
         </Link>)}</div>
       </section>}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canSendWork, emptyWorkDraft, initialWorkDraft, workAttachmentError, workDraftKey } from '../../services/ingenium-dashboard/src/app/components/veyra-work/work-state.ts';
+import { availableWorkSelection, canSendWork, currentWorkDraft, emptyWorkDraft, initialWorkDraft, newWorkDraft, visibleWorkFeatures, workAttachmentError, workDraftKey, workModels } from '../../services/ingenium-dashboard/src/app/components/veyra-work/work-state.ts';
 
 const identity = { instanceId: 'installation-a', ownerId: 'owner-a', organizationId: 'org-a', projectId: 'project-a', runtimeId: 'runtime-a', workspaceId: 'workspace-a', sessionId: 'session-a' };
 
@@ -56,4 +56,38 @@ test('existing native session model and effort survive different installation de
   assert.equal(unknown.providerId, '');
   assert.equal(unknown.modelId, '');
   assert.equal(unknown.variant, '');
+});
+
+test('default refresh updates only a fresh default-derived selection and preserves text and references', () => {
+  const stored = { ...initialWorkDraft(null, undefined, { providerId: 'old', modelId: 'old' }), text: 'Keep original', skillIds: ['explicit-skill'] };
+  const next = initialWorkDraft(null, undefined, { providerId: 'new', modelId: 'new', variant: 'medium' });
+  const changed = currentWorkDraft(stored, next, null);
+  assert.equal(changed.providerId, 'new'); assert.equal(changed.variant, 'medium');
+  assert.equal(changed.text, 'Keep original'); assert.deepEqual(changed.skillIds, ['explicit-skill']);
+  const explicit = { ...stored, selectionOrigin: 'explicit' };
+  assert.equal(currentWorkDraft(explicit, next, null), explicit);
+  assert.equal(currentWorkDraft(stored, next, 'existing-session'), stored);
+});
+
+test('variant choices follow qualified catalog metadata and only fresh unsupported defaults are recovered', () => {
+  const models = workModels([{ providerId: 'provider', label: 'Provider', models: [{ id: 'model', label: 'Model', variants: { high: { reasoningEffort: 'high' }, medium: {} } }] }]);
+  assert.deepEqual(models[0].variants, ['high', 'medium']);
+  const valid = newWorkDraft({ providerId: 'provider', modelId: 'model', variant: 'high' }, models);
+  assert.equal(availableWorkSelection(valid.draft, models), true);
+  const recovered = newWorkDraft({ providerId: 'provider', modelId: 'model', variant: 'removed' }, models);
+  assert.equal(recovered.draft.variant, ''); assert.equal(recovered.unsupportedVariant, 'removed');
+  const native = initialWorkDraft('existing', { providerID: 'provider', id: 'model', variant: 'removed' }, null);
+  assert.equal(native.variant, 'removed'); assert.equal(availableWorkSelection(native, models), false);
+  assert.equal(availableWorkSelection({ ...native, modelId: 'missing' }, models), false);
+});
+
+test('feature discovery preserves existing routes and the installation-admin presentation boundary', () => {
+  const member = visibleWorkFeatures(false);
+  const admin = visibleWorkFeatures(true);
+  assert.ok(member.some((feature) => feature.href === '/chat'));
+  assert.ok(member.some((feature) => feature.href === '/customize/plugins'));
+  assert.ok(member.some((feature) => feature.href === '/projects'));
+  assert.ok(member.every((feature) => !feature.adminOnly));
+  assert.ok(admin.some((feature) => feature.href === '/backups'));
+  assert.ok(admin.some((feature) => feature.href === '/config'));
 });

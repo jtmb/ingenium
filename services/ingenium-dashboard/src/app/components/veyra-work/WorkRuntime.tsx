@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRuntime } from "@/lib/RuntimeContext";
@@ -9,16 +9,19 @@ import { useOrganization } from "@/lib/OrganizationContext";
 import { useProject } from "@/lib/ProjectContext";
 import { useOpenCodeSessions } from "@/lib/use-opencode-sessions";
 import { useOpenCodeChat } from "@/lib/use-opencode-chat";
-import type { ChatConfigResponse } from "@/lib/api";
 import RuntimeWorkspacePicker from "../RuntimeWorkspacePicker";
-import WorkWebFrame from "./WorkWebFrame";
+import WorkWebFrame, { type WorkWebQualification } from "./WorkWebFrame";
 import ChatMessages from "../../chat/components/ChatMessages";
 import ActivityDrawer from "../../chat/components/ActivityDrawer";
 import type { ActivitySelection } from "../../chat/components/chat-activity";
 import WorkShell from "./WorkShell";
 import WorkComposer from "./WorkComposer";
 import WorkChanges from "./WorkChanges";
-import { canSendWork, initialWorkDraft, workAttachmentError, workDraftKey, type WorkDraft } from "./work-state";
+import WorkArtifacts from "./WorkArtifacts";
+import { collectWorkArtifacts } from "./work-artifacts";
+import { workSuggestions } from "./work-suggestions";
+import { availableWorkSelection, canSendWork, currentWorkDraft, initialWorkDraft, newWorkDraft, workAttachmentError, workDraftKey, workModels, type WorkDraft } from "./work-state";
+import { useWorkChatConfig } from "./useWorkChatConfig";
 
 function readAttachment(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -30,24 +33,37 @@ function readAttachment(file: File): Promise<string> {
   });
 }
 
-export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject }: {
+export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject, webQualification = null, admissionControl, submissionBlockedReason = null }: {
   initialSessionId: string | null; requestedRuntime: string | null; requestedProject: string | null;
+  webQualification?: WorkWebQualification | null;
+  admissionControl?: ReactNode;
+  submissionBlockedReason?: string | null;
 }) {
   const runtime = useRuntime();
   const project = useProject();
-  if (!runtime.client) return <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Work" />;
+  const auth = useAuth();
+  const unavailable = (notice?: string) => <WorkShell projectLabel={runtime.projectName ?? project} projects={[]} conversations={[]} activeId={null}
+    installationAdmin={auth.installationAdmin}
+    onSelect={() => undefined} onNew={() => undefined} newPending composer={null}
+    web={<p role="status" className="p-6 text-sm">Connect the selected workspace before opening a Web conversation.</p>}>
+    {notice && <p role="alert" className="p-4 text-sm">{notice}</p>}
+    {submissionBlockedReason && <p role="status" className="p-4 text-sm">{submissionBlockedReason}</p>}{admissionControl}
+    <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Work" />
+  </WorkShell>;
+  if (!runtime.client) return unavailable();
   if ((requestedRuntime !== null && requestedRuntime !== (runtime.runtimeId ?? "compatibility"))
     || (requestedProject !== null && requestedProject !== (runtime.projectName ?? project))) {
-    return <div><p role="alert">This conversation belongs to another workspace. Select its project and runtime before opening it.</p>
-      <RuntimeWorkspacePicker controller={runtime.workspace} product="Veyra Work" /></div>;
+    return unavailable("This conversation belongs to another workspace. Select its project and runtime before opening it.");
   }
   return <BoundWorkRuntime key={JSON.stringify([runtime.runtimeId, runtime.projectName, runtime.workspace.confirmedWorkspaceId])}
-    initialSessionId={initialSessionId} />;
+    initialSessionId={initialSessionId} webQualification={webQualification} admissionControl={admissionControl} submissionBlockedReason={submissionBlockedReason} />;
 }
 
-function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | null }) {
+function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl, submissionBlockedReason }: {
+  initialSessionId: string | null; webQualification: WorkWebQualification | null; admissionControl?: ReactNode; submissionBlockedReason: string | null;
+}) {
   const runtime = useRuntime();
-  const { user } = useAuth();
+  const { user, installationAdmin } = useAuth();
   const organization = useOrganization();
   const project = useProject();
   const router = useRouter();
@@ -67,16 +83,17 @@ function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | nul
     queueMicrotask(() => { if (current) setRehydrate(false); });
     return () => { current = false; };
   }, [rehydrate]);
-  const [config, setConfig] = useState<ChatConfigResponse | null>(null);
-  const [configError, setConfigError] = useState<string | null>(null);
+  const { config, loading: configLoading, error: configError, refresh: refreshConfig } = useWorkChatConfig(runtime.client!);
   const [drafts, setDrafts] = useState<Record<string, WorkDraft>>({});
   const [pending, setPending] = useState(false);
   const [navigationPending, startNavigation] = useTransition();
   const [unconfirmed, setUnconfirmed] = useState<Record<string, string>>({});
+  const [creationUnknown, setCreationUnknown] = useState<string | null>(null);
   const sendLock = useRef(false);
   const attachmentInput = useRef<HTMLInputElement>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [review, setReview] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
   const [diff, setDiff] = useState<{ sessionId: string; value: unknown } | null>(null);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [diffPending, setDiffPending] = useState(false);
@@ -85,19 +102,14 @@ function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | nul
   const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: runtime.projectName ?? project,
     runtimeId: runtime.runtimeId ?? "compatibility", workspaceId: runtime.workspace.confirmedWorkspaceId ?? "", sessionId: initialSessionId };
   const draftKey = workDraftKey(identity);
-  const defaultDraft = initialWorkDraft(initialSessionId, active?.model, config?.defaultSelection ?? null);
-  const draft = drafts[draftKey] ?? defaultDraft;
-  const models = config?.providers.flatMap((provider) => provider.models.map((model) => ({
-    providerId: provider.providerId, modelId: model.id, label: `${provider.label} / ${model.label}`,
-  }))) ?? [];
-  const modelAvailable = models.some((model) => model.providerId === draft.providerId && model.modelId === draft.modelId);
-
-  useEffect(() => {
-    let current = true;
-    runtime.client!.chat.config().then((value) => { if (current) setConfig(value); })
-      .catch((error: unknown) => { if (current) setConfigError(error instanceof Error ? error.message : "Model configuration unavailable"); });
-    return () => { current = false; };
-  }, [runtime.client]);
+  const models = workModels(config?.providers ?? []);
+  const freshDefault = newWorkDraft(config?.defaultSelection ?? null, models);
+  const defaultDraft = initialSessionId === null ? freshDefault.draft : initialWorkDraft(initialSessionId, active?.model, null);
+  const protectedDraft = pending || Boolean(unconfirmed[draftKey]) || creationUnknown !== null;
+  const draft = protectedDraft ? drafts[draftKey] ?? defaultDraft : currentWorkDraft(drafts[draftKey], defaultDraft, initialSessionId);
+  const modelAvailable = availableWorkSelection(draft, models);
+  const createDraft = initialSessionId === null ? draft : freshDefault.draft;
+  const creationAvailable = !submissionBlockedReason && !configLoading && !configError && availableWorkSelection(createDraft, models) && creationUnknown === null;
 
   const select = (id: string) => {
     const next = new URLSearchParams(params.toString());
@@ -105,31 +117,38 @@ function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | nul
     startNavigation(() => router.push(`/work?${next.toString()}`, { scroll: false }));
   };
   const create = async () => {
-    if (sendLock.current || sessions.isCreating || navigationPending) return;
+    if (sendLock.current || sessions.isCreating || navigationPending || !creationAvailable) return;
     const originalKey = draftKey;
-    const original = draft;
+    const original = createDraft;
+    const existingIds = sessions.sessions.map((session) => session.id);
+    if (initialSessionId === null) setDrafts((current) => ({ ...current, [originalKey]: original }));
     sendLock.current = true; setPending(true);
     try {
       const id = await sessions.create("New conversation");
       if (id) {
-        if (initialSessionId === null) {
-          const nextKey = workDraftKey({ ...identity, sessionId: id });
-          setDrafts((current) => {
-            const next = { ...current, [nextKey]: original };
-            delete next[originalKey];
-            return next;
-          });
+        if (existingIds.includes(id)) {
+          setCreationUnknown("Creation returned an existing conversation identity. Its history and your original draft are protected; review native admission before continuing.");
+          return;
         }
+        const nextKey = workDraftKey({ ...identity, sessionId: id });
+        setDrafts((current) => {
+          const next = { ...current, [nextKey]: original };
+          if (initialSessionId === null) delete next[originalKey];
+          return next;
+        });
         select(id);
-      }
+      } else setCreationUnknown("New conversation creation was not confirmed. Review the native admission record before trying again. Your original draft is retained.");
+    } catch (error: unknown) {
+      setCreationUnknown(error instanceof Error ? `New conversation creation is unconfirmed: ${error.message}` : "New conversation creation is unconfirmed. Its original remains protected.");
     } finally { sendLock.current = false; setPending(false); }
   };
   const send = async () => {
-    if (sendLock.current || !modelAvailable || !canSendWork({ ready: !rehydrate && chat.sessionReady && !chat.error, pending: pending || navigationPending || chat.isStreaming, draft })) return;
+    if (sendLock.current || submissionBlockedReason || protectedDraft || configLoading || configError || !modelAvailable || !canSendWork({ ready: !rehydrate && chat.sessionReady && !chat.error, pending: pending || navigationPending || chat.isStreaming, draft })) return;
     sendLock.current = true;
     setPending(true);
     const original = draft;
     const originalKey = draftKey;
+    setDrafts((current) => ({ ...current, [originalKey]: original }));
     try {
       const accepted = await chat.send([
         ...(original.text.trim() ? [{ type: "text" as const, text: original.text }] : []),
@@ -145,7 +164,7 @@ function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | nul
     } finally { sendLock.current = false; setPending(false); }
   };
   const attach = async (files: File[]) => {
-    if (!files.length || sendLock.current || pending || navigationPending || chat.isStreaming) return;
+    if (!files.length || protectedDraft || sendLock.current || pending || navigationPending || chat.isStreaming) return;
     const error = workAttachmentError(draft.attachments.length, files);
     setAttachmentError(error);
     if (error) return;
@@ -169,34 +188,52 @@ function BoundWorkRuntime({ initialSessionId }: { initialSessionId: string | nul
     finally { setDiffPending(false); }
   };
   const conversations = sessions.sessions.map((session) => ({ id: session.id, title: session.title }));
+  const artifacts = collectWorkArtifacts(chat.messages);
+  const suggestions = workSuggestions({ hasSession: activeId !== null, hasFiles: artifacts.length > 0,
+    hasChanges: diff !== null && diff.sessionId === activeId && Array.isArray(diff.value) && diff.value.length > 0, hasError: Boolean(chat.error) });
   return <WorkShell projectLabel={runtime.projectName ?? project} projects={[{ id: identity.projectId, label: identity.projectId, conversations }]}
+    installationAdmin={installationAdmin}
     conversations={conversations} activeId={activeId} onSelect={select} onNew={() => { void create(); }}
     onPresentationChange={(view) => { setPresentation(view); if (view === "work") setRehydrate(true); }}
-    newPending={sessions.isCreating || sessions.isLoading || navigationPending}
-    tools={<button type="button" disabled={!activeId || diffPending} onClick={() => { void loadDiff(); }} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Review changes</button>}
+    newPending={pending || sessions.isCreating || sessions.isLoading || navigationPending || !creationAvailable}
+    tools={<><button type="button" disabled={!activeId} onClick={() => setFilesOpen(!filesOpen)} aria-expanded={filesOpen} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Files</button>
+      <button type="button" disabled={!activeId || diffPending} onClick={() => { void loadDiff(); }} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Review changes</button></>}
     status={<div aria-live="polite" className="px-4 text-xs text-neutral-400">
       {sessions.isLoading && <p>Loading conversations…</p>}
       {navigationPending && <p>Opening the selected conversation…</p>}
       {!sessions.isLoading && initialSessionId && !active && <p role="alert">The requested conversation is unavailable in this workspace.</p>}
       {(sessions.error || configError) && <p role="alert">{sessions.error ?? configError}</p>}
+      {configError && <button type="button" onClick={() => { void refreshConfig(); }} className="my-2 rounded border border-white/10 px-3 py-2">Reload model configuration</button>}
+      {creationUnknown && <p role="alert">{creationUnknown}</p>}
+      {submissionBlockedReason && <p role="status">{submissionBlockedReason}</p>}{admissionControl}
       {attachmentError && <p role="alert">{attachmentError}</p>}
       {unconfirmed[draftKey] && <p role="alert">This submission was not confirmed: {unconfirmed[draftKey]} Inspect the conversation history before sending again. Veyra has retained the original and will not resend automatically.</p>}
-      {!config && !configError && <p>Loading model configuration…</p>}
-      {config && !modelAvailable && <p>Select an available model before sending. Saved defaults have not been changed.</p>}
+      {configLoading && <p>Loading model configuration…</p>}
+      {config && !modelAvailable && <p>Select an available model and supported effort before sending. The exact existing selection is retained; saved defaults have not been changed.</p>}
+      {config && !creationAvailable && !configLoading && !configError && !creationUnknown && !submissionBlockedReason && <p>New chats need an available installation default or an explicit new-draft selection. Review the default in Settings General.</p>}
+      {freshDefault.unsupportedVariant && initialSessionId === null && draft.selectionOrigin !== "explicit" && <p>Saved default effort {freshDefault.unsupportedVariant} is unavailable. This new conversation will use model-default reasoning; saved settings are unchanged.</p>}
     </div>}
     web={<><p className="border-b border-white/10 px-4 py-2 text-xs text-neutral-400">
       Unchanged upstream OpenCode Web{active ? ` · ${active.title}` : ""}. The selected Work conversation is linked using the pinned 2.0.11 session route.
-    </p><WorkWebFrame sessionId={activeId} /></>}
-    composer={<><input ref={attachmentInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown" className="hidden" aria-label="Choose Work attachments"
+    </p><WorkWebFrame sessionId={activeId} qualification={webQualification} /></>}
+    composer={<>{!draft.text && !protectedDraft && !pending && !navigationPending && !chat.isStreaming && <nav aria-label="Suggested next steps" className="mx-auto flex w-full max-w-[740px] flex-wrap gap-2 px-4 pb-3">
+      {suggestions.map((suggestion) => <button key={suggestion.id} type="button" title={suggestion.reason}
+        onClick={() => setDrafts((current) => ({ ...current, [draftKey]: { ...draft, text: suggestion.prompt } }))}
+        className="rounded-full border border-white/10 px-3 py-2 text-xs text-neutral-400 hover:bg-white/5 focus-visible:outline-blue-400">{suggestion.label}</button>)}
+    </nav>}<input ref={attachmentInput} type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,text/plain,text/markdown" className="hidden" aria-label="Choose Work attachments"
       onChange={(event) => { const files = Array.from(event.target.files ?? []); event.target.value = ""; void attach(files); }} />
-    <WorkComposer key={draftKey} draft={draft} onChange={(value) => setDrafts((current) => ({ ...current, [draftKey]: value }))}
+    <WorkComposer key={draftKey} draft={draft} onChange={(value) => { if (!protectedDraft) setDrafts((current) => ({ ...current, [draftKey]: value })); }}
       onAttach={() => attachmentInput.current?.click()}
       onSend={() => { void send(); }} onStop={() => { void chat.stop(); }} models={models}
-      ready={!rehydrate && chat.sessionReady && !chat.error && modelAvailable} pending={pending || navigationPending} streaming={chat.isStreaming}
+      ready={!submissionBlockedReason && !protectedDraft && !rehydrate && !configLoading && !configError && chat.sessionReady && !chat.error && modelAvailable} pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
       projectControl={<span>▱ {runtime.projectName ?? project}</span>}
       environmentControl={<span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
       permissionControl={<span>Runtime permissions</span>} /></>}
   >
+    {filesOpen && <section aria-label="Conversation artifacts" className="m-4 rounded-xl border border-white/10 p-4">
+      <div className="flex items-center justify-between"><h2 className="text-sm">Conversation files</h2><button type="button" onClick={() => setFilesOpen(false)} aria-label="Close files">×</button></div>
+      <WorkArtifacts key={activeId} artifacts={artifacts} />
+    </section>}
     {review && <section aria-label="Conversation changes" className="m-4 rounded-xl border border-white/10 p-4">
       <div className="flex items-center justify-between"><h2 className="text-sm">Conversation changes</h2><button type="button" onClick={() => setReview(false)} aria-label="Close changes">×</button></div>
       {diffPending ? <p role="status">Loading changes…</p> : diffError ? <p role="alert">{diffError}</p>

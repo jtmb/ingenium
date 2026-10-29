@@ -2,6 +2,8 @@
 
 These are requests, not edits outside the Work UI writer territory. Current code deliberately uses isolated local consumer types; it does not freeze global DTOs.
 
+Coordinator reported root immersive/mode wiring implemented after5ec99987 source integration. Treat the corresponding rows below as integrated checks awaiting final runtime/visual acceptance, rather than permission for Work to edit those shared paths. Work now uses in-place SettingsLauncher, Customize Plugins route, and usable navigation around unavailable workspace states. The feature directory mirrors existing Navigation routes and its Backups/Logs/Status/Config installation-admin presentation filter; a future shared exported registry should replace this local projection under coordinator ownership.
+
 | Owner / path | Minimal integration action | Acceptance |
 | --- | --- | --- |
 | Coordinator `components/MainContainer.tsx` | Include `/work` in immersive routes | Full-height canvas and bottom composer at reference viewport and 100–200% scaling |
@@ -16,7 +18,7 @@ These are requests, not edits outside the Work UI writer territory. Current code
 
 The stream's original dispositions remain open. F01/F03/F04 conversation presentation uses real existing hooks, including tool and permission/question rendering. F02/F06/F07 navigation is isolated and awaits the shared project/sidebar catalog. F29 delegates existing editor behavior through its real VS Code route. F32 supplies real session diff unified/split/source views and legacy before/after text; branch selection/hunk mutation/commit/push/PR/inline review (F32–F34) require the Projects/execution APIs and coordinator ownership resolution. The parallel plan table assigns Git to Projects while the machine-readable map assigns F32–F34 to Work UI; request an explicit contract/ownership resolution before cross-stream writes.
 
-F45 context suggestions; F51/F53 shared browser sessions and annotations; F56 image generation/editing (image inputs implemented); F57 rich document/spreadsheet/slide/PDF/LaTeX artifact editing/export; F58 interactive artifact preview; F59 Sites lifecycle; F60 maps/custom assistant catalog; F66 optional pets/overlays are **not implemented or accepted by this slice**. Their UI needs real permission-aware service/operation contracts. Existing Docs/VS Code links are capability preservation, not a substitute for these requested deliverables. No original disposition is removed or silently deferred.
+F45 now has observed-context draft-only suggestions. F56 includes image input and read-only raster preview/export. F57 includes read-only conversation text/code/Markdown/JSON/PDF viewing and explicit source/data export. These additions do not accept rich office/LaTeX editing, image generation/editing or all artifact workflows. F51/F53 shared browser sessions and annotations; remaining F56/F57 operations; F58 interactive artifact preview; F59 Sites lifecycle; F60 maps/custom assistant catalog; F66 optional pets/overlays remain **open**. Their UI needs real permission-aware service/operation contracts. Existing Docs/VS Code links are capability preservation, not substitutes for these requested deliverables. No original disposition is removed or silently deferred.
 
 ## Required verification
 
