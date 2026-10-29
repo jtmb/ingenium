@@ -1,0 +1,1076 @@
+{
+  "schemaVersion": 1,
+  "status": "approved-eight-streams-integration-in-progress",
+  "coordinator": {
+    "threadId": "01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",
+    "role": "Integration, defaults, shared contracts, build queue, migrations, publication, deployment and final attended Computer Use",
+    "model": "gpt-6.1-sol",
+    "reasoningEffort": "high"
+  },
+  "sourceBaseline": "99eed8c6c0b47a043ec90d83e96f54f4f5cc2429",
+  "nativeBaseline": "61c99f8e649da85b600fccec93236b5d6b07f78b",
+  "checkoutCount": {
+    "application": 9,
+    "native": 3,
+    "charts": 1,
+    "total": 13,
+    "existing": 4,
+    "additionalAfterApproval": 9
+  },
+  "workerChatCount": 8,
+  "additionalWorkersDispatched": true,
+  "phaseAcceptance": false,
+  "fullGoalComplete": false,
+  "sourceStorage": {
+    "reuseExistingApprovedPairedRoot": true,
+    "ceilingBytes": 21474836480,
+    "minimumFreeBytes": 16106127360,
+    "perNewSourceCheckoutAllowanceBytes": 67108864,
+    "bulkBuilds": "Coordinator lease only; no duplicate dependencies/targets/images"
+  },
+  "sharedFilesOwner": "coordinator",
+  "streams": [
+    {
+      "id": "work-ui",
+      "number": 1,
+      "name": "Work interface and Web toggle",
+      "branch": "codex/veyra-codex-workspace-plan",
+      "checkout": "codex-workspace-plan-source",
+      "writerPrefixes": [
+        "services/ingenium-dashboard/src/app/work/",
+        "services/ingenium-dashboard/src/app/components/veyra-work/",
+        "services/ingenium-dashboard/tests/veyra-work-",
+        "tests/ingenium-dashboard/veyra-work-",
+        "docs/workstreams/work-ui/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F02",
+        "F03",
+        "F04",
+        "F05",
+        "F13",
+        "F14",
+        "F15",
+        "F16",
+        "F17",
+        "F18",
+        "F29",
+        "F32",
+        "F33",
+        "F34",
+        "F45",
+        "F51",
+        "F53",
+        "F56",
+        "F57",
+        "F58",
+        "F59",
+        "F60",
+        "F66"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Implement the screenshot-matched Veyra Work shell, navigation, composer and working feature views, preserving exact conversation state when toggling to unchanged upstream OpenCode Web. Deliver accessible components, behavioral tests, documentation, source/evidence and cleanup within the assigned Work UI writer territory, ready for coordinator integration and final visual/runtime acceptance.",
+      "receipt": "coordination/work-ui/ownership.json",
+      "statusReceipt": "coordination/work-ui/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18934-d937-7813-8c48-5ae85aad4f18",
+      "hostId": "local"
+    },
+    {
+      "id": "projects",
+      "number": 2,
+      "name": "Projects and execution",
+      "branch": "codex/veyra-parallel-projects",
+      "checkout": "parallel/projects",
+      "writerPrefixes": [
+        "packages/veyra-projects/",
+        "crates/veyra-projects/",
+        "services/ingenium-api/lib/projects-v2/",
+        "services/ingenium-dashboard/src/app/components/projects-v2/",
+        "services/ingenium-api/tests/veyra-projects-",
+        "services/ingenium-dashboard/tests/veyra-projects-",
+        "docs/workstreams/projects/"
+      ],
+      "nativeSidecar": true,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F06",
+        "F07",
+        "F08",
+        "F09",
+        "F10",
+        "F11",
+        "F12",
+        "F30",
+        "F31",
+        "F35",
+        "F36",
+        "F62",
+        "F63",
+        "F64",
+        "F65"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Implement Codex-style folder/repository projects and projectless work, explicit native Windows/WSL/cluster execution bindings, terminals, Git and worktrees. Replace the global-project mechanism through a verified lossless migration design and isolated implementation separating installation settings from workspace ownership; preserve IDs/data/permissions. Deliver tests, migration-copy evidence, docs and cleanup ready for coordinator integration.",
+      "receipt": "coordination/projects/ownership.json",
+      "statusReceipt": "coordination/projects/status.json",
+      "nativeCheckout": "parallel/native-projects",
+      "nativeWriterPaths": [
+        "crates/adapters/src/projects.rs",
+        "crates/adapters/src/task_workspaces.rs",
+        "crates/adapters/src/workspace_archive.rs",
+        "docs/workstreams/projects/"
+      ],
+      "threadId": "01a18934-fe43-76a0-940e-6766d96f5770",
+      "hostId": "local"
+    },
+    {
+      "id": "memory",
+      "number": 3,
+      "name": "Memory and context",
+      "branch": "codex/veyra-parallel-memory",
+      "checkout": "parallel/memory",
+      "writerPrefixes": [
+        "packages/veyra-memory/",
+        "crates/veyra-memory/",
+        "services/ingenium-api/lib/memory-v2/",
+        "services/ingenium-dashboard/src/app/components/memory-v2/",
+        "services/ingenium-api/tests/veyra-memory-",
+        "services/ingenium-dashboard/tests/veyra-memory-",
+        "docs/workstreams/memory/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F19",
+        "F20",
+        "F49"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Implement the verified Codex-style memory lifecycle and per-chat controls while preserving Veyra explicit-memory/context/provenance, deletion receipts, tombstones and tenant/project/host isolation. Prove persistence, fresh-chat retrieval, exclusion and forget/restore suppression in scoped tests and controlled runtime when scheduled. Deliver docs, exact evidence and cleanup ready for coordinator integration.",
+      "receipt": "coordination/memory/ownership.json",
+      "statusReceipt": "coordination/memory/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18935-0219-7cc0-88be-368fa7fa330c",
+      "hostId": "local"
+    },
+    {
+      "id": "customize",
+      "number": 4,
+      "name": "Plugins and Skills",
+      "branch": "codex/veyra-parallel-customize",
+      "checkout": "parallel/customize",
+      "writerPrefixes": [
+        "packages/veyra-customize/",
+        "crates/veyra-customize/",
+        "services/ingenium-api/lib/customize-v2/",
+        "services/ingenium-dashboard/src/app/customize/",
+        "services/ingenium-dashboard/src/app/components/customize-v2/",
+        "services/ingenium-api/tests/veyra-customize-",
+        "services/ingenium-dashboard/tests/veyra-customize-",
+        "docs/workstreams/customize/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F40",
+        "F41",
+        "F42",
+        "F43",
+        "F44"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Implement the supplied screenshot-matched Plugins and Skills Customize layouts with real catalogs, scopes and truthful installed state. Preserve discovery, connection, editing, archive/restore, agents/MCP controls, proposals, synthesis and activation workflows. Deliver scoped UI/API modules, behavioral/permission/persistence tests, documentation, evidence and cleanup ready for coordinator integration.",
+      "receipt": "coordination/customize/ownership.json",
+      "statusReceipt": "coordination/customize/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18935-0723-7cc0-9ea1-5e70f5627cc5",
+      "hostId": "local"
+    },
+    {
+      "id": "rust-api",
+      "number": 5,
+      "name": "Rust and API foundation",
+      "branch": "codex/veyra-parallel-rust-api",
+      "checkout": "parallel/rust-api",
+      "writerPrefixes": [
+        "services/veyra-api/",
+        "crates/veyra-auth/",
+        "crates/veyra-runtime/",
+        "services/ingenium-api/tests/veyra-compatibility-",
+        "docs/workstreams/rust-api/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F21",
+        "F22",
+        "F23",
+        "F24",
+        "F25",
+        "F26",
+        "F27",
+        "F28",
+        "F37",
+        "F38",
+        "F39",
+        "F50",
+        "F61",
+        "F67"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Deliver the compatible Rust service foundation, authentication, authorization/capability boundary and progressive domain API migration interfaces. Preserve existing API/crypto/storage contracts, one database writer and Windows inference engine unchanged/excluded from Linux. Produce compatibility ADR, safe read-only slice and tested adapters; retain the recorded architecture approval gate before writable production cutover. Deliver docs/evidence/cleanup ready for coordinator integration.",
+      "receipt": "coordination/rust-api/ownership.json",
+      "statusReceipt": "coordination/rust-api/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18935-0bbb-7142-80a6-39b2b4e0407b",
+      "hostId": "local"
+    },
+    {
+      "id": "dot",
+      "number": 6,
+      "name": "Dot and automation",
+      "branch": "codex/veyra-parallel-dot",
+      "checkout": "parallel/dot",
+      "writerPrefixes": [
+        "packages/veyra-automation/",
+        "crates/veyra-automation/",
+        "services/ingenium-api/lib/dot-v2/",
+        "services/ingenium-dashboard/src/app/dot/",
+        "services/ingenium-dashboard/src/app/components/dot-v2/",
+        "services/ingenium-api/tests/veyra-dot-",
+        "services/ingenium-dashboard/tests/veyra-dot-",
+        "docs/workstreams/dot/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F46",
+        "F47",
+        "F48"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Implement Veyra Dot, scoped proactive suggestions, follow-ups, scheduled work, notifications, event queue and operation history. Prove cancellation, restart recovery, authorization, timezone/DST and missed-run behavior without external-message permission bypasses or a duplicate scheduler. Deliver scoped modules, tests, documentation, evidence and cleanup ready for coordinator integration.",
+      "receipt": "coordination/dot/ownership.json",
+      "statusReceipt": "coordination/dot/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18935-103f-7432-98b0-cd2c51f8c8ab",
+      "hostId": "local"
+    },
+    {
+      "id": "voice",
+      "number": 7,
+      "name": "Live voice and agent calls",
+      "branch": "codex/veyra-parallel-voice",
+      "checkout": "parallel/voice",
+      "writerPrefixes": [
+        "packages/veyra-voice/",
+        "crates/veyra-voice/",
+        "services/ingenium-api/lib/voice-v2/",
+        "services/ingenium-dashboard/src/app/voice/",
+        "services/ingenium-dashboard/src/app/components/voice-v2/",
+        "services/ingenium-api/tests/veyra-voice-",
+        "services/ingenium-dashboard/tests/veyra-voice-",
+        "docs/workstreams/voice/"
+      ],
+      "nativeSidecar": false,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F55"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Reuse qualified Stratus voice pipeline components to implement Veyra dictation, calls with the current working agent and live conversational voice: transcription, speech playback, barge-in/interruption, tool activity and reconnect with exact conversation/runtime scope. Preserve active Stratus source/work/hold. Deliver scoped adapters/UI, CPU tests, integration recipes, docs and cleanup for coordinator-scheduled real audio/device acceptance.",
+      "receipt": "coordination/voice/ownership.json",
+      "statusReceipt": "coordination/voice/status.json",
+      "nativeCheckout": null,
+      "nativeWriterPaths": null,
+      "threadId": "01a18935-1617-7d31-8e56-f77df7b6c756",
+      "hostId": "local"
+    },
+    {
+      "id": "packaging",
+      "number": 8,
+      "name": "Packaging and platform qualification",
+      "branch": "codex/veyra-parallel-packaging",
+      "checkout": "parallel/packaging",
+      "writerPrefixes": [
+        "packages/veyra-operations/",
+        "crates/veyra-operations/",
+        "services/ingenium-api/lib/operations-v2/",
+        "tools/veyra-release/",
+        "tests/veyra-release-",
+        "services/ingenium-api/tests/veyra-operations-",
+        "docs/workstreams/packaging/"
+      ],
+      "nativeSidecar": true,
+      "state": "active-goal-and-ownership-verified",
+      "featureIds": [
+        "F01",
+        "F52",
+        "F54",
+        "F68",
+        "H01",
+        "H02",
+        "H03",
+        "H04",
+        "H05",
+        "H06"
+      ],
+      "model": "gpt-6.1-sol",
+      "reasoningEffort": "medium",
+      "ownedGoal": "Deliver reproducible Windows/Linux Veyra packaging, platform/browser adapters, operations/integration compatibility checks and release evidence. Preserve the existing Windows inference engine/settings/models and exclude that engine from Linux; preserve original data/Secrets/rollback sources. Prepare exact-source release/qualification tooling and tested adapters, docs and cleanup for coordinator-controlled builds, deployment and final platform acceptance.",
+      "receipt": "coordination/packaging/ownership.json",
+      "statusReceipt": "coordination/packaging/status.json",
+      "nativeCheckout": "parallel/native-packaging",
+      "nativeWriterPaths": [
+        "tools/veyra-release/",
+        "crates/harness/tests/veyra_release_",
+        "docs/workstreams/packaging/"
+      ],
+      "threadId": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+      "hostId": "local"
+    }
+  ],
+  "features": [
+    {
+      "id": "F01",
+      "feature": "Windows EXE, installer/portable use, single instance, tray, load/unload/exit",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F02",
+      "feature": "Codex-style rail, sidebar, task header, composer and polished states",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F03",
+      "feature": "Keyboard commands, global search, menus, navigation history",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F04",
+      "feature": "Theme, accent/font customization, scaling and accessibility",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F05",
+      "feature": "Docked/movable tabs, split panes, pop-out and always-on-top windows",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F06",
+      "feature": "Local projects, projectless tasks, multiple roots and sources",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F07",
+      "feature": "Pin, rename, archive/restore, read/unread, sections and sorting",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F08",
+      "feature": "Import/export chats and project configuration without corrupting originals",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F09",
+      "feature": "Native Windows V2 tools and project-scoped terminals",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F10",
+      "feature": "WSL distro selection, attach/reconnect, Linux tools and terminals",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F11",
+      "feature": "Per-project/per-task environment and shell selection",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F12",
+      "feature": "Safe session/worktree handoff between execution locations",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F13",
+      "feature": "Streaming chat, Markdown/code, progress and collapsible tool activity",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F14",
+      "feature": "File/folder/image attachments, drag/drop, paste and references",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F15",
+      "feature": "Model/provider, agent mode, reasoning and sampling controls",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F16",
+      "feature": "Plan/build/review modes and custom agents",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F17",
+      "feature": "Interrupt, steer, queue/edit/cancel follow-ups and resume work",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F18",
+      "feature": "Interactive questions, forms and approval decisions",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F19",
+      "feature": "Context usage, output reservation, compaction and visible provenance",
+      "stream": "memory",
+      "finalVerifier": "coordinator",
+      "originalPhases": "4,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F20",
+      "feature": "Slash commands, instruction hierarchy and AGENTS.md editing",
+      "stream": "memory",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F21",
+      "feature": "Goals, pause/resume, budgets, milestones and completion verification",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F22",
+      "feature": "Parallel tasks, subagents, task forks and coordinated progress",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F23",
+      "feature": "Retry/error UX and recovery from engine, model or transport failure",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F24",
+      "feature": "Local model inventory and one consistent model lifecycle authority",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F25",
+      "feature": "Six current profiles and accurate quantization/vision/tool labels",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F26",
+      "feature": "Per-profile context sizes through 131072; no silent reductions",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F27",
+      "feature": "RAM, GPU allocations, CPU and measured inference timing",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F28",
+      "feature": "Endpoint copying, native/WSL provider routing, logs and diagnostics",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F29",
+      "feature": "File tree/search, code viewer/editor, symbol/diagnostic support",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F30",
+      "feature": "Terminal tabs, PTY resize/input, persistent sessions and output limits",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F31",
+      "feature": "Project run/build/test actions and environment setup scripts",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F32",
+      "feature": "Git status, branch selection, unified/split diffs and review scopes",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F33",
+      "feature": "Stage/revert file or hunk, commit/push and pull requests",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F34",
+      "feature": "Inline review comments, findings and links back to chat",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F35",
+      "feature": "Worktree creation, isolation, setup, inventory and conflict handling",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F36",
+      "feature": "Recoverable worktree archive/restore and cleanup",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F37",
+      "feature": "Workspace/read-only/full-access profiles and granular approvals",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,3",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F38",
+      "feature": "Genuine native Windows sandbox and WSL execution isolation",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F39",
+      "feature": "Model/provider credentials, OAuth and account switching",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F40",
+      "feature": "Plugin discovery/install/update/remove, local/private catalogs",
+      "stream": "customize",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F41",
+      "feature": "Skill discovery, install/edit, per-session access and instructions",
+      "stream": "customize",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F42",
+      "feature": "MCP local/remote servers, status, auth and tool visibility",
+      "stream": "customize",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F43",
+      "feature": "Hooks, references and project/global configuration editor",
+      "stream": "customize",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F44",
+      "feature": "GitHub/GitLab, research, office, mail/calendar and other connectors",
+      "stream": "customize",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F45",
+      "feature": "Context-aware suggested prompts and continuation suggestions",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F46",
+      "feature": "Scheduled tasks, templates, local/worktree jobs and run history",
+      "stream": "dot",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F47",
+      "feature": "Thread follow-ups/heartbeats, proactive assistant/dot workflow",
+      "stream": "dot",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F48",
+      "feature": "Timezone/DST, missed runs, notifications and task interruption",
+      "stream": "dot",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F49",
+      "feature": "Local/project memory, inspect/edit/delete, per-task control",
+      "stream": "memory",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,4",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F50",
+      "feature": "Session statistics, profile/activity, usage and budget displays",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F51",
+      "feature": "Shared browser tabs, navigation, history, downloads and sessions",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F52",
+      "feature": "Browser automation, DOM/screenshots and regular-browser attachment",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F53",
+      "feature": "Browser preview annotations, styling feedback and developer tools",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F54",
+      "feature": "Windows computer use and Appshots/screenshot attachments",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F55",
+      "feature": "Voice dictation, spoken task steering and realtime voice",
+      "stream": "voice",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F56",
+      "feature": "Image inputs and image generation/editing",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F57",
+      "feature": "PDF, document, spreadsheet, slide and LaTeX viewing/editing/export",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F58",
+      "feature": "Interactive visualizations, diagrams and artifact previews",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F59",
+      "feature": "Sites creation, preview, deployment, access controls and versions",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F60",
+      "feature": "Maps, custom assistant/GPT-style catalog and discoverable utilities",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F61",
+      "feature": "Code-review service and security scan/workbench/findings workflows",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F62",
+      "feature": "Remote host connections, pairing, project/task control and reconnect",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F63",
+      "feature": "Mobile/web task steering, approvals, review and attachments",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F64",
+      "feature": "Cloud tasks, hosted execution and environment management",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F65",
+      "feature": "Shared task links, immutable snapshots and collaborative projects/pages",
+      "stream": "projects",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F66",
+      "feature": "Optional pets/Mini overlays, quick chat and activity notifications",
+      "stream": "work-ui",
+      "finalVerifier": "coordinator",
+      "originalPhases": "6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F67",
+      "feature": "Privacy, export/delete, retention, account and relevant family/trusted-contact controls",
+      "stream": "rust-api",
+      "finalVerifier": "coordinator",
+      "originalPhases": "2,5,6",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "F68",
+      "feature": "Updates, rollback, licences, signed packages and diagnostics export",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,6,7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H01",
+      "feature": "Frozen fixture suites and independent verifier/holdout isolation",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1-7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H02",
+      "feature": "Exact runtime/model/context lock and protected hashes",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1-7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H03",
+      "feature": "Tool traces, actual patches, test artifacts and first-edit latency",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1-7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H04",
+      "feature": "Separate functional, context, coding-quality and performance gates",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1-7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H05",
+      "feature": "Filled-context/compaction, vision and Windows/WSL qualification suites",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1,2,6,7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    },
+    {
+      "id": "H06",
+      "feature": "Comparable runs, cancellation, redacted export and evidence provenance",
+      "stream": "packaging",
+      "finalVerifier": "coordinator",
+      "originalPhases": "1-7",
+      "originalDispositionRetained": true,
+      "accepted": false
+    }
+  ],
+  "preservedAcceptance": {
+    "legacyFeatures": 74,
+    "baselineViews": 47,
+    "settingsCategories": 20,
+    "windowsRows": 11
+  },
+  "newAcceptance": [
+    "Codex Work window",
+    "Codex Customize Plugins",
+    "Codex Customize Skills",
+    "Veyra Dot",
+    "Agent call",
+    "Live voice"
+  ],
+  "acceptanceReferences": [
+    {
+      "id": "work-window",
+      "stream": "work-ui",
+      "sha256": "8ae60026e2c79e07302a576d04d5c731431024c83b2329bdf6c76ff0e57dab08",
+      "width": 2559,
+      "height": 1439
+    },
+    {
+      "id": "voice-start",
+      "stream": "voice",
+      "sha256": "0a50e554525c0dbf189e1f7b7cf8fc6780314b8af440433e146767729b60eef5",
+      "width": 674,
+      "height": 501
+    },
+    {
+      "id": "voice-active",
+      "stream": "voice",
+      "sha256": "d3287e0f6af9bdbec1bded4255a214a1ea8f446e2aa5bf324b33c1d5c5a810bd",
+      "width": 1374,
+      "height": 707
+    },
+    {
+      "id": "customize-plugins",
+      "stream": "customize",
+      "sha256": "bd1414301baff800c2263b36b0a3505b93e1c46e819cf3b161373f19ab0cea05",
+      "width": 2560,
+      "height": 1392
+    },
+    {
+      "id": "customize-skills",
+      "stream": "customize",
+      "sha256": "4b026f21699c754420e35ec11606fa6fbc25fd1988edbcd8a6f02f8c06d1d416",
+      "width": 2560,
+      "height": 1392
+    }
+  ],
+  "effortPolicy": "All eight implementation chats use GPT-6.1 Sol / medium. Coordinator uses Sol / high for contract, security/migration review, final merge and acceptance. Do not raise every worker or restart a completed slice; use bounded coordinator review first and escalate only a specific demonstrated hard problem.",
+  "approval": {
+    "source": "Direct human: PLEASE IMPLEMENT THIS PLAN",
+    "at": "2026-10-29T19:43:28.5229177Z",
+    "goalPolicy": "Each worker establishes its actual scoped active goal; parent owns full delivery",
+    "model": "gpt-6.1-sol",
+    "workersEffort": "medium",
+    "coordinatorEffort": "high"
+  }
+}
