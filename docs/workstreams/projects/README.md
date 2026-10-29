@@ -43,7 +43,7 @@ export TMP="$TEMP" TMPDIR="$TEMP"
 node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-*.test.mjs services/ingenium-dashboard/tests/veyra-projects-*.test.mjs
 ```
 
-Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 29 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
+Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 44 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
 
 ## Migration and rollback
 
@@ -70,9 +70,9 @@ No row is accepted by this source milestone. The original 74 dispositions, 47 ba
 
 The verified native baseline already has `ProjectStore`, `task_workspaces`, `workspace_archive`, Git review/worktree routes and recovery snapshots. This stream leaves native source unchanged and consumes those owners instead of introducing alternate authority.
 
-The existing `routes/workbench.rs` exposes terminal list/create/get/input/close, but the inspected router has no resize endpoint. Do not advertise resize for that owner until a genuine PTY/resize capability and route are implemented and qualified by the native integration owner. The UI callback is a consumer port, not evidence of ConPTY support.
+The legacy workbench terminal router lacks resize, but the separate native interactive_terminal router already exposes ConPTY create/input/resize/close/receipts and pinned WSL shells. Use the concrete transport entrypoints in [native-integration.md](native-integration.md). Native source reports client reconnect retention, not service-restart survival. Real-machine qualification remains open.
 
-Reviewed Git worktree creation currently has a Windows-only admission. WSL/cluster worktree controls must remain unavailable until the selected owner advertises qualified support. The native WSL ownership prerequisite gates remain open.
+Native Git review/worktree creation is currently Windows-only. True native projectless execution is unsupported; /v1/scratch creates a real project and is never used as a null-project fallback. A small unapplied native receipt-fingerprint patch request is included for coordinator review; no native files were edited.
 
 ## Output reconciliation
 

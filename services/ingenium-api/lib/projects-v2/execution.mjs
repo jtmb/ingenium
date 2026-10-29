@@ -111,7 +111,7 @@ export class ExecutionOperations {
   }
   async reconcile(scope,request) {
     scope=immutableInput(scope);request=immutableInput(request);
-    const {operationId,projectId,action,target}=await this.admission(scope,request);
+    const {operationId,projectId,action,args,target}=await this.admission(scope,request);
     const scoped=scopeKey(scope);
     const requestHash=createHash("sha256").update(JSON.stringify(canonical(request))).digest("hex");
     const receipt=this.db.prepare(`SELECT * FROM veyra_project_operations
@@ -121,7 +121,7 @@ export class ExecutionOperations {
     if (receipt.state==="succeeded" || receipt.state==="failed") return {operationId,state:receipt.state,
       result:receipt.result_json===null ? null : JSON.parse(receipt.result_json)};
     requireValue(typeof this.readOperation==="function","RECONCILIATION_UNAVAILABLE",501);
-    const observed=await this.readOperation({scope,projectId,binding:target,action,operationId,requestHash});
+    const observed=await this.readOperation({scope,projectId,binding:target,action,args,operationId,requestHash});
     requireValue(observed && ["pending","succeeded","failed","unknown"].includes(observed.state),
       "INVALID_OWNER_RECEIPT",502);
     if (observed.state==="succeeded" || observed.state==="failed") {

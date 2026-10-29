@@ -1,6 +1,6 @@
 # Lossless global-project replacement
 
-Status: additive source proposal and tested schema/seeded-data fixtures; production cutover remains coordinator-owned and gated.
+Status: coordinator allocated projects migration 122 with organization/user FKs. This stream retains the draft as a standalone reference fixture; production cutover remains coordinator-owned and gated.
 
 ## Preservation design
 
@@ -37,7 +37,7 @@ Native project records stay native-owned through the adapter; these tables are n
 
 The dependency-free SQLite suite exercises:
 
-- Complete fresh canonical schema: 121 base migration files; four historical conditional upgrade variants are excluded because `packages/ingenium-core/lib/db.ts` chooses them only for older schema shapes.
+- Complete fresh canonical schema: lock the original 121 base files, then apply allocated later files without reapplying the draft if migration 122 already supplies the catalog; four historical conditional upgrade variants are excluded because `packages/ingenium-core/lib/db.ts` chooses them only for older schema shapes.
 - 220 existing tables unchanged after the additive draft/import, 118 legacy project-reference columns inventoried and zero foreign-key violations.
 - Seeded migration fixture: stable project/session IDs, encrypted BLOB bytes, owner fields, logical references, duplicate labels, ambiguous scope and archive state remain unchanged.
 - All-or-nothing failure, changed-inventory refusal, idempotent alias import, conflicting evidence and one-time root binding.
@@ -47,3 +47,5 @@ The dependency-free SQLite suite exercises:
 First fixture failures were retained as narrow evidence: a naive all-files loop selected the historical `094_authentication_auth101_upgrade.sql` after the already-current base schema; then migration 101 required the existing SHA-256 SQL function. The test was repaired by following the existing conditional-upgrade selection and registering the deterministic SHA-256 equivalent. No production migration or existing source file was changed.
 
 These are schema/seeded-data fixtures, not a backup of the user's live database. Real production-copy data/provenance, logical references, resource catalogs and rollback acceptance remain required. Never infer them from the passing fixture counts.
+
+Test-only VEYRA_PROJECTS_MIGRATIONS_DIR selects an authorized source migrations directory. Coordinator 122/123/124 source was tested read-only in an in-memory fixture: all 220 original table digests remain unchanged and FK violations are zero. This does not substitute for actual core getDb/better-sqlite or production data-copy verification.

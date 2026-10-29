@@ -15,7 +15,7 @@ export interface ExecutionDependencies {
   resolveAdmission:(scope:OwnerScope,request:{projectId:string|null;bindingId:string;action:string;
     args:Record<string,unknown>})=>Promise<ExecutionAdmission>;
   readOperation?:(request:{scope:OwnerScope;projectId:string|null;binding:ExecutionBinding;action:WorkspaceAction;
-    operationId:string;requestHash:string})=>Promise<{state:"pending"|"succeeded"|"failed"|"unknown";result:unknown}>;
+    args:Record<string,unknown>;operationId:string;requestHash:string})=>Promise<{state:"pending"|"succeeded"|"failed"|"unknown";result:unknown}>;
   dispatch:(request:{scope:OwnerScope;projectId:string|null;binding:ExecutionBinding;action:WorkspaceAction;
     args:Record<string,unknown>;operationId:string})=>Promise<{state:"succeeded"|"failed"|"unknown";result:unknown}>;
 }

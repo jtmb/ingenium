@@ -12,7 +12,7 @@ Reviewed boundary: owned project modules, prefixed dependency-free tests and con
 - Bind execution/read ports to the existing native/runtime owner, with immutable workspace identity/mapping hash/security epoch/instance/revision. Operation admission must authorize specific terminal/action/worktree targets and retain exact-original recovery.
 - Supply private projectless working-area admission. Existing native contracts require a project for task submission; projectless UI must not create a synthetic global project to bypass that limitation. Coordinator must implement or expose an explicit private working-area owner before enabling unsupported native projectless execution.
 - Wire the three UI components into Work's slots. Pass only current authorized state and preserve unavailable selections. Terminal inputs retain draft/unknown outcomes and must not be replayed by reconnect.
-- Existing native terminal router lacks resize. Genuine PTY/resize/persistence and real WSL prerequisites remain a native integration request, not a passing worker claim.
+- Use the existing separate native interactive-terminal ConPTY router for resize and exact owner receipts; the legacy workbench router lacks resize. See native-integration.md for concrete entrypoints, persistence limits and the native original-fingerprint patch request.
 - Shared sidebar preferences, read/unread, import/export, cross-location handoff, remote pairing/mobile/cloud and immutable share snapshots keep their existing native owners. Qualify those adapters with the coordinator's actual native/runtime/auth contracts; do not create duplicate stores to make controls look active.
 
 ## Concrete requested validation
@@ -29,3 +29,7 @@ No build/resource lease has been consumed by this stream. No publication, runtim
 ## Supplemental exact-request review
 
 Regression tests exposed mutable caller scope/request data changing during host admission and a native list project identity changing between authorization and response mapping. Inputs and native owner responses now use detached, recursively frozen JSON snapshots before asynchronous work. Non-JSON/cyclic inputs are rejected before admission. Both failing regressions pass after that change; the dependency-free suite is now 29/29. This does not close the pending React/typecheck/runtime gates.
+
+## Native protocol integration follow-through
+
+See native-integration.md for seven mountable handler entrypoints, actual native HTTP routes, F32–F34 exact-original boundaries and explicit unsupported native projectless behavior. The native receipt-proof patch remains unapplied outside writer scope; Windows Git apply --check passed, but native compilation/runtime qualification was not run. Migration allocation 122 is coordinator-owned. The adjusted schema-copy fixture passes against allocated 122–124 without duplicate draft application and keeps all 220 original table hashes/FK preservation checks.

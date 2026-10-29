@@ -1,0 +1,84 @@
+--- a/crates/contracts/src/interactive_terminals.rs
++++ b/crates/contracts/src/interactive_terminals.rs
+@@ -63,6 +63,10 @@
+     pub terminal_id: Option<String>,
+     pub state: TerminalOperationState,
+     pub terminal: Option<TerminalSessionView>,
++    /// Proof of the retained typed original, without returning terminal input text.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    #[ts(optional)]
++    pub original_sha256: Option<String>,
+     pub message: String,
+ }
+
+--- a/apps/service/src/routes/interactive_terminal.rs
++++ b/apps/service/src/routes/interactive_terminal.rs
+@@ -2,6 +2,7 @@
+ use axum::{Json, Router, extract::{Path, Query, State}, http::StatusCode,
+     response::{IntoResponse, Response}, routing::{get, post}};
+ use serde::{Deserialize, Serialize};
++use sha2::{Digest, Sha256};
+ use std::{collections::{HashMap, HashSet, VecDeque}, sync::{Arc, Mutex, OnceLock}, time::{Duration, Instant}};
+ use veyra_adapters::interactive_terminal::{InteractiveTerminalManager, TerminalError, TerminalView};
+ use veyra_contracts::{Project, TerminalOwner, TerminalOperationKind as Kind,
+@@ -107,6 +108,30 @@
+ #[derive(Clone, PartialEq)]
+ enum Mutation { Create(NewTerminal), Input(String,Input), Resize(String,Resize), Close(String,Close) }
+ impl Mutation {
++    fn original_sha256(&self) -> Result<String> {
++        fn ordered(value: serde_json::Value) -> Result<serde_json::Value> {
++            match value {
++                serde_json::Value::Object(values) => {
++                    let values = values.into_iter().map(|(key, value)| Ok((key, ordered(value)?)))
++                        .collect::<Result<std::collections::BTreeMap<_, _>>>()?;
++                    serde_json::to_value(values).map_err(|_| invalid())
++                }
++                serde_json::Value::Array(values) => Ok(serde_json::Value::Array(
++                    values.into_iter().map(ordered).collect::<Result<Vec<_>>>()?,
++                )),
++                value => Ok(value),
++            }
++        }
++        let body = match self {
++            Self::Create(body) => serde_json::to_value(body),
++            Self::Input(_, body) => serde_json::to_value(body),
++            Self::Resize(_, body) => serde_json::to_value(body),
++            Self::Close(_, body) => serde_json::to_value(body),
++        }.map_err(|_| invalid())?;
++        let value = ordered(serde_json::json!({"terminal_id":self.identity().3,"body":body}))?;
++        let bytes = serde_json::to_vec(&value).map_err(|_| invalid())?;
++        Ok(format!("{:x}", Sha256::digest(bytes)))
++    }
+     fn identity(&self) -> (&TerminalOwner,&str,Kind,Option<&str>) {
+         match self {
+             Self::Create(b)=>( &b.owner,&b.request_id,Kind::Create,None),
+@@ -199,7 +224,7 @@
+     }
+     let request_id=request_id.to_owned();
+     let mut receipt=Receipt { request_id:request_id.clone(),owner:owner.clone(),kind,
+-        terminal_id:terminal_id.map(str::to_owned),state:OpState::Pending,terminal:None,
++        terminal_id:terminal_id.map(str::to_owned),state:OpState::Pending,terminal:None,original_sha256:Some(body.original_sha256()?),
+         message:"The service retained this request. Reconcile it by GET; do not resend.".into() };
+     {
+         let mut ledger=operations().lock().map_err(|_|unavailable())?;
+@@ -282,3 +307,20 @@
+     let _effects=EFFECTS.try_lock().map_err(|_|TerminalError::Unavailable)?;
+     manager().stop_until(deadline)
+ }
++
++#[cfg(test)]
++mod original_fingerprint_tests {
++    use super::*;
++    #[test]
++    fn terminal_original_fingerprint_matches_json_golden() {
++        let original = Mutation::Input("44444444-4444-4444-8444-444444444444".into(), Input {
++            owner: TerminalOwner {
++                project_id: "11111111-1111-4111-8111-111111111111".into(), project_revision: 5,
++                service_instance_id: "22222222-2222-4222-8222-222222222222".into(),
++                environment: veyra_contracts::ExecutionEnvironment::Windows,
++            },
++            request_id: "33333333-3333-4333-8333-333333333333".into(), text: "exact é\r".into(),
++        });
++        assert_eq!(original.original_sha256().ok().as_deref(), Some("4d408e101613853fe5352b043b9fc636dc33c205fde27f59619733239a0958c5"));
++    }
++}

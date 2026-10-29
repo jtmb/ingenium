@@ -1,0 +1,18 @@
+{
+  "nativeBase": "61c99f8e649da85b600fccec93236b5d6b07f78b",
+  "sourceFiles": [
+    {
+      "path": "crates/contracts/src/interactive_terminals.rs",
+      "sha256": "839ac364c78d7d2c5da4eb7176ec78c39d751f96cd6774f9b0e7f739a1e82115"
+    },
+    {
+      "path": "apps/service/src/routes/interactive_terminal.rs",
+      "sha256": "2cf2d4e5f6d1012a32c836fef01a30c8a0f30f62f4663ed12c5924ad619f07ad"
+    }
+  ],
+  "patchSha256": "7c685fcff3ac0b7024267f2924e2f0ff20a02c656d8dbaeea08d4553f8e37cec",
+  "goldenFingerprint": "4d408e101613853fe5352b043b9fc636dc33c205fde27f59619733239a0958c5",
+  "applied": false,
+  "nativeBuildRun": false,
+  "windowsGitApplyCheck": "passed; no native files changed"
+}

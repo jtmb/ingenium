@@ -68,6 +68,7 @@ export class NativeProjectCatalogAdapter {
     requireValue(patch.pinned===undefined || typeof patch.pinned==="boolean");
     requireValue(patch.archived===undefined || typeof patch.archived==="boolean");
     return this.map(scope,await this.owner.updateProject({scope,projectId:id,expectedInstanceId:this.instanceId,
-      request:{expected_revision:expectedRevision,name:patch.label,pinned:patch.pinned,archived:patch.archived}}),id);
+      request:{expected_revision:expectedRevision,...(patch.label===undefined?{}:{name:patch.label}),
+        ...(patch.pinned===undefined?{}:{pinned:patch.pinned}),...(patch.archived===undefined?{}:{archived:patch.archived})}}),id);
   }
 }
