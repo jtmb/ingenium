@@ -1,3 +1,4 @@
+import {immutableInput} from "./immutable-input.mjs";
 import {requireValue, scopeKey, text} from "../../../../packages/veyra-projects/domain.mjs";
 
 // This adapter never writes API catalog rows for a native-owned project.
@@ -10,6 +11,7 @@ export class NativeProjectCatalogAdapter {
     requireValue(await this.authorize(scope,action,id) === true,"FORBIDDEN",403);
   }
   async map(scope, envelope, expectedProjectId) {
+    envelope=immutableInput(envelope);
     requireValue(envelope?.instanceId === this.instanceId,"NATIVE_INSTANCE_CHANGED",409);
     const p=envelope.project;
     requireValue(p && p.id === expectedProjectId && text(p.id) && text(p.name) && Number.isSafeInteger(p.revision) &&
@@ -30,13 +32,15 @@ export class NativeProjectCatalogAdapter {
       source:{system:"native",instanceId:this.instanceId,revision:p.revision}};
   }
   async get(scope,id) {
+    scope=immutableInput(scope);
     await this.access(scope,"projects:read",id);
     return this.map(scope,await this.owner.getProject({scope,projectId:id,expectedInstanceId:this.instanceId}),id);
   }
   async list(scope,{after="",limit=50,archived=false}={}) {
+    scope=immutableInput(scope);
     await this.access(scope,"projects:list",null);
     requireValue(typeof after==="string" && Number.isInteger(limit) && limit>0 && limit<=100);
-    const reply=await this.owner.listProjects({scope,after,limit,archived,expectedInstanceId:this.instanceId});
+    const reply=immutableInput(await this.owner.listProjects({scope,after,limit,archived,expectedInstanceId:this.instanceId}));
     requireValue(reply.instanceId===this.instanceId && Array.isArray(reply.projects),"NATIVE_INSTANCE_CHANGED",409);
     const data=[];
     for (const project of reply.projects) {
@@ -46,6 +50,7 @@ export class NativeProjectCatalogAdapter {
     return {data,pagination:{hasMore:reply.next_cursor!==null,cursor:reply.next_cursor}};
   }
   async create(scope,draft,id) {
+    scope=immutableInput(scope);draft=immutableInput(draft);
     await this.access(scope,"projects:create",null);
     // The native adapter receives the exact native draft; no path translation or target inference.
     requireValue(text(id) && draft && text(draft.name) && Array.isArray(draft.roots) &&
@@ -54,6 +59,7 @@ export class NativeProjectCatalogAdapter {
       request:{project_id:id,draft}}),id);
   }
   async update(scope,id,expectedRevision,patch) {
+    scope=immutableInput(scope);patch=immutableInput(patch);
     await this.access(scope,"projects:write",id);
     requireValue(Number.isSafeInteger(expectedRevision) && expectedRevision>0 &&
       patch && Object.keys(patch).length>0 &&

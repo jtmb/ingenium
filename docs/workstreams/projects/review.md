@@ -25,3 +25,7 @@ Reviewed boundary: owned project modules, prefixed dependency-free tests and con
 6. Package/runtime smoke from exact integrated `dist/`, then Windows and Kubernetes workflow/persistence/rollback/visual gates.
 
 No build/resource lease has been consumed by this stream. No publication, runtime start/stop, desktop/microphone capture or model/GPU workload was performed.
+
+## Supplemental exact-request review
+
+Regression tests exposed mutable caller scope/request data changing during host admission and a native list project identity changing between authorization and response mapping. Inputs and native owner responses now use detached, recursively frozen JSON snapshots before asynchronous work. Non-JSON/cyclic inputs are rejected before admission. Both failing regressions pass after that change; the dependency-free suite is now 29/29. This does not close the pending React/typecheck/runtime gates.

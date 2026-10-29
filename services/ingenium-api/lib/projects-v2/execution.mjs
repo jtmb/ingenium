@@ -1,3 +1,4 @@
+import {immutableInput} from "./immutable-input.mjs";
 import {createHash} from "node:crypto";
 import {requireValue, scopeKey, resolveExecution, terminalDimensions, terminalInput, text}
   from "../../../../packages/veyra-projects/domain.mjs";
@@ -70,6 +71,7 @@ export class ExecutionOperations {
     return {operationId,projectId,binding,action,args,target};
   }
   async execute(scope, request) {
+    scope=immutableInput(scope);request=immutableInput(request);
     const {operationId,projectId,action,args,target} = await this.admission(scope,request);
     const requestHash = createHash("sha256").update(JSON.stringify(canonical(request))).digest("hex");
     const scoped = scopeKey(scope);
@@ -108,6 +110,7 @@ export class ExecutionOperations {
     }
   }
   async reconcile(scope,request) {
+    scope=immutableInput(scope);request=immutableInput(request);
     const {operationId,projectId,action,target}=await this.admission(scope,request);
     const scoped=scopeKey(scope);
     const requestHash=createHash("sha256").update(JSON.stringify(canonical(request))).digest("hex");

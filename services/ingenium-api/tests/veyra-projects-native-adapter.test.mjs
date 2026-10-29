@@ -41,3 +41,36 @@ test("conversation projectless context remains explicit and bound to original wo
   assert.throws(()=>conversationWorkspace({scope,conversation,project:null,binding:{...binding,id:"other"}}),
     e=>e.code==="CONVERSATION_BINDING_MISMATCH");
 });
+
+test("native catalog snapshots the owner envelope while canonical root proofs await",async()=>{
+  const f=fixture();const mutable=structuredClone(project);
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  f.owner.getProject=async()=>({instanceId:"native-a",project:mutable});
+  f.adapter.resolveRoot=async(s,{directory})=>{
+    await gate;
+    return {id:"root",canonicalRootId:"inode-a",hostId:"pc",environmentId:"wsl:Ubuntu:alice",directory};
+  };
+  const pending=f.adapter.get(scope,project.id);
+  await new Promise(resolve=>setImmediate(resolve));
+  mutable.id="other-project";mutable.name="Changed";mutable.roots[0]="/another/root";
+  release();
+  const mapped=await pending;
+  assert.equal(mapped.id,project.id);
+  assert.equal(mapped.label,project.name);
+  assert.equal(mapped.roots[0].displayPath,project.primary_root);
+});
+
+test("native list snapshots identities before asynchronous per-project authorization",async()=>{
+  const f=fixture();const mutable=structuredClone(project);
+  f.owner.listProjects=async()=>({instanceId:"native-a",projects:[mutable],next_cursor:null});
+  f.adapter.authorize=async(s,action,id)=>{
+    if (action==="projects:list") return true;
+    assert.equal(id,project.id);
+    mutable.id="unrelated-project";mutable.name="Unrelated";
+    return true;
+  };
+  const page=await f.adapter.list(scope);
+  assert.equal(page.data[0].id,project.id);
+  assert.equal(page.data[0].label,project.name);
+});

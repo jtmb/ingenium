@@ -246,3 +246,30 @@ test("unknown original reconciles through a read-only owner receipt without repl
     await assert.rejects(()=>service.reconcile(scope,{...request,operationId:"missing"}),e=>e.code==="NOT_FOUND");
   } finally {f.db.close();}
 });
+
+test("execution snapshots scope and request before asynchronous admission",async()=>{
+  const f=fixture();
+  let release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const originalScope=structuredClone(scope);
+  const callerScope=structuredClone(scope);
+  const originalBinding=structuredClone(binding);
+  let dispatched;
+  try {
+    const service=new ExecutionOperations({...f,
+      resolveAdmission:async()=>{await gate;return {scope:originalScope,binding:originalBinding,
+        projectId:null,online:true,capabilities:["terminal:input"],terminalId:"term"};},
+      dispatch:async request=>{dispatched=request;return {state:"succeeded",result:{terminalId:"term"}};}});
+    const request={operationId:"snapshot",projectId:null,binding:structuredClone(binding),
+      action:"terminal.input",args:{terminalId:"term",data:"original"}};
+    const running=service.execute(callerScope,request);
+    callerScope.ownerUserId="someone-else";
+    request.binding.directory="C:/another-directory";
+    request.args.data="changed-after-admission";
+    release();
+    assert.equal((await running).state,"succeeded");
+    assert.equal(dispatched.scope.ownerUserId,originalScope.ownerUserId);
+    assert.equal(dispatched.args.data,"original");
+    assert.equal(dispatched.binding.directory,originalBinding.directory);
+  } finally {release?.();f.db.close();}
+});

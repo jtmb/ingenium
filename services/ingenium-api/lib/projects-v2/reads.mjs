@@ -1,8 +1,11 @@
+import {immutableInput} from "./immutable-input.mjs";
 import {requireValue, resolveExecution, text, readTerminalWindow} from "../../../../packages/veyra-projects/domain.mjs";
 
 export class WorkspaceReads {
   constructor({catalog, resolveAdmission, readOwner}) {Object.assign(this,{catalog,resolveAdmission,readOwner});}
-  async read(scope,{projectId,binding,kind,args={}}) {
+  async read(scope,request) {
+    scope=immutableInput(scope);
+    const {projectId,binding,kind,args={}}=immutableInput(request);
     const capabilities={terminals:"terminal:read",output:"terminal:read",actions:"projects:read",
       worktrees:"git:read",git:"git:read"};
     requireValue(Object.hasOwn(capabilities,kind) && (projectId===null || text(projectId)));

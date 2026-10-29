@@ -8,7 +8,7 @@ Source-ready implementation for the approved parallel stream. This is not a depl
 - `packages/veyra-projects/contracts.d.ts`: proposed transport shapes. `context.mjs` preserves the existing conversation owner and explicit null project; no transcript store.
 - `services/ingenium-api/lib/projects-v2/catalog.mjs`: API-owned folder/non-Git/multi-root catalog, stable IDs, scoped reads, pagination, CAS rename/pin/archive/restore and one-time attested root binding for imported projects. Rename never moves a directory.
 - `native-catalog.mjs`: delegates native-owned projects to the existing native owner. It preserves native project IDs/revisions and instance identity; it does not create an API mirror. Root proofs come from the host adapter.
-- `execution.mjs`: exact-request, scoped operation receipts before effects; repeated pending/unknown requests do not execute again; changed requests conflict. Read-only reconciliation queries the original owner receipt without dispatching effects. The existing host owner executes PTY/Git/worktree/setup effects with the original operation identity.
+- `execution.mjs`: immutable request/scope snapshots before asynchronous admission; exact-request, scoped operation receipts before effects; repeated pending/unknown requests do not execute again; changed requests conflict. Read-only reconciliation queries the original owner receipt without dispatching effects. The existing host owner executes PTY/Git/worktree/setup effects with the original operation identity.
 - `reads.mjs`: refreshed admission before terminal/output/actions/Git/worktree reads; bounded output with sequence/gap information. No second PTY or persistent output store.
 - `installation.mjs`: installation preference facade over the retained legacy owner. `chat_defaults` and Docs `chat_selection` remain separate exact values. Secret keys are not exposed. Writes require the existing settings owner's CAS/admission implementation.
 - `handlers.mjs`: unmounted authenticated-scope handlers, safe errors and 202 for pending/unknown outcomes. Existing auth must supply scope; request bodies do not choose actor ownership.
@@ -43,7 +43,7 @@ export TMP="$TEMP" TMPDIR="$TEMP"
 node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-*.test.mjs services/ingenium-dashboard/tests/veyra-projects-*.test.mjs
 ```
 
-Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 24 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
+Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 29 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
 
 ## Migration and rollback
 
