@@ -102,6 +102,7 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({
 
 vi.mock("../src/lib/use-opencode-chat", () => ({
   useOpenCodeChat: () => ({
+    sessionReady: true,
     messages: [],
     isStreaming: false,
     isLoading: false,

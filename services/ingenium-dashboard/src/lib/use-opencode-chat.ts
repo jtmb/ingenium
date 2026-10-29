@@ -261,6 +261,15 @@ function extractReasoning(parts: OpenCodePart[]): string | undefined {
   return texts.length > 0 ? texts.join("\n\n") : undefined;
 }
 
+/** The pinned API lists running sessions; absence is idle only after a valid read. */
+function nativeSessionIsBusy(statuses: unknown, sessionId: string): boolean {
+  if (!Array.isArray(statuses) || statuses.some((entry) => entry === null || typeof entry !== "object"
+    || typeof entry.sessionID !== "string" || !["busy", "idle"].includes(entry.type))) {
+    throw new Error("Conversation activity is unavailable.");
+  }
+  return statuses.some((entry) => entry.sessionID === sessionId && entry.type === "busy");
+}
+
 function isSuccessfulAssistantFinish(finish: string | undefined): boolean {
   return finish === "stop";
 }
@@ -851,6 +860,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   });
 
   const sseAbortRef = useRef<AbortController | null>(null);
+  const streamEventVersionRef = useRef(0);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seenEventIdsRef = useRef<Set<string>>(new Set());
@@ -906,6 +916,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     seenEventIdsRef.current.clear();
     parserRef.current = new SSEParser();
     streamPartTypesRef.current.clear();
+    streamEventVersionRef.current = 0;
     lastSendPartsRef.current = null;
     lastSendOptionsRef.current = undefined;
     pendingUserTurnsRef.current.clear();
@@ -922,15 +933,32 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
 
     (async () => {
       try {
-        const rawMessages = (await opencode.sessions.messages(
+        let rawMessages = (await opencode.sessions.messages(
           sessionId,
         )) as unknown as OpenCodeApiMessage[];
+        if (cancelled || activeScopeRef.current !== scopeKey) return;
+        const lastMessage = rawMessages.at(-1);
+        let busy = false;
+        if (lastMessage?.info.role === "user"
+          || lastMessage?.info.role === "assistant" && !lastMessage.info.finish) {
+          // Home can unmount after admission and before the first assistant
+          // record exists. Read native activity instead of inferring idle from
+          // that user-only history. An idle read precedes a fresh history read
+          // so a completion between the two original reads is not lost.
+          busy = nativeSessionIsBusy(await opencode.sessions.status(), sessionId);
+          if (cancelled || activeScopeRef.current !== scopeKey) return;
+          if (!busy) rawMessages = await opencode.sessions.messages(sessionId) as unknown as OpenCodeApiMessage[];
+        }
         if (!cancelled && activeScopeRef.current === scopeKey) {
           markLoadedScope(scopeKey);
           dispatch({
             type: "LOAD_MESSAGES",
             messages: normalizeMessages(rawMessages),
           });
+          if (busy) {
+            dispatch({ type: "SET_STREAMING", value: true });
+            dispatch({ type: "SET_STREAM_ACTIVITY", activity: "connecting" });
+          }
         }
       } catch (err: unknown) {
         if (!cancelled && activeScopeRef.current === scopeKey) {
@@ -1100,7 +1128,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
     }
   }, []);
 
-  const connectSSE = useCallback((sid: string) => {
+  const connectSSE = useCallback((sid: string, recover = false) => {
     if (!scopeKey) return () => undefined;
     const connectionScope = scopeKey;
     // Abort any existing connection
@@ -1115,6 +1143,9 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
 
     const abortController = new AbortController();
     sseAbortRef.current = abortController;
+    const ownsConnection = () => activeScopeRef.current === connectionScope
+      && activeSessionRef.current === sid && sseAbortRef.current === abortController
+      && !abortController.signal.aborted;
 
     const streamUrl = opencode.events.url(sid);
     // Reset parser for fresh connection (preserves lastEventId for reconnect)
@@ -1146,6 +1177,29 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         const parser = parserRef.current;
         reconnectAttemptRef.current = 0; // Reset on successful connection
         dispatch({ type: "SET_TRANSIENT_ERROR", error: null });
+
+        if (recover) {
+          const eventVersion = streamEventVersionRef.current;
+          void (async () => {
+            // The subscription now exists. Recover a completion that happened
+            // before it opened, without replacing any newer event-backed turn.
+            const busy = nativeSessionIsBusy(await opencode.sessions.status(), sid);
+            if (!ownsConnection() || streamEventVersionRef.current !== eventVersion) return;
+            const rawMessages = await opencode.sessions.messages(sid) as unknown as OpenCodeApiMessage[];
+            if (!ownsConnection() || streamEventVersionRef.current !== eventVersion) return;
+            if (!busy) {
+              markPendingTurnsTerminal(connectionScope);
+              dispatch({ type: "FINALIZE_STREAMING" });
+              dispatch({ type: "SET_STATUS", status: "idle" });
+              dispatch({ type: "SET_STREAM_ACTIVITY", activity: "complete" });
+            }
+            dispatch({ type: "RECONCILE_MESSAGES", messages: normalizeMessages(rawMessages) });
+            if (!busy) void persistCompletedTurn(sid);
+          })().catch(() => {
+            if (!ownsConnection() || streamEventVersionRef.current !== eventVersion) return;
+            dispatch({ type: "SET_TRANSIENT_ERROR", error: "Conversation recovery is unavailable. Live updates continue." });
+          });
+        }
 
         async function readStream(): Promise<void> {
           let receivedTerminalEvent = false;
@@ -1186,6 +1240,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
               if (evt.type === "session.idle" || evt.type === "session.error") {
                 receivedTerminalEvent = true;
               }
+              if (!evt.type.startsWith("server.")) streamEventVersionRef.current += 1;
               dispatchSSEEvent(evt, sid, connectionScope);
 
               // Fetch streams are allowed to coalesce several provider events
@@ -1229,7 +1284,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
           });
           dispatch({ type: "SET_STREAM_ACTIVITY", activity: "reconnecting" });
           reconnectTimerRef.current = setTimeout(() => {
-            connectSSE(sid);
+            connectSSE(sid, true);
           }, delay);
         } else {
           markPendingTurnsTerminal(connectionScope);
@@ -1500,14 +1555,14 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
   }
 
   useEffect(() => {
-    if (!state.isStreaming || !sessionId) {
+    if (!state.isStreaming || !sessionId || !scopeKey || loadedScopeKey !== scopeKey) {
       return undefined;
     }
 
     // send() opens the subscription before awaiting the prompt request so an
     // immediately-emitted provider delta cannot be missed. This effect owns
     // that connection's lifecycle and supplies the normal resume path.
-    if (!sseAbortRef.current) connectSSE(sessionId);
+    if (!sseAbortRef.current) connectSSE(sessionId, true);
 
     return () => {
       if (sseAbortRef.current) {
@@ -1515,7 +1570,7 @@ export function useOpenCodeChat(sessionId: string | null, persistence?: ChatPers
         sseAbortRef.current = null;
       }
     };
-  }, [state.isStreaming, sessionId, connectSSE]);
+  }, [state.isStreaming, sessionId, scopeKey, loadedScopeKey, connectSSE]);
 
   useEffect(() => {
     return () => {

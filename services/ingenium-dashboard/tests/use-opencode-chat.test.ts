@@ -17,9 +17,10 @@ import {
 } from "../src/lib/use-opencode-chat";
 import type { OpenCodePart } from "../src/lib/opencode";
 
-const { mockPrompt, mockMessages, mockPermissionsList, mockQuestionsList, mockQuestionReply, mockContextLink, mockPersistTurn } = vi.hoisted(() => ({
+const { mockPrompt, mockMessages, mockSessionStatus, mockPermissionsList, mockQuestionsList, mockQuestionReply, mockContextLink, mockPersistTurn } = vi.hoisted(() => ({
   mockPrompt: vi.fn(),
   mockMessages: vi.fn(),
+  mockSessionStatus: vi.fn(),
   mockPermissionsList: vi.fn(),
   mockQuestionsList: vi.fn(),
   mockQuestionReply: vi.fn(),
@@ -30,6 +31,7 @@ const { mockPrompt, mockMessages, mockPermissionsList, mockQuestionsList, mockQu
 const mockOpenCodeClient = {
   sessions: {
     messages: mockMessages,
+    status: mockSessionStatus,
     prompt: mockPrompt,
     abort: vi.fn(),
     revert: vi.fn(),
@@ -1009,6 +1011,7 @@ describe("useOpenCodeChat hook — send() integration", () => {
     // persist across tests unless explicitly reset.
     mockMessages.mockReset();
     mockMessages.mockResolvedValue([]);
+    mockSessionStatus.mockReset().mockResolvedValue([]);
     mockPrompt.mockReset();
     mockPermissionsList.mockReset().mockResolvedValue([]);
     mockQuestionsList.mockReset().mockResolvedValue([]);
@@ -1629,6 +1632,9 @@ describe("useOpenCodeChat hook — send() integration", () => {
       .mockResolvedValueOnce([
         { info: { id: "old-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Old conversation" }] },
       ])
+      .mockResolvedValueOnce([
+        { info: { id: "old-user", sessionID: "session-1", role: "user", time: { created: 1 } }, parts: [{ type: "text", text: "Old conversation" }] },
+      ])
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
     const { result, rerender } = renderHook(
       ({ sessionId }) => useOpenCodeChat(sessionId),
@@ -1648,7 +1654,7 @@ describe("useOpenCodeChat hook — send() integration", () => {
     await act(async () => { resolveSecond([]); });
     await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.messages).toEqual([]);
-    expect(mockMessages.mock.calls.map(([sessionId]) => sessionId)).toEqual(["session-1", "session-2"]);
+    expect(mockMessages.mock.calls.map(([sessionId]) => sessionId)).toEqual(["session-1", "session-1", "session-2"]);
   });
 
   it("rejects a delayed old-session reconciliation after selecting a blank session", async () => {
@@ -1702,6 +1708,12 @@ describe("useOpenCodeChat hook — send() integration", () => {
           parts: [{ id: "runtime-a-part", sessionID: "shared-session", messageID: "runtime-a-user", type: "text", text: "Runtime A history" }],
         },
       ])
+      .mockResolvedValueOnce([
+        {
+          info: { id: "runtime-a-user", sessionID: "shared-session", role: "user", time: { created: 1 } },
+          parts: [{ id: "runtime-a-part", sessionID: "shared-session", messageID: "runtime-a-user", type: "text", text: "Runtime A history" }],
+        },
+      ])
       .mockResolvedValueOnce([]);
     const runtimeA = {
       project: "project-a",
@@ -1722,7 +1734,7 @@ describe("useOpenCodeChat hook — send() integration", () => {
     rerender({ persistence: runtimeB });
 
     expect(result.current.messages).toEqual([]);
-    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mockMessages).toHaveBeenCalledTimes(3));
     await vi.waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.messages).toEqual([]);
   });
