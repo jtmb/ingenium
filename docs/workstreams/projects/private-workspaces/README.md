@@ -97,7 +97,26 @@ These tests exercise the executable policy model and real SQLite schema constrai
 Run the source fixture with the already available Node runtime and process-scoped TEMP/TMP/TMPDIR in coordination/projects:
 
 ```sh
-node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-private-workspace.test.mjs
+# PHASE is the existing absolute phase root; no checkout is created.
+: "${PHASE:?Set PHASE to the existing absolute phase root}"
+VEYRA_PROJECTS_NATIVE_SOURCE_ROOT="$PHASE/windows-source" \
+node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-private-workspace.test.mjs services/ingenium-api/tests/veyra-projects-native-source.test.mjs
 ```
 
 Required follow-through: coordinator reviews/applies the shared patch, regenerates DTOs, runs focused Rust compilation/tests and database-copy rollback checks, implements the actual authenticated/custody/execution ports, and performs attended real private projectless workflows. Preserve the original full goal and all existing project/WSL/cluster gates.
+
+
+The native root is mandatory and has no default or sibling-checkout fallback. The
+reader requires an absolute, canonical plain source workspace, validates Cargo
+identity, and checks all five original SQL files as raw bytes against lengths,
+SHA-256 hashes and Git blob IDs recorded from base
+61c99f8e649da85b600fccec93236b5d6b07f78b. An integrated HEAD may differ; these
+baseline bytes must remain unchanged. The metadata manifest contains no SQL.
+Validation finishes before opening the in-memory fixture database.
+
+Six reader tests cover valid explicit source, missing/relative roots, alias and
+symlink rejection, wrong workspace identity, a newline-only SQL change, and
+unreadable roots without alternate probes. The original thirteen private tests
+retain their schema, migration and policy assertions. For the full source CPU
+suite, export the same VEYRA_PROJECTS_NATIVE_SOURCE_ROOT before running the
+projects tests; keep TEMP/TMP/TMPDIR in the existing coordination/projects root.

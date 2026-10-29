@@ -6,6 +6,7 @@ import {readFileSync} from "node:fs";
 import {PrivateWorkspaceBoundary,privateWorkspaceFingerprint} from "../lib/projects-v2/private-workspace-policy.mjs";
 import {ProjectError} from "../../../packages/veyra-projects/domain.mjs";
 import {legacyDigest} from "../lib/projects-v2/migration.mjs";
+import {readConfiguredNativeBaseline} from "./veyra-projects-native-source.mjs";
 
 const workspaceId="11111111-1111-4111-8111-111111111111";
 const createId="22222222-2222-4222-8222-222222222222";
@@ -51,9 +52,10 @@ function modelStore(db) {
   return store;
 }
 function fixture({migrate=true}={}) {
+  const native=readConfiguredNativeBaseline();
   const db=new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
-  for(let version=1;version<=5;version++) db.exec(readFileSync(new URL("../../../../native-projects/crates/adapters/src/projects/"+String(version).padStart(4,"0")+".sql",import.meta.url),"utf8"));
+  for(const migration of native.migrations) db.exec(migration.sql);
   const draft={name:"Preserved Ω",environment:{kind:"windows"},primary_root:"C:/preserved",roots:["C:/preserved"]};
   db.prepare("INSERT INTO projects(id,name,environment,primary_root,roots,creation_request) VALUES(?,?,?,?,?,?)")
     .run("77777777-7777-4777-8777-777777777777",draft.name,JSON.stringify(draft.environment),draft.primary_root,JSON.stringify(draft.roots),JSON.stringify(draft));

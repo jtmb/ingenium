@@ -1,0 +1,36 @@
+{
+  "baseCommit": "61c99f8e649da85b600fccec93236b5d6b07f78b",
+  "evidence": "Windows Git ls-tree at the verified native baseline; integrated HEAD may differ but these five SQL blobs must remain byte-identical",
+  "files": [
+    {
+      "path": "crates/adapters/src/projects/0001.sql",
+      "bytes": 562,
+      "sha256": "43f4f32ea059a2ba52651e31b0b026d13f80b7ca59b1d590e6c604577e2ddfeb",
+      "gitBlob": "dc1ba8c0a14665d608455dbfe9ef9625a04b1edc"
+    },
+    {
+      "path": "crates/adapters/src/projects/0002.sql",
+      "bytes": 380,
+      "sha256": "9d7b5063f822c31c0e19489993e4e8f552c6c4fb11768176a4ec4c870d58d1fa",
+      "gitBlob": "887ec642b6248241594d9e865f85d78a1675ce34"
+    },
+    {
+      "path": "crates/adapters/src/projects/0003.sql",
+      "bytes": 611,
+      "sha256": "fd1775d65cd2d00f8153e04291fa88a8cd9f551fc6e5446b45e18d02ab5e5cdd",
+      "gitBlob": "81ed638d1f96a54466647e1a118691d80346486e"
+    },
+    {
+      "path": "crates/adapters/src/projects/0004.sql",
+      "bytes": 364,
+      "sha256": "8631eb2ec54fe419e210f3aa12a1d6c6cb0a23bee712defb26212ea9f2314723",
+      "gitBlob": "42eed709bb06f601c24bd5ba4b42f0e3f4acb551"
+    },
+    {
+      "path": "crates/adapters/src/projects/0005.sql",
+      "bytes": 234,
+      "sha256": "bc6bd5e03fa9c8f993388a7e9abf4f66c770e14e09ed38a633e361f823348a61",
+      "gitBlob": "f30dd9e05c242030464487f2c8f27b486b6c08f3"
+    }
+  ]
+}
