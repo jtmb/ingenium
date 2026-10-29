@@ -189,5 +189,77 @@
       "width": 1362,
       "height": 932
     }
+  },
+  "nativePickerEvidence": {
+    "guiSha256": "b0589f4d819dabc954bf089553eee952ed8fa244cdb8558d51f704e0743efd22",
+    "sourceCodeCommit": "ab41cb804521ca75cdcdd36211c5e4890d33fe71",
+    "scope": "Actual native picker, creation/reconnect/recoverable archive workflows and post-restart shared Chat; not full phase or display-DPI/route-wide acceptance",
+    "ownedModal": true,
+    "cancelAndSelectionPassed": true,
+    "rootFocusRestored": true,
+    "nativeAndSelectedUserWslCreationPassed": true,
+    "originalEightActiveRecordsByteEqual": true,
+    "controlledRecordsArchived": true,
+    "savedDevAuthReused": true,
+    "standardLunaRetained": true,
+    "visualAccepted": false,
+    "captures": [
+      {
+        "view": "owned-picker-modal",
+        "capture": "native-picker-owner-modal-20261029.jpg",
+        "sha256": "001839cc7c35e936ccc7f35ab4a57641e2cbf520ae3ffcbb4949e7c1a767171c",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "picker-cancel-focus",
+        "capture": "native-picker-owner-cancel-focus-20261029.jpg",
+        "sha256": "9b80bd0cb22d2b4f5243aa06e0a4ba907423dad213a285fb4d6902a95eaff86a",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "picker-selected-focus",
+        "capture": "native-picker-owner-selected-focus-20261029.jpg",
+        "sha256": "e7cda514cb4b1de7da31c6ee65a2c312f5d8f1fcb10c72e49088b47cd875f728",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "native-gui-project-created",
+        "capture": "native-gui-project-created-20261029.jpg",
+        "sha256": "8620d536e521e23ce53984d11d2d0d16bd5b01c12148929a4b8720304cdb6efc",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "wsl-gui-project-created",
+        "capture": "wsl-gui-project-created-20261029.jpg",
+        "sha256": "1953d14e0ba22dd9c17a5ff3040032d6643cad7f8bffc94c18af2a4f5c8666dd",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "wsl-gui-project-restored",
+        "capture": "wsl-gui-project-restored-20261029.jpg",
+        "sha256": "7fea712ad7fde2a4fa07567341a9db399f0f7814a1a9898cbe158c8e956bc0e5",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "shared-chat-after-picker-update",
+        "capture": "native-composer-picker-qualified-20261029.jpg",
+        "sha256": "6f54d8acd9f93c3c61c35ab2acc5bc07c94867e082a16980fa2839427f95e4f0",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      }
+    ]
   }
 }
