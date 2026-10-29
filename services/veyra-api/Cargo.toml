@@ -1,0 +1,20 @@
+[package]
+name = "veyra-api"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+members = ["."]
+
+[dependencies]
+axum = "0.8"
+http = "1"
+reqwest = { version = "0.12", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+veyra-auth = { path = "../../crates/veyra-auth" }
+veyra-runtime = { path = "../../crates/veyra-runtime" }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

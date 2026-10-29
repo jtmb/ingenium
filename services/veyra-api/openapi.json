@@ -1,0 +1,515 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Veyra read-only compatibility edge",
+    "version": "0.1.0",
+    "description": "Source candidate only. Existing Ingenium API owns identity/RBAC/storage. No writable cutover authorization."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:4107"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Host-ingenium_session"
+      }
+    },
+    "schemas": {
+      "Collection": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "Opaque existing Project row; IDs, organization ownership, global/archive fields and unknown fields are preserved.",
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {},
+              "requestId": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/projects": {
+      "get": {
+        "operationId": "readProjects",
+        "description": "Exact GET only; no trailing slash, implicit HEAD or alternate route. Credentials and organization query go through existing Node policy. Body bytes are never transformed.",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Existing Node collection authorization target. Additional query bytes are forwarded without interpretation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing authorized collection, original bytes; no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                },
+                "example": {
+                  "data": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated or excessive headers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Existing API authentication denial; WWW-Authenticate preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Existing API authorization denial",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Hidden resource/private marker refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Existing API input validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Existing API rate limit; Retry-After preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Existing API internal failure preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream connection/stream/redirect/size refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Existing API unavailable or auth/audit not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Legacy API timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/archive": {
+      "get": {
+        "operationId": "readArchivedProjects",
+        "description": "Exact GET only; no trailing slash, implicit HEAD or alternate route. Credentials and organization query go through existing Node policy. Body bytes are never transformed.",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "organization_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Existing Node collection authorization target. Additional query bytes are forwarded without interpretation."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existing authorized collection, original bytes; no-store.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                },
+                "example": {
+                  "data": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid, repeated or excessive headers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Existing API authentication denial; WWW-Authenticate preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Existing API authorization denial",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Hidden resource/private marker refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Existing API input validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Existing API rate limit; Retry-After preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Existing API internal failure preserved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream connection/stream/redirect/size refusal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Existing API unavailable or auth/audit not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Legacy API timeout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "error": {
+                    "code": "SYNTHETIC_ERROR",
+                    "message": "Safe synthetic error",
+                    "details": null,
+                    "requestId": "fixture"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
