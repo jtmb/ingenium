@@ -5,8 +5,8 @@
   "acceptedBasePatchSha256": "1294cbf1b5cf778cae5b08cc306583d8071f93e35d39451510af630af9c60672",
   "originalStagedIndexPatchByteHashVerified": true,
   "followOnPatch": "native-work-layout.patch",
-  "followOnSha256": "0379a12c41d573098663844a55931dc40a15c7c4a4a851c05aee3acd77e41a7c",
-  "bytes": 40550,
+  "followOnSha256": "d07545882d2e06874173f0017eb4d10f71a7f0ede16d4fe752b535e2d4b91c02",
+  "bytes": 40668,
   "applyOrder": "After accepted original patch1294cbf1, not bare native61c99",
   "tests": "11 Work React cases in4 suites source-only; not run by worker",
   "checks": "native unstaged diff check and exact follow-on reverse apply check PASS",
@@ -45,8 +45,8 @@
     {
       "path": "apps/web/src/features/work-ui/native-work.css",
       "beforeIndexBlobSha256": "48b6717269d0c47f096499162aee5a887791734b87c815a8ff6a8963b0041c52",
-      "afterWorkingFileSha256": "67547ac30bf48d76d725635666f7fc79f4885a2bf760f45c357f04af03f3315c",
-      "afterGitBlob": "e50640d48ec3e9c8d34b22398b18110fa4aabda8"
+      "afterWorkingFileSha256": "305cf47d868f4efc0965aaa3cd714f15fb100efdc75e66921c8826c2c2dd3428",
+      "afterGitBlob": "a054936690c97f88fdea7a70e63cf70b7fb511b9"
     },
     {
       "path": "apps/web/src/features/workbench/LiveSessionSidebar.tsx",

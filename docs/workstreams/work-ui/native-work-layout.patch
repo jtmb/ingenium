@@ -323,10 +323,10 @@ index 431e9fa9..a82a90c2 100644
      <div className="native-work-viewport">
        <div id={`${id}-work`} role="region" aria-label="Native Work presentation"
 diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
-index 8e72eede..e50640d4 100644
+index 8e72eede..a0549366 100644
 --- a/apps/web/src/features/work-ui/native-work.css
 +++ b/apps/web/src/features/work-ui/native-work.css
-@@ -31,6 +31,31 @@
+@@ -31,6 +31,32 @@
  .native-work-no-project-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
  .native-work-no-project-actions p { flex-basis: 100%; color: var(--muted); line-height: 1.5; }
  .native-work-no-project-actions button:disabled { cursor: not-allowed; opacity: .55; }
@@ -355,6 +355,7 @@ index 8e72eede..e50640d4 100644
 +.native-work-welcome { padding-bottom: 12vh; }
 +.native-work-welcome > p { font-size: .95rem; margin: 8px 0 20px; }
 +.native-work-welcome .native-work-start-welcome { flex: 0 0 auto; max-width: 30rem; }
++.native-work-start-welcome .native-work-start-options > div { left: auto; right: 0; max-width: calc(100vw - 80px); }
  .native-work-presentation .wb-toolbar { flex-wrap: wrap; padding: 8px 16px; gap: 8px; min-height: 40px; background: var(--canvas); border-bottom-color: transparent; }
  .native-work-presentation .wb-sessionbar { flex-wrap: wrap; padding: 6px 16px; border-bottom-color: transparent; }
  .native-work-presentation .wb-chat { border-right: 0; }

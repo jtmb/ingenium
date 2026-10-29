@@ -5,8 +5,8 @@ The coordinator's real NativeWorkDesktop/App no-project fixture exposed two full
 ## Exact base and patch
 
 - Apply after accepted native268962e20bef8c246fce332241c08c00c1fc2317 / original patch1294cbf1b5cf778cae5b08cc306583d8071f93e35d39451510af630af9c60672.
-- Follow-on: [native-work-layout.patch](native-work-layout.patch), 40550 bytes.
-- SHA256: `0379a12c41d573098663844a55931dc40a15c7c4a4a851c05aee3acd77e41a7c`.
+- Follow-on: [native-work-layout.patch](native-work-layout.patch), 40668 bytes.
+- SHA256: `d07545882d2e06874173f0017eb4d10f71a7f0ede16d4fe752b535e2d4b91c02`.
 - [Before/after hashes](native-work-layout.json) cover all eight follow-on files, including the newly authorized exact LiveSessionSidebar.tsx path.
 - The original ten-file staged index remains frozen. Its exact binary diff byte hash still matches1294cbf1; follow-on edits are unstaged and the new test is untracked in the same native checkout. No add/reset/clean/native commit or hook bypass occurred.
 - Actual scoped goal tracker remains blocked. The coordinator explicitly requested this additional bounded source work; this receipt does not invent an active tracker state or claim full acceptance.
