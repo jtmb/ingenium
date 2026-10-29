@@ -1,0 +1,803 @@
+{
+  "info": {
+    "description": "Consumer integration contract; does not create authentication, transcript or operation authority.",
+    "title": "Veyra voice adapter",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "components": {
+    "schemas": {
+      "approveRequest": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          },
+          "approvalId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow-once",
+              "deny"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          }
+        },
+        "required": [
+          "scope",
+          "turn",
+          "approvalId",
+          "decision"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "closeRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "scope",
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "resumeRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dictation",
+              "agent-call",
+              "conversation"
+            ]
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "scope",
+          "mode",
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "interruptRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          }
+        },
+        "required": [
+          "scope",
+          "turn"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "VoiceTurn": {
+        "properties": {
+          "turnId": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requestId": {
+            "description": "voice:<sessionId>:<turnId>",
+            "maxLength": 160,
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "sessionId",
+          "turnId",
+          "generation",
+          "requestId"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "transcribeRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          }
+        },
+        "required": [
+          "scope",
+          "turn"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "VoiceScope": {
+        "properties": {
+          "executionBindingId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organizationId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accountId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "actorId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "projectId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executionRevision": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "runtimeId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "agentId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "conversationId": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "executionBindingId",
+          "organizationId",
+          "accountId",
+          "actorId",
+          "projectId",
+          "executionRevision",
+          "runtimeId",
+          "agentId",
+          "conversationId"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "openRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dictation",
+              "agent-call",
+              "conversation"
+            ]
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "scope",
+          "mode",
+          "sessionId"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "steerRequest": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "steer",
+              "queue"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          }
+        },
+        "required": [
+          "scope",
+          "turn",
+          "text",
+          "delivery"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "submitRequest": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "prompt",
+              "steer",
+              "queue"
+            ]
+          },
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          }
+        },
+        "required": [
+          "scope",
+          "turn",
+          "text",
+          "delivery"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "completeRequest": {
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          }
+        },
+        "required": [
+          "scope",
+          "turn"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      },
+      "synthesizeRequest": {
+        "properties": {
+          "turn": {
+            "$ref": "#/components/schemas/VoiceTurn"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "$ref": "#/components/schemas/VoiceScope"
+          }
+        },
+        "required": [
+          "scope",
+          "turn",
+          "text"
+        ],
+        "additionalProperties": false,
+        "type": "object"
+      }
+    }
+  },
+  "paths": {
+    "/api/voice/v2/approve": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/approveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoiceapprove"
+      }
+    },
+    "/api/voice/v2/resume": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/resumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoiceresume"
+      }
+    },
+    "/api/voice/v2/synthesize": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/synthesizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoicesynthesize"
+      }
+    },
+    "/api/voice/v2/steer": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/steerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoicesteer"
+      }
+    },
+    "/api/voice/v2/close": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/closeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoiceclose"
+      }
+    },
+    "/api/voice/v2/open": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/openRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoiceopen"
+      }
+    },
+    "/api/voice/v2/transcribe": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "description": "16kHz mono s16le PCM, 250ms to 15sec",
+              "schema": {
+                "format": "binary",
+                "maxLength": 480000,
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoicetranscribe",
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "parameters": [
+          {
+            "description": "URI-encoded JSON transcribeRequest envelope",
+            "required": true,
+            "in": "header",
+            "name": "X-Veyra-Voice",
+            "schema": {
+              "type": "string",
+              "maxLength": 8192
+            }
+          }
+        ],
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        }
+      }
+    },
+    "/api/voice/v2/complete": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/completeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoicecomplete"
+      }
+    },
+    "/api/voice/v2/submit": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/submitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoicesubmit"
+      }
+    },
+    "/api/voice/v2/interrupt": {
+      "post": {
+        "responses": {
+          "403": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "401": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "200": {
+            "description": "Confirmed JSON result; submit streams application/x-ndjson event/result/error records; synthesize returns audio/wav"
+          },
+          "410": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "503": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "413": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "429": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "400": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          },
+          "409": {
+            "description": "Error JSON: error.code and error.message; rejected, expired, unknown or unavailable operation"
+          }
+        },
+        "description": "Existing authenticated session, CSRF/origin/rate-limit/capability policy applies. Coordinator mounting is pending.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/interruptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "operationId": "veyraVoiceinterrupt"
+      }
+    }
+  }
+}

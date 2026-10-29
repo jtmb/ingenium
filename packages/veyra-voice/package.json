@@ -1,0 +1,7 @@
+{
+  "name": "@ingenium/veyra-voice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./session.mjs", "./audio": "./audio.mjs" }
+}
