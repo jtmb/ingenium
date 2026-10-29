@@ -9,7 +9,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { useOrganization } from "@/lib/OrganizationContext";
 import { useProject } from "@/lib/ProjectContext";
 import { useOpenCodeSessions } from "@/lib/use-opencode-sessions";
-import { useOpenCodeChat } from "@/lib/use-opencode-chat";
+import { useOpenCodeChat, type ChatMessage } from "@/lib/use-opencode-chat";
 import RuntimeWorkspacePicker from "../RuntimeWorkspacePicker";
 import WorkWebFrame, { type WorkWebQualification } from "./WorkWebFrame";
 import ChatMessages from "../../chat/components/ChatMessages";
@@ -107,6 +107,9 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   }, [rehydrate]);
   const { config, loading: configLoading, error: configError, refresh: refreshConfig } = useWorkChatConfig(runtime.client!);
   const [drafts, setDrafts] = useState<Record<string, WorkDraft>>({});
+  // Keep the last render during controller reload, never an alternate history
+  // authority. The full draft scope fences this read-only reference.
+  const [retainedHistory, setRetainedHistory] = useState<{ key: string; messages: ChatMessage[] } | null>(null);
   const [pending, setPending] = useState(false);
   const [firstSendPending, setFirstSendPending] = useState(false);
   const [navigationPending, startNavigation] = useTransition();
@@ -129,6 +132,14 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: projectRefId === undefined ? routeProject : projectRefId,
     runtimeId: runtime.runtimeId ?? "compatibility", workspaceId: runtime.workspace.confirmedWorkspaceId ?? "", sessionId: initialSessionId };
   const draftKey = workDraftKey(identity);
+  const retainingHistory = retainedHistory?.key === draftKey && (rehydrate || !chat.sessionReady || chat.isLoading || Boolean(chat.error));
+  const displayedMessages = retainingHistory && retainedHistory ? retainedHistory.messages : chat.messages;
+  useEffect(() => {
+    if (!retainedHistory || rehydrate || !chat.sessionReady || chat.isLoading || chat.error) return;
+    let current = true;
+    queueMicrotask(() => { if (current) setRetainedHistory(null); });
+    return () => { current = false; };
+  }, [chat.error, chat.isLoading, chat.sessionReady, rehydrate, retainedHistory]);
   const slotBinding = { ownerId: user.id, organizationId: organization.active?.id ?? null, projectId: projectRefId ?? null, runtimeId: runtime.runtimeId,
     workspaceId: runtime.workspace.confirmedWorkspaceId, sessionId: activeId };
   const slotSelectionResolved = projectRefId !== undefined && projectRefId !== "" && (initialSessionId === null || activeId !== null);
@@ -189,7 +200,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     } finally { sendLock.current = false; setPending(false); }
   };
   const submitOriginal = useCallback(async (original: WorkDraft, originalKey: string, current: () => boolean): Promise<boolean> => {
-    if (!current() || submissionBlockedReason || configLoading || configError || !chat.sessionReady || chat.isStreaming || chat.sessionStatus === "busy" || chat.error || !availableWorkSelection(original, models)) return false;
+    if (!current() || submissionBlockedReason || configLoading || configError || !chat.sessionReady || chat.isLoading || chat.isStreaming || chat.sessionStatus === "busy" || chat.error || !availableWorkSelection(original, models)) return false;
     try {
       const accepted = await chat.send([
         ...(original.text.trim() ? [{ type: "text" as const, text: original.text }] : []),
@@ -205,7 +216,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       setUnconfirmed((current) => ({ ...current, [originalKey]: current[originalKey] ?? failure }));
       return false;
     }
-  }, [chat.send, chat.sessionReady, chat.isStreaming, chat.sessionStatus, chat.error, configLoading, configError, models, submissionBlockedReason]);
+  }, [chat.send, chat.sessionReady, chat.isLoading, chat.isStreaming, chat.sessionStatus, chat.error, configLoading, configError, models, submissionBlockedReason]);
 
   useLayoutEffect(() => {
     freshStart.publish({ sessionId: activeId, ready: !rehydrate && !configLoading && chat.sessionReady === true && !chat.isLoading && !chat.isStreaming && chat.sessionStatus !== "busy",
@@ -215,7 +226,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
 
   const send = async () => {
     const first = initialSessionId === null;
-    const ready = first ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.error;
+    const ready = first ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.isLoading && !chat.error;
     if (sendLock.current || submissionBlockedReason || protectedDraft || configLoading || configError || !modelAvailable || !canSendWork({ ready, pending: pending || navigationPending || chat.isStreaming, draft })) return;
     sendLock.current = true; setPending(true);
     if (first) setFirstSendPending(true);
@@ -276,21 +287,28 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     finally { setDiffPending(false); }
   };
   const conversations = sessions.sessions.map((session) => ({ id: session.id, title: session.title }));
-  const artifacts = collectWorkArtifacts(chat.messages);
+  const artifacts = collectWorkArtifacts(displayedMessages);
   const suggestions = workSuggestions({ hasSession: activeId !== null, hasFiles: artifacts.length > 0,
     hasChanges: diff !== null && diff.sessionId === activeId && Array.isArray(diff.value) && diff.value.length > 0, hasError: Boolean(chat.error) });
   return <WorkShell projectLabel={projectLabel} projects={identity.projectId === null ? [] : [{ id: identity.projectId, label: projectLabel, conversations }]}
     installationAdmin={installationAdmin}
     conversations={conversations} activeId={activeId} onSelect={select} onNew={() => { void create(); }}
     dot={slots?.dot}
-    onPresentationChange={(view) => { setPresentation(view); if (view === "work") setRehydrate(true); }}
+    onPresentationChange={(view) => {
+      setPresentation(view);
+      if (view === "work") {
+        if (activeId && chat.sessionReady) setRetainedHistory({ key: draftKey, messages: chat.messages });
+        setRehydrate(true);
+      }
+    }}
     newPending={pending || sessions.isCreating || sessions.isLoading || navigationPending || !creationAvailable}
     tools={<><button type="button" disabled={!activeId} onClick={() => setFilesOpen(!filesOpen)} aria-expanded={filesOpen} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Files</button>
       <button type="button" disabled={!activeId || diffPending} onClick={() => { void loadDiff(); }} className="rounded border border-white/10 px-3 py-1 text-xs disabled:opacity-40">Review changes</button>{slots?.tools}</>}
-    status={<div aria-live="polite" className="px-4 text-xs text-neutral-400">
+    status={<div aria-live="polite" className="max-h-32 overflow-y-auto px-4 text-xs text-neutral-400">
       {sessions.isLoading && <p>Loading conversations…</p>}
       {navigationPending && <p>Opening the selected conversation…</p>}
       {firstSendPending && <p role="status">Preparing the selected conversation and its captured first prompt…</p>}
+      {retainingHistory && <p role="status">{chat.error ? "History refresh failed. Showing the previous read-only history; sending remains blocked." : "Refreshing history; showing the previous read-only view."}</p>}
       {!sessions.isLoading && initialSessionId && !active && <p role="alert">The requested conversation is unavailable in this workspace.</p>}
       {(sessions.error || configError) && <p role="alert">{sessions.error ?? configError}</p>}
       {configError && <button type="button" onClick={() => { void refreshConfig(); }} className="my-2 rounded border border-white/10 px-3 py-2">Reload model configuration</button>}
@@ -318,7 +336,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       onAttach={() => attachmentInput.current?.click()}
       onSend={() => { void send(); }} onStop={() => { void chat.stop(); }} models={models}
       ready={!submissionBlockedReason && !protectedDraft && !configLoading && !configError && modelAvailable
-        && (initialSessionId === null ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.error)}
+        && (initialSessionId === null ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.isLoading && !chat.error)}
       pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
       projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {projectLabel}</span>}
       environmentControl={slots?.environmentControl ?? <span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
@@ -339,12 +357,12 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       <Image src="/veyra-blue.png" alt="" width={48} height={48} />
       <h1 className="text-xl font-medium">{projectRefId === null ? "What should we build?" : `What should we build in ${projectLabel}?`}</h1>
       <p className="text-xs text-neutral-400">Send a message to start a new chat, or choose an existing conversation.</p>
-    </div> : <ChatMessages messages={chat.messages} isLoading={chat.isLoading} isStreaming={chat.isStreaming}
-      streamActivity={chat.streamActivity} error={chat.error} permissions={chat.permissions} replyPermission={chat.replyPermission}
-      questions={chat.questions} replyQuestion={chat.replyQuestion}
+    </div> : <ChatMessages messages={displayedMessages} isLoading={chat.isLoading} isStreaming={chat.isStreaming}
+      streamActivity={chat.streamActivity} error={chat.error} permissions={retainingHistory ? [] : chat.permissions} replyPermission={chat.replyPermission}
+      questions={retainingHistory ? [] : chat.questions} replyQuestion={chat.replyQuestion}
       onActivityOpen={(messageId, partId) => { if (activeId) setActivity({ sessionId: activeId, selection: { messageId, partId } }); }}
       activitySelection={activity?.sessionId === activeId ? activity.selection : null} />}
     <ActivityDrawer isOpen={presentation === "work" && activity !== null && activity.sessionId === activeId} selection={activity?.sessionId === activeId ? activity.selection : null}
-      messages={chat.messages} onClose={() => setActivity(null)} />
+      messages={displayedMessages} onClose={() => setActivity(null)} />
   </WorkShell>;
 }

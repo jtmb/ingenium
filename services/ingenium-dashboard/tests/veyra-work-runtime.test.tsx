@@ -7,10 +7,12 @@ const state = vi.hoisted(() => ({
   sessionReady: true, isStreaming: false, chatError: null as string | null,
   nativeVariant: "", extraSessions: [] as Array<{ id: string; title: string }>,
   connected: true,
+  messages: [] as Array<{ id: string; role: "user" | "assistant"; content: string; parts: []; timestamp: number }>,
 }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/work", useRouter: () => ({ push: state.push, replace: state.replace }), useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock("next/image", () => ({ default: () => null }));
-vi.mock("next/link", () => ({ default: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a> }));
+// Preserve the real Link's accessibility attributes when replacing its router.
+vi.mock("next/link", () => ({ default: ({ children, ...props }: React.ComponentProps<"a">) => <a {...props}>{children}</a> }));
 vi.mock("../src/lib/AuthContext", () => ({ useAuth: () => ({ user: { id: "owner-a" } }) }));
 vi.mock("../src/lib/OrganizationContext", () => ({ useOrganization: () => ({ active: { id: "org-a" } }) }));
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "project-a" }));
@@ -26,10 +28,12 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({ useOpenCodeSessions: () => 
 }) }));
 vi.mock("../src/lib/use-opencode-chat", () => ({ useOpenCodeChat: (id: string | null) => {
   state.chat(id);
-  return { messages: [], sessionReady: state.sessionReady && id !== null, send: state.send,
+  const ready = state.sessionReady && id !== null;
+  return { messages: ready ? state.messages : [], sessionReady: ready, isLoading: id !== null && !ready, send: state.send,
     isStreaming: state.isStreaming, error: state.chatError, permissions: [], questions: [], stop: vi.fn() };
 } }));
-vi.mock("../src/app/chat/components/ChatMessages", () => ({ default: () => <p>Transcript owner</p> }));
+vi.mock("../src/app/chat/components/ChatMessages", () => ({ default: ({ messages }: { messages: Array<{ id: string; content: string }> }) =>
+  messages.length ? <div data-testid="transcript-scroll">{messages.map((message) => <p key={message.id}>{message.content}</p>)}</div> : <p>Transcript owner</p> }));
 vi.mock("../src/app/chat/components/ActivityDrawer", () => ({ default: () => null }));
 vi.mock("../src/app/components/veyra-work/WorkWebFrame", () => ({ default: ({ sessionId }: { sessionId: string | null }) => <p>Upstream frame: {sessionId}</p> }));
 vi.mock("../src/app/components/RuntimeWorkspacePicker", () => ({ default: () => <p>Workspace picker</p> }));
@@ -40,7 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.config.mockReset(); state.send.mockReset(); state.create.mockReset();
   state.sessionReady = true; state.isStreaming = false; state.chatError = null; state.query = "settings=general";
-  state.nativeVariant = ""; state.extraSessions = []; state.connected = true;
+  state.nativeVariant = ""; state.extraSessions = []; state.connected = true; state.messages = [];
   state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-a", modelId: "model-a" }, providers: [
     { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A" }] },
   ] });
@@ -388,5 +392,42 @@ describe("Work runtime boundary and conversation state", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(state.create).toHaveBeenCalledTimes(1); expect(state.send).toHaveBeenCalledTimes(1);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Keep first admission original");
+  });
+
+  it("retains the last rendered transcript node and scroll while authoritative history reloads after Web", async () => {
+    const original = { id: "message-a", role: "user" as const, content: "Previously confirmed history", parts: [] as [], timestamp: 1 };
+    state.messages = [original];
+    const view = render(<WorkRuntime {...props} />);
+    await screen.findByText(original.content);
+    const scroll = screen.getByTestId("transcript-scroll"); scroll.scrollTop = 120;
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
+    state.sessionReady = false;
+    view.rerender(<WorkRuntime {...props} />);
+    expect(screen.getByText(original.content)).toBeTruthy();
+    expect(screen.getByTestId("transcript-scroll")).toBe(scroll); expect(scroll.scrollTop).toBe(120);
+    state.messages = [original, { id: "message-b", role: "assistant", content: "Authoritative Web update", parts: [], timestamp: 2 }];
+    state.sessionReady = true;
+    view.rerender(<WorkRuntime {...props} />);
+    await screen.findByText("Authoritative Web update");
+    expect(screen.getByTestId("transcript-scroll")).toBe(scroll); expect(scroll.scrollTop).toBe(120);
+  });
+
+  it("labels a failed refresh as a previous read-only view, blocks sends and never shows it in another session", async () => {
+    state.messages = [{ id: "message-a", role: "user", content: "Retain this scoped history", parts: [], timestamp: 1 }];
+    const view = render(<WorkRuntime {...props} />);
+    await screen.findByText("Retain this scoped history");
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
+    state.sessionReady = false;
+    view.rerender(<WorkRuntime {...props} />);
+    state.chatError = "History unavailable"; state.sessionReady = true;
+    view.rerender(<WorkRuntime {...props} />);
+    await screen.findByText(/History refresh failed. Showing the previous read-only history/);
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    state.messages = []; state.sessionReady = false;
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-b" />);
+    expect(screen.queryByText("Retain this scoped history")).toBeNull();
+    expect(state.send).not.toHaveBeenCalled();
   });
 });

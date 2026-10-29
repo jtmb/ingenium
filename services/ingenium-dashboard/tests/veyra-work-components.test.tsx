@@ -22,9 +22,14 @@ describe("Work presentation", () => {
     fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "Preserve this exact draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
     expect(screen.getByText("Unchanged upstream")).toBeTruthy();
+    const inactiveWork = screen.getByLabelText("Work presentation");
+    expect(inactiveWork.getAttribute("inert")).not.toBeNull();
+    expect(inactiveWork.hasAttribute("hidden")).toBe(false);
+    expect(screen.getByRole("region", { name: "Web presentation" }).getAttribute("aria-hidden")).toBe("false");
     expect(screen.getByRole("button", { name: "Web", exact: true }).getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
     expect((screen.getByLabelText("Draft") as HTMLInputElement).value).toBe("Preserve this exact draft");
+    expect(screen.getByLabelText("Web presentation").getAttribute("inert")).not.toBeNull();
     expect(mounted).toHaveBeenCalledTimes(1); expect(removed).not.toHaveBeenCalled();
   });
 

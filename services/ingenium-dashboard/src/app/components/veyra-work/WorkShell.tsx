@@ -45,7 +45,7 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
     </button>
   </li>;
   const matches = (conversation: WorkConversation) => conversation.title.toLocaleLowerCase().includes(search.toLocaleLowerCase());
-  return <div data-testid="veyra-work-shell" className="flex h-full min-h-[32rem] min-w-0 overflow-hidden bg-[#181616] text-neutral-200">
+  return <div data-testid="veyra-work-shell" className="flex h-full min-h-0 min-w-0 overflow-hidden bg-[#181616] text-neutral-200">
     <nav aria-label="Work applications" className="flex w-[52px] shrink-0 flex-col items-center gap-3 border-r border-white/5 bg-[#202020] py-3">
       <button type="button" aria-label="Toggle conversation sidebar" aria-expanded={sidebar} aria-controls="veyra-work-sidebar"
         onClick={() => setSidebar(!sidebar)} className="rounded-lg p-2 hover:bg-white/10 focus-visible:outline-blue-400">
@@ -110,11 +110,16 @@ export default function WorkShell({ projectLabel, projects, conversations, activ
           <strong className="text-sm">{feature.label}</strong><p className="text-xs text-neutral-400">{feature.description}</p>
         </Link>)}</div>
       </section>}
-      {/* Presentation changes retain both controllers, drafts, scroll and upstream frame. */}
-      <div hidden={view !== "work"} className={`${view === "work" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>
-        <div className="min-h-0 flex-1 overflow-auto">{children}</div>{composer}
+      {/* Keep both viewport boxes full size: hidden iframe geometry can reset
+          upstream virtual lists even when the frame itself remains mounted. */}
+      <div className="relative min-h-0 flex-1">
+        <div role="region" aria-label="Work presentation" aria-hidden={view !== "work"} inert={view !== "work"}
+          className={`absolute inset-0 flex min-h-0 min-w-0 flex-col ${view === "work" ? "visible opacity-100 pointer-events-auto" : "invisible opacity-0 pointer-events-none"}`}>
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto">{children}</div>{composer}
+        </div>
+        <div role="region" aria-label="Web presentation" aria-hidden={view !== "web"} inert={view !== "web"}
+          className={`absolute inset-0 flex min-h-0 min-w-0 flex-col ${view === "web" ? "visible opacity-100 pointer-events-auto" : "invisible opacity-0 pointer-events-none"}`}>{webVisited ? web : null}</div>
       </div>
-      <div hidden={view !== "web"} className={`relative ${view === "web" ? "flex" : "hidden"} min-h-0 flex-1 flex-col`}>{webVisited ? web : null}</div>
     </section>
   </div>;
 }
