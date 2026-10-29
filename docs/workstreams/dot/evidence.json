@@ -17,11 +17,11 @@
   "exitCode": 0,
   "summary": [
     "ok 32 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
-    "# tests 53",
-    "# pass 52",
+    "# tests 57",
+    "# pass 56",
     "# fail 0",
     "# skipped 1",
-    "# duration_ms 456.121502"
+    "# duration_ms 388.319276"
   ],
   "sourceSHA256": {
     "packages/veyra-automation/contracts.d.ts": "a72712535ce8974cab206aa0d7275ec46aa9f1eaad508868d418b167ed92198e",
@@ -33,14 +33,14 @@
     "services/ingenium-api/lib/dot-v2/router.ts": "005e75bf8ff6ea907f380da8cdf57196e1e33426359b0aa742dd164bf2ee5868",
     "services/ingenium-api/lib/dot-v2/schedule.ts": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
     "services/ingenium-api/lib/dot-v2/schema.sql": "5bcb2330eff3c679e544dd855718c1fb0853f2f3bff46158b2829c1fe6439e47",
-    "services/ingenium-api/lib/dot-v2/service.ts": "57c47984c977f9e4ff56ff5b7ce1df21062a904ffc2e3d20cedc5e527d5f171f",
+    "services/ingenium-api/lib/dot-v2/service.ts": "c0ff6cb873916c9dca379f7151958777e15c2d5e8883479e5a073d3738a609b4",
     "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "d669deb3fe718f4a254edd9ebbac9a57b4f393e100e561618641c01669377d60",
     "services/ingenium-api/tests/veyra-dot-core-binding.cpu.mjs": "672b4945aae1150cafead7e497c4d359f6a9e13a7d4c9f13628bbfe37cdaf5ca",
     "services/ingenium-api/tests/veyra-dot-loader.mjs": "8f1ea1b49de741f673ee35e69d1d88de9913be844f522c86f4f2fa22a448fac8",
     "services/ingenium-api/tests/veyra-dot-router-boundary.cpu.mjs": "ce86ccac6b6eda76bb7be7b14e40e3dbfe6e07202e302b301ba06574f9b9443e",
     "services/ingenium-api/tests/veyra-dot-router.test.ts": "5efdc482e99943330e9dc23d2db203e35288c2b8efc0fa60a5d3f79a01a17732",
     "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs": "6b15292b1f423664dce9e143d41e7ab1c079edebc964bf301753e1b0996eb510",
-    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "f1e69e1edf946b3f59581387e8a2540e25d649bb9c36d5aa479f9b3ddf153f0d",
+    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "2cd65cdd3d174e8988e5f2fe44f89601b151e7db917fc90257a30de8b4e3a7bb",
     "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "75fab77030a2e48673f8e4c1a568e79a102083ac4b74396f60a3c857f9f3c0e5",
     "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "01423dd03b4682a729edabbba0b1660e296282a6ffbe832c2cff680bac5a3888",
     "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac"
@@ -140,5 +140,13 @@
     "logs": "coordination/integration/*-r1.log in coordinator root",
     "scope": "Not scoped acceptance; does not cover later core-binding adapter"
   },
-  "sharedPatchSHA256": "1addbbee1ad0a0240915e547341c68cf6c651b4df82ae3364adc81624971b317"
+  "sharedPatchSHA256": "1addbbee1ad0a0240915e547341c68cf6c651b4df82ae3364adc81624971b317",
+  "suggestionDTOValidation": {
+    "proof": "Only declared fields persisted; exact prompt bytes survive; malformed/excess capabilities fail before capability authorization; malformed idempotent replay cannot match a stored source",
+    "source": "services/ingenium-api/lib/dot-v2/service.ts"
+  },
+  "scopeValidation": {
+    "proof": "Explicit null project/conversation scopes work; missing/undefined/empty nullable fields and null actor are rejected before record reads",
+    "source": "services/ingenium-api/lib/dot-v2/service.ts"
+  }
 }

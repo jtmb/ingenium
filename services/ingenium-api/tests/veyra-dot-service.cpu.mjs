@@ -200,3 +200,27 @@ test("cursor CAS rejects stale progress and user changes without overwriting pau
  assert.equal(f.repo.get("followup",follow.id,scope).state,"paused");assert.equal(f.repo.get("followup",follow.id,scope).cursor,paused.cursor);
  assert.throws(()=>f.repo.advanceFollowupCursor(paused,"2026-10-29T00:00:00.000Z"),/backward/);
 });
+
+test("suggestions retain only declared DTO fields and preserve exact prompt bytes",t=>{
+ const f=fixture();t.after(()=>f.db.close());const prompt="  Review this task\nwithout rewriting its content.  ";const value=f.suggestion({prompt,unexpected:{large:"untrusted extra payload"},source:{kind:"user",reference:"message",instructions:"untrusted extra source data"}});
+ assert.equal(value.prompt,prompt);assert.equal("unexpected" in value,false);assert.deepEqual(value.source,{kind:"user",reference:"message"});const stored=f.repo.get("suggestion",value.id,scope);assert.equal("unexpected" in stored,false);assert.equal("instructions" in stored.source,false);
+});
+test("invalid capability sizes/types are rejected before per-capability authorization or persistence",t=>{
+ const f=fixture();t.after(()=>f.db.close());const initialChecks=f.checks.length;
+ for(const capabilities of [Array(33).fill("read"),[{}],[""],null,"read"]){assert.throws(()=>f.suggestion({capabilities}),/VALIDATION/);}
+ assert.equal(f.checks.length,initialChecks);assert.equal(f.repo.page("suggestion",scope).data.length,0);
+});
+test("source-idempotent admission validates malformed replay inputs rather than treating them as a match",t=>{
+ const f=fixture();t.after(()=>f.db.close());const input={title:"Review",prompt:"Check progress",source:{kind:"event",reference:"same-source/revision-1"},capabilities:[],expiresAt:"2026-11-01T00:00:00.000Z"};
+ const first=f.api.proposeForSource(actor,scope,input);
+ for(const extra of [{capabilities:undefined},{capabilities:""},{expiresAt:"bad"},{source:{kind:"event",reference:"same-source/revision-1"},title:""}])assert.throws(()=>f.api.proposeForSource(actor,scope,{...input,...extra}),/VALIDATION/);
+ assert.equal(f.repo.page("suggestion",scope).data.length,1);assert.equal(f.repo.get("suggestion",first.id,scope).prompt,input.prompt);
+});
+
+test("missing nullable scope fields cannot alias explicit projectless or conversationless records",t=>{
+ const f=fixture();t.after(()=>f.db.close());const projectless={...scope,projectId:null,conversationId:null};
+ f.api.propose(actor,projectless,{title:"Private suggestion",prompt:"Review private work",source:{kind:"user",reference:"private-message"},capabilities:[],expiresAt:"2026-11-01T00:00:00.000Z"});
+ assert.equal(f.api.page(actor,projectless,"suggestion").data.length,1);
+ for(const invalid of [{...projectless,projectId:undefined},{...projectless,conversationId:undefined},{...projectless,projectId:""},{...projectless,conversationId:""}])assert.throws(()=>f.api.page(actor,invalid,"suggestion"),/FORBIDDEN/);
+ assert.throws(()=>f.api.page(null,projectless,"suggestion"),/FORBIDDEN/);
+});

@@ -19,13 +19,22 @@ export class DotError extends Error {
   constructor(code: string) { super(code); this.code=code; }
 }
 const text = (value: string, max: number) => { if (typeof value !== "string" || !value.trim() || value.length > max) throw new DotError("DOT_VALIDATION"); };
+function suggestionInput(input: SuggestionInput): SuggestionInput {
+  if(!input || !input.source || !Array.isArray(input.capabilities) || input.capabilities.length>32)throw new DotError("DOT_VALIDATION");
+  text(input.title,160);text(input.prompt,16000);text(input.source.reference,512);
+  if(!["user","event","memory"].includes(input.source.kind))throw new DotError("DOT_VALIDATION");
+  for(const capability of input.capabilities)text(capability,128);
+  if(typeof input.expiresAt!=="string" || !Number.isFinite(Date.parse(input.expiresAt)) || new Date(input.expiresAt).toISOString()!==input.expiresAt)throw new DotError("DOT_VALIDATION");
+  return {title:input.title,prompt:input.prompt,source:{kind:input.source.kind,reference:input.source.reference},capabilities:[...new Set(input.capabilities)],expiresAt:input.expiresAt};
+}
 const terminal = new Set(["success", "failed", "cancelled", "skipped", "blocked"]);
 
 export class DotService {
   readonly repository: DotRepository; readonly authorization: Authorization; readonly jobs: JobAuthority; readonly now: () => string; readonly id: () => string;
   constructor(repository: DotRepository, authorization: Authorization, jobs: JobAuthority, now: () => string, id: () => string) { this.repository=repository; this.authorization=authorization; this.jobs=jobs; this.now=now; this.id=id; }
   private require(actor: Actor, scope: DotScope, action: Parameters<Authorization["require"]>[2], capabilities: string[] = []) {
-    if (![scope.organizationId,scope.ownerUserId,scope.executionBindingId,scope.executionBindingFingerprint].every(v => typeof v === "string" && v.length > 0) || !actor.id || actor.organizationId !== scope.organizationId || actor.id !== scope.ownerUserId || !scope.executionBindingId) throw new DotError("DOT_FORBIDDEN");
+    if (!actor || !scope || ![scope.organizationId,scope.ownerUserId,scope.executionBindingId,scope.executionBindingFingerprint].every(v => typeof v === "string" && v.length > 0) || !actor.id || actor.organizationId !== scope.organizationId || actor.id !== scope.ownerUserId) throw new DotError("DOT_FORBIDDEN");
+    if ((scope.projectId !== null && (typeof scope.projectId !== "string" || !scope.projectId.length)) || (scope.conversationId !== null && (typeof scope.conversationId !== "string" || !scope.conversationId.length))) throw new DotError("DOT_FORBIDDEN");
     this.authorization.require(actor,scope,action,capabilities);
   }
   private suggestion(actor: Actor, scope: DotScope, id: string): Suggestion {
@@ -41,8 +50,7 @@ export class DotService {
   assertCanSuggest(actor: Actor, scope: DotScope): void { this.require(actor,scope,"suggest"); }
   proposeForSource(actor: Actor, scope: DotScope, input: SuggestionInput): Suggestion {
     this.require(actor,scope,"suggest");
-    if(!input || !input.source)throw new DotError("DOT_VALIDATION");
-    text(input.source.reference,512);
+    input=suggestionInput(input);
     const id="dot-source-"+createHash("sha256").update(JSON.stringify([scopeKey(scope),input.source.kind,input.source.reference])).digest("hex");
     return this.repository.transaction(() => {
       const existing=this.repository.get<Suggestion>("suggestion",id,scope);
@@ -56,15 +64,12 @@ export class DotService {
     });
   }
   private createSuggestion(actor: Actor, scope: DotScope, input: SuggestionInput, stableId?: string): Suggestion {
-    if (!input || !input.source || !Array.isArray(input.capabilities)) throw new DotError("DOT_VALIDATION");
+    input=suggestionInput(input);
     this.require(actor,scope,"suggest",input.capabilities);
-    text(input.title,160); text(input.prompt,16000); text(input.source.reference,512);
-    if (!["user","event","memory"].includes(input.source.kind) || !Array.isArray(input.capabilities) || input.capabilities.length > 32) throw new DotError("DOT_VALIDATION");
-    for (const capability of input.capabilities) text(capability,128);
     if (input.source.kind === "memory" && !this.authorization.canReadMemory(actor,scope)) throw new DotError("DOT_MEMORY_DISABLED");
     this.authorization.requireSource(actor,scope,input.source);
     const now = this.now();
-    if (!Number.isFinite(Date.parse(input.expiresAt)) || new Date(input.expiresAt).toISOString() !== input.expiresAt || input.expiresAt <= now) throw new DotError("DOT_EXPIRED");
+    if (input.expiresAt <= now) throw new DotError("DOT_EXPIRED");
     const value: Suggestion = { ...input, capabilities: [...new Set(input.capabilities)], scope, id: stableId ?? this.id(), revision: 0, state: "proposed", createdAt: now };
     this.repository.put("suggestion",value,null);
     return value;
