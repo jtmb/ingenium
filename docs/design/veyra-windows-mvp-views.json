@@ -133,7 +133,61 @@
     "First-run and native-service recovery states",
     "Full create-project distro/user/shell/workdir validation and submission; Windows/WSL dialog visuals captured",
     "Tray menu and confirmed graceful whole-service exit",
-    "Keyboard/focus and 100-200 percent scaling"
+    "Windows display DPI and route-wide scaling/keyboard focus; connection and shared Chat page zoom/focus passed"
   ],
-  "freshNativeReplacementRenderingPassed": true
+  "freshNativeReplacementRenderingPassed": true,
+  "pageZoomEvidence": {
+    "guiSha256": "d986d41f6a348a725fe69d75201f5ee8e244fd7c59ad2252672aa0048cc7af35",
+    "sourceCodeCommit": "42f8d946ba0af8042d88e9248aca99a19ccb6460",
+    "scope": "Actual connection and shared Chat page zoom/focus only; not Windows display DPI or route-wide acceptance",
+    "shortcutSequence": "Ctrl+0 then five Ctrl+Plus; Ctrl+0 restored both windows",
+    "composerPixelHeights": [
+      52,
+      104
+    ],
+    "keyboardFocusBothWindows": true,
+    "modelPickerOpenedByKeyboard": true,
+    "standardLunaRetained": true,
+    "visualAccepted": false,
+    "captures": [
+      {
+        "view": "connection",
+        "capture": "native-companion-zoom-100-20261029.jpg",
+        "sha256": "70f9fe49698ca949082d8f701835a37afe7e12e9e64b5c1fe5b196c8cb723ded",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "connection",
+        "capture": "native-companion-zoom-200-focus-20261029.jpg",
+        "sha256": "38cff6d90ba34ce6c601599b4a9d1a9168366b284e0d0e49b668b5739f352b32",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 2
+      },
+      {
+        "view": "shared-chat-new-conversation",
+        "capture": "native-chat-zoom-100-20261029.jpg",
+        "sha256": "62f1c27690e02458a3c20a1b0724ded1e83608164cb6c9aca3631e3b6ed622ba",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 1
+      },
+      {
+        "view": "shared-chat-new-conversation",
+        "capture": "native-chat-zoom-200-focus-20261029.jpg",
+        "sha256": "63e413603afa06b43b508e2e2642750b708b2b4e0bfb0255b534848f2530fa80",
+        "width": 1362,
+        "height": 932,
+        "pageScale": 2
+      }
+    ],
+    "finalCapture": {
+      "capture": "native-composer-final-zoom-qualified-20261029.jpg",
+      "sha256": "9d995b7903a6c7c7849a044896e03e4897aa3b584d5b78eedf0f3088db048520",
+      "width": 1362,
+      "height": 932
+    }
+  }
 }
