@@ -193,3 +193,20 @@ test('adapter-backed generation and forget preserve defaults, source suppression
     assert.throws(() => f.session.memory.admit(scope,'chat-a',[{id:'message-a',contentHash:sha(f.content)}]),code('SOURCE_FORGOTTEN'));
   } finally { f.db.close(); }
 });
+
+test('legacy scope denial becomes FORBIDDEN while an unexpected core failure remains a server error', () => {
+  const f=fixture();
+  try {
+    const request={action:'policy',method:'GET',chatId:'chat-a'};
+    const denied=createApiMemorySession({...f.ports,resolveExistingScope:() => { throw Object.assign(new Error('private scope absent'),{code:'MEMORY_SCOPE_NOT_FOUND'}); }});
+    expectStatus(denied,403);
+    const broken=createApiMemorySession({...f.ports,resolveExistingScope:() => { throw new Error('unexpected core fixture failure'); }});
+    expectStatus(broken,500);
+    function expectStatus(session,status) {
+      const result=memoryResponse(session.memory,() => session.resolveScope('read','chat-a'),request);
+      assert.equal(result.status,status);
+      assert.equal(JSON.stringify(result).includes('private scope absent'),false);
+      assert.equal(JSON.stringify(result).includes('unexpected core fixture failure'),false);
+    }
+  } finally { f.db.close(); }
+});

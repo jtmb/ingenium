@@ -51,3 +51,24 @@ Coordinator previously integrated through `6d52d341`: memory UI4/4 is verified i
 The existing API TypeScript build emits `core-session.ts`. The coordinator reports its AST closure copier now handles static MJS imports; ensure it includes the new factory import and excludes tests. Runtime modules are `lifecycle.mjs`, `http.mjs`, `jobs.mjs`, `adapters.mjs`; do not ship `adapters.test.mjs` through a blanket glob. The coordinator retains router registration, source/binding port assembly, migration numbering, restore barriers, shared journal, native/cluster checks and final visual acceptance.
 
 Coordinator subsequently reports migrations122–124 allocated in parent, including memory123 generated virtual organization/owner FK references from the canonical six-axis key without changing positional inserts. Its actual core-wrapper integration test verifies original-table digests, memory/Dot/catalog writes, close/reopen fresh-chat recall/receipts and forget. This advances base-core compatibility evidence; it does not substitute for assembly/typechecking of the new adapter factory in this patch. The worker proposal schema remains unchanged and is used only by pure fixtures.
+
+## Central real-core Vitest suite
+
+`services/ingenium-api/tests/veyra-memory-core-adapters.test.ts` is submitted source for the coordinator's next central run. It imports the real `ingenium-core` through the existing API Vitest alias and the actual `createCoreMemorySession` entry point. It does not mock DB/auth/workspace functions or install the draft schema. The suite requires migration123's generated organization/owner columns; missing real migrations fail the setup.
+
+Six sequential cases cover actual browser-session actor/revocation denial; actual service credential resolution/attestation/revocation; workspace security-epoch revocation through the core lifecycle; same-scope fresh-chat retrieval/receipts after close/reopen followed by durable forget; original receipt identity/version after a controlled post-commit checkpoint fault and reopen; and read/use gating over actual explicit saved memories. Original explicit-memory/context row digests and foreign keys are checked. The only fault seam replaces the checkpoint callback in one case; real core transactions and persistence remain in use.
+
+Execution/host/source eligibility ports are deliberate fixture resolvers over the actual fixture runtime and Context records, not qualified production/live-engine bindings. Core runtime transitions update fixture DB records only; no provisioner, service, model, scheduler, container or microphone is invoked. The coordinator retains all real resolver wiring and attended runtime gates.
+
+Run centrally after applying this commit, using existing dependencies and the existing API alias:
+
+```sh
+VEYRA_MEMORY_CORE_TEST_ROOT="$OWNED_MEMORY_COORD" \
+TEMP="$OWNED_MEMORY_COORD/tmp" TMP="$OWNED_MEMORY_COORD/tmp" TMPDIR="$OWNED_MEMORY_COORD/tmp" \
+node node_modules/vitest/vitest.mjs run --config services/ingenium-api/vitest.config.ts \
+  services/ingenium-api/tests/veyra-memory-core-adapters.test.ts
+```
+
+The central runner supplies an existing absolute task-owned root and creates its scoped temp directory under its measured resource lease. No fallback to system temp, profile DB or user credentials is allowed. The suite creates one fresh SQLite fixture for all cases, restores process environment, closes the singleton and writes `veyra-memory-core-fixture.json` with exact generated paths. The fixture includes fake auth material only. Keep the fixture until the coordinator reviews the result/first failure, then perform normal exact containment/handle/mount/source-preservation cleanup. Budget one core DB/WAL plus a small fixture key/config, conservatively32MiB before central measurement; no dependency copy/install is requested. The worker has **not run this Vitest suite**.
+
+Expected denial normalization is narrow: core `MEMORY_SCOPE_NOT_FOUND` becomes memory `FORBIDDEN`/403. Unexpected core/DB errors still fail as500 with sanitized responses. This closes the actual-core wrong-actor facade mismatch found during test design; no broader catch or authorization fallback is introduced.

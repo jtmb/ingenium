@@ -53,7 +53,13 @@ export function createApiMemorySession({ core, request, selected, authenticate, 
       // expiry, service-principal and storage-path attestation checks.
       const legacyPrincipal = principal.type === 'user' ? { type: 'user', userId: principal.id }
         : { type: 'service', servicePrincipalId: principal.id, credentialId: principal.tokenId, storageMappingHash: principal.storageMappingHash };
-      const legacy = resolveExistingScope({ projectId: selection.projectId, workspaceId: selection.workspaceId, principal: legacyPrincipal, allowProjectVisibility: false });
+      let legacy;
+      try {
+        legacy = resolveExistingScope({ projectId: selection.projectId, workspaceId: selection.workspaceId, principal: legacyPrincipal, allowProjectVisibility: false });
+      } catch (error) {
+        if (error?.code === 'MEMORY_SCOPE_NOT_FOUND') denied();
+        throw error;
+      }
       if (!legacy || legacy.projectId !== selection.projectId || legacy.workspaceId !== selection.workspaceId || !id(legacy.organizationId) || !id(legacy.ownerUserId)
         || (principal.type === 'user' && legacy.ownerUserId !== principal.id)) denied();
       ownership = connection().prepare(`SELECT w.id AS workspaceId,w.organization_id AS organizationId,w.project_id AS projectId,
