@@ -1,0 +1,15 @@
+# Work UI local adapter contracts
+
+Consumes coordinator `docs/contracts/veyra-parallel-v1.md` semantics (read 2026-10-29). These shapes are local component proposals and do not supersede the coordinator's versioned DTOs or existing runtime/API authority.
+
+`WorkIdentity` scopes in-memory drafts by installation surface, user, organization, nullable project, runtime, workspace and nullable engine session. It encodes the tuple with JSON, avoiding concatenation collisions. The current compatibility route uses existing ProjectContext/runtime names; it does not synthesize a projectless/global project mapping. The Projects adapter must supply the explicit null project under the new contract.
+
+`WorkDraft` carries text, file reference/data URLs, explicit skill IDs, provider/model/variant. Draft state does not grant attachment/tool/skill authority. The current runtime consumer sends only supported text/file parts and model/variant; skill activation awaits the resource lifecycle adapter. Unknown admissions retain the exact draft and a visible unconfirmed status. Reload durability and exact admission receipts remain owned integration contracts.
+
+`WorkProject {id,label,conversations}` and `WorkConversation {id,title,pinned?,busy?}` are presentation projections from an already permission-filtered catalog. WorkShell does not create/rename/archive projects or modify pin preferences. `onSelect(id)` must resolve the existing engine session on its admitted execution binding, never match titles or move a conversation implicitly.
+
+`WorkModel {providerId,modelId,label,variants?}` contains only qualified catalog choices. The composer clears the old variant on explicit model change. Existing session provider/model/variant comes from native session metadata; new-session defaults come from the API-owned installation preferences adapter. Missing native selection/catalog blocks send and asks for explicit selection; Work does not write settings or silently copy last-chat choices into defaults.
+
+`WorkShell` provides named `composer`, `web`, `status`, `tools` and `dot` React slots. `WorkComposer` provides `projectControl`, `environmentControl`, `permissionControl`, `memoryControl`, `voiceControl` slots and attachment callback. Domain controllers remain in the owning streams. Pass real capability/status/error controls; sidebar placement does not grant admission. These slots avoid direct dependencies on still evolving resource, scheduling and voice implementations.
+
+Required addition from coordinator: an `ExecutionBinding`/`ConversationRef` adapter carrying instance/revision/immutable workspace hash/epoch, actual native/WSL/cluster host/directory and project organization independently. It must provide exact-session Web navigation/reconciliation and operation receipts before automatic toggle acceptance. Do not derive these fields from folder labels, current browser origin or an iframe's DOM.
