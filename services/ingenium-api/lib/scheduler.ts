@@ -1,3 +1,4 @@
+import type { CoreDotRuntime } from "./dot-v2/core-binding.js";
 import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
 import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
 import { getUsageSyncInterval, syncUsageFromOpenCode } from "./usage-sync.js";
@@ -42,6 +43,7 @@ const EVENT_JOB_CLAIMS_PER_CYCLE = 4;
 const EVENT_JOB_TICK_MS = 10_000;
 
 let schedulerRunning = false;
+let dotRuntime: CoreDotRuntime | undefined;
 let schedulerGeneration = 0;
 const scheduledTimeouts = new Set<ReturnType<typeof setTimeout>>();
 const renewalIntervals = new Set<ReturnType<typeof setInterval>>();
@@ -388,6 +390,8 @@ function runJobScheduler(generation: number): void {
     logger.warn("job-scheduler", "Vault job recovery retained unresolved evidence");
   });
   try {
+    try { dotRuntime?.recoverOperations(100); }
+    catch (error) { logger.warn("dot-scheduler", "Dot operation recovery requires attention", { name: error instanceof Error ? error.name : "unknown" }); }
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const now = new Date();
@@ -398,6 +402,7 @@ function runJobScheduler(generation: number): void {
       const projectJobs = jobs.listJobs(p.id);
 
       for (const job of projectJobs) {
+        if (dotRuntime?.ownsJob(job.project_id, job.id)) { dueJobs.push(job); continue; }
         if (!job.enabled) continue;
         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
         if (!matchesCron(job.schedule_cron, now)) continue;
@@ -406,6 +411,13 @@ function runJobScheduler(generation: number): void {
     }
     for (const job of jobs.orderJobsForFairDispatch(dueJobs, "cron")) {
         if (!isSchedulerActive(generation)) break;
+        const dot = dotRuntime;
+        if (dot?.ownsJob(job.project_id, job.id)) {
+          void trackTask(dot.dispatchJob(job.project_id, job.id, () => isSchedulerActive(generation))).catch((error: unknown) => {
+            logger.warn("dot-scheduler", "Dot dispatch requires attention", { name: error instanceof Error ? error.name : "unknown" });
+          });
+          continue;
+        }
         const scheduledFor = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
         const result = jobs.startJobRun(job.project_id, job.id, "cron", {
           scheduledFor,
@@ -495,13 +507,14 @@ function scheduleLockCleanup(generation: number): void {
   });
 }
 
-export function startScheduler(port: number): void {
+export function startScheduler(port: number, dot?: CoreDotRuntime): void {
   if (schedulerRunning) {
     logger.warn("scheduler", "Scheduler start ignored because it is already running");
     return;
   }
 
   schedulerRunning = true;
+  dotRuntime = dot;
   const generation = ++schedulerGeneration;
   logger.info(
     "scheduler",
@@ -566,6 +579,7 @@ export async function stopScheduler(): Promise<void> {
   activeAbortControllers.clear();
 
   await Promise.allSettled([...activeTasks]);
+  dotRuntime = undefined;
   logger.info("scheduler", "Background scheduler stopped");
 }
 

@@ -5505,7 +5505,56 @@ function runMigrations(db: Database.Database): void {
     })();
     logger.info("db", "Applied migration 121_repository_sync_worktree_state.sql");
   }
+  applyVeyraDomainMigrations(db, migrationsDir);
   enforceReservedBrokerInvariant(db);
+}
+
+/** The existing API connection remains the sole schema/data writer. */
+function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: string): void {
+  const migrations = [
+    { file: "122_veyra_workspace_projects.sql", tables: ["veyra_installation_identity", "veyra_workspace_projects", "veyra_workspace_roots", "veyra_installation_legacy_refs", "veyra_project_aliases", "veyra_project_operations"], triggers: [] },
+    { file: "123_veyra_memory_lifecycle.sql", tables: ["veyra_memory_policy", "veyra_memory_chat_policy", "veyra_memory_recall", "veyra_memory_suppression", "veyra_memory_receipt", "veyra_memory_extraction"], triggers: ["veyra_memory_receipt_immutable_update", "veyra_memory_receipt_immutable_delete", "veyra_memory_suppression_immutable_update", "veyra_memory_suppression_immutable_delete", "veyra_memory_extraction_immutable_update", "veyra_memory_extraction_immutable_delete"] },
+    { file: "124_veyra_dot_automation.sql", tables: ["veyra_dot_records"], triggers: [] },
+  ];
+  for (const migration of migrations) {
+    const present = migration.tables.filter(name => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+    if (present.length > 0 && present.length !== migration.tables.length) throw new Error("Incomplete Veyra schema: " + migration.file);
+    if (present.length === 0) {
+      database.transaction(() => {
+        database.exec(readFileSync(resolve(migrationsDir, migration.file), "utf8"));
+        for (const table of migration.tables) {
+          if (database.prepare("PRAGMA foreign_key_check(" + table + ")").all().length) throw new Error("Veyra migration foreign key failure");
+        }
+      })();
+      logger.info("db", "Applied migration " + migration.file);
+    }
+    const references = (table: string, column: string, parent: string): void => {
+      const keys = database.prepare("PRAGMA foreign_key_list(" + table + ")").all() as { from: string; table: string; to: string; on_delete: string }[];
+      if (!keys.some(key => key.from === column && key.table === parent && key.to === (parent === "veyra_installation_identity" ? "instance_id" : "id") && key.on_delete === "RESTRICT")) throw new Error("Missing Veyra ownership invariant: " + table + "." + column);
+    };
+    if (migration.file.startsWith("122_")) {
+      for (const table of ["veyra_workspace_projects", "veyra_workspace_roots", "veyra_project_aliases", "veyra_installation_legacy_refs"]) references(table, "instance_id", "veyra_installation_identity");
+      references("veyra_workspace_projects", "organization_id", "organizations");
+      references("veyra_workspace_projects", "owner_user_id", "users");
+    }
+    if (migration.file.startsWith("123_")) {
+      for (const table of migration.tables) {
+        references(table, "scope_organization_id", "organizations");
+        references(table, "scope_owner_user_id", "users");
+        const columns = database.prepare("PRAGMA table_xinfo(" + table + ")").all() as { name: string; hidden: number }[];
+        if (!["scope_organization_id", "scope_owner_user_id"].every(name => columns.some(column => column.name === name && column.hidden === 2))) throw new Error("Missing Veyra derived scope invariant: " + table);
+      }
+    }
+    if (migration.file.startsWith("124_")) {
+      references("veyra_dot_records", "organization_id", "organizations");
+      references("veyra_dot_records", "owner_user_id", "users");
+      const indexes = database.prepare("PRAGMA index_list(veyra_dot_records)").all() as { name: string; unique: number; partial: number }[];
+      if (!indexes.some(index => index.name === "veyra_dot_job_owner" && index.unique === 1 && index.partial === 1)) throw new Error("Missing Veyra job ownership invariant");
+    }
+    for (const trigger of migration.triggers) {
+      if (!database.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(trigger)) throw new Error("Missing Veyra retention invariant: " + trigger);
+    }
+  }
 }
 
 function reconcileDuplicateActiveGlobals(db: Database.Database): void {
@@ -5649,8 +5698,8 @@ export function sanitizeFts5Query(input: string): string {
 /**
  * Conditionally issue a PASSIVE WAL checkpoint after every 50th write.
  *
- * 🔴 MUST be called OUTSIDE `execTransaction()` — see WAL SAFETY warning on execTransaction.
- * Calling checkpoint inside a transaction causes SQLITE_LOCKED.
+ * Nested writers may request a checkpoint while an outer transaction is active.
+ * Retain the pending count until the next post-commit call; SQLite cannot checkpoint inside it.
  *
  * The 50-write threshold is a heuristic:
  * - Too frequent (<10 writes): checkpoint overhead dominates write latency.
@@ -5664,7 +5713,7 @@ export function sanitizeFts5Query(input: string): string {
 let writeCount = 0;
 export function checkpointAfterWrite(): void {
   writeCount++;
-  if (writeCount >= 50) {
+  if (writeCount >= 50 && !db?.inTransaction) {
     db?.pragma("wal_checkpoint(PASSIVE)");
     writeCount = 0;
   }
