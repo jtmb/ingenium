@@ -21,11 +21,12 @@ Notifications are persisted internal inbox entries, deduplicated by operation id
 - `repository.ts` and `schema.sql`: injected API connection/transaction and coordinator migration input. The module never opens a production database.
 - `service.ts`: authenticated lifecycle, CAS, source-idempotent admission, explicit missed-run recovery, cancellation recovery and notifications.
 - `proactive.ts`: opt-in scoped source consumer with authorization before discovery; no added scheduler or queue.
+- `core-binding.ts`: actual core API ports, atomic claim/operation transaction and post-commit launch; see [core-binding.md](core-binding.md) and its coordinator-only scheduler/checkpoint patch.
 - `existing-jobs.ts`: existing `jobs.startJobRun(...,"cron",...)` adapter; no process launcher or second queue.
 - `commands.ts`, `router.ts`: command/error boundary and injectable Express router, not mounted here.
 - `services/ingenium-dashboard/src/app/components/dot-v2/`: workspace and pure view model. No shared shell/context/CSS changes.
 
-No new environment variables, dependencies, compiler outputs, manifests or lockfile changes are introduced. The pure test command is below. No API runtime, model, GPU, microphone, desktop or cluster job is started.
+No new production environment variables, dependencies, compiler outputs, manifests or lockfile changes are introduced. The optional test-only `VEYRA_DOT_TEST_EXPRESS` points at an existing lock-compatible Express entrypoint for in-process router checks; it does not install, copy or mutate dependencies. The pure test command is below. No API runtime, model, GPU, microphone, desktop or cluster job is started.
 
 ## Verification
 
@@ -34,10 +35,12 @@ From this exact checkout with Node 22.23.1:
 ```sh
 export TEMP=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot
 export TMP="$TEMP" TMPDIR="$TEMP"
+# Optional read-only existing Express for socket-disabled router checks:
+export VEYRA_DOT_TEST_EXPRESS=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/express/index.js
 node --experimental-strip-types --loader ./services/ingenium-api/tests/veyra-dot-loader.mjs --test services/ingenium-api/tests/veyra-dot-*.cpu.mjs services/ingenium-dashboard/tests/veyra-dot-*.cpu.mjs
 ```
 
-Tests exercise real in-memory SQLite transactions, DST in Toronto and Lord Howe, missed-run policy/bounds, approval and scope isolation, memory revocation, job revisions/capabilities, persisted cancellation intent, unknown outcomes, notification deduplication/read state, pause/resume, capacity rejection and atomic rollback. A disk reopen fixture runs only when every process descriptor can be inspected before generation; otherwise it reports a cleanup-safety skip and creates no artifact. This is CPU/source evidence, not real runner, HTTP, visual or release acceptance.
+Tests exercise real in-memory SQLite transactions, actual Express dispatch with listening/connect disabled, injected core savepoint/claim/launch contracts, DST in Toronto and Lord Howe, missed-run policy/bounds, approval and scope isolation, memory revocation, job revisions/capabilities, persisted cancellation intent, unknown outcomes, notification deduplication/read state, pause/resume, capacity rejection and atomic rollback. A disk reopen fixture runs only when every process descriptor can be inspected before generation; otherwise it reports a cleanup-safety skip and creates no artifact. This is CPU/source evidence, not real runner, HTTP, visual or release acceptance.
 
 Initial run: five schedule tests passed; service import failed because strip-only Node cannot transform TypeScript parameter properties. Explicit erasable fields repaired it. Next runs passed 11/11 then 22/22 tests. The latter closed/reopened a real test SQLite file; it was removed at 20,480 measured bytes. Subsequent tests strengthen cleanup preflight; current exact results live in `evidence.json` and the assigned coordination status.
 

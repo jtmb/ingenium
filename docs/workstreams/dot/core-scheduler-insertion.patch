@@ -1,0 +1,65 @@
+--- a/packages/ingenium-core/lib/db.ts
++++ b/packages/ingenium-core/lib/db.ts
+@@ -5665,5 +5665,5 @@
+ export function checkpointAfterWrite(): void {
+   writeCount++;
+-  if (writeCount >= 50) {
++  if (writeCount >= 50 && !db?.inTransaction) {
+     db?.pragma("wal_checkpoint(PASSIVE)");
+     writeCount = 0;
+--- a/services/ingenium-api/lib/scheduler.ts
++++ b/services/ingenium-api/lib/scheduler.ts
+@@ -1,2 +1,3 @@
++import type { CoreDotRuntime } from "./dot-v2/core-binding.js";
+ import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
+ import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
+@@ -43,4 +44,5 @@
+
+ let schedulerRunning = false;
++let dotRuntime: CoreDotRuntime | undefined;
+ let schedulerGeneration = 0;
+ const scheduledTimeouts = new Set<ReturnType<typeof setTimeout>>();
+@@ -389,4 +391,6 @@
+   });
+   try {
++    try { dotRuntime?.recoverOperations(100); }
++    catch (error) { logger.warn("dot-scheduler", "Dot operation recovery requires attention", { name: error instanceof Error ? error.name : "unknown" }); }
+     const allProjects = projects.listProjects();
+     const activeProjects = allProjects.filter(p => !p.archived_at);
+@@ -399,4 +403,5 @@
+
+       for (const job of projectJobs) {
++        if (dotRuntime?.ownsJob(job.project_id, job.id)) { dueJobs.push(job); continue; }
+         if (!job.enabled) continue;
+         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
+@@ -407,4 +412,11 @@
+     for (const job of jobs.orderJobsForFairDispatch(dueJobs, "cron")) {
+         if (!isSchedulerActive(generation)) break;
++        const dot = dotRuntime;
++        if (dot?.ownsJob(job.project_id, job.id)) {
++          void trackTask(dot.dispatchJob(job.project_id, job.id, () => isSchedulerActive(generation))).catch((error: unknown) => {
++            logger.warn("dot-scheduler", "Dot dispatch requires attention", { name: error instanceof Error ? error.name : "unknown" });
++          });
++          continue;
++        }
+         const scheduledFor = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
+         const result = jobs.startJobRun(job.project_id, job.id, "cron", {
+@@ -496,5 +508,5 @@
+ }
+
+-export function startScheduler(port: number): void {
++export function startScheduler(port: number, dot?: CoreDotRuntime): void {
+   if (schedulerRunning) {
+     logger.warn("scheduler", "Scheduler start ignored because it is already running");
+@@ -503,4 +515,5 @@
+
+   schedulerRunning = true;
++  dotRuntime = dot;
+   const generation = ++schedulerGeneration;
+   logger.info(
+@@ -567,4 +580,5 @@
+
+   await Promise.allSettled([...activeTasks]);
++  dotRuntime = undefined;
+   logger.info("scheduler", "Background scheduler stopped");
+ }

@@ -8,22 +8,25 @@
     "./services/ingenium-api/tests/veyra-dot-loader.mjs",
     "--test",
     "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs",
+    "services/ingenium-api/tests/veyra-dot-core-binding.cpu.mjs",
+    "services/ingenium-api/tests/veyra-dot-router-boundary.cpu.mjs",
     "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs",
     "services/ingenium-api/tests/veyra-dot-service.cpu.mjs",
     "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs"
   ],
   "exitCode": 0,
   "summary": [
-    "ok 19 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
-    "# tests 33",
-    "# pass 32",
+    "ok 32 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
+    "# tests 53",
+    "# pass 52",
     "# fail 0",
     "# skipped 1",
-    "# duration_ms 378.793003"
+    "# duration_ms 456.121502"
   ],
   "sourceSHA256": {
     "packages/veyra-automation/contracts.d.ts": "a72712535ce8974cab206aa0d7275ec46aa9f1eaad508868d418b167ed92198e",
     "services/ingenium-api/lib/dot-v2/commands.ts": "814807ce97b158c8d7a943239a58cab162ea76e99764fa162314d04740d47616",
+    "services/ingenium-api/lib/dot-v2/core-binding.ts": "05a79c858af344c7c6d77e687b0dc9868cd61f537b90338e6362fc9cc9f6e048",
     "services/ingenium-api/lib/dot-v2/existing-jobs.ts": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
     "services/ingenium-api/lib/dot-v2/proactive.ts": "bb120999cd0d9c71758b8c2421cdc8756c89e842fc206fa4f4bfdc0b08bd741a",
     "services/ingenium-api/lib/dot-v2/repository.ts": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863",
@@ -32,7 +35,9 @@
     "services/ingenium-api/lib/dot-v2/schema.sql": "5bcb2330eff3c679e544dd855718c1fb0853f2f3bff46158b2829c1fe6439e47",
     "services/ingenium-api/lib/dot-v2/service.ts": "57c47984c977f9e4ff56ff5b7ce1df21062a904ffc2e3d20cedc5e527d5f171f",
     "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "d669deb3fe718f4a254edd9ebbac9a57b4f393e100e561618641c01669377d60",
-    "services/ingenium-api/tests/veyra-dot-loader.mjs": "6d3e0c94e02181540f6307c582598fb2627799461c538e13f57ee1c9e7148d81",
+    "services/ingenium-api/tests/veyra-dot-core-binding.cpu.mjs": "672b4945aae1150cafead7e497c4d359f6a9e13a7d4c9f13628bbfe37cdaf5ca",
+    "services/ingenium-api/tests/veyra-dot-loader.mjs": "8f1ea1b49de741f673ee35e69d1d88de9913be844f522c86f4f2fa22a448fac8",
+    "services/ingenium-api/tests/veyra-dot-router-boundary.cpu.mjs": "ce86ccac6b6eda76bb7be7b14e40e3dbfe6e07202e302b301ba06574f9b9443e",
     "services/ingenium-api/tests/veyra-dot-router.test.ts": "5efdc482e99943330e9dc23d2db203e35288c2b8efc0fa60a5d3f79a01a17732",
     "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs": "6b15292b1f423664dce9e143d41e7ab1c079edebc964bf301753e1b0996eb510",
     "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "f1e69e1edf946b3f59581387e8a2540e25d649bb9c36d5aa479f9b3ddf153f0d",
@@ -48,6 +53,10 @@
     {
       "signature": "Evidence subprocess FileNotFoundError node from non-login Python PATH",
       "resolution": "Use verified /home/brajam/.local/bin/node; no source/artifact mutation occurred in failed attempt"
+    },
+    {
+      "signature": "git diff --check flagged unified patch artifact blank context markers as trailing whitespace",
+      "resolution": "Regenerated with two-line context and empty context-line spelling; source core/scheduler remain unchanged; apply check repeated"
     }
   ],
   "priorDiskProof": {
@@ -73,5 +82,63 @@
     "After coordinator cherry-pick, from integration checkout: node node_modules/typescript/bin/tsc -p docs/workstreams/dot/typecheck-api.json --incremental false",
     "After coordinator cherry-pick, from integration checkout: node node_modules/typescript/bin/tsc -p docs/workstreams/dot/typecheck-ui.json --incremental false",
     "Coordinator lease: node node_modules/vitest/vitest.mjs run --config services/ingenium-api/vitest.config.ts services/ingenium-api/tests/veyra-dot-router.test.ts --maxWorkers=1 --fileParallelism=false"
-  ]
+  ],
+  "isolatedTypecheck": {
+    "compilerVersion": "5.9.3",
+    "results": [
+      {
+        "target": "api",
+        "rootFileCount": 8,
+        "diagnostics": []
+      },
+      {
+        "target": "ui",
+        "rootFileCount": 3,
+        "diagnostics": []
+      }
+    ],
+    "emittedFiles": 0,
+    "exitCode": 0,
+    "method": "Existing compiler API, source configs plus read-only parent type paths; no emit/create of program outputs; stdin runner creates no file",
+    "windowsCFreeBeforeBytes": 62617354240,
+    "destinationFreeBeforeBytes": 614469341184,
+    "scopeLimit": "Passed before core-binding.ts was introduced. Latest coordinator direction says no builds; new adapter has CPU source execution evidence only and needs coordinator typecheck."
+  },
+  "testEnvironment": {
+    "TEMP": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot",
+    "TMP": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot",
+    "TMPDIR": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot",
+    "VEYRA_DOT_TEST_EXPRESS": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/express/index.js"
+  },
+  "routerBoundary": {
+    "method": "Actual Express app.handle + in-memory SQLite, Node request/response objects, network Server.listen and Socket.connect patched to reject; no listening socket or service lifecycle",
+    "tests": "8 passing: five collections 200/422/403/500; create/read/dismiss409; invalid422/missing404/private failure sanitization",
+    "notProven": "Real session/auth/CSRF/rate-limit middleware, actual listening server, process runner or native/cluster lifecycle"
+  },
+  "tooling": {
+    "compiler": "5.9.3",
+    "express": "4.22.2",
+    "workerLockSHA256": "07e954e2af4bad758da89ffe94d08cc1309568a9d990c321aba7cdf2dd87e179",
+    "toolingCheckoutLockSHA256": "07e954e2af4bad758da89ffe94d08cc1309568a9d990c321aba7cdf2dd87e179",
+    "mutation": "None; shared tool/dependency files read only"
+  },
+  "coreBinding": {
+    "method": "Real in-memory SQLite claim/Dot writes with injected core API/savepoint/checkpoint fixtures",
+    "tests": 12,
+    "proof": "Atomic rollback, post-commit launch, lifecycle/grant/source revocation, unknown identity/no replay, exact binding/database checks, checkpoint failures and cancellation reconstruction; organization ownership, grant denial and foreign run identity rejection",
+    "remaining": "Actual core 50-write threshold test after shared checkpoint deferral patch; qualified real runner and exact runtime bindings",
+    "sharedPatch": "docs/workstreams/dot/core-scheduler-insertion.patch",
+    "patchApplyCheck": "git apply --check passed against owned base without mutating shared files"
+  },
+  "coordinatorReportedChecks": {
+    "source": "Coordinator message from 01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",
+    "coveredCommit": "417660d7a2511d038865093e9392ee0b4fa4c22a",
+    "results": [
+      "Full API/dashboard noEmit PASS",
+      "Real HTTP veyra-dot-router.test.ts PASS 7/7"
+    ],
+    "logs": "coordination/integration/*-r1.log in coordinator root",
+    "scope": "Not scoped acceptance; does not cover later core-binding adapter"
+  },
+  "sharedPatchSHA256": "1addbbee1ad0a0240915e547341c68cf6c651b4df82ae3364adc81624971b317"
 }
