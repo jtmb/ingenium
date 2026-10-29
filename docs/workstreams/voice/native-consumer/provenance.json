@@ -1,13 +1,19 @@
 {
   "nativeHead": "268962e20bef8c246fce332241c08c00c1fc2317",
   "nativePreimages": {
-    "crates/adapters/src/speech.rs": "1f9e4c9647b584a86d690733a83816cfe564f7541d64d2296219015f54796dd6"
+    "crates/adapters/src/speech.rs": "1f9e4c9647b584a86d690733a83816cfe564f7541d64d2296219015f54796dd6",
+    "crates/adapters/src/voice.rs": "3c7bd9e9eae213a135629e24eea9a6b561068c73ffdc28aa0f403d4c8e82c422",
+    "apps/service/src/routes/speech.rs": "e694174060da73d10208ddbb63a33c0f79ba27e3498ed81afa7e512d3b4cb236",
+    "apps/service/src/routes/voice.rs": "09356e52f16e132f4e5bfe12795241f92662a2ace2b99a887f360754423ffdcd"
   },
   "proposedPostimages": {
-    "crates/adapters/src/speech.rs": "cd7baf6a20b737a97cf64c7c38004aa081b207f49056c40b032da60873743695",
-    "crates/adapters/src/speech/http_worker.rs": "0b82d78f3f82b4929d72ba2d88ecb1367b6c3812868b71195c86a98cb418dad8"
+    "crates/adapters/src/speech.rs": "b89188c3f8e2a1914a285711cb37d07e75d5feafd949470478c93962b3de6e2c",
+    "crates/adapters/src/speech/http_worker.rs": "dc627828d72237690a709695546378642086623ce5268fabafc769f6726f83d8",
+    "crates/adapters/src/voice.rs": "fa433d02c25c63441d47db3eba255653d11a10f8726678a14152d2050960e6ad",
+    "apps/service/src/routes/speech.rs": "c10b497295eceacacd434aff1e7bf36432d64fcfb5509682fd268d966c8aeaee",
+    "apps/service/src/routes/voice.rs": "349ac0b131dd1100bb8cb34b6cfc5f9d5f0c1e80b1443a9eca5e0d18a25023cb"
   },
-  "patchSha256": "4af1672774f8db47c49abd5924982cdc461f42e38ef14c674690d20c154fc9ff",
+  "patchSha256": "62dc62c675d06b0c5f2c83474fb25527c60022bc6d59f0c88e013086fc6b8986",
   "activation": "not authorized or performed; coordinator composition/build/runtime acceptance required",
   "nativeOwnerSourceHashes": {
     "apps/service/src/routes/speech.rs": "e694174060da73d10208ddbb63a33c0f79ba27e3498ed81afa7e512d3b4cb236",
@@ -19,7 +25,10 @@
     "apps/web/src/features/workbench/SpeechControls.tsx": "11f72fa24e406f636ec7993467b579b9bc85c6e6138c6054d66d4ed992a1908d",
     "apps/web/src/features/workbench/VoiceChat.tsx": "4c65c2a405848b9fc86a7160d754baae1c23c269c38b5262cd1d6f9d7782fd17",
     "apps/web/src/features/workbench/VoiceWorkspace.tsx": "3165a60fe8fcc771ddf8d134ad5ef40e018c38b43fb917772ea5b9c91c33c752",
-    "apps/web/src/platform/gateway.ts": "fab30d1bdd9ce66030f5b908c9d8b8761dea0765b4da208e5f017d40983a943d"
+    "apps/web/src/platform/gateway.ts": "fab30d1bdd9ce66030f5b908c9d8b8761dea0765b4da208e5f017d40983a943d",
+    "crates/adapters/src/windows_acl.rs": "31f12c81b21e1fe5c157b02b8cd9a6785fd1ba0af519ff80c6b6cf4a9e4b2bd9",
+    "crates/adapters/src/windows_file_metadata.rs": "396b221602b988846c27d98f496218086c44e616ed02a947769684879171020c",
+    "crates/adapters/src/opencode/service_launch_config/loader/native.rs": "601492b9d10442eb56bf0707ef4f1e78f47ff1c9e4d61e2b7862742cc3df469f"
   },
   "workerContractHashes": {
     "veyra_worker.py": "7f5b964e153266b69003098117ab15597229a0975ce31d003558195f6c6d062c",

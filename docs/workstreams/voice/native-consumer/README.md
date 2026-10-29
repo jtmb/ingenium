@@ -47,18 +47,38 @@ helpers as well as before, closing the join/uncertainty observation race.
 ## Smallest coordinator composition decisions
 
 1. Review/apply `native-cpu-http.patch` to the native baseline only after checking
-   `provenance.json` preimage hash; it changes only `speech.rs` and adds
-   `speech/http_worker.rs`. Existing `ureq` 2.12.1 JSON support is reused; no new
+   `provenance.json` preimage hashes; it changes `speech.rs`, adds
+   `speech/http_worker.rs`, and rewires only status callsites in the existing
+   adapter Voice and service speech/voice routes. Status comes from the same
+   captured Speech owner as execution, never a fresh environment selection;
+   service status health I/O runs on `spawn_blocking`. Existing `ureq` 2.12.1
+   JSON support is reused; no new
    Cargo dependency or public error enum is introduced. Run native formatting,
    compilation and Rust unit/retirement/privacy tests under the central lease.
-   Five Rust tests are proposed, **not executed here**. Exact application is
+   Eight Rust tests per platform are proposed, **not executed here**. Exact application is
    verified by `git apply --check`, which does not compile Rust.
 2. In the existing native configuration/composition authority, explicitly set
    `VEYRA_SPEECH_BACKEND=owned-http-cpu`, `VEYRA_SPEECH_HTTP_URL` (only
    `http://127.0.0.1:<port>`), `VEYRA_SPEECH_HTTP_TOKEN_FILE` (private absolute,
    regular non-reparse file), `VEYRA_SPEECH_HTTP_INSTANCE` and
    `VEYRA_SPEECH_HTTP_DEFAULT_VOICE`. Keep process environment immutable for the
-   lifetime of the owner. The worker must independently own dedicated exact-hash
+   lifetime of the owner. The selected configuration is captured once; later
+   environment mutations cannot change the owner's advertised backend/default.
+   The proposal supplies custody checks only for native Windows: local
+   disk paths, retained non-reparse ancestor guards, existing owner-only parent
+   and leaf ACLs, one non-delete-pending plain leaf with exactly one link,
+   write/delete-denying sharing, at most 259 bytes read through that one handle,
+   and equal before/after file identity/size/metadata and observed byte length.
+   It reuses `windows_acl::verify_owner_only` and `windows_file_metadata::inspect`;
+   no ACL is changed. Ancestor sharing follows the existing launch-config
+   `capture_provision_parent` custody pattern and denies new write/delete handles
+   until the bounded read ends; a conflicting existing handle refuses the read,
+   without stopping its workload. All retained ancestor metadata is rechecked.
+   Missing protection, changed identity/size, reparse/ADS path,
+   hardlinks, oversize/invalid token or unsupported platform returns unconfigured,
+   without token bytes in errors/debug/provenance. Native Linux CPU HTTP
+   composition needs a separately qualified custody implementation; the Linux
+   worker itself remains separate source. The worker must independently own dedicated exact-hash
    CPU assets, Python 3.12 dependencies and bounded scratch. Do not reuse Stratus
    credentials/services/assets. No credentials or personal paths belong in UI.
 3. Wire the existing SpeechControls/VoiceChat capture limits and text/voice
@@ -102,12 +122,13 @@ git -C <native-checkout> apply --check <absolute-native-cpu-http.patch>
 
 The generator refuses ambiguous/drifted anchors, never writes native source, and
 records exact pre/postimages, inspected owner sources and worker contract hashes.
-Eleven executed dependency-free checks cover real Python Application/_job scope
+Fourteen executed dependency-free checks cover real Python Application/_job scope
 exit, success, cancellation ACK while the original is still active, original
 terminal cancellation, dropped response without a request-specific health proof,
-overlong-audio/text and unsupported-voice refusal, patch identity/scope and no neural imports. Structural
+overlong-audio/text and unsupported-voice refusal, patch identity/scope, hard
+credential bounds/custody refusal structure, captured-owner status and no neural imports. Structural
 Rust proposal assertions do not establish Rust transport execution. Actual Rust
-compilation, HTTP fault injection against the compiled native adapter, private
+compilation, native ACL/link/reparse/identity race qualification, HTTP fault injection against the compiled native adapter, private
 endpoint/asset identity, Windows and Linux CPU inference, actual voices/audio,
 VAD/echo/barge-in/latency, visual and full release acceptance remain open.
 

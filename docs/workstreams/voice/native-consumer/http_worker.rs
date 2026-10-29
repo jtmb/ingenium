@@ -24,16 +24,7 @@ impl Config {
         let port = endpoint.strip_prefix("http://127.0.0.1:").ok_or(Error::Unconfigured)?;
         if port.parse::<u16>().ok().filter(|port| *port > 0).is_none()
             || !port.bytes().all(|byte| byte.is_ascii_digit()) { return Err(Error::Unconfigured); }
-        let path = super::configured_file("VEYRA_SPEECH_HTTP_TOKEN_FILE")?;
-        if std::fs::metadata(&path).map_err(|_| Error::Unconfigured)?.len() > 258 {
-            return Err(Error::Unconfigured);
-        }
-        let bytes = std::fs::read(path).map_err(|_| Error::Unconfigured)?;
-        let token = String::from_utf8(bytes).map_err(|_| Error::Unconfigured)?;
-        let token = token.trim().to_owned();
-        if !(32..=192).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
-            return Err(Error::Unconfigured);
-        }
+        let token = protected_token()?;
         let instance = std::env::var("VEYRA_SPEECH_HTTP_INSTANCE").map_err(|_| Error::Unconfigured)?;
         let default_voice = std::env::var("VEYRA_SPEECH_HTTP_DEFAULT_VOICE").map_err(|_| Error::Unconfigured)?;
         if instance.is_empty() || instance.len() > 128 || default_voice.is_empty() || default_voice.len() > 64 {
@@ -145,6 +136,102 @@ impl Config {
     }
 }
 
+// Credential custody is qualified only for the native Windows owner. Linux's
+// worker is a separate process; no permissive Unix credential-loader claim is made.
+#[cfg(not(windows))]
+fn protected_token() -> super::Result<String> { Err(Error::Unconfigured) }
+
+#[cfg(windows)]
+fn protected_token() -> super::Result<String> {
+    use std::{fs::OpenOptions, os::windows::fs::OpenOptionsExt,
+        path::{Component, PathBuf, Prefix}};
+    use windows_sys::Win32::{Foundation::GENERIC_READ, Storage::FileSystem::*};
+    use crate::{windows_acl::{verify_owner_only, ProtectedAclKind}, windows_file_metadata::inspect};
+    let path = PathBuf::from(std::env::var_os("VEYRA_SPEECH_HTTP_TOKEN_FILE")
+        .ok_or(Error::Unconfigured)?);
+    if !path.is_absolute() || !matches!(path.components().next(), Some(Component::Prefix(prefix))
+        if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+        || !path.to_str().is_some_and(|s| s.len() <= 4096 && !s.chars().any(char::is_control))
+        || path.components().any(|c| matches!(c, Component::ParentDir | Component::CurDir)) {
+        return Err(Error::Unconfigured);
+    }
+    if path.components().any(|component| match component {
+        Component::Normal(name) => name.to_str().is_none_or(|name|
+            name.contains(':') || name.ends_with('.') || name.ends_with(' ')),
+        _ => false,
+    }) { return Err(Error::Unconfigured); }
+    let parent = path.parent().ok_or(Error::Unconfigured)?;
+    let mut captured_path = PathBuf::new();
+    let mut ancestors = Vec::new();
+    for component in parent.components() {
+        captured_path.push(component);
+        if matches!(component, Component::Prefix(_)) { continue; }
+        if ancestors.len() >= 128 { return Err(Error::Unconfigured); }
+        // Use the existing launch-config capture_provision_parent custody pattern:
+        // deny new write/delete directory handles until this bounded read ends.
+        // A conflicting existing handle refuses configuration; no workload is stopped.
+        let guard = OpenOptions::new().access_mode(GENERIC_READ | READ_CONTROL)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&captured_path).map_err(|_| Error::Unconfigured)?;
+        let facts = inspect(&guard).map_err(|_| Error::Unconfigured)?;
+        if !facts.disk || !facts.directory || facts.reparse || facts.delete_pending {
+            return Err(Error::Unconfigured);
+        }
+        ancestors.push((guard, facts));
+    }
+    let (private_parent, _) = ancestors.last().ok_or(Error::Unconfigured)?;
+    verify_owner_only(private_parent, ProtectedAclKind::Directory).map_err(|_| Error::Unconfigured)?;
+    // One retained plain handle: no pathname metadata/read reopen; sharing denies
+    // concurrent write/delete, including already-open incompatible writer handles.
+    let file = OpenOptions::new().access_mode(GENERIC_READ | READ_CONTROL)
+        .share_mode(FILE_SHARE_READ).custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(&path).map_err(|_| Error::Unconfigured)?;
+    let before = inspect(&file).map_err(|_| Error::Unconfigured)?;
+    if !token_shape(before.disk && !before.directory && !before.reparse && !before.delete_pending,
+        before.links, before.length) { return Err(Error::Unconfigured); }
+    verify_owner_only(&file, ProtectedAclKind::File).map_err(|_| Error::Unconfigured)?;
+    let bytes = bounded_token_bytes(&file)?;
+    let after = inspect(&file).map_err(|_| Error::Unconfigured)?;
+    if !token_observation_matches(before, after, bytes.len()) {
+        return Err(Error::Unconfigured);
+    }
+    for (guard, expected) in &ancestors {
+        if inspect(guard).map_err(|_| Error::Unconfigured)? != *expected {
+            return Err(Error::Unconfigured);
+        }
+    }
+    verify_owner_only(&file, ProtectedAclKind::File).map_err(|_| Error::Unconfigured)?;
+    verify_owner_only(private_parent, ProtectedAclKind::Directory).map_err(|_| Error::Unconfigured)?;
+    // Ancestor guards and the original leaf remain alive through the final checks.
+    decode_token(bytes)
+}
+#[cfg(windows)]
+fn token_observation_matches(before: crate::windows_file_metadata::PhysicalMetadata,
+    after: crate::windows_file_metadata::PhysicalMetadata, read_length: usize) -> bool {
+    before == after && read_length as u64 == before.length
+}
+#[cfg(any(windows, test))]
+fn token_shape(plain: bool, links: u32, length: u64) -> bool {
+    plain && links == 1 && (32..=258).contains(&length)
+}
+#[cfg(any(windows, test))]
+fn bounded_token_bytes(reader: impl Read) -> super::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    reader.take(259).read_to_end(&mut bytes).map_err(|_| Error::Unconfigured)?;
+    if !(32..=258).contains(&bytes.len()) { return Err(Error::Unconfigured); }
+    Ok(bytes)
+}
+#[cfg(any(windows, test))]
+fn decode_token(bytes: Vec<u8>) -> super::Result<String> {
+    let text = String::from_utf8(bytes).map_err(|_| Error::Unconfigured)?;
+    let token = text.trim();
+    if !(32..=192).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::Unconfigured);
+    }
+    Ok(token.to_owned())
+}
+
 fn read(response: ureq::Response, max: usize) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     response.into_reader().take((max + 1) as u64).read_to_end(&mut bytes)?;
@@ -192,6 +279,40 @@ fn valid_output(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn credential_read_has_a_hard_sentinel_bound() {
+        let mut cursor = std::io::Cursor::new(vec![b'x'; 1_000_000]);
+        assert!(bounded_token_bytes(&mut cursor).is_err());
+        assert_eq!(cursor.position(), 259);
+        let token = bounded_token_bytes(std::io::Cursor::new(vec![b'x'; 32])).unwrap();
+        assert_eq!(decode_token(token).unwrap().len(), 32);
+    }
+    #[test] fn credential_shape_and_decode_refuse_untrusted_or_invalid_input() {
+        assert!(!token_shape(false, 1, 32));
+        assert!(!token_shape(true, 2, 32));
+        assert!(!token_shape(true, 1, 259));
+        assert!(!token_shape(true, 1, 0));
+        assert!(decode_token(vec![0; 32]).is_err());
+        assert!(decode_token(vec![b'x'; 193]).is_err());
+    }
+    #[cfg(not(windows))]
+    #[test] fn unsupported_custody_platform_refuses() {
+        assert!(protected_token().is_err());
+    }
+    #[cfg(windows)]
+    #[test] fn token_identity_length_and_hardlink_drift_are_refused() {
+        use crate::windows_file_metadata::{FileIdentity, PhysicalMetadata};
+        let original = PhysicalMetadata { identity:FileIdentity {volume:1,id:[1;16]},
+            disk:true,directory:false,reparse:false,delete_pending:false,links:1,length:32 };
+        assert!(token_observation_matches(original, original, 32));
+        let mut changed = original;
+        changed.identity.id = [2;16];
+        assert!(!token_observation_matches(original, changed, 32));
+        changed = original; changed.length = 33;
+        assert!(!token_observation_matches(original, changed, 32));
+        changed = original; changed.links = 2;
+        assert!(!token_observation_matches(original, changed, 32));
+        assert!(!token_observation_matches(original, original, 31));
+    }
     #[test] fn terminal_original_error_is_known() {
         assert!(matches!(classify_error(409, Some("CANCELLED")), Failure::Known(_)));
     }

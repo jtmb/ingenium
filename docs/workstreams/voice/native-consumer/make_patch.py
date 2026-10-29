@@ -8,7 +8,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 native = Path(sys.argv[1]).resolve()
 relative = "crates/adapters/src/speech.rs"
-original = (native / relative).read_text()
+original = (native / relative).read_bytes().decode("utf-8")
 source = original
 
 
@@ -22,12 +22,17 @@ def replace(old, new):
 
 replace("mod privacy;", "mod privacy;\nmod http_worker;")
 replace("    first_stop: OnceLock<Instant>,\n", "    first_stop: OnceLock<Instant>,\n    remote: Result<Option<http_worker::Config>>,\n    remote_uncertain: Arc<AtomicBool>,\n")
-replace("pub fn status() -> Value {\n", """pub fn status() -> Value {
-    match http_worker::Config::load() {
-        Ok(Some(config)) => return config.status(),
-        Err(_) => return json!({"backend":"unavailable", "available":false,
-            "qualified":false,"transcription_configured":false,"synthesis_configured":false}),
-        Ok(None) => {},
+replace("pub fn status() -> Value {\n", "fn local_status() -> Value {\n")
+replace("impl Speech {\n", """impl Speech {
+    pub fn status(&self) -> Value {
+        // The same immutable selection drives status and execution. Status never
+        // reloads a credential/backend/default from the process environment.
+        match &self.remote {
+            Ok(Some(config)) => config.status(),
+            Ok(None) => local_status(),
+            Err(_) => json!({"backend":"unavailable", "available":false,
+                "qualified":false,"transcription_configured":false,"synthesis_configured":false}),
+        }
     }
 """)
 replace('"realtime_duplex":"unverified"})', '"realtime_duplex":"unverified", "backend":"local-process",\n        "limits":{"max_recording_ms":60000,"max_text_chars":2000},\n        "configured_default_voice":"af_sarah","voices":[],"voice_catalog_verified":false})')
@@ -106,10 +111,43 @@ replace("    // Every mutating entry holds this guard through its final filesyst
     // Every mutating entry holds this guard through its final filesystem effect.""")
 
 module = (HERE / "http_worker.rs").read_text()
+extras = {}
+
+
+def propose(name, anchors):
+    """Only exact status-callsite rewiring; preserve all request/agent authority."""
+    before = (native / name).read_bytes().decode("utf-8")
+    after = before
+    for old, new, count in anchors:
+        if after.count(old) != count:
+            raise SystemExit(f"Native status-callsite drift: {name}: {old!r}")
+        after = after.replace(old, new)
+    extras[name] = (before, after)
+
+
+propose("crates/adapters/src/voice.rs", [
+    ("crate::speech::status()", "self.speech.status()", 2)])
+fallback = 'json!({"backend":"unavailable","available":false,"qualified":false,"transcription_configured":false,"synthesis_configured":false})'
+propose("apps/service/src/routes/speech.rs", [
+    ("use veyra_adapters::speech::{self, Error, Operation, Speech};", "use veyra_adapters::speech::{Error, Operation, Speech};", 1),
+    ("async fn status() -> Json<Value> {\n    Json(speech::status())\n}",
+     "async fn status(State(state): State<Arc<super::ServiceState>>) -> Json<Value> {\n"
+     "    let speech = state.speech.clone();\n"
+     "    Json(tokio::task::spawn_blocking(move || speech.status()).await\n"
+     "        .unwrap_or_else(|_| " + fallback + "))\n}", 1)])
+propose("apps/service/src/routes/voice.rs", [
+    ("async fn status() -> Json<Value> {\n", "async fn status(State(state): State<Arc<ServiceState>>) -> Json<Value> {\n"
+     "    let speech = state.speech.clone();\n"
+     "    let speech_status = tokio::task::spawn_blocking(move || speech.status()).await\n"
+     "        .unwrap_or_else(|_| " + fallback + ");\n", 1),
+    ("veyra_adapters::speech::status()", "speech_status", 1)])
 patch = "".join(difflib.unified_diff(original.splitlines(True), source.splitlines(True),
     fromfile="a/" + relative, tofile="b/" + relative))
 patch += "".join(difflib.unified_diff([], module.splitlines(True),
     fromfile="/dev/null", tofile="b/crates/adapters/src/speech/http_worker.rs"))
+for name, (before, after) in extras.items():
+    patch += "".join(difflib.unified_diff(before.splitlines(True), after.splitlines(True),
+        fromfile="a/" + name, tofile="b/" + name))
 (HERE / "native-cpu-http.patch").write_text(patch, newline="\n")
 manifest = {
     "nativeHead": "268962e20bef8c246fce332241c08c00c1fc2317",
@@ -119,12 +157,17 @@ manifest = {
     "patchSha256": hashlib.sha256(patch.encode()).hexdigest(),
     "activation": "not authorized or performed; coordinator composition/build/runtime acceptance required",
 }
+for name, (before, after) in extras.items():
+    manifest["nativePreimages"][name] = hashlib.sha256(before.encode()).hexdigest()
+    manifest["proposedPostimages"][name] = hashlib.sha256(after.encode()).hexdigest()
 inspected = ["apps/service/src/routes/speech.rs", "apps/service/src/routes/voice.rs",
     "apps/service/src/routes/live_agent/voice.rs", "crates/adapters/src/voice.rs",
     "crates/adapters/src/speech/privacy.rs", "crates/adapters/src/media_worker.rs",
     "apps/web/src/features/workbench/SpeechControls.tsx",
     "apps/web/src/features/workbench/VoiceChat.tsx",
-    "apps/web/src/features/workbench/VoiceWorkspace.tsx", "apps/web/src/platform/gateway.ts"]
+    "apps/web/src/features/workbench/VoiceWorkspace.tsx", "apps/web/src/platform/gateway.ts",
+    "crates/adapters/src/windows_acl.rs", "crates/adapters/src/windows_file_metadata.rs",
+    "crates/adapters/src/opencode/service_launch_config/loader/native.rs"]
 manifest["nativeOwnerSourceHashes"] = {name: hashlib.sha256((native / name).read_bytes()).hexdigest()
     for name in inspected}
 worker = HERE.parents[3] / "packages/veyra-voice/speech-worker"
