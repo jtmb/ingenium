@@ -116,7 +116,7 @@
           "presentationQualified": true
         },
         {
-          "file": "composer-live-standard-luna.png",
+          "file": "composer-live-standard-luna.jpg",
           "sha256": "3716bffa398939612dc32829de0aa417d4638e3ffdbe8da8552011c5b5b13006",
           "imageSize": {
             "width": 1280,
@@ -1852,7 +1852,7 @@
     "liveStandardModelResponsePassed": true,
     "normalReloadPersistencePassed": true,
     "liveCapture": {
-      "file": "composer-live-standard-luna.png",
+      "file": "composer-live-standard-luna.jpg",
       "sha256": "3716bffa398939612dc32829de0aa417d4638e3ffdbe8da8552011c5b5b13006",
       "imageSize": {
         "width": 1280,
