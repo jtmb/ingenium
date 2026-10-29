@@ -1,6 +1,6 @@
 # Coordinator integration requests and acceptance
 
-No shared-path edits are included. Review and integrate these modules in dependency order without changing root manifests or copying dependency trees.
+See the bounded [integrated closure review](integrated-closure-review.md) for observed source evidence, the build-input reproducibility finding and remaining candidate gates. No shared-path edits are included. Review and integrate these modules in dependency order without changing root manifests or copying dependency trees.
 
 | Request | Coordinator action | Required evidence |
 | --- | --- | --- |
