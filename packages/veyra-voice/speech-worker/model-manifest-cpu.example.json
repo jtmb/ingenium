@@ -1,0 +1,74 @@
+{
+  "transcription": {
+    "directory": "small.en",
+    "files": [
+      {
+        "file": "small.en/config.json",
+        "sha256": "666a9605530ac1f61fa8177f3702b4dacec9966749e42610839fcc32661d5fae"
+      },
+      {
+        "file": "small.en/tokenizer.json",
+        "sha256": "929c5252409436dce1b38a75d1abbcb5e132d170d8e324e4e04ed915fa2d22df"
+      },
+      {
+        "file": "small.en/vocabulary.txt",
+        "sha256": "ff77588746d3a2595d32ab5b69ffd7b95ce2441ac57533cb66fc3eb575a115cf"
+      },
+      {
+        "file": "small.en/model.bin",
+        "sha256": "62b2a45b05ee59acb4a5341b33ee35e041395d378d418a18acfe4c9e768ee37a"
+      }
+    ],
+    "revision": "d1d751a5f8271d482d14ca55d9e2deeebbae577f",
+    "license": "MIT per Systran faster-whisper-small.en model card"
+  },
+  "revision": "veyra-explicit-cpu-source-v1",
+  "backend": "cpu-onnx",
+  "license": "Kokoro Apache-2.0; kokoro-onnx MIT; Systran Whisper MIT per retained source model cards",
+  "version": 3,
+  "voice": "af_heart",
+  "kokoro": {
+    "model": {
+      "file": "kokoro/kokoro-v1.0.onnx",
+      "sha256": "beb0d1848dee9a49da392cc3df26958d46cfa35d321edf434f52949153f0df3a"
+    },
+    "voices": {
+      "file": "kokoro/voices-v1.0.bin",
+      "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+    },
+    "revision": "model-files-v1.1",
+    "license": "Apache-2.0 model; MIT kokoro-onnx engine",
+    "presets": [
+      {
+        "id": "af_heart",
+        "label": "Heart · American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "af_bella",
+        "label": "Bella · American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "af_nicole",
+        "label": "Nicole · American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "am_michael",
+        "label": "Michael · American masculine",
+        "language": "en-us"
+      },
+      {
+        "id": "bf_emma",
+        "label": "Emma · British feminine",
+        "language": "en-gb"
+      },
+      {
+        "id": "bm_george",
+        "label": "George · British masculine",
+        "language": "en-gb"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "backend": "directml",
+  "instance_id": "veyra-speech-wsl-directml",
+  "host": "127.0.0.1",
+  "port": 3011,
+  "private_network": false,
+  "model_root": "/models",
+  "model_manifest": "veyra-gpu-manifest.json",
+  "token_file": "/run/secrets/veyra-speech-token",
+  "scratch_root": "/run/veyra-speech",
+  "physical_vram_mib": 8192,
+  "budget_mib": 8192
+}

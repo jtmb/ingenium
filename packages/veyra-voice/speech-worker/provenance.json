@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "origin": "Authorized read-only Stratus source",
+  "sourceHead": "3199ed969546bf021f77ffe57f287e0427b2eed6",
+  "sourceWorkingTreeDirty": true,
+  "sourceWorkerReferenceSha256": "a47c4872be389a8f09253ce43f885384e7dd233b37a21dcaffa48a20106bf613",
+  "authorship": "Original Stratus contributors retain authorship; new Veyra wrapper/CPU consumer is independently owned source.",
+  "licence": "No original repository-wide licence grant is invented. Preserve original notices and exact model/dependency licences during coordinator packaging.",
+  "newCode": [
+    "veyra_worker.py",
+    "cpu_models.py",
+    "tests/test_veyra_worker.py"
+  ],
+  "qualificationInherited": false,
+  "runtimeQualificationRequired": true,
+  "activeStratusStateUsed": false,
+  "modelsOrRuntimeCopied": false,
+  "records": [
+    {
+      "ownedFile": "model-manifest-gpu.example.json",
+      "sourceFile": "speech-worker/model-manifest-gpu.example.json",
+      "sourceSha256": "fc484cc694d85d00e16c9b8c95f6504a8fcd4362902e01a13dbe750f0e32a4c3",
+      "ownedSha256": "fc484cc694d85d00e16c9b8c95f6504a8fcd4362902e01a13dbe750f0e32a4c3",
+      "changes": "Byte-identical read-only source reuse."
+    },
+    {
+      "ownedFile": "requirements-cpu.lock",
+      "sourceFile": "speech-worker/requirements.lock",
+      "sourceSha256": "3016fbac3e97c479475d96d417b8fab7a5aa1c7b8bc52c7ec6444c46d5e48d70",
+      "ownedSha256": "7ca60ceedc2c8d0800b9f2d6ed8c3dc7953d6d6fa7129b84c13e3078c0d0fb64",
+      "changes": "Comment-only workstation-path redaction; exact pinned dependency/hash entries retained."
+    },
+    {
+      "ownedFile": "directml_models.py",
+      "sourceFile": "speech-worker/directml_models.py",
+      "sourceSha256": "8d5bd8c85853c50497f20b69299eddfb1866c901c5443a1726b0d805fbd96fc7",
+      "ownedSha256": "df5e50b602bfabc1a5efae25fa7bd1ffaac6722fb3dbf5c1c02ef1c3c769b1b0",
+      "changes": "Only required Veyra-owned physical/budget environment key names; removed Stratus defaults. Neural arithmetic/control code retained."
+    },
+    {
+      "ownedFile": "requirements-directml.lock",
+      "sourceFile": "speech-worker/requirements-directml.lock",
+      "sourceSha256": "0ff386babde284a36be65d9ac42eb25fcdbf3b37c131e7bd288c1767cc9a947f",
+      "ownedSha256": "ac4c6395f487b476058bd228bb51aeb5b398dd78c59425b14027964ca24bb14c",
+      "changes": "Comment-only workstation-path redaction; exact pinned dependency/hash entries retained."
+    },
+    {
+      "ownedFile": "inference_control.py",
+      "sourceFile": "speech-worker/inference_control.py",
+      "sourceSha256": "fe9ad8edc83d045af7f5f6f5bdd182e94b212c23f7ee8172a7552c66acd7897b",
+      "ownedSha256": "fe9ad8edc83d045af7f5f6f5bdd182e94b212c23f7ee8172a7552c66acd7897b",
+      "changes": "Byte-identical read-only source reuse."
+    },
+    {
+      "ownedFile": "model-manifest-cpu.example.json",
+      "sourceFile": "speech-worker/model-manifest.example.json",
+      "sourceSha256": "400aeb09ae7653f2327eafe49653222be0c191dbb35f402fdc2cb5568c38461f",
+      "ownedSha256": "cf922e8e73c48d89f8a2805661efd680f3ad1b4229876d9c21d410335994f12c",
+      "changes": "Explicit version-3 cpu-onnx manifest derived from existing Kokoro and transcription declarations; no Piper model selected."
+    }
+  ]
+}

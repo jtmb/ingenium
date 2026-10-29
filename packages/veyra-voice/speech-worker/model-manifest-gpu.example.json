@@ -1,0 +1,112 @@
+{
+  "version": 2,
+  "backend": "directml",
+  "voice": "af_heart",
+  "license": "Apache-2.0 Kokoro; MIT Whisper",
+  "revision": "gpu-directml-1",
+  "gpu": {
+    "tts": {
+      "directory": "kokoro-torch",
+      "revision": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+      "files": [
+        {
+          "file": "kokoro-torch/config.json",
+          "sha256": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f"
+        },
+        {
+          "file": "kokoro-torch/kokoro-v1_0.pth",
+          "sha256": "496dba118d1a58f5f3db2efc88dbdc216e0483fc89fe6e47ee1f2c53f18ad1e4"
+        }
+      ],
+      "license": "Apache-2.0"
+    },
+    "stt": {
+      "directory": "whisper-base.en",
+      "revision": "911407f4214e0e1d82085af863093ec0b66f9cd6",
+      "files": [
+        {
+          "file": "whisper-base.en/added_tokens.json",
+          "sha256": "560be47bea388757f8d4cc185c5d82067426cbb6361e38016dd90ddc01ab203a"
+        },
+        {
+          "file": "whisper-base.en/config.json",
+          "sha256": "160c1df40a60d4ef5a6014d536fd845c33aabfd1f318458ac7f87cfe91ebbe76"
+        },
+        {
+          "file": "whisper-base.en/generation_config.json",
+          "sha256": "c5750f05d94777579e00ce26ef65e5d87c108439f90e3ac519df2587b9d5d41f"
+        },
+        {
+          "file": "whisper-base.en/merges.txt",
+          "sha256": "1ce1664773c50f3e0cc8842619a93edc4624525b728b188a9e0be33b7726adc5"
+        },
+        {
+          "file": "whisper-base.en/model.safetensors",
+          "sha256": "d4dd5542fd6a1d35639e21384238f3bfe6c557c849d392b5905d33ee29e71db5"
+        },
+        {
+          "file": "whisper-base.en/normalizer.json",
+          "sha256": "bf1c507dc8724ca9cf9903640dacfb69dae2f00edee4f21ceba106a7392f26dd"
+        },
+        {
+          "file": "whisper-base.en/preprocessor_config.json",
+          "sha256": "9b5cd03a36fbb8a627c64d98a5b5b126ead95a77720723944487311f0110b666"
+        },
+        {
+          "file": "whisper-base.en/special_tokens_map.json",
+          "sha256": "014f8f802366ed818919550be0ad9e35907327cb9e142e8aaa102420f460bda8"
+        },
+        {
+          "file": "whisper-base.en/tokenizer.json",
+          "sha256": "5eb60cec1e77aeeb6869a2bb5a8e01a84c3fe5d072d75369343021fe6f5310d0"
+        },
+        {
+          "file": "whisper-base.en/tokenizer_config.json",
+          "sha256": "14f84bdf4b9ecdbd4738ddc81c17a1baedfc02bb93c6e049c951e15a1b40b70d"
+        },
+        {
+          "file": "whisper-base.en/vocab.json",
+          "sha256": "3ba3c3109ff33976c4bd966589c11ee14fcaa1f4c9e5e154c2ed7f99d80709e7"
+        }
+      ],
+      "license": "MIT"
+    },
+    "voices": {
+      "file": "kokoro/voices-v1.0.bin",
+      "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+    },
+    "presets": [
+      {
+        "id": "af_heart",
+        "label": "Heart \u00b7 American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "af_bella",
+        "label": "Bella \u00b7 American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "af_nicole",
+        "label": "Nicole \u00b7 American feminine",
+        "language": "en-us"
+      },
+      {
+        "id": "am_michael",
+        "label": "Michael \u00b7 American masculine",
+        "language": "en-us"
+      },
+      {
+        "id": "bf_emma",
+        "label": "Emma \u00b7 British feminine",
+        "language": "en-gb"
+      },
+      {
+        "id": "bm_george",
+        "label": "George \u00b7 British masculine",
+        "language": "en-gb"
+      }
+    ],
+    "maxVramBytes": 8589934592
+  }
+}

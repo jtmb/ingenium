@@ -250,10 +250,10 @@ test('server will not admit a new agent turn before native interrupt acknowledge
 test('speech protocol enforces GPU readiness, bounded transcription and authenticated wire', async () => {
   const calls = [];
   const worker = new SpeechWorker({ baseUrl: 'http://speech:8092', token: 'fixture-secret', voice: 'af_heart', redactSpeech: text => text,
-    fetch: async (url, options) => { calls.push([url.pathname, options]); return new Response(JSON.stringify(url.pathname === '/health' ? { ready: true, stt: true, tts: true, gpuReady: true, voices: ['af_heart'] } : { text: 'hello', language: 'en', durationMs: 300 }), { status: 200 }); } });
+    fetch: async (url, options) => { calls.push([url.pathname, options]); return new Response(JSON.stringify(url.pathname === '/health' ? { service: 'veyra-speech', backend: 'torch-directml', ready: true, stt: true, tts: true, gpuReady: true, voices: ['af_heart'] } : { text: 'hello', language: 'en', durationMs: 300 }), { status: 200 }); } });
   await worker.health(); assert.equal((await worker.transcribe({ pcm: new Uint8Array(9600), turn: { requestId: 'voice:fixture:1' } })).text, 'hello');
   assert.equal(calls[1][1].headers.Authorization, 'Bearer fixture-secret'); assert.equal(calls[1][1].redirect, 'error');
-  const unavailable = new SpeechWorker({ baseUrl: 'http://speech:8092', token: 'fixture', voice: 'af_heart', redactSpeech: x => x, fetch: async () => new Response(JSON.stringify({ ready: true, stt: true, tts: true, gpuReady: false, voice: 'af_heart' })) });
+  const unavailable = new SpeechWorker({ baseUrl: 'http://speech:8092', token: 'fixture', voice: 'af_heart', redactSpeech: x => x, fetch: async () => new Response(JSON.stringify({ service: 'veyra-speech', backend: 'torch-directml', ready: true, stt: true, tts: true, gpuReady: false, voice: 'af_heart' })) });
   await assert.rejects(() => unavailable.health(), /NOT_QUALIFIED/);
 });
 test('worker rejects oversize responses and validates actual WAV before playback', async () => {
@@ -261,4 +261,13 @@ test('worker rejects oversize responses and validates actual WAV before playback
   await assert.rejects(() => worker.transcribe({ pcm: new Uint8Array(9600), turn: { requestId: 'voice:fixture:1' } }), /RESPONSE_LIMIT/);
   const audio = new SpeechWorker({ baseUrl: 'http://speech:8092', token: 'fixture', voice: 'af_heart', redactSpeech: () => 'safe words', fetch: async () => new Response(wav()) });
   assert.equal(validateWav(await audio.synthesize({ text: 'private tool text', turn: { requestId: 'voice:fixture:2' } })).durationMs, 10);
+});
+test('speech service identity and backend selection cannot silently reuse Stratus or fall back', async () => {
+  const cpuHealth = { service: 'veyra-speech', instanceId: 'veyra-linux-cpu', backend: 'cpu-onnx', ready: true, stt: true, tts: true, gpuReady: false, voice: 'af_heart' };
+  const options = { baseUrl: 'http://veyra-speech:3011', token: 'fixture', voice: 'af_heart', redactSpeech: text => text, fetch: async () => new Response(JSON.stringify(cpuHealth)) };
+  await assert.rejects(() => new SpeechWorker(options).health(), /VOICE_WORKER_NOT_QUALIFIED/);
+  assert.equal((await new SpeechWorker({ ...options, backend: 'cpu-onnx', instanceId: 'veyra-linux-cpu' }).health()).backend, 'cpu-onnx');
+  await assert.rejects(() => new SpeechWorker({ ...options, backend: 'cpu-onnx', instanceId: 'different-owner' }).health(), /VOICE_WORKER_IDENTITY_MISMATCH/);
+  await assert.rejects(() => new SpeechWorker({ ...options, backend: 'cpu-onnx', fetch: async () => new Response(JSON.stringify({ ...cpuHealth, service: 'stratus-speech' })) }).health(), /VOICE_WORKER_IDENTITY_MISMATCH/);
+  assert.throws(() => new SpeechWorker({ ...options, backend: 'auto' }), /VOICE_WORKER_CONFIG_INVALID/);
 });

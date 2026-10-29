@@ -1,0 +1,13 @@
+torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.4.1%2Bcpu-cp312-cp312-linux_x86_64.whl#sha256=8800deef0026011d502c0c256cc4b67d002347f63c3a38cd8e45f1f445c61364
+torchvision @ https://download-r2.pytorch.org/whl/cpu/torchvision-0.19.1%2Bcpu-cp312-cp312-linux_x86_64.whl#sha256=7207647b0ceb38cb72ac951e57807aaa58a6450d00ea5b542e4def992fec397b
+torch-directml==0.2.5.dev240914
+numpy==1.26.4
+kokoro==0.9.4
+transformers==4.51.3
+spacy==3.7.5
+spacy-curated-transformers==0.3.1
+phonemizer==3.4.0
+espeakng-loader==0.2.4
+weasel==0.3.4
+typer==0.9.0
+click==8.1.8

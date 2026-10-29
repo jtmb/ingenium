@@ -1,0 +1,6 @@
+# Source-qualified dependency closure is frozen in requirements-cpu.lock.
+# Only Kokoro ONNX and faster-whisper are instantiated by the explicit CPU backend.
+# The historical lock retains Piper as well; it is never an automatic backend.
+piper-tts==1.8.0
+faster-whisper==1.2.1
+kokoro-onnx==0.6.1

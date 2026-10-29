@@ -21,12 +21,12 @@ async function readBounded(response, limit) {
   return body;
 }
 
-/** Server-only consumer of the Stratus speech protocol. No worker/model startup or CPU fallback. */
+/** Server-only consumer of Veyra's Stratus-compatible speech protocol. No automatic backend fallback. */
 export class SpeechWorker {
-  constructor({ baseUrl, token, voice, redactSpeech, fetch: request = globalThis.fetch }) {
+  constructor({ baseUrl, token, voice, backend = 'directml', instanceId, redactSpeech, fetch: request = globalThis.fetch }) {
     const url = new URL(baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !token || !voice || typeof redactSpeech !== 'function') throw new VoiceError('VOICE_WORKER_CONFIG_INVALID');
-    Object.assign(this, { baseUrl: url.origin, token, voice, redactSpeech, request });
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !token || !voice || !['directml', 'cpu-onnx'].includes(backend) || (instanceId !== undefined && (typeof instanceId !== 'string' || !instanceId || instanceId.length > 160)) || typeof redactSpeech !== 'function') throw new VoiceError('VOICE_WORKER_CONFIG_INVALID');
+    Object.assign(this, { baseUrl: url.origin, token, voice, backend, instanceId, redactSpeech, request });
   }
   async #call(path, options, limit, signal) {
     const response = await this.request(new URL(path, this.baseUrl), { ...options, headers: { ...options.headers, Authorization: `Bearer ${this.token}` }, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
@@ -34,8 +34,10 @@ export class SpeechWorker {
   }
   async health(signal) {
     const body = JSON.parse(new TextDecoder().decode(await this.#call('/health', {}, 4096, signal)));
-    if (body.ready !== true || body.stt !== true || body.tts !== true || body.gpuReady !== true || (body.voice !== this.voice && !body.voices?.includes(this.voice))) throw new VoiceError('VOICE_WORKER_NOT_QUALIFIED');
-    return { ready: true, gpuReady: true };
+    if (body.service !== 'veyra-speech' || (this.instanceId !== undefined && body.instanceId !== this.instanceId)) throw new VoiceError('VOICE_WORKER_IDENTITY_MISMATCH');
+    const matchesBackend = this.backend === 'directml' ? body.backend === 'torch-directml' && body.gpuReady === true : body.backend === 'cpu-onnx' && body.gpuReady === false;
+    if (body.ready !== true || body.stt !== true || body.tts !== true || !matchesBackend || (body.voice !== this.voice && !body.voices?.includes(this.voice))) throw new VoiceError('VOICE_WORKER_NOT_QUALIFIED');
+    return { ready: true, gpuReady: body.gpuReady, backend: this.backend };
   }
   async #withCancel(requestId, signal, work) {
     if (typeof requestId !== 'string' || requestId.length > 160 || !requestId.length) throw new VoiceError('VOICE_REQUEST_INVALID');

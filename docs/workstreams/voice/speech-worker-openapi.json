@@ -1,0 +1,38 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Veyra private speech worker", "version": "1.0.0", "description": "Veyra-owned Stratus-compatible STT/TTS wire. Backend is explicitly selected by operator configuration; no model/path/provider input or automatic fallback." },
+  "security": [{ "speechBearer": [] }],
+  "paths": {
+    "/health": { "get": { "operationId": "speechHealth", "responses": {
+      "200": { "description": "Selected backend has passed its actual startup speech round-trip and is not quarantined", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } } },
+      "401": { "$ref": "#/components/responses/Error" }, "503": { "description": "Backend is unavailable/quarantined; same health shape with ready false" }
+    } } },
+    "/v1/voices": { "get": { "operationId": "speechVoices", "responses": {
+      "200": { "description": "Manifest-installed voice catalog; not an audible-acceptance claim", "content": { "application/json": { "schema": { "type": "object", "required": ["defaultVoice", "voices"], "properties": { "defaultVoice": { "type": "string" }, "voices": { "type": "array", "maxItems": 20, "items": { "type": "object", "required": ["id", "label", "language", "engine"], "properties": { "id": { "type": "string" }, "label": { "type": "string" }, "language": { "enum": ["en-us", "en-gb"] }, "engine": { "enum": ["kokoro"] } } } } } } } } },
+      "401": { "$ref": "#/components/responses/Error" }
+    } } },
+    "/v1/transcriptions": { "post": { "operationId": "speechTranscribe", "parameters": [{ "name": "X-Request-Id", "in": "header", "required": true, "schema": { "$ref": "#/components/schemas/RequestId" } }], "requestBody": { "required": true, "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary", "minLength": 8000, "maxLength": 480000 }, "description": "16 kHz mono signed 16-bit little-endian PCM; even byte length; 250ms through 15sec" } } }, "responses": {
+      "200": { "description": "Final transcript, or empty text for suppressed silence/noise", "content": { "application/json": { "schema": { "type": "object", "required": ["text", "language", "durationMs"], "properties": { "text": { "type": "string", "maxLength": 2000 }, "language": { "const": "en" }, "durationMs": { "type": "number", "minimum": 250, "maximum": 15000 } } } } } },
+      "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" }, "413": { "$ref": "#/components/responses/Error" }, "415": { "$ref": "#/components/responses/Error" }, "429": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" }, "503": { "$ref": "#/components/responses/Error" }, "504": { "$ref": "#/components/responses/Error" }
+    } } },
+    "/v1/speech": { "post": { "operationId": "speechSynthesize", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "required": ["requestId", "text", "voice"], "properties": { "requestId": { "$ref": "#/components/schemas/RequestId" }, "text": { "type": "string", "minLength": 1, "maxLength": 600, "description": "Nonempty; at most 2400 UTF-8 bytes; no controls except newline/tab" }, "voice": { "type": "string", "description": "Exactly an installed manifest voice ID" } } } } } }, "responses": {
+      "200": { "description": "At most 15sec mono integer s16 PCM WAV at the backend-declared rate", "content": { "audio/wav": { "schema": { "type": "string", "format": "binary", "maxLength": 1440128 } } } },
+      "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "409": { "$ref": "#/components/responses/Error" }, "413": { "$ref": "#/components/responses/Error" }, "415": { "$ref": "#/components/responses/Error" }, "429": { "$ref": "#/components/responses/Error" }, "502": { "$ref": "#/components/responses/Error" }, "503": { "$ref": "#/components/responses/Error" }, "504": { "$ref": "#/components/responses/Error" }
+    } } },
+    "/v1/cancel": { "post": { "operationId": "speechCancel", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "additionalProperties": false, "required": ["requestId"], "properties": { "requestId": { "$ref": "#/components/schemas/RequestId" } } } } } }, "responses": {
+      "200": { "description": "Idempotent named cancellation/pre-admission tombstone; no hard-preemption guarantee", "content": { "application/json": { "schema": { "type": "object", "required": ["cancelled"], "properties": { "cancelled": { "const": true } } } } } },
+      "400": { "$ref": "#/components/responses/Error" }, "401": { "$ref": "#/components/responses/Error" }, "413": { "$ref": "#/components/responses/Error" }, "415": { "$ref": "#/components/responses/Error" }, "429": { "$ref": "#/components/responses/Error" }
+    } } }
+  },
+  "components": {
+    "securitySchemes": { "speechBearer": { "type": "http", "scheme": "bearer", "description": "Dedicated Veyra speech secret; never a Stratus/provider/database credential" } },
+    "schemas": {
+      "RequestId": { "type": "string", "minLength": 1, "maxLength": 160, "description": "Only ASCII letters, digits, colon, underscore and hyphen" },
+      "Health": { "type": "object", "required": ["service", "instanceId", "version", "protocol", "ready", "gpuReady", "tts", "stt", "voice", "voices", "backend", "busy"], "properties": {
+        "service": { "const": "veyra-speech" }, "instanceId": { "type": "string" }, "version": { "const": 1 }, "protocol": { "const": "stratus-speech-v1" }, "ready": { "type": "boolean" }, "gpuReady": { "type": "boolean" }, "tts": { "type": "boolean" }, "stt": { "type": "boolean" }, "voice": { "type": "string" }, "voices": { "type": "array", "items": { "type": "string" }, "maxItems": 20 }, "backend": { "enum": ["torch-directml", "cpu-onnx"] }, "busy": { "type": "boolean" }
+      } },
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string" } } } } }
+    },
+    "responses": { "Error": { "description": "Sanitized stable code; no transcript, token, model path or raw exception", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } } }
+  }
+}
