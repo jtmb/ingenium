@@ -1,0 +1,75 @@
+{
+  "status": "source-only-ready-for-integration",
+  "node": "v22.23.1",
+  "command": [
+    "/home/brajam/.local/bin/node",
+    "--experimental-strip-types",
+    "--loader",
+    "./services/ingenium-api/tests/veyra-dot-loader.mjs",
+    "--test",
+    "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs",
+    "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs",
+    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs",
+    "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs"
+  ],
+  "exitCode": 0,
+  "summary": [
+    "ok 19 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
+    "# tests 25",
+    "# pass 24",
+    "# fail 0",
+    "# skipped 1",
+    "# duration_ms 451.011912"
+  ],
+  "sourceSHA256": {
+    "packages/veyra-automation/contracts.d.ts": "a72712535ce8974cab206aa0d7275ec46aa9f1eaad508868d418b167ed92198e",
+    "services/ingenium-api/lib/dot-v2/commands.ts": "7df6809ed676f5cd68e9198a7a446ebd49746e5bbec40e285af2e7e2577a5d6a",
+    "services/ingenium-api/lib/dot-v2/existing-jobs.ts": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
+    "services/ingenium-api/lib/dot-v2/repository.ts": "ae8177909c94f5138c2c1655069bed5789477bc46db579dd790011b4f1fb579c",
+    "services/ingenium-api/lib/dot-v2/router.ts": "005e75bf8ff6ea907f380da8cdf57196e1e33426359b0aa742dd164bf2ee5868",
+    "services/ingenium-api/lib/dot-v2/schedule.ts": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
+    "services/ingenium-api/lib/dot-v2/schema.sql": "5bcb2330eff3c679e544dd855718c1fb0853f2f3bff46158b2829c1fe6439e47",
+    "services/ingenium-api/lib/dot-v2/service.ts": "82778bcc96c263fd6eae3e66d208d09f97ca14976c3de512253d489c6df433d3",
+    "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "646ffb15f19e2c3fb3c7a68f88cfb61a5d31e34363a2a6e5e033848d84d641c5",
+    "services/ingenium-api/tests/veyra-dot-loader.mjs": "6d3e0c94e02181540f6307c582598fb2627799461c538e13f57ee1c9e7148d81",
+    "services/ingenium-api/tests/veyra-dot-router.test.ts": "5efdc482e99943330e9dc23d2db203e35288c2b8efc0fa60a5d3f79a01a17732",
+    "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs": "6b15292b1f423664dce9e143d41e7ab1c079edebc964bf301753e1b0996eb510",
+    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "fbf345efdaf1a1a749d92ffe858ad28f7a5af03a18560aeab7e2724bb6556740",
+    "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "e1158fc4efbb4b4810538a42269f89fa21b5088a2f59a7503d61cf3343293f9a",
+    "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "285293a3caff0519a1390cd28307b6abd5d31740ca5ddaf9b914f79fc937496a",
+    "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac"
+  },
+  "priorFailures": [
+    {
+      "signature": "ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX parameter properties",
+      "resolution": "Explicit erasable fields; subsequent source tests pass"
+    },
+    {
+      "signature": "Evidence subprocess FileNotFoundError node from non-login Python PATH",
+      "resolution": "Use verified /home/brajam/.local/bin/node; no source/artifact mutation occurred in failed attempt"
+    }
+  ],
+  "priorDiskProof": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot/restart-proof-985675.sqlite",
+    "measuredRemovedBytes": 20480,
+    "outcome": "Earlier 22-test run closed and reopened SQLite and removed fixture; current stricter process inspection preflight skips disk generation",
+    "remainingGate": "Coordinator real API/core restart test; current disk fixture cleanup preflight cannot inspect every process descriptor"
+  },
+  "acceptance": "Not integrated type/HTTP/visual/native/cluster acceptance",
+  "generatedOutputs": {
+    "removed": [
+      {
+        "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/dot/restart-proof-985675.sqlite",
+        "bytes": 20480
+      }
+    ],
+    "currentTestFixtures": [],
+    "retained": [
+      "Owned source and minimal evidence.json; coordinator integration consumer"
+    ]
+  },
+  "pendingTests": [
+    "services/ingenium-api/tests/veyra-dot-router.test.ts: real Express/SQLite HTTP integration source written; not run without coordinator resource/runtime lease",
+    "Targeted TypeScript/React noEmit check; coordinator shared-toolchain lease pending"
+  ]
+}
