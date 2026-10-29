@@ -1,0 +1,70 @@
+{
+  "owner": "01a18934-d937-7813-8c48-5ae85aad4f18",
+  "actualGoalStatus": "blocked",
+  "acceptedNativeCommit": "268962e20bef8c246fce332241c08c00c1fc2317",
+  "acceptedBasePatchSha256": "1294cbf1b5cf778cae5b08cc306583d8071f93e35d39451510af630af9c60672",
+  "originalStagedIndexPatchByteHashVerified": true,
+  "followOnPatch": "native-work-layout.patch",
+  "followOnSha256": "0379a12c41d573098663844a55931dc40a15c7c4a4a851c05aee3acd77e41a7c",
+  "bytes": 40550,
+  "applyOrder": "After accepted original patch1294cbf1, not bare native61c99",
+  "tests": "11 Work React cases in4 suites source-only; not run by worker",
+  "checks": "native unstaged diff check and exact follow-on reverse apply check PASS",
+  "lineEndings": "Git patch canonical source hashes provided; working byte hashes distinguish platform line endings",
+  "sourceFiles": [
+    {
+      "path": "apps/web/src/app/App.tsx",
+      "beforeIndexBlobSha256": "987428cf729817771427e5b74127844696748ae00625a603457059b590616fb1",
+      "afterWorkingFileSha256": "6385976960d5ac3da689873189f50fa4922085a7548bb401a4e136d4d1ba6be0",
+      "afterGitBlob": "a62d9551ebc709219b839249a6df5de5a786724b"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx",
+      "beforeIndexBlobSha256": "19f17e20183c7c484c9ee2f688cdd372ac83a8ce130073b60ef65053d927402b",
+      "afterWorkingFileSha256": "9ad9103c439fba2e79b772b4affb44c0dc9979ca6c73a270519e2d77a1bd6121",
+      "afterGitBlob": "2bbdcc109b4787e11fefbadbe208d9f30ebaffca"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx",
+      "beforeIndexBlobSha256": "6a01982377ca20bbd93226e11c8d6fc8575db808572e520dac83375c54e0f712",
+      "afterWorkingFileSha256": "60284ec9cf2565da745866c1151249df9adfbd2f19e5619bac12a5a9e816e4be",
+      "afterGitBlob": "1f394747a0d4be907101e735c2f90253a289a0ae"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx",
+      "beforeIndexBlobSha256": "8f5039e93ff4eb97bf1335ea8fbe98a5a668954d496d7c638f7a871ba5a1556c",
+      "afterWorkingFileSha256": "211503f59e09bd3348d0feb120f47848b5912fc11000e3e5d8ce149a8426d1aa",
+      "afterGitBlob": "3007084e7e83e96ae8818613e99a7836d457eba9"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.tsx",
+      "beforeIndexBlobSha256": "a69227087de0dacb73037d64d4ed1f7dd24d5fed0f46fb4a2159d49117412543",
+      "afterWorkingFileSha256": "8eb3d23ec32c361bde703646b0ff99c02001d6311e3f476abad09b96b45131b9",
+      "afterGitBlob": "a82a90c27e696aae2f11a26e43d545d7a48ca2db"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/native-work.css",
+      "beforeIndexBlobSha256": "48b6717269d0c47f096499162aee5a887791734b87c815a8ff6a8963b0041c52",
+      "afterWorkingFileSha256": "67547ac30bf48d76d725635666f7fc79f4885a2bf760f45c357f04af03f3315c",
+      "afterGitBlob": "e50640d48ec3e9c8d34b22398b18110fa4aabda8"
+    },
+    {
+      "path": "apps/web/src/features/workbench/LiveSessionSidebar.tsx",
+      "beforeIndexBlobSha256": "a2e2df606843c701e83137b03fb0d3cb0414779d00f079e284efb84377d68bdf",
+      "afterWorkingFileSha256": "62d32b1bc95be4c0458fc85dffa07c788e45663eb20e1bfb7e93ac65df76f6cf",
+      "afterGitBlob": "ca42600d11d6e06aa3e405597eb8d34bc511d77e"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx",
+      "beforeIndexBlobSha256": null,
+      "afterWorkingFileSha256": "7ddd76d77f79b325e66d1b65e77f7bc458e45f9fa92f253343d66b98ed06857b",
+      "afterGitBlob": "fe6e8f700355368c1cdce8355e14721c5d27ffb6"
+    }
+  ],
+  "cleanup": {
+    "generatedBulk": "none",
+    "removedPaths": [],
+    "retained": "Two required sequential native review patches and minimal source/hash evidence; no full source snapshots or dependencies",
+    "removedBytes": 0
+  }
+}

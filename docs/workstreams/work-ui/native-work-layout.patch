@@ -1,0 +1,486 @@
+diff --git a/apps/web/src/app/App.tsx b/apps/web/src/app/App.tsx
+index 4374ac75..a62d9551 100644
+--- a/apps/web/src/app/App.tsx
++++ b/apps/web/src/app/App.tsx
+@@ -1,5 +1,5 @@
+ import { useCollaborationRecovery } from "../features/remote-hosts/useCollaborationRecovery";
+-import { NativeWorkPresentation } from "../features/work-ui/NativeWorkPresentation";
++import { NativeWorkDisclosure, NativeWorkGroup, NativeWorkPresentation } from "../features/work-ui/NativeWorkPresentation";
+ import { NativeWorkNoProjectActions } from "../features/work-ui/NativeWorkNoProjectActions";
+ import { startScratchProject, type ScratchProjectIntent } from "../features/work-ui/scratchProjectStart";
+ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+@@ -252,6 +252,8 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+   const securityFeedbackRef = useRef(securityFeedback); securityFeedbackRef.current = securityFeedback;
+   const [securityReviewVersion, setSecurityReviewVersion] = useState(0);
+   const [scannerFindingsOpenRequest, setScannerFindingsOpenRequest] = useState(0);
++  const [workLayoutOpen, setWorkLayoutOpen] = useState(false);
++  const [workFindingsOpen, setWorkFindingsOpen] = useState(false);
+   const previewAnnotations = useRef<PreviewAnnotation[]>([]);
+   const previewFeedbackRef = useRef(previewFeedback); previewFeedbackRef.current = previewFeedback;
+   const officeDrafts = useRef(new Map<string, ProjectSession>());
+@@ -1138,6 +1140,19 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+     }
+   };
+   const title = navigation.find((item) => item.id === area)!.label;
++  const projectSidebar = <ProjectSidebar
++    sort={sidebarOrganization.preferences.projectSort}
++    collapsed={sidebarOrganization.preferences.collapsed.includes("projects")}
++    onToggleCollapsed={() => sidebarOrganizationControls.toggleCollapsed("projects")}
++    disabledReason={sidebarOrganizationReason} reason={projectsReason}
++    renderReadControl={gateway.getSidebarReadStates && gateway.updateSidebarReadState
++      ? project => <SidebarReadControl owner={serviceSidebar} item={{ kind: "project", id: project.id }} label={project.name} /> : undefined}
++    catalog={projectNavigation} supported={projectsSupported} connected={connected}
++    onCreate={() => {
++      if (collaborationHeldRef.current || restoring.current) return;
++      setArea("workspace"); setWorkspaceView("projects"); openProjectCreate();
++    }}
++    onSelect={() => { setArea("workspace"); setWorkspaceView("projects"); setCodingWorkspace(true); }} />;
+   // The new desktop reuses this existing model action owner unchanged. Its
+   // compatibility panel exposes no legacy task/multichat orchestration UI.
+   if (modelsOnly) return <section className="preserved-models">
+@@ -1156,6 +1171,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+       inert={collaborationHeld}
+       ref={layout.desktopRef}
+       className={`desktop ${workDefault ? "native-work-default" : ""} ${sidebar ? "" : "sidebar-collapsed"}`}
++      data-work-layout={workLayoutOpen}
+       style={{ "--sidebar-width": `${layout.width}px`, "--rail-width": `${layout.railWidth}px` } as CSSProperties}
+     >
+       <nav ref={layout.railRef} className="global-rail" aria-label="Main navigation">
+@@ -1163,7 +1179,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+           V
+         </div>
+         <div className="rail-links">
+-          {navigation.map(({ id, label, icon: Icon }) => (
++          {navigation.filter(item => !workDefault || ["workspace", "scheduled", "customize", "settings"].includes(item.id)).map(({ id, label, icon: Icon }) => (
+             <button
+               key={id}
+               className={`rail-button ${area === id ? "active" : ""}`}
+@@ -1176,6 +1192,18 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+               <Icon size={20} />
+             </button>
+           ))}
++          {workDefault && <details className="native-work-applications" onKeyDown={event => {
++            if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
++          }}>
++            <summary aria-label="More applications" title="More applications">•••</summary>
++            <div className="native-work-application-menu" aria-label="More applications">
++              {navigation.filter(item => !["workspace", "scheduled", "customize", "settings"].includes(item.id)).map(({ id, label, icon: Icon }) =>
++                <button type="button" key={id} aria-current={area === id ? "page" : undefined} disabled={historyBusy}
++                  onClick={event => { setArea(id); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
++                  <Icon size={18} />{label}
++                </button>)}
++            </div>
++          </details>}
+         </div>
+         <div className="rail-footer">
+           {onOpenDiagnostics && <button type="button" className="rail-button" aria-label="Connection and engine diagnostics"
+@@ -1284,7 +1312,10 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+                 {scratchBusy ? <LoaderCircle size={17} className="spin" /> : <Plus size={17} />}
+                 {scratchBusy ? "Creating chat…" : !catalog.selected && scratchRequestId ? "Resume new chat" : "New chat"}
+               </button>}
++              {workDefault && <button type="button" className="sidebar-link native-work-dot" disabled={historyBusy}
++                onClick={() => setArea("scheduled")}>◌ Dot</button>}
+               <LiveSessionSidebar gateway={gateway} projectId={catalog.selected?.id ?? null} project={catalog.selected} instance={instance} connected={connected}
++                presentation={workDefault ? "work" : undefined} betweenGroups={workDefault ? projectSidebar : undefined}
+                 selectedId={liveSessionSelection?.projectId === catalog.selected?.id ? liveSessionSelection?.id ?? null : null}
+                 onDeleted={id => {
+                   if (liveSessionSelection?.id === id) { setLiveSessionSelection(null); setNewSessionVersion(value => value + 1); }
+@@ -1293,9 +1324,10 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+                   setLiveSessionSelection({ projectId: catalog.selected.id, id });
+                   setCodingWorkspace(true); setArea("workspace"); setWorkspaceView("projects");
+                 }}/>
++              <NativeWorkDisclosure enabled={workDefault} label="More in sidebar">
+               {sidebarOrganization.preferences.order.map(id => (
+                 <section key={id} data-sidebar-section={id}>
+-                {id === "projects" ? (
++                {id === "projects" ? (workDefault ? null :
+                 <ProjectSidebar
+                 sort={sidebarOrganization.preferences.projectSort}
+                 collapsed={sidebarOrganization.preferences.collapsed.includes(id)}
+@@ -1371,7 +1403,10 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+                 )}
+                 </section>
+               ))}
++              </NativeWorkDisclosure>
++              <NativeWorkDisclosure enabled={workDefault} label="Sidebar status">
+               <div className="sidebar-service-state"><ServiceSidebarStatus owner={serviceSidebar} /></div>
++              </NativeWorkDisclosure>
+               <div className="sidebar-bottom">
+                 <span className={`dot ${connected ? "ready" : ""}`} />
+                 <span>
+@@ -1393,6 +1428,12 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+             <RenameTask owner={taskNaming.owner} canChange={() => taskNaming.owner.editor ? taskRenameReason(taskNaming.owner.editor.taskId, true) : "Choose a task before renaming."} />}
+         </div>
+         <header className="topbar history-topbar">
++          {workDefault && <div className="native-work-utilities">
++            <button type="button" className="icon-button" aria-label="Review findings" title="Review findings" aria-expanded={workFindingsOpen} aria-controls="native-work-findings"
++              onClick={() => setWorkFindingsOpen(!workFindingsOpen)}>▤</button>
++            <button type="button" className="icon-button" aria-label="View layout" title="View layout" aria-expanded={workLayoutOpen} aria-controls="native-work-layout"
++              onClick={() => setWorkLayoutOpen(!workLayoutOpen)}>▥</button>
++          </div>}
+           <button
+             className="icon-button"
+             aria-label={sidebar ? "Collapse sidebar" : "Expand sidebar"}
+@@ -1519,6 +1560,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+           </div>
+         )}
+         {historyNotice && <div className="history-notice" role="status">{historyNotice}</div>}
++        <NativeWorkGroup enabled={workDefault} open={workFindingsOpen} id="native-work-findings">
+         <GitFeedbackHistory />
+         <ReviewRequestHistory gateway={gateway} connected={connected} service={instance ?? undefined} />
+         <ReviewFindingPreparationHistory gateway={gateway} connected={connected} service={instance ?? undefined} />
+@@ -1526,6 +1568,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+         <ReviewFindingFeedbackHistory />
+         <ReviewFindingTriageHistory gateway={gateway} connected={connected} service={instance ?? undefined} openRequest={findingsOpenRequest} />
+         <ScannerFindingsWorkbench gateway={gateway} connected={connected} service={instance ?? undefined} openRequest={scannerFindingsOpenRequest} onFeedback={reviewSecurityFeedback} />
++        </NativeWorkGroup>
+         {previewFeedback && <div className="history-notice" role="status">Preview feedback retained for {previewFeedback.annotation.task?.title}.
+           <button type="button" disabled={!connected || !previewFeedback.annotation.task || !previewTaskMatches(previewFeedback.annotation.task, catalog.selected, instance ?? undefined)} onClick={() => {
+             const owner = previewFeedback.annotation.task;
+@@ -1535,10 +1578,12 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+           }}>Open original task review</button>
+           <button type="button" onClick={() => { previewFeedbackRef.current = null; setPreviewFeedback(null); }}>Close feedback review</button>
+         </div>}
++        <NativeWorkGroup enabled={workDefault} open={workLayoutOpen} id="native-work-layout">
+         <DockedViews layout={views} activeView={activeDockedView}
+           onSelect={selectDockedView}
+           canChangeLayout={() => commandReason("projects") === null}
+           disabledReason={searchOpen || projectCreateOpen ? "Close the current dialog first." : commandReason("projects")} />
++        </NativeWorkGroup>
+         <SplitWorkspace activeView={activeDockedView} availableViews={views.preferences.open}
+           disabledReason={searchOpen || projectCreateOpen ? "Close the current dialog first." : commandReason("projects")}
+           canChangeLayout={() => commandReason("projects") === null}
+@@ -1582,7 +1627,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+             </Suspense></PaneRenderBoundary>
+             : area === "security" ? <PaneRenderBoundary viewLabel="Security"><Suspense fallback={<p role="status">Opening security findings…</p>}>
+               <SecurityWorkspace key={`${instance}:${catalog.selected?.id ?? "none"}`} gateway={gateway} project={catalog.selected} connected={connected} serviceInstanceId={instance ?? ""}
+-                onRetainedFindings={() => setScannerFindingsOpenRequest(v => v + 1)}
++                onRetainedFindings={() => { setWorkFindingsOpen(true); setScannerFindingsOpenRequest(v => v + 1); }}
+                 onReview={() => { setSecurityReviewVersion(v => v + 1); setCodingWorkspace(true); setWorkspaceView("projects"); setArea("workspace"); }}
+                 onFeedback={reviewSecurityFeedback}/>
+             </Suspense></PaneRenderBoundary>
+@@ -1669,7 +1714,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+                 catalog.selected.environment, catalog.selected.primary_root, liveSessionSelection, newSessionVersion])}
+                 projectName={catalog.selected.name}>
+               <Workbench collaborationRecovery={collaborationRecovery} key={catalog.selected.id} gateway={gateway} project={catalog.selected}
+-                onOpenFindings={() => setFindingsOpenRequest(value => value + 1)}
++                onOpenFindings={() => { setWorkFindingsOpen(true); setFindingsOpenRequest(value => value + 1); }}
+                 fileWorkspaceCache={fileWorkspaceCache.current}
+                 terminalSessionCache={terminalSessionCache.current}
+                 projects={catalog.projects}
+@@ -1692,12 +1737,12 @@ export function App({ gateway = desktopGateway, modelsOnly = false, workDefault
+               </NativeWorkPresentation>
+             </PaneRenderBoundary>
+           ) : workDefault && view === "projects" && codingWorkspace && !catalog.selected ? (
+-            <NativeWorkPresentation scope={JSON.stringify([instance, "no-project"])} projectName="No project selected">
++            <NativeWorkPresentation scope={JSON.stringify([instance, "no-project"])} projectName="No project selected" hasWorkspace={false}>
+               <section className="native-work-welcome">
+                 <img src="/veyra-blue.png" alt="" width="48" height="48" />
+                 <h1>What should we build?</h1>
+-                <p>Choose a project to get started. A scratch project creates a new working folder.</p>
+-                <NativeWorkNoProjectActions scratchAvailable={connected && !!gateway.workbench && projectsSupported}
++                <p>Choose a project to start a conversation.</p>
++                <NativeWorkNoProjectActions variant="welcome" scratchAvailable={connected && !!gateway.workbench && projectsSupported}
+                   creating={scratchBusy} resumable={!!scratchRequestId}
+                   onCreateScratch={() => { void startScratchChat("explicit-scratch-project"); }}
+                   onChooseProject={() => setCodingWorkspace(false)} />
+diff --git a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx
+index dbe586ab..2bbdcc10 100644
+--- a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.test.tsx
+@@ -17,6 +17,7 @@ describe("Work without a qualified private project owner", () => {
+     // fallbacks, even if a stale callback is invoked despite the disabled UI.
+     expect(await startScratchProject(true, "new-chat", allocateProject)).toBe(false);
+     expect(gateway.workbench).not.toHaveBeenCalled();
++    fireEvent.click(screen.getByText("Start options"));
+     fireEvent.click(screen.getByRole("button", { name: "Create scratch project" }));
+     await waitFor(() => expect(gateway.workbench).toHaveBeenCalledTimes(1));
+     expect(gateway.workbench).toHaveBeenLastCalledWith("POST", "/v1/scratch");
+@@ -27,6 +28,7 @@ describe("Work without a qualified private project owner", () => {
+     expect(await startScratchProject(false, "new-chat", originalOwner)).toBe(true);
+     expect(originalOwner).toHaveBeenCalledTimes(1);
+     render(<NativeWorkNoProjectActions scratchAvailable creating={false} resumable onCreateScratch={originalOwner} />);
++    fireEvent.click(screen.getByText("Start options"));
+     expect(screen.getByRole("button", { name: "Resume scratch project creation" })).toBeTruthy();
+     expect(screen.queryByRole("button", { name: "Resume new chat" })).toBeNull();
+   });
+diff --git a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
+index 660f4534..1f394747 100644
+--- a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
+@@ -1,16 +1,22 @@
+ import { useId } from "react";
+ 
+-export function NativeWorkNoProjectActions({ scratchAvailable, creating, resumable, onCreateScratch, onChooseProject }: {
++export function NativeWorkNoProjectActions({ scratchAvailable, creating, resumable, onCreateScratch, onChooseProject, variant = "sidebar" }: {
+   scratchAvailable: boolean; creating: boolean; resumable: boolean;
+   onCreateScratch: () => void; onChooseProject?: () => void;
++  variant?: "sidebar" | "welcome";
+ }) {
+   const reason = useId();
+-  return <div className="native-work-no-project-actions" role="group" aria-label="No-project chat actions">
+-    <button type="button" className="button new-task" disabled aria-describedby={reason}>New chat</button>
+-    <p id={reason} role="status">Chats without a project are currently unavailable. Choose a project or create a scratch project.</p>
+-    <button type="button" className="button" disabled={!scratchAvailable || creating}
++  return <div className={`native-work-no-project-actions native-work-start-${variant}`} role="group" aria-label="No-project chat actions">
++    {variant === "sidebar" && <button type="button" className="button new-task" disabled aria-describedby={reason}>New chat</button>}
++    {onChooseProject && <button type="button" className="button" onClick={onChooseProject}>Choose project</button>}
++    <details className="native-work-start-options">
++      <summary>Start options</summary>
++      <div>
++      <p id={reason}>Chats without a project are currently unavailable. Choose a project or create a scratch project.</p>
++      <button type="button" className="button" disabled={!scratchAvailable || creating}
+       title="Creates a project and a working folder."
+       onClick={onCreateScratch}>{creating ? "Creating scratch project…" : resumable ? "Resume scratch project creation" : "Create scratch project"}</button>
+-    {onChooseProject && <button type="button" className="button" onClick={onChooseProject}>Choose project</button>}
++      </div>
++    </details>
+   </div>;
+ }
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+index ba897cd1..3007084e 100644
+--- a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+@@ -1,7 +1,7 @@
+ import { useEffect, useState } from "react";
+ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+-import { NativeWorkPresentation } from "./NativeWorkPresentation";
++import { NativeWorkDisclosure, NativeWorkGroup, NativeWorkPresentation } from "./NativeWorkPresentation";
+ 
+ afterEach(cleanup);
+ describe("native Work presentation boundary", () => {
+@@ -48,4 +48,32 @@ describe("native Work presentation boundary", () => {
+     expect(tools.getAttribute("aria-pressed")).toBe("true");
+     expect(terminal.getAttribute("aria-pressed")).toBe("true");
+   });
++
++  it("keeps secondary owners mounted while their explicit drawer is closed", () => {
++    const removed = vi.fn();
++    function Original() { useEffect(() => removed, []); return <input aria-label="Original review draft" defaultValue="Retained" />; }
++    const view = render(<NativeWorkGroup enabled open={false} id="review"><Original /></NativeWorkGroup>);
++    const input = screen.getByLabelText("Original review draft");
++    view.rerender(<NativeWorkGroup enabled open id="review"><Original /></NativeWorkGroup>);
++    expect(screen.getByRole("textbox", { name: "Original review draft" })).toBe(input);
++    view.rerender(<NativeWorkGroup enabled open={false} id="review"><Original /></NativeWorkGroup>);
++    expect(input.closest("[inert]")).toBeTruthy();
++    expect(removed).not.toHaveBeenCalled();
++  });
++
++  it("leaves legacy secondary content directly visible and makes Work extras explicit", () => {
++    const view = render(<NativeWorkDisclosure enabled={false} label="More in sidebar"><button>Task library</button></NativeWorkDisclosure>);
++    expect(screen.getByRole("button", { name: "Task library" })).toBeTruthy();
++    expect(screen.queryByText("More in sidebar")).toBeNull();
++    view.rerender(<NativeWorkDisclosure enabled label="More in sidebar"><button>Task library</button></NativeWorkDisclosure>);
++    fireEvent.click(screen.getByText("More in sidebar"));
++    expect(screen.getByRole("button", { name: "Task library" })).toBeTruthy();
++  });
++
++  it("does not advertise absent workspace tools on the no-project canvas", () => {
++    render(<NativeWorkPresentation scope="none" projectName="No project selected" hasWorkspace={false}><p>Choose project</p></NativeWorkPresentation>);
++    expect(screen.queryByRole("button", { name: "Workspace tools" })).toBeNull();
++    expect(screen.queryByRole("button", { name: "Terminal panel" })).toBeNull();
++    expect(screen.getByRole("button", { name: "Web", exact: true })).toBeTruthy();
++  });
+ });
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+index 431e9fa9..a82a90c2 100644
+--- a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+@@ -1,12 +1,21 @@
+ import { useId, useState, type ReactNode } from "react";
+ 
++/** Native disclosure keeps existing feature owners mounted while collapsed. */
++export function NativeWorkDisclosure({ enabled, label, children }: { enabled: boolean; label: string; children: ReactNode }) {
++  return enabled ? <details className="native-work-disclosure"><summary>{label}</summary><div>{children}</div></details> : <>{children}</>;
++}
++
++export function NativeWorkGroup({ enabled, open, id, children }: { enabled: boolean; open: boolean; id: string; children: ReactNode }) {
++  return enabled ? <div id={id} className={id} hidden={!open} inert={!open}>{children}</div> : <>{children}</>;
++}
++
+ /**
+  * Presentation only: the existing Workbench keeps its draft, scroll, pending
+  * originals and service subscriptions mounted behind the explicit Web toggle.
+  * No native gateway currently qualifies an upstream exact-session Web surface.
+  */
+-export function NativeWorkPresentation({ scope, projectName, children }: {
+-  scope: string; projectName: string; children: ReactNode;
++export function NativeWorkPresentation({ scope, projectName, children, hasWorkspace = true }: {
++  scope: string; projectName: string; children: ReactNode; hasWorkspace?: boolean;
+ }) {
+   const id = useId();
+   const [selection, setSelection] = useState({ scope, view: "work" as "work" | "web" });
+@@ -23,8 +32,8 @@ export function NativeWorkPresentation({ scope, projectName, children }: {
+         <button type="button" aria-pressed={view === "web"} aria-controls={`${id}-web`}
+           onClick={() => setSelection({ scope, view: "web" })}>Web</button>
+       </div>
+-      <button type="button" aria-pressed={tools} onClick={() => setTools(!tools)}>Workspace tools</button>
+-      <button type="button" aria-pressed={terminal} onClick={() => setTerminal(!terminal)}>Terminal panel</button>
++      {hasWorkspace && <><button type="button" aria-pressed={tools} onClick={() => setTools(!tools)}>Workspace tools</button>
++      <button type="button" aria-pressed={terminal} onClick={() => setTerminal(!terminal)}>Terminal panel</button></>}
+     </header>
+     <div className="native-work-viewport">
+       <div id={`${id}-work`} role="region" aria-label="Native Work presentation"
+diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
+index 8e72eede..e50640d4 100644
+--- a/apps/web/src/features/work-ui/native-work.css
++++ b/apps/web/src/features/work-ui/native-work.css
+@@ -31,6 +31,31 @@
+ .native-work-no-project-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+ .native-work-no-project-actions p { flex-basis: 100%; color: var(--muted); line-height: 1.5; }
+ .native-work-no-project-actions button:disabled { cursor: not-allowed; opacity: .55; }
++.native-work-default .main { position: relative; }
++.native-work-utilities { display: flex; gap: 2px; }
++.native-work-findings { position: absolute; z-index: 30; top: 48px; right: 12px; width: min(640px, calc(100% - 24px)); max-height: calc(100% - 72px); overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--sidebar); box-shadow: var(--shadow); }
++.native-work-default[data-work-layout=false] .split-toolbar { display: none; }
++.native-work-applications { position: relative; }
++.native-work-default .rail-links { overflow: visible; }
++.native-work-applications > summary { display: grid; place-items: center; width: 36px; height: 36px; cursor: pointer; list-style: none; }
++.native-work-applications > summary:focus-visible, .native-work-disclosure > summary:focus-visible, .native-work-start-options > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.native-work-applications > summary::-webkit-details-marker { display: none; }
++.native-work-application-menu { position: fixed; z-index: 40; top: 60px; left: 60px; min-width: 220px; max-height: min(600px, calc(100dvh - 120px)); overflow-y: auto; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--sidebar); box-shadow: var(--shadow); }
++.native-work-application-menu button { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px; text-align: left; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; }
++.native-work-application-menu button:hover { background: var(--control); }
++.native-work-disclosure { margin: 8px 0; color: var(--muted); font-size: .9rem; }
++.native-work-disclosure > summary { padding: 8px 12px; cursor: pointer; }
++.native-work-disclosure > div { padding: 4px; }
++.native-work-default .live-session-sidebar h3 { margin: 0; font-weight: 400; }
++.native-work-default .native-work-dot { margin-top: 4px; }
++.native-work-no-project-actions { padding: 0; gap: 4px; align-items: center; }
++.native-work-start-sidebar { flex-direction: column; align-items: stretch; }
++.native-work-start-options { position: relative; color: var(--muted); font-size: .85rem; }
++.native-work-start-options > summary { cursor: pointer; padding: 6px 10px; }
++.native-work-start-options > div { position: absolute; z-index: 35; top: 100%; left: 0; width: min(300px, 70vw); padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--sidebar); box-shadow: var(--shadow); text-align: left; }
++.native-work-welcome { padding-bottom: 12vh; }
++.native-work-welcome > p { font-size: .95rem; margin: 8px 0 20px; }
++.native-work-welcome .native-work-start-welcome { flex: 0 0 auto; max-width: 30rem; }
+ .native-work-presentation .wb-toolbar { flex-wrap: wrap; padding: 8px 16px; gap: 8px; min-height: 40px; background: var(--canvas); border-bottom-color: transparent; }
+ .native-work-presentation .wb-sessionbar { flex-wrap: wrap; padding: 6px 16px; border-bottom-color: transparent; }
+ .native-work-presentation .wb-chat { border-right: 0; }
+diff --git a/apps/web/src/features/workbench/LiveSessionSidebar.tsx b/apps/web/src/features/workbench/LiveSessionSidebar.tsx
+index 9f051263..ca42600d 100644
+--- a/apps/web/src/features/workbench/LiveSessionSidebar.tsx
++++ b/apps/web/src/features/workbench/LiveSessionSidebar.tsx
+@@ -1,4 +1,5 @@
+-import { useCallback, useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
++import { NativeWorkDisclosure } from "../work-ui/NativeWorkPresentation";
+ import { Archive, ChevronRight, MessageSquare, MoreHorizontal, Pin, RefreshCw, Trash2 } from "lucide-react";
+ import type { Gateway } from "../../platform/types";
+ import type { Project } from "@veyra/contracts";
+@@ -28,11 +29,13 @@ function rows(value: unknown): Session[] {
+   }).filter(item => !!item.id);
+ }
+ 
+-export function LiveSessionSidebar({ gateway, projectId, project, instance, connected, selectedId, onSelect, onDeleted }: {
++export function LiveSessionSidebar({ gateway, projectId, project, instance, connected, selectedId, onSelect, onDeleted, presentation, betweenGroups }: {
+   gateway: Gateway; projectId: string | null; connected: boolean; selectedId: string | null;
+   project?: Project | null; instance?: string | null;
+   onSelect(id: string): void;
+   onDeleted?(id: string): void;
++  presentation?: "work";
++  betweenGroups?: ReactNode;
+ }) {
+   const [sessions, setSessions] = useState<Session[]>([]);
+   const [cursor, setCursor] = useState<string | null>(null);
+@@ -181,17 +184,9 @@ export function LiveSessionSidebar({ gateway, projectId, project, instance, conn
+     if(deletionLock.current || !window.confirm("Preserve the original deletion as unresolved history and release this view’s pending slot? This does not prove deletion or authorize repeating it."))return;
+     try {await deletionStorage(()=> {const key=`veyra.chat-deletion.v2:${projectId}`,legacyKey=`veyra.chat-deletion.v1:${projectId}`,historyKey=`${key}.history`,raw=localStorage.getItem(key),legacy=localStorage.getItem(legacyKey),prior:unknown=JSON.parse(localStorage.getItem(historyKey)||"[]");if(!raw&&!legacy)throw new Error("No original retained.");if(!Array.isArray(prior)||prior.length>=128)throw new Error("Recovery history is full or unreadable.");const next=JSON.stringify([...prior,{state:"unresolved",raw,legacy}]);if(next.length>2*1024*1024)throw new Error("Recovery history is full.");localStorage.setItem(historyKey,next);if(localStorage.getItem(historyKey)!==next||localStorage.getItem(key)!==raw||localStorage.getItem(legacyKey)!==legacy)throw new Error("Original changed while preserving history.");localStorage.removeItem(key);localStorage.removeItem(legacyKey);});setDeletion(null);setLegacyDeletion("");setDeletionStorageReady(true);setDeletionNotice("Original preserved unresolved; its effect outcome remains unknown.");}catch(cause){setError(String(cause));}
+   };
+-  const visible = sessions.filter(item => archived || !item.presentation.archived).sort((a, b) => Number(b.presentation.pinned) - Number(a.presentation.pinned));
+-  if (!projectId) return null;
+-  return <section className="live-session-sidebar" aria-label="Project conversations">
+-    <div className="sidebar-section-title">Chats <span>{sessions.length}</span><button type="button" className="icon-button" aria-label="Refresh conversations" disabled={!connected || loading || !!busyId} onClick={() => void load()}><RefreshCw size={13}/></button></div>
+-    {!connected && <p className="sidebar-hint">Reconnect to open conversations.</p>}
+-    {loading && !sessions.length && <p className="sidebar-hint" role="status">Loading conversations…</p>}
+-    {error && <p className="sidebar-hint live-session-error" role="alert">{error}</p>}
+-    {deletionNotice && <p className="sidebar-hint" role="status">{deletionNotice}</p>}
+-    {deletion && <div className="live-session-deletion"><p>“{deletion.title}” has an original deletion or cleanup receipt pending. It is retained for read-only reconciliation.</p><button type="button" disabled={!connected || !!busyId} onClick={() => void checkDeletion()}>Check original deletion</button></div>}
+-    {(deletion || legacyDeletion || !deletionStorageReady) && <div className="live-session-deletion"><p>{legacyDeletion ? "A legacy unbound deletion is preserved. It cannot authorize cleanup or replay." : "Deletion originals may contain private project paths and settings."}</p><button type="button" disabled={!!busyId} onClick={exportDeletion}>Export private deletion recovery</button><button type="button" disabled={!!busyId} onClick={()=>void preserveDeletion()}>Preserve deletion unresolved</button></div>}
+-    <div className="live-session-list">{visible.map(session => <div className="live-session-item" key={session.id}>
++  const returned = sessions.filter(item => archived || !item.presentation.archived);
++  const visible = presentation === "work" ? returned : returned.sort((a, b) => Number(b.presentation.pinned) - Number(a.presentation.pinned));
++  const renderRows = (items: Session[]) => (<div className="live-session-list">{items.map(session => <div className="live-session-item" key={session.id}>
+       {renameId === session.id ? <form onSubmit={event => { event.preventDefault(); if (renameText.trim()) void update(session, { title: renameText.trim() }); }}><input autoFocus aria-label="Conversation title" maxLength={200} value={renameText} onChange={event => setRenameText(event.target.value)} onKeyDown={event => { if (event.key === "Escape") setRenameId(""); }}/><button type="submit" disabled={!!busyId || !renameText.trim()}>Save</button><button type="button" onClick={() => setRenameId("")}>Cancel</button></form>
+         : <><button type="button" className={`sidebar-link live-session-open${selectedId === session.id ? " selected" : ""}`} disabled={!connected} onClick={() => { onSelect(session.id); if (session.presentation.unread) void update(session, { unread: false }); }}>
+           {session.presentation.pinned ? <Pin size={14}/> : session.presentation.archived ? <Archive size={14}/> : <MessageSquare size={14}/>}
+@@ -203,9 +198,26 @@ export function LiveSessionSidebar({ gateway, projectId, project, instance, conn
+           <button type="button" disabled={!!busyId || !!deletion} onClick={() => void update(session, { archived: !session.presentation.archived })}>{session.presentation.archived ? "Restore" : "Archive"}</button>
+           <button type="button" disabled={!connected || !!busyId || !!deletion || !!legacyDeletion || !deletionStorageReady || !project || !instance} onClick={() => void deleteSession(session)}><Trash2 size={13}/> Delete chat</button>
+         </div></details></>}
+-    </div>)}</div>
++    </div>)}</div>);
++  if (!projectId && presentation !== "work") return null;
++  return <section className="live-session-sidebar" aria-label="Project conversations">
++    {presentation !== "work" && <div className="sidebar-section-title">Chats <span>{sessions.length}</span><button type="button" className="icon-button" aria-label="Refresh conversations" disabled={!connected || loading || !!busyId} onClick={() => void load()}><RefreshCw size={13}/></button></div>}
++    {!connected && <p className="sidebar-hint">Reconnect to open conversations.</p>}
++    {loading && !sessions.length && <p className="sidebar-hint" role="status">Loading conversations…</p>}
++    {error && <p className="sidebar-hint live-session-error" role="alert">{error}</p>}
++    {deletionNotice && <p className="sidebar-hint" role="status">{deletionNotice}</p>}
++    {deletion && <div className="live-session-deletion"><p>“{deletion.title}” has an original deletion or cleanup receipt pending. It is retained for read-only reconciliation.</p><button type="button" disabled={!connected || !!busyId} onClick={() => void checkDeletion()}>Check original deletion</button></div>}
++    {(deletion || legacyDeletion || !deletionStorageReady) && <div className="live-session-deletion"><p>{legacyDeletion ? "A legacy unbound deletion is preserved. It cannot authorize cleanup or replay." : "Deletion originals may contain private project paths and settings."}</p><button type="button" disabled={!!busyId} onClick={exportDeletion}>Export private deletion recovery</button><button type="button" disabled={!!busyId} onClick={()=>void preserveDeletion()}>Preserve deletion unresolved</button></div>}
++    {presentation === "work" ? <>
++      <section aria-label="Pinned conversations"><h3 className="sidebar-section-title">Pinned</h3>{renderRows(visible.filter(item => item.presentation.pinned))}</section>
++      {betweenGroups}
++      <section aria-label="Recent conversations"><h3 className="sidebar-section-title">Recents</h3>{renderRows(visible.filter(item => !item.presentation.pinned))}</section>
++    </> : renderRows(visible)}
+     {!loading && !error && !visible.length && <p className="sidebar-hint">Your conversations will appear here.</p>}
++    {projectId && <NativeWorkDisclosure enabled={presentation === "work"} label="Conversation options">
++    {presentation === "work" && <button type="button" className="sidebar-link" disabled={!connected || loading || !!busyId} onClick={() => void load()}><RefreshCw size={13}/>Refresh conversations</button>}
+     <button type="button" className="sidebar-link" onClick={() => setArchived(value => !value)}><Archive size={14}/>{archived ? "Hide archived" : "Show archived"}</button>
+     {cursor && <button type="button" className="sidebar-link" disabled={loading || !connected || sessions.length >= 500} onClick={() => void load(cursor)}>More conversations <ChevronRight size={14}/></button>}
++    </NativeWorkDisclosure>}
+   </section>;
+ }
+diff --git a/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx b/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx
+new file mode 100644
+index 00000000..fe6e8f70
+--- /dev/null
++++ b/apps/web/src/features/work-ui/LiveSessionSidebarWork.test.tsx
+@@ -0,0 +1,45 @@
++import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import type { Gateway } from "../../platform/types";
++import { LiveSessionSidebar } from "../workbench/LiveSessionSidebar";
++
++afterEach(cleanup);
++function fixture() {
++  const workbench = vi.fn().mockResolvedValue({ sessions: [
++    { id: "recent-z", title: "Recent Z", presentation: { revision: 1, pinned: false } },
++    { id: "pinned-z", title: "Pinned Z", presentation: { revision: 1, pinned: true } },
++    { id: "recent-a", title: "Recent A", presentation: { revision: 1, pinned: false } },
++    { id: "pinned-a", title: "Pinned A", presentation: { revision: 1, pinned: true } },
++  ] });
++  return { gateway: { workbench } as Gateway, workbench };
++}
++describe("existing session owner Work grouping", () => {
++  it("groups actual pin flags around the existing Projects slot, preserving returned order and actions without writes", async () => {
++    const { gateway, workbench } = fixture();
++    const view = render(<LiveSessionSidebar gateway={gateway} projectId="project" connected selectedId={null}
++      onSelect={vi.fn()} presentation="work" betweenGroups={<section aria-label="Projects"><h3>Projects</h3></section>} />);
++    await screen.findByRole("button", { name: "Recent A", exact: true });
++    const pins = within(screen.getByRole("region", { name: "Pinned conversations" }));
++    const recents = within(screen.getByRole("region", { name: "Recent conversations" }));
++    expect(pins.getAllByRole("button", { name: /^Pinned / }).map(node => node.textContent)).toEqual(["Pinned Z", "Pinned A"]);
++    expect(recents.getAllByRole("button", { name: /^Recent / }).map(node => node.textContent)).toEqual(["Recent Z", "Recent A"]);
++    expect(Array.from(view.container.querySelectorAll("h3")).map(node => node.textContent)).toEqual(["Pinned", "Projects", "Recents"]);
++    fireEvent.click(screen.getByLabelText("Actions for Pinned Z"));
++    expect(pins.getByRole("button", { name: "Unpin", exact: true })).toBeTruthy();
++    fireEvent.click(screen.getByText("Conversation options"));
++    expect(screen.getByRole("button", { name: "Show archived" })).toBeTruthy();
++    expect(workbench.mock.calls.every(([method]) => method === "GET")).toBe(true);
++    expect(workbench).toHaveBeenCalledTimes(1);
++  });
++
++  it("keeps the default legacy Chats presentation and its original controls", async () => {
++    const { gateway, workbench } = fixture();
++    render(<LiveSessionSidebar gateway={gateway} projectId="project" connected selectedId={null} onSelect={vi.fn()} />);
++    await screen.findByRole("button", { name: "Recent A", exact: true });
++    expect(screen.getByText("Chats")).toBeTruthy();
++    expect(screen.queryByRole("region", { name: "Pinned conversations" })).toBeNull();
++    expect(screen.getByRole("button", { name: "Refresh conversations" })).toBeTruthy();
++    expect(screen.getByRole("button", { name: "Show archived" })).toBeTruthy();
++    expect(workbench.mock.calls.every(([method]) => method === "GET")).toBe(true);
++  });
++});
