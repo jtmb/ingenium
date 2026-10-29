@@ -15,28 +15,29 @@
   "exitCode": 0,
   "summary": [
     "ok 19 - SQLite close/reopen retains approved work, cursor, operation and unknown outcome without re-dispatch # SKIP Disk fixture not generated: cannot inspect every process descriptor for cleanup safety",
-    "# tests 25",
-    "# pass 24",
+    "# tests 31",
+    "# pass 30",
     "# fail 0",
     "# skipped 1",
-    "# duration_ms 451.011912"
+    "# duration_ms 328.938949"
   ],
   "sourceSHA256": {
     "packages/veyra-automation/contracts.d.ts": "a72712535ce8974cab206aa0d7275ec46aa9f1eaad508868d418b167ed92198e",
-    "services/ingenium-api/lib/dot-v2/commands.ts": "7df6809ed676f5cd68e9198a7a446ebd49746e5bbec40e285af2e7e2577a5d6a",
+    "services/ingenium-api/lib/dot-v2/commands.ts": "814807ce97b158c8d7a943239a58cab162ea76e99764fa162314d04740d47616",
     "services/ingenium-api/lib/dot-v2/existing-jobs.ts": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
+    "services/ingenium-api/lib/dot-v2/proactive.ts": "bb120999cd0d9c71758b8c2421cdc8756c89e842fc206fa4f4bfdc0b08bd741a",
     "services/ingenium-api/lib/dot-v2/repository.ts": "ae8177909c94f5138c2c1655069bed5789477bc46db579dd790011b4f1fb579c",
     "services/ingenium-api/lib/dot-v2/router.ts": "005e75bf8ff6ea907f380da8cdf57196e1e33426359b0aa742dd164bf2ee5868",
     "services/ingenium-api/lib/dot-v2/schedule.ts": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
     "services/ingenium-api/lib/dot-v2/schema.sql": "5bcb2330eff3c679e544dd855718c1fb0853f2f3bff46158b2829c1fe6439e47",
-    "services/ingenium-api/lib/dot-v2/service.ts": "82778bcc96c263fd6eae3e66d208d09f97ca14976c3de512253d489c6df433d3",
-    "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "646ffb15f19e2c3fb3c7a68f88cfb61a5d31e34363a2a6e5e033848d84d641c5",
+    "services/ingenium-api/lib/dot-v2/service.ts": "fe36ae4acaf2e4370ef4d1a81f66a6e996554cb8a28c0dbff6886d72a6e5cd59",
+    "services/ingenium-api/tests/veyra-dot-adapter.cpu.mjs": "d669deb3fe718f4a254edd9ebbac9a57b4f393e100e561618641c01669377d60",
     "services/ingenium-api/tests/veyra-dot-loader.mjs": "6d3e0c94e02181540f6307c582598fb2627799461c538e13f57ee1c9e7148d81",
     "services/ingenium-api/tests/veyra-dot-router.test.ts": "5efdc482e99943330e9dc23d2db203e35288c2b8efc0fa60a5d3f79a01a17732",
     "services/ingenium-api/tests/veyra-dot-schedule.cpu.mjs": "6b15292b1f423664dce9e143d41e7ab1c079edebc964bf301753e1b0996eb510",
-    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "fbf345efdaf1a1a749d92ffe858ad28f7a5af03a18560aeab7e2724bb6556740",
-    "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "e1158fc4efbb4b4810538a42269f89fa21b5088a2f59a7503d61cf3343293f9a",
-    "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "285293a3caff0519a1390cd28307b6abd5d31740ca5ddaf9b914f79fc937496a",
+    "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "988ce25f826354b30d5c53c5769ac835d83605342f4299a8f5b1aa599d9e69f3",
+    "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "75fab77030a2e48673f8e4c1a568e79a102083ac4b74396f60a3c857f9f3c0e5",
+    "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "01423dd03b4682a729edabbba0b1660e296282a6ffbe832c2cff680bac5a3888",
     "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac"
   },
   "priorFailures": [

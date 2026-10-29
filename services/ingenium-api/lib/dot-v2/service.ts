@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import type { Actor, Authorization, DotScope, Suggestion, Followup, Operation, Notification, Schedule, MissedPolicy } from "../../../../packages/veyra-automation/contracts.js";
 import { DotRepository, DotConflict, scopeKey } from "./repository.js";
 import { validateSchedule, planDue } from "./schedule.js";
 
+export type SuggestionInput = Pick<Suggestion,"title"|"prompt"|"source"|"capabilities"|"expiresAt">;
 export interface BoundJob {
   id: string; revision: number; scheduleRevision: number; scope: DotScope;
   prompt: string; enabled: boolean; cron: string | null; capabilities: string[];
@@ -33,7 +35,27 @@ export class DotService {
     this.authorization.requireSource(actor,scope,value.source);
     return value;
   }
-  propose(actor: Actor, scope: DotScope, input: Pick<Suggestion,"title"|"prompt"|"source"|"capabilities"|"expiresAt">): Suggestion {
+  propose(actor: Actor, scope: DotScope, input: SuggestionInput): Suggestion {
+    return this.createSuggestion(actor,scope,input);
+  }
+  assertCanSuggest(actor: Actor, scope: DotScope): void { this.require(actor,scope,"suggest"); }
+  proposeForSource(actor: Actor, scope: DotScope, input: SuggestionInput): Suggestion {
+    this.require(actor,scope,"suggest");
+    if(!input || !input.source)throw new DotError("DOT_VALIDATION");
+    text(input.source.reference,512);
+    const id="dot-source-"+createHash("sha256").update(JSON.stringify([scopeKey(scope),input.source.kind,input.source.reference])).digest("hex");
+    return this.repository.transaction(() => {
+      const existing=this.repository.get<Suggestion>("suggestion",id,scope);
+      if(existing){
+        this.require(actor,scope,"suggest",existing.capabilities);
+        const visible=this.suggestion(actor,scope,id);
+        if(visible.prompt!==input.prompt || visible.title!==input.title || JSON.stringify([...visible.capabilities].sort())!==JSON.stringify([...new Set(input.capabilities)].sort()))throw new DotError("DOT_SOURCE_CONFLICT");
+        return visible;
+      }
+      return this.createSuggestion(actor,scope,input,id);
+    });
+  }
+  private createSuggestion(actor: Actor, scope: DotScope, input: SuggestionInput, stableId?: string): Suggestion {
     if (!input || !input.source || !Array.isArray(input.capabilities)) throw new DotError("DOT_VALIDATION");
     this.require(actor,scope,"suggest",input.capabilities);
     text(input.title,160); text(input.prompt,16000); text(input.source.reference,512);
@@ -43,7 +65,7 @@ export class DotService {
     this.authorization.requireSource(actor,scope,input.source);
     const now = this.now();
     if (!Number.isFinite(Date.parse(input.expiresAt)) || new Date(input.expiresAt).toISOString() !== input.expiresAt || input.expiresAt <= now) throw new DotError("DOT_EXPIRED");
-    const value: Suggestion = { ...input, capabilities: [...new Set(input.capabilities)], scope, id: this.id(), revision: 0, state: "proposed", createdAt: now };
+    const value: Suggestion = { ...input, capabilities: [...new Set(input.capabilities)], scope, id: stableId ?? this.id(), revision: 0, state: "proposed", createdAt: now };
     this.repository.put("suggestion",value,null);
     return value;
   }
@@ -83,7 +105,15 @@ export class DotService {
   page(actor: Actor, scope: DotScope, kind: "suggestion"|"followup"|"operation"|"notification", after = "", limit = 20) {
     this.require(actor,scope,"read");
     const page = this.repository.page(kind,scope,after,limit);
-    if (kind === "suggestion") page.data = page.data.filter(value => !("source" in value) || value.source.kind !== "memory" || this.authorization.canReadMemory(actor,scope));
+    if (kind === "suggestion") page.data = page.data.filter(value => {
+      if (!("source" in value)) return false;
+      if (value.source.kind === "memory" && !this.authorization.canReadMemory(actor,scope)) return false;
+      try { this.authorization.requireSource(actor,scope,value.source); return true; }
+      catch (error) {
+        if (error instanceof DotError && ["DOT_FORBIDDEN","DOT_SOURCE_REVOKED","DOT_NOT_FOUND"].includes(error.code)) return false;
+        throw error;
+      }
+    });
     return page;
   }
   setPaused(actor: Actor, scope: DotScope, id: string, revision: number, paused: boolean): Followup {
@@ -94,6 +124,23 @@ export class DotService {
       if (f.revision !== revision || f.state === "cancelled") throw new DotConflict("Follow-up changed");
       this.require(actor,scope,"approve",f.capabilities);
       const next: Followup = {...f,state:paused ? "paused" : "active",revision:f.revision+1};
+      this.repository.put("followup",next,f.revision);
+      return next;
+    });
+  }
+  skipMissed(actor: Actor, scope: DotScope, id: string, revision: number): Followup {
+    this.require(actor,scope,"approve");
+    return this.repository.transaction(() => {
+      const f=this.repository.get<Followup>("followup",id,scope);
+      if(!f)throw new DotError("DOT_NOT_FOUND");
+      if(f.revision !== revision || f.state === "cancelled")throw new DotConflict("Follow-up changed");
+      this.require(actor,scope,"approve",f.capabilities);
+      const now=this.now();
+      if(!Number.isFinite(Date.parse(now)) || new Date(now).toISOString() !== now || now < f.cursor)throw new DotError("DOT_CLOCK_REVERSED");
+      if(now === f.cursor)return f;
+      const operation:Operation={id:JSON.stringify([f.id,"explicit-skip",f.cursor,now]),revision:0,followupId:f.id,scope,scheduledFor:now,state:"skipped",runId:null,code:`USER_SKIPPED_RANGE:${f.cursor}`,updatedAt:now};
+      this.repository.put("operation",operation,null);
+      const next:Followup={...f,cursor:now,revision:f.revision+1};
       this.repository.put("followup",next,f.revision);
       return next;
     });

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existingJobsAuthority } from "../lib/dot-v2/existing-jobs.ts";
+import { DotError } from "../lib/dot-v2/service.ts";
 import { dotErrorResponse, executeDotCommand } from "../lib/dot-v2/commands.ts";
 test("bridge reuses exact existing cron claim and never creates a runner/scheduler",()=>{
  const calls=[];const port=existingJobsAuthority({resolveAuthorizedBinding(){},startJobRun(...args){calls.push(args);return {id:"run"};},cancelOwnedRun(...args){calls.push(args);},inspectOwnedRun(){return "unknown";}});
@@ -15,4 +16,5 @@ test("command validation and errors preserve revision requirements and hide inte
  assert.throws(()=>executeDotCommand({}, {}, {}, {type:"surprise",id:"a",revision:0}),/VALIDATION/);
  const error=dotErrorResponse(Error("secret SQL /private/path"));assert.equal(error.status,500);assert.doesNotMatch(JSON.stringify(error),/private|secret SQL/);
  assert.equal(dotErrorResponse(new RangeError("bad time")).status,422);
+ assert.equal(dotErrorResponse(new DotError("DOT_SOURCE_REVOKED")).status,403);
 });

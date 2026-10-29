@@ -1,7 +1,7 @@
 import type { DotSnapshot, Schedule, MissedPolicy, Followup } from "../../../../../../packages/veyra-automation/contracts.js";
 export type DotUICommand =
  | {type:"approve";id:string;revision:number;input:{jobId:string;schedule:Schedule;missedPolicy:MissedPolicy;notificationPolicy:Followup["notificationPolicy"]}}
- | {type:"dismiss"|"cancel"|"read";id:string;revision:number}
+ | {type:"dismiss"|"cancel"|"read"|"skip-missed";id:string;revision:number}
  | {type:"pause";id:string;revision:number;paused:boolean};
 export type DotActionResult = {ok:true;snapshot:DotSnapshot} | {ok:false;code:string;message:string;outcome:"known"|"unknown"};
 export function operationLabel(state: string): string {

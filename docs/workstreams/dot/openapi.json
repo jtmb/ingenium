@@ -997,7 +997,8 @@
                 "enum": [
                   "dismiss",
                   "cancel",
-                  "read"
+                  "read",
+                  "skip-missed"
                 ]
               },
               "id": {

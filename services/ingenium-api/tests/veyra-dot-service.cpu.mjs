@@ -4,23 +4,24 @@ import { readFileSync, openSync, closeSync, realpathSync, lstatSync, readdirSync
 import { resolve, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DotRepository } from "../lib/dot-v2/repository.ts";
-import { DotService } from "../lib/dot-v2/service.ts";
+import { collectProactiveSuggestions } from "../lib/dot-v2/proactive.ts";
+import { DotService, DotError } from "../lib/dot-v2/service.ts";
 const scope={organizationId:"org",ownerUserId:"user",projectId:"p",executionBindingId:"native",executionBindingFingerprint:"host-native/workspace-immutable/epoch-1/revision-1",conversationId:"chat"};
 const actor={id:"user",organizationId:"org"};
 function fixture(path=":memory:") {
  const db=new DatabaseSync(path);
  db.exec(readFileSync(new URL("../lib/dot-v2/schema.sql",import.meta.url),"utf8"));
- let clock="2026-10-29T00:00:00.000Z", sequence=0, allowed=true, memory=true;
+ let clock="2026-10-29T00:00:00.000Z", sequence=0, allowed=true, memory=true, sourceAllowed=true;
  const transaction=fn=>{db.exec("BEGIN IMMEDIATE");try{const result=fn();db.exec("COMMIT");return result;}catch(e){db.exec("ROLLBACK");throw e;}};
  const repo=new DotRepository(db,transaction), states=new Map(), claims=[], cancels=[], checks=[];
  const job={id:"job",revision:1,scheduleRevision:1,scope,prompt:"Check task progress",enabled:true,cron:null,capabilities:["read"]};
- const auth={require(a,s,action,caps){checks.push({action,caps});if(!allowed)throw Error("denied");},requireSource(){if(!allowed)throw Error("denied");},canReadMemory(){return memory;}};
+ const auth={require(a,s,action,caps){checks.push({action,caps});if(!allowed)throw Error("denied");},requireSource(){if(!sourceAllowed)throw new DotError("DOT_SOURCE_REVOKED");if(!allowed)throw Error("denied");},canReadMemory(){return memory;}};
  const jobs={readAuthorizedJob(){return job;},claim(j,at,policy){claims.push({at,policy});states.set("run"+claims.length,"running");return {runId:"run"+claims.length};},requestCancellation(s,id){cancels.push(id);},inspect(s,id){return states.get(id)??"unknown";}};
  const create=()=>new DotService(repo,auth,jobs,()=>clock,()=>"id"+(++sequence));
  const api=create();
  const suggestion=(extra={})=>api.propose(actor,scope,{title:"Check progress",prompt:job.prompt,source:{kind:"user",reference:"message"},capabilities:["read"],expiresAt:"2026-11-01T00:00:00.000Z",...extra});
  const approve=(s=suggestion(),extra={})=>api.approve(actor,scope,s.id,0,{jobId:job.id,schedule:{kind:"interval",anchor:clock,minutes:60},missedPolicy:"latest",notificationPolicy:"meaningful",...extra});
- return {db,repo,api,create,job,states,claims,cancels,checks,jobs,suggestion,approve,tick(v){clock=v;},deny(){allowed=false;},memoryOff(){memory=false;}};
+ return {db,repo,api,create,job,states,claims,cancels,checks,jobs,suggestion,approve,tick(v){clock=v;},deny(){allowed=false;},memoryOff(){memory=false;},sourceOff(){sourceAllowed=false;}};
 }
 test("suggestions never schedule automatically; approval binds exact scope, prompt and capabilities", t=>{
  const f=fixture();t.after(()=>f.db.close());const s=f.suggestion();
@@ -135,4 +136,48 @@ test("repeated latest-capacity rejection does not duplicate skipped history or n
  const first=f.api.reconcile(actor,scope,follow.id);assert.equal(first.skipped,2);assert.equal(f.api.notify(actor,scope,first.operations[0].id,false),null);
  assert.doesNotThrow(()=>f.api.reconcile(actor,scope,follow.id));assert.equal(f.repo.page("operation",scope).data.length,2);
  f.jobs.claim=claim;assert.equal(f.api.reconcile(actor,scope,follow.id).operations[0].state,"claimed");assert.equal(f.claims.length,1);
+});
+
+test("explicit missed-run recovery crosses a long offline window without replaying old work",t=>{
+ const f=fixture();t.after(()=>f.db.close());const follow=f.approve(undefined,{missedPolicy:"all"});f.tick("2026-11-29T00:00:00.000Z");
+ assert.throws(()=>f.api.reconcile(actor,scope,follow.id),/eight days/);assert.equal(f.repo.get("followup",follow.id,scope).cursor,follow.cursor);
+ const next=f.api.skipMissed(actor,scope,follow.id,0);assert.equal(next.cursor,"2026-11-29T00:00:00.000Z");assert.equal(next.state,"active");assert.equal(f.claims.length,0);
+ const history=f.repo.page("operation",scope).data;assert.equal(history.length,1);assert.equal(history[0].state,"skipped");assert.equal(history[0].code,`USER_SKIPPED_RANGE:${follow.cursor}`);
+ assert.throws(()=>f.api.skipMissed(actor,scope,follow.id,0),/changed/);
+ f.tick("2026-11-29T01:00:00.000Z");assert.equal(f.api.reconcile(actor,scope,follow.id).operations[0].scheduledFor,"2026-11-29T01:00:00.000Z");assert.equal(f.claims.length,1);
+});
+test("missed-run recovery preserves active runs, pause state and authorization; clock reversal changes nothing",t=>{
+ const f=fixture();t.after(()=>f.db.close());const follow=f.approve();f.tick("2026-10-29T01:00:00.000Z");const running=f.api.reconcile(actor,scope,follow.id).operations[0];
+ const current=f.repo.get("followup",follow.id,scope);const paused=f.api.setPaused(actor,scope,follow.id,current.revision,true);
+ f.tick("2026-10-29T00:30:00.000Z");assert.throws(()=>f.api.skipMissed(actor,scope,follow.id,paused.revision),/CLOCK_REVERSED/);
+ f.tick("2026-11-29T00:00:00.000Z");const skipped=f.api.skipMissed(actor,scope,follow.id,paused.revision);assert.equal(skipped.state,"paused");assert.equal(f.repo.get("operation",running.id,scope).state,"claimed");assert.equal(f.cancels.length,0);
+ f.deny();assert.throws(()=>f.api.skipMissed(actor,scope,follow.id,skipped.revision),/denied/);
+});
+
+test("revoked source provenance disappears from collection reads and cannot approve or dispatch",t=>{
+ const f=fixture();t.after(()=>f.db.close());const pending=f.suggestion();const follow=f.approve();f.sourceOff();
+ assert.equal(f.api.page(actor,scope,"suggestion").data.length,0);
+ assert.throws(()=>f.api.get(actor,scope,"suggestion",pending.id),/SOURCE_REVOKED/);
+ assert.throws(()=>f.approve(pending),/SOURCE_REVOKED/);
+ f.tick("2026-10-29T01:00:00.000Z");assert.throws(()=>f.api.reconcile(actor,scope,follow.id),/SOURCE_REVOKED/);assert.equal(f.claims.length,0);
+});
+
+test("proactive source admission is opt-in, scoped, stable across restart and never schedules a task",t=>{
+ const f=fixture();t.after(()=>f.db.close());let enabled=false,reads=0;
+ const input={title:"Review task progress",prompt:"Check task progress",source:{kind:"event",reference:"eligible-source/revision-1"},capabilities:["read"],expiresAt:"2026-11-01T00:00:00.000Z"};
+ const sources={isEnabled(a,s){assert.deepEqual(a,actor);assert.deepEqual(s,scope);return enabled;},readEligible(a,s,limit){reads++;assert.equal(limit,20);return [input];}};
+ assert.deepEqual(collectProactiveSuggestions(f.api,actor,scope,sources),[]);assert.equal(reads,0);
+ enabled=true;const first=collectProactiveSuggestions(f.api,actor,scope,sources)[0];const again=collectProactiveSuggestions(f.create(),actor,scope,sources)[0];assert.equal(first.id,again.id);assert.equal(f.repo.page("suggestion",scope).data.length,1);assert.equal(f.repo.page("followup",scope).data.length,0);assert.equal(f.claims.length,0);
+ f.api.dismiss(actor,scope,first.id,0);assert.equal(collectProactiveSuggestions(f.create(),actor,scope,sources)[0].state,"dismissed");
+ assert.throws(()=>f.api.proposeForSource(actor,scope,{...input,prompt:"Changed source meaning"}),/SOURCE_CONFLICT/);
+ f.sourceOff();assert.throws(()=>collectProactiveSuggestions(f.api,actor,scope,sources),/SOURCE_REVOKED/);
+});
+test("proactive batches reject excess sources; memory read denial cannot persist a generated suggestion",t=>{
+ const f=fixture();t.after(()=>f.db.close());assert.throws(()=>collectProactiveSuggestions(f.api,actor,scope,{isEnabled:()=>true,readEligible:()=>Array(21).fill({})}),/VALIDATION/);
+ f.memoryOff();assert.throws(()=>f.api.proposeForSource(actor,scope,{title:"Review",prompt:"Check",source:{kind:"memory",reference:"receipt"},capabilities:[],expiresAt:"2026-11-01T00:00:00.000Z"}),/MEMORY_DISABLED/);assert.equal(f.repo.page("suggestion",scope).data.length,0);
+});
+
+test("proactive permission denial happens before source discovery or read",t=>{
+ const f=fixture();t.after(()=>f.db.close());f.deny();let reads=0;
+ assert.throws(()=>collectProactiveSuggestions(f.api,actor,scope,{isEnabled(){reads++;return true;},readEligible(){reads++;return [];}}),/denied/);assert.equal(reads,0);
 });
