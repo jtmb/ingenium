@@ -172,3 +172,53 @@ The practical ownership rule is simple: source changes stay in their package or 
 
 Update `AGENTS.md` only on explicit request. Update it when the root `opencode.json` agent map, canonical skill set, command set, or roadmap board materially changes; never auto-rewrite it from session memory (`MEMORY-100` boundary). Historical content is never rewritten.
 This file is a hub, not a duplicate of those authoritative sources.
+
+
+## Computer Use hygiene
+
+Desktop control must be attended and acquired only immediately before a concrete
+UI action or observation. Keep each check short and release/reset the control
+session immediately after its last UI step. Reading a screen also counts as a
+control session; do not leave that session open while doing something else.
+
+- BEFORE asking any question, requesting approval, opening a question tool, or
+  waiting for user input, release/reset every active desktop-control session and
+  verify the cleanup tool returned successfully. The user must have control of
+  their computer while deciding or replying.
+- Release/reset BEFORE shell commands, file/code work, builds, downloads, remote
+  jobs, sleeps, polling, other non-UI work, or ending a turn. Never hold desktop
+  control across an unattended wait, including a wait for another tool or agent.
+- Arrange cleanup with try/finally from acquisition. On success, error,
+  interruption, physical Escape, cancellation, or an abandoned UI attempt, stop
+  input and release/reset the owning Computer Use runtime immediately. A stopped
+  input attempt is not proof that its control session has been closed.
+- Use the supported release/reset API for the actual owning runtime (including
+  the node_repl reset when it owns the desktop helper). Do not substitute a
+  status message, promise, process kill, or another automation path for cleanup.
+  After a user interruption, do not silently re-acquire control or evade it.
+- If cleanup fails, report that exact failure promptly. Do not ask a question or
+  continue ordinary work while silently leaving the desktop session claimed.
+
+## Autonomous completion and no question-tool loops
+
+For an authorized task with an established goal and acceptance criteria, work
+through to the actual requested end state. Use the existing scope and evidence
+to make routine decisions. Authorization and preferences persist across turns.
+
+- Do not use request_user_input, request_user_input_async, or equivalent question
+  tools unless the user explicitly requests choices or a higher-priority rule
+  requires that tool. Do not interrupt execution for optional preferences,
+  routine clarification, repeated permission, startup acknowledgement, or
+  confirmation of work already authorized.
+- Do not hand work back merely with a plan, progress report, minor checkpoint,
+  passing build, partial feature, or offer to continue. Continue the active goal;
+  a phase milestone is not completion of the full goal. Keep required progress
+  updates concise and informational, without turning them into a decision gate.
+- Preserve explicit approval boundaries and safety requirements. When a truly
+  necessary fact or authorization cannot be established from existing evidence,
+  finish all independent authorized work first, then state the exact blocker and
+  the minimum required user action in plain text. Do not invent consent, waive
+  acceptance criteria, or claim completion to avoid that boundary.
+- If the user asks for status or corrects the work, incorporate it and continue
+  unless they clearly ask to stop. Keep desktop control released throughout any
+  user-input or approval wait.
