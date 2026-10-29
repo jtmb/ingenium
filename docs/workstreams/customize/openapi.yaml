@@ -1,0 +1,90 @@
+openapi: 3.1.0
+info:
+  title: Veyra Customize catalog integration
+  version: 1.0.0
+  description: Read-only integration proposal. Router is not mounted by this worker.
+x-veyra-integration-status: coordinator-auth-policy-and-mount-required
+paths:
+  /api/v1/customize:
+    get:
+      operationId: listCustomizeCatalog
+      description: Requires existing authentication and exact project/resource read capability.
+      security:
+        - existingSession: []
+      parameters:
+        - in: query
+          name: project
+          required: true
+          schema: { type: string, minLength: 1 }
+        - in: query
+          name: kind
+          schema: { type: string, enum: [plugin, skill], default: plugin }
+        - in: query
+          name: visibility
+          schema: { type: string, enum: [project, public, personal, system], default: project }
+        - in: query
+          name: offset
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Actual scoped catalog; installed state is derived from persisted project membership.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, scope, scopes, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, kind, name, description, category, visibility, installed, enabled, archived, revision, actions]
+                      properties:
+                        id: { type: string }
+                        kind: { type: string, enum: [plugin, skill] }
+                        name: { type: string }
+                        description: { type: string }
+                        category: { type: string }
+                        visibility: { type: string, enum: [project, public, personal, system] }
+                        installed: { type: boolean }
+                        enabled: { type: boolean }
+                        archived: { type: boolean }
+                        revision: { type: [integer, 'null'] }
+                        actions: { type: array, items: { type: string } }
+                  scope:
+                    type: object
+                    required: [kind, projectId]
+                    properties:
+                      kind: { type: string, const: project }
+                      projectId: { type: string }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  pagination:
+                    type: object
+                    required: [offset, limit, total, hasMore]
+                    properties:
+                      offset: { type: integer }
+                      limit: { type: integer }
+                      total: { type: integer }
+                      hasMore: { type: boolean }
+        '400':
+          description: Invalid catalog query.
+        '401':
+          description: Missing or unresolved authenticated identity.
+        '403':
+          description: Exact resource read capability denied.
+        '409':
+          description: Requested catalog scope is unavailable.
+        '500':
+          description: Catalog owner failed; internal details are redacted.
+components:
+  securitySchemes:
+    existingSession:
+      type: apiKey
+      in: cookie
+      name: __Host-ingenium_session
+      description: Existing session cookie. The host must additionally enforce its registered project/resource authorization policy. No new cookie is introduced.
