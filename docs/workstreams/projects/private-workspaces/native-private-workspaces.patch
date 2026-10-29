@@ -1,0 +1,662 @@
+--- /dev/null
++++ b/crates/contracts/src/private_workspaces.rs
+@@ -0,0 +1,116 @@
++//! Private working areas are execution scope, never organization projects or transcript owners.
++use serde::{Deserialize, Serialize};
++use ts_rs::TS;
++
++/// Execution environment for private roots; unknown nested fields and implicit WSL users are rejected.
++#[derive(Clone, Serialize, Deserialize, TS)]
++#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
++pub enum PrivateWorkspaceEnvironment { Windows,Wsl {distro:String,user:String} }
++impl PrivateWorkspaceEnvironment {
++    /// Translate environment metadata only; this does not create a Project or authorize execution.
++    pub fn native(&self)->crate::ExecutionEnvironment {
++        match self {
++            Self::Windows=>crate::ExecutionEnvironment::Windows,
++            Self::Wsl{distro,user}=>crate::ExecutionEnvironment::Wsl{distro:distro.clone(),user:Some(user.clone())},
++        }
++    }
++}
++#[derive(Clone, Serialize, Deserialize, TS)]
++#[serde(rename_all="camelCase",deny_unknown_fields)]
++pub struct PrivateWorkspaceCreate {
++    pub request_id:String,
++    pub workspace_id:String,
++    pub environment:PrivateWorkspaceEnvironment,
++    pub service_instance_id:String,
++    pub authority_epoch:u64,
++}
++#[derive(Clone, Serialize, Deserialize, TS)]
++#[serde(rename_all="camelCase",deny_unknown_fields)]
++pub struct PrivateWorkspaceView {
++    pub project_id:(),
++    pub id:String,
++    pub revision:u32,
++    pub state:String,
++    pub environment:PrivateWorkspaceEnvironment,
++    pub service_instance_id:String,
++    pub authority_epoch:u64,
++    pub directory:Option<String>,
++    pub root_identity:Option<String>,
++}
++#[derive(Clone, Serialize, Deserialize, TS)]
++#[serde(tag="kind",rename_all="snake_case",deny_unknown_fields)]
++pub enum PrivateWorkspaceOperation {
++    TerminalOpen { shell:String, columns:u16, rows:u16 },
++    TerminalInput { #[serde(rename="terminalId")] terminal_id:String, text:String },
++    TerminalResize { #[serde(rename="terminalId")] terminal_id:String, columns:u16, rows:u16 },
++    TerminalClose { #[serde(rename="terminalId")] terminal_id:String },
++    AgentTurn {
++        #[serde(rename="conversationRef")] conversation_ref:String,
++        #[serde(rename="originalTurnRef")] original_turn_ref:String,
++    },
++}
++impl PrivateWorkspaceOperation {
++    /// This label is policy metadata, never a shell command or permission grant.
++    pub fn kind(&self)->&'static str {
++        match self {
++            Self::TerminalOpen{..}=>"terminal_open",Self::TerminalInput{..}=>"terminal_input",
++            Self::TerminalResize{..}=>"terminal_resize",Self::TerminalClose{..}=>"terminal_close",
++            Self::AgentTurn{..}=>"agent_turn",
++        }
++    }
++}
++#[derive(Clone, Serialize, Deserialize, TS)]
++#[serde(rename_all="camelCase",deny_unknown_fields)]
++pub struct PrivateWorkspaceOriginal {
++    pub project_id:(),
++    pub workspace_id:String,
++    pub expected_revision:u32,
++    pub service_instance_id:String,
++    pub authority_epoch:u64,
++    pub request_id:String,
++    pub operation:PrivateWorkspaceOperation,
++}
++#[derive(Debug,Clone,Copy,PartialEq,Eq,Serialize,Deserialize,TS)]
++#[serde(rename_all="snake_case")]
++pub enum PrivateOperationState { Pending,Succeeded,Failed,Unknown }
++#[derive(Clone,Serialize,Deserialize,TS)]
++#[serde(rename_all="camelCase",deny_unknown_fields)]
++pub struct PrivateOperationReceipt {
++    pub project_id:(),
++    pub workspace_id:String,
++    pub request_id:String,
++    pub workspace_revision:u32,
++    pub service_instance_id:String,
++    pub authority_epoch:u64,
++    pub original_sha256:String,
++    pub state:PrivateOperationState,
++    pub result_ref:Option<String>,
++}
++pub(crate) fn declarations(cfg:&ts_rs::Config)->Vec<String> {
++    vec![PrivateWorkspaceEnvironment::decl(cfg),PrivateWorkspaceCreate::decl(cfg),PrivateWorkspaceView::decl(cfg),PrivateWorkspaceOperation::decl(cfg),
++        PrivateWorkspaceOriginal::decl(cfg),PrivateOperationState::decl(cfg),PrivateOperationReceipt::decl(cfg)]
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn private_workspace_contract_rejects_nested_path_and_project_identity() {
++        let mut request=serde_json::json!({
++            "requestId":"22222222-2222-4222-8222-222222222222",
++            "workspaceId":"11111111-1111-4111-8111-111111111111",
++            "environment":{"kind":"windows"},
++            "serviceInstanceId":"33333333-3333-4333-8333-333333333333","authorityEpoch":7
++        });
++        assert!(serde_json::from_value::<PrivateWorkspaceCreate>(request.clone()).is_ok());
++        request["environment"]["directory"]=serde_json::json!("C:/forged");
++        assert!(serde_json::from_value::<PrivateWorkspaceCreate>(request).is_err());
++        let original=serde_json::json!({
++            "projectId":"hidden-project","workspaceId":"11111111-1111-4111-8111-111111111111",
++            "expectedRevision":2,"serviceInstanceId":"33333333-3333-4333-8333-333333333333",
++            "authorityEpoch":7,"requestId":"55555555-5555-4555-8555-555555555555",
++            "operation":{"kind":"terminal_close","terminalId":"66666666-6666-4666-8666-666666666666"}
++        });
++        assert!(serde_json::from_value::<PrivateWorkspaceOriginal>(original).is_err());
++    }
++}
+--- /dev/null
++++ b/crates/adapters/src/projects/private_workspaces.rs
+@@ -0,0 +1,196 @@
++//! Additive private scope metadata in the existing ProjectStore connection.
++//! Directory allocation, process custody and engine transcripts stay with their current owners.
++use super::*;
++use veyra_contracts::{PrivateWorkspaceCreate,PrivateWorkspaceOriginal,PrivateOperationReceipt,PrivateOperationState};
++const COLUMNS:&str="id,owner_key,environment,revision,state,directory,root_identity,create_request_id,create_sha256,created_instance_id";
++
++/// Existing-writer metadata; deliberately not serializable as execution authority.
++#[derive(Clone)]
++pub struct PrivateWorkspaceRecord {
++    pub id:String,pub owner_key:String,pub environment:veyra_contracts::PrivateWorkspaceEnvironment,
++    pub revision:u32,pub state:String,pub directory:Option<String>,pub root_identity:Option<String>,
++    pub create_request_id:String,pub create_sha256:String,pub created_instance_id:String,
++}
++fn record(row:&rusqlite::Row<'_>)->rusqlite::Result<PrivateWorkspaceRecord> {
++    let environment:String=row.get(2)?;
++    Ok(PrivateWorkspaceRecord {id:row.get(0)?,owner_key:row.get(1)?,
++        environment:serde_json::from_str(&environment).map_err(|_|rusqlite::Error::InvalidQuery)?,
++        revision:row.get(3)?,state:row.get(4)?,directory:row.get(5)?,root_identity:row.get(6)?,
++        create_request_id:row.get(7)?,create_sha256:row.get(8)?,created_instance_id:row.get(9)?})
++}
++fn owner(value:&str)->Result<(),StoreError> {
++    if value.len()==64 && value.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {Ok(())}
++    else {Err(StoreError::Invalid)}
++}
++fn id(value:&str)->Result<(),StoreError> {
++    if uuid::Uuid::parse_str(value).is_ok_and(|id|!id.is_nil() && id.to_string()==value) {Ok(())}
++    else {Err(StoreError::Invalid)}
++}
++fn operation(row:&rusqlite::Row<'_>)->rusqlite::Result<PrivateOperationReceipt> {
++    let state:String=row.get(7)?;
++    let state=match state.as_str() {"pending"=>PrivateOperationState::Pending,"succeeded"=>PrivateOperationState::Succeeded,
++        "failed"=>PrivateOperationState::Failed,"unknown"=>PrivateOperationState::Unknown,_=>return Err(rusqlite::Error::InvalidQuery)};
++    Ok(PrivateOperationReceipt {project_id:(),workspace_id:row.get(0)?,request_id:row.get(1)?,
++        workspace_revision:row.get(2)?,service_instance_id:row.get(3)?,authority_epoch:row.get(4)?,
++        original_sha256:row.get(5)?,state,result_ref:row.get(8)?})
++}
++const OP_COLUMNS:&str="workspace_id,request_id,workspace_revision,service_instance_id,authority_epoch,original_sha256,operation_kind,state,result_ref";
++
++impl ProjectStore {
++    /// Reserve exact creation before filesystem work. A repeated/unknown original never allocates again.
++    pub fn reserve_private_workspace(&mut self,owner_key:&str,request:&PrivateWorkspaceCreate,sha256:&str)
++        ->Result<(bool,PrivateWorkspaceRecord),StoreError> {
++        owner(owner_key)?;owner(sha256)?;id(&request.workspace_id)?;id(&request.request_id)?;id(&request.service_instance_id)?;
++        let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        let prior=tx.query_row(&format!("SELECT {COLUMNS} FROM private_workspaces WHERE owner_key=?1 AND create_request_id=?2"),
++            params![owner_key,request.request_id],record).optional()?;
++        if let Some(prior)=prior {
++            if prior.create_sha256!=sha256 || prior.id!=request.workspace_id {return Err(StoreError::Conflict);}
++            tx.commit()?;return Ok((false,prior));
++        }
++        if tx.query_row("SELECT 1 FROM private_workspaces WHERE id=?1",params![request.workspace_id],|_|Ok(())).optional()?.is_some() {
++            return Err(StoreError::Conflict);
++        }
++        let environment=serde_json::to_string(&request.environment).map_err(|_|StoreError::Invalid)?;
++        tx.execute("INSERT INTO private_workspaces(id,owner_key,environment,state,create_request_id,create_sha256,created_instance_id)
++            VALUES(?1,?2,?3,'pending',?4,?5,?6)",params![request.workspace_id,owner_key,environment,request.request_id,sha256,request.service_instance_id])?;
++        let saved=tx.query_row(&format!("SELECT {COLUMNS} FROM private_workspaces WHERE id=?1 AND owner_key=?2"),
++            params![request.workspace_id,owner_key],record)?;
++        tx.commit()?;Ok((true,saved))
++    }
++    /// Read only through authenticated ownership. No missing-row fallback or directory creation.
++    pub fn private_workspace(&self,owner_key:&str,workspace_id:&str)->Result<PrivateWorkspaceRecord,StoreError> {
++        owner(owner_key)?;id(workspace_id)?;
++        self.connection.query_row(&format!("SELECT {COLUMNS} FROM private_workspaces WHERE id=?1 AND owner_key=?2"),
++            params![workspace_id,owner_key],record).optional()?.ok_or(StoreError::NotFound)
++    }
++    /// Persist an actually captured root. This metadata does not confer execution authority.
++    pub fn activate_private_workspace(&mut self,owner_key:&str,workspace_id:&str,directory:&str,identity:&str)
++        ->Result<PrivateWorkspaceRecord,StoreError> {
++        owner(owner_key)?;id(workspace_id)?;
++        if directory.is_empty() || directory.len()>32760 || directory.chars().any(char::is_control)
++            || identity.is_empty() || identity.len()>4096 || identity.chars().any(char::is_control) {return Err(StoreError::Invalid);}
++        if self.connection.execute("UPDATE private_workspaces SET state='active',directory=?1,root_identity=?2,revision=revision+1
++            WHERE id=?3 AND owner_key=?4 AND state='pending'",params![directory,identity,workspace_id,owner_key])?!=1 {
++            return Err(StoreError::Conflict);
++        }
++        self.private_workspace(owner_key,workspace_id)
++    }
++    /// Unknown roots/intents remain retained for owner reconciliation; this never deletes files.
++    pub fn mark_private_workspace_unknown(&mut self,owner_key:&str,workspace_id:&str)->Result<PrivateWorkspaceRecord,StoreError> {
++        owner(owner_key)?;id(workspace_id)?;
++        self.connection.execute("UPDATE private_workspaces SET state='unknown' WHERE id=?1 AND owner_key=?2 AND state='pending'",
++            params![workspace_id,owner_key])?;
++        self.private_workspace(owner_key,workspace_id)
++    }
++    /// The same native writer reserves effects; command/prompt bodies are not copied into this table.
++    pub fn reserve_private_operation(&mut self,owner_key:&str,request:&PrivateWorkspaceOriginal,sha256:&str)
++        ->Result<(bool,PrivateOperationReceipt),StoreError> {
++        owner(owner_key)?;owner(sha256)?;id(&request.workspace_id)?;id(&request.request_id)?;id(&request.service_instance_id)?;
++        let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        let prior=tx.query_row(&format!("SELECT {OP_COLUMNS} FROM private_workspace_operations WHERE owner_key=?1 AND request_id=?2"),
++            params![owner_key,request.request_id],operation).optional()?;
++        if let Some(prior)=prior {
++            if prior.original_sha256!=sha256 || prior.workspace_id!=request.workspace_id {return Err(StoreError::Conflict);}
++            tx.commit()?;return Ok((false,prior));
++        }
++        let current=tx.query_row(&format!("SELECT {COLUMNS} FROM private_workspaces WHERE id=?1 AND owner_key=?2"),
++            params![request.workspace_id,owner_key],record).optional()?.ok_or(StoreError::NotFound)?;
++        if current.state!="active" || current.revision!=request.expected_revision {return Err(StoreError::Conflict);}
++        tx.execute("INSERT INTO private_workspace_operations(owner_key,request_id,workspace_id,workspace_revision,
++            service_instance_id,authority_epoch,original_sha256,operation_kind,state) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'pending')",
++            params![owner_key,request.request_id,request.workspace_id,request.expected_revision,request.service_instance_id,
++                request.authority_epoch,sha256,request.operation.kind()])?;
++        let saved=tx.query_row(&format!("SELECT {OP_COLUMNS} FROM private_workspace_operations WHERE owner_key=?1 AND request_id=?2"),
++            params![owner_key,request.request_id],operation)?;
++        tx.commit()?;Ok((true,saved))
++    }
++    /// Observe a prior original after reconnect/restart; absence never authorizes replay.
++    pub fn private_operation(&self,owner_key:&str,workspace_id:&str,request_id:&str)->Result<PrivateOperationReceipt,StoreError> {
++        owner(owner_key)?;id(workspace_id)?;id(request_id)?;
++        self.connection.query_row(&format!("SELECT {OP_COLUMNS} FROM private_workspace_operations
++            WHERE owner_key=?1 AND workspace_id=?2 AND request_id=?3"),params![owner_key,workspace_id,request_id],operation)
++            .optional()?.ok_or(StoreError::NotFound)
++    }
++    /// Settle only the retained pending original using an observation from the existing effect owner.
++    pub fn settle_private_operation(&mut self,owner_key:&str,workspace_id:&str,request_id:&str,state:PrivateOperationState,result_ref:Option<&str>)
++        ->Result<PrivateOperationReceipt,StoreError> {
++        owner(owner_key)?;id(workspace_id)?;id(request_id)?;
++        let state=match state {PrivateOperationState::Succeeded=>"succeeded",PrivateOperationState::Failed=>"failed",
++            PrivateOperationState::Unknown=>"unknown",PrivateOperationState::Pending=>return Err(StoreError::Invalid)};
++        self.connection.execute("UPDATE private_workspace_operations SET state=?1,result_ref=?2
++            WHERE owner_key=?3 AND workspace_id=?4 AND request_id=?5 AND state='pending'",
++            params![state,result_ref,owner_key,workspace_id,request_id])?;
++        self.private_operation(owner_key,workspace_id,request_id)
++    }
++}
++pub(super) fn validate_absent(connection:&Connection)->Result<(),StoreError> {
++    let count:i64=connection.query_row("SELECT count(*) FROM sqlite_master WHERE name IN
++        ('private_workspaces','private_workspace_operations','private_workspaces_owner')",[],|row|row.get(0))?;
++    if count==0 {Ok(())} else {Err(StoreError::Corrupt)}
++}
++pub(super) fn validate(connection:&Connection)->Result<(),StoreError> {
++    let template=include_str!("0006.sql");
++    for (kind,name) in [("TABLE","private_workspaces"),("TABLE","private_workspace_operations"),("INDEX","private_workspaces_owner")] {
++        let marker=format!("CREATE {kind} {name}");
++        let start=template.find(&marker).ok_or(StoreError::Corrupt)?;
++        let expected=template[start..].split(';').next().ok_or(StoreError::Corrupt)?;
++        let actual:String=connection.query_row("SELECT sql FROM sqlite_master WHERE name=?1",params![name],|row|row.get(0))?;
++        fn normalized(sql:&str)->String {sql.chars().filter(|c|!c.is_whitespace()).flat_map(char::to_lowercase).collect()}
++        if normalized(&actual)!=normalized(expected) {return Err(StoreError::Corrupt);}
++    }
++    let invalid:i64=connection.query_row("SELECT count(*) FROM private_workspace_operations o LEFT JOIN private_workspaces w ON w.id=o.workspace_id AND w.owner_key=o.owner_key WHERE w.id IS NULL",[],|row|row.get(0))?;
++    if invalid!=0 {return Err(StoreError::Corrupt);}
++    for (table,expected) in [
++        ("private_workspaces",vec!["id","owner_key","environment","revision","state","create_request_id","create_sha256","created_instance_id","directory","root_identity"]),
++        ("private_workspace_operations",vec!["owner_key","request_id","workspace_id","workspace_revision","service_instance_id","authority_epoch","original_sha256","operation_kind","state","result_ref"]),
++    ] {
++        let mut statement=connection.prepare(&format!("PRAGMA table_info({table})"))?;
++        let actual=statement.query_map([],|row|row.get::<_,String>(1))?.collect::<Result<Vec<_>,_>>()?;
++        if actual!=expected {return Err(StoreError::Corrupt);}
++    }
++    let mut statement=connection.prepare(&format!("SELECT {COLUMNS} FROM private_workspaces"))?;
++    for item in statement.query_map([],record)? {let row=item?;owner(&row.owner_key)?;owner(&row.create_sha256)?;id(&row.id)?;id(&row.create_request_id)?;id(&row.created_instance_id)?;}
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn store()->ProjectStore {
++        let connection=Connection::open_in_memory().expect("in-memory fixture");
++        connection.execute_batch(include_str!("0001.sql")).expect("v1");
++        connection.execute_batch(include_str!("0002.sql")).expect("v2");
++        connection.execute_batch(include_str!("0003.sql")).expect("v3");
++        connection.execute_batch(include_str!("0004.sql")).expect("v4");
++        connection.execute_batch(include_str!("0005.sql")).expect("v5");
++        connection.execute_batch(include_str!("0006.sql")).expect("v6");
++        connection.execute_batch("PRAGMA foreign_keys=ON").expect("FK");
++        ProjectStore {connection}
++    }
++    fn create()->PrivateWorkspaceCreate {
++        PrivateWorkspaceCreate {request_id:"22222222-2222-4222-8222-222222222222".into(),
++            workspace_id:"11111111-1111-4111-8111-111111111111".into(),
++            environment:veyra_contracts::PrivateWorkspaceEnvironment::Windows,
++            service_instance_id:"33333333-3333-4333-8333-333333333333".into(),authority_epoch:7}
++    }
++    #[test]
++    fn private_workspace_schema_and_creation_do_not_seed_projects() {
++        let mut store=store();validate(&store.connection).expect("shape");
++        let actor="a".repeat(64);let request=create();
++        assert!(store.reserve_private_workspace(&actor,&request,&"b".repeat(64)).expect("reserve").0);
++        assert!(!store.reserve_private_workspace(&actor,&request,&"b".repeat(64)).expect("same original").0);
++        let count:i64=store.connection.query_row("SELECT count(*) FROM projects",[],|r|r.get(0)).expect("count");
++        assert_eq!(count,0);
++        assert!(matches!(store.private_workspace(&"c".repeat(64),&request.workspace_id),Err(StoreError::NotFound)));
++        assert!(matches!(store.reserve_private_workspace(&actor,&request,&"d".repeat(64)),Err(StoreError::Conflict)));
++    }
++    #[test]
++    fn private_workspace_unknown_survives_read_without_allocation() {
++        let mut store=store();let actor="a".repeat(64);let request=create();
++        store.reserve_private_workspace(&actor,&request,&"b".repeat(64)).expect("reserve");
++        store.mark_private_workspace_unknown(&actor,&request.workspace_id).expect("unknown");
++        assert_eq!(store.private_workspace(&actor,&request.workspace_id).expect("read").state,"unknown");
++        assert!(!store.reserve_private_workspace(&actor,&request,&"b".repeat(64)).expect("repeat only reads").0);
++    }
++}
+--- /dev/null
++++ b/crates/adapters/src/projects/0006.sql
+@@ -0,0 +1,32 @@
++-- Native workspace.db v6 proposal. No project/account/transcript rows are rewritten.
++CREATE TABLE private_workspaces (
++  id TEXT PRIMARY KEY NOT NULL,
++  owner_key TEXT NOT NULL CHECK(length(owner_key)=64 AND owner_key NOT GLOB '*[^0-9a-f]*'),
++  environment TEXT NOT NULL CHECK(json_valid(environment)),
++  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision BETWEEN 1 AND 4294967295),
++  state TEXT NOT NULL CHECK(state IN ('pending','active','unknown','failed','retired')),
++  create_request_id TEXT NOT NULL,
++  create_sha256 TEXT NOT NULL CHECK(length(create_sha256)=64),
++  created_instance_id TEXT NOT NULL,
++  directory TEXT,
++  root_identity TEXT,
++  UNIQUE(owner_key,create_request_id),
++  UNIQUE(id,owner_key),
++  CHECK(state <> 'active' OR (directory IS NOT NULL AND root_identity IS NOT NULL))
++) STRICT;
++CREATE TABLE private_workspace_operations (
++  owner_key TEXT NOT NULL,
++  request_id TEXT NOT NULL,
++  workspace_id TEXT NOT NULL,
++  workspace_revision INTEGER NOT NULL CHECK(workspace_revision BETWEEN 1 AND 4294967295),
++  service_instance_id TEXT NOT NULL,
++  authority_epoch INTEGER NOT NULL CHECK(authority_epoch>=0),
++  original_sha256 TEXT NOT NULL CHECK(length(original_sha256)=64),
++  operation_kind TEXT NOT NULL,
++  state TEXT NOT NULL CHECK(state IN ('pending','succeeded','failed','unknown')),
++  result_ref TEXT,
++  PRIMARY KEY(owner_key,request_id),
++  FOREIGN KEY(workspace_id,owner_key) REFERENCES private_workspaces(id,owner_key) ON DELETE RESTRICT
++) STRICT;
++CREATE INDEX private_workspaces_owner ON private_workspaces(owner_key,id);
++PRAGMA user_version=6;
+--- /dev/null
++++ b/apps/service/src/routes/private_workspaces.rs
+@@ -0,0 +1,210 @@
++//! Unmounted until the existing authenticated actor and execution owners supply these ports.
++//! No request-body owner, arbitrary directory, hidden Project, transcript store, or raw process launcher.
++use super::*;
++use axum::{Router,Json,http::{HeaderMap,StatusCode},extract::{State,Path},routing::{get,post}};
++use serde::Serialize;
++use sha2::{Digest,Sha256};
++use veyra_contracts::{PrivateWorkspaceCreate as Create,PrivateWorkspaceOriginal as Original,
++    PrivateWorkspaceView as View,PrivateOperationReceipt as Receipt,PrivateOperationState as OpState,
++    PrivateWorkspaceOperation as Operation,PrivateWorkspaceEnvironment as Environment};
++use veyra_adapters::projects::{ProjectStore,PrivateWorkspaceRecord as Record};
++
++/// Constructed only by the existing authenticated native/session/grant adapter. Never Deserialize.
++#[derive(Clone)]
++pub(super) struct VerifiedActor {pub owner_key:String,pub authority_epoch:u64}
++/// The coordinator must map the real principal and current revocation epoch. There is no default implementation.
++pub(super) trait ActorAuthority:Send+Sync {
++    fn resolve(&self,headers:&HeaderMap,action:&str,workspace_id:Option<&str>)->Result<VerifiedActor,StatusCode>;
++}
++/// Actual held native custody, not a serializable metadata/path grant.
++pub(super) trait CapturedPrivateWorkspace:Send+Sync {
++    fn workspace_id(&self)->&str;
++    fn owner_key(&self)->&str;
++    fn directory(&self)->&str;
++    fn root_identity(&self)->&str;
++    fn verify(&self)->bool;
++}
++/// Implement on the existing process/engine owner. Do not instantiate a second terminal manager,
++/// construct a Project, change the inference engine, or add a transcript authority.
++pub(super) trait ExecutionOwner:Send+Sync {
++    fn supports_environment(&self,environment:&Environment)->bool;
++    fn supports_operation(&self,operation:&Operation,environment:&Environment)->bool;
++    fn prepare_once(&self,actor:&VerifiedActor,request:&Create)->Result<Box<dyn CapturedPrivateWorkspace>,StatusCode>;
++    fn acquire_existing(&self,actor:&VerifiedActor,record:&Record)->Result<Box<dyn CapturedPrivateWorkspace>,StatusCode>;
++    /// Consume the same custody and invoke check immediately at real effect admission; retain all late failures.
++    /// Existing approval/sandbox/drain/process ownership and engine-session originals still apply.
++    fn execute_once(&self,lease:&dyn CapturedPrivateWorkspace,actor:&VerifiedActor,original:&Original,
++        check:&dyn Fn()->Result<(),StatusCode>)->Result<(OpState,Option<String>),StatusCode>;
++}
++pub(super) struct Boundary {
++    pub state:Arc<ServiceState>,
++    pub authority:Arc<dyn ActorAuthority>,
++    pub execution:Arc<dyn ExecutionOwner>,
++}
++pub(super) fn router(boundary:Arc<Boundary>)->Router<Arc<ServiceState>> {
++    Router::new().route("/",post(create)).route("/{id}",get(read))
++        .route("/{id}/operations",post(execute)).route("/{id}/operations/{request_id}",get(receipt))
++        .layer(axum::extract::DefaultBodyLimit::max(512*1024)).with_state(boundary)
++}
++fn valid_id(value:&str)->bool {uuid::Uuid::parse_str(value).is_ok_and(|id|!id.is_nil() && id.to_string()==value)}
++fn hash<T:Serialize>(value:&T)->Result<String,StatusCode> {
++    fn ordered(value:serde_json::Value)->Result<serde_json::Value,StatusCode> {
++        match value {
++            serde_json::Value::Object(values)=>{
++                let values=values.into_iter().map(|(k,v)|Ok((k,ordered(v)?)))
++                    .collect::<Result<std::collections::BTreeMap<_,_>,StatusCode>>()?;
++                serde_json::to_value(values).map_err(|_|StatusCode::BAD_REQUEST)
++            }
++            serde_json::Value::Array(values)=>Ok(serde_json::Value::Array(
++                values.into_iter().map(ordered).collect::<Result<Vec<_>,_>>()?)),
++            value=>Ok(value),
++        }
++    }
++    let value=ordered(serde_json::to_value(value).map_err(|_|StatusCode::BAD_REQUEST)?)?;
++    Ok(format!("{:x}",Sha256::digest(serde_json::to_vec(&value).map_err(|_|StatusCode::BAD_REQUEST)?)))
++}
++fn actor(boundary:&Boundary,headers:&HeaderMap,action:&str,id:Option<&str>)->Result<VerifiedActor,StatusCode> {
++    let actor=boundary.authority.resolve(headers,action,id)?;
++    if actor.owner_key.len()!=64 || !actor.owner_key.bytes().all(|b|b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
++        || actor.authority_epoch>i64::MAX as u64 {return Err(StatusCode::FORBIDDEN);}
++    Ok(actor)
++}
++fn valid_environment(environment:&Environment)->bool {
++    match environment {
++        Environment::Windows=>true,
++        Environment::Wsl{distro,user}=>[distro,user].iter().all(|value|!value.is_empty() && value.len()<=256 && !value.chars().any(char::is_control)),
++    }
++}
++fn same_actor(a:&VerifiedActor,b:&VerifiedActor)->Result<(),StatusCode> {
++    if a.owner_key==b.owner_key && a.authority_epoch==b.authority_epoch {Ok(())} else {Err(StatusCode::FORBIDDEN)}
++}
++fn view(boundary:&Boundary,actor:&VerifiedActor,record:Record)->View {
++    View {project_id:(),id:record.id,revision:record.revision,state:record.state,environment:record.environment,
++        service_instance_id:boundary.state.instance_id.clone(),authority_epoch:actor.authority_epoch,
++        directory:record.directory,root_identity:record.root_identity}
++}
++fn store_error(error:veyra_adapters::projects::StoreError)->StatusCode {
++    use veyra_adapters::projects::StoreError as E;
++    match error {E::Invalid=>StatusCode::BAD_REQUEST,E::NotFound=>StatusCode::NOT_FOUND,
++        E::Conflict=>StatusCode::CONFLICT,_=>StatusCode::SERVICE_UNAVAILABLE}
++}
++async fn storage<T:Send+'static>(boundary:Arc<Boundary>,
++    action:impl FnOnce(&mut ProjectStore)->Result<T,veyra_adapters::projects::StoreError>+Send+'static)->Result<T,StatusCode> {
++    tokio::task::spawn_blocking(move||{
++        let mut store=boundary.state.projects.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
++        action(store.as_mut().ok_or(StatusCode::SERVICE_UNAVAILABLE)?).map_err(store_error)
++    }).await.map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?
++}
++fn verify(lease:&dyn CapturedPrivateWorkspace,actor:&VerifiedActor,record:&Record)->Result<(),StatusCode> {
++    if lease.workspace_id()!=record.id || lease.owner_key()!=actor.owner_key || !lease.verify()
++        || lease.directory().is_empty() || lease.root_identity().is_empty() {return Err(StatusCode::CONFLICT);}
++    if record.state=="active" && (record.directory.as_deref()!=Some(lease.directory()) ||
++        record.root_identity.as_deref()!=Some(lease.root_identity())) {return Err(StatusCode::CONFLICT);}
++    Ok(())
++}
++async fn create(State(boundary):State<Arc<Boundary>>,headers:HeaderMap,Json(request):Json<Create>)
++    ->Result<(StatusCode,Json<View>),StatusCode> {
++    if !valid_id(&request.request_id) || !valid_id(&request.workspace_id) ||
++        request.service_instance_id!=boundary.state.instance_id || !valid_environment(&request.environment) {return Err(StatusCode::CONFLICT);}
++    let who=actor(&boundary,&headers,"private-workspaces:create",None)?;
++    if who.authority_epoch!=request.authority_epoch {return Err(StatusCode::CONFLICT);}
++    if !boundary.execution.supports_environment(&request.environment) {return Err(StatusCode::NOT_IMPLEMENTED);}
++    let digest=hash(&request)?;let key=who.owner_key.clone();let original=request.clone();
++    let (fresh,record)=storage(boundary.clone(),move|store|store.reserve_private_workspace(&key,&original,&digest)).await?;
++    if !fresh {let status=if record.state=="active"{StatusCode::OK}else{StatusCode::ACCEPTED};
++        return Ok((status,Json(view(&boundary,&who,record))));}
++    let execution=boundary.execution.clone();let original=request.clone();let captured_actor=who.clone();
++    let captured_record=record.clone();
++    let captured=tokio::task::spawn_blocking(move||{
++        let lease=execution.prepare_once(&captured_actor,&original)?;
++        verify(lease.as_ref(),&captured_actor,&captured_record)?;
++        Ok::<_,StatusCode>(lease)
++    }).await.map_err(|_|StatusCode::SERVICE_UNAVAILABLE);
++    let activated=match captured {
++        Ok(Ok(lease))=>{
++            let current=actor(&boundary,&headers,"private-workspaces:create",Some(&record.id));
++            if current.as_ref().is_ok_and(|current|same_actor(&who,current).is_ok()) {
++                let key=who.owner_key.clone();let id=record.id.clone();
++                let directory=lease.directory().to_owned();let identity=lease.root_identity().to_owned();
++                storage(boundary.clone(),move|store|store.activate_private_workspace(&key,&id,&directory,&identity)).await
++            } else {Err(StatusCode::FORBIDDEN)}
++        }
++        _=>Err(StatusCode::SERVICE_UNAVAILABLE),
++    };
++    match activated {
++        Ok(record)=>Ok((StatusCode::CREATED,Json(view(&boundary,&who,record)))),
++        Err(_)=>{
++            let key=who.owner_key.clone();let id=record.id;
++            let record=storage(boundary.clone(),move|store|store.mark_private_workspace_unknown(&key,&id)).await?;
++            Ok((StatusCode::ACCEPTED,Json(view(&boundary,&who,record))))
++        }
++    }
++}
++async fn read(State(boundary):State<Arc<Boundary>>,headers:HeaderMap,Path(id):Path<String>)
++    ->Result<Json<View>,StatusCode> {
++    let who=actor(&boundary,&headers,"private-workspaces:read",Some(&id))?;let key=who.owner_key.clone();
++    let record=storage(boundary.clone(),move|store|store.private_workspace(&key,&id)).await?;
++    Ok(Json(view(&boundary,&who,record)))
++}
++fn operation_valid(operation:&Operation)->bool {
++    match operation {
++        Operation::TerminalOpen{shell,columns,rows}=>!shell.is_empty() && shell.len()<=32 &&
++            !shell.chars().any(char::is_control) && (20..=300).contains(columns) && (5..=120).contains(rows),
++        Operation::TerminalResize{terminal_id,columns,rows}=>valid_id(terminal_id) &&
++            (20..=300).contains(columns) && (5..=120).contains(rows),
++        Operation::TerminalInput{terminal_id,text}=>valid_id(terminal_id) && !text.is_empty() && text.len()<=65536,
++        Operation::TerminalClose{terminal_id}=>valid_id(terminal_id),
++        Operation::AgentTurn{conversation_ref,original_turn_ref}=>[conversation_ref,original_turn_ref].iter()
++            .all(|value|!value.is_empty() && value.len()<=4096 && !value.chars().any(char::is_control)),
++    }
++}
++async fn execute(State(boundary):State<Arc<Boundary>>,headers:HeaderMap,Path(id):Path<String>,Json(original):Json<Original>)
++    ->Result<(StatusCode,Json<Receipt>),StatusCode> {
++    if id!=original.workspace_id || !valid_id(&id) || !valid_id(&original.request_id) ||
++        original.service_instance_id!=boundary.state.instance_id || !operation_valid(&original.operation) {
++        return Err(StatusCode::CONFLICT);
++    }
++    let action=format!("private-workspaces:execute:{}",original.operation.kind());
++    let who=actor(&boundary,&headers,&action,Some(&id))?;
++    if who.authority_epoch!=original.authority_epoch {return Err(StatusCode::CONFLICT);}
++    let key=who.owner_key.clone();let workspace_id=id.clone();
++    let record=storage(boundary.clone(),move|store|store.private_workspace(&key,&workspace_id)).await?;
++    if record.state!="active" || record.revision!=original.expected_revision {return Err(StatusCode::CONFLICT);}
++    if !boundary.execution.supports_operation(&original.operation,&record.environment) {return Err(StatusCode::NOT_IMPLEMENTED);}
++    let digest=hash(&original)?;let key=who.owner_key.clone();let request=original.clone();
++    let (fresh,saved)=storage(boundary.clone(),move|store|store.reserve_private_operation(&key,&request,&digest)).await?;
++    if !fresh {return Ok((receipt_status(&saved),Json(saved)));}
++    let service=boundary.clone();let captured_actor=who.clone();let request=original.clone();
++    let effect=tokio::task::spawn_blocking(move||{
++        let lease=service.execution.acquire_existing(&captured_actor,&record)?;
++        let check=||{
++            verify(lease.as_ref(),&captured_actor,&record)?;
++            {
++                let store=service.state.projects.lock().map_err(|_|StatusCode::SERVICE_UNAVAILABLE)?;
++                let current=store.as_ref().ok_or(StatusCode::SERVICE_UNAVAILABLE)?
++                    .private_workspace(&captured_actor.owner_key,&record.id).map_err(store_error)?;
++                if current.state!="active" || current.revision!=record.revision ||
++                    current.directory!=record.directory || current.root_identity!=record.root_identity {
++                    return Err(StatusCode::CONFLICT);
++                }
++            }
++            let current=actor(&service,&headers,&action,Some(&record.id))?;
++            same_actor(&captured_actor,&current)
++        };
++        check()?;
++        service.execution.execute_once(lease.as_ref(),&captured_actor,&request,&check)
++    }).await;
++    let (state,result_ref)=match effect {Ok(Ok((state,result))) if state!=OpState::Pending=>(state,result),
++        _=>(OpState::Unknown,None)};
++    let key=who.owner_key;let workspace_id=id;let request_id=original.request_id;
++    let saved=storage(boundary.clone(),move|store|store.settle_private_operation(&key,&workspace_id,&request_id,state,result_ref.as_deref())).await?;
++    Ok((receipt_status(&saved),Json(saved)))
++}
++fn receipt_status(receipt:&Receipt)->StatusCode {
++    if matches!(receipt.state,OpState::Pending|OpState::Unknown) {StatusCode::ACCEPTED} else {StatusCode::OK}
++}
++async fn receipt(State(boundary):State<Arc<Boundary>>,headers:HeaderMap,Path((id,request_id)):Path<(String,String)>)
++    ->Result<Json<Receipt>,StatusCode> {
++    let who=actor(&boundary,&headers,"private-workspaces:read",Some(&id))?;
++    Ok(Json(storage(boundary,move|store|store.private_operation(&who.owner_key,&id,&request_id)).await?))
++}
+--- a/apps/service/src/routes.rs
++++ b/apps/service/src/routes.rs
+@@ -1,3 +1,4 @@
++mod private_workspaces;
+ use crate::{
+     diagnostics::Diagnostics,
+     models::{Action, Health, ModelRuntime},
+--- a/crates/adapters/src/projects.rs
++++ b/crates/adapters/src/projects.rs
+@@ -1,6 +1,8 @@
+ //! Transactional workspace storage, owned by the single Veyra service.
+ mod backup;
+ mod close;
++mod private_workspaces;
++pub use private_workspaces::PrivateWorkspaceRecord;
+ pub mod configuration;
+ pub mod presentation;
+ mod saved_metadata_search;
+@@ -16,7 +18,7 @@
+ pub use close::{ProjectStoreCloseError, ProjectStoreClosed};
+ pub use saved_metadata_search::ProjectMetadataCandidate;
+
+-const SCHEMA_VERSION: u32 = 5;
++const SCHEMA_VERSION: u32 = 6;
+ const PROJECT_COLUMNS: &str = "id,name,environment,primary_root,roots,revision,archived,pinned";
+
+ #[derive(Debug, thiserror::Error)]
+@@ -93,6 +95,9 @@
+         if version < 5 {
+             configuration::validate_absent(&connection)?;
+         }
++        if version < 6 {
++            private_workspaces::validate_absent(&connection)?;
++        }
+         connection.execute_batch(
+             "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;",
+         )?;
+@@ -107,6 +112,9 @@
+         }
+         if current < 4 {
+             schema_v4::validate_absent(&migration)?;
++        }
++        if current < 6 {
++            private_workspaces::validate_absent(&migration)?;
+         }
+         match current {
+             0 => {
+@@ -129,7 +137,7 @@
+                 schema_v3::validate_absent(&migration)?;
+                 migration.execute_batch(migration_v3)?;
+             }
+-            3 | 4 | SCHEMA_VERSION => (),
++            3 | 4 | 5 | SCHEMA_VERSION => (),
+             _ => return Err(StoreError::NewerSchema),
+         }
+         if current < 4 {
+@@ -140,6 +148,10 @@
+             configuration::validate_absent(&migration)?;
+             validate_schema(&migration, 4)?;
+             migration.execute_batch(include_str!("projects/0005.sql"))?;
++        }
++        if current < 6 {
++            private_workspaces::validate_absent(&migration)?;
++            migration.execute_batch(include_str!("projects/0006.sql"))?;
+         }
+         if schema_version(&migration)? != SCHEMA_VERSION {
+             return Err(StoreError::Corrupt);
+@@ -393,6 +405,9 @@
+     }
+     if version >= 5 {
+         configuration::validate(connection)?;
++    }
++    if version >= 6 {
++        private_workspaces::validate(connection)?;
+     }
+     Ok(())
+ }
+--- a/crates/contracts/src/lib.rs
++++ b/crates/contracts/src/lib.rs
+@@ -26,6 +26,8 @@
+ mod task_forks;
+ pub use task_forks::*;
+ mod task_workspaces;
++mod private_workspaces;
++pub use private_workspaces::*;
+ pub use task_workspaces::*;
+ mod task_children;
+ pub use task_children::*;
+@@ -530,6 +532,7 @@
+     declarations.extend(task_coordination::declarations(&cfg));
+     declarations.extend(task_forks::declarations(&cfg));
+     declarations.extend(task_workspaces::declarations(&cfg));
++    declarations.extend(private_workspaces::declarations(&cfg));
+     declarations.extend(compactions::declarations(&cfg));
+     declarations.extend(instruction_edits::declarations(&cfg));
+     declarations.extend(goal_controls::declarations(&cfg));

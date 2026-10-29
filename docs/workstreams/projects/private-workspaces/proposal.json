@@ -1,0 +1,50 @@
+{
+  "nativeBase": "61c99f8e649da85b600fccec93236b5d6b07f78b",
+  "nativeVersionProposal": 6,
+  "sharedFiles": [
+    {
+      "path": "crates/contracts/src/private_workspaces.rs",
+      "baseSha256": null,
+      "proposedSha256": "6208ceb6b3ead00a9fa59acb160158b897d25db77bb1bde4628e44b0696dba06"
+    },
+    {
+      "path": "crates/adapters/src/projects/private_workspaces.rs",
+      "baseSha256": null,
+      "proposedSha256": "baf71b7eace08bdd38377e6e388afeeefc37938603ec8d1c7b9566433353df60"
+    },
+    {
+      "path": "crates/adapters/src/projects/0006.sql",
+      "baseSha256": null,
+      "proposedSha256": "e5a3a2a4187e3a07ea4018fb82bc8d750787b020fd385ba85e9f38df88bfb130"
+    },
+    {
+      "path": "apps/service/src/routes/private_workspaces.rs",
+      "baseSha256": null,
+      "proposedSha256": "5c1b22b894cabf8ca4ecf2771cb54e9713faf3537082f1604d5fb11a58f826e4"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "baseSha256": "11033d9c478b38691cc181d4437baabeadebcb34f582cd35bbdeca7f00ea36ea",
+      "proposedSha256": "6967ebf9b654f26fa15d6a0f4930adbb2e02c006012f1591f24f7876745048a0"
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "baseSha256": "2cf3b102534dbbdc05356b1faac387eb7abfa5a701475b0927cf67c8c1f22a3e",
+      "proposedSha256": "30490c93f19d638d6eb50a95c2e83c55795dc4717daa46a4f683faf59b695819"
+    },
+    {
+      "path": "crates/contracts/src/lib.rs",
+      "baseSha256": "983c1aa10457e222c0a041580865ff63a8a1779e9342a792b37550e86451f616",
+      "proposedSha256": "d09779b838656906a2d42990c920e01a4d908b0c35903352581f3b80c2c64d17"
+    }
+  ],
+  "applied": false,
+  "compiled": false,
+  "runtimeStarted": false,
+  "mounting": "intentionally absent until actual authenticated actor and existing custody/execution ports supplied",
+  "patchBytes": 38891,
+  "patchSha256": "4392b999c793fb24ef41b6d4407396e279767a66c8bb76e7ca5b9aa3394a5eb1",
+  "windowsGitApplyCheck": "passed against assigned clean native baseline; patch not applied",
+  "proposedRustTests": 3,
+  "actualSourceModelTests": 13
+}

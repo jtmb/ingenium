@@ -43,7 +43,7 @@ export TMP="$TEMP" TMPDIR="$TEMP"
 node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-*.test.mjs services/ingenium-dashboard/tests/veyra-projects-*.test.mjs
 ```
 
-Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 44 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
+Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 57 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
 
 ## Migration and rollback
 
@@ -77,3 +77,7 @@ Native Git review/worktree creation is currently Windows-only. True native proje
 ## Output reconciliation
 
 Owner: projects stream; generated-output root and physical volume remain the original approved paired C-backed task roots. No dependency installation/copy, build, native run, runtime data copy or scratch database was created. No generated bulk was deleted: 0 bytes. Owned source/tests/docs are retained for coordinator review, merge and regeneration. The small coordination ownership/status/test receipts are retained for that review and final evidence. No unrelated or previously rejected cleanup target was touched. No Windows disk recovery is claimed.
+
+## Private projectless follow-through
+
+The coordinator-requested bounded native proposal is in [private-workspaces/README.md](private-workspaces/README.md). It adds no hidden Project or scratch/global fallback. The seven-file patch and schema-v6 copy fixture are unapplied; the proposed native route stays unmounted until existing authenticated actor and actual custody/execution owner ports are provided. Thirteen source/model/migration tests cover negative admission and reconnect preservation. This is not a claim that native projectless execution is already available.

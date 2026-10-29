@@ -33,3 +33,7 @@ Regression tests exposed mutable caller scope/request data changing during host 
 ## Native protocol integration follow-through
 
 See native-integration.md for seven mountable handler entrypoints, actual native HTTP routes, F32–F34 exact-original boundaries and explicit unsupported native projectless behavior. The native receipt-proof patch remains unapplied outside writer scope; Windows Git apply --check passed, but native compilation/runtime qualification was not run. Migration allocation 122 is coordinator-owned. The adjusted schema-copy fixture passes against allocated 122–124 without duplicate draft application and keeps all 220 original table hashes/FK preservation checks.
+
+## Bounded private-workspace proposal
+
+Native private execution has no existing non-project owner in the inspected source. The coordinator confirmed an additive private scope in the existing workspace.db writer, opaque authenticated actor/authority ownership and nonserializable custody. See private-workspaces/README.md and its exact seven-file patch. Windows Git apply --check passes; three pure Rust tests are included but not run. Thirteen SQLite-backed source/model/artifact tests pass, including atomic migration rollback, cross-actor/path denial, no hidden Project and reconnect without replay. Do not mount the factory before the real existing actor/custody/execution ports are implemented and qualified.
