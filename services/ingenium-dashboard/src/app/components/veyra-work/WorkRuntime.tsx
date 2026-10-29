@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -21,10 +21,13 @@ import WorkChanges from "./WorkChanges";
 import WorkArtifacts from "./WorkArtifacts";
 import { collectWorkArtifacts } from "./work-artifacts";
 import { workSuggestions } from "./work-suggestions";
-import { availableWorkSelection, canSendWork, currentWorkDraft, initialWorkDraft, newWorkDraft, workAttachmentError, workDraftKey, workModels, type WorkDraft } from "./work-state";
+import { availableWorkSelection, canSendWork, currentWorkDraft, initialWorkDraft, newWorkDraft, workAttachmentError, workDraftKey, workModels, type WorkDraft, type WorkIdentity } from "./work-state";
+import { FreshConversationStart } from "@/lib/fresh-conversation-start";
 import { useWorkChatConfig } from "./useWorkChatConfig";
 import { workControlBindingMatches, type WorkContextSlots } from "./work-context";
-import { workConversationNavigation } from "./work-navigation";
+import { workConversationNavigation, workLocationMatches } from "./work-navigation";
+
+type FirstWorkInput = { draft: WorkDraft; originalKey: string; identity: WorkIdentity };
 
 function readAttachment(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -85,6 +88,8 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const projectLabel = projectDisplayName ?? (projectRefId === null ? "No project" : routeProject);
   const router = useRouter();
   const params = useSearchParams();
+  const committedLocation = useRef(params.toString());
+  useLayoutEffect(() => { committedLocation.current = params.toString(); });
   const sessions = useOpenCodeSessions({ initialSelection: "none" });
   const active = sessions.sessions.find((session) => session.id === initialSessionId);
   const activeId = active?.id ?? null;
@@ -103,9 +108,14 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const { config, loading: configLoading, error: configError, refresh: refreshConfig } = useWorkChatConfig(runtime.client!);
   const [drafts, setDrafts] = useState<Record<string, WorkDraft>>({});
   const [pending, setPending] = useState(false);
+  const [firstSendPending, setFirstSendPending] = useState(false);
   const [navigationPending, startNavigation] = useTransition();
   const [unconfirmed, setUnconfirmed] = useState<Record<string, string>>({});
   const [creationUnknown, setCreationUnknown] = useState<string | null>(null);
+  const [freshEpoch, setFreshEpoch] = useState(0);
+  const freshStart = useMemo(() => new FreshConversationStart<FirstWorkInput>(),
+    [runtime.client, user.id, organization.active?.id, routeProject, projectRefId, freshEpoch]);
+  useLayoutEffect(() => freshStart.activate(), [freshStart]);
   const sendLock = useRef(false);
   const attachmentInput = useRef<HTMLInputElement>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -123,7 +133,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     workspaceId: runtime.workspace.confirmedWorkspaceId, sessionId: activeId };
   const slotSelectionResolved = projectRefId !== undefined && projectRefId !== "" && (initialSessionId === null || activeId !== null);
   const slots = slotSelectionResolved && contextSlots && workControlBindingMatches(contextSlots.binding, slotBinding) ? contextSlots : null;
-  const models = workModels(config?.providers ?? []);
+  const models = useMemo(() => workModels(config?.providers ?? []), [config]);
   const freshDefault = newWorkDraft(config?.defaultSelection ?? null, models);
   const defaultDraft = initialSessionId === null ? freshDefault.draft : initialWorkDraft(initialSessionId, active?.model, null);
   const protectedDraft = pending || Boolean(unconfirmed[draftKey]) || creationUnknown !== null;
@@ -140,7 +150,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   }, [activeId, identity.runtimeId, navigationPending, params, routeProject, router, sessions.isLoading]);
 
   const select = (id: string) => {
-    const navigation = workConversationNavigation({ search: params.toString(), hash: window.location.hash,
+    const navigation = workConversationNavigation({ search: committedLocation.current, hash: window.location.hash,
       sessionId: id, runtimeId: identity.runtimeId, project: routeProject, intent: "select" });
     if (navigation.action === "none") return;
     startNavigation(() => {
@@ -152,12 +162,16 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     if (sendLock.current || sessions.isCreating || navigationPending || !creationAvailable) return;
     const originalKey = draftKey;
     const original = createDraft;
-    const existingIds = sessions.sessions.map((session) => session.id);
+    const existingIds = [...sessions.sessions, ...(sessions.archivedSessions ?? [])].map((session) => session.id);
     if (initialSessionId === null) setDrafts((current) => ({ ...current, [originalKey]: original }));
     sendLock.current = true; setPending(true);
     try {
       const id = await sessions.create("New conversation");
       if (id) {
+        if (!freshStart.isActive()) {
+          setCreationUnknown(`Conversation ${id} was created on the original binding. Review it before continuing; nothing was sent.`);
+          return;
+        }
         if (existingIds.includes(id)) {
           setCreationUnknown("Creation returned an existing conversation identity. Its history and your original draft are protected; review native admission before continuing.");
           return;
@@ -174,13 +188,8 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       setCreationUnknown(error instanceof Error ? `New conversation creation is unconfirmed: ${error.message}` : "New conversation creation is unconfirmed. Its original remains protected.");
     } finally { sendLock.current = false; setPending(false); }
   };
-  const send = async () => {
-    if (sendLock.current || submissionBlockedReason || protectedDraft || configLoading || configError || !modelAvailable || !canSendWork({ ready: !rehydrate && chat.sessionReady && !chat.error, pending: pending || navigationPending || chat.isStreaming, draft })) return;
-    sendLock.current = true;
-    setPending(true);
-    const original = draft;
-    const originalKey = draftKey;
-    setDrafts((current) => ({ ...current, [originalKey]: original }));
+  const submitOriginal = useCallback(async (original: WorkDraft, originalKey: string, current: () => boolean): Promise<boolean> => {
+    if (!current() || submissionBlockedReason || configLoading || configError || !chat.sessionReady || chat.isStreaming || chat.sessionStatus === "busy" || chat.error || !availableWorkSelection(original, models)) return false;
     try {
       const accepted = await chat.send([
         ...(original.text.trim() ? [{ type: "text" as const, text: original.text }] : []),
@@ -190,10 +199,57 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
         setDrafts((current) => ({ ...current, [originalKey]: { ...original, text: "", attachments: [] } }));
         setUnconfirmed((current) => { const next = { ...current }; delete next[originalKey]; return next; });
       } else setUnconfirmed((current) => ({ ...current, [originalKey]: current[originalKey] ?? "The runtime did not confirm prompt admission." }));
+      return accepted;
     } catch (error: unknown) {
       const failure = error instanceof Error ? error.message : "The prompt admission outcome is unknown.";
       setUnconfirmed((current) => ({ ...current, [originalKey]: current[originalKey] ?? failure }));
-    } finally { sendLock.current = false; setPending(false); }
+      return false;
+    }
+  }, [chat.send, chat.sessionReady, chat.isStreaming, chat.sessionStatus, chat.error, configLoading, configError, models, submissionBlockedReason]);
+
+  useLayoutEffect(() => {
+    freshStart.publish({ sessionId: activeId, ready: !rehydrate && !configLoading && chat.sessionReady === true && !chat.isLoading && !chat.isStreaming && chat.sessionStatus !== "busy",
+      error: chat.error ?? configError ?? submissionBlockedReason, send: (input, current) => submitOriginal(input.draft,
+        workDraftKey({ ...input.identity, sessionId: activeId }), current) });
+  }, [activeId, chat.error, chat.isLoading, chat.isStreaming, chat.sessionStatus, chat.sessionReady, configError, configLoading, freshStart, rehydrate, submissionBlockedReason, submitOriginal]);
+
+  const send = async () => {
+    const first = initialSessionId === null;
+    const ready = first ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.error;
+    if (sendLock.current || submissionBlockedReason || protectedDraft || configLoading || configError || !modelAvailable || !canSendWork({ ready, pending: pending || navigationPending || chat.isStreaming, draft })) return;
+    sendLock.current = true; setPending(true);
+    if (first) setFirstSendPending(true);
+    const original = { ...draft, attachments: draft.attachments.map((item) => ({ ...item })), skillIds: [...draft.skillIds] };
+    const originalKey = draftKey;
+    setDrafts((current) => ({ ...current, [originalKey]: original }));
+    try {
+      if (!first) { await submitOriginal(original, originalKey, () => freshStart.isActive()); return; }
+      let creationFailure: string | null = null;
+      const existingIds = [...sessions.sessions, ...(sessions.archivedSessions ?? [])].map((session) => session.id);
+      const result = await freshStart.start(async () => {
+        let id: string | null;
+        try { id = await sessions.create("New conversation"); }
+        catch (error: unknown) { creationFailure = error instanceof Error ? error.message : "Creation outcome is unknown."; throw error; }
+        if (id && freshStart.isActive() && !workLocationMatches(committedLocation.current, { sessionId: initialSessionId, runtimeId: identity.runtimeId, project: routeProject })) {
+          creationFailure = `Conversation ${id} was created on the original target, but navigation changed. The captured first draft was retained and no prompt was submitted.`;
+          throw new Error(creationFailure);
+        }
+        if (id && !existingIds.includes(id) && freshStart.isActive()) {
+          const nextKey = workDraftKey({ ...identity, sessionId: id });
+          setDrafts((current) => ({ ...current, [nextKey]: original }));
+          select(id);
+        }
+        return id;
+      }, { draft: original, originalKey, identity: { ...identity } }, existingIds);
+      if (result.kind === "accepted") {
+        setDrafts((current) => { const next = { ...current }; delete next[originalKey]; return next; });
+        setFreshEpoch((value) => value + 1);
+      } else if (result.kind === "review") {
+        setCreationUnknown(`First-send admission needs review in conversation ${result.sessionId}. The original draft is retained; nothing will be resent automatically.`);
+      } else if (result.kind !== "busy") {
+        setCreationUnknown(creationFailure ?? "First-send creation or preparation was not confirmed. The original draft is retained; review admission before trying again.");
+      }
+    } finally { sendLock.current = false; setPending(false); if (first) setFirstSendPending(false); }
   };
   const attach = async (files: File[]) => {
     if (!files.length || protectedDraft || sendLock.current || pending || navigationPending || chat.isStreaming) return;
@@ -234,6 +290,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     status={<div aria-live="polite" className="px-4 text-xs text-neutral-400">
       {sessions.isLoading && <p>Loading conversations…</p>}
       {navigationPending && <p>Opening the selected conversation…</p>}
+      {firstSendPending && <p role="status">Preparing the selected conversation and its captured first prompt…</p>}
       {!sessions.isLoading && initialSessionId && !active && <p role="alert">The requested conversation is unavailable in this workspace.</p>}
       {(sessions.error || configError) && <p role="alert">{sessions.error ?? configError}</p>}
       {configError && <button type="button" onClick={() => { void refreshConfig(); }} className="my-2 rounded border border-white/10 px-3 py-2">Reload model configuration</button>}
@@ -260,7 +317,9 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     <WorkComposer key={draftKey} draft={draft} onChange={(value) => { if (!protectedDraft) setDrafts((current) => ({ ...current, [draftKey]: value })); }}
       onAttach={() => attachmentInput.current?.click()}
       onSend={() => { void send(); }} onStop={() => { void chat.stop(); }} models={models}
-      ready={!submissionBlockedReason && !protectedDraft && !rehydrate && !configLoading && !configError && chat.sessionReady && !chat.error && modelAvailable} pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
+      ready={!submissionBlockedReason && !protectedDraft && !configLoading && !configError && modelAvailable
+        && (initialSessionId === null ? creationAvailable && !sessions.isLoading && !sessions.error : !rehydrate && chat.sessionReady && !chat.error)}
+      pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
       projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {projectLabel}</span>}
       environmentControl={slots?.environmentControl ?? <span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
       permissionControl={slots?.permissionControl ?? <span>Runtime permissions</span>}
@@ -279,7 +338,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     {!activeId ? <div className="flex h-full min-h-64 flex-col items-center justify-center gap-5 px-6 text-center">
       <Image src="/veyra-blue.png" alt="" width={48} height={48} />
       <h1 className="text-xl font-medium">{projectRefId === null ? "What should we build?" : `What should we build in ${projectLabel}?`}</h1>
-      <p className="text-xs text-neutral-400">Choose a conversation or start a new chat.</p>
+      <p className="text-xs text-neutral-400">Send a message to start a new chat, or choose an existing conversation.</p>
     </div> : <ChatMessages messages={chat.messages} isLoading={chat.isLoading} isStreaming={chat.isStreaming}
       streamActivity={chat.streamActivity} error={chat.error} permissions={chat.permissions} replyPermission={chat.replyPermission}
       questions={chat.questions} replyQuestion={chat.replyQuestion}

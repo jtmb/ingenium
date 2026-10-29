@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseWorkRouteParams, workConversationNavigation } from '../../services/ingenium-dashboard/src/app/components/veyra-work/work-navigation.ts';
+import { parseWorkRouteParams, workConversationNavigation, workLocationMatches } from '../../services/ingenium-dashboard/src/app/components/veyra-work/work-navigation.ts';
 
 const selected = { search: 'session=ses-a&runtime=runtime-a&project=project-a&settings=general', hash: '#file-reference', sessionId: 'ses-b', runtimeId: 'runtime-a', project: 'project-a', intent: 'select' };
 test('route parsing preserves exact identity and rejects repeated or empty explicit fields instead of opening a new conversation', () => {
@@ -41,4 +41,13 @@ test('URL construction encodes identity data and rejects missing binding or malf
   assert.throws(() => workConversationNavigation({ ...selected, sessionId: '' }));
   assert.throws(() => workConversationNavigation({ ...selected, runtimeId: '' }));
   assert.throws(() => workConversationNavigation({ ...selected, hash: '/another-route' }));
+});
+
+test('delayed creation accepts unrelated query changes but cannot redirect a newer session or workspace selection', () => {
+  const original = { sessionId: null, runtimeId: 'runtime-a', project: 'project-a' };
+  assert.equal(workLocationMatches('settings=general&panel=files', original), true);
+  assert.equal(workLocationMatches('runtime=runtime-a&project=project-a&settings=providers', original), true);
+  for (const search of ['session=ses-other', 'runtime=runtime-other', 'project=project-other', 'session=', 'runtime=runtime-a&runtime=runtime-other']) {
+    assert.equal(workLocationMatches(search, original), false, search);
+  }
 });

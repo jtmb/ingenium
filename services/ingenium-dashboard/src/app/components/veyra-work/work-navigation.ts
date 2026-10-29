@@ -38,3 +38,11 @@ export function workConversationNavigation(input: {
   const sameSession = current.get("session") === input.sessionId;
   return { action: input.intent === "canonicalize" || sameSession ? "replace" : "push", href };
 }
+
+export function workLocationMatches(search: string, expected: { sessionId: string | null; runtimeId: string; project: string }): boolean {
+  const params = new URLSearchParams(search);
+  if (["session", "runtime", "project"].some((key) => params.getAll(key).length > 1 || params.get(key) === "")) return false;
+  return params.get("session") === expected.sessionId
+    && (params.get("runtime") === null || params.get("runtime") === expected.runtimeId)
+    && (params.get("project") === null || params.get("project") === expected.project);
+}

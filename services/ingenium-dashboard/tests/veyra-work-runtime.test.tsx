@@ -323,4 +323,70 @@ describe("Work runtime boundary and conversation state", () => {
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Project A original draft");
     expect(state.replace).not.toHaveBeenCalled();
   });
+
+  it("first Send creates one session, waits for that exact history and submits the captured text/file/model/effort once", async () => {
+    state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-a", modelId: "model-a", variant: "high" }, providers: [
+      { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A", variants: { high: {} } }] },
+    ] });
+    state.create.mockImplementation(async () => { state.extraSessions.push({ id: "ses-first", title: "Created first send" }); return "ses-first"; });
+    const view = render(<WorkRuntime {...props} initialSessionId={null} />);
+    await waitFor(() => expect((screen.getByLabelText("Reasoning effort") as HTMLSelectElement).value).toBe("high"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Captured first prompt" } });
+    fireEvent.change(screen.getByLabelText("Choose Work attachments"), { target: { files: [new File(["exact context"], "notes.txt", { type: "text/plain" })] } });
+    await screen.findByRole("button", { name: "Remove notes.txt" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(false));
+    state.sessionReady = false;
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(state.push).toHaveBeenCalledWith("/work?settings=general&session=ses-first&runtime=runtime-a&project=project-a", { scroll: false }));
+    expect(state.create).toHaveBeenCalledTimes(1); expect(state.send).not.toHaveBeenCalled();
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-first" />);
+    expect(state.send).not.toHaveBeenCalled();
+    state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-b", modelId: "model-b", variant: "medium" }, providers: [
+      { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A", variants: { high: {} } }] },
+      { providerId: "provider-b", label: "Provider B", models: [{ id: "model-b", label: "Model B", variants: { medium: {} } }] },
+    ] });
+    fireEvent(window, new Event("veyra-chat-defaults-changed"));
+    await screen.findByRole("option", { name: "Provider B / Model B" });
+    expect((screen.getByLabelText("Work model") as HTMLSelectElement).value).toBe('["provider-a","model-a"]');
+    state.sessionReady = true;
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-first" />);
+    await waitFor(() => expect(state.send).toHaveBeenCalledTimes(1));
+    expect(state.send).toHaveBeenCalledWith([
+      { type: "text", text: "Captured first prompt" },
+      { type: "file", mime: "text/plain", url: expect.stringContaining("data:text/plain;base64,"), filename: "notes.txt" },
+    ], { model: { providerID: "provider-a", modelID: "model-a" }, variant: "high" });
+    await waitFor(() => expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(""));
+  });
+
+  it("preserves the captured first draft and never creates again when creation acknowledgement is lost", async () => {
+    state.create.mockResolvedValue(null);
+    render(<WorkRuntime {...props} initialSessionId={null} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "First draft with unknown creation" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/First-send creation or preparation was not confirmed/);
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    expect(state.create).toHaveBeenCalledTimes(1); expect(state.send).not.toHaveBeenCalled();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("First draft with unknown creation");
+  });
+
+  it("does not resend a first prompt after unknown admission or a Work/Web round trip", async () => {
+    state.create.mockImplementation(async () => { state.extraSessions.push({ id: "ses-first", title: "Created first send" }); return "ses-first"; });
+    state.send.mockResolvedValue(false);
+    const view = render(<WorkRuntime {...props} initialSessionId={null} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Keep first admission original" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(state.push).toHaveBeenCalled());
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-first" />);
+    await screen.findByText(/First-send admission needs review in conversation ses-first/);
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(state.create).toHaveBeenCalledTimes(1); expect(state.send).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Keep first admission original");
+  });
 });
