@@ -142,10 +142,11 @@ function SkillSaveNotice({ result, busy, onVerify }: {
 }
 export default function SkillsPage() {
   const project = useProject();
-  return <ProjectSkills key={project} project={project} />;
+  const [tab, setTab] = useState<SkillsTab>("active");
+  return <ProjectSkills key={project} project={project} tab={tab} setTab={setTab} />;
 }
 
-function ProjectSkills({ project }: { project: string }) {
+function ProjectSkills({ project, tab, setTab }: { project: string; tab: SkillsTab; setTab: (tab: SkillsTab) => void }) {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [skillsState, setSkillsState] = useState<ActiveSkillsState>("loading");
   const [skillsError, setSkillsError] = useState<string | null>(null);
@@ -176,7 +177,6 @@ function ProjectSkills({ project }: { project: string }) {
   }, []);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<SkillsTab>("active");
   const [proposalCounts, setProposalCounts] = useState<ProposalCountsState>(() => emptyProposalCounts(null));
   const [openProposalPage, setOpenProposalPage] = useState<ProposalPageState>(() => emptyProposalPage(null));
   const [historyProposalPage, setHistoryProposalPage] = useState<ProposalPageState>(() => emptyProposalPage(null));
