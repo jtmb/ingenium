@@ -12,7 +12,7 @@ import { usePathname } from "next/navigation";
  */
 export default function MainContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isImmersive = pathname === "/opencode" || pathname === "/vscode" || pathname === "/docs" || pathname === "/chat";
+  const isImmersive = pathname === "/work" || pathname === "/customize" || pathname.startsWith("/customize/") || pathname === "/opencode" || pathname === "/vscode" || pathname === "/docs" || pathname === "/chat";
   const fullWidth =
     pathname === "/mail" ||
     pathname === "/tasks" ||

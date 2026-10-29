@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { plugins, logger } from "ingenium-core";
+import { plugins, logger, getPluginsBase } from "ingenium-core";
 import { requireProject } from "../helpers.js";
-import { resolve } from "node:path";
-import { readFileSync } from "node:fs";
+import { resolve, relative, isAbsolute } from "node:path";
+import { readSync, realpathSync, lstatSync, openSync, fstatSync, closeSync, constants, type Stats } from "node:fs";
 
 /**
  * Handles /api/v1/plugins — plugin lifecycle management.
@@ -35,7 +35,7 @@ pluginsRouter.post("/", (req, res) => {
   }
 });
 
-// GET /:name/source — get plugin source from disk
+// GET /:name/source — authoritative API source, then bounded legacy file read
 pluginsRouter.get("/:name/source", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -44,12 +44,42 @@ pluginsRouter.get("/:name/source", (req, res) => {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Plugin not found" } });
     return;
   }
+  // The API-owned source is authoritative, including an intentionally empty file.
+  if (typeof plugin.source_content === "string") {
+    res.json({ data: { source: plugin.source_content } });
+    return;
+  }
+  let fd: number | undefined;
   try {
-    const filePath = resolve(process.cwd(), plugin.file_path);
-    const content = readFileSync(filePath, "utf-8");
-    res.json({ data: { source: content } });
+    const registeredBase = getPluginsBase(projectId);
+    const base = realpathSync(registeredBase);
+    const candidate = resolve(registeredBase, plugin.file_path);
+    const relativeCandidate = relative(resolve(registeredBase), candidate);
+    if (!relativeCandidate || isAbsolute(relativeCandidate) || relativeCandidate === ".." || relativeCandidate.startsWith("../") || relativeCandidate.startsWith("..\\")) throw new Error("Uncontained source");
+    const canonical = realpathSync(candidate);
+    const inside = relative(base, canonical);
+    if (!inside || isAbsolute(inside) || inside === ".." || inside.startsWith("../") || inside.startsWith("..\\")) throw new Error("Uncontained source");
+    const before = lstatSync(canonical);
+    if (!before.isFile() || before.nlink !== 1 || before.size > 4 * 1024 * 1024) throw new Error("Unavailable source");
+    fd = openSync(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    const unchanged = (entry: Stats) => entry.isFile() && entry.nlink === 1
+      && entry.dev === before.dev && entry.ino === before.ino && entry.size === before.size
+      && entry.mtimeMs === before.mtimeMs && entry.ctimeMs === before.ctimeMs;
+    if (!unchanged(fstatSync(fd))) throw new Error("Changed source");
+    const bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) throw new Error("Truncated source");
+      offset += count;
+    }
+    if (readSync(fd, Buffer.alloc(1), 0, 1, offset) !== 0 || !unchanged(fstatSync(fd))
+      || !unchanged(lstatSync(canonical)) || realpathSync(candidate) !== canonical) throw new Error("Changed source");
+    res.json({ data: { source: bytes.toString("utf8") } });
   } catch {
-    res.json({ data: { source: plugin.source_content || "" } });
+    res.status(503).json({ error: { code: "PLUGIN_SOURCE_UNAVAILABLE", message: "Plugin source is unavailable. Restore its registered source before editing." } });
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 });
 

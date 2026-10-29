@@ -204,6 +204,12 @@ export function listSkills(projectId: string): Skill[] {
     .all(projectId) as Skill[];
 }
 
+/** Read installed membership, including disabled records. Activation still uses listSkills. */
+export function listSkillRecords(projectId: string): Skill[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  return db.prepare("SELECT * FROM skills WHERE project_id = ? AND archived_at IS NULL ORDER BY name, id").all(projectId) as Skill[];
+}
+
 /** List all archived skills for a project. */
 export function listArchivedSkills(projectId: string): Skill[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

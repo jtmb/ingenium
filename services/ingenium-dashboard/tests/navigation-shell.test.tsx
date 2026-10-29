@@ -22,10 +22,10 @@ vi.mock("next/link", () => ({
 import Navigation, { NavigationProvider, NavigationTrigger } from "../src/app/components/Navigation";
 
 const links = [
-  ["Home", "/"], ["Chat", "/chat"], ["OpenCode", "/opencode"], ["VS Code", "/vscode"], ["Mail", "/mail"], ["Tasks", "/tasks"], ["Docs", "/docs"],
+  ["Home", "/"], ["Chat", "/chat"], ["Work", "/work"], ["OpenCode", "/opencode"], ["VS Code", "/vscode"], ["Mail", "/mail"], ["Tasks", "/tasks"], ["Docs", "/docs"],
   ["Skills", "/skills"], ["Agents", "/agents"], ["Observations", "/observations"], ["Personality", "/personality"], ["Context", "/context"], ["Pipeline", "/pipeline"],
   ["Jobs", "/jobs"], ["Backups", "/backups"], ["Logs", "/logs"], ["Usage", "/usage"], ["Status", "/status"],
-  ["Projects", "/projects"], ["Organizations", "/organizations"], ["Plugins", "/plugins"], ["MCP Servers", "/mcp-servers"], ["Config", "/config"], ["Secrets", "/secrets"],
+  ["Projects", "/projects"], ["Organizations", "/organizations"], ["Customize", "/customize/plugins"], ["Plugins", "/plugins"], ["MCP Servers", "/mcp-servers"], ["Config", "/config"], ["Secrets", "/secrets"],
 ] as const;
 
 function renderShell({ includeBackgroundTargets = false }: { includeBackgroundTargets?: boolean } = {}) {
@@ -125,7 +125,7 @@ describe("UI-103 application shell navigation", () => {
     expect(localStorage.getItem("ingenium-nav-compact")).toBe("true");
     expect(screen.getByLabelText("Expand navigation").getAttribute("aria-expanded")).toBe("false");
 
-    for (const [label, href] of [["Chat", "/chat"], ["Projects", "/projects"], ["OpenCode", "/opencode"], ["Settings", "/settings"], ["Home", "/"]]) {
+    for (const [label, href] of [["Chat", "/chat"], ["Projects", "/projects"], ["Work", "/work"], ["Settings", "/settings"], ["Home", "/"]]) {
       const link = screen.getByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
       expect(link.getAttribute("aria-label")).toBe(label);

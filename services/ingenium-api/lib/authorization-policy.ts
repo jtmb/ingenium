@@ -73,7 +73,7 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
   return req.method === "POST" && /^\/api\/v1\/context\/conversations\/[^/]+\/(?:maintenance\/authorize|archive)$/.test(req.path);
 }
 
-export function policyForRequest(req: Pick<Request, "method" | "path">): AuthorizationPolicy | undefined {
+export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
   if ((req.method === "GET" && req.path === "/auth/callback") || PUBLIC_AUTH_PATHS.has(route)) return PUBLIC_POLICY;
   if (req.path === "/api/v1/health") return PUBLIC_POLICY;
@@ -104,6 +104,10 @@ export function policyForRequest(req: Pick<Request, "method" | "path">): Authori
     const permission = permissionFor(req as Request);
     const collection = req.method === "GET" && (req.path === "/api/v1/projects" || req.path === "/api/v1/projects/archive");
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
+  }
+  if (req.method === "GET" && /^\/api\/v1\/customize\/?$/i.test(req.path)) {
+    const resource = req.query?.kind === "skill" ? "skills" : "plugins";
+    return { action: resource + ".read", resource, permission: "read", target: "project" };
   }
   if (req.path.startsWith("/api/v1/synthesis/cross-project")) return { action: "synthesis.execute", resource: "synthesis", permission: "execute", target: "installation", sensitive: true };
   if (req.method === "PUT" && /^\/api\/v1\/jobs\/[^/]+\/provider\/?$/i.test(req.path)) {

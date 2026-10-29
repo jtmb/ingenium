@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "npm run build --workspace=ingenium-email && tsc",
+    "build": "npm run build --workspace=ingenium-email && tsc && node scripts/copy-domain-runtime.mjs",
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
     "check:database-integrity": "node dist/scripts/check-database-integrity.js",

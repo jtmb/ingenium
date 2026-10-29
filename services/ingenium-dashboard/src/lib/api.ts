@@ -2361,6 +2361,10 @@ export const api = {
     detail: (name: string) => request<{ data: any }>(`/projects/${encodeURIComponent(name)}/detail`),
     purgeOne: (name: string) => request<null>(`/projects/${encodeURIComponent(name)}/purge`, { method: "DELETE" }),
   },
+  customize: {
+    catalog: (project: string, kind: "plugin" | "skill", visibility: "project" | "system" = "project", offset = 0, limit = 50) =>
+      request<unknown>("/customize?" + new URLSearchParams({ project, kind, visibility, offset: String(offset), limit: String(limit) })),
+  },
   skills: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${encodeURIComponent(project)}`),
     get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Skill }>(`/skills/${name}?project=${encodeURIComponent(project)}`),

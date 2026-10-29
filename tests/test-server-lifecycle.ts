@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createConnection } from "node:net";
+import { rewriteFrontendDomainImports } from "./frontend-domain-imports.mjs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import {
   cleanupTestRun,
@@ -78,9 +79,24 @@ function prepareTestRunDashboardWorkspace(context: TestRunContext, includeBuildA
     filter: (path) => {
       const name = basename(path);
       if (name === "node_modules") return false;
-      return name !== ".next";
+      return name !== ".next" && !name.endsWith(".tsbuildinfo");
     },
   });
+  // The fixture adds one directory level. Resolve only shared domain source
+  // imports against the exact coordinator checkout; copy no dependency/cache tree.
+  const bindSharedSources = (directory: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const snapshotPath = join(directory, entry.name);
+      if (entry.isDirectory()) bindSharedSources(snapshotPath);
+      else if (entry.isFile() && /\.(?:ts|tsx|mts|mjs)$/.test(entry.name)) {
+        const originalPath = join(source, relative(target, snapshotPath));
+        const text = readFileSync(snapshotPath, "utf8");
+        const rebound = rewriteFrontendDomainImports(text, originalPath, context.repoRoot);
+        if (rebound !== text) writeFileSync(snapshotPath, rebound);
+      }
+    }
+  };
+  bindSharedSources(join(target, "src"));
   symlinkSync(join(source, "node_modules"), join(target, "node_modules"), "dir");
   // Next derives its page-worker count from all host CPUs, even under taskset.
   // Bound the isolated fixture's memory use without altering production config.

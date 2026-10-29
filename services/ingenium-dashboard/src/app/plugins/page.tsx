@@ -284,13 +284,18 @@ function ProjectPlugins({ project }: { project: string }) {
                     <button
                       type="button"
                       onClick={async () => {
-                        let content = p.source_content || "";
-                        if (!content) {
+                        let content = typeof p.source_content === "string" ? p.source_content : null;
+                        if (content === null) {
                           try {
                             const res = await api.plugins.getSource(p.name, project);
+                            if (typeof res.data.source !== "string") throw new Error("Plugin source response was invalid");
                             content = res.data.source;
-                          } catch { /* keep empty */ }
+                          } catch (failure) {
+                            setError(failure instanceof Error ? failure.message : "Unable to load plugin source. Restore or reload it before editing.");
+                            return;
+                          }
                         }
+                        setError(null);
                         setEditingId(p.id);
                         setEditPath(p.file_path);
                         setEditContent(content);

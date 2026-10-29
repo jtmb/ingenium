@@ -19,6 +19,7 @@ import {
 } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
+import { createHostedCustomizeRouter } from "../lib/routes/customize.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
 import { memoryRouter } from "../lib/routes/memory.js";
@@ -179,6 +180,7 @@ app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
 app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
+app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/memory", memoryRouter);

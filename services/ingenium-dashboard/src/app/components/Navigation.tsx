@@ -285,6 +285,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: "Chat", href: "/chat", icon: <IconMessageSquare /> },
+      { label: "Work", href: "/work", icon: <IconCode /> },
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
       { label: "VS Code", href: "/vscode", icon: <IconCode /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
@@ -324,6 +325,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Projects", href: "/projects", icon: <IconFolder /> },
       { label: "Organizations", href: "/organizations", icon: <IconUsers /> },
+      { label: "Customize", href: "/customize/plugins", icon: <IconPuzzle /> },
       { label: "Plugins", href: "/plugins", icon: <IconPlug /> },
       { label: "MCP Servers", href: "/mcp-servers", icon: <IconServer /> },
       { label: "Config", href: "/config", icon: <IconGear /> },
