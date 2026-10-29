@@ -68,9 +68,11 @@ type MemoryNotice = {
  *
  * Responsive: on mobile (<768px) the sidebar becomes an overlay drawer.
  */
-export default function ChatShell({ presentation = "chat", onConversationStarted, initialSessionId }: {
+export default function ChatShell({ presentation = "chat", onConversationStarted, onActiveSessionChange, navigationPending = false, initialSessionId }: {
   presentation?: "chat" | "home";
   onConversationStarted?: (sessionId: string) => void;
+  onActiveSessionChange?: (sessionId: string | null) => void;
+  navigationPending?: boolean;
   initialSessionId?: string | null;
 } = {}) {
   const opencode = useOpenCodeClient();
@@ -163,6 +165,13 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
     isCreating = false,
     refresh: refreshSessions,
   } = useOpenCodeSessions({ initialSelection: presentation === "home" ? "none" : "recent", initialSessionId });
+
+  useLayoutEffect(() => {
+    if (presentation !== "chat" || sessionsLoading || isCreating || navigationPending) return;
+    // An unavailable explicit link must keep its identity and error. A confirmed
+    // selection (or an empty catalog after removal) can update the route.
+    if (activeId !== null || !sessionsError) onActiveSessionChange?.(activeId);
+  }, [activeId, isCreating, navigationPending, onActiveSessionChange, presentation, sessionsError, sessionsLoading]);
 
   const activeSession = sessions.find((session) => session.id === activeId);
   const memoryProject = selectedProject;
@@ -394,7 +403,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   // A missing default must not disable recovery when the catalog still offers
   // providers. Only an empty catalog disables the provider and agent selectors.
   const selectorsDisabled = !chatConfigReady || chatConfigLoading || !!chatConfigError
-    || rateLimitSeconds !== null || availableProviders.length === 0;
+    || rateLimitSeconds !== null || availableProviders.length === 0 || (presentation === "chat" && (navigationPending || isCreating));
   useLayoutEffect(() => {
     homeSelection.current = { providerId, modelId, allowed: !selectorsDisabled && hasSelectableModel };
   }, [providerId, modelId, selectorsDisabled, hasSelectableModel]);
@@ -513,11 +522,11 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   /* ---- Session handlers ---- */
 
   const handleNew = useCallback(async () => {
-    if (isCreating) return;
+    if (isCreating || navigationPending) return;
     closeActivity();
     await create("New conversation");
     setMobileDrawerOpen(false);
-  }, [closeActivity, create, isCreating]);
+  }, [closeActivity, create, isCreating, navigationPending]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -549,6 +558,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
   const handleSend = useCallback(
     async (text: string, options?: SendOptions, intentCurrent?: () => boolean, draft?: ComposerSnapshot): Promise<boolean> => {
       if (intentCurrent && !intentCurrent()) return false;
+      if (presentation === "chat" && (isCreating || navigationPending)) return false;
       if (!activeId) return false;
       if (!hasSelectableModel || !providerId || !modelId) return false;
       const sendProvider = draft?.providerId ?? providerId;
@@ -669,7 +679,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
       return true;
     },
     [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel,
-      memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities],
+      memoryProject, savedMemoryWorkspaceId, selectedProject, memoryCapabilities, presentation, isCreating, navigationPending],
   );
 
   useLayoutEffect(() => {
@@ -926,7 +936,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
       <div className="veyra-chat-main flex-1 flex-col min-w-0 min-h-0 flex">
         <div className="flex items-center gap-2 px-4 py-2">
           <button type="button" onClick={() => setCollapsed((value) => !value)} className="hidden md:inline-flex rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]" aria-expanded={!collapsed}>History</button>
-          <button type="button" onClick={handleNew} disabled={isCreating} className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">New conversation</button>
+          <button type="button" onClick={handleNew} disabled={isCreating || navigationPending} className="rounded-lg px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50">New conversation</button>
         </div>
         <details className="veyra-conversation-options">
           <summary className="cursor-pointer px-4 py-2 text-xs text-[var(--color-text-secondary)]">Conversation options</summary>
@@ -1183,7 +1193,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               <button
                 type="button"
                 onClick={handleNew}
-                disabled={isCreating}
+                disabled={isCreating || navigationPending}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
@@ -1231,7 +1241,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               <button
                 type="button"
                 onClick={handleNew}
-                disabled={isCreating}
+                disabled={isCreating || navigationPending}
                 className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors disabled:cursor-wait disabled:opacity-50"
               >
                 <svg
@@ -1277,7 +1287,8 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
                 {chat.error ? "Conversation could not be loaded. Reload or choose another conversation before sending."
                   : sessionsLoading || isCreating || activeId ? "Loading conversation…" : "Choose or create a conversation to send a message."}
               </p>
-            ) : <ChatInput
+            ) : <fieldset disabled={isCreating || navigationPending} className="contents" aria-label="Chat composer">
+            <ChatInput
               key={activeId}
               onSend={handleSend}
               onStop={handleStop}
@@ -1296,7 +1307,8 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
                 {!hasSelectableModel && <option value="">No model available</option>}
                 {currentModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </Select>}
-            />}
+            />
+            </fieldset>}
           </>
         )}
       </div>

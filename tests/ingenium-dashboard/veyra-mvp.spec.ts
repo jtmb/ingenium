@@ -204,6 +204,40 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   await page.getByRole("button", { name: "History", exact: true }).click();
   await expect(page.getByRole("complementary", { name: "Chat sessions", exact: true })).toBeVisible();
   await page.screenshot({ path: join(artifacts, "veyra-chat-conversation-fixture.png"), fullPage: true });
+
+  const previousSession = new URL(page.url()).searchParams.get("session");
+  expect(previousSession).toBeTruthy();
+  const created = page.waitForResponse(response => response.request().method() === "POST"
+    && new URL(response.url()).pathname.endsWith("/opencode/sessions") && response.status() === 201);
+  await page.locator(".veyra-chat-main").getByRole("button", { name: "New conversation", exact: true }).click();
+  const nextSession = (await (await created).json()).data.id as string;
+  expect(nextSession).not.toBe(previousSession);
+  await expect(page).toHaveURL(url => url.searchParams.get("session") === nextSession
+    && url.searchParams.get("project") === runtime.project && !!url.searchParams.get("runtime"));
+  await expect(page.getByRole("heading", { name: "Ready when you are.", exact: true })).toBeVisible();
+  await expect(page.getByTestId("chat-user-message")).toHaveCount(0);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("chat-composer")).toBeEnabled({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Ready when you are.", exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("session")).toBe(nextSession);
+  const nextPrompt = page.waitForRequest(request => request.method() === "POST"
+    && /\/opencode\/sessions\/[^/]+\/prompt$/.test(new URL(request.url()).pathname));
+  await page.getByTestId("chat-composer").fill("New URL identity only");
+  await page.getByTestId("chat-composer").press("Enter");
+  const sentSession = new URL((await nextPrompt).url()).pathname.match(/\/sessions\/([^/]+)\/prompt$/)![1]!;
+  expect(decodeURIComponent(sentSession)).toBe(nextSession);
+  await expect(page.getByText("I've completed the analysis. The chat pipeline is working correctly.")).toBeVisible({ timeout: 30_000 });
+  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("complementary", { name: "Chat sessions", exact: true }).getByText("Hello from E2E test", { exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get("session") === previousSession);
+  await expect(page.getByTestId("chat-user-message").filter({ hasText: "Hello from E2E test" })).toBeVisible();
+  await expect(page.getByTestId("chat-user-message").filter({ hasText: "New URL identity only" })).toHaveCount(0);
+  await page.goBack({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(url => url.searchParams.get("session") === nextSession);
+  await expect(page.getByTestId("chat-user-message").filter({ hasText: "New URL identity only" })).toBeVisible();
+  await page.goForward({ waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(url => url.searchParams.get("session") === previousSession);
+  await expect(page.getByTestId("chat-user-message").filter({ hasText: "Hello from E2E test" })).toBeVisible();
 });
 
 test("Veyra settings and navigation remain discoverable and keyboard reachable", async ({ page }) => {
