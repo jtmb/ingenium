@@ -19,6 +19,11 @@ export function sameScope(a, b) {
   return Boolean(a && b && scopeKeys.every(key => a[key] === b[key]) && Object.keys(b).length === scopeKeys.length);
 }
 
+export function validateTurn(turn) {
+  if (!turn || Object.keys(turn).sort().join() !== 'generation,requestId,sessionId,turnId' || typeof turn.sessionId !== 'string' || !turn.sessionId || turn.sessionId.length > 128 || !Number.isSafeInteger(turn.turnId) || turn.turnId < 1 || !Number.isSafeInteger(turn.generation) || turn.generation < 0 || turn.requestId !== `voice:${turn.sessionId}:${turn.turnId}` || turn.requestId.length > 160) throw new VoiceError('VOICE_TURN_INVALID');
+  return turn;
+}
+
 function boundedText(text, max = 2000) {
   if (typeof text !== 'string' || !text.trim() || [...text].length > max) throw new VoiceError('VOICE_TEXT_INVALID');
   return text.trim();

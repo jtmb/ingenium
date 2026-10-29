@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { VoiceSession, validateScope } from '../../../packages/veyra-voice/session.mjs';
+import { VoiceSession, validateScope, validateTurn } from '../../../packages/veyra-voice/session.mjs';
 import { PcmNormalizer, UtteranceSegmenter, validateWav } from '../../../packages/veyra-voice/audio.mjs';
 import { VoiceService } from '../lib/voice-v2/service.mjs';
 import { SpeechWorker } from '../lib/voice-v2/speech-worker.mjs';
@@ -35,6 +35,16 @@ test('scope requires exact runtime, conversation and account; no extra authority
   assert.throws(() => validateScope({ ...scope, token: 'forged' }), /VOICE_SCOPE_INVALID/);
   assert.throws(() => validateScope({ ...scope, executionBindingId: '' }), /VOICE_SCOPE_INVALID/);
   assert.throws(() => validateScope({ ...scope, executionRevision: '' }), /VOICE_SCOPE_INVALID/);
+});
+test('turn shape and active generation are exact at API admission', async () => {
+  const { service, envelope } = serviceHarness();
+  assert.equal(validateTurn(envelope.turn).requestId, envelope.turn.requestId);
+  assert.throws(() => validateTurn({ ...envelope.turn, model: 'foreign-model' }), /VOICE_TURN_INVALID/);
+  await service.open({}, { scope, sessionId: 'service-a', mode: 'agent-call' });
+  await service.submit({}, envelope);
+  await assert.rejects(() => service.synthesize({}, { ...envelope, turn: { ...envelope.turn, generation: 999 } }), /VOICE_TURN_CONFLICT/);
+  await assert.rejects(() => service.complete({}, { ...envelope, turn: { ...envelope.turn, generation: 999 } }), /VOICE_TURN_CONFLICT/);
+  await service.complete({}, envelope);
 });
 test('dictation inserts only into the bound draft and never submits or plays', async () => {
   const { session, calls } = harness({}, 'dictation'); await session.connect(); await session.receive(new Uint8Array(9600));

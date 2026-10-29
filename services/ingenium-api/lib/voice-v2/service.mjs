@@ -1,4 +1,4 @@
-import { VoiceError, sameScope, validateScope } from '../../../../packages/veyra-voice/session.mjs';
+import { VoiceError, sameScope, validateScope, validateTurn } from '../../../../packages/veyra-voice/session.mjs';
 
 /** Authenticated API adapter; identity, durable admission and native agent authority are injected. */
 export class VoiceService {
@@ -25,14 +25,14 @@ export class VoiceService {
     return { allowed: true, scope: validated, sessionId, mode, expiresAt: session.expires };
   }
   async #admit(context, envelope, capability) {
-    const session = this.#sessions.get(envelope.turn?.sessionId);
+    const turn = validateTurn(envelope.turn);
+    const session = this.#sessions.get(turn.sessionId);
     if (!session || session.state !== 'ready' || session.expires <= this.now() || !sameScope(session.scope, envelope.scope)) throw new VoiceError('VOICE_SCOPE_EXPIRED');
     const access = await this.authorize(context, session.scope, capability, envelope.signal);
     if (!access?.allowed || !sameScope(access.scope, session.scope)) throw new VoiceError('VOICE_FORBIDDEN');
     if (this.#sessions.get(envelope.turn.sessionId) !== session || session.state !== 'ready' || session.expires <= this.now()) throw new VoiceError('VOICE_SCOPE_EXPIRED');
     envelope.signal?.throwIfAborted();
-    const turn = envelope.turn;
-    if (!Number.isSafeInteger(turn.turnId) || turn.turnId < 1 || !Number.isSafeInteger(turn.generation) || turn.generation < 0 || turn.requestId !== `voice:${turn.sessionId}:${turn.turnId}` || turn.requestId.length > 160) throw new VoiceError('VOICE_TURN_INVALID');
+    if (session.active && !['agent:prompt', 'voice:transcribe'].includes(capability) && (session.active.turnId !== turn.turnId || session.active.generation !== turn.generation || session.active.requestId !== turn.requestId)) throw new VoiceError('VOICE_TURN_CONFLICT');
     return session;
   }
   async transcribe(context, envelope) {

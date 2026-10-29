@@ -22,6 +22,7 @@ export interface VoicePorts {
 export class VoiceError extends Error { code: string; constructor(code: string) }
 export function validateScope(scope: unknown): Readonly<VoiceScope>;
 export function sameScope(a: unknown, b: unknown): boolean;
+export function validateTurn(turn: unknown): VoiceTurn;
 export class VoiceSession {
   constructor(options: { scope: VoiceScope; mode: VoiceMode; sessionId: string; ports: VoicePorts; interruptDeadlineMs?: number });
   readonly scope: Readonly<VoiceScope>; readonly mode: VoiceMode;
