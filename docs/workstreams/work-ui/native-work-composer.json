@@ -1,0 +1,46 @@
+{
+  "baseAggregateSha256": "d07545882d2e06874173f0017eb4d10f71a7f0ede16d4fe752b535e2d4b91c02",
+  "separateTestFixSha256": "a25e27efe6d0cbd734880d79aa029cc1a6459c24eae83de91ad934f1e44c6f60",
+  "patchSha256": "2c1898f0987104a2231c712cbd4aca91bc2b25c6817f11b230a1bb17dd86cfd7",
+  "bytes": 69423,
+  "files": [
+    {
+      "path": "apps/web/src/app/App.tsx",
+      "beforeGitBlob": "a62d9551ebc709219b839249a6df5de5a786724b",
+      "afterGitBlob": "3822b6bbc6fb7605d0d4146a1449d1b90ec98ab7",
+      "beforeSha256": "6385976960d5ac3da689873189f50fa4922085a7548bb401a4e136d4d1ba6be0",
+      "afterSha256": "ccdcb554cd126fde673696525e8aad7f518121b3766fb8761538ba8890c483c4"
+    },
+    {
+      "path": "apps/web/src/features/workbench/Workbench.tsx",
+      "beforeGitBlob": "5947532f061f8e10092223da081774650cd710e0",
+      "afterGitBlob": "08898a8e857dc8fa5b9a948b0437bdd1b8c3aa26",
+      "beforeSha256": "29339a51a005f03c19aa1e9a9d807d7d93abf1168ae2c5179a29dcacfa279361",
+      "afterSha256": "cd132c9e81d8b2e6f238eceeed0f3d2ff49741523390a084a9bc2ca9216e4e44"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.tsx",
+      "beforeGitBlob": "a82a90c27e696aae2f11a26e43d545d7a48ca2db",
+      "afterGitBlob": "730c60acbf9ecd4a6367f1703c826e2d73b180f8",
+      "beforeSha256": "8eb3d23ec32c361bde703646b0ff99c02001d6311e3f476abad09b96b45131b9",
+      "afterSha256": "7ac2663927a561870d7291e81dda74880ebed4e3bd811bdaeed6f52ba8f246c2"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx",
+      "beforeGitBlob": "3007084e7e83e96ae8818613e99a7836d457eba9",
+      "afterGitBlob": "71c431d424da2b1b2dc8e98e47a12375a5631d53",
+      "beforeSha256": "211503f59e09bd3348d0feb120f47848b5912fc11000e3e5d8ce149a8426d1aa",
+      "afterSha256": "6194f53797813d461822932f9dd9dcdd2bfe17cc13d00b84b8c8fa285f29bc27"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/native-work.css",
+      "beforeGitBlob": "a054936690c97f88fdea7a70e63cf70b7fb511b9",
+      "afterGitBlob": "bf80b2e003a4947458fc115f116d4d95daadda49",
+      "beforeSha256": "305cf47d868f4efc0965aaa3cd714f15fb100efdc75e66921c8826c2c2dd3428",
+      "afterSha256": "7e87c09b4d2ff6f1e52f4d214828b6c65dface5182f3102d72e720208e5a7ed3"
+    }
+  ],
+  "operationalOwnerRegionUnchanged": true,
+  "expectedVoiceDependency": "VoiceWorkspace compact?: boolean, supplied by Voice owner",
+  "workerFrameworkChecks": "Not run; central lease/integration required"
+}

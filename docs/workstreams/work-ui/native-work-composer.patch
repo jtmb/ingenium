@@ -1,0 +1,683 @@
+diff --git a/apps/web/src/app/App.tsx b/apps/web/src/app/App.tsx
+index a62d9551ebc709219b839249a6df5de5a786724b..3822b6bbc6fb7605d0d4146a1449d1b90ec98ab7 100644
+--- a/apps/web/src/app/App.tsx
++++ b/apps/web/src/app/App.tsx
+@@ -1714,6 +1714,7 @@
+                 catalog.selected.environment, catalog.selected.primary_root, liveSessionSelection, newSessionVersion])}
+                 projectName={catalog.selected.name}>
+               <Workbench collaborationRecovery={collaborationRecovery} key={catalog.selected.id} gateway={gateway} project={catalog.selected}
++                workDefault={workDefault}
+                 onOpenFindings={() => { setWorkFindingsOpen(true); setFindingsOpenRequest(value => value + 1); }}
+                 fileWorkspaceCache={fileWorkspaceCache.current}
+                 terminalSessionCache={terminalSessionCache.current}
+diff --git a/apps/web/src/features/workbench/Workbench.tsx b/apps/web/src/features/workbench/Workbench.tsx
+index 5947532f061f8e10092223da081774650cd710e0..08898a8e857dc8fa5b9a948b0437bdd1b8c3aa26 100644
+--- a/apps/web/src/features/workbench/Workbench.tsx
++++ b/apps/web/src/features/workbench/Workbench.tsx
+@@ -5,6 +5,7 @@
+ import { ServiceError } from "../../platform/gateway";
+ import { readSuggestionContext } from "../../platform/suggestions";
+ import { displayedForkOwner, exportForkOriginals, forkOwnerKey, readForkOwner, requireForkChild, requireForkHistoryRoom, retainForkReceipt } from "./sessionForkOwner";
++import { NativeWorkComposerOptions, NativeWorkDisclosure } from "../work-ui/NativeWorkPresentation";
+ import { creationOwnerKey, creationReceiptPath, displayedCreationOwner, exportCreationOriginals, readCreationOwner, requireCreatedSession, requireCreationHistoryRoom, retainCreationReceipt } from "./sessionCreationOwner";
+ import { displayedPromptOriginal, exportPromptOriginals, promptReceiptPath, requirePromptRoom, retainPromptReceipt, withPromptLock } from "./promptOriginal";
+ import { latestReplyAttempts, mergeReplyHistory, parseReplyAttempt, readPublicReplyAttempts, sameReplyIntent, type PublicReplyAttempt } from "../../platform/publicReplyAttempts";
+@@ -368,7 +369,7 @@
+   );
+ }
+ 
+-export function Workbench({ collaborationRecovery, gateway, project, projects = [], selectedModel, snapshot, connected, newSessionVersion = 0, assistantDraft, onAssistantDraftApplied, previewFeedback, onPreviewFeedbackDismiss, securityFeedback, onSecurityFeedbackDismiss, reviewRequestVersion = 0, onProjectSettings, onOpenFindings, onScheduleThread, selectedSessionId, onSessionChange, fileWorkspaceCache, terminalSessionCache }: {
++export function Workbench({ collaborationRecovery, gateway, project, projects = [], selectedModel, snapshot, connected, newSessionVersion = 0, assistantDraft, onAssistantDraftApplied, previewFeedback, onPreviewFeedbackDismiss, securityFeedback, onSecurityFeedbackDismiss, reviewRequestVersion = 0, onProjectSettings, onOpenFindings, onScheduleThread, selectedSessionId, onSessionChange, fileWorkspaceCache, terminalSessionCache, workDefault = false }: {
+   gateway: Gateway; project: Project | null; selectedModel: ModelProfile | null; snapshot: Snapshot | null; connected: boolean;
+   newSessionVersion?: number; onProjectSettings?: () => void;
+   onOpenFindings?: () => void;
+@@ -386,6 +387,7 @@
+   collaborationRecovery: ReturnType<typeof useCollaborationRecovery>;
+   fileWorkspaceCache: FileWorkspaceCache;
+   terminalSessionCache: TerminalSessionCache;
++  workDefault?: boolean;
+ }) {
+   const api = (gateway as WorkbenchGateway).workbench;
+   const collaborationHeldRef = useRef(collaborationRecovery.isHeld); collaborationHeldRef.current = collaborationRecovery.isHeld;
+@@ -3061,9 +3063,7 @@
+     );
+   }
+ 
+-  return (
+-    <section className={`wb-shell${compactInspectorOpen ? " wb-compact-inspector-active" : ""}`} aria-label="Coding workspace">
+-      <header className="wb-toolbar">
++  const conversationHeader = (<header className="wb-toolbar">
+         <div className="wb-crumb">
+           <Folder size={16} />
+           <strong>{project.name}</strong>
+@@ -3092,11 +3092,50 @@
+           if (!connected || !snapshot?.service.instance_id || !activeSessionId || activeSessionRef.current !== activeSessionId || projectScopeRef.current !== project.id) return;
+           onScheduleThread({ project_id: project.id, project_revision: project.revision, service_instance_id: snapshot.service.instance_id, environment: project.environment, cwd: project.primary_root }, activeSessionId);
+         }}>Follow up / heartbeat</button>}
+-      </header>
+-
+-      <div className={`wb-body${compactInspectorOpen ? " wb-inspector-open" : ""}`}>
+-        <main ref={compactChatRef} className="wb-chat">
+-          <div className="wb-sessionbar">
++      </header>);
++  const executionSettings = (<EngineIsolationOptions
++            project={project} engineReady={running} disabled={!connected || busy || !!isolationChoice.pending || !!isolationChoice.error}
++            value={isolationChoice.mode} onChange={changeIsolationMode}
++            workspaceAccess={workspaceAccess} onWorkspaceAccessChange={setWorkspaceAccess}
++            runtimeReadOnlyText={runtimeReadOnlyText} inferredRuntimeDirectory={inferredRuntimeDirectory} onRuntimeReadOnlyTextChange={setRuntimeReadOnlyText}
++            acknowledgeUnqualified={candidateAcknowledged} onAcknowledgeUnqualifiedChange={checked => {
++              setCandidateAcknowledgement(checked ? candidateAcknowledgementKey : "");
++            }}
++            observedBoundary={isolationBoundary} boundaryError={isolationBoundaryError} candidateStartIssue={candidateStartIssue}
++          />);
++  const engineSettings = (!running && <details className="wb-engine-options" open={candidateMode}>
++            <summary>Engine options</summary>
++            <label>Executable path <span>{candidateMode ? "Required for the WSL candidate · existing pinned Linux executable" : "Optional · WSL paths must be absolute Linux paths"}</span>
++              <input value={executablePath} required={candidateMode} aria-required={candidateMode} disabled={busy || !!isolationChoice.pending} onChange={event => setExecutablePath(event.target.value)} placeholder={candidateMode ? "/usr/local/bin/opencode" : project.environment.kind === "wsl" ? "/usr/local/bin/opencode" : "Use the configured OpenCode executable"} />
++            </label>
++            {candidateMode && <p className="wb-queue-note">Enter an absolute Linux path to an existing OpenCode binary in the recorded WSL user. Nothing is installed or downloaded automatically.</p>}
++          </details>);
++  const creationRecords = (project && <details><summary>Private conversation creation records</summary><p>Originals may contain paths and settings.</p><button type="button" className="wb-button" onClick={() => { try { exportCreationOriginals(project.id,creationOriginals.current,creationStorageFailures.current); } catch(cause) { setError(cause instanceof Error ? cause.message : "Could not export private creation originals."); } }}>Export private creation originals</button></details>);
++  const replyRecords = (retainedRequestView.sessionId && <section className="wb-inline-note" aria-label="Retained original reply results">
++            <div><strong>Original reply results</strong><p>Read-only service records. Acknowledged and uncertain originals block another response, even if the request is no longer pending.</p>
++              {retainedReplies?.owner === retainedRequestView && retainedReplies.error && <p role="alert">{retainedReplies.error}</p>}
++              {retainedReplies?.owner === retainedRequestView && retainedReplies.available && !retainedReplies.attempts.length && <p>No retained original replies were returned.</p>}
++              {retainedReplies?.owner === retainedRequestView && retainedReplies.attempts.slice(-retainedReplyLimit).map(attempt => <details key={attempt.attempt_id}><summary>{attempt.kind === "permissions" ? "Permission" : "Form"} {attempt.request_id} · {attempt.outcome} · service record {attempt.seq}</summary><p>This outcome belongs only to the original definition and explicit response below.</p><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 240, overflow: "auto" }}>{JSON.stringify({ scope: attempt.scope, original: attempt.original }, null, 2)}</pre></details>)}
++              {retainedReplies?.owner === retainedRequestView && retainedReplies.attempts.length > retainedReplyLimit && <button type="button" onClick={() => setRetainedReplyLimit(limit => limit + 40)}>Show earlier original results</button>}
++            </div>
++            <button type="button" disabled={!connected || busy} onClick={() => void refreshRetainedReplies()}>Check original reply results</button>
++          </section>);
++  const taskAccess = (<TaskPermissions
++            policy={permissionPolicy}
++            policyError={permissionPolicyError}
++            loading={!!activeSessionId && connected && !displayedRequests}
++            connected={connected}
++            project={project}
++            serviceInstanceId={snapshot?.service.instance_id}
++            sessionId={activeSessionId}
++            engineProjectId={str(session?.projectID)}
++            newSessionMode={mode}
++            refreshDisabled={busy || !connected}
++            onRefresh={() => void checkPendingRequests()}
++          />);
++  const promptRecords = (project && <details><summary>Private prompt records</summary><p>Originals can contain text, files, memory, paths and settings.</p><button type="button" className="wb-button" onClick={() => { try { exportPromptOriginals(project.id,promptOriginals.current); } catch(cause) { setError(cause instanceof Error ? cause.message : "Could not export private prompt originals."); } }}>Export private prompt originals</button></details>);
++  const forkRecords = (project && <button type="button" className="wb-button" disabled={forkBusy} onClick={() => { try { exportForkOriginals(project.id,forkOriginals.current,forkStorageFailures.current); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not export the private fork originals."); } }}>Export private fork originals</button>);
++  const sessionControls = (<div className="wb-sessionbar">
+             <div className="wb-session-select">
+               <MessageSquare size={15} />
+               <select
+@@ -3153,229 +3192,9 @@
+               {busy ? <LoaderCircle size={14} className="wb-spin" /> : running ? <Square size={12} /> : <Play size={13} />}
+               {running ? "Stop engine" : nativeCandidateMode ? "Start Windows candidate" : candidateMode ? "Start WSL candidate" : "Start engine"}
+             </button>
+-          </div>
+-          {str(selectedAgent?.description) && <p className="wb-queue-note" role="status">{str(selectedAgent?.description)}</p>}
++          </div>);
+ 
+-          <div className="wb-engine-note">
+-            <i className={running ? "is-ready" : ""} />
+-            {observedCandidate
+-              ? `OpenCode V2 ${running ? "ready" : "unavailable"} · ${observedCandidateLabel} · unqualified${isolationBoundary ? ` · service state: ${isolationBoundary.state}` : " · service isolation details unavailable"}${!running && agent.error ? ` · ${str(agent.error)}` : ""}`
+-              : running ? isolationBoundaryError ? "OpenCode V2 ready · isolation status unavailable" : "OpenCode V2 ready" : str(agent.error, str(agent.detail, str(agent.status, "Engine status unavailable")))}
+-          <span>{displayedModel || "No model selected"}{activeSessionId && str(session?.mode) ? ` · ${str(selectedAgent?.name, str(session?.mode))}` : ""}</span>
+-          {activeSessionId && <span role="status">{streamState === "live" ? "Live updates" : streamState === "connecting" ? "Connecting updates…" : streamState === "reconnecting" ? "Reconnecting updates…" : "Updates paused"}</span>}
+-          </div>
+-          {(candidateMode || observedCandidate) && <p className="wb-queue-note" role="status">This namespace applies to OpenCode and its tools. Veyra’s file, Git, terminal and saved-action controls, service and model runtime execute outside it.</p>}
+-          <EngineIsolationOptions
+-            project={project} engineReady={running} disabled={!connected || busy || !!isolationChoice.pending || !!isolationChoice.error}
+-            value={isolationChoice.mode} onChange={changeIsolationMode}
+-            workspaceAccess={workspaceAccess} onWorkspaceAccessChange={setWorkspaceAccess}
+-            runtimeReadOnlyText={runtimeReadOnlyText} inferredRuntimeDirectory={inferredRuntimeDirectory} onRuntimeReadOnlyTextChange={setRuntimeReadOnlyText}
+-            acknowledgeUnqualified={candidateAcknowledged} onAcknowledgeUnqualifiedChange={checked => {
+-              setCandidateAcknowledgement(checked ? candidateAcknowledgementKey : "");
+-            }}
+-            observedBoundary={isolationBoundary} boundaryError={isolationBoundaryError} candidateStartIssue={candidateStartIssue}
+-          />
+-          {isolationChoice.error && <div className="wb-inline-note" role="alert"><span>{isolationChoice.error}</span><button type="button" disabled={busy} onClick={() => setIsolationDraft(savedIsolation(project))}>Reload saved execution choice</button></div>}
+-          {isolationChoice.pending && <div className="wb-inline-note" role="status"><span>{isolationChoice.pending.observed ? "The candidate startup owner was identified. Check its status or stop it before another start." : "Candidate startup is pending. Check engine status before starting again; an unobserved start stays retained even after a stop acknowledgement."} {isolationChoice.pending.workspaceAccess === undefined ? "This older retained request has no recorded workspace access or runtime mount choices; its original was preserved." : `Original request: ${isolationChoice.pending.workspaceAccess === "read_write" ? "read/write" : "read-only"} workspace · ${isolationChoice.pending.runtimeReadOnly?.length ?? 0} additional read-only runtime directories.`}</span><button type="button" disabled={!connected || busy} onClick={() => void action("Read engine status", () => refreshRuntime(true))}>Check engine status</button><button type="button" disabled={!connected || busy} onClick={stopAgent}>Stop owned engine</button></div>}
+-          {(stopBlocked || (running && !!agent.error)) && (
+-            <div className="wb-inline-note wb-force-stop" role="status">
+-              <span>Normal stop did not complete. Force stop applies only to the engine Veyra owns.</span>
+-              <button onClick={forceStopAgent} disabled={!connected || busy}>Force stop owned engine</button>
+-            </div>
+-          )}
+-
+-          {!running && <details className="wb-engine-options" open={candidateMode}>
+-            <summary>Engine options</summary>
+-            <label>Executable path <span>{candidateMode ? "Required for the WSL candidate · existing pinned Linux executable" : "Optional · WSL paths must be absolute Linux paths"}</span>
+-              <input value={executablePath} required={candidateMode} aria-required={candidateMode} disabled={busy || !!isolationChoice.pending} onChange={event => setExecutablePath(event.target.value)} placeholder={candidateMode ? "/usr/local/bin/opencode" : project.environment.kind === "wsl" ? "/usr/local/bin/opencode" : "Use the configured OpenCode executable"} />
+-            </label>
+-            {candidateMode && <p className="wb-queue-note">Enter an absolute Linux path to an existing OpenCode binary in the recorded WSL user. Nothing is installed or downloaded automatically.</p>}
+-          </details>}
+-
+-          {error && (
+-            <div className="wb-error" role="alert">
+-              <ShieldAlert size={15} />
+-              {error}
+-              <button aria-label="Dismiss error" onClick={() => setError(null)}><X size={14} /></button>
+-            </div>
+-          )}
+-          {!connected && <div className="wb-inline-note" role="status">The service is disconnected. Workspace actions are paused until it reconnects.</div>}
+-          {!api && <div className="wb-inline-note" role="status">This service build has not exposed workspace operations yet.</div>}
+-          {creationStorageIssue && <div className="wb-inline-note" role="alert">{creationStorageIssue}</div>}
+-          {project && <details><summary>Private conversation creation records</summary><p>Originals may contain paths and settings.</p><button type="button" className="wb-button" onClick={() => { try { exportCreationOriginals(project.id,creationOriginals.current,creationStorageFailures.current); } catch(cause) { setError(cause instanceof Error ? cause.message : "Could not export private creation originals."); } }}>Export private creation originals</button></details>}
+-          {pendingSession && <div className="wb-inline-note" role="status"><span>The original conversation request is retained. Check it without repeating creation. Your message draft has not been sent.</span><button type="button" onClick={checkOriginalSession} disabled={!connected || busy}>Check original conversation</button></div>}
+-
+-          {retainedRequestView.sessionId && <section className="wb-inline-note" aria-label="Retained original reply results">
+-            <div><strong>Original reply results</strong><p>Read-only service records. Acknowledged and uncertain originals block another response, even if the request is no longer pending.</p>
+-              {retainedReplies?.owner === retainedRequestView && retainedReplies.error && <p role="alert">{retainedReplies.error}</p>}
+-              {retainedReplies?.owner === retainedRequestView && retainedReplies.available && !retainedReplies.attempts.length && <p>No retained original replies were returned.</p>}
+-              {retainedReplies?.owner === retainedRequestView && retainedReplies.attempts.slice(-retainedReplyLimit).map(attempt => <details key={attempt.attempt_id}><summary>{attempt.kind === "permissions" ? "Permission" : "Form"} {attempt.request_id} · {attempt.outcome} · service record {attempt.seq}</summary><p>This outcome belongs only to the original definition and explicit response below.</p><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 240, overflow: "auto" }}>{JSON.stringify({ scope: attempt.scope, original: attempt.original }, null, 2)}</pre></details>)}
+-              {retainedReplies?.owner === retainedRequestView && retainedReplies.attempts.length > retainedReplyLimit && <button type="button" onClick={() => setRetainedReplyLimit(limit => limit + 40)}>Show earlier original results</button>}
+-            </div>
+-            <button type="button" disabled={!connected || busy} onClick={() => void refreshRetainedReplies()}>Check original reply results</button>
+-          </section>}
+-
+-          <TaskPermissions
+-            policy={permissionPolicy}
+-            policyError={permissionPolicyError}
+-            loading={!!activeSessionId && connected && !displayedRequests}
+-            connected={connected}
+-            project={project}
+-            serviceInstanceId={snapshot?.service.instance_id}
+-            sessionId={activeSessionId}
+-            engineProjectId={str(session?.projectID)}
+-            newSessionMode={mode}
+-            refreshDisabled={busy || !connected}
+-            onRefresh={() => void checkPendingRequests()}
+-          />
+-          <PendingRequests
+-            permissions={permissions}
+-            forms={forms}
+-            formValues={formValues}
+-            setFormValues={setScopedFormValues}
+-            busy={busy || pendingReplyInFlight.current}
+-            connected={connected}
+-            policy={permissionPolicy}
+-            policyError={permissionPolicyError}
+-            decidePermission={decidePermission}
+-            replyForm={replyForm}
+-            replyNotice={replyNotice}
+-            refreshRequests={() => void checkPendingRequests()}
+-          />
+-          {project && <details><summary>Private prompt records</summary><p>Originals can contain text, files, memory, paths and settings.</p><button type="button" className="wb-button" onClick={() => { try { exportPromptOriginals(project.id,promptOriginals.current); } catch(cause) { setError(cause instanceof Error ? cause.message : "Could not export private prompt originals."); } }}>Export private prompt originals</button></details>}
+-          {pendingPrompt && (
+-            <div className="wb-uncertain" role="alert">
+-              <ShieldAlert size={15} />
+-              <div>
+-                <strong>Prompt admission needs checking</strong>
+-                <p>Original request saved for this session: “{pendingPrompt.text}”</p>
+-                {typeof pendingPrompt.rawDraftText === "string" && <details><summary>Original composer draft</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 180, overflow: "auto" }}>{pendingPrompt.rawDraftText || "(empty text; attachments only)"}</pre></details>}
+-                <p>Original explicit skills: {pendingPrompt.skillIds?.join(", ") || "none"}. Checking admission does not resend or change this selection.</p>
+-                <p>Original memory revisions: {pendingPrompt.memorySelection?.map(item => `${item.id} (revision ${item.revision})`).join(", ") || "none"}. Admission checks preserve the original context.</p>
+-                <p>Veyra will not submit it again. Check the retained session history before continuing.</p>
+-              </div>
+-              {!pendingPrompt.queueItemId && <button type="button" disabled={busy} onClick={() => {
+-                if (projectScopeRef.current !== pendingPrompt.projectId || activeSessionRef.current !== pendingPrompt.sessionId) return;
+-                try {
+-                  requireOwnPrompt(pendingPrompt, JSON.stringify(pendingPrompt));
+-                  setScopedPromptSkills(pendingPrompt.skillIds ?? []);
+-                } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the original prompt selection."); }
+-              }}>Use original skills for this draft</button>}
+-              <button onClick={() => checkOriginalPrompt(pendingPrompt)} disabled={busy}>Check original</button>
+-            </div>
+-          )}
+-          {pendingFork && (
+-            <div className="wb-uncertain" role="alert">
+-              <ShieldAlert size={15} />
+-              <div>
+-                <strong>Fork admission needs checking</strong>
+-                <p>The original source and cutoff are saved. Veyra will only read its receipt and will not submit the fork again. A conversation fork shares the source files; it does not create an isolated workspace.</p>
+-              </div>
+-              <button onClick={() => checkOriginalFork(pendingFork)} disabled={busy || !connected || !api}>Check original fork</button>
+-            </div>
+-          )}
+-          {forkStorageIssue && <p className="wb-inline-note" role="alert">{forkStorageIssue}</p>}
+-          {forkPreview && forkPreview.view === forkViewToken && forkPreview.owner.original && <section className="wb-interrupt-review" aria-label="Review conversation fork" aria-busy={forkBusy} onKeyDown={event => { if (event.key === "Escape" && !forkBusy) { event.stopPropagation(); setForkPreview(null); forkButtonRef.current?.focus(); } }}>
+-            <strong>Review conversation fork</strong>
+-            <p>A new conversation will copy history before {forkPreview.before}. Both chats share the same files.</p>
+-            <dl><dt>Service / library</dt><dd>{forkPreview.owner.service_instance_id} / {forkPreview.owner.original.library_id}</dd>
+-              <dt>Engine / revision</dt><dd>{forkPreview.owner.original.engine_instance_id} / {forkPreview.owner.original.engine_revision}</dd>
+-              <dt>Source conversation</dt><dd>{forkPreview.owner.session_id}</dd>
+-              <dt>Saved Project</dt><dd><details><summary>{project?.name} · revision {forkPreview.owner.project_revision}</summary><pre>{JSON.stringify(forkPreview.owner.original.project,null,2)}</pre></details></dd>
+-              <dt>Configuration</dt><dd><details><summary>{forkPreview.owner.profile_id} · {forkPreview.owner.quant} · {forkPreview.owner.context} tokens</summary><pre>{JSON.stringify(forkPreview.owner.original.configuration,null,2)}</pre></details></dd>
+-              <dt>Source provenance</dt><dd><details><summary>Original session, parent and cutoff provenance</summary><pre>{JSON.stringify(forkPreview.owner.original.session,null,2)}</pre></details></dd></dl>
+-            <button type="button" disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession || !!forkStorageIssue || contextSaving} onClick={() => void forkBefore(forkPreview.before,forkPreview.owner)}>Fork displayed original</button>
+-            <button type="button" disabled={forkBusy} onClick={() => { setForkPreview(null); forkButtonRef.current?.focus(); }}>Close fork preview</button>
+-          </section>}
+-          {project && <button type="button" className="wb-button" disabled={forkBusy} onClick={() => { try { exportForkOriginals(project.id,forkOriginals.current,forkStorageFailures.current); } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not export the private fork originals."); } }}>Export private fork originals</button>}
+-          {(pendingFork || forkStorageIssue) && <p className="wb-inline-note">Private fork originals may contain paths and settings. Older incomplete records remain preserved and cannot authorize another engine.</p>}
+-          {activeSessionId && <p className="wb-inline-note">Fork here copies the conversation up to the selected message. Both conversations share the same files; parallel edits require a separate workspace.</p>}
+-
+-          <div
+-            className="wb-messages"
+-            ref={scrollRef}
+-            onScroll={event => {
+-              const node = event.currentTarget;
+-              atBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
+-            }}
+-            aria-live="polite"
+-            aria-relevant="additions text"
+-          >
+-            {messages.length > messageList.length && <button type="button" className="wb-button" onClick={() => { atBottomRef.current = false; setMessageWindow(current => Math.min(1000, current + 100)); }}>Show earlier loaded messages</button>}
+-            {historyCursor && <button type="button" className="wb-button" disabled={!connected || historyLoading || messages.length >= 1000} onClick={() => void loadHistory()}>{historyLoading ? "Loading saved messages…" : "Load more saved messages"}</button>}
+-            {loading && !messageList.length && (
+-              <div className="wb-loading"><LoaderCircle className="wb-spin" size={18} />Loading session and workspace…</div>
+-            )}
+-            {!messageList.length && !loading && (
+-              <div className="wb-welcome">
+-                <div className="wb-mark">V</div>
+-                <h1>What are we building?</h1>
+-                <p>Ask for a change, explore this project, or start with a plan.</p>
+-                <div className="wb-suggestions">
+-                  <button onClick={() => setDraft("Explore this project and summarize its structure.")}>Explore this project</button>
+-                  <button onClick={() => { setMode("plan"); setDraft("Plan the next change in this project."); }}>Plan a change</button>
+-                </div>
+-              </div>
+-            )}
+-              {messageList.map(message => (
+-              <article className={`wb-message ${message.role === "user" ? "from-user" : "from-agent"}`} key={message.id}>
+-                <div className="wb-avatar">{message.role === "user" ? "Y" : "V"}</div>
+-                <div className="wb-message-content">
+-                  <div className="wb-message-label">
+-                    {message.role === "user" ? "You" : "Veyra"}
+-                    {message.status && <span>{message.status}</span>}
+-                    {activeSessionId && message.id && !pendingFork && message.role !== "user" && <button className="wb-fork-message" title="Review a fork before this message; shares the same files" aria-label={`Review fork before message ${message.id}`} disabled={busy || !connected || !!pendingPrompt || !!forkStorageIssue || !durableMessageIds.current.has(message.id) || !currentProfile?.status.loaded || currentProfile.status.context !== currentProfile.context || forkDisplayedSessionId !== activeSessionId} onClick={event => { forkButtonRef.current = event.currentTarget; void forkBefore(message.id); }}><GitFork size={12} />Fork here…</button>}
+-                  </div>
+-                  <div className="wb-prose">
+-                    {message.parts.length ? message.parts.map((part, index) => (
+-                      <MessagePart key={`${message.id}-${index}`} part={part} />
+-                    )) : <Suspense fallback={<p>{message.text}</p>}><RichMarkdown text={message.text} /></Suspense>}
+-                    {message.error && message.parts.length > 0 && <p className="wb-inline-note" role="alert">{message.error}</p>}
+-                  </div>
+-                </div>
+-              </article>
+-            ))}
+-          </div>
+-
+-          <div className={`wb-composer${draggingFiles ? " wb-composer-dragging" : ""}`}
+-            onDragOver={event => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDraggingFiles(true); } }}
+-            onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFiles(false); }}
+-            onDrop={event => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); addComposerFiles(Array.from(event.dataTransfer.files)); } }}>
+-            {draggingFiles && <p className="wb-queue-note" role="status">Drop files to attach to this session’s next prompt.</p>}
+-            {previewFeedback && <PreviewFeedbackReview key={previewFeedback.requestId} feedback={previewFeedback}
+-              available={previewFeedbackAvailable} onAdd={addPreviewFeedback} onDismiss={() => onPreviewFeedbackDismiss?.(previewFeedback.requestId)} />}
+-            {securityFeedback && <SecurityFeedbackReview key={securityFeedback.requestId} feedback={securityFeedback}
+-              task={activeSessionId} available={securityFeedbackAvailable} onAdd={addSecurityFeedback} onDismiss={() => onSecurityFeedbackDismiss?.(securityFeedback.requestId)}/>}
+-            {composerDraft.notice && <p className="wb-queue-note" role="alert">{composerDraft.notice}</p>}
+-            <ReviewPromptSelection project={project} service={snapshot?.service.instance_id} taskId={activeSessionId} selected={reviewPromptSelection}
+-              disabled={busy || !connected || contextSaving || !!pendingPrompt || !!pendingFork || !!pendingSession || !!findingFeedbackSendSelection} onChange={chooseReviewPrompt}/>
+-            <FindingFeedbackSendSelection project={project} service={snapshot?.service.instance_id} taskId={activeSessionId} selected={findingFeedbackSendSelection}
+-              proposal={findingFeedbackSendProposal} disabled={busy || !connected || contextSaving || !!pendingPrompt || !!pendingFork || !!pendingSession || !!reviewPromptSelection} onChange={chooseFindingFeedbackSend}/>
+-            {composerSkillIssue && <p className="wb-queue-note" role="alert">{composerSkillIssue} Sending and queueing are paused. Open Instructions, references & skills to explicitly review or clear this draft’s selection.</p>}
+-            <ScopedContextPanel key={`context:${project.id}:${activeSessionId}`} request={call} sessionId={activeSessionId} project={project} connected={connected} disabled={busy || !!pendingPrompt || !!pendingFork || !!pendingSession} selectedSkillIds={selectedSkillIds} skillSelectionIssue={composerSkillIssue} onSkillSelectionIssue={composerDraft.flagSkillSelectionIssue} onSkillsChange={setScopedPromptSkills} onDirtyChange={setScopedContextDirty} onMutationChange={setScopedContextSaving}/>
+-            <MemoryPanel key={`memory:${memoryScopeKey}`} request={call} projectId={project.id} sessionId={activeSessionId} connected={connected} disabled={busy || !!pendingPrompt || !!pendingFork || !!pendingSession} selection={selectedMemory} onChange={changeMemorySelection}/>
+-            {contextDirty && <p className="wb-queue-note" role="status">Session context has unsaved changes. Sending, voice and queued follow-ups use the saved instructions and references until you save.</p>}
+-            {contextSaving && <p className="wb-queue-note" role="status">Prompt admission is paused while session context is saving or awaiting reconciliation. Open Instructions, references & skills to check the saved context.</p>}
+-            <VoiceWorkspace key={`${voiceOwnerKey}:${voiceEpoch.current.revision}`} request={call} scope={`${project.id}:${activeSessionId || "new"}:${attachmentDraftId || newSessionVersion}`}
+-              projectId={project.id} sessionId={activeSessionId} connected={connected} isCurrent={voiceIsCurrent} ownerMatches={voiceOwnerMatches}
+-              disabled={busy || contextSaving || contextDirty || !!pendingPrompt || !!pendingFork || !!pendingSession || !!composerDraft.notice}
+-              continuousDisabledReason={draft.trim() || attachments.length || selectedSkillIds.length || selectedMemory.length
+-                ? "Send or clear the current draft, attachments, selected skills and memory before continuous voice. Dictation can still append to this draft."
+-                : resumeQueue || followUpQueue.items.length ? "Pause and clear queued follow-ups before continuous voice, so only your spoken turns can advance this chat." : ""}
+-              reply={[...messages].reverse().find(message => message.role === "assistant" && message.text.trim())?.text ?? ""}
+-              onInsert={text => {
+-                if (!voiceIsCurrent() || composerAdmissionLock.current || !connected || busy || contextSaving)
+-                  return { ok: false, message: "The original composer is unavailable. No transcript was inserted." };
+-                return composerDraft.appendTranscript(text);
+-              }}/>
+-            {selectedSkillIds.length > 0 && <p className="wb-queue-note">{selectedSkillIds.length} skills selected for typed messages and new queued drafts. Each queued draft keeps its own selection. Voice uses saved session context without these selections.</p>}
+-            {draft.length === 0 && <ProjectSuggestions key={`${feedbackOwnerKey}:${activeSessionId}:${newSessionVersion}`} project={project} serviceInstanceId={snapshot?.service.instance_id ?? ""}
+-              sessionId={activeSessionId} view={suggestionView} files={sourceContext} git={gitSuggestionContext} transcript={continuationContext}
+-              unavailable={suggestionUnavailable} isCurrent={suggestionCurrent} onChoose={chooseSuggestion}
+-              transcriptLoading={suggestionsLoading && suggestionsLoadingRef.current === suggestionView}
+-              onRefreshTranscript={activeSessionId ? () => { void refreshSuggestionContext(); } : undefined} />}
+-            {suggestionNotice?.view === suggestionView && <p className="wb-queue-note" role="status">{suggestionNotice.text}</p>}
+-            {activeSessionId && <section className="wb-follow-up-queue" aria-label="Follow-up queue">
++  const composerQueue = (activeSessionId && <section className="wb-follow-up-queue" aria-label="Follow-up queue">
+               <div className="wb-follow-up-heading">
+                 <div><strong>Follow-up queue</strong><span>{queueRecovery ? "Paused · recovery required" : `${displayedQueue.items.length}/${FOLLOW_UP_LIMIT} drafts${queueMutationDraft && !staleQueueMutation ? " · unsaved preview" : ""}`}</span></div>
+                 {followUpQueue.items.length > 0 && <button className="wb-queue-resume" onClick={toggleFollowUpQueue} disabled={!connected || queueMutationDisabled || !!queueMutationDraft}>
+@@ -3484,17 +3303,229 @@
+                   </li>)}
+                 </ol>
+               </> : !queueRecovery && <p className="wb-queue-note">{queueMutationDraft && !staleQueueMutation ? "The unsaved proposal has no drafts. Save it to cancel the saved entries." : "Add text here while a turn runs, or queue a draft for the next turn."}</p>}
+-            </section>}
+-            {activeSessionId && project ? attachmentDraftId
++            </section>);
++  const composerAttachments = (activeSessionId && project ? attachmentDraftId
+               ? <Attachments ref={attachmentsRef} gateway={gateway} ownerKey={JSON.stringify([feedbackOwnerKey, generationRef.current, connected, modelId, currentProfile?.quant, currentProfile?.context, visionAvailable])} key={`${project.id}:${activeSessionId}:${attachmentDraftId}`} request={call} sessionId={activeSessionId} projectId={project.id} draftId={attachmentDraftId} vision={visionAvailable} disabled={!connected || busy || !!pendingPrompt || !!pendingFork || attachmentRotationFailed}
+                   onChange={setScopedAttachments} onBusyChange={setScopedAttachmentBusy} onReadyChange={setScopedAttachmentReady}/>
+               : <p className="wb-queue-note" role="status">Restoring this session’s attachment draft…</p>
+-              : <p className="wb-queue-note" role="status">Send a message to start a conversation, or <button type="button" disabled={!connected || busy || !running || !modelId || !!pendingSession} onClick={() => void createDurableSession(draft.trim().slice(0, 72) || "New conversation")}>start a session to attach files</button>.</p>}
+-            {!visionAvailable && <div className="wb-queue-note" role="status"><p>{currentProfile?.vision ? "Image input is unavailable until this exact model and projector have reviewed qualification and are loaded." : "This task uses a text-only model. Images require an explicitly chosen compatible task and model."} Original draft attachments stay with their task.</p>
+-              {imageSupport.error && <p>{imageSupport.error}</p>}
++              : <p className="wb-queue-note" role="status">Send a message to start a conversation, or <button type="button" disabled={!connected || busy || !running || !modelId || !!pendingSession} onClick={() => void createDurableSession(draft.trim().slice(0, 72) || "New conversation")}>start a session to attach files</button>.</p>);
++  const imageCapabilities = (!visionAvailable && <div className="wb-queue-note" role="status"><p>{currentProfile?.vision ? "Image input is unavailable until this exact model and projector have reviewed qualification and are loaded." : "This task uses a text-only model. Images require an explicitly chosen compatible task and model."} Original draft attachments stay with their task.</p>
++              {imageSupport.error && <p role={workDefault ? "alert" : undefined}>{imageSupport.error}</p>}
+               {(snapshot?.profiles ?? []).filter(profile => imageSupport.supports(profile)).map(profile => <button type="button" key={profile.id} disabled={!connected || busy || !!pendingPrompt || !!pendingFork || !!pendingSession} onClick={() => { if (createSession()) { setModelId(profile.id); } }}>New conversation with {profile.name}</button>)}
+               <button type="button" disabled={!connected || busy} onClick={() => void imageSupport.refresh()}>Refresh image capability</button>
+-            </div>}
++            </div>);
++
++  return (
++    <section className={`wb-shell${compactInspectorOpen ? " wb-compact-inspector-active" : ""}`} aria-label="Coding workspace">
++                {!workDefault && conversationHeader}
++
++      <div className={`wb-body${compactInspectorOpen ? " wb-inspector-open" : ""}`}>
++        <main ref={compactChatRef} className="wb-chat">
++          <NativeWorkDisclosure enabled={workDefault} label="Conversation settings" attention={Boolean(isolationChoice.error || isolationChoice.pending || isolationBoundaryError || candidateStartIssue || permissionPolicyError || (activeSessionId && (!permissionPolicy || taskPermissionPolicyIssue(permissionPolicy, project, snapshot?.service.instance_id, activeSessionId, str(session?.projectID)))) || (retainedReplies?.owner === retainedRequestView && (retainedReplies.error || retainedReplies.attempts.length)))}>
++            {workDefault && conversationHeader}
++            {sessionControls}
++            {workDefault && executionSettings}
++            {workDefault && engineSettings}
++            {workDefault && creationRecords}
++            {workDefault && replyRecords}
++            {workDefault && taskAccess}
++            {workDefault && promptRecords}
++            {workDefault && forkRecords}
++          </NativeWorkDisclosure>
++          {str(selectedAgent?.description) && <p className="wb-queue-note" role="status">{str(selectedAgent?.description)}</p>}
++
++          <div className="wb-engine-note">
++            <i className={running ? "is-ready" : ""} />
++            {observedCandidate
++              ? `OpenCode V2 ${running ? "ready" : "unavailable"} · ${observedCandidateLabel} · unqualified${isolationBoundary ? ` · service state: ${isolationBoundary.state}` : " · service isolation details unavailable"}${!running && agent.error ? ` · ${str(agent.error)}` : ""}`
++              : running ? isolationBoundaryError ? "OpenCode V2 ready · isolation status unavailable" : "OpenCode V2 ready" : str(agent.error, str(agent.detail, str(agent.status, "Engine status unavailable")))}
++          <span>{displayedModel || "No model selected"}{activeSessionId && str(session?.mode) ? ` · ${str(selectedAgent?.name, str(session?.mode))}` : ""}</span>
++          {activeSessionId && <span role="status">{streamState === "live" ? "Live updates" : streamState === "connecting" ? "Connecting updates…" : streamState === "reconnecting" ? "Reconnecting updates…" : "Updates paused"}</span>}
++          </div>
++          {(candidateMode || observedCandidate) && <p className="wb-queue-note" role="status">This namespace applies to OpenCode and its tools. Veyra’s file, Git, terminal and saved-action controls, service and model runtime execute outside it.</p>}
++                    {!workDefault && executionSettings}
++          {isolationChoice.error && <div className="wb-inline-note" role="alert"><span>{isolationChoice.error}</span><button type="button" disabled={busy} onClick={() => setIsolationDraft(savedIsolation(project))}>Reload saved execution choice</button></div>}
++          {isolationChoice.pending && <div className="wb-inline-note" role="status"><span>{isolationChoice.pending.observed ? "The candidate startup owner was identified. Check its status or stop it before another start." : "Candidate startup is pending. Check engine status before starting again; an unobserved start stays retained even after a stop acknowledgement."} {isolationChoice.pending.workspaceAccess === undefined ? "This older retained request has no recorded workspace access or runtime mount choices; its original was preserved." : `Original request: ${isolationChoice.pending.workspaceAccess === "read_write" ? "read/write" : "read-only"} workspace · ${isolationChoice.pending.runtimeReadOnly?.length ?? 0} additional read-only runtime directories.`}</span><button type="button" disabled={!connected || busy} onClick={() => void action("Read engine status", () => refreshRuntime(true))}>Check engine status</button><button type="button" disabled={!connected || busy} onClick={stopAgent}>Stop owned engine</button></div>}
++          {(stopBlocked || (running && !!agent.error)) && (
++            <div className="wb-inline-note wb-force-stop" role="status">
++              <span>Normal stop did not complete. Force stop applies only to the engine Veyra owns.</span>
++              <button onClick={forceStopAgent} disabled={!connected || busy}>Force stop owned engine</button>
++            </div>
++          )}
++
++                    {!workDefault && engineSettings}
++
++          {error && (
++            <div className="wb-error" role="alert">
++              <ShieldAlert size={15} />
++              {error}
++              <button aria-label="Dismiss error" onClick={() => setError(null)}><X size={14} /></button>
++            </div>
++          )}
++          {!connected && <div className="wb-inline-note" role="status">The service is disconnected. Workspace actions are paused until it reconnects.</div>}
++          {!api && <div className="wb-inline-note" role="status">This service build has not exposed workspace operations yet.</div>}
++          {creationStorageIssue && <div className="wb-inline-note" role="alert">{creationStorageIssue}</div>}
++                    {!workDefault && creationRecords}
++          {pendingSession && <div className="wb-inline-note" role="status"><span>The original conversation request is retained. Check it without repeating creation. Your message draft has not been sent.</span><button type="button" onClick={checkOriginalSession} disabled={!connected || busy}>Check original conversation</button></div>}
++
++                    {!workDefault && replyRecords}
++
++                    {!workDefault && taskAccess}
++          <PendingRequests
++            permissions={permissions}
++            forms={forms}
++            formValues={formValues}
++            setFormValues={setScopedFormValues}
++            busy={busy || pendingReplyInFlight.current}
++            connected={connected}
++            policy={permissionPolicy}
++            policyError={permissionPolicyError}
++            decidePermission={decidePermission}
++            replyForm={replyForm}
++            replyNotice={replyNotice}
++            refreshRequests={() => void checkPendingRequests()}
++          />
++                    {!workDefault && promptRecords}
++          {pendingPrompt && (
++            <div className="wb-uncertain" role="alert">
++              <ShieldAlert size={15} />
++              <div>
++                <strong>Prompt admission needs checking</strong>
++                <p>Original request saved for this session: “{pendingPrompt.text}”</p>
++                {typeof pendingPrompt.rawDraftText === "string" && <details><summary>Original composer draft</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: 180, overflow: "auto" }}>{pendingPrompt.rawDraftText || "(empty text; attachments only)"}</pre></details>}
++                <p>Original explicit skills: {pendingPrompt.skillIds?.join(", ") || "none"}. Checking admission does not resend or change this selection.</p>
++                <p>Original memory revisions: {pendingPrompt.memorySelection?.map(item => `${item.id} (revision ${item.revision})`).join(", ") || "none"}. Admission checks preserve the original context.</p>
++                <p>Veyra will not submit it again. Check the retained session history before continuing.</p>
++              </div>
++              {!pendingPrompt.queueItemId && <button type="button" disabled={busy} onClick={() => {
++                if (projectScopeRef.current !== pendingPrompt.projectId || activeSessionRef.current !== pendingPrompt.sessionId) return;
++                try {
++                  requireOwnPrompt(pendingPrompt, JSON.stringify(pendingPrompt));
++                  setScopedPromptSkills(pendingPrompt.skillIds ?? []);
++                } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not read the original prompt selection."); }
++              }}>Use original skills for this draft</button>}
++              <button onClick={() => checkOriginalPrompt(pendingPrompt)} disabled={busy}>Check original</button>
++            </div>
++          )}
++          {pendingFork && (
++            <div className="wb-uncertain" role="alert">
++              <ShieldAlert size={15} />
++              <div>
++                <strong>Fork admission needs checking</strong>
++                <p>The original source and cutoff are saved. Veyra will only read its receipt and will not submit the fork again. A conversation fork shares the source files; it does not create an isolated workspace.</p>
++              </div>
++              <button onClick={() => checkOriginalFork(pendingFork)} disabled={busy || !connected || !api}>Check original fork</button>
++            </div>
++          )}
++          {forkStorageIssue && <p className="wb-inline-note" role="alert">{forkStorageIssue}</p>}
++          {forkPreview && forkPreview.view === forkViewToken && forkPreview.owner.original && <section className="wb-interrupt-review" aria-label="Review conversation fork" aria-busy={forkBusy} onKeyDown={event => { if (event.key === "Escape" && !forkBusy) { event.stopPropagation(); setForkPreview(null); forkButtonRef.current?.focus(); } }}>
++            <strong>Review conversation fork</strong>
++            <p>A new conversation will copy history before {forkPreview.before}. Both chats share the same files.</p>
++            <dl><dt>Service / library</dt><dd>{forkPreview.owner.service_instance_id} / {forkPreview.owner.original.library_id}</dd>
++              <dt>Engine / revision</dt><dd>{forkPreview.owner.original.engine_instance_id} / {forkPreview.owner.original.engine_revision}</dd>
++              <dt>Source conversation</dt><dd>{forkPreview.owner.session_id}</dd>
++              <dt>Saved Project</dt><dd><details><summary>{project?.name} · revision {forkPreview.owner.project_revision}</summary><pre>{JSON.stringify(forkPreview.owner.original.project,null,2)}</pre></details></dd>
++              <dt>Configuration</dt><dd><details><summary>{forkPreview.owner.profile_id} · {forkPreview.owner.quant} · {forkPreview.owner.context} tokens</summary><pre>{JSON.stringify(forkPreview.owner.original.configuration,null,2)}</pre></details></dd>
++              <dt>Source provenance</dt><dd><details><summary>Original session, parent and cutoff provenance</summary><pre>{JSON.stringify(forkPreview.owner.original.session,null,2)}</pre></details></dd></dl>
++            <button type="button" disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession || !!forkStorageIssue || contextSaving} onClick={() => void forkBefore(forkPreview.before,forkPreview.owner)}>Fork displayed original</button>
++            <button type="button" disabled={forkBusy} onClick={() => { setForkPreview(null); forkButtonRef.current?.focus(); }}>Close fork preview</button>
++          </section>}
++                    {!workDefault && forkRecords}
++          {(pendingFork || forkStorageIssue) && <p className="wb-inline-note">Private fork originals may contain paths and settings. Older incomplete records remain preserved and cannot authorize another engine.</p>}
++          {activeSessionId && <p className="wb-inline-note">Fork here copies the conversation up to the selected message. Both conversations share the same files; parallel edits require a separate workspace.</p>}
++
++          <div
++            className="wb-messages"
++            ref={scrollRef}
++            onScroll={event => {
++              const node = event.currentTarget;
++              atBottomRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
++            }}
++            aria-live="polite"
++            aria-relevant="additions text"
++          >
++            {messages.length > messageList.length && <button type="button" className="wb-button" onClick={() => { atBottomRef.current = false; setMessageWindow(current => Math.min(1000, current + 100)); }}>Show earlier loaded messages</button>}
++            {historyCursor && <button type="button" className="wb-button" disabled={!connected || historyLoading || messages.length >= 1000} onClick={() => void loadHistory()}>{historyLoading ? "Loading saved messages…" : "Load more saved messages"}</button>}
++            {loading && !messageList.length && (
++              <div className="wb-loading"><LoaderCircle className="wb-spin" size={18} />Loading session and workspace…</div>
++            )}
++            {!messageList.length && !loading && (
++              <div className="wb-welcome">
++                <div className="wb-mark">V</div>
++                <h1>What are we building?</h1>
++                <p>Ask for a change, explore this project, or start with a plan.</p>
++                <div className="wb-suggestions">
++                  <button onClick={() => setDraft("Explore this project and summarize its structure.")}>Explore this project</button>
++                  <button onClick={() => { setMode("plan"); setDraft("Plan the next change in this project."); }}>Plan a change</button>
++                </div>
++              </div>
++            )}
++              {messageList.map(message => (
++              <article className={`wb-message ${message.role === "user" ? "from-user" : "from-agent"}`} key={message.id}>
++                <div className="wb-avatar">{message.role === "user" ? "Y" : "V"}</div>
++                <div className="wb-message-content">
++                  <div className="wb-message-label">
++                    {message.role === "user" ? "You" : "Veyra"}
++                    {message.status && <span>{message.status}</span>}
++                    {activeSessionId && message.id && !pendingFork && message.role !== "user" && <button className="wb-fork-message" title="Review a fork before this message; shares the same files" aria-label={`Review fork before message ${message.id}`} disabled={busy || !connected || !!pendingPrompt || !!forkStorageIssue || !durableMessageIds.current.has(message.id) || !currentProfile?.status.loaded || currentProfile.status.context !== currentProfile.context || forkDisplayedSessionId !== activeSessionId} onClick={event => { forkButtonRef.current = event.currentTarget; void forkBefore(message.id); }}><GitFork size={12} />Fork here…</button>}
++                  </div>
++                  <div className="wb-prose">
++                    {message.parts.length ? message.parts.map((part, index) => (
++                      <MessagePart key={`${message.id}-${index}`} part={part} />
++                    )) : <Suspense fallback={<p>{message.text}</p>}><RichMarkdown text={message.text} /></Suspense>}
++                    {message.error && message.parts.length > 0 && <p className="wb-inline-note" role="alert">{message.error}</p>}
++                  </div>
++                </div>
++              </article>
++            ))}
++          </div>
++
++          <div className={`wb-composer${draggingFiles ? " wb-composer-dragging" : ""}`}
++            onDragOver={event => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setDraggingFiles(true); } }}
++            onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDraggingFiles(false); }}
++            onDrop={event => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); addComposerFiles(Array.from(event.dataTransfer.files)); } }}>
++            {draggingFiles && <p className="wb-queue-note" role="status">Drop files to attach to this session’s next prompt.</p>}
++            {previewFeedback && <PreviewFeedbackReview key={previewFeedback.requestId} feedback={previewFeedback}
++              available={previewFeedbackAvailable} onAdd={addPreviewFeedback} onDismiss={() => onPreviewFeedbackDismiss?.(previewFeedback.requestId)} />}
++            {securityFeedback && <SecurityFeedbackReview key={securityFeedback.requestId} feedback={securityFeedback}
++              task={activeSessionId} available={securityFeedbackAvailable} onAdd={addSecurityFeedback} onDismiss={() => onSecurityFeedbackDismiss?.(securityFeedback.requestId)}/>}
++            {composerDraft.notice && <p className="wb-queue-note" role="alert">{composerDraft.notice}</p>}
++            <NativeWorkComposerOptions enabled={workDefault} attention={Boolean(contextDirty || contextSaving || composerSkillIssue || reviewPromptSelection || findingFeedbackSendSelection || queueRecovery || queueMutationDraft || queueOriginal || displayedQueue.items.length || attachmentBusy || attachments.length || attachmentRotationFailed)}>
++            <ReviewPromptSelection project={project} service={snapshot?.service.instance_id} taskId={activeSessionId} selected={reviewPromptSelection}
++              disabled={busy || !connected || contextSaving || !!pendingPrompt || !!pendingFork || !!pendingSession || !!findingFeedbackSendSelection} onChange={chooseReviewPrompt}/>
++            <FindingFeedbackSendSelection project={project} service={snapshot?.service.instance_id} taskId={activeSessionId} selected={findingFeedbackSendSelection}
++              proposal={findingFeedbackSendProposal} disabled={busy || !connected || contextSaving || !!pendingPrompt || !!pendingFork || !!pendingSession || !!reviewPromptSelection} onChange={chooseFindingFeedbackSend}/>
++            {composerSkillIssue && <p className="wb-queue-note" role="alert">{composerSkillIssue} Sending and queueing are paused. Open Instructions, references & skills to explicitly review or clear this draft’s selection.</p>}
++            <ScopedContextPanel key={`context:${project.id}:${activeSessionId}`} request={call} sessionId={activeSessionId} project={project} connected={connected} disabled={busy || !!pendingPrompt || !!pendingFork || !!pendingSession} selectedSkillIds={selectedSkillIds} skillSelectionIssue={composerSkillIssue} onSkillSelectionIssue={composerDraft.flagSkillSelectionIssue} onSkillsChange={setScopedPromptSkills} onDirtyChange={setScopedContextDirty} onMutationChange={setScopedContextSaving}/>
++            <MemoryPanel key={`memory:${memoryScopeKey}`} request={call} projectId={project.id} sessionId={activeSessionId} connected={connected} disabled={busy || !!pendingPrompt || !!pendingFork || !!pendingSession} selection={selectedMemory} onChange={changeMemorySelection}/>
++            {workDefault && composerQueue}
++            {workDefault && composerAttachments}
++            {workDefault && imageCapabilities}
++            </NativeWorkComposerOptions>
++            {contextDirty && <p className="wb-queue-note" role="status">Session context has unsaved changes. Sending, voice and queued follow-ups use the saved instructions and references until you save.</p>}
++            {contextSaving && <p className="wb-queue-note" role="status">Prompt admission is paused while session context is saving or awaiting reconciliation. Open Instructions, references & skills to check the saved context.</p>}
++            <VoiceWorkspace compact={workDefault} key={`${voiceOwnerKey}:${voiceEpoch.current.revision}`} request={call} scope={`${project.id}:${activeSessionId || "new"}:${attachmentDraftId || newSessionVersion}`}
++              projectId={project.id} sessionId={activeSessionId} connected={connected} isCurrent={voiceIsCurrent} ownerMatches={voiceOwnerMatches}
++              disabled={busy || contextSaving || contextDirty || !!pendingPrompt || !!pendingFork || !!pendingSession || !!composerDraft.notice}
++              continuousDisabledReason={draft.trim() || attachments.length || selectedSkillIds.length || selectedMemory.length
++                ? "Send or clear the current draft, attachments, selected skills and memory before continuous voice. Dictation can still append to this draft."
++                : resumeQueue || followUpQueue.items.length ? "Pause and clear queued follow-ups before continuous voice, so only your spoken turns can advance this chat." : ""}
++              reply={[...messages].reverse().find(message => message.role === "assistant" && message.text.trim())?.text ?? ""}
++              onInsert={text => {
++                if (!voiceIsCurrent() || composerAdmissionLock.current || !connected || busy || contextSaving)
++                  return { ok: false, message: "The original composer is unavailable. No transcript was inserted." };
++                return composerDraft.appendTranscript(text);
++              }}/>
++            {selectedSkillIds.length > 0 && <p className="wb-queue-note">{selectedSkillIds.length} skills selected for typed messages and new queued drafts. Each queued draft keeps its own selection. Voice uses saved session context without these selections.</p>}
++            {draft.length === 0 && <ProjectSuggestions key={`${feedbackOwnerKey}:${activeSessionId}:${newSessionVersion}`} project={project} serviceInstanceId={snapshot?.service.instance_id ?? ""}
++              sessionId={activeSessionId} view={suggestionView} files={sourceContext} git={gitSuggestionContext} transcript={continuationContext}
++              unavailable={suggestionUnavailable} isCurrent={suggestionCurrent} onChoose={chooseSuggestion}
++              transcriptLoading={suggestionsLoading && suggestionsLoadingRef.current === suggestionView}
++              onRefreshTranscript={activeSessionId ? () => { void refreshSuggestionContext(); } : undefined} />}
++            {suggestionNotice?.view === suggestionView && <p className="wb-queue-note" role="status">{suggestionNotice.text}</p>}
++            {!workDefault && composerQueue}
++            {!workDefault && composerAttachments}
++            {!workDefault && imageCapabilities}
+             {activeSessionId && attachments.length > 0 && <p className="wb-queue-note" role="status">Attachments are saved for this prompt and cannot be added to the follow-up queue. Remove them before queueing.</p>}
+             {attachmentBusy && <p className="wb-queue-note" role="status">Saving attachments… sending and queueing are paused until they finish.</p>}
+             <textarea
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+index a82a90c27e696aae2f11a26e43d545d7a48ca2db..730c60acbf9ecd4a6367f1703c826e2d73b180f8 100644
+--- a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+@@ -1,8 +1,40 @@
+-import { useId, useState, type ReactNode } from "react";
++import { useId, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from "react";
+ 
+ /** Native disclosure keeps existing feature owners mounted while collapsed. */
+-export function NativeWorkDisclosure({ enabled, label, children }: { enabled: boolean; label: string; children: ReactNode }) {
+-  return enabled ? <details className="native-work-disclosure"><summary>{label}</summary><div>{children}</div></details> : <>{children}</>;
++export function NativeWorkDisclosure({ enabled, label, children, attention = false, hostRef }: { enabled: boolean; label: string; children: ReactNode; attention?: boolean; hostRef?: Ref<HTMLDetailsElement> }) {
++  return enabled ? <details ref={hostRef} className="native-work-disclosure" open={attention || undefined} onToggle={event => {
++    // Presentation guard only: do not let collapse conceal a reported error or
++    // original recovery action. Existing operational owners remain unchanged.
++    if (attention && !event.currentTarget.open) event.currentTarget.open = true;
++  }}><summary>{label}{attention && <span> · Needs attention</span>}</summary><div>{children}</div></details> : <>{children}</>;
++}
++
++/** Composer-only visibility adapter. Observe the existing owners' semantic
++ * alerts, never their private state or transport. Reveal nested recovery UI
++ * without unmounting it, dispatching work, or changing admission readiness. */
++export function NativeWorkComposerOptions({ enabled, attention, children }: { enabled: boolean; attention: boolean; children: ReactNode }) {
++  const host = useRef<HTMLDetailsElement>(null);
++  const [childAlert, setChildAlert] = useState(false);
++  useLayoutEffect(() => {
++    if (!enabled || !host.current) return;
++    const root = host.current;
++    const revealAlerts = () => {
++      const alerts = root.querySelectorAll('[role="alert"]');
++      setChildAlert(alerts.length > 0);
++      for (const alert of alerts) {
++        let disclosure = alert.closest("details");
++        while (disclosure && root.contains(disclosure)) {
++          disclosure.open = true;
++          disclosure = disclosure.parentElement?.closest("details") ?? null;
++        }
++      }
++    };
++    revealAlerts();
++    const observer = new MutationObserver(revealAlerts);
++    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ["role"] });
++    return () => observer.disconnect();
++  }, [enabled]);
++  return <NativeWorkDisclosure enabled={enabled} label="Composer options" attention={attention || childAlert} hostRef={host}>{children}</NativeWorkDisclosure>;
+ }
+ 
+ export function NativeWorkGroup({ enabled, open, id, children }: { enabled: boolean; open: boolean; id: string; children: ReactNode }) {
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+index 3007084e7e83e96ae8818613e99a7836d457eba9..71c431d424da2b1b2dc8e98e47a12375a5631d53 100644
+--- a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+@@ -1,7 +1,7 @@
+ import { useEffect, useState } from "react";
+-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+-import { NativeWorkDisclosure, NativeWorkGroup, NativeWorkPresentation } from "./NativeWorkPresentation";
++import { NativeWorkComposerOptions, NativeWorkDisclosure, NativeWorkGroup, NativeWorkPresentation } from "./NativeWorkPresentation";
+ 
+ afterEach(cleanup);
+ describe("native Work presentation boundary", () => {
+@@ -76,4 +76,24 @@
+     expect(screen.queryByRole("button", { name: "Terminal panel" })).toBeNull();
+     expect(screen.getByRole("button", { name: "Web", exact: true })).toBeTruthy();
+   });
++
++  it("reveals original nested composer alerts while retaining the mounted draft and owner", async () => {
++    const original = (failed: boolean) => <details><summary>Instructions</summary><input aria-label="Original instruction draft" defaultValue="Exact unsaved instructions" />
++      {failed && <p role="alert">Original context save needs reconciliation</p>}</details>;
++    const view = render(<NativeWorkComposerOptions enabled attention={false}>{original(false)}</NativeWorkComposerOptions>);
++    const input = screen.getByLabelText("Original instruction draft");
++    fireEvent.change(input, { target: { value: "Keep my exact edit" } });
++    view.rerender(<NativeWorkComposerOptions enabled attention={false}>{original(true)}</NativeWorkComposerOptions>);
++    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Original context save needs reconciliation"));
++    expect(screen.getByLabelText("Original instruction draft")).toBe(input);
++    expect((input as HTMLInputElement).value).toBe("Keep my exact edit");
++    expect(input.closest("details")?.open).toBe(true);
++  });
++
++  it("exposes original recovery actions when attention is reported without invoking them", () => {
++    const check = vi.fn();
++    render(<NativeWorkDisclosure enabled label="Conversation settings" attention><button onClick={check}>Check original operation</button></NativeWorkDisclosure>);
++    expect(screen.getByRole("button", { name: "Check original operation" })).toBeTruthy();
++    expect(check).not.toHaveBeenCalled();
++  });
+ });
+diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
+index a054936690c97f88fdea7a70e63cf70b7fb511b9..bf80b2e003a4947458fc115f116d4d95daadda49 100644
+--- a/apps/web/src/features/work-ui/native-work.css
++++ b/apps/web/src/features/work-ui/native-work.css
+@@ -57,6 +57,15 @@
+ .native-work-welcome > p { font-size: .95rem; margin: 8px 0 20px; }
+ .native-work-welcome .native-work-start-welcome { flex: 0 0 auto; max-width: 30rem; }
+ .native-work-start-welcome .native-work-start-options > div { left: auto; right: 0; max-width: calc(100vw - 80px); }
++.native-work-presentation .wb-chat > .native-work-disclosure { margin: 0; flex: 0 0 auto; }
++.native-work-presentation .wb-chat > .native-work-disclosure > summary { padding: 6px 16px; font-size: .85rem; }
++.native-work-presentation .wb-chat > .native-work-disclosure > div { max-height: min(45dvh, 440px); overflow-y: auto; border-bottom: 1px solid var(--border); padding: 8px; }
++.native-work-presentation .wb-chat > .native-work-disclosure[open] .wb-toolbar { min-height: 0; }
++.native-work-presentation .wb-composer > .native-work-disclosure { margin: 0; font-size: .85rem; border-bottom: 1px solid var(--border); }
++.native-work-presentation .wb-composer > .native-work-disclosure > summary { padding: 7px 14px; }
++.native-work-presentation .wb-composer > .native-work-disclosure > div { max-height: 40dvh; overflow-y: auto; padding: 8px; }
++.native-work-presentation .wb-composer textarea { min-height: 64px; max-height: 28dvh; }
++.native-work-presentation .wb-engine-note { padding-block: 4px; font-size: .8rem; }
+ .native-work-presentation .wb-toolbar { flex-wrap: wrap; padding: 8px 16px; gap: 8px; min-height: 40px; background: var(--canvas); border-bottom-color: transparent; }
+ .native-work-presentation .wb-sessionbar { flex-wrap: wrap; padding: 6px 16px; border-bottom-color: transparent; }
+ .native-work-presentation .wb-chat { border-right: 0; }
