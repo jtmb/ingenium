@@ -1,0 +1,361 @@
+diff --git a/apps/web/src/app/App.tsx b/apps/web/src/app/App.tsx
+index 457b29fd..45a76977 100644
+--- a/apps/web/src/app/App.tsx
++++ b/apps/web/src/app/App.tsx
+@@ -1,4 +1,5 @@
+ import { useCollaborationRecovery } from "../features/remote-hosts/useCollaborationRecovery";
++import { NativeWorkPresentation } from "../features/work-ui/NativeWorkPresentation";
+ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+ import "../features/artifacts/artifact-editor.css";
+ import {
+@@ -194,7 +195,9 @@ function initialWorkspaceDestination(): { view: DockedView; selectionId: string
+   return { view, selectionId: validSelection ? selection : null, sessionId: session && /^ses_[A-Za-z0-9_-]{1,128}$/.test(session) ? session : null };
+ }
+ 
+-export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?: Gateway; modelsOnly?: boolean }) {
++export function App({ gateway = desktopGateway, modelsOnly = false, workDefault = false, onOpenDiagnostics }: {
++  gateway?: Gateway; modelsOnly?: boolean; workDefault?: boolean; onOpenDiagnostics?: () => void;
++}) {
+   const [initialDestination] = useState(initialWorkspaceDestination);
+   const [collaborationHeld, setCollaborationHeld] = useState(false), collaborationHeldRef = useRef(false);
+   const { snapshot, connected, error, checking, readerScope, refresh } =
+@@ -1150,7 +1153,7 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+     <>{collaborationRecovery.retained && <details open={collaborationHeld} className="collaboration-recovery-local"><summary>Private page and snapshot recovery</summary>{collaborationRecovery.panel}</details>}<div
+       inert={collaborationHeld}
+       ref={layout.desktopRef}
+-      className={`desktop ${sidebar ? "" : "sidebar-collapsed"}`}
++      className={`desktop ${workDefault ? "native-work-default" : ""} ${sidebar ? "" : "sidebar-collapsed"}`}
+       style={{ "--sidebar-width": `${layout.width}px`, "--rail-width": `${layout.railWidth}px` } as CSSProperties}
+     >
+       <nav ref={layout.railRef} className="global-rail" aria-label="Main navigation">
+@@ -1173,6 +1176,8 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+           ))}
+         </div>
+         <div className="rail-footer">
++          {onOpenDiagnostics && <button type="button" className="rail-button" aria-label="Connection and engine diagnostics"
++            title="Connection and engine diagnostics" onClick={onOpenDiagnostics}><ShieldCheck size={20} /></button>}
+           <span className="local-avatar" title="Local workspace">
+             L
+           </span>
+@@ -1654,6 +1659,9 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+             </PaneRenderBoundary>
+           ) : view === "projects" && codingWorkspace && catalog.selected ? (
+             <PaneRenderBoundary viewLabel="Coding workspace">
++              <NativeWorkPresentation scope={JSON.stringify([instance, catalog.selected.id, catalog.selected.revision,
++                catalog.selected.environment, catalog.selected.primary_root, liveSessionSelection, newSessionVersion])}
++                projectName={catalog.selected.name}>
+               <Workbench collaborationRecovery={collaborationRecovery} key={catalog.selected.id} gateway={gateway} project={catalog.selected}
+                 onOpenFindings={() => setFindingsOpenRequest(value => value + 1)}
+                 fileWorkspaceCache={fileWorkspaceCache.current}
+@@ -1675,7 +1683,21 @@ export function App({ gateway = desktopGateway, modelsOnly = false }: { gateway?
+                   setScheduledThreadSeed({ request_id: crypto.randomUUID(), owner, session_id: sessionId });
+                   setArea("scheduled");
+                 }} />
++              </NativeWorkPresentation>
+             </PaneRenderBoundary>
++          ) : workDefault && view === "projects" && codingWorkspace && !catalog.selected ? (
++            <NativeWorkPresentation scope={JSON.stringify([instance, "no-project"])} projectName="No project selected">
++              <section className="native-work-welcome">
++                <img src="/veyra-blue.png" alt="" width="48" height="48" />
++                <h1>What should we build?</h1>
++                <p>Choose a project, or start a private scratch chat with the existing native workspace owner.</p>
++                <div><button type="button" className="button" disabled={!connected || !gateway.workbench || !projectsSupported || scratchBusy}
++                  onClick={() => void startScratchChat()}>{scratchBusy ? "Creating chat…" : scratchRequestId ? "Resume new chat" : "New chat"}</button>
++                  <button type="button" className="button" onClick={() => setCodingWorkspace(false)}>Choose project</button></div>
++                <p role="status">{!connected ? "Reconnect the native service before starting a chat." : !gateway.workbench || !projectsSupported
++                  ? "Native chat creation is unavailable in this service build." : "Creating a chat does not start an engine or send a prompt."}</p>
++              </section>
++            </NativeWorkPresentation>
+           ) : view === "projects" && savedProjectPresentation && connected && readerScope === savedProjectPresentation.readerScope &&
+             instance === savedProjectPresentation.instanceId && catalog.selected === savedProjectPresentation.project &&
+             !projectsSupported ? (
+diff --git a/apps/web/src/features/work-ui/NativeWorkDesktop.test.tsx b/apps/web/src/features/work-ui/NativeWorkDesktop.test.tsx
+new file mode 100644
+index 00000000..e7d67d50
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkDesktop.test.tsx
+@@ -0,0 +1,53 @@
++import { useEffect } from "react";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import type { Gateway } from "../../platform/types";
++
++const state = vi.hoisted(() => ({ mounted: vi.fn(), disposed: vi.fn(), diagnostics: vi.fn() }));
++vi.mock("../../platform/gateway", () => ({ desktopGateway: {} }));
++vi.mock("../../app/App", () => ({
++  App: ({ workDefault, onOpenDiagnostics }: { workDefault: boolean; onOpenDiagnostics: () => void }) => {
++    useEffect(() => { state.mounted(); return state.disposed; }, []);
++    return <section><p>{workDefault ? "Native Work default" : "Wrong default"}</p>
++      <label>Owned draft<textarea defaultValue="Preserve original" /></label>
++      <p>Unconfirmed admission original retained</p>
++      <button type="button" onClick={onOpenDiagnostics}>Connection and engine diagnostics</button></section>;
++  },
++}));
++vi.mock("../../app/MvpDesktop", () => ({
++  MvpDesktop: () => { state.diagnostics(); return <p>Existing connection and qualification controls</p>; },
++}));
++import { NativeWorkDesktop } from "./NativeWorkDesktop";
++
++const modal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal");
++const close = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close");
++beforeEach(() => {
++  Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } });
++  Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } });
++});
++afterEach(() => {
++  cleanup(); vi.clearAllMocks();
++  if (modal) Object.defineProperty(HTMLDialogElement.prototype, "showModal", modal);
++  else Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
++  if (close) Object.defineProperty(HTMLDialogElement.prototype, "close", close);
++  else Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
++});
++describe("native Work default", () => {
++  it("starts in Work and opens diagnostics only by explicit action without replacing its owner", async () => {
++    render(<NativeWorkDesktop gateway={{} as Gateway} />);
++    expect(screen.getByText("Native Work default")).toBeTruthy();
++    expect(state.diagnostics).not.toHaveBeenCalled();
++    const draft = screen.getByLabelText("Owned draft");
++    fireEvent.change(draft, { target: { value: "Exact edited original" } });
++    const trigger = screen.getByRole("button", { name: "Connection and engine diagnostics" });
++    trigger.focus(); fireEvent.click(trigger);
++    await screen.findByText("Existing connection and qualification controls");
++    expect(screen.getByRole("dialog", { name: "Connection and engine diagnostics" })).toBeTruthy();
++    fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
++    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
++    expect(screen.getByLabelText("Owned draft")).toBe(draft);
++    expect((draft as HTMLTextAreaElement).value).toBe("Exact edited original");
++    expect(document.activeElement).toBe(trigger);
++    expect(state.mounted).toHaveBeenCalledTimes(1); expect(state.disposed).not.toHaveBeenCalled();
++  });
++});
+diff --git a/apps/web/src/features/work-ui/NativeWorkDesktop.tsx b/apps/web/src/features/work-ui/NativeWorkDesktop.tsx
+new file mode 100644
+index 00000000..c12593cb
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkDesktop.tsx
+@@ -0,0 +1,39 @@
++import { lazy, Suspense, useLayoutEffect, useRef, useState } from "react";
++import type { Gateway } from "../../platform/types";
++import { desktopGateway } from "../../platform/gateway";
++import { App } from "../../app/App";
++import "./native-work.css";
++
++const Diagnostics = lazy(() => import("../../app/MvpDesktop").then(module => ({ default: module.MvpDesktop })));
++
++/** DesktopEntry remains the admission boundary outside this presentation. */
++export function NativeWorkDesktop({ gateway = desktopGateway }: { gateway?: Gateway }) {
++  const [diagnostics, setDiagnostics] = useState(false);
++  const dialog = useRef<HTMLDialogElement>(null);
++  const trigger = useRef<HTMLElement | null>(null);
++  useLayoutEffect(() => {
++    if (!diagnostics || !dialog.current) return;
++    const surface = dialog.current;
++    // Native dialog supplies focus containment and Escape. The open fallback
++    // supports DOM-only tests without claiming desktop modal qualification.
++    if (typeof surface.showModal === "function") surface.showModal();
++    else surface.setAttribute("open", "");
++    return () => {
++      if (typeof surface.close === "function" && surface.open) surface.close();
++      trigger.current?.focus({ preventScroll: true });
++    };
++  }, [diagnostics]);
++  return <div className="native-work-desktop">
++    <div className="native-work-app" inert={diagnostics} aria-hidden={diagnostics}>
++      <App gateway={gateway} workDefault onOpenDiagnostics={() => {
++        trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
++        setDiagnostics(true);
++      }} />
++    </div>
++    {diagnostics && <dialog ref={dialog} className="native-work-diagnostics" aria-label="Connection and engine diagnostics"
++      onCancel={event => { event.preventDefault(); setDiagnostics(false); }}>
++      <header><h1>Connection and engine diagnostics</h1><button type="button" autoFocus onClick={() => setDiagnostics(false)}>Return to Work</button></header>
++      <Suspense fallback={<p role="status">Opening diagnostics…</p>}><Diagnostics gateway={gateway} /></Suspense>
++    </dialog>}
++  </div>;
++}
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+new file mode 100644
+index 00000000..ba897cd1
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx
+@@ -0,0 +1,51 @@
++import { useEffect, useState } from "react";
++import { cleanup, fireEvent, render, screen } from "@testing-library/react";
++import { afterEach, describe, expect, it, vi } from "vitest";
++import { NativeWorkPresentation } from "./NativeWorkPresentation";
++
++afterEach(cleanup);
++describe("native Work presentation boundary", () => {
++  it("retains the actual child owner, draft, scroll and unknown original across Web return", () => {
++    const mounted = vi.fn(), disposed = vi.fn(), send = vi.fn();
++    function ExistingOwner() {
++      const [draft, setDraft] = useState("Exact pending original");
++      useEffect(() => { mounted(); return disposed; }, []);
++      return <div><label>Native draft<textarea value={draft} onChange={event => setDraft(event.target.value)} /></label>
++        <div data-testid="transcript">Authoritative native transcript</div>
++        <p>Original admission outcome unknown; review before retry</p>
++        <button type="button" disabled onClick={send}>Send message</button></div>;
++    }
++    render(<NativeWorkPresentation scope="instance/project/session-a" projectName="Project"><ExistingOwner /></NativeWorkPresentation>);
++    fireEvent.change(screen.getByLabelText("Native draft"), { target: { value: "Original with exact edits" } });
++    const transcript = screen.getByTestId("transcript"); transcript.scrollTop = 120;
++    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
++    expect(screen.getByText("Web is unavailable for this conversation")).toBeTruthy();
++    const inactive = screen.getByLabelText("Native Work presentation");
++    expect(inactive.hasAttribute("inert")).toBe(true); expect(inactive.hasAttribute("hidden")).toBe(false);
++    fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
++    expect((screen.getByLabelText("Native draft") as HTMLTextAreaElement).value).toBe("Original with exact edits");
++    expect(screen.getByTestId("transcript")).toBe(transcript); expect(transcript.scrollTop).toBe(120);
++    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
++    expect(mounted).toHaveBeenCalledTimes(1); expect(disposed).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
++    expect(document.querySelector("iframe")).toBeNull();
++  });
++
++  it("returns a changed native binding to Work without recreating the conversation owner", () => {
++    const view = render(<NativeWorkPresentation scope="owner-a/session-a" projectName="Original"><input aria-label="Existing owner" defaultValue="retained" /></NativeWorkPresentation>);
++    const input = screen.getByLabelText("Existing owner");
++    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
++    view.rerender(<NativeWorkPresentation scope="owner-b/session-b" projectName="Selected"><input aria-label="Existing owner" defaultValue="retained" /></NativeWorkPresentation>);
++    expect(screen.getByRole("button", { name: "Work", exact: true }).getAttribute("aria-pressed")).toBe("true");
++    expect(screen.getByLabelText("Existing owner")).toBe(input);
++  });
++
++  it("offers explicit optional panels without invoking any operational action", () => {
++    render(<NativeWorkPresentation scope="a" projectName="Long project name"><p>Existing controller</p></NativeWorkPresentation>);
++    const tools = screen.getByRole("button", { name: "Workspace tools" });
++    const terminal = screen.getByRole("button", { name: "Terminal panel" });
++    expect(tools.getAttribute("aria-pressed")).toBe("false");
++    fireEvent.click(tools); fireEvent.click(terminal);
++    expect(tools.getAttribute("aria-pressed")).toBe("true");
++    expect(terminal.getAttribute("aria-pressed")).toBe("true");
++  });
++});
+diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+new file mode 100644
+index 00000000..b5742db3
+--- /dev/null
++++ b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
+@@ -0,0 +1,43 @@
++import { useId, useState, type ReactNode } from "react";
++
++/**
++ * Presentation only: the existing Workbench keeps its draft, scroll, pending
++ * originals and service subscriptions mounted behind the explicit Web toggle.
++ * No native gateway currently qualifies an upstream exact-session Web surface.
++ */
++export function NativeWorkPresentation({ scope, projectName, children }: {
++  scope: string; projectName: string; children: ReactNode;
++}) {
++  const id = useId();
++  const [selection, setSelection] = useState({ scope, view: "work" as "work" | "web" });
++  const [tools, setTools] = useState(false);
++  const [terminal, setTerminal] = useState(false);
++  const view = selection.scope === scope ? selection.view : "work";
++  return <section className="native-work-presentation" aria-label="Work conversation"
++    data-tools={tools} data-terminal={terminal}>
++    <header className="native-work-heading">
++      <span className="native-work-project" title={projectName}>{projectName}</span>
++      <div role="group" aria-label="Conversation presentation" className="native-work-switch">
++        <button type="button" aria-pressed={view === "work"} aria-controls={`${id}-work`}
++          onClick={() => setSelection({ scope, view: "work" })}>Work</button>
++        <button type="button" aria-pressed={view === "web"} aria-controls={`${id}-web`}
++          onClick={() => setSelection({ scope, view: "web" })}>Web</button>
++      </div>
++      <button type="button" aria-pressed={tools} onClick={() => setTools(!tools)}>Workspace tools</button>
++      <button type="button" aria-pressed={terminal} onClick={() => setTerminal(!terminal)}>Terminal panel</button>
++    </header>
++    <div className="native-work-viewport">
++      <div id={`${id}-work`} role="region" aria-label="Native Work presentation"
++        aria-hidden={view !== "work"} inert={view !== "work"} data-active={view === "work"}
++        className="native-work-surface">{children}</div>
++      <div id={`${id}-web`} role="region" aria-label="Upstream Web presentation"
++        aria-hidden={view !== "web"} inert={view !== "web"} data-active={view === "web"}
++        className="native-work-surface native-work-unavailable">
++        <h2>Web is unavailable for this conversation</h2>
++        <p>The native service has no qualified upstream Web binding for this exact project and session.</p>
++        <p>Your Work conversation stays open. Its draft, attachments and original operation outcomes remain with the native controller.</p>
++        <button type="button" onClick={() => setSelection({ scope, view: "work" })}>Return to Work</button>
++      </div>
++    </div>
++  </section>;
++}
+diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
+new file mode 100644
+index 00000000..5e7580e3
+--- /dev/null
++++ b/apps/web/src/features/work-ui/native-work.css
+@@ -0,0 +1,54 @@
++/* Native presentation only. All engine, transcript, file, review and admission
++   behavior stays in the existing App / Workbench / platform gateway owners. */
++.native-work-desktop, .native-work-app { height: 100%; min-height: 0; }
++.native-work-default.desktop { grid-template-columns: 52px var(--sidebar-width, 244px) minmax(0, 1fr); }
++.native-work-default.desktop.sidebar-collapsed { grid-template-columns: 52px minmax(0, 1fr); }
++.native-work-default .global-rail { padding-top: 12px; }
++.native-work-default .rail-links { gap: 6px; }
++.native-work-default .sidebar { background: var(--sidebar); }
++.native-work-default .sidebar-heading { border-bottom-color: transparent; }
++.native-work-default .history-topbar { height: auto; min-height: 44px; flex-wrap: wrap; gap: 8px; border-bottom-color: transparent; }
++.native-work-default .statusbar { min-height: 24px; }
++.native-work-presentation { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; background: var(--canvas); }
++.native-work-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 16px; flex-shrink: 0; }
++.native-work-heading button, .native-work-unavailable button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
++.native-work-heading button:focus-visible, .native-work-unavailable button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.native-work-project { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
++.native-work-switch { display: flex; border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
++.native-work-switch button { border: 0; }
++.native-work-heading button[aria-pressed=true] { background: var(--control); }
++.native-work-viewport { flex: 1; min-height: 0; position: relative; }
++/* visibility retains geometry and scroll; inert removes inactive keyboard and
++   accessibility access. Never display:none the owner during a Web toggle. */
++.native-work-surface { position: absolute; inset: 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
++.native-work-surface[data-active=false] { visibility: hidden; pointer-events: none; }
++.native-work-unavailable { align-items: center; justify-content: center; padding: 24px; overflow-y: auto; text-align: center; }
++.native-work-unavailable p { max-width: 56ch; color: var(--muted); line-height: 1.6; }
++.native-work-welcome { display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; min-height: 0; overflow-y: auto; padding: 24px; text-align: center; }
++.native-work-welcome h1 { font-size: 1.6rem; font-weight: 500; }
++.native-work-welcome p { max-width: 52ch; color: var(--muted); line-height: 1.6; }
++.native-work-welcome > div { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
++.native-work-presentation .wb-toolbar { flex-wrap: wrap; padding: 8px 16px; gap: 8px; min-height: 40px; background: var(--canvas); border-bottom-color: transparent; }
++.native-work-presentation .wb-sessionbar { flex-wrap: wrap; padding: 6px 16px; border-bottom-color: transparent; }
++.native-work-presentation .wb-chat { border-right: 0; }
++.native-work-presentation .wb-messages { padding-inline: max(16px, calc((100% - 740px) / 2)); }
++.native-work-presentation .wb-composer { width: min(740px, calc(100% - 32px)); margin: 12px auto 20px; border-radius: 20px; background: var(--elevated); }
++.native-work-presentation .wb-composer textarea { background: transparent; }
++.native-work-presentation[data-tools=false] .wb-inspector:not(.is-open) { display: none; }
++.native-work-presentation[data-tools=false] .wb-body:not(.wb-inspector-open) { grid-template-columns: minmax(0, 1fr); }
++.native-work-presentation[data-terminal=false] .wb-bottom { display: none; }
++.native-work-presentation .wb-compact-tools-toggle { display: inline-flex; }
++.native-work-diagnostics { width: min(1200px, calc(100vw - 32px)); height: min(900px, calc(100dvh - 32px)); padding: 0; color: var(--text); background: var(--canvas); border: 1px solid var(--border); border-radius: 12px; }
++.native-work-diagnostics::backdrop { background: #0009; }
++.native-work-diagnostics > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; }
++.native-work-diagnostics h1 { font-size: 1rem; }
++.native-work-diagnostics > .mvp-desktop { height: calc(100% - 64px); min-height: 0; }
++.native-work-diagnostics > header button { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--control); color: var(--text); }
++@media (max-width: 900px) {
++  .native-work-heading { padding: 8px; }
++  .native-work-heading > .native-work-project { flex-basis: 100%; }
++  .native-work-presentation[data-tools=true] .wb-body { grid-template-columns: minmax(0, 1fr); }
++  .native-work-presentation[data-tools=true] .wb-inspector { display: flex; min-height: 0; overflow: auto; }
++  .native-work-presentation[data-tools=true] .wb-chat { display: none; }
++  .native-work-presentation .wb-composer { width: calc(100% - 16px); margin: 8px auto; }
++}
+diff --git a/apps/web/src/main.tsx b/apps/web/src/main.tsx
+index 6188627f..a8295c17 100644
+--- a/apps/web/src/main.tsx
++++ b/apps/web/src/main.tsx
+@@ -1,6 +1,6 @@
+ import React from "react";
+ import ReactDOM from "react-dom/client";
+-import { MvpDesktop } from "./app/MvpDesktop";
++import { NativeWorkDesktop } from "./features/work-ui/NativeWorkDesktop";
+ import { DesktopEntry } from "./app/DesktopEntry";
+ import { desktopGateway } from "./platform/gateway";
+ import "./styles/tokens.css";
+@@ -12,6 +12,6 @@ ReactDOM.createRoot(document.getElementById("root")!, {
+   onCaughtError: () => console.error("Veyra could not render a view."),
+ }).render(
+   <React.StrictMode>
+-    <DesktopEntry gateway={desktopGateway}><MvpDesktop /></DesktopEntry>
++    <DesktopEntry gateway={desktopGateway}><NativeWorkDesktop gateway={desktopGateway} /></DesktopEntry>
+   </React.StrictMode>,
+ );
