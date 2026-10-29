@@ -1,0 +1,34 @@
+{
+  "candidate": {
+    "platform": "windows",
+    "appRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "nativeRevision": "cccccccccccccccccccccccccccccccccccccccc",
+    "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifactSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "acceptance": {
+    "views": 47,
+    "featureDispositions": 74,
+    "windowsRows": 11,
+    "originalContractSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "retainedContractSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "settings": 20
+  },
+  "evidence": [
+    {
+      "gate": "source-provenance",
+      "kind": "provenance",
+      "status": "pass",
+      "fixture": true,
+      "subject": {
+        "platform": "windows",
+        "appRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "nativeRevision": "cccccccccccccccccccccccccccccccccccccccc",
+        "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifactSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "receiptPath": "tests/veyra-release-fixtures/receipt.json",
+      "receiptSha256": "b0142b6d8f521cac43d568335a1755eb38da5688a83364cc9ad49943d9b68b44"
+    }
+  ]
+}

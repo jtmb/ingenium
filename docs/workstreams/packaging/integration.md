@@ -10,7 +10,7 @@ No shared-path edits are included. Review and integrate these modules in depende
 | Exact source | Capture clean application and native identities after integrating every stream and preserving installation Chat defaults | Raw source inventory and pinned external dependency/lock hashes before/after the build |
 | Windows release | Use the existing storage-guarded desktop builder with an exact reviewed integrated frontend and isolated candidate | Archive hash, notices, truthful signing/update status, portable/installer rollback, lifecycle/tray/native/WSL/terminal/reconnect, unchanged installed engine/settings/models |
 | Linux release | Use the existing image build/publisher and Helm/Flux owner with no custom engine/model closure | Immutable image revision/digest, ingress/auth, original PVC/Secret identities, restart persistence, isolated restore and rollback |
-| Release evidence | Feed independently reviewed immutable candidate-bound receipts into `qualify.mjs` | All platform gates plus original and newly approved functional/visual acceptance |
+| Release evidence | Feed independently reviewed immutable candidate-bound receipt descriptors and their canonical evidence root into `qualify.mjs` | All platform gates plus original and newly approved functional/visual acceptance |
 
 ## Build queue requests
 

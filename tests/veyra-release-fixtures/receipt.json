@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "fixture": true,
+  "gate": "source-provenance",
+  "kind": "provenance",
+  "status": "pass",
+  "subject": {
+    "platform": "windows",
+    "appRevision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "nativeRevision": "cccccccccccccccccccccccccccccccccccccccc",
+    "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "artifactSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  }
+}
