@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "status": "Additional Windows states proposed for review; original 47 baselines unchanged",
+  "visualApproval": false,
+  "views": [
+    {
+      "id": "connection",
+      "capture": "gui-mascot-connection-0.jpg",
+      "sha256": "8418bb17fd6e2bee8d356140a1b63b338d72ca6b177ce2b849fb48dd5bfe7f99",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:13:57.198Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "project-library",
+      "capture": "gui-mascot-project-library-0.jpg",
+      "sha256": "b86f532fa53a6d3ef0152312c416c5720f1518672901e5b5f75bf61d5a5bf7cc",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:15:23.596Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "native-project",
+      "capture": "gui-mascot-native-project-0.jpg",
+      "sha256": "1f1d30c8e92966ac4f52d7a903bf3d03f15f1ba9b1f7d85ed5c4f8fa0f855ffe",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:16:48.629Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "wsl-project",
+      "capture": "gui-mascot-wsl-project-0.jpg",
+      "sha256": "f55d78d48fe1ecc3e676c1c6732f848ccd8e80c2dd15e7b80d470bb8feccea27",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:18:46.182Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "native-terminal-output",
+      "capture": "gui-mascot-native-terminal-output-0.jpg",
+      "sha256": "dafeadb71de2ad47890d0c92276668a9259dbd48a41a0e82b60159b95c7b150f",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:17:11.731Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "wsl-terminal-output",
+      "capture": "gui-mascot-wsl-terminal-output-0.jpg",
+      "sha256": "2bc5734e815103818319b2b276a02d4e542e976c5f7000d4300b76b039b6f17e",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:19:10.823Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "reconnect",
+      "capture": "gui-mascot-native-reconnect-0.jpg",
+      "sha256": "26acb8a58443d35f91b3933827697d8426a6e61bf06397f107953e7414ef70ef",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:25:49.981Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "terminal-closed",
+      "capture": "gui-mascot-wsl-terminal-closed-0.jpg",
+      "sha256": "9380b7c00dc148bae019031161f5a0e55f0d05efd9f5c2dc0c1f6beb9ac4106e",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-28T21:19:28.956Z",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    }
+  ],
+  "remainingGates": [
+    "First-run and native-service recovery states",
+    "Create-project distro/user/shell/workdir selection dialog",
+    "Tray menu and confirmed graceful whole-service exit",
+    "Keyboard/focus and 100-200 percent scaling",
+    "Fresh native WebView rendering of the replacement Linux image"
+  ]
+}

@@ -1,0 +1,1817 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-10-29",
+  "status": "MVP review candidate; visual approval and unfinished functional gates remain open",
+  "applicationRuntimeSource": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+  "image": "docker.io/jtmb92/ingenium@sha256:b9484ea1ee956dd776200b8251886464364a6083b403b5d63447d736c94c5c64",
+  "baselineContractSha256": "e2c66fc40d8721bc2a54e8a6f11902fd18990cbbdd21d9cf7622f78cf832166e",
+  "legacyFeatureMapSha256": "7d3775dcd07e75454f61e5ed8a3786243056fe24d189c38415888bb5305c3006",
+  "visualApproval": false,
+  "fixtureRuntimeAcceptance": false,
+  "fixtureRun": "a2716567-73b7-4e77-ad57-2779bc0370d4",
+  "views": [
+    {
+      "id": "home",
+      "route": "/",
+      "baselineAsset": "screens/home.png",
+      "baselineSha256": "37a86b1f1522033a5ecc79dc25d94499845ef7e43fe21073b7ac86658d0c5bc3",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "home-fixture.png",
+      "fixtureCaptureSha256": "14dd31eb9a4edbbe62ba3cbbb0a4be83affe33f6d1b772dd2e63b59a3ccd27d0",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-home.jpg",
+          "state": "initial observed state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "b5fe0f4ee48c83b9be007838b30e2ac1d7bd44afd9646d74a8ac43913c16980f",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        },
+        {
+          "file": "linux-42c4-live-home-expanded.jpg",
+          "state": "Expanded navigation state",
+          "sha256": "0bf27b8a35b418fe66673e16637564d4e40fb9f87008065676889f4b0847689b",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "visualAccepted": false
+        }
+      ],
+      "disposition": "Needs Attention review/job actions and complete Home composition remain open.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Historical fixture predates current Home composer; selected live Home compared with unchanged baseline. Shared header/compact navigation differ; Needs Attention controls remain unfinished."
+    },
+    {
+      "id": "chat-reference-v3",
+      "route": "/chat",
+      "baselineAsset": "screens/chat-reference-v3.png",
+      "baselineSha256": "897a197af01e26e835e8b52c57e75782640c74c5a23a359f4bb3f910587efd4e",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "chat-reference-v3-fixture.png",
+      "fixtureCaptureSha256": "0c9344eaa21b2632529576ff0e985c7c5e7da0f6c5efba029c03bd5e82b6ed8c",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-chat-reference-v3-existing-empty-session-full-width.jpg",
+          "sha256": "3f69db27cf93d4b14f8d5f0fdd27ebfa070ffc77b3c30bd212400f81c5457394",
+          "imageSize": {
+            "width": 1672,
+            "height": 941
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 941,
+            "width": 1672
+          },
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "state": "existing-empty-session-full-width",
+          "fullPageCapture": true,
+          "presentationQualified": false,
+          "note": "Capture paint did not match the stable layout geometry; retained diagnostic only."
+        },
+        {
+          "file": "linux-42c4-live-chat-reference-v3-compact-empty-session.jpg",
+          "sha256": "722f3f21495006cc66d7b9ef70b3f4dd5ff57c39748382d74183c6631fed795d",
+          "imageSize": {
+            "width": 1672,
+            "height": 941
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 941,
+            "width": 1672
+          },
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "state": "compact-empty-session",
+          "fullPageCapture": true,
+          "presentationQualified": true
+        }
+      ],
+      "disposition": "Microphone, global search and full keyboard/scaling behavior remain open.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Baseline and actual compact empty Chat personally compared at 1672x941/DPR1. Quiet rail/composer retained; common top header, history/context controls and disabled dictation differ explicitly. One invalid-paint capture is diagnostic only."
+    },
+    {
+      "id": "opencode-upstream-actual",
+      "route": "/opencode",
+      "baselineAsset": "screens/opencode-upstream-actual.png",
+      "baselineSha256": "7abcf0df1c20706af1e3bc349efe630e1dcfde49ddef99a7aaa6f8d27a76b606",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "opencode-upstream-actual-fixture.png",
+      "fixtureCaptureSha256": "5afc954cd4ceab2bb4d554301f9400708cf148869cbae8ccd806a091882b500d",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-opencode-upstream.jpg",
+          "state": "Actual unchanged upstream OpenCode Web",
+          "sha256": "f092e26f6c85046e0542a9f8823e54e1502d0461f6eab9b6f4216cb097812d78",
+          "imageSize": {
+            "width": 1280,
+            "height": 720
+          },
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "visualAccepted": false
+        }
+      ],
+      "disposition": "Actual upstream UI and fresh pinned skill loading passed; individual external capabilities remain separate gates.",
+      "visualAccepted": false
+    },
+    {
+      "id": "vscode",
+      "route": "/vscode",
+      "baselineAsset": "screens/vscode.png",
+      "baselineSha256": "78fa4a1e60fc6676e2c2c788b1a543d3192e691c1de1beebc15aecd27bf93fa9",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "vscode-fixture.png",
+      "fixtureCaptureSha256": "344827573261ca0d05b610ffe22240acf2a3bc15f804e1f7d6e653c0b0ff2669",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-vscode-restricted-mode-existing-workspace.jpg",
+          "state": "restricted-mode-existing-workspace",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "5dd92f4bc30a569645089cf17e5693b1deb7b6d2b46bc570bd300ec5a5f61d26",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Actual code-server loaded in its existing Restricted Mode; no trust change was made.",
+      "visualAccepted": false
+    },
+    {
+      "id": "mail",
+      "route": "/mail",
+      "baselineAsset": "screens/mail.png",
+      "baselineSha256": "c3e33c2be287117c0ad43d17c62e8d00a23e304274799affb636b0338268ae2f",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "mail-fixture.png",
+      "fixtureCaptureSha256": "ea1209dd8ffb29892ddc24212f2f11b033a55ac961fcb0ad967788159d829781",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-mail-owned-message-filter.jpg",
+          "state": "owned-message-filter",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "65b8ebdc4af8e5b07b0ecba571d35346a84c92b51a6265000c1f50089c621045",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Fresh background sync completed for four folders; new send/receive and smart replies remain Phase 2 gates.",
+      "visualAccepted": false
+    },
+    {
+      "id": "tasks",
+      "route": "/tasks",
+      "baselineAsset": "screens/tasks.png",
+      "baselineSha256": "5c6006ec6d50a404f442fc412de27ad17a737295fcc1c7007f23e6eb990065fc",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "tasks-fixture.png",
+      "fixtureCaptureSha256": "5a72078f6ad97fb9bf6faec6554fbdb665ea5a633f5057fe1e8d2fd57b135a90",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-tasks.jpg",
+          "state": "initial observed state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "49ecefcd61f10903a5a3bee36455f8e1b4ea255bb1aa5f06b79d19840fd2de75",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing board rendered; complete create/edit/transition/dependency persistence remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "docs",
+      "route": "/docs",
+      "baselineAsset": "screens/docs.png",
+      "baselineSha256": "ef474ca02d5ca91f5d16336e4f4007f4d4e5bc22e60c699d8a5c70df5f1fb484",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "docs-fixture.png",
+      "fixtureCaptureSha256": "d7c93737ec31dfbf4df59d58be8ba11491d2302675f0f6285b98d405710fbd06",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-docs.jpg",
+          "state": "initial observed state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "052934406254e8ab9d14a2cfeec90ad28f4f667c9a0bf28267d6809fcf0a0853",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        },
+        {
+          "file": "linux-42c4-live-docs-existing-saved-page.jpg",
+          "state": "existing-saved-page",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "61506a844b695cd0f4d0fefef6b9e476a75974780994b51b8b592b67e9652180",
+          "imageSize": {
+            "width": 1280,
+            "height": 720
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 720,
+            "width": 1280
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing saved verification page reopened; editing, publish, RAG and attachments require independent workflows.",
+      "visualAccepted": false
+    },
+    {
+      "id": "skills",
+      "route": "/skills",
+      "baselineAsset": "screens/skills.png",
+      "baselineSha256": "f2d2cb18adc83b0db79aee67d7434cfe83ea69199d3917bd2a0d3a47a4bbaa82",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "skills-fixture.png",
+      "fixtureCaptureSha256": "3205ef7eab19c76f4d54f75da97c743f210a0f48617006bc816201fa9dcc53ea",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-skills.jpg",
+          "state": "initial observed state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "0eac74521ddf79dcd499926e37d2bde20aed18f9f55ba233f4cdb4989994ecf1",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        },
+        {
+          "file": "linux-42c4-live-skills-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "b9e4c358b35803599d3a827e09e7fd719e791f50acaf087de5734247b669fa49",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing nine-skill library rendered; complete upload/edit/archive/restore/proposal lifecycle requires Phase 2 verification.",
+      "visualAccepted": false
+    },
+    {
+      "id": "agents",
+      "route": "/agents",
+      "baselineAsset": "screens/agents.png",
+      "baselineSha256": "639e866e630022b6cf0ea557713c9f8a55ff17193c07a5009ddfb532b534243b",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "agents-fixture.png",
+      "fixtureCaptureSha256": "4db5e4ef1e608945a89eb1942e828e0266d2d470184a05a81d2d36cf76d7f8a1",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-agents.jpg",
+          "state": "initial observed state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "f984fd0ce1a750eeff2242ae0ffe2f248465c0a6064eeea8dfd6166a86202eba",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing profiles rendered; model examples do not authorize changing profiles.",
+      "visualAccepted": false
+    },
+    {
+      "id": "observations",
+      "route": "/observations",
+      "baselineAsset": "screens/observations.png",
+      "baselineSha256": "033a35d0cc77ec668d0ce97da1e20d2317102d8359fdb5f52db389437830bef9",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "observations-fixture.png",
+      "fixtureCaptureSha256": "d73ea67360e53ddd7e2a9fb615ebf03ab0759ebcb74c9210cb54aa852a93cb27",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-observations-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "6edd700ac5861ec478bfdeb41eea12af214cae888f0eb2880f22d380c312b5ca",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing records and detail rendered; complete edit/archive/isolation workflows remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "personality",
+      "route": "/personality",
+      "baselineAsset": "screens/personality.png",
+      "baselineSha256": "be51e882f04f86d7b541c7673b79fb16af725c7a47c716478ab001dc0210d647",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "personality-fixture.png",
+      "fixtureCaptureSha256": "f4b6aa207a6efee5512b468e9b68480816136b7b1b1a4c7aa23c0ab95af6b966",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-personality-empty.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "97e3bf4888925c316e864517da41d457d288d3d9820f37cc8ffa1db588de9dd7",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing 23 active and 103 archived traits rendered; full lifecycle remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "context-current-v2",
+      "route": "/context",
+      "baselineAsset": "screens/context-current-v2.png",
+      "baselineSha256": "bdd41487903e0d2904e0c826a0ea764c6d2a5cbf676206ce63ae4de59da5da83",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "context-current-v2-fixture.png",
+      "fixtureCaptureSha256": "152e74599ca081ff930511857ad59d490e4b05338dd693c250fa1d25de6128e8",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-context-current-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "20554829d6cfe0a236b7c2c451e68eeb9bbf7ce1339d1c121063fd35cae188bd",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Current empty memory/conversation state rendered; refresh/upload/search/checkpoint/restore-as-new remain explicit gates.",
+      "visualAccepted": false
+    },
+    {
+      "id": "pipeline",
+      "route": "/pipeline",
+      "baselineAsset": "screens/pipeline.png",
+      "baselineSha256": "f8dfcb140666462d4a59323d46e593fda7452d6bc593a67b16aa67b70c56ed58",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "pipeline-fixture.png",
+      "fixtureCaptureSha256": "ddd009f71c3d517bd55059f4cfb611c236674d981db1b72c61776413879b9416",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-pipeline-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "109ddf4a090a76da4c3c954783ce00390c46443e8e71a5e92ee8d430f5fdebce",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing pipeline rendered; full synthesis to approval, activation and fresh-chat use remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "jobs",
+      "route": "/jobs",
+      "baselineAsset": "screens/jobs.png",
+      "baselineSha256": "f1166e40b694d5e52926db8dac620a0686203c88d6ee304c2dfffaf5e75762d4",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "jobs-fixture.png",
+      "fixtureCaptureSha256": "04ec9e1c2dfcd5b7e95ebe48d8dbc081256145b74eb71f5956727f85c387c6ed",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-jobs-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "ebb4a7d53eeb7a1ed7ab50023e0fb2ec8e032d9f3b15de2ea616ed6f31a27fb0",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing Jobs/Event queue/Trusted events rendered; run logs/output/approval/Vault audit require independent workflows.",
+      "visualAccepted": false
+    },
+    {
+      "id": "backups-current-v2",
+      "route": "/backups",
+      "baselineAsset": "screens/backups-current-v2.png",
+      "baselineSha256": "92006bebe69902febed29ae3c99338419a8f1fd03eea799ee6fab8d2f6056479",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "backups-current-v2-fixture.png",
+      "fixtureCaptureSha256": "4391c064fbbe375c3409bcba0fff94aea5934ddd29e28b135a1e39f7e6ab6dba",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-backups-current-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "b1945a889d7a4b27151950ac899424c4197e9fb3eb9efcd1d9cab3809034357d",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing backup management rendered; isolated restore and schedule workflows remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "logs",
+      "route": "/logs",
+      "baselineAsset": "screens/logs.png",
+      "baselineSha256": "310445f52979a1365c78114549b2ac9b641304b2d8c38a61c7bfe3a5f30e483a",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "logs-fixture.png",
+      "fixtureCaptureSha256": "2145734c0e9f79817d9c95f6bd405b3b9a56e7f9d9657b9e3d8586ad669067e8",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-logs-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "2b422f23b79a87084fdfadbb82366bc5d440da8cc1690c73063fa8280186449f",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing logs rendered; filtering/export and recovery behavior remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "usage",
+      "route": "/usage",
+      "baselineAsset": "screens/usage.png",
+      "baselineSha256": "6f6c0967131f1254fb8dabeaba5b59ce0f142fa6aed249aa2b34495a865223fc",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "usage-fixture.png",
+      "fixtureCaptureSha256": "88c5541601d37bc34e833561c5718334e615738f32dea21b2c691041a76a0bc6",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-usage-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "48753f9e8df2e62d542855f25f8d9e2438a2875f145f68ab3a97fcc455a3c65c",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "No project mapping, zero requests and no sync timestamps; attribution/sync remains an explicit functional gate.",
+      "visualAccepted": false
+    },
+    {
+      "id": "status-current-v2",
+      "route": "/status",
+      "baselineAsset": "screens/status-current-v2.png",
+      "baselineSha256": "fe7030bdff9bf3435c04ec9b4584b1f0b1a57be1743079507187e52f1e9bd5a3",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "status-current-v2-fixture.png",
+      "fixtureCaptureSha256": "e14bc23b9c3974c4eb74fe39972900ecc5a95f20e857a9e42d65c64140d40e7c",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-status-current-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "9e5b7d8b156263d8a1e8dc8625e223b072c8feed5d591d9770e3d93b4b0f459d",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Twelve runtime and four application service entries rendered; each feature still needs independent workflow evidence.",
+      "visualAccepted": false
+    },
+    {
+      "id": "projects",
+      "route": "/projects",
+      "baselineAsset": "screens/projects.png",
+      "baselineSha256": "75e0cf1ab252af45203adf967d6d79591cea7b7cbd7daa34f1b6ca74d9ae7812",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "projects-fixture.png",
+      "fixtureCaptureSha256": "7640ebed657c61910ae1c388301855f2bc4f17bf5ab8128a92608c0d3305185b",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-projects-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "f413e2d31a8911f41feac0d36581a33000b00773e842a4b1a4194ee4ab5792c3",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "All five existing project identities survived replacement; complete lifecycle/isolation remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "organizations",
+      "route": "/organizations",
+      "baselineAsset": "screens/organizations.png",
+      "baselineSha256": "865c2a11a988603e6e415c2f83a60d3c28669c15fb960f04107827ef13e28e14",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "organizations-fixture.png",
+      "fixtureCaptureSha256": "244df33b0f3e864122938edbf395d2aea82e8c51e40e3f1d2890bfc5759cd4a3",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-organizations-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "f8a88d2392d27cbefff93b015fb2cb0ab8ed37c3fef409d7b24aec9ece376f85",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing workspace rendered; invitation/account/isolation behavior remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "plugins",
+      "route": "/plugins",
+      "baselineAsset": "screens/plugins.png",
+      "baselineSha256": "1965b5e709efd087848d0edf919e89707add6e4018d7b985d235304504307bbc",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "plugins-fixture.png",
+      "fixtureCaptureSha256": "9eb4e8d591885c3edb3901311f6c38e1f06ad0a9931463cb8758079c1ec0b5ec",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-plugins-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "4c4d93c6d9bde6a742e6022a49adeb6f4eddbdc6b223302dc57480924ebf03b2",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing plugin workspace rendered; lifecycle and permissions remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "mcp-current-v2",
+      "route": "/mcp-servers",
+      "baselineAsset": "screens/mcp-current-v2.png",
+      "baselineSha256": "d0c90510c06d88715a03dc7315995ea5574a34f1be281173deb569ca56f6b170",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "mcp-current-v2-fixture.png",
+      "fixtureCaptureSha256": "310682964d151354654751f7f834e78b02aba9ce67794cd9757837762ac61a5c",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-mcp-current-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "3de788e93cfc63728f9b97a8f18642825467871c598fbb63f85e1f35263ba1da",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "One child server and 264 discovered tools rendered; full tools/lifecycle/scope/browser preset/Vault references remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "config-current-v2",
+      "route": "/config",
+      "baselineAsset": "screens/config-current-v2.png",
+      "baselineSha256": "d974f5004093a693b8a96b8d4db9a2e727e3e153882eabcb0dff6f567ba9a51f",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "config-current-v2-fixture.png",
+      "fixtureCaptureSha256": "9af4fbdb8e1842986ad4c48db41144908b0e46a5b54c63e79cbd3e1cee860e3f",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-config-current-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "3a9dacb9cf52e9878c5da678503d9e44b3ca2cdd8bf77704437dc2fcc2c8de3d",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Actual existing configuration rendered; validation and mutation workflows remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "secrets",
+      "route": "/secrets",
+      "baselineAsset": "screens/secrets.png",
+      "baselineSha256": "24893ced47c3e68821f1e0ee97dd157c5852080028fb231be38a79c316365fcf",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "secrets-fixture.png",
+      "fixtureCaptureSha256": "fc6392d459c6752e9d1a6bd0faf4c7ba810c6e318e7d3fae9709b862f9a7008d",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-secrets-sealed.jpg",
+          "state": "sealed",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "7d21962d53eaaac1d18a51d2154bafd425a7705e4694cbf75feacfe42eb8bb48",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Initial sealed/admin-verification state captured; existing Vault recovery later passed via normal API. Consumers/rotation/audit remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-account",
+      "route": "/account",
+      "baselineAsset": "screens/settings-account.png",
+      "baselineSha256": "3c6ecbb0d41bda92317c57478be1808066ff4f814ff97a94d52a71c90654c612",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-account-fixture.png",
+      "fixtureCaptureSha256": "e91e3406aca2e0f5dc37ca270cac4a34e7f434f007f005043d20abd579141ad0",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-account-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "c066e2d745a25b16c69b01d9cee9cef53feffdb532f73f3ed4636e4fdb15ab6c",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        },
+        {
+          "file": "linux-42c4-live-settings-account-account-workspace.jpg",
+          "state": "account-workspace",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "52b28efc6a507b68a8f6afacf3f1f656281d85b64be33f7c9713fda872f6d3b0",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Settings links to the actual Account workspace; inline baseline layout differs.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-general-v2",
+      "route": "/settings",
+      "baselineAsset": "screens/settings-general-v2.png",
+      "baselineSha256": "cc96b55f8e735de3b4c54bcfcbb7a49904cec74b282dda4e638310c54d574255",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-general-v2-fixture.png",
+      "fixtureCaptureSha256": "207449aab82d5e2c12748af2e90793ae8e9e55219e528452a0cd2882ae7d032c",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-general-v2-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "986d22e8d17b2ba35932bdd0396bd06b5492d6fd11b910750627246be62d6cd1",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing System theme and seven-day project retention rendered; depicted typography/motion controls remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "standalone-doc",
+      "route": "/standalone",
+      "baselineAsset": "screens/standalone-doc.png",
+      "baselineSha256": "4627159502dc8ffc2a90941340cb093afb95a1be99e3216ee154ea4ab93dd841",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "standalone-doc-fixture.png",
+      "fixtureCaptureSha256": "12e1681bd7ce8ba60d02179bb631e05a0629f500506682b1ee8410fba93b59fa",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-standalone-doc-space-picker-with-preserved-document-state.jpg",
+          "state": "space-picker-with-preserved-document-state",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "6161e597dbffcb6fde96e36da580cc395153638c543378e5931c7910f92adb16",
+          "imageSize": {
+            "width": 1280,
+            "height": 720
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 720,
+            "width": 1280
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Standalone space picker returns to the saved document; inline standalone editing and pop-up behavior remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "mail-detail",
+      "route": "/mail/[id]",
+      "baselineAsset": "screens/mail-detail.png",
+      "baselineSha256": "b02c9c9de40891bdd0d165a0eb5e7520779f37f44aa56016d8a1f40abedd46f4",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "mail-detail-fixture.png",
+      "fixtureCaptureSha256": "4e634305272db379e79b9b105b1882c517742f366e195da2d1b8b8314e2a504d",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-mail-detail-owned-message.jpg",
+          "state": "owned-message",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "c67f071ec63afc45727a1e86994a2f4f421b1a8aa514cd9ebdd113f1240467dc",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Owned existing verification message opened; cached body persistence is distinct from fresh sync.",
+      "visualAccepted": false
+    },
+    {
+      "id": "mail-oauth-callback",
+      "route": "/mail/oauth/callback",
+      "baselineAsset": "screens/mail-oauth-callback.png",
+      "baselineSha256": "6961545e2475d719c868bac2def1444d17eb2975375dbdcebb4680cb57cd88d7",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "mail-oauth-callback-fixture.png",
+      "fixtureCaptureSha256": "c8f74ff7b92648239cc2e91e093d40876ddb9a348b8d07a5d7904b91ac983198",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture/error presentation only; no new authorization or provider consent flow was attempted.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed authenticated no-code failure; no provider consent or credential change."
+    },
+    {
+      "id": "observation-detail",
+      "route": "/observations/[id]",
+      "baselineAsset": "screens/observation-detail.png",
+      "baselineSha256": "c7e69e384510fd2dfffeaffa89ecf7ef47d8df8d23d4755ebabe8cac8309009d",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "observation-detail-fixture.png",
+      "fixtureCaptureSha256": "2f3ee2bb9b5d8c96a170bebb20ff34a22835f6f4aed90bde960ef04532b93afa",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-observation-detail-loaded.jpg",
+          "state": "loaded",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "7d8c765dce49c2cf80f9d26cb3a7c1e1fca12a56296ac3adddb28127e129c476",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing detail rendered; record mutations remain unverified.",
+      "visualAccepted": false
+    },
+    {
+      "id": "oidc-callback",
+      "route": "/auth/oidc/callback",
+      "baselineAsset": "screens/oidc-callback.png",
+      "baselineSha256": "7885658fcdb437182c972edc16fca59579c05b2efa1be4221facd1c9d0766165",
+      "viewport": {
+        "width": 1584,
+        "height": 993,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "oidc-callback-fixture.png",
+      "fixtureCaptureSha256": "178663517fe1443e42b5de16e357e57dec91afb56e2d8bb2e338b744ecb2a076",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture/error presentation only; actual cross-origin desktop identity-provider flow remains open.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed sign-in failure state; no success claim."
+    },
+    {
+      "id": "bootstrap",
+      "route": "/bootstrap",
+      "baselineAsset": "screens/bootstrap.png",
+      "baselineSha256": "01d917ddb9d0209c4dcef4fcdf394db88e44b0497bc2ec172af0b4f0170e7827",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "bootstrap-fixture.png",
+      "fixtureCaptureSha256": "a46e9b66b44e3b241633a85fcaf2cb4f065c9e0e9c152de14b90f6d966bf66ca",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture/auth presentation only; existing production account was preserved.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed bootstrap-unconfigured failure state; owner creation not exercised."
+    },
+    {
+      "id": "forgot-password",
+      "route": "/forgot-password",
+      "baselineAsset": "screens/forgot-password.png",
+      "baselineSha256": "8012381dc82b20e25e6fcf9d768814a93e6be66932202c73cae24428c0c77ebc",
+      "viewport": {
+        "width": 1584,
+        "height": 993,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "forgot-password-fixture.png",
+      "fixtureCaptureSha256": "0e1f23d0d63bb5a6c0b13616d1ea5eb1ae0e81ed2e3f00d854300752e0e110a0",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture only; no reset message sent.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed controlled blank reset-request form; no message sent."
+    },
+    {
+      "id": "invitation",
+      "route": "/invitation",
+      "baselineAsset": "screens/invitation.png",
+      "baselineSha256": "c08100128d69533a6d795d64674cf26f584c3f68a368505dcd6b50cbcb352b66",
+      "viewport": {
+        "width": 1672,
+        "height": 940,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "invitation-fixture.png",
+      "fixtureCaptureSha256": "7820527677078e3bfaa64a3f12fcc5ac6e2626a5d96a55db39d93c9aaa68a538",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture only; no invitation accepted or sent.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed invalid/expired invitation state; acceptance not exercised."
+    },
+    {
+      "id": "login",
+      "route": "/login",
+      "baselineAsset": "screens/login.png",
+      "baselineSha256": "6a7d64841600a16bb3e12d77a911705d697a066db0f8934033562a592b139060",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "login-fixture.png",
+      "fixtureCaptureSha256": "f9f20f1a18b93e290253a1c5bee6230a1909f1e3c936baa7412a6f2005ea00f3",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Saved existing development login passed in API, native WebView and browser; complete auth visual approval remains open.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed controlled blank local sign-in; no private navigation shown."
+    },
+    {
+      "id": "mfa-clean-v2",
+      "route": "/mfa",
+      "baselineAsset": "screens/mfa-clean-v2.png",
+      "baselineSha256": "4a2563012199ff26d76ac516f38a92b6e003afcef9c1f42bee265c273ecfdfec",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "mfa-clean-v2-fixture.png",
+      "fixtureCaptureSha256": "614fab762262ad02590895215d6b65b1618f05de70073c7a7db5edbb3759e13d",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture only; no new factor enrollment or credential change.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed controlled code/recovery challenge form; no factor changed."
+    },
+    {
+      "id": "reset-password",
+      "route": "/reset-password",
+      "baselineAsset": "screens/reset-password.png",
+      "baselineSha256": "b6fbd9a1680070f45762ae142c6e27df6b484735e999e910159d72696e0e44f4",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "reset-password-fixture.png",
+      "fixtureCaptureSha256": "342ce65001fb8228420a9fb122206dd13a288ec099fba5428273c95db3e624a9",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled blank new-password form only; no credential entered or changed; actual reset workflow remains open.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed blank new-password form; no password entered or changed."
+    },
+    {
+      "id": "verify-email",
+      "route": "/verify-email",
+      "baselineAsset": "screens/verify-email.png",
+      "baselineSha256": "017a5d95e20a03fe44ae8fa4ecb2ea4051de3daf21649563e7015a3a913b4492",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "verify-email-fixture.png",
+      "fixtureCaptureSha256": "5f8787d7e3a324ea47341ebf70360e3bf0a3853ad92868bad8074cb5e3bfa4b8",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "Controlled fixture only; no new verification message or account change.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Personally reviewed invalid/expired verification state."
+    },
+    {
+      "id": "chat-conversation-v3",
+      "route": "additional state",
+      "baselineAsset": "screens/chat-conversation-v3.png",
+      "baselineSha256": "80b08e72f21b0cc5a04bf012064b7b85631735fda208311ab4fb8d80c7ebb3a2",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "chat-conversation-v3-fixture.png",
+      "fixtureCaptureSha256": "1cc18fa637daa93fff9f73e78653a12b4178ff8828c8abffc8457621f0dd8927",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-home-chat-recovery-full-content.jpg",
+          "state": "Live Home handoff response with no reload; fresh native session completion verified",
+          "sha256": "c0874ae84297a8b27e049b81a2a407a5a18656a07a7e10629f707ed258159bad",
+          "imageSize": {
+            "width": 1672,
+            "height": 941
+          },
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "visualAccepted": false
+        }
+      ],
+      "disposition": "Live Luna send, navigation recovery, cancel, history and reload passed; New conversation URL identity remains open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "navigation-all-features-v4",
+      "route": "additional state",
+      "baselineAsset": "screens/navigation-all-features-v4.png",
+      "baselineSha256": "849a4ee4518396a7c8cf364ab2a94d3d0745635c088ee9f72ce7a7388c0ee4c9",
+      "viewport": {
+        "width": 1672,
+        "height": 941,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "navigation-all-features-v4-fixture.png",
+      "fixtureCaptureSha256": "fca1643a460997fe2a24cbd1fe72cf26d23f6df5940af42d96bef1d3b6ace3cc",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "All existing route groups remain discoverable; global search, recent-item and normalized widths require visual approval.",
+      "visualAccepted": false,
+      "presentationReviewNote": "Historical expanded fixture personally reviewed; all grouped destinations remain visible."
+    },
+    {
+      "id": "context-saved-memory",
+      "route": "additional state",
+      "baselineAsset": "screens/context-saved-memory.png",
+      "baselineSha256": "e9cf6fdf04072c19b9a00485a8556cd88ca68a6f31646f46179e5ed627d8d776",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "context-saved-memory-fixture.png",
+      "fixtureCaptureSha256": "36c33fe8871a86aa54fba30b4be9425cc42d7674a32f5816fd34b24165e72ea9",
+      "fixtureHashVerified": true,
+      "liveCaptures": [],
+      "disposition": "No saved memory selected; edit/forget behavior and baseline composition remain open.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-security",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-security.png",
+      "baselineSha256": "bc63d110b26aa55ec989cd0a9805aed4d8bc4feca826f6537bbb7577c38963d1",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-security-fixture.png",
+      "fixtureCaptureSha256": "01ddc407228666216a82c95affcf45a96f0db71f647ea5b643dc089691bf5c6d",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-security-account-workspace.jpg",
+          "state": "account-workspace",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "d9927b9b8fac4e9e2269c788f95d1e259078e821cb898a09471533a8aed494b7",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Account security workspace/anchor rendered; no password or MFA change.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-sessions",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-sessions.png",
+      "baselineSha256": "c60f18cef6f44a930d92a9fb9e0ae6a6085985ceeeb849bb0dd8434c2ba04505",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-sessions-fixture.png",
+      "fixtureCaptureSha256": "f540fcfe653585661ae0f39a2160eae2c4cd579ab2dda3e5d91be678c3d0a6d0",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-sessions-account-workspace.jpg",
+          "state": "account-workspace",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "169af9005e0d1bd8d516319639bd543c35ae3c82c86098a3a2e723560d785225",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Account sessions workspace/anchor rendered; no other session revoked.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-api-tokens",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-api-tokens.png",
+      "baselineSha256": "a6fa5f40d0eeca46605583e3135746dbf6494e8c1d2bb3eed51fc81fa9b5351a",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-api-tokens-fixture.png",
+      "fixtureCaptureSha256": "4b897785567e3fbc33dc0b976c0a6246dd53ff790c9d57962ea3b090720b298c",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-api-tokens-account-workspace.jpg",
+          "state": "account-workspace",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "c20c1972b84a66e42287acda20423bc6c2e8cb3a902db05302d7b58740356a3c",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Account token workspace/anchor rendered; no token created or revoked.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-providers-schedule-v2",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-providers-schedule-v2.png",
+      "baselineSha256": "d73a45a37e4afacb25188f5ee3110b8ab2dc834c1cdc76868d947b8ef823ef94",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-providers-schedule-v2-fixture.png",
+      "fixtureCaptureSha256": "55988d1b6e4a99b2006764a0d2db9c3a74d49b48c410d1428f874c9a03761e58",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-providers-schedule-v2-persisted-luna.jpg",
+          "state": "persisted-luna",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "bb67177cba3b99d933263634c503eaf15a6172a8cfe20eeb99051c757309dcb3",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Requested Chat/synthesis Luna selection persisted through replacement; one-hour provider schedule, empty secondary and other provider settings preserved.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-cloudflare",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-cloudflare.png",
+      "baselineSha256": "3b594003c91611f8deb3874eaa80f59c24cb0c3ec950a923742351a2cf940533",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-cloudflare-fixture.png",
+      "fixtureCaptureSha256": "726cf72dc372c8acc88cfd5bd25934ab498b6d497b56cacd61772db40ad98df9",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-cloudflare-recovered.jpg",
+          "state": "recovered",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "09f0c2fa1f6780269d2168fa5e0dc6dcb3cc5c84b0511c3dac20cb6d7b6be6c5",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing information-only connector resumed with existing Vault credential; homepage/privacy/terms 200 and private routes 404.",
+      "visualAccepted": false
+    },
+    {
+      "id": "settings-mail",
+      "route": "additional state",
+      "baselineAsset": "screens/settings-mail.png",
+      "baselineSha256": "01ab1fd09f640ee1d49a8fb37854c7e6fbd5e00304acb2458bf9ce8ae96aa8f2",
+      "viewport": {
+        "width": 1586,
+        "height": 992,
+        "dpi": 1,
+        "theme": "dark",
+        "font": "Inter"
+      },
+      "fixtureCapture": "settings-mail-fixture.png",
+      "fixtureCaptureSha256": "d299a1d51587f3a29b51b968b08191f87b878683342733f8a90d7d560d8715da",
+      "fixtureHashVerified": true,
+      "liveCaptures": [
+        {
+          "file": "linux-42c4-live-settings-mail-configured.jpg",
+          "state": "configured",
+          "sourceCommit": "42c4124bcc0a34cee5ab61ff998184b0e4211c7a",
+          "sha256": "5b245820352fc8cb4efab266f54fa55e87184857d1a56bd067fdae74cb0f9da4",
+          "imageSize": {
+            "width": 1586,
+            "height": 992
+          },
+          "observedViewport": {
+            "colorScheme": "dark",
+            "dpi": 1,
+            "font": "Inter, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+            "height": 992,
+            "width": 1586
+          },
+          "fullPageCapture": true
+        }
+      ],
+      "disposition": "Existing OAuth configuration and retention rendered; no provider credential/consent change.",
+      "visualAccepted": false
+    }
+  ],
+  "settings": [
+    {
+      "label": "General",
+      "viewId": "settings-general-v2",
+      "visited": true,
+      "presentation": "existing inline settings",
+      "visualAccepted": false
+    },
+    {
+      "label": "Account",
+      "viewId": "settings-account",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Security",
+      "viewId": "settings-security",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Sessions",
+      "viewId": "settings-sessions",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "API tokens",
+      "viewId": "settings-api-tokens",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Organizations",
+      "viewId": "organizations",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Projects",
+      "viewId": "projects",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Skills",
+      "viewId": "skills",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Tasks",
+      "viewId": "tasks",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Jobs",
+      "viewId": "jobs",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Plugins",
+      "viewId": "plugins",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Mail",
+      "viewId": "settings-mail",
+      "visited": true,
+      "presentation": "existing inline settings",
+      "visualAccepted": false
+    },
+    {
+      "label": "Agents",
+      "viewId": "agents",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "MCP",
+      "viewId": "mcp-current-v2",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Config",
+      "viewId": "config-current-v2",
+      "visited": true,
+      "presentation": "existing inline settings",
+      "visualAccepted": false
+    },
+    {
+      "label": "Observations",
+      "viewId": "observations",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Personality",
+      "viewId": "personality",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    },
+    {
+      "label": "Providers",
+      "viewId": "settings-providers-schedule-v2",
+      "visited": true,
+      "presentation": "existing inline settings",
+      "visualAccepted": false
+    },
+    {
+      "label": "Cloudflare",
+      "viewId": "settings-cloudflare",
+      "visited": true,
+      "presentation": "existing inline settings",
+      "visualAccepted": false
+    },
+    {
+      "label": "Logs",
+      "viewId": "logs",
+      "visited": true,
+      "presentation": "gateway to existing feature/account workspace",
+      "visualAccepted": false
+    }
+  ]
+}

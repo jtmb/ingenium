@@ -4,7 +4,13 @@ Ingenium deployment is an external operator task. There are no deployment or mig
 
 The chart is `charts/ingenium` in the private `jtmb/branconet-charts` repository; delivery is `flux-system/ingenium`, targeting namespace `ingenium`. Use the existing Windows-Git/local exact-source validator/validated/Flux publisher. Keep Actions disabled and do not run a second publisher, direct Helm install, or manually advance validated refs.
 
-## Current preparation and cutover gate
+## Current deployed MVP observation — 2026-10-29
+
+The installation has completed its initial migration. The Phase 1 upgrade is running image sha256:b9484ea1ee956dd776200b8251886464364a6083b403b5d63447d736c94c5c64 from application source 42c4124bcc0a34cee5ab61ff998184b0e4211c7a through reviewed charts PR 28, chart 0.1.21 and promotion 334d9bba3359458fc52a0aac06afccaf0abbeb51. All three nodes were Ready; the actual application Pod was Ready with zero restarts at observation. The retained claim is 11 GiB, with the same PV/Longhorn identities and two healthy RW replicas. Existing account/project identities, native Secrets and all 125 migration files were preserved. See [MVP evidence](veyra-mvp.md) for the qualified workflows and remaining visual/functional gates. These are dated observations, not permission to recreate storage.
+
+The following initial preparation notes are historical safeguards; their zero-replica and storage-floor observations do not describe the current deployment. Retain their migration/preservation requirements for any future migration.
+
+## Historical preparation and cutover gate
 
 The initial release renders a zero-replica Deployment, ClusterIP Service, ServiceAccount, trusted public-info inventory and ingress NetworkPolicy. It creates no claim or public route. This is preparation, not a running application or completed migration. Current Longhorn inspection found only worker1 schedulable; master and worker2 are below the existing floor. Keep local Ingenium running until two-replica placement, capacity/headroom, PVC health and copied state are verified. Do not lower replica counts or thresholds, prune node images, delete migration artifacts or change unrelated BORTUS holds.
 

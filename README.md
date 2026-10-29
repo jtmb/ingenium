@@ -25,7 +25,7 @@ Plug any MCP-compatible client (OpenCode, Cline, Claude Desktop) into the extens
 
 ## Windows and Linux delivery status
 
-Veyra Phase 1 is in progress. The shared source builds, while acceptance of the new Windows desktop package and Linux cluster image is still pending. The existing Ingenium production installation remains the recovery baseline. A build or screenshot is not a completed workflow or release.
+Veyra Phase 1 candidates run on Windows and the existing Linux Kubernetes cluster. Live Luna Chat recovery/cancel/history, native/WSL terminals, pinned brain loading and retained installation data have been exercised. Visual approval, targeted Windows checks and explicit feature gates remain open. The full seven-phase delivery goal is active.
 
 Start with the [MVP status and verification guide](docs/operations/veyra-mvp.md), [external brain setup and rollback](docs/operations/veyra-brain.md), [visual contract](docs/design/veyra-visual-contract.md), and [full phased delivery plan](docs/plans/veyra-phased-delivery.md). Windows keeps its native/WSL adapters and existing inference engine; Linux excludes that custom engine. OpenCode Web stays upstream, and ordinary Chat excludes Goal.
 
