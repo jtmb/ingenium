@@ -1,0 +1,67 @@
+# Memory and context integration
+
+Status: implemented in the memory worker checkout; ready for coordinator review. This is an isolated source deliverable, not a release or runtime acceptance claim. The worker goal stays active until integration acceptance.
+
+## Delivered boundary
+
+- `services/ingenium-api/lib/memory-v2/lifecycle.mjs`: learned-recall policy, chat overrides, extraction admission/commit, private scoped retrieval, inspection, CAS forget/reset, immutable operation receipts, suppression export/apply and input watermarks.
+- `schema.sql`: migration **proposal**, installed only by the coordinator on the existing API-owned SQLite connection. No runtime migration is executed by this worker and no second DB opener is introduced. The coordinator assigns migration numbering and parent/binding constraints after shared project contracts freeze.
+- `http.mjs`: transport-neutral authenticated API facade; no route registration, provider access or public generation/restore endpoint. Strict body/query allowlists, CAS conflicts, safe errors and no-store responses.
+- `jobs.mjs`: bounded extraction adapter for the existing Jobs/event worker. Reuses its lease and qualified model, quota, extraction and minimization adapters. No timer, scheduler, transcript store, inference call or model fallback is created here.
+- `packages/veyra-memory/context.mjs`: fail-closed, scope-checked untrusted recall attachment, context/output reservation accounting, inspectable memory lanes and slash-command dispatch descriptions.
+- Dashboard `memory-v2/`: controlled settings, learned-recall/provenance/reset list and composer disclosure. Props carry real state/actions from the coordinator's API controller. These components perform no simulated save or success toast.
+
+Aligned with coordinator `docs/contracts/veyra-parallel-v1.md`, including authoritative execution binding/hash/epoch checks. New defaults remain inactive pending integration approval; existing configured behavior is not replaced.
+
+The `.d.mts` files describe local consumer adapters pending the coordinator's shared DTO freeze. They are not a writable Rust cutover or an extra global contract authority.
+
+## Policy and isolation contract
+
+`MemoryScope = {organizationId,ownerUserId,hostId,environmentId,projectId:string|null,workspaceId,bindingHash,bindingEpoch,visibility:'private'}`. Every axis must be explicitly bound. `bindingHash` and `bindingEpoch` are admission/reconnect proofs rechecked by the authorization adapter and context attachment. The epoch is deliberately excluded from the durable namespace so an authorized reconnect retains existing memory; a stale epoch is denied, never silently upgraded. Projectless remains private to its owner and working area. Missing project is an error, never a global-project fallback. New recall does not implement sharing or cross-host sync; those need intentional authorization and a new identity.
+
+Host/workspace policy: `{revision,enabled,generate,useMemory,externalContext}`. Chat policy: `{revision,useMemory,contribute}`. Inferred generation, chat contribution and tool/external context default OFF. Read use defaults ON to preserve explicit-save behavior; inferred recall starts empty. Turning generation off prevents future admission, not deletion. Turning use off excludes future context, not data already sent. Availability and capability failures are separate from enablement.
+
+The `authorize(scope,permission,chatId)` adapter must synchronously recheck the authenticated owner, org/project membership, actual execution host/environment, canonical authorized workspace, conversation binding, revocation and capability on **every** operation. Never return unconditional true outside fixtures. Permissions: `read`, `write-policy`, `generate`, `read-source`, `forget`, `backup`, `restore`. API scope resolution and CSRF/origin enforcement remain in existing authenticated route owners; never accept caller-supplied owner/org/host as authority. Service credentials still require their existing attested storage binding. A source resolver must check the source chat, not just the destination chat.
+
+The source adapter returns authoritative `{contentHash,active,excluded,uncertain,idleEligible,kind}` from existing transcript/context owners. `idleEligible` requires the approved idle/age policy, not a constant; active, excluded, uncertain or changed inputs fail generation. This worker chooses no new retention duration. Recall rechecks source revocation and hashes. Ordinary Chat's existing tool/orchestration exclusions remain enforced by the turn controller.
+
+Generation stores only bounded minimized recall, source IDs/hashes and qualified-model provenance. Raw candidate text is not written into receipts, logs or another transcript store. `minimize` must redact/minimize before persistence; the small secret-pattern check is defense in depth, not a secret-detection guarantee. No claim of safe automatic generation should be made before the real extractor/minimizer is qualified.
+
+Operation IDs and canonicalized input watermarks prevent replay, reordered-source duplication and duplicate extraction after worker restart. Policy/chat revisions, source state/hash and lease are rechecked after extraction and before commit. Unknown quota defers generation; it must not block the existing explicit save/edit/forget APIs. Missing telemetry stays unknown. Job model/quota policy is independent from installation Chat defaults; no default or model change is authorized.
+
+## Coordinator changes required
+
+1. Allocate/install `schema.sql` using the existing sole API migration owner; add the authoritative parent/binding constraints from the frozen project schema. Instantiate `MemoryLifecycle` with the existing DB connection, post-commit checkpoint hook and real authorization/source adapters. Do not nest its `BEGIN IMMEDIATE` inside another transaction. The current API `tsc` config includes only TypeScript: coordinator packaging must emit/copy `lifecycle.mjs`, `http.mjs` and `jobs.mjs` into the corresponding runtime `dist/lib/memory-v2/` location. Add an explicit reviewed build-copy step or include JavaScript in that build; do not claim existing `tsc` copies these files. The schema is consumed by the allocated migration, not a runtime auto-installer.
+2. Register the `memoryResponse` actions on the authenticated memory API and translate numeric query values strictly before passing them. `policy`, `set-chat-policy` and `recall` require the exact chat ID. `set-policy` applies to the exact selected host/workspace scope. The facade intentionally has no generation or backup/restore public action.
+3. Connect the existing Jobs worker to `runMemoryExtraction`. Existing job admission owns lease, model configuration, eligibility, cancellation and quota. Supply a bounded qualified extractor and minimizer. Do not call this from a browser or ordinary model tool without generation capability.
+4. Mount `MemoryControls` with a key containing the complete scope and chat identity. Parent actions must compare captured scope/chat identity and current epoch, use fresh operation IDs, pass CAS revisions and refresh only matching results. On unknown mutation outcome, retain the original request/operation ID and reconcile its receipt before any replay; never blindly retry.
+5. Mount `LearnedMemoryList` with API inspection/pagination, exact reset preview and confirmed reset. Saved memories retain the existing `ExplicitMemorySection`, API and edit/forget semantics. Existing saved-memory IDs, content hashes, versions, receipts, tombstones and restore suppressions remain untouched. The effective read policy must gate **both** explicit-memory injection and learned recall.
+6. Before each turn, retrieve with current scope/chat policy, build `recallContext(page, expectedScope)`, and show `MemoryDisclosure` for included/omitted entries. Never cache an already-built block across policy or identity changes. This cannot retract prior turns already sent to a provider. Memory budget is at most16 items/2048 estimated tokens/32KiB envelope, separate from transcript/attachments and reserved output. Estimates are labeled; measured usage comes from the engine.
+7. Route `/memory`, `/context`, `/instructions`, `/remember` and `/forget` through existing owners. Instructions stay checked-in/approved, explicit saves require user intent, and forgetting requires the inspect/confirm flow. No command here directly edits AGENTS.md, activates a skill, exports transcripts or writes Docs. Keep Context source refresh, external-session ingestion, message search/load-earlier, immutable checkpoints and restore-as-new reachable. Keep observations/personality/synthesis proposal/approval/activation reachable as separate lanes.
+8. Backup/restore: union durable content-free suppression bundles and original forget/reset receipts with the restored DB **before enabling reads/jobs**. Use an authenticated restore maintenance barrier; never serve pre-suppression restored rows. `applySuppressions` wipes restored summaries and all source derivatives transactionally. Add the learned tables to existing backup inventories without replacing explicit-memory restoration.
+
+## Forget and reset semantics
+
+Forget clears content/provenance for the selected learned entry and every active summary backed by a forgotten source in the same scope. Content-free memory/source/content suppressions remain immutable and block retrieval, queued commits, new extraction and restored summaries. Receipts record identity/version/count, not source text. This is conservative: a shared source can cause several summaries to disappear, which the control explains.
+
+Reset previews an exact scope/count and confirmation digest. Any intervening changed entry makes confirmation stale. Reset affects learned recall only; it preserves transcripts, explicit saved memory, instructions, skills, observations/personality and computer history. Archive is not forget. Chat deletion, explicit-memory forgetting and learned-reset remain distinct operations. Immutable old backups can retain historical content until their separate expiry; no immediate physical-erasure promise is made.
+
+## Evidence and remaining gates
+
+Dependency-free Node22 checks use real SQLite with injected authorization/source/provider fixtures. **33/33 passed with the frozen binding contract, plus1/1 focused source-inspection regression check**, including a file-backed close/reopen, fresh-chat recall, six-axis/projectless isolation, use/contribute exclusion, policy CAS, changed-body replay, source revocation, idle/lease changes, quota deferral, derivative erasure, queued-job suppression, reset race and restored suppression/receipt preservation. The test-only `node:sqlite` experimental warning does not require production adoption; production uses the existing compatible API SQLite connection.
+
+First run:15/16 passed; file persistence could not open its database because shell expansion produced `/persistence.sqlite`. The corrected WSL direct command uses literal absolute scoped environment paths and explicit Node executable. No database was created at the rejected path. Original failure evidence is retained in the worker coordination root. The final amended33-check run has no skip or failure; evidence.md records exact receipts.
+
+Focused dashboard tests contain four behavior cases and are submitted to the coordinator's shared dependency/build queue. They are **not yet run** in this checkout. Typecheck and real compatibility with the production SQLite wrapper also require the coordinator's existing tooling. No install, full build, model/GPU test, runtime start, publication, deployment, desktop or audio control was performed.
+
+Final integration acceptance still requires real authenticated API/service denials, engine fresh-chat retrieval, policy exclusion across Chat/Work/Dot/voice, qualified generation/minimization, restart persistence, backup/restore barrier, saved-memory regression, and attended visual/keyboard/scaling checks. F19/F20/F49 and existing Context/learning capabilities remain accountable, not marked fully accepted by source tests.
+
+Reproduce CPU checks from this checkout, with all four test paths supplied to `node --test`:
+
+```sh
+TEMP="$OWNED_MEMORY_COORD/tmp" TMP="$OWNED_MEMORY_COORD/tmp" TMPDIR="$OWNED_MEMORY_COORD/tmp" \
+VEYRA_MEMORY_TEST_DB="$OWNED_MEMORY_COORD/tmp/persistence.sqlite" \
+node --test services/ingenium-api/tests/veyra-memory-{context,http,jobs,lifecycle}.test.mjs
+```
+
+Use a new empty test DB or safely reconcile the previous fixture before repeating; schema installation deliberately does not overwrite existing tables. The coordinator runs `services/ingenium-dashboard/tests/veyra-memory-controls.test.tsx` with its existing dashboard Vitest config and compatible dependencies; no dependency install is requested.
