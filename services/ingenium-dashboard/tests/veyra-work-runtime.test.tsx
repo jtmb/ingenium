@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   push: vi.fn(), send: vi.fn(), chat: vi.fn(), config: vi.fn(), create: vi.fn(),
-  sessionReady: true, isStreaming: false,
+  sessionReady: true, isStreaming: false, chatError: null as string | null,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: state.push }), useSearchParams: () => new URLSearchParams("settings=general") }));
 vi.mock("next/image", () => ({ default: () => null }));
@@ -23,18 +23,18 @@ vi.mock("../src/lib/use-opencode-sessions", () => ({ useOpenCodeSessions: () => 
 vi.mock("../src/lib/use-opencode-chat", () => ({ useOpenCodeChat: (id: string | null) => {
   state.chat(id);
   return { messages: [], sessionReady: state.sessionReady && id !== null, send: state.send,
-    isStreaming: state.isStreaming, permissions: [], questions: [], stop: vi.fn() };
+    isStreaming: state.isStreaming, error: state.chatError, permissions: [], questions: [], stop: vi.fn() };
 } }));
 vi.mock("../src/app/chat/components/ChatMessages", () => ({ default: () => <p>Transcript owner</p> }));
 vi.mock("../src/app/chat/components/ActivityDrawer", () => ({ default: () => null }));
-vi.mock("../src/app/components/OpenCodeFrame", () => ({ default: () => <p>Upstream frame</p> }));
+vi.mock("../src/app/components/veyra-work/WorkWebFrame", () => ({ default: ({ sessionId }: { sessionId: string | null }) => <p>Upstream frame: {sessionId}</p> }));
 vi.mock("../src/app/components/RuntimeWorkspacePicker", () => ({ default: () => <p>Workspace picker</p> }));
 
 import WorkRuntime from "../src/app/components/veyra-work/WorkRuntime";
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.sessionReady = true; state.isStreaming = false;
+  state.sessionReady = true; state.isStreaming = false; state.chatError = null;
   state.config.mockResolvedValue({ defaultSelection: { providerId: "provider-a", modelId: "model-a" }, providers: [
     { providerId: "provider-a", label: "Provider A", models: [{ id: "model-a", label: "Model A" }] },
   ] });
@@ -67,7 +67,7 @@ describe("Work runtime boundary and conversation state", () => {
     view.rerender(<WorkRuntime {...props} />);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("First task original draft");
     fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
-    expect(screen.getByText(/Automatic session linking is awaiting/)).toBeTruthy();
+    expect(screen.getByText("Upstream frame: ses-a")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Work", exact: true }));
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("First task original draft");
     expect(state.send).not.toHaveBeenCalled();
@@ -97,5 +97,25 @@ describe("Work runtime boundary and conversation state", () => {
     view.rerender(<WorkRuntime {...props} />);
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Draft before session creation");
     expect(state.send).not.toHaveBeenCalled();
+  });
+
+  it("blocks send when the legacy controller marks a failed history load as sessionReady", async () => {
+    state.chatError = "Failed to load messages";
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Must wait for authoritative history" } });
+    expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(state.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps the exact original and first failure when admission throws, without replay", async () => {
+    state.send.mockRejectedValueOnce(new Error("Connection lost before acknowledgement"));
+    render(<WorkRuntime {...props} />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Do not replay this prompt" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText(/Connection lost before acknowledgement/);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Do not replay this prompt");
+    expect(state.send).toHaveBeenCalledTimes(1);
   });
 });

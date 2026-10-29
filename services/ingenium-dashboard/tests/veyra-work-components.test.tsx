@@ -8,7 +8,7 @@ import { emptyWorkDraft } from "../src/app/components/veyra-work/work-state";
 
 vi.mock("next/image", () => ({ default: ({ alt }: { alt: string }) => <span role="img" aria-label={alt} /> }));
 vi.mock("next/link", () => ({ default: ({ children, href, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("Work presentation", () => {
   it("retains composer text and mounted conversation across Web switches; launches Web lazily", () => {
@@ -37,6 +37,20 @@ describe("Work presentation", () => {
     expect(select).toHaveBeenCalledWith("ses-a");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } });
     expect(screen.getByText("No matching chats.")).toBeTruthy();
+  });
+
+  it("starts with a usable narrow canvas and offers keyboard sidebar width controls", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+    render(<WorkShell projectLabel="Example" projects={[]} conversations={[]} activeId={null}
+      onSelect={vi.fn()} onNew={vi.fn()} composer={null} web={null}>{null}</WorkShell>);
+    expect(screen.queryByRole("complementary", { name: "Projects and conversations" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Toggle conversation sidebar" }));
+    const width = screen.getByRole("separator", { name: "Conversation sidebar width" });
+    expect(width.getAttribute("aria-valuenow")).toBe("468");
+    fireEvent.keyDown(width, { key: "Home" });
+    expect(width.getAttribute("aria-valuenow")).toBe("256");
+    fireEvent.keyDown(width, { key: "ArrowRight" });
+    expect(width.getAttribute("aria-valuenow")).toBe("360");
   });
 });
 
