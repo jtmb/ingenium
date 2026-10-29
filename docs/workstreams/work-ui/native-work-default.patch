@@ -1,5 +1,5 @@
 diff --git a/apps/web/src/app/App.tsx b/apps/web/src/app/App.tsx
-index 457b29fd..b3595dec 100644
+index 457b29fd..4374ac75 100644
 --- a/apps/web/src/app/App.tsx
 +++ b/apps/web/src/app/App.tsx
 @@ -1,4 +1,7 @@
@@ -109,12 +109,12 @@ index 457b29fd..b3595dec 100644
 +              <section className="native-work-welcome">
 +                <img src="/veyra-blue.png" alt="" width="48" height="48" />
 +                <h1>What should we build?</h1>
-+                <p>Choose an existing project, or explicitly create a scratch project. A scratch project has a real directory and project identity.</p>
++                <p>Choose a project to get started. A scratch project creates a new working folder.</p>
 +                <NativeWorkNoProjectActions scratchAvailable={connected && !!gateway.workbench && projectsSupported}
 +                  creating={scratchBusy} resumable={!!scratchRequestId}
 +                  onCreateScratch={() => { void startScratchChat("explicit-scratch-project"); }}
 +                  onChooseProject={() => setCodingWorkspace(false)} />
-+                {!connected && <p role="status">Reconnect the native service before creating a scratch project.</p>}
++                {!connected && <p role="status">Reconnect Veyra before creating a scratch project.</p>}
 +              </section>
 +            </NativeWorkPresentation>
            ) : view === "projects" && savedProjectPresentation && connected && readerScope === savedProjectPresentation.readerScope &&
@@ -265,7 +265,7 @@ index 00000000..dbe586ab
 +});
 diff --git a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
 new file mode 100644
-index 00000000..712e64e9
+index 00000000..660f4534
 --- /dev/null
 +++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
 @@ -0,0 +1,16 @@
@@ -278,9 +278,9 @@ index 00000000..712e64e9
 +  const reason = useId();
 +  return <div className="native-work-no-project-actions" role="group" aria-label="No-project chat actions">
 +    <button type="button" className="button new-task" disabled aria-describedby={reason}>New chat</button>
-+    <p id={reason} role="status">New chat without a project is unavailable until the native service provides a private execution owner.</p>
++    <p id={reason} role="status">Chats without a project are currently unavailable. Choose a project or create a scratch project.</p>
 +    <button type="button" className="button" disabled={!scratchAvailable || creating}
-+      title="Creates an actual scratch project with its own directory; this is not a chat without a project."
++      title="Creates a project and a working folder."
 +      onClick={onCreateScratch}>{creating ? "Creating scratch project…" : resumable ? "Resume scratch project creation" : "Create scratch project"}</button>
 +    {onChooseProject && <button type="button" className="button" onClick={onChooseProject}>Choose project</button>}
 +  </div>;
@@ -344,7 +344,7 @@ index 00000000..ba897cd1
 +});
 diff --git a/apps/web/src/features/work-ui/NativeWorkPresentation.tsx b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
 new file mode 100644
-index 00000000..b5742db3
+index 00000000..431e9fa9
 --- /dev/null
 +++ b/apps/web/src/features/work-ui/NativeWorkPresentation.tsx
 @@ -0,0 +1,43 @@
@@ -384,8 +384,8 @@ index 00000000..b5742db3
 +        aria-hidden={view !== "web"} inert={view !== "web"} data-active={view === "web"}
 +        className="native-work-surface native-work-unavailable">
 +        <h2>Web is unavailable for this conversation</h2>
-+        <p>The native service has no qualified upstream Web binding for this exact project and session.</p>
-+        <p>Your Work conversation stays open. Its draft, attachments and original operation outcomes remain with the native controller.</p>
++        <p>You can continue this conversation in Work.</p>
++        <p>Your conversation, draft and attachments are preserved. Switching views does not resend your message.</p>
 +        <button type="button" onClick={() => setSelection({ scope, view: "work" })}>Return to Work</button>
 +      </div>
 +    </div>
