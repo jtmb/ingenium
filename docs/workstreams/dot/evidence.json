@@ -43,7 +43,8 @@
     "services/ingenium-api/tests/veyra-dot-service.cpu.mjs": "2cd65cdd3d174e8988e5f2fe44f89601b151e7db917fc90257a30de8b4e3a7bb",
     "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx": "75fab77030a2e48673f8e4c1a568e79a102083ac4b74396f60a3c857f9f3c0e5",
     "services/ingenium-dashboard/src/app/components/dot-v2/view-model.ts": "01423dd03b4682a729edabbba0b1660e296282a6ffbe832c2cff680bac5a3888",
-    "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac"
+    "services/ingenium-dashboard/tests/veyra-dot-view-model.cpu.mjs": "56335a8d38d0ce68f3d1005aac6e3dee7d529cfe23d47460ee56685078a72cac",
+    "services/ingenium-api/tests/veyra-dot-actual-core.test.ts": "b1d35932c23c7ebbbd0be0f28ce50e7ffb16b418b217c0a0033d36a83916cb33"
   },
   "priorFailures": [
     {
@@ -138,7 +139,8 @@
       "Real HTTP veyra-dot-router.test.ts PASS 7/7"
     ],
     "logs": "coordination/integration/*-r1.log in coordinator root",
-    "scope": "Not scoped acceptance; does not cover later core-binding adapter"
+    "scope": "Not scoped acceptance; does not cover later core-binding adapter",
+    "newSharedHookState": "Coordinator reports checkpoint deferral and reviewed optional scheduler hook applied in parent; Dot runtime remains unset pending real binding/tests"
   },
   "sharedPatchSHA256": "1addbbee1ad0a0240915e547341c68cf6c651b4df82ae3364adc81624971b317",
   "suggestionDTOValidation": {
@@ -148,5 +150,18 @@
   "scopeValidation": {
     "proof": "Explicit null project/conversation scopes work; missing/undefined/empty nullable fields and null actor are rejected before record reads",
     "source": "services/ingenium-api/lib/dot-v2/service.ts"
+  },
+  "actualCoreSuiteSource": {
+    "path": "services/ingenium-api/tests/veyra-dot-actual-core.test.ts",
+    "status": "source-only; not executed by worker",
+    "syntaxCheck": "node --experimental-strip-types --check: exit 0",
+    "runtimeCases": 15,
+    "databaseAuthority": "Real ingenium-core getDb/execTransaction/jobs/authorization; no mock grant or startJobRun",
+    "fixture": "Central-created empty mode-0600 core.sqlite + lease.json in mode-0700 actual-core-test-* under coordination/dot",
+    "activationGuard": "beforeAll executes genuine nested/50-write checkpoint prerequisite; failed prerequisite stops suite before adapter construction",
+    "execution": "Launcher spy validates committed actual core/Dot rows; never spawns a process",
+    "centralCommand": "node node_modules/vitest/vitest.mjs run --config services/ingenium-api/vitest.config.ts services/ingenium-api/tests/veyra-dot-actual-core.test.ts --maxWorkers=1 --fileParallelism=false",
+    "cleanup": "Central lease owner accepted allocation/measurement/cleanup; suite closes actual singleton and prints inventory/consumerDone",
+    "remaining": "Central execution result, actual native/WSL/process lifecycle/production acceptance"
   }
 }
