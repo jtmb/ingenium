@@ -15,6 +15,8 @@ export async function runMemoryExtraction({ memory, scope, chatId, operationId, 
   }
   if (leaseValid() !== true) throw new MemoryError('LEASE_REVOKED');
   const admission = memory.admit(scope, chatId, sourceRefs);
+  const processed = memory.processedExtraction(scope, admission);
+  if (processed) return { status: 'already-processed', memoryId: processed.memoryId };
   const budget = quota(model);
   if (budget !== 'available') return { status: 'deferred', reason: budget === 'exhausted' ? 'quota-exhausted' : 'quota-unknown' };
   const candidate = await extract({ scope, admission, model, maxOutputBytes: 8192 });

@@ -42,6 +42,7 @@ export class MemoryLifecycle {
   setPolicy(scope: MemoryScope, input: Omit<HostPolicy,"revision"> & { operationId: string; expectedRevision: number }): MutationResult;
   setChatPolicy(scope: MemoryScope, chatId: string, input: Omit<ChatPolicy,"revision"> & { operationId: string; expectedRevision: number }): MutationResult;
   admit(scope: MemoryScope, chatId: string, sourceRefs: SourceRef[]): Admission;
+  processedExtraction(scope: MemoryScope, admission: Admission): { memoryId: string } | null;
   commitRecall(scope: MemoryScope, input: { operationId: string; admission: Admission; content: string; model: string }): MutationResult;
   recall(scope: MemoryScope, chatId: string, budget?: { maxItems?: number; maxTokens?: number }): RecallPage;
   inspect(scope: MemoryScope, page?: { offset?: number; limit?: number }): { items: Pick<RecallItem,"id" | "content" | "version" | "provenance">[]; total: number; nextOffset: number | null };

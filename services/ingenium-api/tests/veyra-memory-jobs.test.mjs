@@ -52,3 +52,27 @@ test('job receipt reconciliation rejects a changed model/source body', async () 
     await assert.rejects(runMemoryExtraction({ ...args, sourceRefs: [{ id: 'different-turn', contentHash: 'a'.repeat(64) }] }), (error) => error.code === 'OPERATION_CONFLICT');
   } finally { db.close(); }
 });
+
+test('a new job operation for already processed input skips quota, extraction and minimization', async () => {
+  const { db, memory, args } = fixture();
+  try {
+    const first = await runMemoryExtraction(args);
+    const second = await runMemoryExtraction({ ...args, operationId: 'duplicate-delivery',
+      quota: () => assert.fail('No quota consumption for completed input'),
+      extract: async () => assert.fail('No duplicate model extraction'),
+      minimize: async () => assert.fail('No duplicate minimization') });
+    assert.deepEqual(second, { status: 'already-processed', memoryId: first.receipt.memoryId });
+    assert.equal(memory.operation(scope, 'duplicate-delivery'), null);
+    assert.equal(memory.inspect(scope).total, 1);
+  } finally { db.close(); }
+});
+test('processed input lookup remains scope and capability bound', async () => {
+  const { db, memory, args } = fixture();
+  try {
+    const admission = memory.admit(scope, 'chat', args.sourceRefs);
+    assert.equal(memory.processedExtraction(scope, admission), null);
+    await runMemoryExtraction(args);
+    assert.ok(memory.processedExtraction(scope, admission).memoryId);
+    assert.throws(() => memory.processedExtraction({ ...scope, ownerUserId: 'different-owner' }, admission), (error) => error.code === 'STALE_ADMISSION');
+  } finally { db.close(); }
+});

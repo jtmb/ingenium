@@ -4,4 +4,4 @@ export function runMemoryExtraction(adapters: {
   leaseValid: () => boolean; quota: (model: string) => "available" | "exhausted" | "unknown";
   extract: (input: { scope: MemoryScope; admission: Admission; model: string; maxOutputBytes: number }) => Promise<string>;
   minimize: (candidate: string, context: { scope: MemoryScope; admission: Admission }) => Promise<string>;
-}): Promise<{ status: "committed"; receipt: MemoryReceipt; idempotent: boolean } | { status: "reconciled"; receipt: MemoryReceipt } | { status: "deferred"; reason: "quota-exhausted" | "quota-unknown" }>;
+}): Promise<{ status: "already-processed"; memoryId: string } | { status: "committed"; receipt: MemoryReceipt; idempotent: boolean } | { status: "reconciled"; receipt: MemoryReceipt } | { status: "deferred"; reason: "quota-exhausted" | "quota-unknown" }>;

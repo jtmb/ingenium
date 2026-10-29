@@ -131,6 +131,13 @@ export class MemoryLifecycle {
     const sources = this.validateSources(scope, key, chatId, sourceRefs, policy.externalContext);
     return { schemaVersion: 1, scopeHash: digest(key), chatId, policyRevision: policy.revision, chatRevision: chat.revision, sources, inputHash: hash(sources) };
   }
+  processedExtraction(scope, admission) {
+    const key = this.access(scope, 'generate', admission?.chatId);
+    if (admission?.scopeHash !== digest(key)) fail('STALE_ADMISSION');
+    text(admission.inputHash, 64);
+    const row = this.db.prepare('SELECT memory_id FROM veyra_memory_extraction WHERE scope_key=? AND input_hash=?').get(key, admission.inputHash);
+    return row ? { memoryId: row.memory_id } : null;
+  }
   commitRecall(scope, { operationId, admission, content, model }) {
     const key = this.access(scope, 'generate', admission?.chatId);
     text(content, 8192); text(model, 256);
