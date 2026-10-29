@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import type { VoiceClient } from './voice-client.mjs';
+import { createDeferredDisposal } from './deferred-disposal.mjs';
 
 export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; mascot: ReactNode; onClose(): void }) {
   const state = useSyncExternalStore(client.session.subscribe, client.session.getSnapshot, client.session.getSnapshot);
@@ -12,7 +13,8 @@ export function VoicePanel({ client, mascot, onClose }: { client: VoiceClient; m
   const [devices, setDevices] = useState<{ id: string; kind: string; label: string }[]>([]);
   const [showTranscript, setShowTranscript] = useState(false);
   const run = (operation: () => Promise<unknown>) => { setError(null); void operation().catch(() => setError('The voice action could not be confirmed. Check the connection before trying again.')); };
-  useEffect(() => () => { void client.end().catch(() => undefined); }, [client]);
+  const lifetime = useMemo(() => createDeferredDisposal(() => { void client.end().catch(() => undefined); }), [client]);
+  useEffect(() => lifetime.attach(), [lifetime]);
   const ended = state.phase === 'ended';
   return <section aria-label={client.session.mode === 'agent-call' ? 'Call with current working agent' : 'Veyra voice'} className="flex min-h-[min(36rem,80dvh)] w-full flex-col rounded-3xl bg-[#0e0e0e] p-4 text-neutral-100 sm:p-6" data-testid="veyra-voice-panel">
     <header className="flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-400">

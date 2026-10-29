@@ -6,8 +6,10 @@ Status: owned source implementation for coordinator integration; no real audio, 
 
 - `packages/veyra-voice/session.mjs`: scope-bound dictation, working-agent calls and conversational voice lifecycle. Generation fencing suppresses stale results before submission, synthesis and playback. Stop aborts local work immediately, then requires acknowledgement from the exact native agent turn before reuse. Unknown interruption retires the voice session. Steering and queueing use existing agent semantics without silently interrupting work. Permission requests require an explicit Allow once or Deny action.
 - `packages/veyra-voice/audio.mjs`: streaming FIR normalization to 16 kHz mono s16le, bounded segmentation with pre-roll and WAV format validation. Energy segmentation is a compatibility endpoint detector, not qualified neural VAD or acoustic echo cancellation.
-- API `lib/voice-v2/{service,speech-worker,http}.mjs`: authenticated/capability-authorized adapters, durable operation-ledger injection, GPU-qualified Stratus speech protocol consumer and bounded HTTP/NDJSON handler. No worker process or model is loaded here.
+- API `lib/voice-v2/{service,speech-worker,http,current-agent}.mjs`: authenticated/capability-authorized adapters, durable operation-ledger injection, current native conversation binding, GPU-qualified Stratus speech protocol consumer and bounded HTTP/NDJSON handler. No worker process or model is loaded here.
 - Dashboard `components/voice-v2/`: browser device lifetime and cancellable playback, HTTP consumer, integrated client lifecycle and start/active voice UI. The compact blue Start voice button and dark active canvas follow the protected start/active reference pixels. The existing blue Veyra mascot is supplied as a React slot. Visual comparison remains pending.
+
+The concrete current-agent port, installed native contract findings, truthful availability state and ready-to-mount `VoiceWorkMountProps` are documented in [current-agent-integration.md](current-agent-integration.md). Native turn observation remains bound to the existing conversation event owner; unavailable dependencies are not replaced with a synthetic successful call.
 
 ## Coordinator wiring recipe
 
