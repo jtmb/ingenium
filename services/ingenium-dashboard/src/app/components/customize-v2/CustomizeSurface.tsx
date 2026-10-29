@@ -8,6 +8,9 @@ import { useProject } from "../../../lib/ProjectContext";
 import Overlay from "../Overlay";
 import { customizeViewIdentity, groupCatalogEntries, installationLabel, projectCatalog, readCatalogScope, resolveInstallationScope, scopedHref, visibleEntries, type CustomizeEntry, type CustomizeScopeBinding } from "./catalog.mjs";
 
+import { resolveHostedCatalogBindings } from "./catalog-reader.mjs";
+import { createServiceCatalogSource } from "./service-catalog-source";
+
 type Kind = "plugin" | "skill";
 
 export interface CustomizeCatalogSource {
@@ -26,15 +29,38 @@ const control = "rounded-lg px-3 py-2 text-sm hover:bg-[var(--color-surface-hove
 
 export default function CustomizeSurface({ kind, catalogSources = noCatalogSources }: { kind: Kind; catalogSources?: CustomizeCatalogSource[] }) {
   const project = useProject();
-  return <CustomizeCatalogView project={project} kind={kind} catalogSources={catalogSources} />;
+  return <HostedCustomize key={project} project={project} kind={kind} catalogSources={catalogSources} />;
+}
+
+function HostedCustomize({ project, kind, catalogSources }: {project: string; kind: Kind; catalogSources: CustomizeCatalogSource[]}) {
+  const [sources, setSources] = useState<CustomizeCatalogSource[] | null>(null);
+  const [error, setError] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setSources(null);
+    setError(false);
+    void api.projects.list().then(({ data }) => {
+      const defaults = resolveHostedCatalogBindings(data, project).map(createServiceCatalogSource);
+      const bound = [...defaults.filter(source => !catalogSources.some(override => override.id === source.id)), ...catalogSources];
+      if (active) setSources(bound);
+    }).catch(() => { if (active) setError(true); });
+    return () => { active = false; };
+  }, [project, catalogSources, refresh]);
+  if (error) return <div role="alert" className="p-6 text-sm">
+    <p>Catalog scope could not be resolved. Check project access, then retry.</p>
+    <button type="button" className={control} onClick={() => setRefresh(value => value + 1)}>Retry scope resolution</button>
+  </div>;
+  if (!sources) return <p role="status" className="p-6 text-sm">Resolving catalog scope…</p>;
+  return <CustomizeCatalogView project={project} kind={kind} catalogSources={sources} discoverSystem={false} />;
 }
 
 /** Work may provide explicit projectless/actor-owned sources without a fake project. */
-export function CustomizeCatalogView({ project, kind, catalogSources = noCatalogSources, onNavigate }: {
-  project: string | null; kind: Kind; catalogSources?: CustomizeCatalogSource[]; onNavigate?: (kind: Kind) => void;
+export function CustomizeCatalogView({ project, kind, catalogSources = noCatalogSources, onNavigate, discoverSystem = true }: {
+  project: string | null; kind: Kind; catalogSources?: CustomizeCatalogSource[]; onNavigate?: (kind: Kind) => void; discoverSystem?: boolean;
 }) {
-  const identity = customizeViewIdentity(project, kind, catalogSources);
-  return <ProjectCustomize key={identity} project={project} kind={kind} catalogSources={catalogSources} onNavigate={onNavigate} />;
+  const identity = customizeViewIdentity(project, kind, catalogSources) + ":" + discoverSystem;
+  return <ProjectCustomize key={identity} project={project} kind={kind} catalogSources={catalogSources} onNavigate={onNavigate} discoverSystem={discoverSystem} />;
 }
 
 function CatalogRow({ entry, onSelect }: { entry: CustomizeEntry; onSelect: (entry: CustomizeEntry) => void }) {
@@ -52,7 +78,7 @@ function CatalogRow({ entry, onSelect }: { entry: CustomizeEntry; onSelect: (ent
   );
 }
 
-function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { project: string | null; kind: Kind; catalogSources: CustomizeCatalogSource[]; onNavigate?: (kind: Kind) => void }) {
+function ProjectCustomize({ project, kind, catalogSources, onNavigate, discoverSystem }: { project: string | null; kind: Kind; catalogSources: CustomizeCatalogSource[]; onNavigate?: (kind: Kind) => void; discoverSystem: boolean }) {
   const [plugins, setPlugins] = useState<CatalogState>(project ? pending : { status: "ready", entries: [], error: "" });
   const [skills, setSkills] = useState<CatalogState>(project ? pending : { status: "ready", entries: [], error: "" });
   const [query, setQuery] = useState("");
@@ -62,7 +88,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { proje
   const [refresh, setRefresh] = useState(0);
   const [installation, setInstallation] = useState<CustomizeScopeBinding | null>(null);
   const [scopeError, setScopeError] = useState("");
-  const [scopeResolution, setScopeResolution] = useState<"loading" | "ready" | "error">("loading");
+  const [scopeResolution, setScopeResolution] = useState<"loading" | "ready" | "error">(discoverSystem ? "loading" : "ready");
   const sources = useMemo<CustomizeCatalogSource[]>(() => {
     if (catalogSources.some((source) => !source.scopeIdentity || !source.label || typeof source.read !== "function" || !["project", "public", "personal", "system"].includes(source.id)) ||
         new Set(catalogSources.map((source) => source.id)).size !== catalogSources.length) {
@@ -80,7 +106,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { proje
   const projectSource = sources.find((source) => source.id === "project");
   const selectedSource = sources.find((source) => source.id === scope);
   const selectedProject = selected?.apiProject ?? null;
-  const showSystemTab = (kind === "skill" || project === null || sources.some((source) => source.id === "system"))
+  const showSystemTab = (sources.some((source) => source.id === "system") || discoverSystem && (kind === "skill" || project === null))
     && !(project !== null && sources.find((source) => source.id === "system")?.apiProject === project);
   const scopeProject = scope === "project" ? project : selectedSource?.apiProject ?? null;
   const presentedScope = scope === "system" && project !== null && selectedSource?.apiProject === project ? "project" : scope;
@@ -95,7 +121,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { proje
     setSkills(project ? pending : { status: "ready", entries: [], error: "" });
     setSelected(null);
     setScopeError("");
-    setScopeResolution("loading");
+    setScopeResolution(discoverSystem ? "loading" : "ready");
     setInstallation(null);
     setRefresh((value) => value + 1);
   }
@@ -126,7 +152,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { proje
     return () => { active = false; };
   }, [project, projectSource, refresh]);
   useEffect(() => {
-    if (catalogSources.some((source) => source.id === "system")) return;
+    if (!discoverSystem || catalogSources.some((source) => source.id === "system")) return;
     let active = true;
     void api.projects.list().then(({ data }) => {
       const binding = resolveInstallationScope(data);
@@ -135,7 +161,7 @@ function ProjectCustomize({ project, kind, catalogSources, onNavigate }: { proje
       if (active) { setInstallation(null); setScopeResolution("error"); setScopeError("System scope could not be resolved. Refresh to recheck installation access."); }
     });
     return () => { active = false; };
-  }, [catalogSources, refresh]);
+  }, [catalogSources, discoverSystem, refresh]);
   return (
     <section className="flex min-h-[calc(100dvh-4rem)] min-w-0 flex-col overflow-hidden rounded-xl bg-[var(--color-surface)] text-[var(--color-text-primary)] md:flex-row" data-testid="customize-surface">
       <aside className="shrink-0 border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 md:w-[min(28vw,29rem)] md:border-r md:border-b-0" aria-label="Customize navigation">

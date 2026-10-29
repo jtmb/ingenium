@@ -8,3 +8,5 @@ export function createCatalogPageReader(
   request: <T>(path: string, options?: RequestInit) => Promise<T>,
   binding: CatalogReadBinding,
 ): (kind: "plugin" | "skill") => Promise<CustomizeEntry[]>;
+
+export function resolveHostedCatalogBindings(projects: {id: string; name: string; is_global?: boolean | number; archived_at?: string | null}[], project: string): CatalogReadBinding[];

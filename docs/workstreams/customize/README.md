@@ -102,3 +102,12 @@ C3 supplies the full unarchived skill-record query to the API authority's new re
 The human's direct reporting authorization was verified in the coordinator's two actual user messages. The worker reported all C1/C2/C3 gates and exact test requests directly. Coordinator acknowledged ownership of all three fixes. The same orchestration resource was normally updated to revision 1 by the coordinator; any earlier hash/revision is historical provenance, and this worker imposes no hash-based freeze on authorized skill updates.
 
 C4 records the inherited shared Skills upload/save error-state gate, verified in the integration root and directly reported. It belongs to the coordinator's shared Skills-page territory and remains open alongside the full runtime qualification.
+
+
+## Full default catalog binding
+
+The ProjectProvider-backed default surface now waits for the authenticated project index. It requires one exact active current namespace/UUID, resolves System only from one active is_global row, and constructs full /customize readers for project and system visibility. It does not issue legacy list reads before binding or fall back after a catalog error. Missing/ambiguous mappings show a retryable scope-resolution error. An absent installation mapping leaves System unavailable; a current installation is labelled System once. Public/Personal remain explicitly unavailable unless actual owner sources are supplied.
+
+The exported CustomizeCatalogView still accepts explicit null and host-owned sources/navigation. Its optional discoverSystem=false prevents legacy installation discovery when the host already supplied the authoritative source set. Default hosted routing uses that setting. The compatibility view without full sources continues to disclose Active skills; this is not the default hosted catalog path.
+
+Four dependency-free binding cases cover exact ownership, absent/archived/aliased current projects, duplicate installation mappings, and absence of name-based System inference. Three component cases cover default reads, denied binding, and full-reader denial without active-only fallback. Central component/type/visual acceptance is still required.

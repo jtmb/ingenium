@@ -3,10 +3,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import React from "react";
 import type { CustomizeEntry } from "../src/app/components/customize-v2/catalog.mjs";
 
-const { listPlugins, listSkills, listProjects } = vi.hoisted(() => ({
-  listPlugins: vi.fn(), listSkills: vi.fn(), listProjects: vi.fn(),
+const { listPlugins, listSkills, listProjects, request } = vi.hoisted(() => ({
+  listPlugins: vi.fn(), listSkills: vi.fn(), listProjects: vi.fn(), request: vi.fn(),
 }));
-vi.mock("../src/lib/api", () => ({ api: {
+vi.mock("../src/lib/api", () => ({ request, api: {
   plugins: { list: listPlugins }, skills: { list: listSkills }, projects: { list: listProjects },
 } }));
 vi.mock("../src/lib/ProjectContext", () => ({ useProject: () => "active-project" }));
@@ -22,12 +22,16 @@ vi.mock("../src/app/components/Overlay", () => ({
     isOpen ? <div role="dialog" aria-label={title}>{children}</div> : null,
 }));
 
-import { CustomizeCatalogView, type CustomizeCatalogSource } from "../src/app/components/customize-v2/CustomizeSurface";
+import CustomizeSurface, { CustomizeCatalogView, type CustomizeCatalogSource } from "../src/app/components/customize-v2/CustomizeSurface";
 
 beforeEach(() => {
   listPlugins.mockReset().mockResolvedValue({ data: [] });
   listSkills.mockReset().mockResolvedValue({ data: [] });
   listProjects.mockReset().mockResolvedValue({ data: [] });
+  request.mockReset().mockImplementation(async (path: string) => {
+    const params = new URL("https://fixture.invalid" + path).searchParams;
+    return {scope: {kind: "project", projectId: params.get("project") === "active-project" ? "current" : "installation"}, scopes: [params.get("visibility")], data: [], pagination: {offset: 0, limit: 100, total: 0, hasMore: false}};
+  });
 });
 afterEach(cleanup);
 
@@ -152,5 +156,43 @@ describe("Customize scope ownership and presentation", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Skills could not be loaded");
     expect(listSkills).not.toHaveBeenCalled();
     expect(listPlugins).not.toHaveBeenCalled();
+  });
+});
+
+describe("default hosted catalog bindings", () => {
+  it("waits for the authenticated index then uses full current and System readers only", async () => {
+    listProjects.mockResolvedValue({data: [
+      {id: "current", name: "active-project"}, {id: "installation", name: "actual-owner", is_global: true},
+    ]});
+    render(<CustomizeSurface kind="skill" />);
+    await screen.findByRole("heading", {name: "Skills", exact: true});
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", {name: "System", exact: true}));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+    const params = new URL("https://fixture.invalid" + request.mock.calls[2][0]).searchParams;
+    expect(params.get("project")).toBe("actual-owner");
+    expect(params.get("visibility")).toBe("system");
+    expect(listProjects).toHaveBeenCalledTimes(1);
+    expect(listSkills).not.toHaveBeenCalled();
+    expect(listPlugins).not.toHaveBeenCalled();
+  });
+
+  it("does not read or fall back when the selected project is unavailable", async () => {
+    render(<CustomizeSurface kind="skill" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Catalog scope could not be resolved");
+    expect(request).not.toHaveBeenCalled();
+    expect(listSkills).not.toHaveBeenCalled();
+    expect(listPlugins).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on full read denial and leaves unconfigured Personal unavailable", async () => {
+    listProjects.mockResolvedValue({data: [{id: "current", name: "active-project"}]});
+    request.mockRejectedValue(new Error("Catalog denied"));
+    render(<CustomizeSurface kind="skill" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Skills could not be loaded");
+    fireEvent.click(screen.getByRole("button", {name: "Personal", exact: true}));
+    expect(screen.getByText("Personal scope is not exposed by the current service.")).toBeVisible();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(listSkills).not.toHaveBeenCalled();
   });
 });

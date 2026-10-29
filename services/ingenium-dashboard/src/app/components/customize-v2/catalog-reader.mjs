@@ -1,3 +1,30 @@
+import { resolveInstallationScope } from "./catalog.mjs";
+
+/** Bind only actual active rows returned by the authenticated project index. */
+export function resolveHostedCatalogBindings(projects, project) {
+  if (!Array.isArray(projects) || typeof project !== "string" || !project.trim()) {
+    throw new Error("An authorized project index and exact project are required.");
+  }
+  const matches = projects.filter(row => row?.name === project && !row.archived_at);
+  if (matches.length !== 1 || typeof matches[0].id !== "string" || !matches[0].id) {
+    throw new Error("The selected project is not uniquely available through the current service.");
+  }
+  const current = matches[0];
+  if (projects.filter(row => row?.id === current.id && !row.archived_at).length !== 1) throw new Error("Project identity is ambiguous.");
+  const system = resolveInstallationScope(projects);
+  if (system && projects.filter(row => row?.name === system.apiProject && !row.archived_at).length !== 1) throw new Error("Installation namespace is ambiguous.");
+  const result = [{
+    projectId: current.id, apiProject: current.name, visibility: "project",
+    scopeIdentity: JSON.stringify(["project", current.id, current.name]),
+    label: system?.id === current.id ? "System" : current.name,
+  }];
+  if (system && system.id !== current.id) result.push({
+    projectId: system.id, apiProject: system.apiProject, visibility: "system",
+    scopeIdentity: JSON.stringify(["system", system.id, system.apiProject]), label: "System",
+  });
+  return result;
+}
+
 /** A read-only consumer of the host-mounted authenticated catalog boundary. */
 export function createCatalogPageReader(request, binding) {
   if (!binding || !binding.projectId || !binding.apiProject ||

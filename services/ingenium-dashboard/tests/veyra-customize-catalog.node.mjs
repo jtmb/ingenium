@@ -205,3 +205,40 @@ test("catalog display selectors cannot silently substitute unrelated scope seman
     projectId: "installation", apiProject: "explicit-installation", visibility: "project", selectorId: "system", scopeIdentity: "installation", label: "System",
   }));
 });
+
+test("hosted bindings use real current and installation identities with full System visibility", async () => {
+  const { resolveHostedCatalogBindings } = await import("../src/app/components/customize-v2/catalog-reader.mjs");
+  const bindings = resolveHostedCatalogBindings([
+    { id: "a", name: "work" }, { id: "installation", name: "actual-owner", is_global: true },
+  ], "work");
+  assert.deepEqual(bindings.map(row => [row.projectId, row.apiProject, row.visibility, row.label]),
+    [["a", "work", "project", "work"], ["installation", "actual-owner", "system", "System"]]);
+});
+
+test("hosted binding refuses absent archived duplicate or aliased current ownership", async () => {
+  const { resolveHostedCatalogBindings } = await import("../src/app/components/customize-v2/catalog-reader.mjs");
+  for (const rows of [[], [{ id: "a", name: "work", archived_at: "2026-01-01" }],
+    [{ id: "a", name: "work" }, { id: "b", name: "work" }],
+    [{ id: "a", name: "work" }, { id: "a", name: "other" }]]) {
+    assert.throws(() => resolveHostedCatalogBindings(rows, "work"), /not uniquely|ambiguous/);
+  }
+});
+
+test("hosted bindings do not invent System from a name and do not create duplicate installation selectors", async () => {
+  const { resolveHostedCatalogBindings } = await import("../src/app/components/customize-v2/catalog-reader.mjs");
+  assert.equal(resolveHostedCatalogBindings([{ id: "a", name: "global-default" }], "global-default").length, 1);
+  const binding = resolveHostedCatalogBindings([{ id: "a", name: "actual-owner", is_global: true }], "actual-owner");
+  assert.equal(binding.length, 1);
+  assert.equal(binding[0].visibility, "project");
+  assert.equal(binding[0].label, "System");
+});
+
+test("hosted bindings reject ambiguous installation namespaces without a name fallback", async () => {
+  const { resolveHostedCatalogBindings } = await import("../src/app/components/customize-v2/catalog-reader.mjs");
+  assert.throws(() => resolveHostedCatalogBindings([
+    { id: "a", name: "work" }, { id: "b", name: "owner", is_global: true }, { id: "c", name: "owner" },
+  ], "work"), /namespace is ambiguous/);
+  assert.throws(() => resolveHostedCatalogBindings([
+    { id: "a", name: "work" }, { id: "b", name: "one", is_global: true }, { id: "c", name: "two", is_global: true },
+  ], "work"), /mapping is ambiguous/);
+});
