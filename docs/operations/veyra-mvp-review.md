@@ -12,14 +12,14 @@ Use one dark shell, the selected blue mascot, centered Chat/Work toggle, quiet c
 
 The 2026-10-29 composer reference supersedes the earlier pending compact Chat direction. Use its wide rounded input, aligned attachment/model/microphone/send controls, centered welcome heading and quiet suggestion rows while keeping Veyra's existing charcoal surfaces, blue accent and colour tokens. The supplied reference's private email/task examples are not application content. Dictation remains visibly unavailable until implemented. Home keeps its separate composer.
 
-The standard and Fast native model selections must remain distinct even when OpenCode reports the same underlying API model ID. The saved standard openai/gpt-6-luna choice must display GPT-6 Luna; Fast remains an explicit alternative. The revision is deployed in source 5bb3755c37f741d855d082618ab58b375d063e0e. The live standard Luna selection, real response and normal reload passed. Desktop/mobile geometry and existing Home/Chat workflows passed in production browser fixtures. The current live capture is 1280x720; it does not replace the original contracted 1672x941 comparisons. This revision is pending user visual review and does not accept the 47-view inventory or close unfinished functional gates.
+The standard and Fast native model selections must remain distinct even when OpenCode reports the same underlying API model ID. The saved standard openai/gpt-6-luna choice must display GPT-6 Luna; Fast remains an explicit alternative. The revision is deployed in source 5bb3755c37f741d855d082618ab58b375d063e0e. The live standard Luna selection, real response and normal reload passed. Desktop/mobile geometry and existing Home/Chat workflows passed in production browser fixtures. The earlier browser capture is 1280x720; it does not replace the original contracted 1672x941 comparisons. The current image docker.io/jtmb92/ingenium@sha256:4692f432f88d713d1e625abd189f1849e6afb715aa5544ebe39edaabefe36748 also passed native new-session URL, reload and Back/Forward checks at a captured native window size of 1362x932. This revision is pending user visual review and does not accept the 47-view inventory or close unfinished functional gates.
 
 ## Contracted views
 
 | View | Route | Live captures | Current disposition / remaining gate |
 |---|---|---:|---|
 | home | / | 2 | Needs Attention review/job actions and complete Home composition remain open.
-| chat-reference-v3 | /chat | 2 | Microphone, global search and full keyboard/scaling behavior remain open.
+| chat-reference-v3 | /chat | 3 | Microphone, global search and full keyboard/scaling behavior remain open.
 | opencode-upstream-actual | /opencode | 1 | Actual upstream UI and fresh pinned skill loading passed; individual external capabilities remain separate gates.
 | vscode | /vscode | 1 | Actual code-server loaded in its existing Restricted Mode; no trust change was made.
 | mail | /mail | 1 | Fresh background sync completed for four folders; new send/receive and smart replies remain Phase 2 gates.
@@ -56,7 +56,7 @@ The standard and Fast native model selections must remain distinct even when Ope
 | mfa-clean-v2 | /mfa | 0 | Controlled fixture only; no new factor enrollment or credential change.
 | reset-password | /reset-password | 0 | Controlled blank new-password form only; no credential entered or changed; actual reset workflow remains open.
 | verify-email | /verify-email | 0 | Controlled fixture only; no new verification message or account change.
-| chat-conversation-v3 | additional state | 1 | Live Luna send, navigation recovery, cancel, history and reload passed; New conversation URL identity remains open.
+| chat-conversation-v3 | additional state | 1 | Live Luna send, navigation recovery, cancel, history and reload passed; New conversation URL identity, reload and Back/Forward also passed in the actual native WebView on source 35e0465176b88727c1bc3616111f4a0ce18236ac.
 | navigation-all-features-v4 | additional state | 0 | All existing route groups remain discoverable; global search, recent-item and normalized widths require visual approval.
 | context-saved-memory | additional state | 0 | No saved memory selected; edit/forget behavior and baseline composition remain open.
 | settings-security | additional state | 1 | Account security workspace/anchor rendered; no password or MFA change.
@@ -68,7 +68,7 @@ The standard and Fast native model selections must remain distinct even when Ope
 
 ## Additional Windows states
 
-Eight hash-verified actual native states were personally reviewed: connection, library, selected Windows project, selected WSL project, executed Windows terminal output, executed WSL terminal output, reconnect and closed terminal. [Proposed Windows view record](../design/veyra-windows-mvp-views.json) binds each to its GUI hash, size and capture time. First-run/service recovery, creation dialog, tray/whole-service exit and scaling/focus still need targeted coverage. The existing 47 route baselines alone cannot accept these platform flows.
+Eleven hash-verified actual native states were personally reviewed: connection, library, selected Windows project, selected WSL project, executed Windows terminal output, executed WSL terminal output, reconnect, closed terminal, unsaved Windows and WSL creation dialogs, and the replacement-image new Chat after reload/Back/Forward. [Proposed Windows view record](../design/veyra-windows-mvp-views.json) binds each to its GUI hash, size and capture time. First-run/service recovery, full creation validation/submission, tray/whole-service exit and scaling/focus still need targeted coverage. The existing 47 route baselines alone cannot accept these platform flows.
 
 ## Approval boundaries
 

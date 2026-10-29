@@ -90,13 +90,50 @@
       "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
       "personallyReviewed": true,
       "visualAccepted": false
+    },
+    {
+      "id": "create-windows-dialog",
+      "capture": "native-create-windows-dialog-20261029.jpg",
+      "sha256": "798a3e321e36e83777f22befcbbc46749c5d8dc65bdc3e3606c687dcc1c8bdbc",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-29T11:59:34.810Z",
+      "captureTimeSource": "Operator capture file save time",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "create-wsl-dialog",
+      "capture": "native-create-wsl-dialog-20261029.jpg",
+      "sha256": "2ab79e6d6d9cbfc1348be95d8953276ffc2cf86082ac7c040304fab0ad0f6bb8",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-29T12:02:19.460Z",
+      "captureTimeSource": "Operator capture file save time",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "personallyReviewed": true,
+      "visualAccepted": false
+    },
+    {
+      "id": "shared-chat-new-conversation",
+      "capture": "native-new-conversation-reload-history-20261029.jpg",
+      "sha256": "6a2c1c03e41645a875952965ada090cf8ec120ec6510cc6b9f900f7c405eca4a",
+      "width": 1362,
+      "height": 932,
+      "capturedAt": "2026-10-29T12:25:52.825Z",
+      "captureTimeSource": "Operator capture file save time",
+      "guiSha256": "9b12093dd7844f35ccdffa17f6ec2b0c3bd783bf1aae3a2fc5815c63d067a8f4",
+      "applicationRuntimeSource": "35e0465176b88727c1bc3616111f4a0ce18236ac",
+      "personallyReviewed": true,
+      "visualAccepted": false
     }
   ],
   "remainingGates": [
     "First-run and native-service recovery states",
-    "Create-project distro/user/shell/workdir selection dialog",
+    "Full create-project distro/user/shell/workdir validation and submission; Windows/WSL dialog visuals captured",
     "Tray menu and confirmed graceful whole-service exit",
-    "Keyboard/focus and 100-200 percent scaling",
-    "Fresh native WebView rendering of the replacement Linux image"
-  ]
+    "Keyboard/focus and 100-200 percent scaling"
+  ],
+  "freshNativeReplacementRenderingPassed": true
 }

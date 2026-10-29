@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "updated": "2026-10-29",
   "status": "MVP review candidate; visual approval and unfinished functional gates remain open",
-  "applicationRuntimeSource": "5bb3755c37f741d855d082618ab58b375d063e0e",
-  "image": "docker.io/jtmb92/ingenium@sha256:1925d5695fba242f4990748473f72d847276c10ae721be13173e974dc404ec50",
+  "applicationRuntimeSource": "35e0465176b88727c1bc3616111f4a0ce18236ac",
+  "image": "docker.io/jtmb92/ingenium@sha256:4692f432f88d713d1e625abd189f1849e6afb715aa5544ebe39edaabefe36748",
   "baselineContractSha256": "e2c66fc40d8721bc2a54e8a6f11902fd18990cbbdd21d9cf7622f78cf832166e",
   "legacyFeatureMapSha256": "7d3775dcd07e75454f61e5ed8a3786243056fe24d189c38415888bb5305c3006",
   "visualApproval": false,
@@ -125,6 +125,18 @@
           "sourceCommit": "5bb3755c37f741d855d082618ab58b375d063e0e",
           "state": "Existing controlled empty session; actual catalog standard GPT-6 Luna selected; Fast separately available",
           "presentationQualified": true
+        },
+        {
+          "file": "native-new-conversation-reload-history-20261029.jpg",
+          "sha256": "6a2c1c03e41645a875952965ada090cf8ec120ec6510cc6b9f900f7c405eca4a",
+          "imageSize": {
+            "width": 1362,
+            "height": 932
+          },
+          "sourceCommit": "35e0465176b88727c1bc3616111f4a0ce18236ac",
+          "state": "Actual Windows WebView: new empty conversation after reload, Back and Forward; standard GPT-6 Luna selected",
+          "captureSurface": "Native window including title bar",
+          "visualAccepted": false
         }
       ],
       "disposition": "Microphone, global search and full keyboard/scaling behavior remain open.",
@@ -1412,7 +1424,7 @@
           "visualAccepted": false
         }
       ],
-      "disposition": "Live Luna send, navigation recovery, cancel, history and reload passed; New conversation URL identity remains open.",
+      "disposition": "Live Luna send, navigation recovery, cancel, history and reload passed in prior qualification. Actual native New conversation URL, reload and Back/Forward passed on the current replacement image. Remaining Chat and visual gates stay open.",
       "visualAccepted": false
     },
     {
@@ -1860,6 +1872,30 @@
       },
       "sourceCommit": "5bb3755c37f741d855d082618ab58b375d063e0e",
       "state": "Existing controlled empty session; actual catalog standard GPT-6 Luna selected; Fast separately available"
+    },
+    "currentRuntimeImage": "docker.io/jtmb92/ingenium@sha256:4692f432f88d713d1e625abd189f1849e6afb715aa5544ebe39edaabefe36748",
+    "currentChartPromotion": "152195523e6619fd4c70e32119257c2cf0b2778f",
+    "currentNativeCapture": {
+      "file": "native-new-conversation-reload-history-20261029.jpg",
+      "sha256": "6a2c1c03e41645a875952965ada090cf8ec120ec6510cc6b9f900f7c405eca4a",
+      "imageSize": {
+        "width": 1362,
+        "height": 932
+      },
+      "sourceCommit": "35e0465176b88727c1bc3616111f4a0ce18236ac",
+      "state": "Actual Windows WebView: new empty conversation after reload, Back and Forward; standard GPT-6 Luna selected",
+      "captureSurface": "Native window including title bar",
+      "visualAccepted": false
+    },
+    "currentNativeRouteVerification": {
+      "newConversationURL": true,
+      "reload": true,
+      "back": true,
+      "forward": true,
+      "emptyNativeSessionConfirmed": true,
+      "standardLunaVisible": true,
+      "providerPromptRequested": false,
+      "visualApproval": false
     }
   }
 }
