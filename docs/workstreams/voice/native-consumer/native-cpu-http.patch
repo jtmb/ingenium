@@ -1,0 +1,418 @@
+--- a/crates/adapters/src/speech.rs
++++ b/crates/adapters/src/speech.rs
+@@ -17,6 +17,7 @@
+     time::{Duration, Instant},
+ };
+ mod privacy;
++mod http_worker;
+ #[cfg(test)]
+ pub(crate) mod retirement_fixture;
+ 
+@@ -54,6 +55,8 @@
+     running: Arc<AtomicBool>,
+     stopping: AtomicBool,
+     first_stop: OnceLock<Instant>,
++    remote: Result<Option<http_worker::Config>>,
++    remote_uncertain: Arc<AtomicBool>,
+ }
+ enum Input {
+     Transcribe(Vec<u8>),
+@@ -91,9 +94,17 @@
+     Ok(path)
+ }
+ pub fn status() -> Value {
++    match http_worker::Config::load() {
++        Ok(Some(config)) => return config.status(),
++        Err(_) => return json!({"backend":"unavailable", "available":false,
++            "qualified":false,"transcription_configured":false,"synthesis_configured":false}),
++        Ok(None) => {},
++    }
+     json!({"transcription_configured":configured_file("VEYRA_WHISPER_EXE").is_ok() && configured_file("VEYRA_WHISPER_MODEL").is_ok(),
+         "synthesis_configured":configured_file("VEYRA_SPEECH_PYTHON").is_ok() && configured_file("VEYRA_KOKORO_MODEL").is_ok() && configured_file("VEYRA_KOKORO_VOICES").is_ok(),
+-        "qualified":false,"execution":"local CPU only; installed runtime and model files required","realtime_duplex":"unverified"})
++        "qualified":false,"execution":"local CPU only; installed runtime and model files required","realtime_duplex":"unverified", "backend":"local-process",
++        "limits":{"max_recording_ms":60000,"max_text_chars":2000},
++        "configured_default_voice":"af_sarah","voices":[],"voice_catalog_verified":false})
+ }
+ impl Speech {
+     pub fn new(directory: &Path) -> Self {
+@@ -103,6 +114,8 @@
+             running: Arc::new(AtomicBool::new(false)),
+             stopping: AtomicBool::new(false),
+             first_stop: OnceLock::new(),
++            remote: http_worker::Config::load(),
++            remote_uncertain: Arc::new(AtomicBool::new(false)),
+         }
+     }
+     pub fn transcribe(&self, id: &str, encoded: &str) -> Result<Operation> {
+@@ -114,7 +127,14 @@
+         self.start(id, Input::Transcribe(wav))
+     }
+     pub fn synthesize(&self, id: &str, text: String, voice: Option<String>) -> Result<Operation> {
+-        let voice = voice.unwrap_or_else(|| "af_sarah".into());
++        let voice = match voice {
++            Some(voice) => voice,
++            None => match &self.remote {
++                Ok(Some(config)) => config.default_voice(),
++                Ok(None) => "af_sarah".into(),
++                Err(error) => return Err(*error),
++            },
++        };
+         if text.trim().is_empty()
+             || text.chars().count() > 2000
+             || text.contains('\0')
+@@ -163,6 +183,11 @@
+             mark_restarted(&mut original.operation);
+             return Ok(original.operation);
+         }
++        match &self.remote {
++            Ok(Some(config)) => config.validate(&input)?,
++            Err(error) => return Err(*error),
++            Ok(None) => {},
++        }
+         if jobs.len() >= 16 {
+             let terminal = jobs
+                 .iter()
+@@ -180,7 +205,7 @@
+             wav_base64: None,
+             message: None,
+             elapsed_ms: None,
+-            provenance: json!({"execution":"CPU","qualified":false}),
++            provenance: json!({"execution":"CPU","qualified":false,"remote_cpu":matches!(&self.remote, Ok(Some(_)))}),
+         };
+         prepare_directory(&self.directory)?;
+         if fs::read_dir(&self.directory)
+@@ -217,9 +242,20 @@
+         let running = self.running.clone();
+         let operation_id = id.to_owned();
+         let worker_digest = digest.clone();
++        let remote = self.remote.clone();
++        let remote_uncertain = self.remote_uncertain.clone();
+         let (worker, publication) = crate::media_worker::Original::prepare(move || {
+             let start = Instant::now();
+-            let result = execute(&directory, &operation_id, input, &worker_cancel);
++            let result = match remote {
++                Ok(Some(config)) => config.execute(&operation_id, input, &worker_cancel),
++                Ok(None) => execute(&directory, &operation_id, input, &worker_cancel)
++                    .map_err(http_worker::Failure::Known),
++                Err(error) => Err(http_worker::Failure::Known(error)),
++            };
++            // Joining an HTTP helper cannot prove remote kernel retirement.
++            if matches!(&result, Err(http_worker::Failure::RemoteUncertain)) {
++                remote_uncertain.store(true, Ordering::Release);
++            }
+             if let Ok(mut view) = worker_view.lock() {
+                 view.elapsed_ms = Some(start.elapsed().as_millis());
+                 match result {
+@@ -229,14 +265,22 @@
+                         view.wav_base64 = wav;
+                         view.provenance = provenance;
+                     }
+-                    Err(_) if worker_cancel.load(Ordering::Acquire) => {
++                    Err(http_worker::Failure::RemoteUncertain) => {
++                        view.state = "uncertain".into();
++                        view.message = Some("Remote speech outcome is unknown; no replay, new speech effects or retirement until authoritative reconciliation".into());
++                    }
++                    Err(http_worker::Failure::Known(_)) if worker_cancel.load(Ordering::Acquire) => {
+                         view.state = "cancelled".into();
+                         view.message = Some(
+-                            "Local speech operation cancelled after its owned helper stopped"
++                            if view.provenance["remote_cpu"] == true {
++                                "Remote speech cancellation settled after the original handler returned"
++                            } else {
++                                "Local speech operation cancelled after its owned helper stopped"
++                            }
+                                 .into(),
+                         );
+                     }
+-                    Err(error) => {
++                    Err(http_worker::Failure::Known(error)) => {
+                         view.state = "failed".into();
+                         view.message=Some(match error { Error::Unconfigured=>"Configure the installed speech runtime and model files",_=>"Local speech processing failed; original inputs and model files were not changed" }.into());
+                     }
+@@ -369,6 +413,7 @@
+                     for job in jobs.values() {
+                         job.cancel.store(true, Ordering::Release);
+                     }
++                    if self.remote_quarantined(&jobs)? { return Err(Error::Unavailable); }
+                     let (mut running, mut failed) = (false, false);
+                     for job in jobs.values_mut() {
+                         match job.worker.poll() {
+@@ -377,6 +422,7 @@
+                             crate::media_worker::Phase::Joined => {}
+                         }
+                     }
++                    if self.remote_quarantined(&jobs)? { return Err(Error::Unavailable); }
+                     if running {
+                         None
+                     } else if failed {
+@@ -398,6 +444,33 @@
+         }
+     }
+ 
++    fn remote_quarantined(&self, jobs: &BTreeMap<String, Job>) -> Result<bool> {
++        if self.remote_uncertain.load(Ordering::Acquire) { return Ok(true); }
++        for job in jobs.values() {
++            let view = job.view.lock().map_err(|_| Error::Unavailable)?;
++            if view.provenance["remote_cpu"] == true && view.state == "uncertain" {
++                self.remote_uncertain.store(true, Ordering::Release);
++                return Ok(true);
++            }
++        }
++        let entries = match fs::read_dir(&self.directory) {
++            Ok(entries) => entries,
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
++            Err(_) => return Err(Error::Unavailable),
++        };
++        for entry in entries {
++            let entry = entry.map_err(|_| Error::Unavailable)?;
++            if entry.path().extension().is_none_or(|ext| ext != "json") { continue; }
++            let path = entry.path();
++            let id = path.file_stem().and_then(|s| s.to_str()).ok_or(Error::Unavailable)?;
++            let receipt = read_receipt(&self.directory, id)?.ok_or(Error::Unavailable)?;
++            if http_worker::receipt_blocks(&receipt.operation, jobs.contains_key(id)) {
++                self.remote_uncertain.store(true, Ordering::Release);
++                return Ok(true);
++            }
++        }
++        Ok(false)
++    }
+     // Every mutating entry holds this guard through its final filesystem effect.
+     fn mutation_gate(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, Job>>> {
+         if self.stopping.load(Ordering::Acquire) {
+@@ -413,6 +486,7 @@
+     // or receipt I/O. Failed originals remain enrolled and block new effects.
+     fn admission(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, Job>>> {
+         let mut jobs = self.mutation_gate()?;
++        if self.remote_quarantined(&jobs)? { return Err(Error::Unavailable); }
+         let mut failed = false;
+         for job in jobs.values_mut() {
+             if job.worker.poll() == crate::media_worker::Phase::Failed {
+--- /dev/null
++++ b/crates/adapters/src/speech/http_worker.rs
+@@ -0,0 +1,225 @@
++//! Proposed native adapter, not an activated runtime. The existing Speech owner
++//! retains request UUIDs, private receipts and helper handles.
++use super::{Error, Input, STANDARD};
++use base64::Engine as _;
++use serde_json::{Value, json};
++use std::{io::Read, sync::atomic::{AtomicBool, Ordering}, time::Duration};
++
++pub(super) enum Failure { Known(Error), RemoteUncertain }
++impl From<Error> for Failure { fn from(value: Error) -> Self { Self::Known(value) } }
++pub(super) type Output = (Option<String>, Option<String>, Value);
++
++#[derive(Clone)]
++pub(super) struct Config { endpoint: String, token: String, instance: String, default_voice: String }
++impl Config {
++    pub(super) fn load() -> super::Result<Option<Self>> {
++        match std::env::var("VEYRA_SPEECH_BACKEND").as_deref() {
++            Err(std::env::VarError::NotPresent) | Ok("local-process") => return Ok(None),
++            Ok("owned-http-cpu") => {},
++            _ => return Err(Error::Unconfigured),
++        }
++        let endpoint = std::env::var("VEYRA_SPEECH_HTTP_URL").map_err(|_| Error::Unconfigured)?;
++        // Literal IPv4 loopback and a port only: no proxy, redirects, URL userinfo,
++        // DNS rebinding, path/query or implicit WSL/remote-host trust expansion.
++        let port = endpoint.strip_prefix("http://127.0.0.1:").ok_or(Error::Unconfigured)?;
++        if port.parse::<u16>().ok().filter(|port| *port > 0).is_none()
++            || !port.bytes().all(|byte| byte.is_ascii_digit()) { return Err(Error::Unconfigured); }
++        let path = super::configured_file("VEYRA_SPEECH_HTTP_TOKEN_FILE")?;
++        if std::fs::metadata(&path).map_err(|_| Error::Unconfigured)?.len() > 258 {
++            return Err(Error::Unconfigured);
++        }
++        let bytes = std::fs::read(path).map_err(|_| Error::Unconfigured)?;
++        let token = String::from_utf8(bytes).map_err(|_| Error::Unconfigured)?;
++        let token = token.trim().to_owned();
++        if !(32..=192).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
++            return Err(Error::Unconfigured);
++        }
++        let instance = std::env::var("VEYRA_SPEECH_HTTP_INSTANCE").map_err(|_| Error::Unconfigured)?;
++        let default_voice = std::env::var("VEYRA_SPEECH_HTTP_DEFAULT_VOICE").map_err(|_| Error::Unconfigured)?;
++        if instance.is_empty() || instance.len() > 128 || default_voice.is_empty() || default_voice.len() > 64 {
++            return Err(Error::Unconfigured);
++        }
++        Ok(Some(Self { endpoint, token, instance, default_voice }))
++    }
++    fn agent(&self) -> ureq::Agent {
++        ureq::AgentBuilder::new().redirects(0).try_proxy_from_env(false)
++            .timeout_connect(Duration::from_secs(1)).timeout_read(Duration::from_secs(7))
++            .timeout_write(Duration::from_secs(2)).timeout(Duration::from_secs(9)).build()
++    }
++    fn request(&self, method: &str, path: &str) -> ureq::Request {
++        self.agent().request(method, &format!("{}{path}", self.endpoint))
++            .set("Authorization", &format!("Bearer {}", self.token))
++    }
++    fn health(&self) -> super::Result<Value> {
++        let response = self.request("GET", "/health").call().map_err(|_| Error::Unavailable)?;
++        let body = read(response, 64 * 1024).map_err(|_| Error::Unavailable)?;
++        let health: Value = serde_json::from_slice(&body).map_err(|_| Error::Unavailable)?;
++        if health["service"] != "veyra-speech" || health["version"] != 1
++            || health["protocol"] != "stratus-speech-v1" || health["instanceId"] != self.instance
++            || health["backend"] != "cpu-onnx" || health["ready"] != true
++            || health["tts"] != true || health["stt"] != true
++            || !health["voices"].as_array().is_some_and(|voices| voices.iter().any(|v| v == &self.default_voice)) {
++            return Err(Error::Unavailable);
++        }
++        Ok(health)
++    }
++    pub(super) fn status(&self) -> Value {
++        let health = self.health().ok();
++        json!({"backend":"owned-http-cpu", "transcription_configured":true,
++            "synthesis_configured":true, "available":health.is_some(), "qualified":false,
++            "execution":"explicit Veyra CPU HTTP worker", "realtime_duplex":"unverified",
++            "limits":{"min_recording_ms":250,"max_recording_ms":15000,
++                "max_text_chars":600,"max_text_utf8_bytes":2400,"max_output_ms":15000},
++            "voices":health.as_ref().map(|h| h["voices"].clone()).unwrap_or(json!([])),
++            "configured_default_voice":self.default_voice})
++    }
++    pub(super) fn default_voice(&self) -> String { self.default_voice.clone() }
++    pub(super) fn validate(&self, input: &Input) -> super::Result<()> {
++        validate_input(input)?;
++        let health = self.health()?;
++        if let Input::Synthesize { voice, .. } = input {
++            if !health["voices"].as_array().is_some_and(|voices| voices.iter().any(|v| v == voice)) {
++                return Err(Error::Invalid);
++            }
++        }
++        Ok(())
++    }
++    pub(super) fn execute(&self, id: &str, input: Input, cancel: &AtomicBool) -> Result<Output, Failure> {
++        // Validation/health failures before POST cannot have admitted inference.
++        self.validate(&input)?;
++        if cancel.load(Ordering::Acquire) { return Err(Failure::Known(Error::Unavailable)); }
++        let (path, content_type, body) = match &input {
++            Input::Transcribe(wav) => ("/v1/transcriptions", "application/octet-stream", wav[44..].to_vec()),
++            Input::Synthesize { text, voice } => ("/v1/speech", "application/json",
++                serde_json::to_vec(&json!({"requestId":id,"text":text,"voice":voice})).map_err(|_| Error::Invalid)?),
++        };
++        // The scoped task remains joined by the original native helper. Cancellation
++        // ACK is never returned as the outcome: only this original POST is observed.
++        let result = std::thread::scope(|scope| {
++            let (tx, rx) = std::sync::mpsc::sync_channel(1);
++            scope.spawn(move || {
++                let response = self.request("POST", path).set("Content-Type", content_type)
++                    .set("X-Request-ID", id).send_bytes(&body);
++                let _ = tx.send(response);
++            });
++            let mut cancel_sent = false;
++            loop {
++                if cancel.load(Ordering::Acquire) && !cancel_sent {
++                    cancel_sent = true;
++                    // Best effort cooperative invalidation; no effect on retirement proof.
++                    let _ = self.request("POST", "/v1/cancel")
++                        .send_json(json!({"requestId":id}));
++                }
++                match rx.recv_timeout(Duration::from_millis(20)) {
++                    Ok(response) => break Some(response),
++                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {},
++                    Err(_) => break None,
++                }
++            }
++        });
++        let response = match result.ok_or(Failure::RemoteUncertain)? {
++            Ok(response) => response,
++            Err(ureq::Error::Status(status, response)) => {
++                let body = read(response, 4096).map_err(|_| Failure::RemoteUncertain)?;
++                let value: Value = serde_json::from_slice(&body).map_err(|_| Failure::RemoteUncertain)?;
++                return Err(classify_error(status, value["error"]["code"].as_str()));
++            },
++            Err(_) => return Err(Failure::RemoteUncertain),
++        };
++        if response.status() != 200 { return Err(Failure::RemoteUncertain); }
++        let body = read(response, 1_440_044).map_err(|_| Failure::RemoteUncertain)?;
++        let provenance = json!({"remote_cpu":true,"backend":"cpu-onnx","instance_id":self.instance,
++            "qualified":false,"retirement":"original HTTP response after worker inference scope returned"});
++        match input {
++            Input::Transcribe(_) => {
++                let value: Value = serde_json::from_slice(&body).map_err(|_| Failure::RemoteUncertain)?;
++                let text = value["text"].as_str().filter(|t| t.chars().count() <= 2000)
++                    .ok_or(Failure::RemoteUncertain)?;
++                Ok((Some(text.into()), None, provenance))
++            },
++            Input::Synthesize { .. } => {
++                if !valid_output(&body) { return Err(Failure::RemoteUncertain); }
++                Ok((None, Some(STANDARD.encode(body)), provenance))
++            },
++        }
++    }
++}
++
++fn read(response: ureq::Response, max: usize) -> std::io::Result<Vec<u8>> {
++    let mut bytes = Vec::new();
++    response.into_reader().take((max + 1) as u64).read_to_end(&mut bytes)?;
++    if bytes.len() > max { return Err(std::io::Error::other("bounded response exceeded")); }
++    Ok(bytes)
++}
++fn validate_input(input: &Input) -> super::Result<()> {
++    match input {
++        Input::Transcribe(wav) if wav.len() >= 8044 && wav.len() <= 480044 => super::validate_recording(wav),
++        Input::Synthesize { text, .. } if !text.trim().is_empty() && text.chars().count() <= 600
++            && text.len() <= 2400 && !text.chars().any(|c| c < ' ' && c != '\n' && c != '\t') => Ok(()),
++        _ => Err(Error::Invalid),
++    }
++}
++fn classify_error(status: u16, code: Option<&str>) -> Failure {
++    // Only errors emitted by the inspected synchronous Application contract prove
++    // no remaining inference in THIS original handler. Unknown/malformed errors quarantine.
++    match (status, code) {
++        (409, Some("CANCELLED")) | (504, Some("DEADLINE"))
++        | (503, Some("SPEECH_BACKEND_FAILED" | "BACKEND_UNAVAILABLE"))
++        | (502, Some("TRANSCRIPT_LIMIT" | "INVALID_MODEL_AUDIO" | "AUDIO_LIMIT" | "EMPTY_AUDIO"))
++        | (429, Some("BUSY")) => Failure::Known(Error::Unavailable),
++        (400, Some("INVALID_AUDIO" | "INVALID_TEXT" | "UNKNOWN_VOICE" | "INVALID_REQUEST"))
++        | (413, Some("BODY_LIMIT")) | (415, Some("INVALID_CONTENT_TYPE"))
++        | (401, Some("UNAUTHORIZED")) => Failure::Known(Error::Invalid),
++        _ => Failure::RemoteUncertain,
++    }
++}
++pub(super) fn receipt_blocks(operation: &super::Operation, enrolled: bool) -> bool {
++    operation.provenance["remote_cpu"] == true
++        && (operation.state == "uncertain" || (operation.state == "running" && !enrolled))
++}
++fn valid_output(bytes: &[u8]) -> bool {
++    if bytes.len() < 46 || &bytes[0..4] != b"RIFF" || &bytes[8..16] != b"WAVEfmt "
++        || &bytes[16..20] != 16u32.to_le_bytes().as_slice()
++        || &bytes[20..24] != [1,0,1,0] || &bytes[32..36] != [2,0,16,0]
++        || &bytes[36..40] != b"data" { return false; }
++    let word = |offset| u32::from_le_bytes(bytes[offset..offset+4].try_into().unwrap());
++    let rate = word(24);
++    [16000,22050,24000,44100,48000].contains(&rate) && word(28) == rate*2
++        && word(4) as usize == bytes.len()-8 && word(40) as usize == bytes.len()-44
++        && (bytes.len()-44)%2 == 0 && bytes.len()-44 <= rate as usize*2*15
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test] fn terminal_original_error_is_known() {
++        assert!(matches!(classify_error(409, Some("CANCELLED")), Failure::Known(_)));
++    }
++    #[test] fn ack_unknown_or_dropped_outcome_is_never_terminal() {
++        assert!(matches!(classify_error(200, None), Failure::RemoteUncertain));
++        assert!(matches!(classify_error(503, Some("WORKER_FAILED")), Failure::RemoteUncertain));
++    }
++    #[test] fn no_text_truncation() {
++        assert!(validate_input(&Input::Synthesize {text:"x".repeat(601),voice:"af_sarah".into()}).is_err());
++    }
++    #[test] fn uncertain_latch_blocks_admission_and_retirement_even_without_helpers() {
++        let owner = super::super::Speech::new(std::path::Path::new("nonexistent-test-owner"));
++        owner.remote_uncertain.store(true, Ordering::Release);
++        assert!(owner.admission().is_err());
++        assert!(owner.stop_until(std::time::Instant::now() + Duration::from_secs(1)).is_err());
++    }
++    #[test] fn restart_receipt_retains_remote_uncertainty_without_blocking_local_owner() {
++        let mut operation = super::super::Operation { id:"original".into(),kind:"transcribe".into(),
++            state:"running".into(),text:None,wav_base64:None,message:None,elapsed_ms:None,
++            provenance:json!({"remote_cpu":true}) };
++        assert!(receipt_blocks(&operation, false));
++        assert!(!receipt_blocks(&operation, true));
++        operation.state = "uncertain".into();
++        assert!(receipt_blocks(&operation, true));
++        operation.provenance = json!({"remote_cpu":false});
++        assert!(!receipt_blocks(&operation, false));
++        operation.provenance = json!({"remote_cpu":true});
++        operation.state = "completed".into();
++        assert!(!receipt_blocks(&operation, false));
++    }
++}
