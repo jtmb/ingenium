@@ -59,7 +59,28 @@ body {
   border-radius: 24px;
   max-width: 38rem;
 }
-.veyra-chat-suggestions { max-width: 38rem; }
+/* User-supplied compact composer direction; existing surface/accent tokens stay unchanged. */
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-composer-shell"],
+.veyra-chat-suggestions { max-width: 48rem; }
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-composer-shell"] { border-radius: 26px; }
+.veyra-composer:not(.veyra-home-composer) .veyra-composer-row { gap: 8px; padding: 7px; }
+.veyra-composer:not(.veyra-home-composer) .veyra-composer-row > div:first-child { padding-bottom: 0; }
+.veyra-composer:not(.veyra-home-composer) .veyra-composer-row > div:first-child > button,
+.veyra-composer:not(.veyra-home-composer) .veyra-composer-row > button,
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-send-btn"],
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-stop-btn"] { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 36px; height: 36px; padding: 8px; }
+.veyra-composer:not(.veyra-home-composer) [data-testid="chat-composer"] { min-height: 36px; padding: 8px 0; }
+.veyra-composer-model-wrap { display: flex; align-items: center; flex: 0 1 auto; height: 36px; min-width: 0; max-width: min(13rem, 32vw); }
+.veyra-composer-model-wrap .veyra-composer-model { display: block; field-sizing: content; width: auto; height: 36px; min-width: 0; max-width: 100%; border: 0; background: transparent; padding: 8px 26px 8px 8px; font-size: 14px; line-height: 20px; color: var(--color-text-secondary); text-overflow: ellipsis; }
+.veyra-composer-model-wrap > svg { top: 50%; }
+.veyra-chat-suggestions { margin-top: 24px; gap: 8px; }
+.veyra-chat-suggestion { display: inline-flex; align-items: center; gap: 14px; text-align: left; }
+.veyra-chat-suggestion > svg { flex-shrink: 0; color: var(--color-text-muted); }
+@media (max-width: 480px) {
+  .veyra-composer:not(.veyra-home-composer) .veyra-composer-row { flex-wrap: wrap; }
+  .veyra-composer:not(.veyra-home-composer) [data-testid="chat-composer"] { order: -1; flex-basis: 100%; }
+  .veyra-composer-model-wrap { margin-left: auto; max-width: min(13rem, 40vw); }
+}
 .veyra-composer [data-testid="chat-send-btn"][disabled] { background: var(--color-accent); color: white; opacity: .55; }
 .veyra-composer [data-testid="chat-send-btn"], .veyra-composer [data-testid="chat-stop-btn"] { border-radius: 50%; }
 .veyra-send-controls { display: contents; }

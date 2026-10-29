@@ -8,6 +8,12 @@ The historical 47-view fixture archive has verified image hashes, including load
 
 Use one dark shell, the selected blue mascot, centered Chat/Work toggle, quiet collapsed Chat rail and grouped expanded feature navigation. Keep real project/model/data labels rather than the drawings' sample values. Many Settings categories link to existing full feature/account workspaces. These choices need explicit visual review; they do not waive missing controls. Home Needs Attention, global search, appearance controls, mic and other additions stay tracked.
 
+## User-directed Chat composer revision
+
+The 2026-10-29 composer reference supersedes the earlier pending compact Chat direction. Use its wide rounded input, aligned attachment/model/microphone/send controls, centered welcome heading and quiet suggestion rows while keeping Veyra's existing charcoal surfaces, blue accent and colour tokens. The supplied reference's private email/task examples are not application content. Dictation remains visibly unavailable until implemented. Home keeps its separate composer.
+
+The standard and Fast native model selections must remain distinct even when OpenCode reports the same underlying API model ID. The saved standard openai/gpt-6-luna choice must display GPT-6 Luna; Fast remains an explicit alternative. This revision is pending review and does not accept the 47-view inventory or close unfinished functional gates.
+
 ## Contracted views
 
 | View | Route | Live captures | Current disposition / remaining gate |

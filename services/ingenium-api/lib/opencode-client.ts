@@ -1907,13 +1907,16 @@ export const opencodeClient = {
 
     const modelsByProvider = new Map<string, Record<string, ProviderModel>>();
     for (const model of modelsResult) {
-      if (typeof model?.providerID !== "string" || typeof model.modelID !== "string") continue;
+      if (typeof model?.providerID !== "string" || typeof model.modelID !== "string"
+        || typeof model.id !== "string" || model.id.length === 0) continue;
       const cost = Array.isArray(model.cost) ? model.cost[0] : undefined;
       const providerModels = modelsByProvider.get(model.providerID) ?? {};
-      providerModels[model.modelID] = {
-        id: model.modelID,
+      // Native selections such as standard and Fast can share one upstream
+      // modelID. The session/model API selects their distinct native id.
+      providerModels[model.id] = {
+        id: model.id,
         providerID: model.providerID,
-        api: { id: model.providerID, url: "", npm: "" },
+        api: { id: model.modelID, url: "", npm: "" },
         name: model.name,
         capabilities: model.capabilities ?? {},
         cost: {
@@ -1940,7 +1943,7 @@ export const opencodeClient = {
         options: provider.settings ?? {},
         models: modelsByProvider.get(provider.id) ?? {},
       })),
-      default: defaultResult ? { [defaultResult.providerID]: defaultResult.modelID } : {},
+      default: defaultResult ? { [defaultResult.providerID]: defaultResult.id } : {},
       connected: providersResult
         .filter((provider) => provider.activation !== "disabled")
         .map((provider) => provider.id),

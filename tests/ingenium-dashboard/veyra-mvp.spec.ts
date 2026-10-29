@@ -159,9 +159,20 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   const composer = page.getByTestId("chat-composer");
   await expect(composer).toBeEnabled({ timeout: 20_000 });
   await expect.poll(() => page.locator(".veyra-brand img").evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
-  await expect(page.getByRole("heading", { name: "Where should we begin?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ready when you are." })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Workspace mode" }).getByRole("link", { name: "Work" })).toHaveAttribute("href", "/opencode");
-  await expect(page.getByRole("combobox", { name: "Chat model", exact: true })).toBeEnabled();
+  const modelPicker = page.getByRole("combobox", { name: "Chat model", exact: true });
+  await expect(modelPicker).toBeEnabled();
+  const controls = [page.getByRole("button", { name: "Attach files", exact: true }), composer, modelPicker,
+    modelPicker.locator("..").locator("svg"), page.getByRole("button", { name: "Dictation unavailable", exact: true }), page.getByTestId("chat-send-btn")];
+  const centers = await Promise.all(controls.map(async control => {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    return box!.y + box!.height / 2;
+  }));
+  expect(Math.max(...centers) - Math.min(...centers), "Composer controls share one horizontal centerline").toBeLessThanOrEqual(1);
+  await modelPicker.focus();
+  await expect(modelPicker).toBeFocused();
   await page.getByRole("button", { name: "Draft release notes", exact: true }).click();
   await expect(composer).toHaveValue("Draft release notes");
   await expect(page.getByTestId("chat-stop-btn")).toHaveCount(0);
@@ -170,6 +181,21 @@ test("Veyra chat keeps real send/stream/history controls within the quiet shell"
   const artifacts = visualQaRunDirectory(runtime.context.runId);
   mkdirSync(artifacts, { recursive: true });
   await page.screenshot({ path: join(artifacts, "veyra-chat-empty-fixture.png"), fullPage: true });
+  const desktopViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const shellBox = await page.getByTestId("chat-composer-shell").boundingBox();
+  const mobileBoxes = await Promise.all(controls.map(control => control.boundingBox()));
+  expect(shellBox).not.toBeNull();
+  for (const box of mobileBoxes) {
+    expect(box).not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(shellBox!.x);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(shellBox!.x + shellBox!.width);
+  }
+  const mobileCenters = mobileBoxes.filter((_, index) => index !== 1).map(box => box!.y + box!.height / 2);
+  expect(Math.max(...mobileCenters) - Math.min(...mobileCenters), "Mobile model and action controls share one centerline").toBeLessThanOrEqual(1);
+  expect(mobileBoxes[1]!.y + mobileBoxes[1]!.height).toBeLessThanOrEqual(mobileBoxes[0]!.y);
+  await page.screenshot({ path: join(artifacts, "veyra-chat-mobile-fixture.png"), fullPage: true });
+  await page.setViewportSize(desktopViewport);
   await composer.fill("Hello from E2E test");
   await composer.press("Enter");
   await expect(page.getByText("I've completed the analysis. The chat pipeline is working correctly.")).toBeVisible({ timeout: 30_000 });

@@ -111,6 +111,8 @@ describe("chat fixture lifecycle", () => {
         method: "POST", body: JSON.stringify({ text: "Synthetic native prompt", metadata: { ingeniumVisibleText: "Visible prompt" } }),
       })).json();
       expect(admitted.data).toMatchObject({ type: "user", text: "Synthetic native prompt" });
+      expect((await (await fetch(`${base}/api/session/active`)).json()).data[session.id]).toEqual({ type: "running" });
+      expect((await (await fetch(`${base}/api/model`)).json()).data[0]).toMatchObject({ id: "fixture-model", modelID: "fixture-model" });
       const first = decoder.decode((await reader.read()).value);
       expect(first).toContain('"type":"session.next.step.started"');
       expect(first).toContain(`"sessionID":"${session.id}"`);

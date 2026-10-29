@@ -28,7 +28,7 @@ describe("native system messages in the chat transcript", () => {
   });
   it("shows the ordinary empty state and actual errors when only internal system messages exist", () => {
     const { rerender } = render(<ChatMessages messages={[message("system", "system", notice)]} isLoading={false} />);
-    expect(screen.getByRole("heading", { name: "Where should we begin?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ready when you are." })).toBeInTheDocument();
     rerender(<ChatMessages messages={[message("system", "system", notice)]} isLoading={false} error="Unable to load conversation" />);
     expect(screen.getByRole("alert")).toHaveTextContent("Unable to load conversation");
   });

@@ -452,7 +452,7 @@ export default function ChatInput({
         {memoryUnavailableReason && <p role="status" className="px-3 py-1 text-xs text-[var(--color-text-muted)]">{memoryUnavailableReason}</p>}
         {home && onOpenTools && <button type="button" onClick={onOpenTools} className="px-3 py-2 text-sm">Available tools</button>}
         </details>
-        <div className={`flex min-w-0 items-end gap-2 px-3 py-2${home ? " veyra-home-composer-body" : ""}`}>
+        <div className={`veyra-composer-row flex min-w-0 items-end gap-2 px-3 py-2${home ? " veyra-home-composer-body" : ""}`}>
           {/* Left buttons */}
           <div className="flex min-w-0 items-center gap-1 pb-0.5">
             {/* Attachment button with file picker */}
@@ -491,11 +491,11 @@ export default function ChatInput({
                 strokeWidth="1.5"
                 aria-hidden="true"
               >
-                <path
+                {home ? <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   d="M9.96 3.54L5.45 8.05a2 2 0 102.83 2.83L12.79 6.37a4 4 0 10-5.66-5.66L2.62 5.22a6 6 0 108.49 8.49"
-                />
+                /> : <path d="M8 2v12M2 8h12" strokeLinecap="round" />}
               </svg>
               {home && <span>Attach</span>}
             </button>
@@ -618,7 +618,11 @@ export default function ChatInput({
       </div>
 
       {showSuggestions && <div className="veyra-chat-suggestions max-w-3xl mx-auto mt-5 flex flex-col items-start gap-1">
-        {["Draft release notes", "Summarize a document"].map((prompt) => <button key={prompt} type="button" disabled={isLoading || sending} onClick={() => { setValue(prompt); textareaRef.current?.focus(); }} className="rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]">{prompt}</button>)}
+        {["Draft release notes", "Summarize a document"].map((prompt, index) => <button key={prompt} type="button" disabled={isLoading || sending} onClick={() => { setValue(prompt); textareaRef.current?.focus(); }} className="veyra-chat-suggestion rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]">
+          <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+            {index === 0 ? <><path d="M5 2.5h7l3 3v12H5z" strokeLinejoin="round"/><path d="M12 2.5v4h3M7.5 10h5M7.5 13h5" strokeLinecap="round"/></> : <><path d="m10 2 2.2 5.8L18 10l-5.8 2.2L10 18l-2.2-5.8L2 10l5.8-2.2z" strokeLinejoin="round"/></>}
+          </svg><span>{prompt}</span>
+        </button>)}
       </div>}
     </div>
   );

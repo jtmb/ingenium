@@ -1292,7 +1292,7 @@ export default function ChatShell({ presentation = "chat", onConversationStarted
               memoryUnavailableReason={memoryCapabilities.reason}
               memorySavePending={memoryNotice?.status === "queued"}
               showSuggestions={chat.messages.length === 0}
-              modelControl={<Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || !hasSelectableModel} className="veyra-composer-model max-w-36 text-xs !border-0 !bg-transparent !py-1">
+              modelControl={<Select aria-label="Chat model" value={modelId} onChange={(event) => handleModelChange(event.target.value)} disabled={selectorsDisabled || !hasSelectableModel} wrapperClassName="veyra-composer-model-wrap" className="veyra-composer-model">
                 {!hasSelectableModel && <option value="">No model available</option>}
                 {currentModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
               </Select>}

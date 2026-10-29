@@ -96,7 +96,7 @@ it("supports keyboard image disclosure and announces only initial loading/error 
     await expect(page.getByRole("alert")).toHaveText("Unable to load conversation");
 
     await render({ messages: [], isLoading: false });
-    await expect(page.getByRole("heading", { name: "Where should we begin?" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ready when you are." })).toBeVisible();
     await expect(page.locator('[role="status"], [role="alert"], [aria-live]')).toHaveCount(0);
 
     await render({ messages, isLoading: true, error: "The stream disconnected" });

@@ -1222,6 +1222,26 @@ describe("opencodeClient — method routing", () => {
     }
   });
 
+  it.each([false, true])("keeps standard and Fast native selections distinct (fast default=%s)", async (fastDefault) => {
+    const standard = { id: "gpt-6-luna", modelID: "gpt-6-luna", providerID: "openai", name: "GPT-6 Luna", status: "active" };
+    const fast = { ...standard, id: "gpt-6-luna-fast", name: "GPT-6 Luna Fast" };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/api/provider") return mockResponse(200, { data: [{ id: "openai", name: "OpenAI", activation: "enabled" }] });
+      if (path === "/api/model") return mockResponse(200, { data: [standard, fast] });
+      if (path === "/api/model/default") return mockResponse(200, { data: fastDefault ? fast : standard });
+      throw new Error("Unexpected model identity route");
+    }));
+    const result = await opencodeClient.listProviders();
+    expect(isOpenCodeError(result)).toBe(false);
+    if (isOpenCodeError(result)) throw new Error("Expected the native catalog");
+    const models = result.all.find(provider => provider.id === "openai")!.models;
+    expect(Object.keys(models)).toEqual(["gpt-6-luna", "gpt-6-luna-fast"]);
+    expect(models["gpt-6-luna"]).toMatchObject({ id: "gpt-6-luna", name: "GPT-6 Luna", api: { id: "gpt-6-luna" } });
+    expect(models["gpt-6-luna-fast"]).toMatchObject({ id: "gpt-6-luna-fast", name: "GPT-6 Luna Fast", api: { id: "gpt-6-luna" } });
+    expect(result.default.openai).toBe(fastDefault ? "gpt-6-luna-fast" : "gpt-6-luna");
+  });
+
   it.each(["providers", "models", "both"])("waits for a cold %s catalog without replacing model choices", async (missing) => {
     vi.useFakeTimers();
     try {

@@ -512,7 +512,7 @@ export default function ChatMessages({
             /* Quiet first-conversation state; real loading/error states stay above. */
             <div className="veyra-chat-welcome mx-auto text-center px-4">
               <h2 className="text-2xl font-medium tracking-tight text-[var(--color-text-primary)]">
-                Where should we begin?
+                Ready when you are.
               </h2>
             </div>          )}
         </div>

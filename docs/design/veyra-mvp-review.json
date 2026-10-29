@@ -1813,5 +1813,27 @@
       "presentation": "gateway to existing feature/account workspace",
       "visualAccepted": false
     }
-  ]
+  ],
+  "composerDirection": {
+    "requested": "2026-10-29",
+    "status": "implemented-source-pending-final-runtime-review",
+    "reference": "User-supplied compact Chat composer",
+    "preserveColourScheme": true,
+    "sharedControlCenterline": true,
+    "standardAndFastNativeSelectionsDistinct": true,
+    "standardSavedSelection": "openai/gpt-6-luna",
+    "visualApproval": false,
+    "allExistingGatesRetained": true,
+    "fixtureRun": "998068e8-84d6-4616-8caa-ba5509ea80fc",
+    "browserWorkflowsPassed": 2,
+    "desktopControlCenterlineTolerancePx": 1,
+    "mobileViewport": {
+      "width": 390,
+      "height": 844
+    },
+    "mobileControlsWithinComposer": true,
+    "keyboardModelFocusPassed": true,
+    "emptyCaptureSha256": "316bde9b67f9ffd4987760756695ba3a2489af3152663a3413feefa0dc9d11ff",
+    "mobileCaptureSha256": "52a69f05e40d22b70b8b2c673dd6e8f4091d4118dc28c8ccc0f85d2bc4f95b80"
+  }
 }

@@ -95,7 +95,7 @@ function makeSession(directory: string, title: string): FixtureSession {
 }
 
 const fixtureModel = {
-  modelID: "fixture-model", providerID: "opencode", name: "Fixture Model",
+  id: "fixture-model", modelID: "fixture-model", providerID: "opencode", name: "Fixture Model",
   capabilities: {}, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }],
   limit: { context: 4096, output: 1024 }, status: "active", settings: {},
 };
@@ -254,7 +254,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     json(res, 200, { data: [] }); return;
   }
   if (method === "GET" && path === "/api/session/active") {
-    json(res, 200, { data: Object.fromEntries([...activeTurns].map((id) => [id, { type: "busy" }])) }); return;
+    json(res, 200, { data: Object.fromEntries([...activeTurns].map((id) => [id, { type: "running" }])) }); return;
   }
   if (method === "GET" && path === "/api/event") {
     streamSSE(res); return;
