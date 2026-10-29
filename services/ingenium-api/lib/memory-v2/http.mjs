@@ -10,7 +10,7 @@ const definitions = {
   reset: { method: 'POST', permission: 'forget', keys: ['operationId', 'confirmation'], invoke: (memory, scope, request) => memory.reset(scope, request.body) },
   operation: { method: 'GET', permission: 'read', keys: [], invoke: (memory, scope, request) => memory.operation(scope, request.operationId) },
 };
-const statuses = { FORBIDDEN: 403, INVALID_INPUT: 422, INVALID_SCOPE: 422, NOT_FOUND: 404, VERSION_CONFLICT: 409, OPERATION_CONFLICT: 409, RESET_CHANGED: 409 };
+const statuses = { MEMORY_ADAPTER_UNAVAILABLE: 503, FORBIDDEN: 403, INVALID_INPUT: 422, INVALID_SCOPE: 422, NOT_FOUND: 404, VERSION_CONFLICT: 409, OPERATION_CONFLICT: 409, RESET_CHANGED: 409 };
 
 /** Framework adapter only. resolveScope must run authenticated API scope/CSRF checks,
  * never read owner/host/org from the request body. This module registers no routes.

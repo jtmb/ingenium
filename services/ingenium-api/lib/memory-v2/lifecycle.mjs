@@ -30,9 +30,10 @@ export const DEFAULT_CHAT_MEMORY_POLICY = Object.freeze({ revision: 0, useMemory
  * sources must resolve authoritative transcript hashes/revocation, never caller assertions.
  */
 export class MemoryLifecycle {
-  constructor({ db, authorize, sources, checkpoint, clock = () => new Date().toISOString() }) {
+  constructor({ db, authorize, sources, checkpoint, runTransaction, clock = () => new Date().toISOString() }) {
     if (!db || typeof authorize !== 'function' || typeof sources !== 'function' || typeof checkpoint !== 'function') fail('INVALID_ADAPTER');
-    Object.assign(this, { db, authorize, sources, checkpoint, clock });
+    if (runTransaction !== undefined && typeof runTransaction !== 'function') fail('INVALID_ADAPTER');
+    Object.assign(this, { db, authorize, sources, checkpoint, runTransaction, clock });
   }
   access(scope, permission, chatId = null) {
     const key = scopeKey(scope);
@@ -41,10 +42,13 @@ export class MemoryLifecycle {
     return key;
   }
   transaction(fn) {
-    this.db.exec('BEGIN IMMEDIATE');
     let result;
-    try { result = fn(); this.db.exec('COMMIT'); }
-    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    if (this.runTransaction) result = this.runTransaction(fn);
+    else {
+      this.db.exec('BEGIN IMMEDIATE');
+      try { result = fn(); this.db.exec('COMMIT'); }
+      catch (error) { this.db.exec('ROLLBACK'); throw error; }
+    }
     // A checkpoint failure occurs after commit: the caller must query operation status.
     this.checkpoint();
     return result;
