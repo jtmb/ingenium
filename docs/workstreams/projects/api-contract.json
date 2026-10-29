@@ -1,0 +1,744 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Veyra workspace projects integration proposal",
+    "version": "1.0.0",
+    "description": "UNMOUNTED worker handler contract. Existing auth, CSRF/origin checks, source ownership, package build and additive migration require coordinator integration."
+  },
+  "x-integration-status": "source handlers; no live routes",
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "security": [
+    {
+      "existingApiBearer": []
+    }
+  ],
+  "paths": {
+    "/workspace-projects": {
+      "get": {
+        "operationId": "listWorkspaceProjects",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Only permitted projects with authorized cursor, data and pagination {hasMore,cursor}."
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createApiWorkspaceProject",
+        "description": "API-owned metadata only. Native-owned creation uses the native adapter and exact native draft. Client retains ID/body on unknown outcome; no blind retry.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "label",
+                  "roots"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "roots": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "items": {
+                      "$ref": "#/components/schemas/Root"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created actual stable project identity; Location header points to workspace-projects/{id}",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/workspace-projects/{id}": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getWorkspaceProject",
+        "responses": {
+          "200": {
+            "description": "data: ProjectRef v1; owner scope and roots supplied by the selected catalog owner"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateWorkspaceProject",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expectedRevision",
+                  "patch"
+                ],
+                "properties": {
+                  "expectedRevision": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "patch": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "minProperties": 1,
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "maxLength": 200
+                      },
+                      "pinned": {
+                        "type": "boolean"
+                      },
+                      "archived": {
+                        "type": "boolean"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "data: updated actual ProjectRef with advanced revision"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/workspace-execution/operations": {
+      "post": {
+        "operationId": "executeWorkspaceOperation",
+        "description": "Admission refresh precedes effects and receipt reads. Pending/unknown originals are never executed again. Args are action-specific and owner-verified; no command string or URL field is accepted.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operationId",
+                  "projectId",
+                  "binding",
+                  "action"
+                ],
+                "properties": {
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Explicit null is a private projectless workspace, never a global project"
+                  },
+                  "binding": {
+                    "$ref": "#/components/schemas/ExecutionBinding"
+                  },
+                  "action": {
+                    "enum": [
+                      "terminal.open",
+                      "terminal.input",
+                      "terminal.resize",
+                      "terminal.close",
+                      "project.action",
+                      "git.status",
+                      "git.diff",
+                      "worktree.create",
+                      "worktree.attach",
+                      "worktree.archive",
+                      "worktree.restore"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "description": "terminal.open columns/rows; input terminalId/data; resize terminalId/columns/rows; close terminalId; project.action actionId; git.status no args; git.diff reviewScope/path; worktree.create repositoryId/baseCommit/branch/destinationRef; attach checkoutIdentity; archive/restore worktreeId/expectedRevision/recoveryRef. All other keys rejected."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "data: {operationId,state:succeeded|failed,result}; confirmed owner receipt"
+          },
+          "202": {
+            "description": "data: {operationId,state:pending|unknown,result}; preserve and reconcile original"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          }
+        }
+      }
+    },
+    "/workspace-execution/operation-reconciliation": {
+      "post": {
+        "operationId": "reconcileOriginalWorkspaceOperation",
+        "description": "Read the existing owner receipt for this exact original request. Never dispatches or replays an effect. Revoked/stale/offline binding remains denied.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operationId",
+                  "projectId",
+                  "binding",
+                  "action"
+                ],
+                "properties": {
+                  "operationId": {
+                    "type": "string"
+                  },
+                  "projectId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Explicit null is a private projectless workspace, never a global project"
+                  },
+                  "binding": {
+                    "$ref": "#/components/schemas/ExecutionBinding"
+                  },
+                  "action": {
+                    "enum": [
+                      "terminal.open",
+                      "terminal.input",
+                      "terminal.resize",
+                      "terminal.close",
+                      "project.action",
+                      "git.status",
+                      "git.diff",
+                      "worktree.create",
+                      "worktree.attach",
+                      "worktree.archive",
+                      "worktree.restore"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "description": "terminal.open columns/rows; input terminalId/data; resize terminalId/columns/rows; close terminalId; project.action actionId; git.status no args; git.diff reviewScope/path; worktree.create repositoryId/baseCommit/branch/destinationRef; attach checkoutIdentity; archive/restore worktreeId/expectedRevision/recoveryRef. All other keys rejected."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "data: {operationId,state:succeeded|failed,result}; confirmed owner receipt"
+          },
+          "202": {
+            "description": "data: {operationId,state:pending|unknown,result}; preserve and reconcile original"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error401"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error403"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error404"
+          },
+          "409": {
+            "$ref": "#/components/responses/Error409"
+          },
+          "422": {
+            "$ref": "#/components/responses/Error422"
+          },
+          "500": {
+            "$ref": "#/components/responses/Error500"
+          },
+          "503": {
+            "$ref": "#/components/responses/Error503"
+          },
+          "501": {
+            "$ref": "#/components/responses/Error501"
+          },
+          "502": {
+            "$ref": "#/components/responses/Error502"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "existingApiBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Existing authenticated API boundary; no new token issuance. Browser session/CSRF/origin checks retain their existing implementation."
+      }
+    },
+    "schemas": {
+      "Root": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "canonicalRootId",
+          "hostId",
+          "environmentId",
+          "displayPath",
+          "isPrimary"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "canonicalRootId": {
+            "type": "string",
+            "description": "Must be independently attested by the selected host resolver"
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "environmentId": {
+            "type": "string"
+          },
+          "displayPath": {
+            "type": "string"
+          },
+          "isPrimary": {
+            "type": "boolean"
+          },
+          "repositoryIdentity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ExecutionBinding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "id",
+          "kind",
+          "hostId",
+          "environmentId",
+          "workspaceBindingId",
+          "canonicalRootId",
+          "directory",
+          "shellId",
+          "securityEpoch",
+          "workspaceIdentity",
+          "mappingHash",
+          "ownerInstanceId",
+          "ownerRevision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "hostId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "environmentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "workspaceBindingId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "canonicalRootId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "directory": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32760
+          },
+          "shellId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "workspaceIdentity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "mappingHash": {
+            "type": "string",
+            "minLength": 64,
+            "maxLength": 64,
+            "description": "Lowercase hexadecimal hash; exact existing workspace/storage mapping"
+          },
+          "ownerInstanceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "distro": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "user": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "runtimeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "storageId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "version": {
+            "const": 1
+          },
+          "kind": {
+            "enum": [
+              "windows",
+              "wsl",
+              "cluster"
+            ]
+          },
+          "securityEpoch": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ownerRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "wsl"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "distro",
+                "user"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "cluster"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "runtimeId",
+                "storageId"
+              ]
+            }
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "requestId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Error401": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error403": {
+        "description": "Permission or capability denied",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error404": {
+        "description": "Authorized resource unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error409": {
+        "description": "Revision, binding, operation or migration conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error422": {
+        "description": "Invalid request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error500": {
+        "description": "Sanitized unexpected internal failure",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error503": {
+        "description": "Requested host unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error501": {
+        "description": "Selected owner does not expose read-only reconciliation",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Error502": {
+        "description": "Owner acknowledgement or receipt invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  }
+}
