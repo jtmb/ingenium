@@ -1,16 +1,38 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 
 // Coordinator supplies an authenticated isolated project through its fixture.
 const project = process.env.VEYRA_CUSTOMIZE_TEST_PROJECT;
 test.skip(!project, "Requires an authenticated coordinator-owned test project.");
 
+const installation = { id: "installation-fixture", name: "explicit-installation", is_global: true };
+async function mockProjectIndex(page: Page) {
+  await page.route("**/api/v1/projects", route => route.fulfill({ json: { data: [
+    { id: "current", name: project, is_global: false }, installation,
+  ] } }));
+}
+type FixtureRecord = { id: string; name: string; description: string; enabled: boolean; category?: string };
+function catalogPage(route: Route, records: FixtureRecord[]) {
+  const params = new URL(route.request().url()).searchParams;
+  const isSystem = params.get("project") === installation.name;
+  const visibility = params.get("visibility");
+  if ((!isSystem && params.get("project") !== project) || !["project", ...(isSystem ? ["system"] : [])].includes(visibility ?? "")) {
+    return route.fulfill({status: 403, json: {error: {code: "FORBIDDEN", message: "Fixture scope denied"}}});
+  }
+  return route.fulfill({json: {
+    scope: {kind: "project", projectId: isSystem ? installation.id : "current"},
+    scopes: isSystem ? ["project", "system"] : ["project"],
+    data: records.map(record => ({...record, category: record.category ?? "Local", kind: params.get("kind"),
+      visibility, installed: true, archived: false, revision: 1, actions: []})),
+    pagination: {offset: 0, limit: 100, total: records.length, hasMore: false},
+  }});
+}
+
 test("catalog search, truthful state, scopes and lifecycle navigation", async ({ page }) => {
-  await page.route("**/api/v1/plugins?**", (route) => route.fulfill({ json: { data: [
-    { id: "plugin-mail", name: "Mail helper", description: "Local mail integration", file_path: "mail.ts", enabled: false },
-  ] } }));
-  await page.route("**/api/v1/skills?**", (route) => route.fulfill({ json: { data: [
-    { id: "skill-release", name: "Release checks", description: "Verify release artifacts", enabled: 1, category: "Delivery", archived_at: null },
-  ] } }));
+  await mockProjectIndex(page);
+  await page.route("**/api/v1/customize?**", route => catalogPage(route,
+    new URL(route.request().url()).searchParams.get("kind") === "plugin" ? [
+      {id: "plugin-mail", name: "Mail helper", description: "Local mail integration", enabled: false},
+    ] : [{id: "skill-release", name: "Release checks", description: "Verify release artifacts", enabled: true, category: "Delivery"}]));
   await page.goto("/customize/plugins?project=" + encodeURIComponent(project!));
   const surface = page.getByTestId("customize-surface");
   await expect(surface.getByRole("heading", { name: "Plugins", exact: true })).toBeVisible();
@@ -28,7 +50,10 @@ test("catalog search, truthful state, scopes and lifecycle navigation", async ({
 });
 
 test("failed plugin reads expose retry without inventing installed entries", async ({ page }) => {
-  await page.route("**/api/v1/plugins?**", (route) => route.fulfill({ status: 403, json: { error: { code: "FORBIDDEN", message: "Denied" } } }));
+  await mockProjectIndex(page);
+  await page.route("**/api/v1/customize?**", route => new URL(route.request().url()).searchParams.get("kind") === "plugin"
+    ? route.fulfill({status: 403, json: {error: {code: "FORBIDDEN", message: "Denied"}}})
+    : catalogPage(route, []));
   await page.goto("/customize/plugins?project=" + encodeURIComponent(project!));
   const surface = page.getByTestId("customize-surface");
   await expect(surface.getByRole("alert")).toContainText("Plugins could not be loaded");
@@ -58,15 +83,12 @@ test("archive unknown outcome blocks further writes until authoritative refresh"
 });
 
 test("System catalog reads the explicit installation mapping and keeps editor scope", async ({ page }) => {
-  const installation = { id: "installation-fixture", name: "explicit-installation", is_global: true };
-  await page.route("**/api/v1/projects", (route) => route.fulfill({ json: { data: [
-    { id: "current", name: project, is_global: false }, installation,
-  ] } }));
-  await page.route("**/api/v1/skills?**", (route) => {
-    const requested = new URL(route.request().url()).searchParams.get("project");
-    return route.fulfill({ json: { data: requested === installation.name ? [
-      { id: "orchestration-fixture", project_id: installation.id, name: "phased-checkout-orchestration", description: "Approved planning workflow", enabled: 1 },
-    ] : [] } });
+  await mockProjectIndex(page);
+  await page.route("**/api/v1/customize?**", route => {
+    const params = new URL(route.request().url()).searchParams;
+    return catalogPage(route, params.get("project") === installation.name && params.get("kind") === "skill" ? [
+      {id: "orchestration-fixture", name: "phased-checkout-orchestration", description: "Approved planning workflow", enabled: true},
+    ] : []);
   });
   await page.goto("/customize/skills?project=" + encodeURIComponent(project!));
   const surface = page.getByTestId("customize-surface");
