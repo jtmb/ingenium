@@ -107,6 +107,10 @@ describe("Skills upload and save outcomes", () => {
     expect(screen.getByRole("textbox", { name: "Edit SKILL.md", exact: true })).toHaveValue("# Exact draft  \n");
     expect(getSkill).toHaveBeenCalledTimes(1);
     expect(updateSkill).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId("tab-consolidated"));
+    expect(screen.getByTestId("skill-save-outcome")).toHaveTextContent("Save permission denied");
+    fireEvent.click(screen.getByTestId("tab-active"));
+    expect(screen.getByRole("textbox", { name: "Edit SKILL.md", exact: true })).toHaveValue("# Exact draft  \n");
   });
 
   it("retains a confirmed saved draft after readback failure and verifies without another update", async () => {

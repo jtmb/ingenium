@@ -709,7 +709,7 @@ function ProjectSkills({ project }: { project: string }) {
           {skillWriteBlocked(uploadResult) && <button type="button" onClick={() => void handleVerifyUpload()}
             disabled={uploadBusy || saving} className="rounded border border-[var(--color-border)] px-3 py-2 text-sm disabled:opacity-50">Verify stored upload</button>}
         </div>}
-        {saveResult && !selectedSkill && <SkillSaveNotice result={saveResult} busy={saving || uploadBusy} onVerify={() => void handleVerifySave()} />}
+        {saveResult && (!selectedSkill || tab !== "active") && <SkillSaveNotice result={saveResult} busy={saving || uploadBusy} onVerify={() => void handleVerifySave()} />}
       </div>
       {tab === "active" && (
         <>
