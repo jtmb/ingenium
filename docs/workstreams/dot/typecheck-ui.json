@@ -1,0 +1,13 @@
+{
+  "extends": "../../../services/ingenium-dashboard/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "../../../services/ingenium-dashboard/src/app/components/dot-v2/**/*.ts",
+    "../../../services/ingenium-dashboard/src/app/components/dot-v2/**/*.tsx",
+    "../../../packages/veyra-automation/contracts.d.ts"
+  ],
+  "exclude": []
+}

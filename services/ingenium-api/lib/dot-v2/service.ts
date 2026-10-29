@@ -182,7 +182,8 @@ export class DotService {
         const operation: Operation = { id:JSON.stringify([f.id,"skipped",f.cursor,now]),revision:0,followupId:f.id,scope,scheduledFor:now,state:"skipped",runId:null,code:`missed:${plan.skipped}`,updatedAt:now };
         if (!this.repository.get<Operation>("operation",operation.id,scope)) { this.repository.put("operation",operation,null); operations.push(operation); }
       }
-      this.repository.put("followup",{...f,cursor:through,revision:f.revision+1},f.revision);
+      // Scheduler progress is not a user edit; keep open pause/cancel reviews valid.
+      if(through !== f.cursor && (operations.length > 0 || Date.parse(through)-Date.parse(f.cursor) >= 60_000)) this.repository.advanceFollowupCursor(f,through);
       return { operations,skipped:plan.skipped };
     });
   }

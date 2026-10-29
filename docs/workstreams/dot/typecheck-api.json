@@ -1,0 +1,15 @@
+{
+  "extends": "../../../services/ingenium-api/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "incremental": false,
+    "rootDir": "../../.."
+  },
+  "include": [
+    "../../../services/ingenium-api/lib/dot-v2/**/*.ts",
+    "../../../packages/veyra-automation/contracts.d.ts"
+  ],
+  "exclude": []
+}

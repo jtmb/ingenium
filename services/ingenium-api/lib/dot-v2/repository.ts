@@ -21,6 +21,13 @@ export class DotRepository {
     const rows = this.db.prepare("SELECT id,body FROM veyra_dot_records WHERE kind=? AND scope_key=? AND id>? ORDER BY id LIMIT ?").all(kind,scopeKey(scope),after,limit+1) as { id: string; body: string }[];
     return { data: rows.slice(0,limit).map(r => JSON.parse(r.body)), nextCursor: rows.length > limit ? rows[limit-1]!.id : null };
   }
+  advanceFollowupCursor(followup: Followup, through: string): void {
+    if(through < followup.cursor)throw new RangeError("Cursor cannot move backward");
+    if(through === followup.cursor)return;
+    const next={...followup,cursor:through};
+    const result=this.db.prepare("UPDATE veyra_dot_records SET body=? WHERE kind='followup' AND id=? AND scope_key=? AND revision=? AND json_extract(body,'$.cursor')=?").run(JSON.stringify(next),followup.id,scopeKey(followup.scope),followup.revision,followup.cursor);
+    if(!Number(result.changes))throw new DotConflict("Follow-up progress changed");
+  }
   put(kind: RecordKind, record: DotRecord, expectedRevision: number | null): void {
     const revision = "revision" in record ? record.revision : 0;
     if (expectedRevision === null) {

@@ -181,3 +181,22 @@ test("proactive permission denial happens before source discovery or read",t=>{
  const f=fixture();t.after(()=>f.db.close());f.deny();let reads=0;
  assert.throws(()=>collectProactiveSuggestions(f.api,actor,scope,{isEnabled(){reads++;return true;},readEligible(){reads++;return [];}}),/denied/);assert.equal(reads,0);
 });
+
+test("scheduler progress preserves user-control revision and coalesces idle ticks",t=>{
+ const f=fixture();t.after(()=>f.db.close());const follow=f.approve();
+ f.tick("2026-10-29T00:00:10.000Z");assert.deepEqual(f.api.reconcile(actor,scope,follow.id).operations,[]);
+ assert.equal(f.repo.get("followup",follow.id,scope).cursor,follow.cursor);
+ f.tick("2026-10-29T00:01:00.000Z");f.api.reconcile(actor,scope,follow.id);
+ const progress=f.repo.get("followup",follow.id,scope);assert.equal(progress.cursor,"2026-10-29T00:01:00.000Z");assert.equal(progress.revision,follow.revision);
+ f.tick("2026-10-29T01:00:00.000Z");f.api.reconcile(actor,scope,follow.id);assert.equal(f.repo.get("followup",follow.id,scope).revision,follow.revision);
+ assert.doesNotThrow(()=>f.api.setPaused(actor,scope,follow.id,follow.revision,true));
+});
+test("cursor CAS rejects stale progress and user changes without overwriting pause or cursor",t=>{
+ const f=fixture();t.after(()=>f.db.close());const follow=f.approve();
+ f.repo.advanceFollowupCursor(follow,"2026-10-29T00:01:00.000Z");
+ assert.throws(()=>f.repo.advanceFollowupCursor(follow,"2026-10-29T00:02:00.000Z"),/progress changed/);
+ const fresh=f.repo.get("followup",follow.id,scope);const paused=f.api.setPaused(actor,scope,follow.id,0,true);
+ assert.throws(()=>f.repo.advanceFollowupCursor(fresh,"2026-10-29T00:02:00.000Z"),/progress changed/);
+ assert.equal(f.repo.get("followup",follow.id,scope).state,"paused");assert.equal(f.repo.get("followup",follow.id,scope).cursor,paused.cursor);
+ assert.throws(()=>f.repo.advanceFollowupCursor(paused,"2026-10-29T00:00:00.000Z"),/backward/);
+});
