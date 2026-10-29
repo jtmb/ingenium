@@ -46,7 +46,9 @@ npm run check --workspace=@veyra/web
 npm run test --workspace=@veyra/web -- src/features/work-ui/NativeWorkPresentation.test.tsx src/features/work-ui/NativeWorkDesktop.test.tsx src/features/work-ui/NativeWorkNoProjectActions.test.tsx
 ```
 
-The coordinator must also run original App/Workbench/DesktopEntry regressions, normal web/native commit gates and its scheduled package check. Native window/DPI/keyboard/200% scaling, actual admission/engine/Stop/recovery, diagnostic access, screenshot comparison and qualified upstream binding remain unverified. Existing47 passing Next Work React tests do not prove this native patch.
+Central source evidence now verifies this exact33594-byte patch: native-work-r1.json records the full native source typecheck passing under locked TypeScript7.0.2; native-work-r2.json and native-work-semantics-r2.log record all six new semantic React cases plus two preserved CreateProject cases passing (8/8, zero skips). The coordinator applied the patch over nativee8fb5caf. All ten source-file SHA256 values in its r2 receipt match the frozen worker source. The first semantic attempt failed on the coordinator's config import path before test execution; its original r1 log remains preserved. This result does not erase that failure or establish any browser/native runtime behavior.
+
+The coordinator must still run original App/Workbench/DesktopEntry browser/integration regressions, normal Windows/native commit gates and its scheduled package check. Native window/DPI/keyboard/200% scaling, actual admission/engine/Stop/recovery, diagnostic access, screenshot comparison, private/null-project owner and qualified upstream binding remain unverified. Existing47 passing Next Work React tests do not prove this native patch. Native source remains frozen for those coordinator checks.
 
 ## Storage and cleanup
 
