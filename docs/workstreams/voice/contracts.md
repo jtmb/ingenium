@@ -26,6 +26,8 @@ interface VoiceTurn {
 
 `VoicePorts` in `packages/veyra-voice/session.d.mts` is the complete consumer interface. Call/live modes preserve the existing working conversation and current native session model/effort. No default model is selected in this stream. Work/Web switches must retain or explicitly end this same voice scope rather than create another transcript. Memory use/contribution follows the existing conversation policy and exact host/environment scope through the agent adapter; no independent voice memory storage or extraction is introduced.
 
+Steer/queue requests additionally require `operationId: voice-control:<sessionId>:<counter>`. The operation ledger reserves that ID with the native parent `turn.requestId` and records its own completed/unknown outcome. The native bridge receives the operation ID; the service returns it only after a confirmed scoped native acknowledgement. `VoicePorts.steer` acknowledgements contain `{accepted:true,requestId,operationId,scope}`. This prevents control mutations from sharing the main prompt's single admission record. It is a local consumer contract addition requiring coordinator mapping, not a root-schema edit.
+
 ## Shared edits requested from coordinator
 
 | Owner surface | Minimal change |

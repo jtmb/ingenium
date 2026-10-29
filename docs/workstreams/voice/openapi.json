@@ -253,13 +253,19 @@
           },
           "scope": {
             "$ref": "#/components/schemas/VoiceScope"
+          },
+          "operationId": {
+            "description": "voice-control:<sessionId>:<counter>; durable idempotency identity for this intervention",
+            "maxLength": 160,
+            "type": "string"
           }
         },
         "required": [
           "scope",
           "turn",
           "text",
-          "delivery"
+          "delivery",
+          "operationId"
         ],
         "additionalProperties": false,
         "type": "object"

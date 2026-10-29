@@ -12,7 +12,7 @@ export interface VoicePorts {
   synthesize(request: VoiceRequest & { text: string }): Promise<Uint8Array>;
   complete(request: VoiceRequest): Promise<void>;
   approve(request: VoiceRequest & { approvalId: string; decision: 'allow-once' | 'deny' }): Promise<void>;
-  steer(request: VoiceRequest & { text: string; delivery: 'steer' | 'queue' }): Promise<{ scope: VoiceScope; requestId: string; accepted: boolean }>;
+  steer(request: VoiceRequest & { operationId: string; text: string; delivery: 'steer' | 'queue' }): Promise<{ scope: VoiceScope; requestId: string; operationId: string; accepted: boolean }>;
   interrupt(request: VoiceRequest): Promise<{ acknowledged: boolean; requestId: string; scope: VoiceScope }>;
   disconnect(request: { scope: VoiceScope; sessionId: string }): Promise<void>;
   play(request: { wav: Uint8Array; turn: VoiceTurn; signal: AbortSignal }): Promise<void>;
@@ -23,7 +23,7 @@ export class VoiceError extends Error { code: string; constructor(code: string) 
 export function validateScope(scope: unknown): Readonly<VoiceScope>;
 export function sameScope(a: unknown, b: unknown): boolean;
 export class VoiceSession {
-  constructor(options: { scope: VoiceScope; mode: VoiceMode; sessionId: string; ports: VoicePorts });
+  constructor(options: { scope: VoiceScope; mode: VoiceMode; sessionId: string; ports: VoicePorts; interruptDeadlineMs?: number });
   readonly scope: Readonly<VoiceScope>; readonly mode: VoiceMode;
   subscribe(listener: () => void): () => void;
   getSnapshot(): VoiceSnapshot;

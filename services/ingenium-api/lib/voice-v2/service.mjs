@@ -94,7 +94,23 @@ export class VoiceService {
   async steer(context, envelope) {
     const session = await this.#admit(context, envelope, envelope.delivery === 'queue' ? 'agent:queue' : 'agent:steer');
     if (session.active?.requestId !== envelope.turn.requestId || !['steer', 'queue'].includes(envelope.delivery) || typeof envelope.text !== 'string' || !envelope.text.trim() || [...envelope.text].length > 2000) throw new VoiceError('VOICE_STEERING_INVALID');
-    return this.agent.steer({ ...envelope, context, scope: session.scope });
+    const prefix = `voice-control:${envelope.turn.sessionId}:`;
+    const suffix = typeof envelope.operationId === 'string' && envelope.operationId.startsWith(prefix) ? envelope.operationId.slice(prefix.length) : '';
+    const sequence = Number(suffix);
+    if (!suffix || !Number.isSafeInteger(sequence) || sequence < 1 || String(sequence) !== suffix || envelope.operationId.length > 160) throw new VoiceError('VOICE_STEERING_INVALID');
+    const reservation = await this.operations.reserve({ context, scope: session.scope, requestId: envelope.operationId, parentRequestId: envelope.turn.requestId, kind: `voice-agent-${envelope.delivery}` });
+    if (reservation?.accepted !== true) throw new VoiceError('VOICE_DUPLICATE_OR_UNKNOWN');
+    let settled = false;
+    try {
+      if (session.active?.requestId !== envelope.turn.requestId) throw new VoiceError('VOICE_TURN_CANCELLED');
+      const ack = await this.agent.steer({ ...envelope, context, scope: session.scope });
+      if (ack?.accepted !== true || ack.requestId !== envelope.turn.requestId || !sameScope(ack.scope, session.scope)) throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
+      await this.operations.settle({ context, scope: session.scope, requestId: envelope.operationId, outcome: 'completed' }); settled = true;
+      return { ...ack, operationId: envelope.operationId };
+    } catch (error) {
+      if (!settled) await this.operations.settle({ context, scope: session.scope, requestId: envelope.operationId, outcome: 'unknown' });
+      throw error;
+    }
   }
   async interrupt(context, envelope) {
     const session = await this.#admit(context, envelope, 'agent:interrupt');

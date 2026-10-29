@@ -41,6 +41,8 @@ The UI transcript is volatile presentation of the existing conversation; it is c
 
 An uncertain open is never automatically replayed. Explicit cleanup uses the same known session ID, or a fresh client/session is created after reconciliation. A lost submit stream is an unknown agent outcome and triggers exact native interruption; it is not a refunded/unused prompt. Reconnect reauthorizes the same scope and checks worker health. A cold API process cannot recover volatile voice state: require a fresh session after reconciling the previous native turn against the durable ledger. Playback failure is surfaced and never blindly replayed.
 
+Every steer/queue intervention carries its own stable `voice-control:<sessionId>:<counter>` operation ID under the current turn. The existing durable ledger admits it once and records completion or unknown outcome; a repeated ID never replays the native operation. An uncertain control blocks more controls on the active local turn until it is stopped or finishes. The interruption fence enforces its own three-second acknowledgement deadline even if an adapter ignores abort; expired acknowledgements retire the local session and cannot reopen it. Synthesis receives the exact confirmed reply bytes, while display whitespace may be trimmed independently.
+
 ## Remaining acceptance
 
 See [acceptance.md](acceptance.md) for the required device, workflow, visual, memory, platform and release checks. Coordinator ownership of shared wiring is a concrete integration dependency, not an implemented end-to-end call claim.

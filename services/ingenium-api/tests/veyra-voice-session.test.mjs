@@ -23,7 +23,7 @@ function harness(overrides = {}, mode = 'agent-call') {
     synthesize: async () => wav(), play: async request => { calls.push(['play', request]); },
     complete: async request => { calls.push(['complete', request]); },
     approve: async request => { calls.push(['approve', request]); },
-    steer: async request => { calls.push(['steer', request]); return { scope, requestId: request.turn.requestId, accepted: true }; },
+    steer: async request => { calls.push(['steer', request]); return { scope, requestId: request.turn.requestId, operationId: request.operationId, accepted: true }; },
     interrupt: async request => { calls.push(['interrupt', request]); return { acknowledged: true, requestId: request.turn.requestId, scope }; },
     stopCapture: () => calls.push(['stopCapture']), stopPlayback: () => calls.push(['stopPlayback']), disconnect: async () => calls.push(['disconnect']), ...overrides,
   };
@@ -45,6 +45,24 @@ test('call uses exact working-agent scope and records playback completion', asyn
   const { session, calls } = harness(); await session.connect(); await session.receive(new Uint8Array(9600));
   assert.equal(calls[0][1].scope.executionBindingId, scope.executionBindingId);
   assert.deepEqual(calls.map(call => call[0]), ['submit', 'play', 'complete']); assert.equal(session.getSnapshot().phase, 'ready');
+});
+test('speech request preserves the exact confirmed reply including surrounding whitespace', async () => {
+  let synthesized;
+  const rawReply = '  The targeted tests passed.\n';
+  const { session } = harness({ submit: async request => ({ scope, requestId: request.turn.requestId, text: rawReply }), synthesize: async request => { synthesized = request.text; return wav(); } });
+  await session.connect(); await session.sendText('run tests');
+  assert.equal(synthesized, rawReply); assert.equal(session.getSnapshot().reply, rawReply.trim());
+  assert.equal(session.getSnapshot().error, null);
+});
+test('native adapter ignoring abort cannot keep interruption pending indefinitely', async () => {
+  const pending = deferred(); let interruptSignal;
+  const { ports, calls } = harness({ submit: () => pending.promise, interrupt: request => { interruptSignal = request.signal; return new Promise(() => undefined); } });
+  const session = new VoiceSession({ scope, mode: 'agent-call', sessionId: 'session-a', ports, interruptDeadlineMs: 5 });
+  await session.connect(); const running = session.sendText('inspect'); await tick(); await session.interrupt();
+  assert.equal(interruptSignal.aborted, true); assert.equal(session.getSnapshot().phase, 'ended');
+  assert.equal(session.getSnapshot().error, 'VOICE_INTERRUPT_UNKNOWN'); assert(calls.some(call => call[0] === 'stopCapture'));
+  pending.resolve({ scope, requestId: 'voice:session-a:1', text: 'stale' }); await running;
+  assert.equal(calls.some(call => call[0] === 'play'), false);
 });
 test('scope-mismatched result cannot be synthesized or played', async () => {
   const { session, calls } = harness({ submit: async request => ({ scope: { ...scope, runtimeId: 'native' }, requestId: request.turn.requestId, text: 'foreign reply' }) });
@@ -84,8 +102,18 @@ test('tool and permission events are fenced; steering/queue do not stop working 
   assert.equal(calls.find(call => call[0] === 'approve')[1].approvalId, 'approval-1');
   await session.sendText('Use the Windows runner', 'steer'); await session.sendText('Then report results', 'queue');
   assert.equal(calls.filter(call => call[0] === 'steer').length, 2); assert.equal(calls.some(call => call[0] === 'interrupt'), false);
+  assert.notEqual(calls.filter(call => call[0] === 'steer')[0][1].operationId, calls.filter(call => call[0] === 'steer')[1][1].operationId);
   reply.resolve({ scope, requestId: request.turn.requestId, text: 'Done' }); await running;
   assert.equal(session.acceptEvent(event), false);
+});
+test('uncertain steering is fenced locally instead of automatically admitting another intervention', async () => {
+  const pending = deferred(); let requests = 0;
+  const { session } = harness({ submit: () => pending.promise, steer: async () => { requests++; throw new Error('connection lost after send'); } });
+  await session.connect(); const running = session.sendText('inspect'); await tick();
+  await assert.rejects(() => session.sendText('Change runner', 'steer'), /VOICE_STEERING_OUTCOME_UNKNOWN/);
+  await assert.rejects(() => session.sendText('Change runner', 'steer'), /VOICE_STEERING_OUTCOME_UNKNOWN/); assert.equal(requests, 1);
+  assert.equal(session.getSnapshot().error, 'VOICE_STEERING_OUTCOME_UNKNOWN');
+  await session.interrupt(); pending.resolve({ scope, requestId: 'voice:session-a:1', text: 'late' }); await running;
 });
 test('barge-in rejects unqualified echo evidence; qualified signal cancels', async () => {
   const { session, calls } = harness(); await session.connect();
@@ -170,6 +198,22 @@ test('API checks revocation at each boundary and blocks duplicate after cold rec
   await service.open({}, { scope, sessionId: 'service-a', mode: 'agent-call' }); allowed = false;
   await assert.rejects(() => service.transcribe({}, envelope), /FORBIDDEN/); allowed = true;
   await assert.rejects(() => service.submit({}, envelope), /DUPLICATE_OR_UNKNOWN/);
+});
+test('steer and queue have durable operation IDs; duplicate and unknown controls never replay native work', async () => {
+  const pending = deferred(); let nativeControls = 0;
+  const { service, envelope, calls } = serviceHarness({ agent: {
+    submit: () => pending.promise,
+    steer: async request => { nativeControls++; if (request.delivery === 'queue') throw new Error('unknown native control outcome'); return { accepted: true, scope, requestId: request.turn.requestId }; },
+  } });
+  await service.open({}, { scope, sessionId: 'service-a', mode: 'agent-call' }); const running = service.submit({}, envelope); await tick();
+  const steer = { ...envelope, delivery: 'steer', operationId: 'voice-control:service-a:1' };
+  assert.equal((await service.steer({}, steer)).operationId, steer.operationId);
+  await assert.rejects(() => service.steer({}, steer), /VOICE_DUPLICATE_OR_UNKNOWN/);
+  const queue = { ...envelope, delivery: 'queue', operationId: 'voice-control:service-a:2' };
+  await assert.rejects(() => service.steer({}, queue), /unknown native control outcome/);
+  await assert.rejects(() => service.steer({}, queue), /VOICE_DUPLICATE_OR_UNKNOWN/); assert.equal(nativeControls, 2);
+  assert.equal(calls.find(call => call[0] === 'settle' && call[1].requestId === queue.operationId)[1].outcome, 'unknown');
+  pending.resolve({ scope, requestId: envelope.turn.requestId, text: 'done' }); await running;
 });
 test('concurrent health checks reserve capacity before model readiness', async () => {
   const health = deferred(), { service } = serviceHarness({ maxSessions: 1, speech: { health: () => health.promise } });

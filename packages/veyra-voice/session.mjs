@@ -24,12 +24,25 @@ function boundedText(text, max = 2000) {
   return text.trim();
 }
 
+async function interruptWithDeadline(port, request, timeoutMs) {
+  const controller = new AbortController();
+  let timer;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => port({ ...request, signal: controller.signal })),
+      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new VoiceError('VOICE_INTERRUPT_UNKNOWN')); }, timeoutMs); }),
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
 /** Volatile orchestration only. The existing conversation API remains the transcript writer. */
 export class VoiceSession {
   #listeners = new Set();
   #active;
   #generation = 0;
   #counter = 0;
+  #controlCounter = 0;
+  #steeringUnknown = false;
   #connection = 0;
   #connecting;
   #interrupting;
@@ -37,10 +50,12 @@ export class VoiceSession {
   #ending;
   #snapshot;
 
-  constructor({ scope, mode, sessionId, ports }) {
+  constructor({ scope, mode, sessionId, ports, interruptDeadlineMs = 3000 }) {
     this.scope = validateScope(scope);
     if (!['dictation', 'agent-call', 'conversation'].includes(mode) || typeof sessionId !== 'string' || !sessionId || sessionId.length > 128) throw new VoiceError('VOICE_SESSION_INVALID');
+    if (!Number.isInteger(interruptDeadlineMs) || interruptDeadlineMs < 1 || interruptDeadlineMs > 3000) throw new VoiceError('VOICE_SESSION_INVALID');
     this.mode = mode; this.sessionId = sessionId; this.ports = ports;
+    this.interruptDeadlineMs = interruptDeadlineMs;
     this.#snapshot = Object.freeze({ phase: 'disconnected', muted: true, transcript: '', reply: '', tools: [], approval: null, error: null, generation: 0 });
   }
 
@@ -85,8 +100,15 @@ export class VoiceSession {
     if (!['prompt', 'steer', 'queue'].includes(delivery) || (this.mode === 'dictation' && delivery !== 'prompt')) throw new VoiceError('VOICE_DELIVERY_INVALID');
     if (this.#active && delivery !== 'prompt') {
       const active = this.#active;
-      const ack = await this.ports.steer({ scope: this.scope, turn: active.turn, text: value, delivery, signal: active.controller.signal });
-      if (!sameScope(this.scope, ack.scope) || ack.requestId !== active.turn.requestId || ack.accepted !== true) throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
+      if (this.#steeringUnknown) throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
+      const operationId = `voice-control:${this.sessionId}:${++this.#controlCounter}`;
+      try {
+        const ack = await this.ports.steer({ scope: this.scope, turn: active.turn, operationId, text: value, delivery, signal: active.controller.signal });
+        if (!sameScope(this.scope, ack.scope) || ack.requestId !== active.turn.requestId || ack.operationId !== operationId || ack.accepted !== true) throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
+      } catch {
+        if (this.#current(active.turn)) { this.#steeringUnknown = true; this.reportError('VOICE_STEERING_OUTCOME_UNKNOWN'); }
+        throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
+      }
       return;
     }
     if (this.#active) await this.interrupt();
@@ -97,6 +119,7 @@ export class VoiceSession {
     if (this.#closed || this.#interrupting || this.#snapshot.muted || this.#snapshot.phase !== 'ready') throw new VoiceError('VOICE_NOT_READY');
     const turn = Object.freeze({ sessionId: this.sessionId, turnId: ++this.#counter, generation: this.#generation, requestId: `voice:${this.sessionId}:${this.#counter}` });
     const active = { turn, controller: new AbortController(), submitted: false }; this.#active = active;
+    this.#steeringUnknown = false;
     this.#set({ phase: 'transcribing', transcript: '', reply: '', tools: [], approval: null, error: null });
     try {
       const text = await transcript(active);
@@ -111,7 +134,7 @@ export class VoiceSession {
       if (!sameScope(this.scope, result.scope) || result.requestId !== turn.requestId) throw new VoiceError('VOICE_RESULT_SCOPE_MISMATCH');
       const reply = boundedText(result.text, 32000);
       this.#set({ reply, phase: 'synthesizing', approval: null });
-      const wav = await this.ports.synthesize({ scope: this.scope, turn, text: reply, signal: active.controller.signal });
+      const wav = await this.ports.synthesize({ scope: this.scope, turn, text: result.text, signal: active.controller.signal });
       if (!this.#current(turn)) return;
       this.#set({ phase: 'speaking' });
       await this.ports.play({ wav, turn, signal: active.controller.signal });
@@ -155,7 +178,7 @@ export class VoiceSession {
       await Promise.resolve();
       try {
         if (active?.submitted) {
-          const ack = await this.ports.interrupt({ scope: this.scope, turn: active.turn, signal: AbortSignal.timeout(3000) });
+          const ack = await interruptWithDeadline(request => this.ports.interrupt(request), { scope: this.scope, turn: active.turn }, this.interruptDeadlineMs);
           if (ack?.acknowledged !== true || ack.requestId !== active.turn.requestId || !sameScope(this.scope, ack.scope)) throw new VoiceError('VOICE_INTERRUPT_UNKNOWN');
         }
         if (!this.#closed) this.#set({ phase: 'ready' });

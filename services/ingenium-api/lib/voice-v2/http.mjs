@@ -3,7 +3,7 @@ import { VoiceError } from '../../../../packages/veyra-voice/session.mjs';
 const fields = {
   open: ['scope', 'mode', 'sessionId'], resume: ['scope', 'mode', 'sessionId'], close: ['scope', 'sessionId'],
   transcribe: ['scope', 'turn'], submit: ['scope', 'turn', 'text', 'delivery'], synthesize: ['scope', 'turn', 'text'],
-  approve: ['scope', 'turn', 'approvalId', 'decision'], steer: ['scope', 'turn', 'text', 'delivery'], interrupt: ['scope', 'turn'], complete: ['scope', 'turn'],
+  approve: ['scope', 'turn', 'approvalId', 'decision'], steer: ['scope', 'turn', 'operationId', 'text', 'delivery'], interrupt: ['scope', 'turn'], complete: ['scope', 'turn'],
 };
 async function read(request, limit) {
   if (!request.body) throw new VoiceError('VOICE_REQUEST_INVALID');
