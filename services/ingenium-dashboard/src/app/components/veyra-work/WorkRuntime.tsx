@@ -36,7 +36,7 @@ function readAttachment(file: File): Promise<string> {
   });
 }
 
-export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject, webQualification = null, admissionControl, submissionBlockedReason = null, contextSlots = null, projectPicker, routeError = null }: {
+export default function WorkRuntime({ initialSessionId, requestedRuntime, requestedProject, webQualification = null, admissionControl, submissionBlockedReason = null, contextSlots = null, projectPicker, routeError = null, projectRefId, projectDisplayName }: {
   initialSessionId: string | null; requestedRuntime: string | null; requestedProject: string | null;
   webQualification?: WorkWebQualification | null;
   admissionControl?: ReactNode;
@@ -44,11 +44,13 @@ export default function WorkRuntime({ initialSessionId, requestedRuntime, reques
   contextSlots?: WorkContextSlots | null;
   projectPicker?: ReactNode;
   routeError?: string | null;
+  projectRefId?: string | null;
+  projectDisplayName?: string;
 }) {
   const runtime = useRuntime();
   const project = useProject();
   const auth = useAuth();
-  const unavailable = (notice?: string) => <WorkShell projectLabel={runtime.projectName ?? project} projects={[]} conversations={[]} activeId={null}
+  const unavailable = (notice?: string) => <WorkShell projectLabel={projectDisplayName ?? (projectRefId === null ? "No project" : runtime.projectName ?? project)} projects={[]} conversations={[]} activeId={null}
     installationAdmin={auth.installationAdmin}
     onSelect={() => undefined} onNew={() => undefined} newPending composer={null}
     web={<p role="status" className="p-6 text-sm">Connect the selected workspace before opening a Web conversation.</p>}>
@@ -66,17 +68,21 @@ export default function WorkRuntime({ initialSessionId, requestedRuntime, reques
   }
   return <BoundWorkRuntime key={JSON.stringify([runtime.runtimeId, runtime.projectName, runtime.workspace.confirmedWorkspaceId])}
     initialSessionId={initialSessionId} webQualification={webQualification} admissionControl={admissionControl} submissionBlockedReason={submissionBlockedReason}
-    contextSlots={contextSlots} projectPicker={projectPicker} />;
+    contextSlots={contextSlots} projectPicker={projectPicker} projectRefId={projectRefId} projectDisplayName={projectDisplayName} />;
 }
 
-function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl, submissionBlockedReason, contextSlots, projectPicker }: {
+function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl, submissionBlockedReason, contextSlots, projectPicker, projectRefId, projectDisplayName }: {
   initialSessionId: string | null; webQualification: WorkWebQualification | null; admissionControl?: ReactNode; submissionBlockedReason: string | null;
   contextSlots: WorkContextSlots | null; projectPicker?: ReactNode;
+  projectRefId: string | null | undefined;
+  projectDisplayName?: string;
 }) {
   const runtime = useRuntime();
   const { user, installationAdmin } = useAuth();
   const organization = useOrganization();
   const project = useProject();
+  const routeProject = runtime.projectName ?? project;
+  const projectLabel = projectDisplayName ?? (projectRefId === null ? "No project" : routeProject);
   const router = useRouter();
   const params = useSearchParams();
   const sessions = useOpenCodeSessions({ initialSelection: "none" });
@@ -110,12 +116,12 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const [diffPending, setDiffPending] = useState(false);
   const [activity, setActivity] = useState<{ sessionId: string; selection: ActivitySelection } | null>(null);
   const [presentation, setPresentation] = useState<"work" | "web">("work");
-  const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: runtime.projectName ?? project,
+  const identity = { instanceId: "authenticated-dashboard", ownerId: user.id, organizationId: organization.active?.id ?? "unresolved", projectId: projectRefId === undefined ? routeProject : projectRefId,
     runtimeId: runtime.runtimeId ?? "compatibility", workspaceId: runtime.workspace.confirmedWorkspaceId ?? "", sessionId: initialSessionId };
   const draftKey = workDraftKey(identity);
-  const slotBinding = { ownerId: user.id, organizationId: organization.active?.id ?? null, runtimeId: runtime.runtimeId,
+  const slotBinding = { ownerId: user.id, organizationId: organization.active?.id ?? null, projectId: projectRefId ?? null, runtimeId: runtime.runtimeId,
     workspaceId: runtime.workspace.confirmedWorkspaceId, sessionId: activeId };
-  const slotSelectionResolved = initialSessionId === null || activeId !== null;
+  const slotSelectionResolved = projectRefId !== undefined && projectRefId !== "" && (initialSessionId === null || activeId !== null);
   const slots = slotSelectionResolved && contextSlots && workControlBindingMatches(contextSlots.binding, slotBinding) ? contextSlots : null;
   const models = workModels(config?.providers ?? []);
   const freshDefault = newWorkDraft(config?.defaultSelection ?? null, models);
@@ -129,13 +135,13 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   useEffect(() => {
     if (!activeId || sessions.isLoading || navigationPending) return;
     const navigation = workConversationNavigation({ search: params.toString(), hash: window.location.hash,
-      sessionId: activeId, runtimeId: identity.runtimeId, project: identity.projectId, intent: "canonicalize" });
+      sessionId: activeId, runtimeId: identity.runtimeId, project: routeProject, intent: "canonicalize" });
     if (navigation.action === "replace") router.replace(navigation.href, { scroll: false });
-  }, [activeId, identity.projectId, identity.runtimeId, navigationPending, params, router, sessions.isLoading]);
+  }, [activeId, identity.runtimeId, navigationPending, params, routeProject, router, sessions.isLoading]);
 
   const select = (id: string) => {
     const navigation = workConversationNavigation({ search: params.toString(), hash: window.location.hash,
-      sessionId: id, runtimeId: identity.runtimeId, project: identity.projectId, intent: "select" });
+      sessionId: id, runtimeId: identity.runtimeId, project: routeProject, intent: "select" });
     if (navigation.action === "none") return;
     startNavigation(() => {
       if (navigation.action === "replace") router.replace(navigation.href, { scroll: false });
@@ -217,7 +223,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
   const artifacts = collectWorkArtifacts(chat.messages);
   const suggestions = workSuggestions({ hasSession: activeId !== null, hasFiles: artifacts.length > 0,
     hasChanges: diff !== null && diff.sessionId === activeId && Array.isArray(diff.value) && diff.value.length > 0, hasError: Boolean(chat.error) });
-  return <WorkShell projectLabel={runtime.projectName ?? project} projects={[{ id: identity.projectId, label: identity.projectId, conversations }]}
+  return <WorkShell projectLabel={projectLabel} projects={identity.projectId === null ? [] : [{ id: identity.projectId, label: projectLabel, conversations }]}
     installationAdmin={installationAdmin}
     conversations={conversations} activeId={activeId} onSelect={select} onNew={() => { void create(); }}
     dot={slots?.dot}
@@ -255,7 +261,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
       onAttach={() => attachmentInput.current?.click()}
       onSend={() => { void send(); }} onStop={() => { void chat.stop(); }} models={models}
       ready={!submissionBlockedReason && !protectedDraft && !rehydrate && !configLoading && !configError && chat.sessionReady && !chat.error && modelAvailable} pending={pending || navigationPending || protectedDraft} streaming={chat.isStreaming}
-      projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {runtime.projectName ?? project}</span>}
+      projectControl={slots?.projectControl ?? projectPicker ?? <span>▱ {projectLabel}</span>}
       environmentControl={slots?.environmentControl ?? <span>{runtime.workspace.mode === "compatibility" ? "Compatibility workspace" : "Isolated runtime"}</span>}
       permissionControl={slots?.permissionControl ?? <span>Runtime permissions</span>}
       memoryControl={slots?.memoryControl} voiceControl={slots?.voiceControl} /></>}
@@ -272,7 +278,7 @@ function BoundWorkRuntime({ initialSessionId, webQualification, admissionControl
     </section>}
     {!activeId ? <div className="flex h-full min-h-64 flex-col items-center justify-center gap-5 px-6 text-center">
       <Image src="/veyra-blue.png" alt="" width={48} height={48} />
-      <h1 className="text-xl font-medium">What should we build in {runtime.projectName ?? project}?</h1>
+      <h1 className="text-xl font-medium">{projectRefId === null ? "What should we build?" : `What should we build in ${projectLabel}?`}</h1>
       <p className="text-xs text-neutral-400">Choose a conversation or start a new chat.</p>
     </div> : <ChatMessages messages={chat.messages} isLoading={chat.isLoading} isStreaming={chat.isStreaming}
       streamActivity={chat.streamActivity} error={chat.error} permissions={chat.permissions} replyPermission={chat.replyPermission}

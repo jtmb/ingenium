@@ -252,15 +252,15 @@ describe("Work runtime boundary and conversation state", () => {
   });
 
   it("renders only the parent controls matching the exact actor, workspace and selected conversation", async () => {
-    const binding = { ownerId: "owner-a", organizationId: "org-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: "ses-a" };
+    const binding = { ownerId: "owner-a", organizationId: "org-a", projectId: "canonical-project-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: "ses-a" };
     const startVoice = vi.fn();
     const slots = { binding, voiceControl: <button type="button" onClick={startVoice}>Call selected agent</button>,
       memoryControl: <button type="button">Memory policy</button>, dot: <button type="button">Your dot</button>, panels: <p>Bound domain panel</p> };
-    const view = render(<WorkRuntime {...props} contextSlots={slots} />);
+    const view = render(<WorkRuntime {...props} projectRefId="canonical-project-a" contextSlots={slots} />);
     await screen.findByRole("button", { name: "Call selected agent" });
     fireEvent.click(screen.getByRole("button", { name: "Call selected agent" }));
     expect(startVoice).toHaveBeenCalledTimes(1); expect(state.send).not.toHaveBeenCalled();
-    view.rerender(<WorkRuntime {...props} initialSessionId="ses-b" contextSlots={slots} />);
+    view.rerender(<WorkRuntime {...props} initialSessionId="ses-b" projectRefId="canonical-project-a" contextSlots={slots} />);
     expect(screen.queryByRole("button", { name: "Call selected agent" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Memory policy" })).toBeNull();
     expect(screen.queryByText("Bound domain panel")).toBeNull();
@@ -289,12 +289,38 @@ describe("Work runtime boundary and conversation state", () => {
   });
 
   it("does not reinterpret an unavailable explicit session as the new-session domain controls", async () => {
-    render(<WorkRuntime {...props} initialSessionId="ses-missing" contextSlots={{
-      binding: { ownerId: "owner-a", organizationId: "org-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: null },
+    render(<WorkRuntime {...props} initialSessionId="ses-missing" projectRefId="canonical-project-a" contextSlots={{
+      binding: { ownerId: "owner-a", organizationId: "org-a", projectId: "canonical-project-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: null },
       voiceControl: <button type="button">Start a new voice session</button>,
     }} />);
     await screen.findByRole("alert");
     expect(screen.queryByRole("button", { name: "Start a new voice session" })).toBeNull();
     expect(state.send).not.toHaveBeenCalled();
+  });
+
+  it("requires an explicit canonical project ref and distinguishes project organization on the same execution binding", () => {
+    const slots = { binding: { ownerId: "owner-a", organizationId: "org-a", projectId: "canonical-project-a", runtimeId: "runtime-a", workspaceId: "workspace-a", sessionId: "ses-a" },
+      memoryControl: <button type="button">Bound memory policy</button> };
+    const view = render(<WorkRuntime {...props} contextSlots={slots} />);
+    expect(screen.queryByRole("button", { name: "Bound memory policy" })).toBeNull();
+    view.rerender(<WorkRuntime {...props} projectRefId="" contextSlots={slots} />);
+    expect(screen.queryByRole("button", { name: "Bound memory policy" })).toBeNull();
+    view.rerender(<WorkRuntime {...props} projectRefId="canonical-project-b" contextSlots={slots} />);
+    expect(screen.queryByRole("button", { name: "Bound memory policy" })).toBeNull();
+    view.rerender(<WorkRuntime {...props} projectRefId="canonical-project-a" contextSlots={slots} />);
+    expect(screen.getByRole("button", { name: "Bound memory policy" })).toBeTruthy();
+  });
+
+  it("isolates canonical project drafts without substituting the project label into the API route binding", async () => {
+    state.query = "session=ses-a&runtime=runtime-a&project=project-a";
+    const view = render(<WorkRuntime {...props} projectRefId="canonical-project-a" projectDisplayName="Display A" />);
+    await waitFor(() => expect(screen.getByLabelText("Work model").textContent).toContain("Model A"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Project A original draft" } });
+    view.rerender(<WorkRuntime {...props} projectRefId="canonical-project-b" projectDisplayName="Display B" />);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    expect(state.replace).not.toHaveBeenCalled();
+    view.rerender(<WorkRuntime {...props} projectRefId="canonical-project-a" projectDisplayName="Renamed A" />);
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Project A original draft");
+    expect(state.replace).not.toHaveBeenCalled();
   });
 });
