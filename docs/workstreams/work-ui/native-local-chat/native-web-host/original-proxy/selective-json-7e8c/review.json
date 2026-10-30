@@ -1,0 +1,32 @@
+{
+  "scope": "unintegrated finite source/composition checks only",
+  "checks": {
+    "four_path_followon_exact_7e8c_in_memory": true,
+    "no_full_value_or_string_ast": true,
+    "same_actual_payload_pool_for_keys": true,
+    "key_destination_before_append": true,
+    "selected_destination_before_decode_copy": true,
+    "bounded_selected_length_before_allocation": true,
+    "decoded_duplicate_keys_checked": true,
+    "bounded_depth_nodes_and_keys": true,
+    "surrogate_pair_and_raw_utf8_checks": true,
+    "selected_members_are_actual_spans": true,
+    "stable_key_serialization_still_same_tuple": true,
+    "ack_classification_retains_required_fields": true,
+    "no_materialization_join_minted": true,
+    "five_rust_fixtures_supplied_unrun": true
+  },
+  "passed": 14,
+  "rust_fixtures_supplied": 5,
+  "rust_fixtures_run": false,
+  "compiler_or_runtime_run": false,
+  "ddl_or_dependency_change": false,
+  "patch_sha256": "ec24db9c40bc3d60d353903087166d83a54a9f08adf6742d9139423369a60f4d",
+  "patch_bytes": 15285,
+  "remaining": [
+    "Root semantic/compiler/fuzz/real JSON qualification",
+    "Windows materialization/WSL canonical provenance AST replacement",
+    "source/decode/path/HTTP/SQLite/bookkeeping budgets",
+    "real20MiB/full64MiB acceptance"
+  ]
+}

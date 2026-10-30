@@ -1,0 +1,18 @@
+{
+  "crates/adapters/src/lib.rs": {
+    "preimage_sha256": "7e0fe10797169814bc4a17cba9b0354e0a603e82d3cfda06734697fa32f22536",
+    "proposed_sha256": "d31bd67bf73b68de85b16268c93b9ab3b7b8d31a628da8f280b39b27c778f140"
+  },
+  "crates/adapters/src/native_web_json.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "414a8346b62cb7bff71ca3de85a0b4d4c2f4118111de1c8d991d06f2082529db"
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs": {
+    "preimage_sha256": "cecd31bfa4bcbe0883cd78d392e487c4cf6b9bc1d75c2ad946e7d152088ea789",
+    "proposed_sha256": "50ec089f3803553c2ec58f0434a34f8a99750c7dc5baf8881129cb57abfb9d51"
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs": {
+    "preimage_sha256": "0fe59c8b2e2bdc27b778d284a9c2da56e9079f960e69fc81b0023916e83e86e6",
+    "proposed_sha256": "e37d23e8c69730b89ec3325b3eb485a11e9ea46130a782df85d62d6fc57afcf7"
+  }
+}
