@@ -1,0 +1,51 @@
+{
+  "base": "251d19a22c9239da045ca5c66ce07c0beb77bad6",
+  "scope": "One-file read-only kernel-probe proposal. Root applies; no cgroup/namespace/process writes or runtime qualification.",
+  "patchSha256": "232fc695a5a5bb6f7995843bcfdb4eab3eb90f0f47ae9d3e3c8ae2dcf437eda0",
+  "changes": [
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-resource-probe.mjs",
+      "preimageSha256": "3a59d046dbfdf9fa446e195fbc8a979f32ca40a4799a3aecac0a479a709317cb",
+      "proposedSha256": "bdcf98d2d316ae38499d44143db6fa0b4b785ec2361fcc3769f377c001af4fa8"
+    }
+  ],
+  "protectedSource": [
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs",
+      "sha256": "8b2ff9128ba83a83d7cc1c79372922dd2e49dd7baa26080946ba46068f6d094d"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts",
+      "sha256": "439b5b2459065ad488bc99420a6723f4abebb1a911d1251896087c5e982de061"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/resource-approval.mjs",
+      "sha256": "454d3f59954fc01653da1660f4e1256f5a0319950a8ea395fbe455707a0874a4"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "sha256": "c681fda0509e50ac8c480383c149d565cb96c48d99a2a7c7651dbb34a8b7d347"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "sha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "sha256": "cfeb6c08395d7e726ab13dfc7bc5f8fb13323e2e198144d0129c11af892fa6ed"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
+      "sha256": "b4c2ace194e9b3e2912034897ae68824c435b6f78dd0b3664e6ab2264a8b405a"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-cpu.ts",
+      "sha256": "af2ba23aa5f520c3870a80346d7af0fb41aab92fa380134c1b0de279389f1022"
+    }
+  ],
+  "remaining": [
+    "Actual finite Root-owned leaf/controller readback and manager/process placement",
+    "Genuine exact model/profile/thread cold/hot/witness peaks",
+    "Full platform/runtime/inference acceptance"
+  ]
+}
