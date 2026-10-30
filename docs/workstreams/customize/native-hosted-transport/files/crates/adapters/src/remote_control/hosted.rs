@@ -5,6 +5,7 @@ use crate::account_vault::{AccountVault,node_hosted::{AccountReview,Target}};
 use crate::access_profiles::AccessProfiles;
 pub mod contracts;
 pub mod attestation;
+pub mod ceremony;
 mod wire;
 pub use wire::{payload_hash,RemotePending};
 use contracts::*;
@@ -83,7 +84,7 @@ impl SessionConnection {
   let required=if write{"hosted_governance_write"}else{"hosted_governance_read"};
   if !grant.scope.permissions.iter().any(|p|p==required){return Err(Error::Forbidden);}Ok(())
  }
- pub fn read(&self,vault:&AccountVault,profiles:&AccessProfiles,current:&Identity,command:&Read)->Result<Value,Error>{
+ pub fn read(&self,vault:&AccountVault,profiles:&AccessProfiles,current:&Identity,command:&contracts::Read)->Result<Value,Error>{
   self.authorized(profiles,current,false)?;
   if !current.capabilities.contains(&command.capability()){return Err(Error::Forbidden);}
   vault.with_node_hosted_session(&self.target(),&self.enrollment().account_review,|s|wire::read(&self.target(),&s,&current.binding,command).map_err(|_|crate::account_vault::Error::Conflict)).map_err(account_error)

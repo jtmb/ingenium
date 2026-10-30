@@ -1,6 +1,6 @@
 /** Decodes actual paired Native proofs against original PRIVATE custody; no body-derived identities. */
 export type NativeOwner={library_id:string;service_instance_id:string;project:Record<string,unknown>|null};
-export type NativePairOriginal={actorId:string;installationId:string;enrollmentRequestId:string;authorityId:string;grantId:string;grantRevision:number;nativeOwner:NativeOwner};
+export type NativePairOriginal={actorId:string;installationId:string;enrollmentRequestId:string;hostedProjectId:string;authorityId:string;grantId:string;grantRevision:number;nativeOwner:NativeOwner};
 type Json=Record<string,unknown>;
 const obj=(v:unknown):v is Json=>!!v&&typeof v==="object"&&!Array.isArray(v);
 const same=(a:unknown,b:unknown)=>stable(a)===stable(b);

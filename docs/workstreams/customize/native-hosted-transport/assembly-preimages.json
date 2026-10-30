@@ -1,0 +1,14 @@
+[
+  {
+    "path": "services/ingenium-api/lib/routes/native-customize.ts",
+    "sha256": "8dc8987429756be855c2b473497c08317ba42561823a908f55ed88158aadde96"
+  },
+  {
+    "path": "services/ingenium-api/scripts/api-server.ts",
+    "sha256": "0cca48b6a3f78ad9719bbf929f248d6aba20be24a18f889b99b4a2fb9f932607"
+  },
+  {
+    "path": "services/ingenium-api/lib/authorization-policy.ts",
+    "sha256": "4642a0a6c19386f9927583e4b689724aee75d765a7c7f8e63fdf3a4f0cd1693c"
+  }
+]

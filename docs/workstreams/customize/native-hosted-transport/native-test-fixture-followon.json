@@ -1,0 +1,14 @@
+[
+  {
+    "path": "apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts",
+    "preSha256": "1682a108a74a4c4f7cfbd17447d305df53413013160c170bc2872a3025a1cf9c",
+    "postSha256": "5eb521dfdb6bb782113ad7763a2174cf995cb07e82990890ed97fdf07bfbc0bd",
+    "scope": "test only; direct worker write acknowledged"
+  },
+  {
+    "path": "apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx",
+    "preSha256": "caafb79429855152f0cf658cbf18216c63269024991782df79d6827682dc70a0",
+    "postSha256": "dbc8fe0d03024b07676763d80f8fd5a4bd15efbe11c6d02108b1dc89b1798e03",
+    "scope": "test only; direct worker write acknowledged"
+  }
+]

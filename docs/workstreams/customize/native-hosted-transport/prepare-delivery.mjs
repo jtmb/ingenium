@@ -18,7 +18,7 @@ edit("crates/adapters/src/remote_control.rs",(once,get,set)=>{
  once('        let token = open_token(\n','        if saved.node_hosted.is_some() { return Err(Error::Forbidden); }\n        let token = open_token(\n');
  const all=get(),connectionsStart=all.indexOf("    pub fn connections(&self)"),connectionsEnd=all.indexOf("    /// Check retained public owners",connectionsStart);
  if(connectionsStart<0||connectionsEnd<0)throw new Error("Connections owner marker missing");
- const connections=all.slice(connectionsStart,connectionsEnd);once(connections,connections.replace("                    .values()","                    .values()\\n                    .filter(|entry| entry.node_hosted.is_none())"));
+ const connections=all.slice(connectionsStart,connectionsEnd);once(connections,connections.replace("                    .values()","                    .values()\n                    .filter(|entry| entry.node_hosted.is_none())"));
  once('        "projects_read",','        "hosted_enrollment",\n        "hosted_governance_read",\n        "hosted_governance_write",\n        "projects_read",');
  once('        || scope.project_ids.is_empty()','        || scope.project_ids.is_empty() && scope.permissions != ["hosted_enrollment"]');
 });

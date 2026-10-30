@@ -1,0 +1,122 @@
+{
+  "baseCommit": "b2832ba29663a12d5d0c2df70fc0859e64ea661c",
+  "normalizedPatchContext": "LF; Root r6 contracts::Read fix already present",
+  "consolidatedNodePatchSha256": "5496bfe92beecaa518dcb4def3e8287644523650c94f0b9d297e30404c46ba3b",
+  "files": [
+    {
+      "target": "apps/service/src/routes/remote_control/hosted_governance.rs",
+      "base": "f6cbf7c0c1c8c938438a9d6d37911d92d20d6df49a3fb450c07f128eb15fb9ae",
+      "sha256": "c0007de2b9216994c2b139f32eff47ec652064c6c3382d84ef8355f08c08e873",
+      "bytes": 22352,
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted/ceremony.rs",
+      "base": null,
+      "sha256": "68d587a2bc3eca431b62dab36af70d9a1484dfca08008cc61219244d4f71fc17",
+      "bytes": 3295,
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted/wire.rs",
+      "base": "0627efb6d170e66126f272af16d15da8adf9e67951865750e1a7d46e86a1e0b6",
+      "sha256": "75245430c2614b0dfd0d1d10d2dd0e45059c7808a27a04ed40adf4ac12de38b1",
+      "bytes": 11546,
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted.rs",
+      "base": "2b77af5132b0a9249b77c5f609d20df6ae5e81f2cb1d2b59f24610bbc8e1f046",
+      "sha256": "bc6a43cfd7a196b40ed980a5a779ce3d7b8f0932acce5730fdecc57960df69ab",
+      "bytes": 17153,
+      "kind": "native"
+    },
+    {
+      "target": "packages/ingenium-core/lib/index.ts",
+      "base": "5f34ad73da5af06f0292563abb81f6ccd7c723cb0f2ccfd90bedb56dfafbea9f",
+      "sha256": "468017b7ba686451dae3805d8c5fa7acbab84ed1e1503bff100ca0853c51c2d0",
+      "bytes": 4734,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/authorization-policy.ts",
+      "base": "4642a0a6c19386f9927583e4b689724aee75d765a7c7f8e63fdf3a4f0cd1693c",
+      "sha256": "cc26ea641d4cda43b2c8e5716ff912747b323b9fb05892c949ccd84284ab71ac",
+      "bytes": 28448,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "base": "e5355038383a02b57a78c536301d8a3d4b40dded26d7f679bcdd1a9933dc6c40",
+      "sha256": "4cf461e861dd29ac6c2b14f4d8f409934c7853030345385c87de8f128f0acf2b",
+      "bytes": 6459,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "base": null,
+      "sha256": "8abeaff5adf93e49a5a5064557e33341a2f9dfa45e6895af071d397d40d3580b",
+      "bytes": 13087,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/paired-native-proof.ts",
+      "base": "61e88317e55c16db2fe708e60100ae6319c94817112b42ad229dd2bd9355c109",
+      "sha256": "cc858f049a1b099bfd7920046022c0a999288f52cbf46a3146c3152ebe95519b",
+      "bytes": 2326,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/paired-native-reader.ts",
+      "base": "3c91ecf77ae94520ccdba3d20a1aa960ce804099482c0584ee087e9eae37d840",
+      "sha256": "4fe68dfc135ceff3f13bc15a53245ac8e9aea269aede0f15d4dec1cd2e254b23",
+      "bytes": 8772,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/routes/mcp-servers.ts",
+      "base": "9bff71a9c2d6e9c613ff450813756698401f59dc880dd4ca5e0ef985442491c7",
+      "sha256": "a58bf060c6b9ff689a97810007afc72a9a87c255d327d4785884f5c939418bf9",
+      "bytes": 11742,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "base": null,
+      "sha256": "abd592164ec29bd0b6599f42c2d0589140b4cb5ef6309014aa775a3c0afd02f3",
+      "bytes": 1193,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/routes/native-customize.ts",
+      "base": "8dc8987429756be855c2b473497c08317ba42561823a908f55ed88158aadde96",
+      "sha256": "a80c160c36bc64d1f30feda6a5e2efda7517d3acd7788d2b50fe2d97d9245b53",
+      "bytes": 3323,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/routes/vault.ts",
+      "base": "b40a110198c56aa67f031a8f39bf93e65ccd2d4f79e0874771327f0f705837fe",
+      "sha256": "6d6906e65117d799a4899b4f2ebe1d6a11fc8cec568f843a927df06a9e32dc81",
+      "bytes": 27770,
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/scripts/api-server.ts",
+      "base": "0cca48b6a3f78ad9719bbf929f248d6aba20be24a18f889b99b4a2fb9f932607",
+      "sha256": "0acdd2c930736f6cb620e39f36551cf98b0f7ac2fe90778f89bcdd6b87acfa2e",
+      "bytes": 20663,
+      "kind": "node"
+    }
+  ],
+  "patches": {
+    "native": {
+      "path": "native-pairing-followon.patch",
+      "sha256": "5b25dcbcdabd6bc57dc7f9b87d575ae596455cd1f32167402cb365293d2bf512"
+    },
+    "node": {
+      "path": "node-pairing-followon.patch",
+      "sha256": "6f15e01dd015f5cccd37a2b1ba76dcd3831f9fe2dcf9bc86d323ffcd4a818a11"
+    }
+  }
+}

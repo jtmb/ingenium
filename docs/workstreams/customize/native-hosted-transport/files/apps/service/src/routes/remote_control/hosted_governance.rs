@@ -182,7 +182,7 @@ async fn paired_original(State(state):State<Arc<ServiceState>>,Path((id,operatio
 
 // Existing native account credential-file UI supplies metadata only; no email/password/code/cookie fields.
 pub(super) fn account_router()->Router<Arc<ServiceState>>{
- Router::new().route("/connections",get(hosted_connections)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
+ Router::new().route("/connections",get(hosted_connections)).route("/pairing-commands",post(pairing_command)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
   .layer(axum::extract::DefaultBodyLimit::max(128*1024))
 }
 async fn account_command(State(state):State<Arc<ServiceState>>,Json(input):Json<hosted::AccountCommand>)->Response{
@@ -210,10 +210,67 @@ async fn account_original(State(state):State<Arc<ServiceState>>,Path(id):Path<St
   if library(&state)?!=query.library_id{return Err(Error::Forbidden);}
   let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
   let row=journal.original(&id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
-  if row["original"]["protocol"]!="node_hosted_account_v1"||row["original"]["command"]["native_owner"]["library_id"]!=query.library_id{return Err(Error::Forbidden);}Ok(row)
+  if !["node_hosted_account_v1","node_hosted_pairing_v1"].contains(&row["original"]["protocol"].as_str().unwrap_or(""))||row["original"]["command"].get("native_owner").or_else(||row["original"]["command"]["account"].get("native_owner")).and_then(|n|n.get("library_id")).and_then(Value::as_str)!=Some(query.library_id.as_str()){return Err(Error::Forbidden);}Ok(row)
  }).await{Ok(value)=>Json(value).into_response(),Err(e)=>problem(e)}
 }
 
 async fn hosted_connections(State(state):State<Arc<ServiceState>>)->Response{
  match blocking(move||state.remote_control.store.hosted_connections()).await{Ok(rows)=>Json(json!({"connections":rows})).into_response(),Err(e)=>problem(e)}
+}
+
+enum CeremonyStart {Existing(Value),Prepared(hosted::PreparedPairing,hosted::ceremony::Publication)}
+async fn pairing_command(State(state):State<Arc<ServiceState>>,Json(input):Json<hosted::ceremony::PairingCommand>)->Response{
+ let input=Arc::new(input);let control=state.remote_control.clone();let worker=state.clone();
+ let(tx,rx)=tokio::sync::oneshot::channel();
+ if let Err(e)=control.retain(format!("hosted-pair:{}",input.account.operation_id),async move{
+  let _serial=worker.serial.clone().lock_owned().await;
+  let guard=worker.remote_control.commands.clone().lock_owned().await;
+  let listener=worker.remote_control.listener.lock().await;
+  if !listener.as_ref().is_some_and(|l|!l.task.is_finished()&&!*l.stop.borrow()){let _=tx.send(Err(Error::Unavailable));return;}
+  let listener_revision=worker.remote_control.listener_revision.load(Ordering::SeqCst);drop(listener);
+  let prepare_worker=worker.clone();let prepare_input=input.clone();
+  let started=blocking(move||{
+   let _commands=guard;
+   if prepare_worker.draining.load(Ordering::SeqCst){return Err(Error::Unavailable);}
+   let command=&prepare_input.account;
+   let actual=native_owner(&prepare_worker,&command.native_owner.library_id,&command.native_owner.service_instance_id,command.native_owner.project.as_ref().map(|p|p.id.as_str()),command.native_owner.project.as_ref().map(|p|p.revision))?;
+   if json!(actual)!=json!(command.native_owner){return Err(Error::Conflict);}
+   let mut journal=utility_operations::Store::open(&prepare_worker.state_directory).map_err(|_|Error::Unavailable)?;
+   let original=json!({"protocol":"node_hosted_pairing_v1","command":&*prepare_input});
+   if let Some(row)=journal.original(&command.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?{
+    return if row["original"]==original{Ok(CeremonyStart::Existing(row))}else{Err(Error::Conflict)};
+   }
+   journal.begin(&command.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
+   let publication=prepare_worker.remote_control.store.pairing_publication()?;
+   let prepared=prepare_worker.remote_control.store.prepare_hosted_pairing(&prepare_worker.state_directory,command,prepare_input.pairing_policy.clone())?;
+   Ok(CeremonyStart::Prepared(prepared,publication))
+  }).await;
+  let result=match started{
+   Ok(CeremonyStart::Existing(row))=>Ok(row),
+   Ok(CeremonyStart::Prepared(prepared,publication))=>{
+    // No command guard here: Node must redeem our /remote/v1/pair, which takes it.
+    // Serial and retained worker remain owned across the await and HTTP disconnect.
+    let publish_worker=worker.clone();let publish_input=input.clone();
+    let published=blocking(move||publish_worker.remote_control.store.publish_hosted_pairing(&publish_worker.state_directory,&publish_input,prepared,publication)).await;
+    let guard=worker.remote_control.commands.clone().lock_owned().await;
+    blocking(move||{
+     let _commands=guard;let command=&input.account;
+     let finish=(||{
+      published?;
+      if worker.draining.load(Ordering::SeqCst)||worker.remote_control.listener_revision.load(Ordering::SeqCst)!=listener_revision{return Err(Error::Conflict);}
+      let actual=native_owner(&worker,&command.native_owner.library_id,&command.native_owner.service_instance_id,command.native_owner.project.as_ref().map(|p|p.id.as_str()),command.native_owner.project.as_ref().map(|p|p.revision))?;
+      if json!(actual)!=json!(command.native_owner){return Err(Error::Conflict);}
+      worker.remote_control.store.enroll_hosted(&worker.state_directory,command,&input.hosted_project_id,input.visibility.clone(),input.governance_policy.clone(),input.name.clone())
+     })();
+     let receipt=match finish{Ok(view)=>json!({"state":"completed","value":view}),Err(_)=>json!({"state":"unconfirmed","code":"node_hosted_pairing_unconfirmed","message":"Original retained; inspect without replaying pairing or enrollment."})};
+     let mut journal=utility_operations::Store::open(&worker.state_directory).map_err(|_|Error::Unavailable)?;
+     journal.finish(&command.operation_id,&receipt).map_err(|_|Error::Unavailable)?;
+     journal.original(&command.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
+    }).await
+   },
+   Err(e)=>Err(e)
+  };
+  let _=tx.send(result);
+ }){return problem(e);}
+ match rx.await{Ok(Ok(v))=>Json(v).into_response(),Ok(Err(e))=>problem(e),Err(_)=>problem(Error::Unavailable)}
 }

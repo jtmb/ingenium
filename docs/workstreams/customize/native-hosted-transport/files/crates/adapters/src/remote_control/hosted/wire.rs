@@ -55,7 +55,7 @@ pub fn enroll(target:&Target<'_>,s:&Session<'_>,request_id:&str,hosted_project:&
  if result.session_actor_id!=s.actor_id||result.binding.actor_id!=s.actor_id||result.binding.hosted_project_id!=hosted_project||result.binding.visibility!=*visibility{return Err(Error::Forbidden);}
  Ok(result)
 }
-pub fn read(target:&Target<'_>,s:&Session<'_>,binding:&Binding,command:&Read)->Result<Value,Error>{
+pub fn read(target:&Target<'_>,s:&Session<'_>,binding:&Binding,command:&contracts::Read)->Result<Value,Error>{
  let value=post(target,s,&format!("{BASE}/read"),&json!({"grantId":binding.grant_id,"command":command}),None)?;
  if value["session_actor_id"]!=s.actor_id||value["binding"]!=json!(binding)||!value.as_object().is_some_and(|m|m.contains_key("value")){return Err(Error::Forbidden);}
  Ok(value["value"].clone())
@@ -135,4 +135,19 @@ pub(super) fn site_identity(target:&Target<'_>,s:&Session<'_>)->Result<SiteIdent
    assert_eq!(payload_hash(&original).unwrap(),vector["payloadHash"].as_str().unwrap());
   }
  }
+}
+
+/// Fixed existing vault creation + private connection command. No URL or token in reply.
+pub(super) fn publish_pairing(target:&Target<'_>,s:&Session<'_>,api_project:&str,hosted_project:&str,request_id:&str,preparation:&Value)->Result<(),Error>{
+ if api_project.is_empty()||api_project.len()>256||api_project.chars().any(char::is_control){return Err(Error::Invalid);}
+ let mut endpoint=url(target,"/api/v1/vault/items")?;endpoint.query_pairs_mut().append_pair("project",api_project);
+ let response=target.client.post(endpoint).header(reqwest::header::COOKIE,s.cookie).header(reqwest::header::ORIGIN,target.dashboard_origin)
+  .header("x-ingenium-ui","dashboard").header("x-csrf-token",s.csrf).json(&json!({
+   "name":"Native pairing preparation","type":"native-pairing-credential","owner_kind":"user","value":preparation.to_string()
+  })).send().map_err(|_|Error::Unavailable)?;
+ let created=decode(response)?;
+ let item=created.get("id").and_then(Value::as_str).filter(|id|crate::utility_operations::canonical(id)).ok_or(Error::Unavailable)?;
+ let paired=post(target,s,&format!("{BASE}/pairings"),&json!({"enrollmentRequestId":request_id,"hostedProjectId":hosted_project,"preparationItemId":item}),None)?;
+ if paired["enrollmentRequestId"]!=request_id||paired["state"]!="paired"{return Err(Error::Unavailable);}
+ Ok(())
 }

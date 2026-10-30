@@ -1,0 +1,41 @@
+{
+  "checks": [
+    {
+      "name": "protocol-custody-preflight",
+      "exitCode": 0,
+      "stdoutSha256": "f5996da21fb142aafedbe2c0238d02ab258b130fd9fd67f36aa680e6cb554400",
+      "summary": [
+        "# tests 50",
+        "# pass 50",
+        "# fail 0",
+        "# cancelled 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "name": "private-node-source",
+      "exitCode": 0,
+      "stdoutSha256": "8c5f1511df51c609153c027892b0bc90f7c6162d1a52fc59e3e0aabb1d69c287",
+      "summary": [
+        "{\"privateNodeSourceFiles\":6,\"contract\":\"Frozen Worker5 engine plus exact source auth/vault interfaces; no runtime auth stub; shared vault route remains Root compile gate\",\"diagnostics\":0,\"emitted\":0}",
+        "{\"allCanonicalTypeScriptSyntaxDiagnostics\":0}"
+      ]
+    },
+    {
+      "name": "portable-web-source",
+      "exitCode": 0,
+      "stdoutSha256": "152e57c7c2f7256f57eae25db652dfa02dd018acc64bbee1d8a75fdc1b0ea3ba",
+      "summary": [
+        "{\"portableAndWebFiles\":9,\"compatibilityOverrides\":5,\"diagnostics\":0,\"emitted\":0}"
+      ]
+    }
+  ],
+  "actualRuntimeAcceptance": false,
+  "nativeRustCompilation": "UNRUN; Root owns",
+  "cleanup": {
+    "removed": [],
+    "bytesRemoved": 0,
+    "scratchRemaining": [],
+    "generatedBuildCacheDependencies": false
+  }
+}

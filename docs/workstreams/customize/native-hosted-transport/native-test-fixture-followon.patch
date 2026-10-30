@@ -1,0 +1,25 @@
+--- a/apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts
++++ b/apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts
+@@ -9,7 +9,9 @@
+   qualityScore:.9,noveltyScore:.8,createdAt:"2026-10-30",updatedAt:"2026-10-30",projectId:"hosted-project",targetSkillId:"skill-id",
+   sourceProjectId:null,expectedRevision:3,expectedSourceRevision:null,proposedState:{description:"Proposed",content:"# Proposed"},
+   evidence:[{kind:"observation",id:12}],observationIds:[12],reviewer:null,reviewReason:null,appliedAt:null,rolledBackAt:null,
+-  observations:[{id:12,contentPreview:"Grounded observation"}],currentSkill:{content:"# Original",revision:3}};
++  observations:[{id:12,contentPreview:"Grounded observation"}],currentSkill:{id:"skill-id",content:"# Original",revision:3},sourceSkill:null,
++  reviewed:{status:"pending",updatedAt:"2026-10-30",targetSkillId:"skill-id",sourceProjectId:null,sourceName:null,expectedRevision:3,expectedSourceRevision:null,
++    currentTarget:{id:"skill-id",revision:3},currentSource:null,proposalHash:"e253e2f141b4184e99db662abdb7e31927ad716e69c1a10a3d025a3786dcf665"}};
+ export const baseStatus:SynthesisStatus={total_observations:4,pending_count:1,processed_count:3,trait_count:0,last_synthesis_at:null,incompleteBatch:null};
+ /** Deterministic owner fixture only; no operational persistence or production authority. */
+ export function fixture(binding:Binding=structuredClone(originalBinding)) {
+--- a/apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx
++++ b/apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx
+@@ -63,7 +63,8 @@
+     expect(state.sends.length).toBe(0);
+     fireEvent.click(screen.getByRole("button",{name:"Confirm exact change"}));
+     await waitFor(()=>expect(state.sends.length).toBe(1));
+-    expect(state.sends[0].command).toMatchObject({op:"approve",id:baseProposal.id,reviewed:{status:"pending",expectedRevision:3,updatedAt:baseProposal.updatedAt}});
++    expect(state.sends[0].command).toMatchObject({op:"approve",id:baseProposal.id,reviewed:baseProposal.reviewed});
++    expect("reviewed" in state.sends[0].command && state.sends[0].command.reviewed).toEqual(baseProposal.reviewed);
+   });
+   it("shows trigger acknowledgement without claiming batch completion or changing model defaults",async()=>{
+     const {transport,state}=fixture();render(<HostedGovernance transport={transport}/>);await ready();
