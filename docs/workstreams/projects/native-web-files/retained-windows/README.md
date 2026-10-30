@@ -1,5 +1,7 @@
 # Retained Windows original-URI read constructor
 
+Latest composition: see native15-composition/README.md and its exact locked-helper.patch. Canonical windows_read.rs now requires Work1 frozen Native15 inspect_local_web_prompt_locked. Root must merge overlapping loaders/exports; the ancestor73fc loader patch is not a standalone current composite.
+
 This is source-only in the same owned checkout/storage root. Root owns actual shared writes, compilation, runtime and journal/sender integration. It supplies genuine held-handle acquisition/rechecks, not a completed Web dispatcher or release proof. Full unchanged Web acceptance remains open.
 
 ## Concrete source interfaces

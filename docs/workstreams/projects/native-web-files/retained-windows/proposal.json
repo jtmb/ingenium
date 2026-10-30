@@ -44,8 +44,8 @@
     },
     {
       "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs",
-      "bytes": 7070,
-      "sha256": "1c08f4978115680539bf5832e4d6c11c874f1293ae53508a2dff38249721cd09"
+      "bytes": 8151,
+      "sha256": "0535d56c8930a3c3cd58fd200811f1278098ecb00c0ee25e78e0391e395d13c5"
     }
   ],
   "patchSha256": "ddc94937498ad6a25293f909b9b92f6b18d45dc738823a396f05911dc2152a42",
@@ -60,5 +60,7 @@
   ],
   "originalOwnership": "LocalCustodyOriginals inventory owns carrier before OS opens; one active original only",
   "bounds": "Existing8MiB aggregate including original inline inputs /32files unchanged;30s admission deadline never releases sent uncertainty",
-  "remaining": "Root/Work1 actual single-send journal token + joined ACK/private request owner + original engine closure proof adapter required; no copied DTO/callback join API"
+  "remaining": "Root/Work1 actual single-send journal token + joined ACK/private request owner + original engine closure proof adapter required; no copied DTO/callback join API",
+  "requiresWork1FrozenCommit": "094c34e39b7ba62e7e3d3e45cd1e77d4432d48ed",
+  "native15Composition": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/native-web-files/retained-windows/native15-composition/inputs.json"
 }

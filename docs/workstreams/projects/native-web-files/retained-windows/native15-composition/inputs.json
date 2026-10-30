@@ -1,0 +1,40 @@
+{
+  "work1Commit": "094c34e39b7ba62e7e3d3e45cd1e77d4432d48ed",
+  "work1ManifestSha256": "675e604716bc900510cdecda7a21aaa0f45979a54b0198ed2e710e57499dca40",
+  "work1PatchSha256": "94e664c8e9aabbb517e1244fdf4514a04acf4ceae955acedff5515c603f77fc7",
+  "frozenReviewInputs": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "sha256": "54b0ce0dc0046d2f84bb2dc0b6d8b477cd9ee38492b781f31dbcd33a262c6a14",
+      "bytes": 36233
+    },
+    {
+      "path": "crates/adapters/src/projects/local_web_originals.rs",
+      "sha256": "0386f495484114a486aa4337b137644fe61612d92bf8d716fe4a5f1bd3510ad1",
+      "bytes": 21071
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "sha256": "2247b18f4e9daf6ad2155e7938a4e2a2269ec0abb43badfc32399d0fa700dcfe",
+      "bytes": 10028
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_web_transport.rs",
+      "sha256": "96c6ce9459e7d698fa4e1eb2b606db3f23a0828f758023e05c4779d63f138251",
+      "bytes": 5738
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs",
+      "sha256": "f3f23901e14d07d9fe4ebefb4e12810634e6ed930cf72caf46017ddab7d47726",
+      "bytes": 13677
+    }
+  ],
+  "helperBaseCommit": "73fc7184db630400483b972fb464495bd660632e",
+  "helperPath": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs",
+  "helperPreimageSha256": "1c08f4978115680539bf5832e4d6c11c874f1293ae53508a2dff38249721cd09",
+  "helperPostimageSha256": "0535d56c8930a3c3cd58fd200811f1278098ecb00c0ee25e78e0391e395d13c5",
+  "patchSha256": "7001b91af0a336c2c2db0d280c785c43774585dc10de78f63f48897e1c4cd439",
+  "requires": "Native15 inspect_local_web_prompt_locked and constructor loader composition; NOT standalone73fc source activation",
+  "sharedWritten": false,
+  "compiled": false
+}
