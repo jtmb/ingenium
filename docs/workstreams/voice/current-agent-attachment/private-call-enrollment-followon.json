@@ -1,0 +1,17 @@
+{
+  "kind": "private-call-before-start-enrollment-followon-v1",
+  "parentCheckpoint": "b5c99b018d5351ae8418af18b8e9d59512e27382",
+  "source": "docs/workstreams/voice/current-agent-attachment/private-current-call.additions.ts",
+  "preimageSha256": "480e8fa3bc71b7d507cc3fac7eb64936665f03eceec1557ea378c62c4fc470fe",
+  "postimageSha256": "17218828a94a18009cc1a081e6af7dd5ae4457bc41c74bc082ddb373c3c46fcb",
+  "appliedCanonical": false,
+  "changes": [
+    "Private retainCallWork takes internal effect closure and enrolls Promise before first effect microtask",
+    "All refresh/session/plan work uses deferred enrollment; separate optional real abort signal",
+    "Planning reset runs even when fenced before effect entry",
+    "Actual sub slot stores pending Promise before original feed fetch can start"
+  ],
+  "mountGate": "Every new HTTP request requires actual fresh authentication to same original user+authSession+nine-axis scope. callId/captured old request/DTO are not authority.",
+  "exactPatch": "private-call-enrollment-followon.patch",
+  "exactPatchSha256": "f05c0f64138cbbeff4eb4fde4f6db5ed665a85602ae1bfccddc7146bcaa9898c"
+}

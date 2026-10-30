@@ -50,13 +50,22 @@ async function refreshCallPhysicalSource(call:CallRecord,allowOpening=false,sign
  call.physicalExpiresAt=raw.expiresAt;
 }
 export function refreshHostedCurrentAgentCall(handle:HostedCurrentAgentCall):Promise<void> {
- const call=currentCall(handle);callCurrent(call);return retainCallWork(call,refreshCallPhysicalSource(call));
+ const call=currentCall(handle);callCurrent(call);return retainCallWork(call,()=>refreshCallPhysicalSource(call));
 }
 function selectedCallTarget<T>(call:CallRecord,effect:()=>T):T {
  const facts=liveFacts(original(call.context));
  return withOpenCodeRuntimeTarget({baseUrl:`http://${facts.runtime.backendName}:4098`,directory:'/workspace'},effect);
 }
-function retainCallWork<T>(call:CallRecord,promise:Promise<T>):Promise<T> {
+function retainCallWork<T>(call:CallRecord,effect:()=>Promise<T>|T,signal:AbortSignal=call.lifetime.signal):Promise<T> {
+ const generation=call.generation;
+ // Publish the real pending Promise before its INTERNAL effect can start.
+ // This closure never arrives from an HTTP caller or authorizes any scope.
+ const promise=Promise.resolve().then(()=>{
+  signal.throwIfAborted();
+  if(call.generation!==generation||call.controller.signal.aborted||call.lifetime.signal.aborted||!['opening','open'].includes(call.state))
+   throw Object.assign(Error('CALL_WORK_FENCED_BEFORE_START'),{code:'CALL_WORK_FENCED_BEFORE_START'});
+  return effect();
+ });
  call.work.add(promise);promise.catch(error=>{if(error&&typeof error==='object'&&'code'in error&&String(error.code).includes('CLEANUP_UNKNOWN'))call.failure=error;}).finally(()=>call.work.delete(promise));return promise;
 }
 function disposeCallPlans(call:CallRecord):void {
@@ -80,9 +89,9 @@ export async function openHostedCurrentAgentCall(context:HostedVoiceRequestConte
  call.timer=setTimeout(()=>{void endHostedCurrentAgentCall(handle).catch(error=>{call.failure=error;});},Math.max(1,deadlineAt-Date.now()));call.timer.unref();
  const openingAbort=()=>call.lifetime.abort();signal.addEventListener('abort',openingAbort,{once:true});
  try{
-  call.profile=resource.producer.inspectAttachmentLease(lease);call.deadlineAt=Math.min(call.deadlineAt,call.profile.deadlineAt);if(call.timer)clearTimeout(call.timer);call.timer=setTimeout(()=>{void endHostedCurrentAgentCall(handle).catch(error=>{call.failure=error;});},Math.max(1,call.deadlineAt-Date.now()));call.timer.unref();callCurrent(call,true);await retainCallWork(call,refreshCallPhysicalSource(call,true));const combined=AbortSignal.any([signal,call.controller.signal]);
-  const read=await retainCallWork(call,selectedCallTarget(call,()=>readOriginalCallSessionSelection({sessionId:record.sessionId,agentId:record.scope.agentId,deadlineAt:Math.min(call.deadlineAt,Date.now()+10000),signal:combined})));
-  try{await retainCallWork(call,refreshCallPhysicalSource(call,true));callCurrent(call,true);combined.throwIfAborted();call.selection=read.selection;call.sessionSha256=read.sha256;call.state='open';return handle;}finally{read.raw.fill(0);}
+  call.profile=resource.producer.inspectAttachmentLease(lease);call.deadlineAt=Math.min(call.deadlineAt,call.profile.deadlineAt);if(call.timer)clearTimeout(call.timer);call.timer=setTimeout(()=>{void endHostedCurrentAgentCall(handle).catch(error=>{call.failure=error;});},Math.max(1,call.deadlineAt-Date.now()));call.timer.unref();callCurrent(call,true);await retainCallWork(call,()=>refreshCallPhysicalSource(call,true));const combined=AbortSignal.any([signal,call.controller.signal]);
+  const read=await retainCallWork(call,()=>selectedCallTarget(call,()=>readOriginalCallSessionSelection({sessionId:record.sessionId,agentId:record.scope.agentId,deadlineAt:Math.min(call.deadlineAt,Date.now()+10000),signal:combined})));
+  try{await retainCallWork(call,()=>refreshCallPhysicalSource(call,true));callCurrent(call,true);combined.throwIfAborted();call.selection=read.selection;call.sessionSha256=read.sha256;call.state='open';return handle;}finally{read.raw.fill(0);}
  }catch(error){try{await endHostedCurrentAgentCall(handle);}catch(cleanup){call.failure=cleanup;const failure=Object.assign(Error('CALL_OPEN_CLEANUP_UNKNOWN'),{code:'CALL_OPEN_CLEANUP_UNKNOWN'});Object.defineProperty(failure,'originalCall',{value:handle});throw failure;}throw error;}finally{signal.removeEventListener('abort',openingAbort);}
 }
 export function inspectHostedCurrentAgentCall(handle:HostedCurrentAgentCall):Readonly<Record<string,unknown>> {
@@ -99,7 +108,7 @@ export function planHostedCurrentAgentSpeech(handle:HostedCurrentAgentCall,messa
  if(call.planning)return Promise.reject(Object.assign(Error('CALL_PLAN_BUSY'),{code:'CALL_PLAN_BUSY'}));
  const generation=call.generation,combined=AbortSignal.any([signal,call.controller.signal]);combined.throwIfAborted();call.planning=true;
  const check=()=>{callCurrent(call);combined.throwIfAborted();if(call.generation!==generation)return fail('CALL_GENERATION_FENCED',409);};
- const task=(async()=>{
+ const task=retainCallWork(call,async()=>{
   let read:OriginalRawAssistantReadData|undefined,rawHandle:OriginalRawAssistantRead|undefined;
   try{
    check();await refreshCallPhysicalSource(call,false,combined);check();rawHandle=await selectedCallTarget(call,()=>readOriginalRawAssistantMessage({sessionId:call.scope.conversationId,messageId,agentId:call.scope.agentId,deadlineAt:Math.min(call.deadlineAt,Date.now()+10000),signal:combined}));
@@ -131,8 +140,8 @@ export function planHostedCurrentAgentSpeech(handle:HostedCurrentAgentCall,messa
    await refreshCallPhysicalSource(call,false,combined);check();if(call.plans.size+staged.length>64||call.plannedCount+staged.length>256||call.retainedBytes+added>262144)return fail('CALL_PLAN_CAPACITY',429);
    for(const item of staged){currentAgentPlans.set(item.token,item.plan);call.plans.add(item.token);call.seen.set(item.seenKey,{end:item.end,prefixSha256:item.prefixSha256});call.retainedBytes+=item.plan.bytes;call.plannedCount++;}
    return Object.freeze(staged.map(item=>item.token));
-  }finally{if(rawHandle)discardOriginalRawAssistantRead(rawHandle);read?.rawResponseBytes.fill(0);read?.sessionBeforeBytes.fill(0);read?.sessionAfterBytes.fill(0);call.planning=false;}
- })();return retainCallWork(call,task);
+  }finally{if(rawHandle)discardOriginalRawAssistantRead(rawHandle);read?.rawResponseBytes.fill(0);read?.sessionBeforeBytes.fill(0);read?.sessionAfterBytes.fill(0);}
+ },combined);task.finally(()=>{call.planning=false;}).catch(()=>undefined);return task;
 }
 export function inspectHostedCurrentAgentPlan(callHandle:HostedCurrentAgentCall,planHandle:HostedAssistantObservation):Readonly<Record<string,unknown>> {
  const call=currentCall(callHandle),plan=currentAgentPlans.get(planHandle);callCurrent(call);
@@ -152,11 +161,19 @@ async function stopCallSubscription(sub:CallSub):Promise<void> {
   if(sub.reader){await sub.reader.cancel();if(sub.pending)await Promise.allSettled([sub.pending]);sub.reader.releaseLock();sub.reader=null;}else await stream.cancel();sub.buffer='';
  })();return sub.stop;
 }
+function enrollCallSubscription(call:CallRecord,controller:AbortController):CallSub {
+ // The microtask closes over sub only AFTER the actual slot is published.
+ const sub:CallSub={controller,open:Promise.resolve().then(()=>{
+  controller.signal.throwIfAborted();
+  if(sub.stopped||call.sub!==sub||call.state!=='open'||call.lifetime.signal.aborted)
+   throw Object.assign(Error('CALL_SUBSCRIPTION_FENCED_BEFORE_START'),{code:'CALL_SUBSCRIPTION_FENCED_BEFORE_START'});
+  callCurrent(call);return selectedCallTarget(call,()=>openOriginalCallEventBody(controller.signal));
+ }),reader:null,pending:null,stop:null,buffer:'',decoder:new TextDecoder('utf-8',{fatal:true}),total:0,stopped:false,failure:null};
+ call.sub=sub;sub.open.catch(error=>{sub.failure=error;});return sub;
+}
 export async function openHostedCurrentAgentEvents(handle:HostedCurrentAgentCall):Promise<void> {
  const call=currentCall(handle);callCurrent(call);if(call.sub)return fail('CALL_SUBSCRIPTION_ORIGINAL_EXISTS',409);
- const controller=new AbortController();
- const sub:CallSub={controller,open:selectedCallTarget(call,()=>openOriginalCallEventBody(controller.signal)),reader:null,pending:null,stop:null,buffer:'',decoder:new TextDecoder('utf-8',{fatal:true}),total:0,stopped:false,failure:null};
- call.sub=sub;sub.open.catch(error=>{sub.failure=error;});
+ const sub=enrollCallSubscription(call,new AbortController());
  try{const stream=await sub.open;if(sub.stopped||call.state!=='open'){await stopCallSubscription(sub);return fail('CALL_GENERATION_FENCED',409);}callCurrent(call);sub.reader=stream.getReader();}
  catch(error){await stopCallSubscription(sub);throw error;}
 }

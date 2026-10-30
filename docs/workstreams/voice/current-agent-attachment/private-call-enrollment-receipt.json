@@ -1,0 +1,61 @@
+{
+  "kind": "private-call-enroll-before-network-receipt-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "b5c99b018d5351ae8418af18b8e9d59512e27382",
+  "rootImport": "aa37964a",
+  "appliedCanonical": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "testsAuthored": 6,
+  "testsExecuted": 0,
+  "supersedesSourceHashesIn": "Historical private-current-call-receipt.json remains evidence at b5; this followon lists current changed sources",
+  "outputs": [
+    {
+      "path": "private-current-call.additions.ts",
+      "bytes": 22830,
+      "sha256": "17218828a94a18009cc1a081e6af7dd5ae4457bc41c74bc082ddb373c3c46fcb"
+    },
+    {
+      "path": "private-current-call-splices.json",
+      "bytes": 8130,
+      "sha256": "737c4ad5d623a54de3cb608d00511a40372583ce91138d2eeecce1de1e964fad"
+    },
+    {
+      "path": "private-call-enrollment-followon.json",
+      "bytes": 1137,
+      "sha256": "a67e8764aa15931080ff2c95222989bd0bfaf071894a1a7334f3f7a87119e8e4"
+    },
+    {
+      "path": "private-call-enrollment-followon.patch",
+      "bytes": 9115,
+      "sha256": "f05c0f64138cbbeff4eb4fde4f6db5ed665a85602ae1bfccddc7146bcaa9898c"
+    },
+    {
+      "path": "private-call-enrollment.test.mjs",
+      "bytes": 5102,
+      "sha256": "3ef2f5cd724efc8cfae2b9a8f98ddab7a1121b29701d8a071f586569fa8c471b"
+    },
+    {
+      "path": "private-call-enrollment-review.md",
+      "bytes": 3711,
+      "sha256": "99d04e71e5c0b1c50882bdb8c7c85c76431636d8d39514f71ab7b7548bf76158"
+    }
+  ],
+  "validation": [
+    "Unexecuted strictV8 parse of actual private enrollment helpers and sixfixturetestsource",
+    "Exact additive patch versus b5 and original preimage/composed canonical postimage checks",
+    "JSON/sourcehash/manifest/gitdiffchecks"
+  ],
+  "mountGate": "Every new HTTP request must authenticate actual user/authSession/nineaxis scope against original call; no callId/captured old request/DTO check is authority",
+  "boundaries": [
+    "Closures internal, unexported execution scheduling only",
+    "Actual pending work retained through settlement/cleanupunknown; no timerjoin/retry",
+    "No production API mount/Core134dispatch/restore/audio activation"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "generatedRuntimeArtifacts": [],
+    "retained": "Minimal exactdelta/current source/test/receipt for Root review and actual checks; parent evidence preserved"
+  }
+}

@@ -149,6 +149,31 @@
       "sha256": "8fd18041a8a5051b940677218c7eb4414e157e3e34daa01d2ce76777389db66d"
     },
     {
+      "path": "private-call-enrollment-followon.json",
+      "bytes": 1137,
+      "sha256": "a67e8764aa15931080ff2c95222989bd0bfaf071894a1a7334f3f7a87119e8e4"
+    },
+    {
+      "path": "private-call-enrollment-followon.patch",
+      "bytes": 9115,
+      "sha256": "f05c0f64138cbbeff4eb4fde4f6db5ed665a85602ae1bfccddc7146bcaa9898c"
+    },
+    {
+      "path": "private-call-enrollment-receipt.json",
+      "bytes": 2423,
+      "sha256": "6b1a8c63850998ae6bb0d353d37021b99e8d4d0fbb989b682fd2288ee3214f1f"
+    },
+    {
+      "path": "private-call-enrollment-review.md",
+      "bytes": 3711,
+      "sha256": "99d04e71e5c0b1c50882bdb8c7c85c76431636d8d39514f71ab7b7548bf76158"
+    },
+    {
+      "path": "private-call-enrollment.test.mjs",
+      "bytes": 5102,
+      "sha256": "3ef2f5cd724efc8cfae2b9a8f98ddab7a1121b29701d8a071f586569fa8c471b"
+    },
+    {
       "path": "private-current-call-negative.test.ts",
       "bytes": 1827,
       "sha256": "a0a7ecbfa7e01b9642f81e460fd5bd226136b5578b14cec1f97fc68a7f6a4fe3"
@@ -166,12 +191,12 @@
     {
       "path": "private-current-call-splices.json",
       "bytes": 8130,
-      "sha256": "8edad15e04a3669e0b77f0f28251e7c00a61a79775360e0785b3cbe5cd0de859"
+      "sha256": "737c4ad5d623a54de3cb608d00511a40372583ce91138d2eeecce1de1e964fad"
     },
     {
       "path": "private-current-call.additions.ts",
-      "bytes": 21700,
-      "sha256": "480e8fa3bc71b7d507cc3fac7eb64936665f03eceec1557ea378c62c4fc470fe"
+      "bytes": 22830,
+      "sha256": "17218828a94a18009cc1a081e6af7dd5ae4457bc41c74bc082ddb373c3c46fcb"
     },
     {
       "path": "private-current-call.test.mjs",
@@ -309,5 +334,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 318062
+  "totalContentBytes": 340680
 }
