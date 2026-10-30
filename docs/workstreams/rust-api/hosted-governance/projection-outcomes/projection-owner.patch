@@ -1,0 +1,364 @@
+--- a/packages/ingenium-core/lib/tools/skills.ts
++++ b/packages/ingenium-core/lib/tools/skills.ts
+@@ -1,10 +1,64 @@
+ import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
+ import { Skill, SkillVersion } from "../schema.js";
+-import { randomUUID } from "node:crypto";
++import { randomUUID, createHash } from "node:crypto";
+ import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, realpathSync, lstatSync } from "node:fs";
+ import { resolve, sep, isAbsolute } from "node:path";
+ import { logger } from "../logger.js";
+ import { getSkillsBase } from "./paths.js";
++
++/** Synchronous opt-in scope owned by the original skill projection module. */
++export interface SkillProjectionWitness {
++  phase: "attempt" | "completed" | "failed";
++  action: "write" | "remove" | "mkdir" | "validate";
++  projectId: string; skillId: string | null; name: string; revision: number | null;
++  relativePath: string; code?: string; expectedSha256?: string;
++}
++export type SkillProjectionObserver = (event: Readonly<SkillProjectionWitness>) => void;
++let strictProjectionObserver: SkillProjectionObserver | undefined;
++export class SkillProjectionFailure extends Error {
++  constructor(public readonly witness: Readonly<SkillProjectionWitness>) {
++    super("Skill projection did not complete: " + (witness.code ?? "PROJECTION_FAILED"));
++    this.name = "SkillProjectionFailure";
++  }
++}
++/** Observer validates the admission plan and captures bounded memory events; never writes SQL here. */
++export function withStrictSkillProjection<T>(observer: SkillProjectionObserver, work: () => T): T {
++  if (typeof observer !== "function" || strictProjectionObserver) throw new Error("Exclusive synchronous projection observer required");
++  if (work.constructor.name === "AsyncFunction") throw new Error("Asynchronous skill projection is forbidden");
++  strictProjectionObserver = observer;
++  try {
++    const result = work();
++    if (result && typeof (result as {then?: unknown}).then === "function") throw new Error("Asynchronous skill projection is forbidden");
++    return result;
++  } finally { strictProjectionObserver = undefined; }
++}
++function projectionEvent(skill: Partial<Skill> & {name: string}, action: SkillProjectionWitness["action"], relativePath: string, phase: SkillProjectionWitness["phase"], code?: string): SkillProjectionWitness {
++  return {phase,action,projectId:skill.project_id ?? "",skillId:skill.id ?? null,name:skill.name,
++    revision:typeof skill.revision === "number" ? skill.revision : null,relativePath,...(code?{code}:{})};
++}
++function projectionRefused(skill: Partial<Skill> & {name:string}, code: string, relativePath = ""): void {
++  if (!strictProjectionObserver) return;
++  const event = projectionEvent(skill,"validate",relativePath,"failed",code);
++  strictProjectionObserver(Object.freeze(event));
++  throw new SkillProjectionFailure(event);
++}
++function projectionIo<T>(skill: Partial<Skill> & {name:string}, action: SkillProjectionWitness["action"], relativePath: string, work: () => T, expectedSha256?: string): T {
++  if (!strictProjectionObserver) return work();
++  const observer = strictProjectionObserver;
++  const eventAt = (phase: SkillProjectionWitness["phase"], code?: string) => ({...projectionEvent(skill,action,relativePath,phase,code),...(expectedSha256?{expectedSha256}:{})});
++  observer(Object.freeze(eventAt("attempt")));
++  try {
++    const result = work();
++    observer(Object.freeze(eventAt("completed")));
++    return result;
++  } catch (error) {
++    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
++      && /^[A-Z0-9_]{1,48}$/.test(error.code) ? error.code : "PROJECTION_IO_FAILED";
++    const event = eventAt("failed",code);
++    try { observer(Object.freeze(event)); } catch { /* Attempt is already durable; preserve failure. */ }
++    throw new SkillProjectionFailure(event);
++  }
++}
+ 
+ /**
+  * Validate a skill name for filesystem safety.
+@@ -276,10 +330,12 @@
+ export function writeSkillToDisk(skill: Skill): void {
+   // Archived skills should not have a SKILL.md written (it was removed on archive)
+   if ((skill as any).archived_at) {
++    projectionRefused(skill,"ARCHIVED_PROJECTION");
+     return;
+   }
+ 
+   if (!isSafeSkillName(skill.name)) {
++    projectionRefused(skill,"UNSAFE_SKILL_NAME");
+     logger.warn("skills", "Refusing to write skill with unsafe name", { name: skill.name });
+     return;
+   }
+@@ -288,11 +344,12 @@
+   const skillsBase = getSkillsBase(projectId);
+   const baseDir = safeSkillDir(skillsBase, skill.name);
+   if (!baseDir) {
++    projectionRefused(skill,"UNSAFE_SKILL_DIRECTORY");
+     logger.warn("skills", "Refusing to write skill — unsafe directory (symlink/canonical escape)", { name: skill.name });
+     return;
+   }
+   const dir = resolve(skillsBase, skill.name);
+-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
++  if (!existsSync(dir)) projectionIo(skill,"mkdir","",()=>mkdirSync(dir, { recursive: true }));
+ 
+   // Write SKILL.md with YAML frontmatter
+   const escaped = (skill.description || "")
+@@ -306,29 +363,30 @@
+ ---
+ `;
+   const body = stripLeadingFrontmatter(skill.content);
+-  writeFileSync(resolve(dir, "SKILL.md"), frontmatter + "\n" + body);
++  projectionIo(skill,"write","SKILL.md",()=>writeFileSync(resolve(dir,"SKILL.md"),frontmatter+"\n"+body),createHash("sha256").update(frontmatter+"\n"+body).digest("hex"));
+ 
+   // Write metadata.json
+   const tags = skill.tags ? skill.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
+   const meta = JSON.stringify({ tags, alwaysApply: (skill as any).always_apply === 1 }, null, 2);
+-  writeFileSync(resolve(dir, "metadata.json"), meta);
++  projectionIo(skill,"write","metadata.json",()=>writeFileSync(resolve(dir,"metadata.json"),meta),createHash("sha256").update(meta).digest("hex"));
+ 
+   // Write file_tree
+   if ((skill as any).file_tree) {
+     try {
+       const tree = JSON.parse((skill as any).file_tree);
+       for (const [relPath, content] of Object.entries(tree)) {
+-        if (typeof content !== "string") continue; // defensively skip non-string values
++        if (typeof content !== "string") { projectionRefused(skill,"INVALID_REFERENCE_BODY"); continue; }
+         const safePath = resolveSafePath(baseDir, relPath as string);
+         if (!safePath) {
++          projectionRefused(skill,"UNSAFE_REFERENCE_PATH");
+           logger.warn("skills", "Rejected unsafe file_tree path", {
+             name: skill.name, path: relPath, baseDir,
+           });
+           continue;
+         }
+         const parentDir = resolve(safePath, "..");
+-        if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
+-        writeFileSync(safePath, content as string, "utf-8");
++        if (!existsSync(parentDir)) projectionIo(skill,"mkdir",relPath,()=>mkdirSync(parentDir, { recursive: true }));
++        projectionIo(skill,"write",relPath,()=>writeFileSync(safePath,content as string,"utf-8"),createHash("sha256").update(content as string).digest("hex"));
+ 
+         // Post-write symlink defense
+         try {
+@@ -337,11 +395,13 @@
+             logger.warn("skills", "Post-write symlink escape detected, removing file", {
+               name: skill.name, path: relPath, realPath,
+             });
+-            unlinkSync(safePath);
++            projectionIo(skill,"remove",relPath,()=>unlinkSync(safePath));
++            projectionRefused(skill,"POST_WRITE_PATH_ESCAPE");
+           }
+-        } catch { /* realpath may fail; safe to ignore */ }
++        } catch (error) { if(strictProjectionObserver) { if(error instanceof SkillProjectionFailure) throw error; projectionRefused(skill,"POST_WRITE_VALIDATION_FAILED"); } }
+       }
+     } catch (e) {
++      if(strictProjectionObserver) { if(e instanceof SkillProjectionFailure) throw e; projectionRefused(skill,"REFERENCE_PROJECTION_FAILED"); }
+       logger.warn("skills", "Failed to parse file_tree JSON", { name: skill.name });
+     }
+   }
+@@ -349,19 +409,32 @@
+ 
+ /** Remove only SKILL.md from disk for a given skill (preserves metadata.json and all auxiliary files). */
+ export function removeSkillMdOnly(name: string, projectId?: string): void {
++  const projectionSkill = strictProjectionObserver && projectId ? getSkill(projectId,name) : undefined;
++  const witnessSkill = projectionSkill ?? {name,project_id:projectId};
++  if(strictProjectionObserver && !projectionSkill) projectionRefused(witnessSkill,"PROJECTION_SKILL_UNAVAILABLE");
+   if (!isSafeSkillName(name)) {
++    projectionRefused(witnessSkill,"UNSAFE_SKILL_NAME");
+     logger.warn("skills", "Refusing to remove SKILL.md with unsafe name", { name });
+     return;
+   }
+   const skillsBase = getSkillsBase(projectId);
+   const canonical = safeSkillDir(skillsBase, name);
+   if (!canonical) {
++    projectionRefused(witnessSkill,"UNSAFE_SKILL_DIRECTORY");
+     logger.warn("skills", "Refusing to remove SKILL.md — unsafe directory (symlink/canonical escape)", { name });
+     return;
+   }
+   const dir = resolve(skillsBase, name);
+   const filePath = resolve(dir, "SKILL.md");
+-  try { if (existsSync(filePath)) unlinkSync(filePath); } catch {}
++  try { projectionIo(witnessSkill,"remove","SKILL.md",()=>{
++    if(strictProjectionObserver) {
++      try { lstatSync(filePath); } catch(error) {
++        if(error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;
++        throw error;
++      }
++      unlinkSync(filePath);
++    } else if(existsSync(filePath))unlinkSync(filePath);
++  }); } catch(error) { if(strictProjectionObserver) throw error; }
+ }
+ 
+ /**
+--- a/packages/ingenium-core/lib/tools/hosted-governance.ts
++++ b/packages/ingenium-core/lib/tools/hosted-governance.ts
+@@ -22,7 +22,8 @@
+   isSafeSkillName(name: unknown): boolean;
+   isValidSkillFileTree(value: unknown): boolean;
+   locks(projectId: string): Row[];
+-  execute(command: Row, binding: Row, actor: Actor): Row | undefined;
++  projectionPlan?(original: Row): Row;
++  execute(command: Row, binding: Row, actor: Actor, operationId: string, projection: {plan:Row|null;events:Row[]}): Row | undefined;
+   read(command: Row, binding: Row): unknown | Promise<unknown>;
+ }
+ export class HostedRefusal extends Error {
+@@ -269,15 +270,17 @@
+           return {fresh:false,receipt:authorizedReceipt(g,old)};
+         }
+         const now=new Date().toISOString();
++        const projectionPlan=ports.projectionPlan?.(original)??null;
+         const proposalSource=original.command.reviewed
+           ?db().prepare("SELECT source_project_id FROM skill_proposals WHERE id=? AND project_id=?").get(original.command.id,g.hosted_project_id)?.source_project_id??null
+           :null;
+-        db().prepare("INSERT INTO native_hosted_governance_effects(operation_id,grant_id,actor_id,project_id,source_project_id,payload_hash,binding_hash,command_kind,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,'executing',?,?)")
+-          .run(original.id,g.id,actor.id,g.hosted_project_id,proposalSource,hash,payloadHash(original.binding),original.command.op,now,now);
++        db().prepare("INSERT INTO native_hosted_governance_effects(operation_id,grant_id,actor_id,project_id,source_project_id,payload_hash,binding_hash,command_kind,projection_plan_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,'executing',?,?)")
++          .run(original.id,g.id,actor.id,g.hosted_project_id,proposalSource,hash,payloadHash(original.binding),original.command.op,projectionPlan?JSON.stringify(projectionPlan):null,now,now);
+         return {fresh:true};
+       });
+       ports.checkpoint();
+       if(!admission.fresh) return admission.receipt!;
++      const projectionEvents: Row[]=[];
+       try {
+         const terminal=ports.transaction(()=>{
+           const admitted=db().prepare("SELECT * FROM native_hosted_governance_effects WHERE operation_id=?").get(original.id);
+@@ -299,7 +302,7 @@
+               .run(error.code,error.status,new Date().toISOString(),original.id);
+             return receipt(db().prepare("SELECT * FROM native_hosted_governance_effects WHERE operation_id=?").get(original.id));
+           }
+-          const result=ports.execute(original.command,original.binding,actor!);
++          const result=ports.execute(original.command,original.binding,actor!,original.id,{plan:admitted.projection_plan_json?JSON.parse(admitted.projection_plan_json):null,events:projectionEvents});
+           if(!result) throw new Error("CORE_EFFECT_RESULT_MISSING");
+           const expectedStatus: Row={submit:"pending",approve:"applied",reject:"rejected",rollback:"rolled_back"};
+           if(original.command.reviewed && result.status!==expectedStatus[original.command.op]) throw new Error("CORE_EFFECT_STATUS_UNEXPECTED");
+@@ -311,7 +314,7 @@
+         ports.checkpoint();return terminal;
+       } catch {
+         try {
+-          ports.transaction(()=>db().prepare("UPDATE native_hosted_governance_effects SET first_failure_code=COALESCE(first_failure_code,'CORE_EFFECT_INTERRUPTED') WHERE operation_id=?").run(original.id));
++          ports.transaction(()=>db().prepare("UPDATE native_hosted_governance_effects SET first_failure_code=COALESCE(first_failure_code,'CORE_EFFECT_INTERRUPTED'),projection_witness_json=COALESCE(projection_witness_json,?) WHERE operation_id=?").run(JSON.stringify(projectionEvents),original.id));
+           ports.checkpoint();
+         } catch { /* Durable admission blocks replay even when failure annotation is unavailable. */ }
+         return {operationId:original.id,payloadHash:hash,outcome:"unknown",firstFailureCode:"CORE_EFFECT_INTERRUPTED"};
+--- a/packages/ingenium-core/lib/tools/hosted-governance-owner.ts
++++ b/packages/ingenium-core/lib/tools/hosted-governance-owner.ts
+@@ -3,6 +3,8 @@
+ import * as skillGovernance from "./skill-governance.js";
+ import * as maintenanceLocks from "./maintenance-locks.js";
+ import { createHostedGovernance, HostedRefusal, type Ports, type Row, type SqlDb } from "./hosted-governance.js";
++
++import { deriveHostedProjectionPlan, createHostedProjectionObserver } from "./hosted-projection-plan.js";
+ 
+ export type HostedGovernanceAuthentication = Pick<Ports,
+   "actor"|"allow"|"systemAllowed"|"verifyEnrollment"|"verifyNativeOwner"|"read">;
+@@ -18,7 +20,10 @@
+     isValidSkillFileTree:skills.isValidSkillFileTree,
+     locks:projectId=>maintenanceLocks.listActiveLocks("skills")
+       .filter(lock=>lock.resource==="skills"&&(lock.project_id===projectId||lock.project_id==="*")),
+-    execute(command:Row,binding:Row,actor) {
++    projectionPlan:original=>deriveHostedProjectionPlan(getDb() as unknown as SqlDb,original),
++    execute(command:Row,binding:Row,actor,operationId,projection) {
++      if(!projection.plan||projection.plan.operationId!==operationId)throw new Error("Original projection plan required");
++      return skills.withStrictSkillProjection(createHostedProjectionObserver(projection.plan,projection.events),()=>{
+       const project=binding.hostedProjectId,name=command.name;
+       switch(command.op) {
+         case "create":
+@@ -36,6 +41,7 @@
+         case "rollback":return skillGovernance.rollbackProposal(project,command.id,actor.id,command.reason) as unknown as Row;
+         default:throw new HostedRefusal("UNSUPPORTED_COMMAND",422);
+       }
++      });
+     },
+   });
+ }
+--- a/packages/ingenium-core/data/migrations/125_native_hosted_governance.sql
++++ b/packages/ingenium-core/data/migrations/125_native_hosted_governance.sql
+@@ -23,6 +23,7 @@
+  command_kind TEXT NOT NULL CHECK(command_kind IN ('create','save','archive','restore','enable','disable','submit','approve','reject','rollback')),
+  state TEXT NOT NULL CHECK(state IN ('executing','succeeded','refused')),
+  value_ref_json TEXT, error_code TEXT, error_status INTEGER, first_failure_code TEXT,
++ projection_plan_json TEXT, projection_witness_json TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  CHECK((state='executing' AND value_ref_json IS NULL AND error_status IS NULL)
+   OR (state='succeeded' AND error_status IS NULL)
+@@ -32,7 +33,7 @@
+ CREATE TRIGGER native_hosted_effect_identity_immutable BEFORE UPDATE ON native_hosted_governance_effects
+ WHEN NEW.operation_id<>OLD.operation_id OR NEW.grant_id<>OLD.grant_id OR NEW.actor_id<>OLD.actor_id
+  OR NEW.project_id<>OLD.project_id OR NEW.payload_hash<>OLD.payload_hash OR NEW.binding_hash<>OLD.binding_hash
+- OR NEW.command_kind<>OLD.command_kind OR NEW.source_project_id IS NOT OLD.source_project_id OR NEW.created_at<>OLD.created_at
++ OR NEW.command_kind<>OLD.command_kind OR NEW.projection_plan_json IS NOT OLD.projection_plan_json OR NEW.source_project_id IS NOT OLD.source_project_id OR NEW.created_at<>OLD.created_at
+ BEGIN SELECT RAISE(ABORT,'hosted original identity is immutable'); END;
+ CREATE TRIGGER native_hosted_effect_terminal_immutable BEFORE UPDATE ON native_hosted_governance_effects
+ WHEN OLD.state<>'executing' AND (NEW.state<>OLD.state OR NEW.value_ref_json IS NOT OLD.value_ref_json
+--- /dev/null
++++ b/packages/ingenium-core/lib/tools/hosted-projection-plan.ts
+@@ -0,0 +1,80 @@
++import { createHash } from "node:crypto";
++import { canonical, payloadHash, type Row, type SqlDb } from "./hosted-governance.js";
++import type { SkillProjectionObserver, SkillProjectionWitness } from "./skills.js";
++
++/** Conservative allowlist from current authoritative SQL and reviewed original, not renderer paths. */
++export function deriveHostedProjectionPlan(db: SqlDb, original: Row): Row {
++  const command=original.command,project=original.binding.hostedProjectId,entries: Row[]=[];
++  const skill=(projectId: string,name: string)=>db.prepare("SELECT * FROM skills WHERE project_id=? AND name=?").get(projectId,name);
++  const digest=(value: unknown)=>createHash("sha256").update(canonical(value)).digest("hex");
++  function entry(projectId: string,name: string,current: Row|undefined,states: Row[],remove=false): void {
++    const paths=new Map<string,Row>();
++    const add=(action:string,path:string)=>paths.set(action+":"+path,{action,relativePath:path});
++    if(remove)add("remove","SKILL.md");
++    else {
++      add("mkdir","");add("write","SKILL.md");add("write","metadata.json");
++      for(const state of states)for(const value of [state.file_tree,state.file_tree_patch]) {
++        if(value==null)continue;
++        const tree=JSON.parse(value);
++        if(!tree||typeof tree!=="object"||Array.isArray(tree))throw new Error("Invalid projection plan tree");
++        for(const path of Object.keys(tree)) {
++          // Unsafe paths are never authorized; the original owner must reject them.
++          if(!path || path.includes("\\")||path.startsWith("/")||path.includes("\0")||path.split("/").some(p=>p===".."||p===""))continue;
++          add("mkdir",path);add("write",path);add("remove",path);
++        }
++      }
++    }
++    entries.push({projectId,skillId:current?.id??null,name,
++      revision:current?current.revision+1:0,paths:[...paths.values()],stateDigests:states.map(state=>digest({
++        content:state.content??null,description:state.description??null,tags:state.tags??null,
++        alwaysApply:state.always_apply??null,fileTree:state.file_tree??null,fileTreePatch:state.file_tree_patch??null}))});
++  }
++  if(["submit","reject"].includes(command.op)) { /* No filesystem actions. */ }
++  else if(command.name) {
++    const current=skill(project,command.name);
++    const next=command.op==="create"?{description:command.description,content:command.content}
++      :command.op==="save"?{...current,content:command.content,tags:command.extra.tags??current?.tags,
++        always_apply:command.extra.always_apply,file_tree:command.extra.files??current?.file_tree}:current??{};
++    entry(project,command.name,current,[next],["archive","disable"].includes(command.op));
++  } else {
++    const proposal=db.prepare("SELECT * FROM skill_proposals WHERE id=? AND project_id=?").get(command.id,project);
++    if(!proposal)throw new Error("Projection plan proposal unavailable");
++    const target=skill(project,proposal.target_name);
++    if(command.op==="approve") {
++      const state=JSON.parse(proposal.proposed_state);
++      entry(project,proposal.target_name,target,[target??{},state],proposal.proposal_type==="archive");
++      if(proposal.proposal_type==="merge")entry(proposal.source_project_id,proposal.source_name,
++        skill(proposal.source_project_id,proposal.source_name),[],true);
++    } else if(command.op==="rollback") {
++      const version=(id:string,revision:number)=>db.prepare("SELECT * FROM skill_versions WHERE skill_id=? AND revision=?").get(id,revision);
++      const remove=proposal.proposal_type==="create"||!!proposal.target_created;
++      const previous=remove?undefined:version(proposal.target_skill_id,proposal.target_revision_before);
++      if(!remove&&!previous)throw new Error("Projection plan target version unavailable");
++      entry(project,previous?.name??proposal.target_name,target,[previous??{}],remove||!!previous?.archived_at);
++      if(proposal.proposal_type==="merge") {
++        const source=skill(proposal.source_project_id,proposal.source_name);
++        const prior=source&&version(source.id,proposal.source_revision_before);
++        if(!prior)throw new Error("Projection plan source version unavailable");
++        entry(proposal.source_project_id,prior.name,source,[prior],!!prior.archived_at);
++      }
++    } else throw new Error("Unsupported projection plan command");
++  }
++  const plan={version:1,operationId:original.id,payloadHash:payloadHash(original),entries};
++  if(entries.length>2||entries.some(e=>e.paths.length>2048)||Buffer.byteLength(canonical(plan))>262144)throw new Error("Projection plan exceeds evidence limit");
++  return plan;
++}
++
++/** No DB writes here. Only planned filesystem actions may execute; refusal is always observable. */
++export function createHostedProjectionObserver(plan: Row, events: Row[]): SkillProjectionObserver {
++  return (event: Readonly<SkillProjectionWitness>)=>{
++    if(events.length>=8192||Buffer.byteLength(canonical(event))>4096
++      ||Buffer.byteLength(canonical(events))+Buffer.byteLength(canonical(event))>524288)throw new Error("Projection witness exceeds evidence limit");
++    const entry=plan.entries.find((e:Row)=>e.projectId===event.projectId&&e.name===event.name
++      &&(e.skillId===null||e.skillId===event.skillId)&&e.revision===event.revision);
++    if(event.action!=="validate"&&(!entry||!entry.paths.some((p:Row)=>p.action===event.action&&p.relativePath===event.relativePath))) {
++      events.push({...event,phase:"failed",code:"UNPLANNED_PROJECTION"});
++      throw new Error("Unplanned skill projection refused");
++    }
++    events.push({...event});
++  };
++}

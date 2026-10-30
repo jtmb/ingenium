@@ -1,0 +1,37 @@
+{
+  "base": "fbafc1cd0de7e8809218d9e19cca1552ae459e64",
+  "priorProposalCommit": "34351ff2d3c7795709925b48fec81246432908ea",
+  "patchSha256": "c1613a1d8d83dc9534956cf4d3a156d03b721ee5c783f8ced2a05de244b3f0e7",
+  "changes": [
+    {
+      "path": "packages/ingenium-core/lib/tools/skills.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "3488b2d2da7015e71a2eb93aa743849315b92d614bfbddfd5defcce8a9812935",
+      "proposedSha256": "0e537ac05a17b91b27244c6a507f9cd56398537953a717771c1df40c8a85a4c7"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/hosted-governance.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "783738c32984d1b6021acbec2ef57de8e7b70a3f5c80708b7eaeab8cbbf0634c",
+      "proposedSha256": "6e4131e3f58d7544115a1eb566b74e929d7bd55c6b673114289730250bca4e16"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "17dc3519e6c8482384df9a899d699a17a219c3a4de44081ef3100a6e20271a1a",
+      "proposedSha256": "2ff04444e890d2ff1f893054c3a3e55d56c45f046518fc5b61079177c55af8cb"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/125_native_hosted_governance.sql",
+      "expectedAbsent": false,
+      "preimageSha256": "6e4ff4a851c15fe6f322c536c860100ed9301a54301d50e4f73e5fd25c7b2dfd",
+      "proposedSha256": "7ce5ba1676b0f00864c77b2b6821569d521563127db94a0bed505ddac2c7c6b8"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/hosted-projection-plan.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "7405321fb3361e2e6dcf7cb81fb4d17665e8ff9471942140fa6d11804f16babd"
+    }
+  ]
+}
