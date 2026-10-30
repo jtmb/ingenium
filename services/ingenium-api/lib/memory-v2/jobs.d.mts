@@ -1,6 +1,7 @@
 import type { MemoryLifecycle, MemoryScope, MemoryReceipt, Admission, SourceRef } from './lifecycle.mjs';
 export function runMemoryExtraction(adapters: {
   memory: MemoryLifecycle; scope: MemoryScope; chatId: string; operationId: string; sourceRefs: SourceRef[]; model: string;
+  sourceVerification?: { refresh: () => Promise<unknown>; withVerifiedSources: <T>(work: () => T) => T };
   leaseValid: () => boolean; quota: (model: string) => "available" | "exhausted" | "unknown";
   extract: (input: { scope: MemoryScope; admission: Admission; model: string; maxOutputBytes: number }) => Promise<string>;
   minimize: (candidate: string, context: { scope: MemoryScope; admission: Admission }) => Promise<string>;

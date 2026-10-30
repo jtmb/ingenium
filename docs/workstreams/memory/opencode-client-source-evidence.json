@@ -1,0 +1,14 @@
+{
+  "sources": [
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "sha256": "2dd45b0d11b29c4c27f74814410dfd7b942e832c89e5ada857ae209044293ac7"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "sha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79"
+    }
+  ],
+  "sourceHead": "420773d3f9c3774051c08f49e12261af107c168c",
+  "inspection": "Read-only existing client/target source; no transport or runtime executed"
+}
