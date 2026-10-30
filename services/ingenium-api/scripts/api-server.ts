@@ -23,6 +23,7 @@ import { createHostedCustomizeRouter } from "../lib/routes/customize.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
 import { memoryRouter } from "../lib/routes/memory.js";
+import { createMemoryLifecycleRouter } from "../lib/routes/memory-lifecycle.js";
 import {
   CONTEXT_SNAPSHOT_INGEST_PATH,
   contextSnapshotIngestRouter,
@@ -183,6 +184,7 @@ app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
+app.use("/api/v1/memory/lifecycle", createMemoryLifecycleRouter());
 app.use("/api/v1/memory", memoryRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);

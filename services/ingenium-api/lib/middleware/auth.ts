@@ -98,6 +98,15 @@ function cookieValue(req: Request, name: string): string | undefined {
  * and inline configuration have the same strength and timing-safe guarantees.
  */
 export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
+  authenticateRequest(req, next, true);
+}
+
+/** The same authority/precedence checks, without extending credential activity. */
+export function authenticateRequestWithoutActivity(req: Request): void {
+  authenticateRequest(req, () => undefined, false);
+}
+
+function authenticateRequest(req: Request, next: NextFunction, touchActivity: boolean): void {
   if (isPublicOAuthCallbackRequest(req) || isPublicLocalAuthRequest(req) || isPublicHealthRequest(req)) {
     next();
     return;
@@ -166,7 +175,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
 
   const sessionToken = cookieValue(req, authentication.SESSION_COOKIE_NAME);
   if (sessionToken) {
-    const session = authentication.resolveSession(sessionToken, new Date(), true);
+    const session = authentication.resolveSession(sessionToken, new Date(), touchActivity);
     if (!session) throw new AppError("Authentication is required", "UNAUTHORIZED", 401);
     req.principal = { type: "user", id: session.user_id, scopes: ["user:*"], session };
     next();
@@ -214,7 +223,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     if (req.get("x-ingenium-storage-mapping-hash") !== undefined) {
       throw new AppError("Resource not found", "NOT_FOUND", 404);
     }
-    const resolved = mcpCredentials.resolveMcpCredential(authHeader.slice(7), audience);
+    const resolved = (touchActivity ? mcpCredentials.resolveMcpCredential : mcpCredentials.inspectMcpCredential)(authHeader.slice(7), audience);
     if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
     const launcherWorktree = audience === "runtime" ? "/workspace" : resolved.launcherWorktree;
     if (req.get("x-ingenium-workspace") !== resolved.workspaceId || req.get("x-ingenium-launcher-worktree") !== launcherWorktree) {
@@ -242,7 +251,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
     return;
   }
   if (authHeader?.startsWith("Bearer ing_")) {
-    const resolved = securityTokens.resolveScopedApiToken(authHeader.slice(7));
+    const resolved = (touchActivity ? securityTokens.resolveScopedApiToken : securityTokens.inspectScopedApiToken)(authHeader.slice(7));
     if (!resolved) throw new AppError("Invalid bearer token", "INVALID_TOKEN", 401);
     req.principal = resolved.userId
       ? { type: "user", id: resolved.userId, scopes: resolved.scopes, tokenId: resolved.id, organizationId: resolved.organizationId, projectId: resolved.projectId }

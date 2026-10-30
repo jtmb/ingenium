@@ -401,6 +401,15 @@ export function listMcpCredentials(userId: string): McpCredential[] {
 }
 
 export function resolveMcpCredential(token: string, audience: McpCredentialAudience, now = new Date()): McpCredential | undefined {
+  return resolveMcpCredentialState(token, audience, now, true);
+}
+
+/** Preserve all credential/workspace checks without activity writes or checkpoints. */
+export function inspectMcpCredential(token: string, audience: McpCredentialAudience, now = new Date()): McpCredential | undefined {
+  return resolveMcpCredentialState(token, audience, now, false);
+}
+
+function resolveMcpCredentialState(token: string, audience: McpCredentialAudience, now: Date, touch: boolean): McpCredential | undefined {
   if (!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
   let hash: string;
   try { hash = hashSecurityToken(token); } catch { return undefined; }
@@ -427,10 +436,12 @@ export function resolveMcpCredential(token: string, audience: McpCredentialAudie
         AND service_principals.security_epoch = mcp_credentials.security_epoch${runtimePredicate}`)
     .get(hash, audience, timestamp, ...(audience === "runtime" ? [timestamp] : [])) as CredentialRow | undefined;
   if (!row) return undefined;
-  execTransaction(() => db.prepare("UPDATE mcp_credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL")
-    .run(now.toISOString(), row.id));
-  checkpointAfterWrite();
-  return toCredential({ ...row, last_used_at: now.toISOString() });
+  if (touch) {
+    execTransaction(() => db.prepare("UPDATE mcp_credentials SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL")
+      .run(now.toISOString(), row.id));
+    checkpointAfterWrite();
+  }
+  return toCredential(touch ? { ...row, last_used_at: now.toISOString() } : row);
 }
 
 export function revokeMcpCredential(id: string, userId: string, now = new Date()): boolean {

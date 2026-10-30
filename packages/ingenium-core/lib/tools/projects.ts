@@ -276,6 +276,11 @@ export function deleteProject(name: string): ProjectDeletionResult {
 }
 
 /** Look up a project by name (case-sensitive). Returns undefined if not found. */
+/** Stable identity lookup; labels and archive filtering remain the caller's policy. */
+export function getProjectById(id: string): Project | undefined {
+  return getDb().prepare("SELECT * FROM projects WHERE id = ?").get(id) as Project | undefined;
+}
+
 export function getProject(name: string): Project | undefined {
   if (!isValidProjectName(name)) return undefined;
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

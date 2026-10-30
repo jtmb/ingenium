@@ -244,6 +244,11 @@ function requestedProject(req: Request): { id: string; organizationId: string } 
     const global = projects.getGlobalProject();
     return global ? { id: global.id, organizationId: global.organization_id } : undefined;
   }
+  // The versioned memory lifecycle selects stable project IDs; retain the legacy name contract elsewhere.
+  if (/^\/api\/v1\/memory\/lifecycle(?:\/|$)/u.test(req.path) && typeof req.query.projectId==="string") {
+    const project=projects.getProjectById(req.query.projectId);
+    return project && !project.archived_at ? {id:project.id,organizationId:project.organization_id} : undefined;
+  }
   const projectPathName = req.path.startsWith("/api/v1/projects/") ? req.path.slice("/api/v1/projects/".length).split("/")[0] : undefined;
   const name = projectPathName ?? req.params.name ?? (typeof req.query.project === "string" ? req.query.project : undefined);
   if (!name || !projects.isValidProjectName(name)) return undefined;

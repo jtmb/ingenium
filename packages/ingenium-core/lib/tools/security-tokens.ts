@@ -120,6 +120,15 @@ export function listUserApiTokens(userId: string): ScopedApiToken[] {
 }
 
 export function resolveScopedApiToken(token: string, now = new Date()): ScopedApiToken | undefined {
+  return resolveScopedApiTokenState(token, now, true);
+}
+
+/** Recheck current token authority without writing activity under a domain transaction. */
+export function inspectScopedApiToken(token: string, now = new Date()): ScopedApiToken | undefined {
+  return resolveScopedApiTokenState(token, now, false);
+}
+
+function resolveScopedApiTokenState(token: string, now: Date, touch: boolean): ScopedApiToken | undefined {
   if (!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
   const database = getDb(process.env.INGENIUM_CORE_DB_PATH);
   const row = database.prepare(
@@ -135,11 +144,13 @@ export function resolveScopedApiToken(token: string, now = new Date()): ScopedAp
        AND (scoped_api_tokens.service_principal_id IS NULL OR service_principals.status = 'active')`,
   ).get(hashSecurityToken(token), now.toISOString()) as Parameters<typeof toToken>[0] | undefined;
   if (!row) return undefined;
-  execTransaction(() => database.prepare(
-    "UPDATE scoped_api_tokens SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL",
-  ).run(now.toISOString(), row.id));
-  checkpointAfterWrite();
-  return toToken({ ...row, last_used_at: now.toISOString() });
+  if (touch) {
+    execTransaction(() => database.prepare(
+      "UPDATE scoped_api_tokens SET last_used_at = ? WHERE id = ? AND revoked_at IS NULL",
+    ).run(now.toISOString(), row.id));
+    checkpointAfterWrite();
+  }
+  return toToken(touch ? { ...row, last_used_at: now.toISOString() } : row);
 }
 
 export function revokeScopedApiToken(tokenId: string, userId?: string): boolean {

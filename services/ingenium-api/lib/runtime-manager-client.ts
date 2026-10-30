@@ -1,7 +1,9 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import type { runtimes } from "ingenium-core";
+import { isManagedRuntimeObservation, type ManagedRuntimeObservation } from "./runtime-placement-contract.js";
 
 export interface RuntimeManagerInspect {
+  placement?: unknown;
   backendId?: string;
   backendName?: string;
   runtimeId?: string;
@@ -49,6 +51,7 @@ async function requestManager(path: string, method = "GET", body?: unknown): Pro
   const base = managerUrl();
   const response = await fetch(new URL(path, base), {
     method,
+    redirect: "error",
     headers: {
       Authorization: `Bearer ${managerToken()}`,
       Accept: "application/json",
@@ -102,6 +105,16 @@ export function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promi
 
 export function inspectManagedRuntime(runtimeId: string): Promise<RuntimeManagerInspect> {
   return requestManager(`/v1/runtimes/${encodeURIComponent(runtimeId)}`);
+}
+
+export async function inspectManagedRuntimePlacement(runtimeId: string): Promise<ManagedRuntimeObservation> {
+  if (!UUID.test(runtimeId)) throw new Error("Runtime placement identity is invalid");
+  const result=await requestManager(`/v1/runtimes/${encodeURIComponent(runtimeId)}/placement`);
+  if (!isManagedRuntimeObservation(result.placement) || result.placement.runtimeId!==runtimeId
+    || result.placement.backendId!==result.backendId || result.placement.backendName!==result.backendName
+    || result.placement.imageRevision!==result.imageRevision || result.placement.state!==result.state
+    || result.placement.health!==result.health) throw new Error("Runtime placement evidence is invalid");
+  return Object.freeze({...result.placement});
 }
 
 export function stopManagedRuntime(runtimeId: string): Promise<RuntimeManagerInspect> {

@@ -9,6 +9,8 @@ import {
   type RuntimeProvisionRequest,
 } from "../lib/runtime-manager-contract.js";
 
+import { observeManagedRuntime } from "../lib/runtime-placement-contract.js";
+
 const DOCKER_SOCKET = "/var/run/docker.sock";
 const MAX_BODY_BYTES = 64 * 1024;
 const MAX_DOCKER_RESPONSE_BYTES = 1024 * 1024;
@@ -384,6 +386,16 @@ export function startRuntimeManager(): import("node:http").Server {
       if (request.method === "POST" && url.pathname === "/v1/runtimes") {
         const inspect = await provisionRuntime(await readJsonBody(request) as RuntimeProvisionRequest, mappings);
         response.writeHead(202).end(JSON.stringify({ data: publicInspect(inspect) }));
+        return;
+      }
+      const placement = /^\/v1\/runtimes\/([0-9a-f-]+)\/placement$/.exec(url.pathname);
+      if (request.method === "GET" && placement && UUID.test(placement[1]!)) {
+        const [runtime,daemon] = await Promise.all([
+          inspectRuntime(placement[1]!), dockerRequest<{ID?:string}>("GET","/info"),
+        ]);
+        if (!runtime || daemon.status!==200 || !daemon.data) throw new Error("Runtime placement owner unavailable");
+        const observation=observeManagedRuntime(runtime,daemon.data.ID,Date.now());
+        response.writeHead(200).end(JSON.stringify({data:{...publicInspect(runtime),placement:observation}}));
         return;
       }
       const match = /^\/v1\/runtimes\/([0-9a-f-]+)(\/stop)?$/.exec(url.pathname);
