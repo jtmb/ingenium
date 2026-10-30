@@ -1,6 +1,7 @@
 //! Actual Ingenium local-user sign-in; session/CSRF remain in the existing DPAPI vault.
 //! No secret-bearing type implements Serialize or Debug. No automatic login or refresh.
 use super::*;
+use serde_json::json;
 use reqwest::blocking::{Client,Response};
 const SESSION:&str="__Host-ingenium_session";
 const PREAUTH:&str="__Host-ingenium_pre_auth";
@@ -148,5 +149,32 @@ impl AccountVault {
   r.credentials.insert("NODE_HOSTED_MFA_CREDENTIAL".into(),code.0.clone());
   r.credentials.insert("NODE_HOSTED_SESSION_REVISION_TOKEN".into(),uuid::Uuid::new_v4().to_string());
   r.account.credential_names=r.credentials.keys().cloned().collect();let result=review(r);self.write(&contents)?;Ok(result)
+ }
+}
+
+impl AccountVault{
+ /// Restricted retirement constructor. Fresh login may replace session revision, but cannot
+ /// change saved account, original enrollment/connection or actual Node actor/installation/authority.
+ /// Normal hosted effects continue to require the unchanged AccountReview/session revision.
+ pub(crate) fn with_node_hosted_retirement_session<T>(&self,target:&Target<'_>,expected:&AccountReview,enrollment_id:&str,binding:&crate::remote_control::hosted::contracts::Binding,work:impl FnOnce(Session<'_>)->Result<T,Error>)->Result<T,Error>{
+  let _lock=self.lock()?;let contents=self.read()?;
+  let r=contents.accounts.iter().find(|r|r.account.id==expected.account.id).ok_or(Error::NotFound)?;
+  if r.account.revoked_at.is_some()||r.account.provider!="ingenium-node-hosted"||!r.account.scopes.iter().any(|s|s=="hosted-governance")||
+   !r.credentials.get(CONNECTION).is_some_and(|id|id==&binding.connection_id||id==enrollment_id)||
+   r.credentials.get(ACTOR).map(String::as_str)!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
+  let session=Session{cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:None,source:None}};
+  let value=body(target.client.get(url(target,"/api/v1/auth/session")?).header(reqwest::header::COOKIE,session.cookie).send().map_err(|_|Error::Unavailable)?)?;
+  if value["data"]["user"]["id"].as_str()!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
+  let (actor,installation,authority)=crate::remote_control::hosted::retirement_site_identity(target,&session).map_err(|_|Error::Conflict)?;
+  if actor!=binding.actor_id||installation!=binding.installation_id||authority!=binding.authority_id{return Err(Error::Conflict);}
+  work(session)
+ }
+}
+// A local reconciliation never claims that an unknown remote login was logged out.
+impl AccountVault{
+ pub fn node_hosted_local_credentials_revoked(&self,id:&str)->Result<bool,Error>{
+  let _lock=self.lock()?;let contents=self.read()?;
+  let r=contents.accounts.iter().find(|r|r.account.id==id).ok_or(Error::NotFound)?;
+  Ok(r.account.provider=="ingenium-node-hosted"&&r.account.revoked_at.is_some()&&r.credentials.is_empty()&&!contents.bindings.iter().any(|b|b.account_id==id))
  }
 }

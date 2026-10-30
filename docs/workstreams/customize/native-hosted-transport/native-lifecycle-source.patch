@@ -1,0 +1,380 @@
+diff --git a/apps/service/src/routes/remote_control/hosted_governance.rs b/apps/service/src/routes/remote_control/hosted_governance.rs
+--- a/apps/service/src/routes/remote_control/hosted_governance.rs
++++ b/apps/service/src/routes/remote_control/hosted_governance.rs
+@@ -14,7 +14,7 @@
+ struct OwnerRequest {binding:Binding}
+ pub(super) fn router()->Router<Arc<ServiceState>>{
+  Router::new().route("/context",post(context)).route("/read",post(read)).route("/reserve",post(reserve))
+-  .route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
++  .route("/lifecycle-review",post(lifecycle_review)).route("/lifecycle-commands",post(lifecycle_command)).route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
+   .layer(axum::extract::DefaultBodyLimit::max(2_100_000))
+   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
+ }
+@@ -150,7 +150,7 @@
+ #[derive(Deserialize)]#[serde(deny_unknown_fields)]
+ struct OriginalProofQuery{actor_id:String,installation_id:String,payload_hash:String}
+ pub(super) fn paired_router()->Router<Arc<ServiceState>>{
+- Router::new().route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
++ Router::new().route("/remote/v1/node-hosted/enrollments/{id}/retirement",get(paired_retirement)).route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
+   .route("/remote/v1/node-hosted/enrollments/{id}/originals/{operation}",get(paired_original))
+   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
+ }
+@@ -182,7 +182,7 @@
+ 
+ // Existing native account credential-file UI supplies metadata only; no email/password/code/cookie fields.
+ pub(super) fn account_router()->Router<Arc<ServiceState>>{
+- Router::new().route("/connections",get(hosted_connections)).route("/pairing-commands",post(pairing_command)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
++ Router::new().route("/connections",get(hosted_connections)).route("/local-account-reconciliation",post(local_account_reconciliation)).route("/history",get(admin_history)).route("/pairing-commands",post(pairing_command)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
+   .layer(axum::extract::DefaultBodyLimit::max(128*1024))
+ }
+ async fn account_command(State(state):State<Arc<ServiceState>>,Json(input):Json<hosted::AccountCommand>)->Response{
+@@ -210,7 +210,7 @@
+   if library(&state)?!=query.library_id{return Err(Error::Forbidden);}
+   let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+   let row=journal.original(&id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
+-  if !["node_hosted_account_v1","node_hosted_pairing_v1"].contains(&row["original"]["protocol"].as_str().unwrap_or(""))||row["original"]["command"].get("native_owner").or_else(||row["original"]["command"]["account"].get("native_owner")).and_then(|n|n.get("library_id")).and_then(Value::as_str)!=Some(query.library_id.as_str()){return Err(Error::Forbidden);}Ok(row)
++  if !["node_hosted_account_v1","node_hosted_pairing_v1","node_hosted_retirement_command_v1","node_hosted_local_account_reconciliation_v1"].contains(&row["original"]["protocol"].as_str().unwrap_or(""))||row["original"]["command"].get("native_owner").or_else(||row["original"]["command"]["account"].get("native_owner")).and_then(|n|n.get("library_id")).and_then(Value::as_str).or_else(||row["original"]["command"]["binding"]["nativeLibraryId"].as_str()).or_else(||row["original"]["source_original"]["command"]["native_owner"]["library_id"].as_str()).or_else(||row["original"]["source_original"]["command"]["account"]["native_owner"]["library_id"].as_str())!=Some(query.library_id.as_str()){return Err(Error::Forbidden);}Ok(row)
+  }).await{Ok(value)=>Json(value).into_response(),Err(e)=>problem(e)}
+ }
+ 
+@@ -273,4 +273,70 @@
+   let _=tx.send(result);
+  }){return problem(e);}
+  match rx.await{Ok(Ok(v))=>Json(v).into_response(),Ok(Err(e))=>problem(e),Err(_)=>problem(Error::Unavailable)}
++}
++async fn paired_retirement(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,axum::extract::Query(q):axum::extract::Query<CustodianQuery>,headers:HeaderMap)->Response{
++ if proxy::origin(&state,&headers,false).await.is_err(){return problem(Error::Forbidden);}
++ let Some(token)=headers.get("authorization").and_then(|v|v.to_str().ok()).and_then(|v|v.strip_prefix("Bearer ")).map(str::to_string)else{return problem(Error::Forbidden);};
++ match blocking(move||{
++  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
++  let pending=journal.hosted_effect_resource_has_custody(&id).map_err(|_|Error::Unavailable)?;
++  state.remote_control.store.hosted_retirement_proof(&token,&id,&q.actor_id,&q.installation_id,pending)
++ }).await{Ok(proof)=>Json(proof).into_response(),Err(e)=>problem(e)}
++}
++fn retirement_connection(state:&ServiceState,id:&str,b:&Binding)->Result<hosted::SessionConnection,Error>{
++ let connection=state.remote_control.store.hosted(id)?;let e=connection.enrollment();
++ if b.connection_id!=id||hosted::recovery_key(b)!=hosted::recovery_key(&e.identity.binding){return Err(Error::Forbidden);}
++ // Retirement revokes the retained historical authority; it does not revive its old service/project view.
++ if library(state)?!=e.native_owner.library_id{return Err(Error::Forbidden);}Ok(connection)
++}
++async fn lifecycle_review(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<OwnerRequest>)->Response{
++ retained(state,move|state|{
++  let connection=retirement_connection(&state,&id,&input.binding)?;
++  connection.retirement_review(&AccountVault::new(&state.state_directory),&state.remote_control.store)
++ }).await
++}
++#[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
++struct LifecycleCommand{operation_id:String,binding:Binding,review:Value}
++async fn lifecycle_command(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<LifecycleCommand>)->Response{
++ retained(state,move|state|{
++  let connection=retirement_connection(&state,&id,&input.binding)?;
++  let mut journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
++  let original=json!({"protocol":"node_hosted_retirement_command_v1","command":input,"private_owner":connection.enrollment()});
++  if let Some(row)=journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?{return if row["original"]==original{Ok(row)}else{Err(Error::Conflict)};}
++  journal.begin(&input.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
++  let result=match connection.retire_hosted(&state.state_directory,&AccountVault::new(&state.state_directory),&state.remote_control.store,&input.review){
++   Ok(receipt)=>json!({"state":"completed","value":receipt}),
++   Err(_)=>json!({"state":"unconfirmed","code":"hosted_retirement_unconfirmed","message":"Original retained. Review actual grants, journal and Node owner; do not replay hosted effects."})
++  };
++  journal.finish(&input.operation_id,&result).map_err(|_|Error::Unavailable)?;
++  journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
++ }).await
++}
++#[derive(Deserialize)]#[serde(deny_unknown_fields)]
++struct AdminHistoryQuery{library_id:String,#[serde(default)]after:String,limit:u32}
++async fn admin_history(State(state):State<Arc<ServiceState>>,axum::extract::Query(q):axum::extract::Query<AdminHistoryQuery>)->Response{
++ match blocking(move||{
++  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
++  if journal.library_id().map_err(|_|Error::Unavailable)?!=q.library_id{return Err(Error::Forbidden);}
++  journal.hosted_admin_history(&q.after,q.limit).map_err(|_|Error::Unavailable)
++ }).await{Ok(value)=>Json(value).into_response(),Err(e)=>problem(e)}
++}
++#[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
++struct LocalAccountReconciliation{operation_id:String,source_operation_id:String}
++async fn local_account_reconciliation(State(state):State<Arc<ServiceState>>,Json(input):Json<LocalAccountReconciliation>)->Response{
++ retained(state,move|state|{
++  let mut journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
++  let source=journal.original(&input.source_operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
++  if !["node_hosted_account_v1","node_hosted_pairing_v1"].contains(&source["original"]["protocol"].as_str().unwrap_or("")){return Err(Error::Conflict);}
++  let command:hosted::AccountCommand=serde_json::from_value(if source["original"]["protocol"]=="node_hosted_pairing_v1"{source["original"]["command"]["account"].clone()}else{source["original"]["command"].clone()}).map_err(|_|Error::Conflict)?;
++  if library(&state)?!=command.native_owner.library_id{return Err(Error::Forbidden);}
++  let original=json!({"protocol":"node_hosted_local_account_reconciliation_v1","source_operation_id":input.source_operation_id,"source_original":source["original"]});
++  if let Some(row)=journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?{return if row["original"]==original{Ok(row)}else{Err(Error::Conflict)};}
++  if !AccountVault::new(&state.state_directory).node_hosted_local_credentials_revoked(&command.account_review.account.id).map_err(|_|Error::Unavailable)?||
++   !state.remote_control.store.hosted_unpaired_account_is_clear(&command.enrollment_request_id,&command.account_review.account.id,&command.native_owner)?||
++   journal.hosted_effect_resource_has_custody(&command.enrollment_request_id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
++  journal.begin(&input.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
++  journal.finish(&input.operation_id,&json!({"state":"completed","local_native_custody_released":true,"remote_sign_in_outcome":"unconfirmed","account_credentials_revoked":true,"active_native_authority":false})).map_err(|_|Error::Unavailable)?;
++  journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
++ }).await
+ }
+\ No newline at end of file
+diff --git a/crates/adapters/src/account_vault/node_hosted.rs b/crates/adapters/src/account_vault/node_hosted.rs
+--- a/crates/adapters/src/account_vault/node_hosted.rs
++++ b/crates/adapters/src/account_vault/node_hosted.rs
+@@ -151,3 +151,30 @@
+   r.account.credential_names=r.credentials.keys().cloned().collect();let result=review(r);self.write(&contents)?;Ok(result)
+  }
+ }
++
++impl AccountVault{
++ /// Restricted retirement constructor. Fresh login may replace session revision, but cannot
++ /// change saved account, original enrollment/connection or actual Node actor/installation/authority.
++ /// Normal hosted effects continue to require the unchanged AccountReview/session revision.
++ pub(crate) fn with_node_hosted_retirement_session<T>(&self,target:&Target<'_>,expected:&AccountReview,enrollment_id:&str,binding:&crate::remote_control::hosted::contracts::Binding,work:impl FnOnce(Session<'_>)->Result<T,Error>)->Result<T,Error>{
++  let _lock=self.lock()?;let contents=self.read()?;
++  let r=contents.accounts.iter().find(|r|r.account.id==expected.account.id).ok_or(Error::NotFound)?;
++  if r.account.revoked_at.is_some()||r.account.provider!="ingenium-node-hosted"||!r.account.scopes.iter().any(|s|s=="hosted-governance")||
++   !r.credentials.get(CONNECTION).is_some_and(|id|id==&binding.connection_id||id==enrollment_id)||
++   r.credentials.get(ACTOR).map(String::as_str)!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
++  let session=Session{cookie:r.credentials.get(COOKIE).ok_or(Error::Conflict)?,csrf:r.credentials.get(CSRF).ok_or(Error::Conflict)?,actor_id:r.credentials.get(ACTOR).ok_or(Error::Conflict)?,locks:Maintenance{target:None,source:None}};
++  let value=body(target.client.get(url(target,"/api/v1/auth/session")?).header(reqwest::header::COOKIE,session.cookie).send().map_err(|_|Error::Unavailable)?)?;
++  if value["data"]["user"]["id"].as_str()!=Some(binding.actor_id.as_str()){return Err(Error::Conflict);}
++  let (actor,installation,authority)=crate::remote_control::hosted::retirement_site_identity(target,&session).map_err(|_|Error::Conflict)?;
++  if actor!=binding.actor_id||installation!=binding.installation_id||authority!=binding.authority_id{return Err(Error::Conflict);}
++  work(session)
++ }
++}
++// A local reconciliation never claims that an unknown remote login was logged out.
++impl AccountVault{
++ pub fn node_hosted_local_credentials_revoked(&self,id:&str)->Result<bool,Error>{
++  let _lock=self.lock()?;let contents=self.read()?;
++  let r=contents.accounts.iter().find(|r|r.account.id==id).ok_or(Error::NotFound)?;
++  Ok(r.account.provider=="ingenium-node-hosted"&&r.account.revoked_at.is_some()&&r.credentials.is_empty()&&!contents.bindings.iter().any(|b|b.account_id==id))
++ }
++}
+\ No newline at end of file
+diff --git a/crates/adapters/src/remote_control/hosted/lifecycle.rs b/crates/adapters/src/remote_control/hosted/lifecycle.rs
+new file mode 100644
+--- /dev/null
++++ b/crates/adapters/src/remote_control/hosted/lifecycle.rs
+@@ -0,0 +1,99 @@
++//! Actual custodian retirement in the existing Native connection/grant owner.
++use super::*;
++fn matches(c:&attestation::Custodian,e:&Enrollment)->bool{
++ c.enrollment_request_id==e.enrollment_request_id&&c.actor_id==e.identity.binding.actor_id&&c.installation_id==e.identity.binding.installation_id&&json!(c.native_owner)==json!(e.native_owner)
++}
++fn inventory(db:&Database,e:&Enrollment)->Value{
++ json!({"enrollment_request_id":e.enrollment_request_id,"actor_id":e.identity.binding.actor_id,"installation_id":e.identity.binding.installation_id,"native_owner":e.native_owner,
++ "grants":db.grants.values().filter(|g|g.node_custodian.as_ref().is_some_and(|c|matches(c,e))).map(|g|json!(g.view)).collect::<Vec<_>>(),
++ "pairings":db.pairings.iter().filter(|(_,p)|p.node_custodian.as_ref().is_some_and(|c|matches(c,e))).map(|(id,p)|json!({"id":id,"expires_at":p.expires_at})).collect::<Vec<_>>()})
++}
++impl Store{
++ pub fn hosted_retirement_inventory(&self,connection:&SessionConnection)->Result<Value,Error>{self.require_hosted(connection)?;self.access(|db|Ok(inventory(db,connection.enrollment())),false)}
++ /// Caller verified actual Node quiescence/pending count and Native journal under tracked commands+serial.
++ /// No receipt or missing-row inference enters this physical local revocation.
++ pub fn retire_hosted_custodians(&self,connection:&SessionConnection,expected:&Value)->Result<Value,Error>{
++  self.require_hosted(connection)?;
++  self.access(|db|{
++   let e=connection.enrollment();if inventory(db,e)!=*expected{return Err(Error::Conflict);}
++   db.pairings.retain(|_,p|!p.node_custodian.as_ref().is_some_and(|c|matches(c,e)));
++   for g in db.grants.values_mut().filter(|g|g.node_custodian.as_ref().is_some_and(|c|matches(c,e))){
++    if !g.view.revoked{g.view.revoked=true;g.view.revision=g.view.revision.checked_add(1).ok_or(Error::Conflict)?;}
++   }
++   Ok(inventory(db,e))
++  },true)
++ }
++ /// The OLD token is valid ONLY for this bounded revocation-proof read, never normal authentication.
++ pub fn hosted_retirement_proof(&self,token:&str,id:&str,actor:&str,installation:&str,pending_effects:bool)->Result<Value,Error>{
++  if token.len()!=64{return Err(Error::Forbidden);}let digest=hash(token.as_bytes());
++  self.access(|db|{
++   let grant=db.grants.values().find(|g|g.token_sha256==digest).ok_or(Error::Forbidden)?;
++   let c=grant.node_custodian.as_ref().ok_or(Error::Forbidden)?;
++   if c.enrollment_request_id!=id||c.actor_id!=actor||c.installation_id!=installation{return Err(Error::Forbidden);}
++   let same=|other:&attestation::Custodian|other.enrollment_request_id==id&&other.actor_id==actor&&other.installation_id==installation;
++   Ok(json!({"protocol":"node_hosted_retirement_v1","enrollment_request_id":id,"actor_id":actor,"installation_id":installation,
++    "native_authority_id":db.authority_id,"native_owner":c.native_owner,"grant":grant.view,
++    "live_pairings":db.pairings.values().filter(|p|p.expires_at>now()&&p.node_custodian.as_ref().is_some_and(&same)).count(),
++    "live_grants":db.grants.values().filter(|g|!g.view.revoked&&g.node_custodian.as_ref().is_some_and(&same)).count(),
++    "pending_effects":if pending_effects{1}else{0}}))
++  },false)
++ }
++}
++impl SessionConnection{
++ pub fn retirement_review(&self,vault:&AccountVault,store:&Store)->Result<Value,Error>{
++  store.require_hosted(self)?;
++  vault.with_node_hosted_retirement_session(&self.target(),&self.enrollment().account_review,&self.enrollment().enrollment_request_id,&self.enrollment().identity.binding,|s|{
++   if s.actor_id!=self.enrollment().identity.binding.actor_id{return Err(crate::account_vault::Error::Conflict);}
++   let node=wire::pairing_status(&self.target(),&s,&self.enrollment().enrollment_request_id).map_err(|_|crate::account_vault::Error::Unavailable)?;
++   Ok(json!({"node":node,"native":store.hosted_retirement_inventory(self).map_err(|_|crate::account_vault::Error::Conflict)?}))
++  }).map_err(account_error)
++ }
++ pub fn retire_hosted(&self,state:&Path,vault:&AccountVault,store:&Store,expected:&Value)->Result<Value,Error>{
++  store.require_hosted(self)?;
++  let e=self.enrollment();
++  let journal=crate::utility_operations::Store::open(state).map_err(|_|Error::Unavailable)?;
++  if journal.hosted_effect_resource_has_custody(&e.enrollment_request_id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
++  vault.with_node_hosted_retirement_session(&self.target(),&e.account_review,&e.enrollment_request_id,&e.identity.binding,|s|{
++   if s.actor_id!=e.identity.binding.actor_id{return Err(crate::account_vault::Error::Conflict);}
++   let actual=wire::pairing_status(&self.target(),&s,&e.enrollment_request_id).map_err(|_|crate::account_vault::Error::Unavailable)?;
++   if actual!=expected["node"]||store.hosted_retirement_inventory(self).map_err(|_|crate::account_vault::Error::Conflict)?!=expected["native"]{return Err(crate::account_vault::Error::Conflict);}
++   let quiesced=wire::pairing_lifecycle(&self.target(),&s,&e.enrollment_request_id,"quiesce",actual["revision"].as_u64().ok_or(crate::account_vault::Error::Conflict)?).map_err(|_|crate::account_vault::Error::Unavailable)?;
++   if !["quiescing","retired"].contains(&quiesced["state"].as_str().unwrap_or(""))||quiesced["pendingEffects"]!=0{return Err(crate::account_vault::Error::Conflict);}
++   // Actual persisted Native revocation/removal precedes the Node proof read.
++   let native=store.retire_hosted_custodians(self,&expected["native"]).map_err(|_|crate::account_vault::Error::Conflict)?;
++   let node=wire::pairing_lifecycle(&self.target(),&s,&e.enrollment_request_id,"retire",quiesced["revision"].as_u64().ok_or(crate::account_vault::Error::Conflict)?).map_err(|_|crate::account_vault::Error::Unavailable)?;
++   if node["state"]!="retired"||node["physicalErasure"]!=false{return Err(crate::account_vault::Error::Conflict);}
++   let receipt=json!({"node":node,"native":native,"physical_erasure":false});
++   store.access(|db|{let saved=db.connections.get_mut(&self.saved.view.id).ok_or(Error::NotFound)?;if json!(saved.node_hosted)!=json!(self.saved.node_hosted){return Err(Error::Conflict);}saved.node_hosted.as_mut().ok_or(Error::Forbidden)?.retirement=Some(receipt.clone());Ok(())},true).map_err(|_|crate::account_vault::Error::Conflict)?;
++   Ok(receipt)
++  }).map_err(account_error)
++ }
++}
++// Query real persisted grants, live one-use preparations and saved connection retirement.
++impl Store{
++ fn hosted_live(&self,project:Option<Option<&str>>,resource:Option<&str>)->Result<bool,Error>{
++  self.access(|db|{
++   let owner=|n:&NativeOwner|project.is_none_or(|wanted|n.project.as_ref().map(|p|p.id.as_str())==wanted);
++   let custodian=|c:&attestation::Custodian|owner(&c.native_owner)&&resource.is_none_or(|id|c.enrollment_request_id==id);
++   let connection=db.connections.values().any(|c|c.node_hosted.as_ref().is_some_and(|e|e.retirement.is_none()&&owner(&e.native_owner)&&resource.is_none_or(|id|e.enrollment_request_id==id||e.account_review.account.id==id||e.identity.binding.grant_id==id||c.view.id==id)));
++   let grants=db.grants.values().any(|g|!g.view.revoked&&g.node_custodian.as_ref().is_some_and(|c|owner(&c.native_owner)&&(resource==Some(g.view.id.as_str())||custodian(c))));
++   let pairings=db.pairings.values().any(|p|p.expires_at>now()&&p.node_custodian.as_ref().is_some_and(&custodian));
++   Ok(connection||grants||pairings)
++  },false)
++ }
++ pub fn hosted_project_is_live(&self,project:Option<&str>)->Result<bool,Error>{self.hosted_live(Some(project),None)}
++ pub fn hosted_resource_is_live(&self,id:&str)->Result<bool,Error>{self.hosted_live(None,Some(id))}
++ pub fn hosted_library_is_live(&self)->Result<bool,Error>{self.hosted_live(None,None)}
++}
++impl Store{
++ pub fn hosted_unpaired_account_is_clear(&self,enrollment:&str,account:&str,owner:&NativeOwner)->Result<bool,Error>{
++  self.access(|db|{
++   // Include revoked historical grants: this exact Native owner that gained a paired
++   // authority must use full Node/Native retirement, never absence-based recovery.
++   let grants=db.grants.values().any(|g|g.node_custodian.as_ref().is_some_and(|c|c.enrollment_request_id==enrollment&&(!g.view.revoked||json!(c.native_owner)==json!(owner))));
++   let pairings=db.pairings.values().any(|p|p.expires_at>now()&&p.node_custodian.as_ref().is_some_and(|c|c.enrollment_request_id==enrollment));
++   let connections=db.connections.values().any(|c|c.node_hosted.as_ref().is_some_and(|e|e.account_review.account.id==account&&e.retirement.is_none()||e.enrollment_request_id==enrollment&&(e.retirement.is_none()||json!(e.native_owner)==json!(owner))));
++   Ok(!grants&&!pairings&&!connections)
++  },false)
++ }
++}
+\ No newline at end of file
+diff --git a/crates/adapters/src/remote_control/hosted/wire.rs b/crates/adapters/src/remote_control/hosted/wire.rs
+--- a/crates/adapters/src/remote_control/hosted/wire.rs
++++ b/crates/adapters/src/remote_control/hosted/wire.rs
+@@ -150,4 +150,12 @@
+  let paired=post(target,s,&format!("{BASE}/pairings"),&json!({"enrollmentRequestId":request_id,"hostedProjectId":hosted_project,"preparationItemId":item}),None)?;
+  if paired["enrollmentRequestId"]!=request_id||paired["state"]!="paired"{return Err(Error::Unavailable);}
+  Ok(())
++}
++pub(super) fn pairing_status(target:&Target<'_>,s:&Session<'_>,id:&str)->Result<Value,Error>{
++ if !crate::utility_operations::canonical(id){return Err(Error::Invalid);}
++ get(target,s,&format!("{BASE}/pairings/{id}"),&[])
++}
++pub(super) fn pairing_lifecycle(target:&Target<'_>,s:&Session<'_>,id:&str,action:&str,revision:u64)->Result<Value,Error>{
++ if !crate::utility_operations::canonical(id)||!["quiesce","retire"].contains(&action){return Err(Error::Invalid);}
++ post(target,s,&format!("{BASE}/pairings/{id}/{action}"),&json!({"expectedRevision":revision}),None)
+ }
+\ No newline at end of file
+diff --git a/crates/adapters/src/remote_control/hosted.rs b/crates/adapters/src/remote_control/hosted.rs
+--- a/crates/adapters/src/remote_control/hosted.rs
++++ b/crates/adapters/src/remote_control/hosted.rs
+@@ -7,6 +7,7 @@
+ pub mod contracts;
+ pub mod attestation;
+ pub mod ceremony;
++pub mod lifecycle;
+ mod wire;
+ pub use wire::{payload_hash,RemotePending};
+ use contracts::*;
+@@ -15,7 +16,7 @@
+ #[serde(deny_unknown_fields)]
+ pub struct Enrollment {
+  pub protocol:String,pub enrollment_request_id:String,pub native_owner:NativeOwner,pub identity:Identity,pub account_review:AccountReview,
+- pub dashboard_origin:String,
++ pub dashboard_origin:String,#[serde(default,skip_serializing_if="Option::is_none")]pub retirement:Option<Value>,
+ }
+ #[derive(Deserialize)]
+ #[serde(deny_unknown_fields)]
+@@ -30,7 +31,7 @@
+  pub fn hosted_connections(&self)->Result<Vec<Value>,Error>{
+   self.access(|db|db.connections.values().filter_map(|c|c.node_hosted.as_ref().map(|e|json!({"id":c.view.id,"name":c.view.name,"protocol":e.protocol,
+     "actor_id":e.identity.binding.actor_id,"installation_id":e.identity.binding.installation_id,"hosted_project_id":e.identity.binding.hosted_project_id,
+-    "native_owner":e.native_owner,"account_id":e.account_review.account.id}))).map(Ok).collect(),false)
++    "native_owner":e.native_owner,"retirement":e.retirement,"account_id":e.account_review.account.id}))).map(Ok).collect(),false)
+  }
+  pub fn hosted(&self,id:&str)->Result<SessionConnection,Error>{
+   let saved=self.access(|db|db.connections.get(id).cloned().ok_or(Error::NotFound),false)?;
+@@ -192,7 +193,9 @@
+   let grant=policy_grant(&identity);let id=identity.binding.connection_id.clone();
+   let profiles=AccessProfiles::new(state);
+   profiles.configure_exact(&grant,0,None,policy,now(),||crate::utility_operations::Store::open(state).and_then(|s|s.hosted_pending(&recovery_key(&identity.binding))).map(|rows|rows.is_empty()).map_err(|_|crate::access_profiles::Error::Unavailable)).map_err(|_|Error::Forbidden)?;
+-  let enrollment=Enrollment{protocol:"node_hosted_governance_v1".into(),enrollment_request_id:input.enrollment_request_id.clone(),native_owner:input.native_owner.clone(),identity,account_review:review,dashboard_origin:trust.trust.dashboard_origin.clone()};
++  let enrollment=Enrollment{protocol:"node_hosted_governance_v1".into(),enrollment_request_id:input.enrollment_request_id.clone(),native_owner:input.native_owner.clone(),identity,account_review:review,dashboard_origin:trust.trust.dashboard_origin.clone(),retirement:None};
+   self.save_hosted(id,name,trust,enrollment)
+  }
+ }
++
++pub(crate) fn retirement_site_identity(target:&Target<'_>,session:&crate::account_vault::node_hosted::Session<'_>)->Result<(String,String,String),Error>{let actual=wire::site_identity(target,session)?;Ok((actual.actor_id,actual.installation_id,actual.authority_id))}
+\ No newline at end of file
+diff --git a/crates/adapters/src/utility_operations/hosted.rs b/crates/adapters/src/utility_operations/hosted.rs
+--- a/crates/adapters/src/utility_operations/hosted.rs
++++ b/crates/adapters/src/utility_operations/hosted.rs
+@@ -81,12 +81,63 @@
+ const RESOURCE_CUSTODY: &str = "SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL AND (json_extract(o.original,'$.original.binding.grantId')=? OR json_extract(o.original,'$.original.binding.connectionId')=? OR json_extract(o.original,'$.private_owner.enrollment_request_id')=?))";
+ impl Store {
+  pub fn hosted_project_has_custody(&self,project:Option<&str>)->Result<bool>{
+-  self.hosted_schema()?;self.db.query_row(PROJECT_CUSTODY,[project],|r|r.get(0)).map_err(|_|"Hosted project custody unavailable".into())
++  self.hosted_schema()?;let effects:bool=self.db.query_row(PROJECT_CUSTODY,[project],|r|r.get(0)).map_err(|_|"Hosted project custody unavailable")?;Ok(effects||self.hosted_admin_custody(ADMIN_PROJECT,[project])?)
+  }
++ pub fn hosted_effect_resource_has_custody(&self,id:&str)->Result<bool>{self.hosted_schema()?;self.db.query_row(RESOURCE_CUSTODY,params![id,id,id],|r|r.get(0)).map_err(|_|"Hosted effect custody unavailable".into())}
+  pub fn hosted_resource_has_custody(&self,original_id:&str)->Result<bool>{
+-  self.hosted_schema()?;self.db.query_row(RESOURCE_CUSTODY,params![original_id,original_id,original_id],|r|r.get(0)).map_err(|_|"Hosted resource custody unavailable".into())
++  self.hosted_schema()?;let effects:bool=self.db.query_row(RESOURCE_CUSTODY,params![original_id,original_id,original_id],|r|r.get(0)).map_err(|_|"Hosted resource custody unavailable")?;Ok(effects||self.hosted_admin_custody(ADMIN_RESOURCE,params![original_id,original_id])?)
+  }
+  pub fn hosted_library_has_custody(&self)->Result<bool>{
+-  self.hosted_schema()?;self.db.query_row("SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL)",[],|r|r.get(0)).map_err(|_|"Hosted library custody unavailable".into())
++  self.hosted_schema()?;let effects:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL)",[],|r|r.get(0)).map_err(|_|"Hosted library custody unavailable")?;Ok(effects||self.hosted_admin_custody("",[])?)
+  }
+ }
++
++// A non-null unconfirmed remote_admin receipt is STILL custody.
++// Release is tied to an independently completed physical Native/Node retirement command,
++// exact enrollment/account/full Native owner; the first source result remains immutable.
++const ADMIN_UNRESOLVED:&str=r#"
++FROM originals o
++WHERE o.kind='remote_admin'
++ AND json_extract(o.original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1')
++ AND (o.result IS NULL OR COALESCE(json_extract(o.result,'$.state'),'unconfirmed')<>'completed')
++ AND NOT EXISTS(
++  SELECT 1 FROM originals l WHERE l.kind='remote_admin'
++   AND json_extract(o.original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1')
++   AND json_extract(l.original,'$.protocol')='node_hosted_local_account_reconciliation_v1'
++   AND json_extract(l.original,'$.source_operation_id')=o.id
++   AND json_extract(l.original,'$.source_original')=o.original
++   AND json_extract(l.result,'$.state')='completed'
++   AND json_extract(l.result,'$.local_native_custody_released')=1
++   AND json_extract(l.result,'$.remote_sign_in_outcome')='unconfirmed'
++ )
++ AND NOT EXISTS(
++  SELECT 1 FROM originals r WHERE r.kind='remote_admin'
++   AND json_extract(r.original,'$.protocol')='node_hosted_retirement_command_v1'
++   AND json_extract(r.result,'$.state')='completed'
++   AND json_extract(r.result,'$.value.node.state')='retired'
++   AND json_extract(r.result,'$.value.node.enrollmentRequestId')=COALESCE(json_extract(o.original,'$.command.enrollment_request_id'),json_extract(o.original,'$.command.account.enrollment_request_id'),json_extract(o.original,'$.private_owner.enrollment_request_id'))
++   AND json_extract(r.original,'$.private_owner.account_review.account.id')=COALESCE(json_extract(o.original,'$.command.account_review.account.id'),json_extract(o.original,'$.command.account.account_review.account.id'),json_extract(o.original,'$.private_owner.account_review.account.id'))
++   AND json_extract(r.original,'$.private_owner.native_owner')=COALESCE(json_extract(o.original,'$.command.native_owner'),json_extract(o.original,'$.command.account.native_owner'),json_extract(o.original,'$.private_owner.native_owner'))
++ )
++"#;
++const ADMIN_PROJECT:&str=" AND COALESCE(json_extract(o.original,'$.command.native_owner.project.id'),json_extract(o.original,'$.command.account.native_owner.project.id'),json_extract(o.original,'$.private_owner.native_owner.project.id')) IS ?";
++const ADMIN_RESOURCE:&str=" AND (COALESCE(json_extract(o.original,'$.command.enrollment_request_id'),json_extract(o.original,'$.command.account.enrollment_request_id'),json_extract(o.original,'$.private_owner.enrollment_request_id'))=? OR COALESCE(json_extract(o.original,'$.command.account_review.account.id'),json_extract(o.original,'$.command.account.account_review.account.id'),json_extract(o.original,'$.private_owner.account_review.account.id'))=?)";
++impl Store{
++ fn hosted_admin_custody(&self,scope:&str,values:impl rusqlite::Params)->Result<bool>{
++  self.db.query_row(&format!("SELECT EXISTS(SELECT 1 {ADMIN_UNRESOLVED}{scope})"),values,|r|r.get(0)).map_err(|_|"Hosted administrative custody unavailable".into())
++ }
++ pub fn hosted_admin_history(&self,after:&str,limit:u32)->Result<Value>{
++  if limit==0||limit>100||!after.is_empty()&&!canonical(after){return Err("Invalid administrative cursor".into());}
++  let mut q=self.db.prepare("SELECT id,json_extract(original,'$.protocol'),COALESCE(json_extract(original,'$.command.enrollment_request_id'),json_extract(original,'$.command.account.enrollment_request_id'),json_extract(original,'$.private_owner.enrollment_request_id')),COALESCE(json_extract(original,'$.command.account_review.account.id'),json_extract(original,'$.command.account.account_review.account.id'),json_extract(original,'$.private_owner.account_review.account.id')),COALESCE(json_extract(original,'$.command.native_owner.project.id'),json_extract(original,'$.command.account.native_owner.project.id'),json_extract(original,'$.private_owner.native_owner.project.id')),COALESCE(json_extract(result,'$.state'),'unconfirmed'),created FROM originals WHERE kind='remote_admin' AND json_extract(original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1') AND id>? ORDER BY id LIMIT ?").map_err(|_|"Administrative index unavailable")?;
++  let rows=q.query_map(params![after,limit+1],|r|Ok(json!({"operation_id":r.get::<_,String>(0)?,"protocol":r.get::<_,String>(1)?,"enrollment_request_id":r.get::<_,Option<String>>(2)?,"account_id":r.get::<_,Option<String>>(3)?,"project_id":r.get::<_,Option<String>>(4)?,"first_receipt_state":r.get::<_,String>(5)?,"created_at":r.get::<_,i64>(6)?}))).map_err(|_|"Administrative index unavailable")?;
++  let mut data=rows.map(|r|r.map_err(|_|"Administrative metadata unavailable".into())).collect::<Result<Vec<_>>>()?;
++  let more=data.len()>limit as usize;data.truncate(limit as usize);let cursor=if more{data.last().map(|r|r["operation_id"].clone())}else{None};
++  Ok(json!({"data":data,"pagination":{"has_more":more,"next_cursor":cursor}}))
++ }
++}
++impl Store{
++ pub fn hosted_account_enrollments(&self,account:&str)->Result<Vec<String>>{
++  let mut q=self.db.prepare("SELECT DISTINCT COALESCE(json_extract(original,'$.command.enrollment_request_id'),json_extract(original,'$.command.account.enrollment_request_id'),json_extract(original,'$.private_owner.enrollment_request_id')) FROM originals WHERE kind='remote_admin' AND COALESCE(json_extract(original,'$.command.account_review.account.id'),json_extract(original,'$.command.account.account_review.account.id'),json_extract(original,'$.private_owner.account_review.account.id'))=?").map_err(|_|"Account enrollment index unavailable")?;
++  q.query_map([account],|r|r.get::<_,Option<String>>(0)).map_err(|_|"Account enrollment index unavailable")?.filter_map(|r|match r{Ok(Some(id))=>Some(Ok(id)),Ok(None)=>None,Err(_)=>Some(Err("Account enrollment row unavailable".into()))}).collect()
++ }
++}
+\ No newline at end of file

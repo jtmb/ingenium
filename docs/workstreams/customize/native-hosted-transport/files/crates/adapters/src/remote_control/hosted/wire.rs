@@ -151,3 +151,11 @@ pub(super) fn publish_pairing(target:&Target<'_>,s:&Session<'_>,api_project:&str
  if paired["enrollmentRequestId"]!=request_id||paired["state"]!="paired"{return Err(Error::Unavailable);}
  Ok(())
 }
+pub(super) fn pairing_status(target:&Target<'_>,s:&Session<'_>,id:&str)->Result<Value,Error>{
+ if !crate::utility_operations::canonical(id){return Err(Error::Invalid);}
+ get(target,s,&format!("{BASE}/pairings/{id}"),&[])
+}
+pub(super) fn pairing_lifecycle(target:&Target<'_>,s:&Session<'_>,id:&str,action:&str,revision:u64)->Result<Value,Error>{
+ if !crate::utility_operations::canonical(id)||!["quiesce","retire"].contains(&action){return Err(Error::Invalid);}
+ post(target,s,&format!("{BASE}/pairings/{id}/{action}"),&json!({"expectedRevision":revision}),None)
+}

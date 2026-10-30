@@ -1,0 +1,152 @@
+{
+  "base": "74d375b0ab9314557dac768dec0441dc0b9cf3ae",
+  "preimagesNormalizedLF": true,
+  "files": [
+    {
+      "target": "apps/service/src/routes/remote_control/hosted_governance.rs",
+      "preSha256": "c0007de2b9216994c2b139f32eff47ec652064c6c3382d84ef8355f08c08e873",
+      "sha256": "ba8a47e6d58905e51d9e34a022bfb8be1eab405372ac7119cf80d38ea3bc792e",
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/account_vault/node_hosted.rs",
+      "preSha256": "a02888373d16fab5cd897ad6576a13f44807a4cca9423fccb9be4ef272881600",
+      "sha256": "618293efc1e9096e243f9f90d63a33060d4bab0b5f755884dd52a6972fa2cda3",
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted/lifecycle.rs",
+      "preSha256": null,
+      "sha256": "717cc423191f89c7ff9e7a2d2d06a7a3fb9f3cb6da12d180bcfbe81fe8889de8",
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted/wire.rs",
+      "preSha256": "75245430c2614b0dfd0d1d10d2dd0e45059c7808a27a04ed40adf4ac12de38b1",
+      "sha256": "ddffe31fa0f6a86c43586bf87d1c0fe1f53664b3e3b45e3671ae2cc837030c5b",
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/remote_control/hosted.rs",
+      "preSha256": "04381856b841a5eaa43de860f9be7dc1d36d0319215790596f8cba8f8b27e5e3",
+      "sha256": "7c688f471d542d87396770cc802850fb565bdc9d1ebd1227165fa1dfca6820bf",
+      "kind": "native"
+    },
+    {
+      "target": "crates/adapters/src/utility_operations/hosted.rs",
+      "preSha256": "93303131d80531167cd49205aef97a91b34491aef30b5be83035900408985c4e",
+      "sha256": "8dc942d1b373a7201692e7cfab32b58e0f44ad0518dc8db6e6f759cb0e67f7bb",
+      "kind": "native"
+    },
+    {
+      "target": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+      "preSha256": null,
+      "sha256": "1dea6e4cbe8a56973f84dd1cd2ebc6f2d28eac32ca32675836e2031de4271c83",
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/authorization-policy.ts",
+      "preSha256": "cc26ea641d4cda43b2c8e5716ff912747b323b9fb05892c949ccd84284ab71ac",
+      "sha256": "f581e3b59e3a7c2dc251265625e42af4569acbb993591943a2a85e15df7ade82",
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "preSha256": "8abeaff5adf93e49a5a5064557e33341a2f9dfa45e6895af071d397d40d3580b",
+      "sha256": "c09d4338bbf98ca0876b5c72e8c27f99016298c63551aed3279806e66484235a",
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/paired-native-proof.ts",
+      "preSha256": "cc858f049a1b099bfd7920046022c0a999288f52cbf46a3146c3152ebe95519b",
+      "sha256": "4d6a6639c2a5fda6e99c9bb9d61f727e03ce503b9c407f9efd31ba2176fc6420",
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/paired-native-reader.ts",
+      "preSha256": "95eb817802f23e38993217873aa1a7eb2237bab330bb6c66e2ff292206e76d57",
+      "sha256": "0fee448f389d307e71071a1221598b01ed38cff7db7e6cfec93d115fdadee86e",
+      "kind": "node"
+    },
+    {
+      "target": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "preSha256": "abd592164ec29bd0b6599f42c2d0589140b4cb5ef6309014aa775a3c0afd02f3",
+      "sha256": "6dcf60b1be4c4e79a53dbaf5dad2b10e0c5eb3578072ac1150468b8141b26969",
+      "kind": "node"
+    }
+  ],
+  "hookPreimages": [
+    {
+      "target": "apps/service/src/routes/remote_control.rs",
+      "kind": "native",
+      "preSha256": "140cb70522baf6f463840ac18857c7e48d4de58e22a61eb943c2ded47ca3dd96",
+      "postSha256": "bc03eee6ec5ef51da2f5fbd4e698ccd52418ecb3e5a69e58dfc527046d10c80b"
+    },
+    {
+      "target": "crates/adapters/src/remote_control.rs",
+      "kind": "native",
+      "preSha256": "780b86e117024f3d0dbc5f5661a4e82b500e9ca6c18af6eaab863569770f27d5",
+      "postSha256": "036822ec679d8c11ab87975ed1d60f54308764c48408abf797dc2b1970eacef4"
+    },
+    {
+      "target": "apps/service/src/routes/catalog.rs",
+      "kind": "native",
+      "preSha256": "247f33ab40d1d89da6f161c437aeb580fbdf3fc13dfcd46b71793cf9a9b44d83",
+      "postSha256": "95eefd2197027779e2c6d98b9348b7f03384618b7e1602822e63c21e1dfd3ae7"
+    },
+    {
+      "target": "apps/service/src/routes/accounts.rs",
+      "kind": "native",
+      "preSha256": "9bbb0b1fe84268896e01bc9cdaa6e59af24557165a0b43ede0c50718eae7626f",
+      "postSha256": "edef6b78a17f91e5fedad1cd4a67bf28e68ea12fef3d0aeab52af21cd3f44c52"
+    },
+    {
+      "target": "apps/service/src/routes/access_profiles.rs",
+      "kind": "native",
+      "preSha256": "3acc789ee40d75afa9d2664050774d44238771386b5400ea08e3ee8b5360bd28",
+      "postSha256": "8e2d68e139b9becc1bc09e2389c4eb1207ad459dbd02f1ec631d57cf45621bff"
+    },
+    {
+      "target": "apps/service/src/routes/remote_control/owned.rs",
+      "kind": "native",
+      "preSha256": "dbf758826f0fc0d5e6706e52bd80aa455028be15ad9f5cf5de3cb6656534d4e0",
+      "postSha256": "9cba40a54d841c02ab9cc785093a28186341a926e522f7352129003c204feed2"
+    },
+    {
+      "target": "packages/ingenium-core/lib/index.ts",
+      "kind": "node",
+      "preSha256": "c90a5a07de83839e1b88ecf07aed92f5c6cddc13c2fd988c335142ededbba69d",
+      "postSha256": "d193710edb2a27cbe79ffe716d83299649dab817b39cb537d0e106a41903999d"
+    },
+    {
+      "target": "packages/ingenium-core/lib/tools/projects.ts",
+      "kind": "node",
+      "preSha256": "1c7fadcd890d10298653291291ff39d5a20848701c35f4952e86af7cdca6a989",
+      "postSha256": "3b451344d4d728da1bbbd48596d40f77313d3c2ceb0e8768fd174cc2c34579c2"
+    },
+    {
+      "target": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "kind": "node",
+      "preSha256": "cfa16b8e9757f65b3eda87c19bb91cde18fec039d12e95169932d436c7b3cb83",
+      "postSha256": "2cc428bf53db3cf613f13364855094622c485b98f652618155cdd975efe5fa59"
+    }
+  ],
+  "patches": {
+    "native-lifecycle-source.patch": {
+      "sha256": "33a22b09ec2159a272de2efddda38531265afbbe635039f1da6df7909a5a435c",
+      "bytes": 34765
+    },
+    "native-lifecycle-hooks.patch": {
+      "sha256": "9c88430283e645101885f808ab45529278841b68905c9ac570b748ee6c7faaf8",
+      "bytes": 6036
+    },
+    "node-lifecycle-source.patch": {
+      "sha256": "655b6ee3eee6f5820d8b739e05cfb4796c1b1c36b32f00eda3de712b94d1b1d4",
+      "bytes": 22596
+    },
+    "node-lifecycle-hooks.patch": {
+      "sha256": "b7c483ff891ff656d1bf4fcf49e638d9ea65d7b7a867505b09a090e73e0b21b7",
+      "bytes": 5548
+    }
+  }
+}

@@ -1,11 +1,13 @@
 //! Explicit NodeHosted capability domain in the existing saved-connection owner.
 //! Native paired requests never enter this domain; neither credentials nor URLs come from the renderer.
 use super::*;
+use serde_json::json;
 use crate::account_vault::{AccountVault,node_hosted::{AccountReview,Target}};
 use crate::access_profiles::AccessProfiles;
 pub mod contracts;
 pub mod attestation;
 pub mod ceremony;
+pub mod lifecycle;
 mod wire;
 pub use wire::{payload_hash,RemotePending};
 use contracts::*;
@@ -14,7 +16,7 @@ use contracts::*;
 #[serde(deny_unknown_fields)]
 pub struct Enrollment {
  pub protocol:String,pub enrollment_request_id:String,pub native_owner:NativeOwner,pub identity:Identity,pub account_review:AccountReview,
- pub dashboard_origin:String,
+ pub dashboard_origin:String,#[serde(default,skip_serializing_if="Option::is_none")]pub retirement:Option<Value>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -29,7 +31,7 @@ impl Store {
  pub fn hosted_connections(&self)->Result<Vec<Value>,Error>{
   self.access(|db|db.connections.values().filter_map(|c|c.node_hosted.as_ref().map(|e|json!({"id":c.view.id,"name":c.view.name,"protocol":e.protocol,
     "actor_id":e.identity.binding.actor_id,"installation_id":e.identity.binding.installation_id,"hosted_project_id":e.identity.binding.hosted_project_id,
-    "native_owner":e.native_owner,"account_id":e.account_review.account.id}))).map(Ok).collect(),false)
+    "native_owner":e.native_owner,"retirement":e.retirement,"account_id":e.account_review.account.id}))).map(Ok).collect(),false)
  }
  pub fn hosted(&self,id:&str)->Result<SessionConnection,Error>{
   let saved=self.access(|db|db.connections.get(id).cloned().ok_or(Error::NotFound),false)?;
@@ -191,7 +193,9 @@ impl Store {
   let grant=policy_grant(&identity);let id=identity.binding.connection_id.clone();
   let profiles=AccessProfiles::new(state);
   profiles.configure_exact(&grant,0,None,policy,now(),||crate::utility_operations::Store::open(state).and_then(|s|s.hosted_pending(&recovery_key(&identity.binding))).map(|rows|rows.is_empty()).map_err(|_|crate::access_profiles::Error::Unavailable)).map_err(|_|Error::Forbidden)?;
-  let enrollment=Enrollment{protocol:"node_hosted_governance_v1".into(),enrollment_request_id:input.enrollment_request_id.clone(),native_owner:input.native_owner.clone(),identity,account_review:review,dashboard_origin:trust.trust.dashboard_origin.clone()};
+  let enrollment=Enrollment{protocol:"node_hosted_governance_v1".into(),enrollment_request_id:input.enrollment_request_id.clone(),native_owner:input.native_owner.clone(),identity,account_review:review,dashboard_origin:trust.trust.dashboard_origin.clone(),retirement:None};
   self.save_hosted(id,name,trust,enrollment)
  }
 }
+
+pub(crate) fn retirement_site_identity(target:&Target<'_>,session:&crate::account_vault::node_hosted::Session<'_>)->Result<(String,String,String),Error>{let actual=wire::site_identity(target,session)?;Ok((actual.actor_id,actual.installation_id,actual.authority_id))}

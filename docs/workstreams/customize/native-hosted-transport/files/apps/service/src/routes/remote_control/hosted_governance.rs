@@ -14,7 +14,7 @@ struct OriginalRequest {binding:Binding,original:Original}
 struct OwnerRequest {binding:Binding}
 pub(super) fn router()->Router<Arc<ServiceState>>{
  Router::new().route("/context",post(context)).route("/read",post(read)).route("/reserve",post(reserve))
-  .route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
+  .route("/lifecycle-review",post(lifecycle_review)).route("/lifecycle-commands",post(lifecycle_command)).route("/send",post(send)).route("/inspect",post(inspect)).route("/pending",post(pending))
   .layer(axum::extract::DefaultBodyLimit::max(2_100_000))
   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
 }
@@ -150,7 +150,7 @@ struct CustodianQuery{actor_id:String,installation_id:String}
 #[derive(Deserialize)]#[serde(deny_unknown_fields)]
 struct OriginalProofQuery{actor_id:String,installation_id:String,payload_hash:String}
 pub(super) fn paired_router()->Router<Arc<ServiceState>>{
- Router::new().route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
+ Router::new().route("/remote/v1/node-hosted/enrollments/{id}/retirement",get(paired_retirement)).route("/remote/v1/node-hosted/enrollments/{id}/context",get(paired_context))
   .route("/remote/v1/node-hosted/enrollments/{id}/originals/{operation}",get(paired_original))
   .layer(axum::middleware::map_response(|mut r:Response|async move{r.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("no-store"));r}))
 }
@@ -182,7 +182,7 @@ async fn paired_original(State(state):State<Arc<ServiceState>>,Path((id,operatio
 
 // Existing native account credential-file UI supplies metadata only; no email/password/code/cookie fields.
 pub(super) fn account_router()->Router<Arc<ServiceState>>{
- Router::new().route("/connections",get(hosted_connections)).route("/pairing-commands",post(pairing_command)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
+ Router::new().route("/connections",get(hosted_connections)).route("/local-account-reconciliation",post(local_account_reconciliation)).route("/history",get(admin_history)).route("/pairing-commands",post(pairing_command)).route("/account-commands",post(account_command)).route("/account-originals/{id}",get(account_original))
   .layer(axum::extract::DefaultBodyLimit::max(128*1024))
 }
 async fn account_command(State(state):State<Arc<ServiceState>>,Json(input):Json<hosted::AccountCommand>)->Response{
@@ -210,7 +210,7 @@ async fn account_original(State(state):State<Arc<ServiceState>>,Path(id):Path<St
   if library(&state)?!=query.library_id{return Err(Error::Forbidden);}
   let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
   let row=journal.original(&id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
-  if !["node_hosted_account_v1","node_hosted_pairing_v1"].contains(&row["original"]["protocol"].as_str().unwrap_or(""))||row["original"]["command"].get("native_owner").or_else(||row["original"]["command"]["account"].get("native_owner")).and_then(|n|n.get("library_id")).and_then(Value::as_str)!=Some(query.library_id.as_str()){return Err(Error::Forbidden);}Ok(row)
+  if !["node_hosted_account_v1","node_hosted_pairing_v1","node_hosted_retirement_command_v1","node_hosted_local_account_reconciliation_v1"].contains(&row["original"]["protocol"].as_str().unwrap_or(""))||row["original"]["command"].get("native_owner").or_else(||row["original"]["command"]["account"].get("native_owner")).and_then(|n|n.get("library_id")).and_then(Value::as_str).or_else(||row["original"]["command"]["binding"]["nativeLibraryId"].as_str()).or_else(||row["original"]["source_original"]["command"]["native_owner"]["library_id"].as_str()).or_else(||row["original"]["source_original"]["command"]["account"]["native_owner"]["library_id"].as_str())!=Some(query.library_id.as_str()){return Err(Error::Forbidden);}Ok(row)
  }).await{Ok(value)=>Json(value).into_response(),Err(e)=>problem(e)}
 }
 
@@ -273,4 +273,70 @@ async fn pairing_command(State(state):State<Arc<ServiceState>>,Json(input):Json<
   let _=tx.send(result);
  }){return problem(e);}
  match rx.await{Ok(Ok(v))=>Json(v).into_response(),Ok(Err(e))=>problem(e),Err(_)=>problem(Error::Unavailable)}
+}
+async fn paired_retirement(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,axum::extract::Query(q):axum::extract::Query<CustodianQuery>,headers:HeaderMap)->Response{
+ if proxy::origin(&state,&headers,false).await.is_err(){return problem(Error::Forbidden);}
+ let Some(token)=headers.get("authorization").and_then(|v|v.to_str().ok()).and_then(|v|v.strip_prefix("Bearer ")).map(str::to_string)else{return problem(Error::Forbidden);};
+ match blocking(move||{
+  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  let pending=journal.hosted_effect_resource_has_custody(&id).map_err(|_|Error::Unavailable)?;
+  state.remote_control.store.hosted_retirement_proof(&token,&id,&q.actor_id,&q.installation_id,pending)
+ }).await{Ok(proof)=>Json(proof).into_response(),Err(e)=>problem(e)}
+}
+fn retirement_connection(state:&ServiceState,id:&str,b:&Binding)->Result<hosted::SessionConnection,Error>{
+ let connection=state.remote_control.store.hosted(id)?;let e=connection.enrollment();
+ if b.connection_id!=id||hosted::recovery_key(b)!=hosted::recovery_key(&e.identity.binding){return Err(Error::Forbidden);}
+ // Retirement revokes the retained historical authority; it does not revive its old service/project view.
+ if library(state)?!=e.native_owner.library_id{return Err(Error::Forbidden);}Ok(connection)
+}
+async fn lifecycle_review(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<OwnerRequest>)->Response{
+ retained(state,move|state|{
+  let connection=retirement_connection(&state,&id,&input.binding)?;
+  connection.retirement_review(&AccountVault::new(&state.state_directory),&state.remote_control.store)
+ }).await
+}
+#[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
+struct LifecycleCommand{operation_id:String,binding:Binding,review:Value}
+async fn lifecycle_command(State(state):State<Arc<ServiceState>>,Path(id):Path<String>,Json(input):Json<LifecycleCommand>)->Response{
+ retained(state,move|state|{
+  let connection=retirement_connection(&state,&id,&input.binding)?;
+  let mut journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  let original=json!({"protocol":"node_hosted_retirement_command_v1","command":input,"private_owner":connection.enrollment()});
+  if let Some(row)=journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?{return if row["original"]==original{Ok(row)}else{Err(Error::Conflict)};}
+  journal.begin(&input.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
+  let result=match connection.retire_hosted(&state.state_directory,&AccountVault::new(&state.state_directory),&state.remote_control.store,&input.review){
+   Ok(receipt)=>json!({"state":"completed","value":receipt}),
+   Err(_)=>json!({"state":"unconfirmed","code":"hosted_retirement_unconfirmed","message":"Original retained. Review actual grants, journal and Node owner; do not replay hosted effects."})
+  };
+  journal.finish(&input.operation_id,&result).map_err(|_|Error::Unavailable)?;
+  journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
+ }).await
+}
+#[derive(Deserialize)]#[serde(deny_unknown_fields)]
+struct AdminHistoryQuery{library_id:String,#[serde(default)]after:String,limit:u32}
+async fn admin_history(State(state):State<Arc<ServiceState>>,axum::extract::Query(q):axum::extract::Query<AdminHistoryQuery>)->Response{
+ match blocking(move||{
+  let journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  if journal.library_id().map_err(|_|Error::Unavailable)?!=q.library_id{return Err(Error::Forbidden);}
+  journal.hosted_admin_history(&q.after,q.limit).map_err(|_|Error::Unavailable)
+ }).await{Ok(value)=>Json(value).into_response(),Err(e)=>problem(e)}
+}
+#[derive(Serialize,Deserialize)]#[serde(deny_unknown_fields)]
+struct LocalAccountReconciliation{operation_id:String,source_operation_id:String}
+async fn local_account_reconciliation(State(state):State<Arc<ServiceState>>,Json(input):Json<LocalAccountReconciliation>)->Response{
+ retained(state,move|state|{
+  let mut journal=utility_operations::Store::open(&state.state_directory).map_err(|_|Error::Unavailable)?;
+  let source=journal.original(&input.source_operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::NotFound)?;
+  if !["node_hosted_account_v1","node_hosted_pairing_v1"].contains(&source["original"]["protocol"].as_str().unwrap_or("")){return Err(Error::Conflict);}
+  let command:hosted::AccountCommand=serde_json::from_value(if source["original"]["protocol"]=="node_hosted_pairing_v1"{source["original"]["command"]["account"].clone()}else{source["original"]["command"].clone()}).map_err(|_|Error::Conflict)?;
+  if library(&state)?!=command.native_owner.library_id{return Err(Error::Forbidden);}
+  let original=json!({"protocol":"node_hosted_local_account_reconciliation_v1","source_operation_id":input.source_operation_id,"source_original":source["original"]});
+  if let Some(row)=journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?{return if row["original"]==original{Ok(row)}else{Err(Error::Conflict)};}
+  if !AccountVault::new(&state.state_directory).node_hosted_local_credentials_revoked(&command.account_review.account.id).map_err(|_|Error::Unavailable)?||
+   !state.remote_control.store.hosted_unpaired_account_is_clear(&command.enrollment_request_id,&command.account_review.account.id,&command.native_owner)?||
+   journal.hosted_effect_resource_has_custody(&command.enrollment_request_id).map_err(|_|Error::Unavailable)?{return Err(Error::Conflict);}
+  journal.begin(&input.operation_id,"remote_admin",&original).map_err(|_|Error::Conflict)?;
+  journal.finish(&input.operation_id,&json!({"state":"completed","local_native_custody_released":true,"remote_sign_in_outcome":"unconfirmed","account_credentials_revoked":true,"active_native_authority":false})).map_err(|_|Error::Unavailable)?;
+  journal.original(&input.operation_id,"remote_admin").map_err(|_|Error::Unavailable)?.ok_or(Error::Unavailable)
+ }).await
 }

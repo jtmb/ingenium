@@ -22,3 +22,15 @@ export function originalProof(value:unknown,original:NativePairOriginal,operatio
  value.protocol!=="node_hosted_native_original_v1"||value.operation_id!==operationId||value.payload_hash!==payloadHash||value.dispatch_claimed!==true)return denied();
  return contextProof(value.context,original);
 }
+
+/** A revoked-token-only Native endpoint proves actual persisted local retirement.
+ * Authentication failure/404 or missing owner records is never such proof.
+ */
+export function retirementProof(value:unknown,original:NativePairOriginal):void{
+ if(!obj(value)||Object.keys(value).sort().join(",")!=="actor_id,enrollment_request_id,grant,installation_id,live_grants,live_pairings,native_authority_id,native_owner,pending_effects,protocol"||
+ value.protocol!=="node_hosted_retirement_v1"||value.actor_id!==original.actorId||value.installation_id!==original.installationId||
+ value.enrollment_request_id!==original.enrollmentRequestId||value.native_authority_id!==original.authorityId||
+ !same(value.native_owner,original.nativeOwner)||!obj(value.grant)||value.grant.id!==original.grantId||
+ value.grant.revoked!==true||!Number.isSafeInteger(value.grant.revision)||(value.grant.revision as number)<=original.grantRevision||
+ value.live_pairings!==0||value.live_grants!==0||value.pending_effects!==0)return denied();
+}

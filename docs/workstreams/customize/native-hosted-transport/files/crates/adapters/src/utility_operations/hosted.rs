@@ -81,12 +81,63 @@ const PROJECT_CUSTODY: &str = "SELECT EXISTS(SELECT 1 FROM originals o JOIN host
 const RESOURCE_CUSTODY: &str = "SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL AND (json_extract(o.original,'$.original.binding.grantId')=? OR json_extract(o.original,'$.original.binding.connectionId')=? OR json_extract(o.original,'$.private_owner.enrollment_request_id')=?))";
 impl Store {
  pub fn hosted_project_has_custody(&self,project:Option<&str>)->Result<bool>{
-  self.hosted_schema()?;self.db.query_row(PROJECT_CUSTODY,[project],|r|r.get(0)).map_err(|_|"Hosted project custody unavailable".into())
+  self.hosted_schema()?;let effects:bool=self.db.query_row(PROJECT_CUSTODY,[project],|r|r.get(0)).map_err(|_|"Hosted project custody unavailable")?;Ok(effects||self.hosted_admin_custody(ADMIN_PROJECT,[project])?)
  }
+ pub fn hosted_effect_resource_has_custody(&self,id:&str)->Result<bool>{self.hosted_schema()?;self.db.query_row(RESOURCE_CUSTODY,params![id,id,id],|r|r.get(0)).map_err(|_|"Hosted effect custody unavailable".into())}
  pub fn hosted_resource_has_custody(&self,original_id:&str)->Result<bool>{
-  self.hosted_schema()?;self.db.query_row(RESOURCE_CUSTODY,params![original_id,original_id,original_id],|r|r.get(0)).map_err(|_|"Hosted resource custody unavailable".into())
+  self.hosted_schema()?;let effects:bool=self.db.query_row(RESOURCE_CUSTODY,params![original_id,original_id,original_id],|r|r.get(0)).map_err(|_|"Hosted resource custody unavailable")?;Ok(effects||self.hosted_admin_custody(ADMIN_RESOURCE,params![original_id,original_id])?)
  }
  pub fn hosted_library_has_custody(&self)->Result<bool>{
-  self.hosted_schema()?;self.db.query_row("SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL)",[],|r|r.get(0)).map_err(|_|"Hosted library custody unavailable".into())
+  self.hosted_schema()?;let effects:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM originals o JOIN hosted_dispatch h ON h.id=o.id WHERE o.kind='hosted_governance' AND o.result IS NULL)",[],|r|r.get(0)).map_err(|_|"Hosted library custody unavailable")?;Ok(effects||self.hosted_admin_custody("",[])?)
+ }
+}
+
+// A non-null unconfirmed remote_admin receipt is STILL custody.
+// Release is tied to an independently completed physical Native/Node retirement command,
+// exact enrollment/account/full Native owner; the first source result remains immutable.
+const ADMIN_UNRESOLVED:&str=r#"
+FROM originals o
+WHERE o.kind='remote_admin'
+ AND json_extract(o.original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1')
+ AND (o.result IS NULL OR COALESCE(json_extract(o.result,'$.state'),'unconfirmed')<>'completed')
+ AND NOT EXISTS(
+  SELECT 1 FROM originals l WHERE l.kind='remote_admin'
+   AND json_extract(o.original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1')
+   AND json_extract(l.original,'$.protocol')='node_hosted_local_account_reconciliation_v1'
+   AND json_extract(l.original,'$.source_operation_id')=o.id
+   AND json_extract(l.original,'$.source_original')=o.original
+   AND json_extract(l.result,'$.state')='completed'
+   AND json_extract(l.result,'$.local_native_custody_released')=1
+   AND json_extract(l.result,'$.remote_sign_in_outcome')='unconfirmed'
+ )
+ AND NOT EXISTS(
+  SELECT 1 FROM originals r WHERE r.kind='remote_admin'
+   AND json_extract(r.original,'$.protocol')='node_hosted_retirement_command_v1'
+   AND json_extract(r.result,'$.state')='completed'
+   AND json_extract(r.result,'$.value.node.state')='retired'
+   AND json_extract(r.result,'$.value.node.enrollmentRequestId')=COALESCE(json_extract(o.original,'$.command.enrollment_request_id'),json_extract(o.original,'$.command.account.enrollment_request_id'),json_extract(o.original,'$.private_owner.enrollment_request_id'))
+   AND json_extract(r.original,'$.private_owner.account_review.account.id')=COALESCE(json_extract(o.original,'$.command.account_review.account.id'),json_extract(o.original,'$.command.account.account_review.account.id'),json_extract(o.original,'$.private_owner.account_review.account.id'))
+   AND json_extract(r.original,'$.private_owner.native_owner')=COALESCE(json_extract(o.original,'$.command.native_owner'),json_extract(o.original,'$.command.account.native_owner'),json_extract(o.original,'$.private_owner.native_owner'))
+ )
+"#;
+const ADMIN_PROJECT:&str=" AND COALESCE(json_extract(o.original,'$.command.native_owner.project.id'),json_extract(o.original,'$.command.account.native_owner.project.id'),json_extract(o.original,'$.private_owner.native_owner.project.id')) IS ?";
+const ADMIN_RESOURCE:&str=" AND (COALESCE(json_extract(o.original,'$.command.enrollment_request_id'),json_extract(o.original,'$.command.account.enrollment_request_id'),json_extract(o.original,'$.private_owner.enrollment_request_id'))=? OR COALESCE(json_extract(o.original,'$.command.account_review.account.id'),json_extract(o.original,'$.command.account.account_review.account.id'),json_extract(o.original,'$.private_owner.account_review.account.id'))=?)";
+impl Store{
+ fn hosted_admin_custody(&self,scope:&str,values:impl rusqlite::Params)->Result<bool>{
+  self.db.query_row(&format!("SELECT EXISTS(SELECT 1 {ADMIN_UNRESOLVED}{scope})"),values,|r|r.get(0)).map_err(|_|"Hosted administrative custody unavailable".into())
+ }
+ pub fn hosted_admin_history(&self,after:&str,limit:u32)->Result<Value>{
+  if limit==0||limit>100||!after.is_empty()&&!canonical(after){return Err("Invalid administrative cursor".into());}
+  let mut q=self.db.prepare("SELECT id,json_extract(original,'$.protocol'),COALESCE(json_extract(original,'$.command.enrollment_request_id'),json_extract(original,'$.command.account.enrollment_request_id'),json_extract(original,'$.private_owner.enrollment_request_id')),COALESCE(json_extract(original,'$.command.account_review.account.id'),json_extract(original,'$.command.account.account_review.account.id'),json_extract(original,'$.private_owner.account_review.account.id')),COALESCE(json_extract(original,'$.command.native_owner.project.id'),json_extract(original,'$.command.account.native_owner.project.id'),json_extract(original,'$.private_owner.native_owner.project.id')),COALESCE(json_extract(result,'$.state'),'unconfirmed'),created FROM originals WHERE kind='remote_admin' AND json_extract(original,'$.protocol') IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1') AND id>? ORDER BY id LIMIT ?").map_err(|_|"Administrative index unavailable")?;
+  let rows=q.query_map(params![after,limit+1],|r|Ok(json!({"operation_id":r.get::<_,String>(0)?,"protocol":r.get::<_,String>(1)?,"enrollment_request_id":r.get::<_,Option<String>>(2)?,"account_id":r.get::<_,Option<String>>(3)?,"project_id":r.get::<_,Option<String>>(4)?,"first_receipt_state":r.get::<_,String>(5)?,"created_at":r.get::<_,i64>(6)?}))).map_err(|_|"Administrative index unavailable")?;
+  let mut data=rows.map(|r|r.map_err(|_|"Administrative metadata unavailable".into())).collect::<Result<Vec<_>>>()?;
+  let more=data.len()>limit as usize;data.truncate(limit as usize);let cursor=if more{data.last().map(|r|r["operation_id"].clone())}else{None};
+  Ok(json!({"data":data,"pagination":{"has_more":more,"next_cursor":cursor}}))
+ }
+}
+impl Store{
+ pub fn hosted_account_enrollments(&self,account:&str)->Result<Vec<String>>{
+  let mut q=self.db.prepare("SELECT DISTINCT COALESCE(json_extract(original,'$.command.enrollment_request_id'),json_extract(original,'$.command.account.enrollment_request_id'),json_extract(original,'$.private_owner.enrollment_request_id')) FROM originals WHERE kind='remote_admin' AND COALESCE(json_extract(original,'$.command.account_review.account.id'),json_extract(original,'$.command.account.account_review.account.id'),json_extract(original,'$.private_owner.account_review.account.id'))=?").map_err(|_|"Account enrollment index unavailable")?;
+  q.query_map([account],|r|r.get::<_,Option<String>>(0)).map_err(|_|"Account enrollment index unavailable")?.filter_map(|r|match r{Ok(Some(id))=>Some(Ok(id)),Ok(None)=>None,Err(_)=>Some(Err("Account enrollment row unavailable".into()))}).collect()
  }
 }

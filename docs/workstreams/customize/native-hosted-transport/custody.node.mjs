@@ -12,7 +12,7 @@ const ownerCode=transpile(base+"/node-native-pairing-custody.ts")
  .replace(/import \{[^}]+\} from "ingenium-core";/,'const {HostedRefusal}=globalThis.__custodyTest;const getDb=()=>{throw Error("No real database in fixture")},execTransaction=()=>{throw Error("No real transaction in fixture")},checkpointAfterWrite=()=>{},vault={},authorization={};')
  .replace(/import \{[^}]+\} from "\.\/middleware\/auth.js";/,'const authenticateRequestWithoutActivity=()=>{throw Error("No fixture auth acceptance")};')
  .replace(/import \{[^}]+\} from "\.\/authorization-policy.js";/,'const toAuthorizationPrincipal=()=>{throw Error("No fixture auth acceptance")};')
- .replace('"./paired-native-reader.js"',JSON.stringify(readerUrl));
+ .replace('"./paired-native-reader.js"',JSON.stringify(readerUrl)).replace('"./paired-native-proof.js"',JSON.stringify(proofUrl));
 const {createNodeNativePairingOwner}=await import(encode(ownerCode));
 const migration=fs.readFileSync(app+"/packages/ingenium-core/data/migrations/096_resource_ownership.sql","utf8");
 const table=migration.match(/CREATE TABLE provider_connections \([\s\S]*?\n\);/)[0];
@@ -20,8 +20,9 @@ const triggers=[...migration.matchAll(/CREATE TRIGGER provider_connections_[\s\S
 function fixture(){
  const db=new DatabaseSync(":memory:");db.exec("PRAGMA foreign_keys=ON; CREATE TABLE organizations(id TEXT PRIMARY KEY); CREATE TABLE users(id TEXT PRIMARY KEY); CREATE TABLE projects(id TEXT PRIMARY KEY,organization_id TEXT,is_global INTEGER); CREATE TABLE organization_memberships(organization_id TEXT,user_id TEXT,status TEXT); CREATE TABLE vault_items(id TEXT PRIMARY KEY,project_id TEXT,organization_id TEXT,owner_kind TEXT,owner_user_id TEXT,type TEXT,version INTEGER,access_policy TEXT,encrypted BLOB); CREATE TABLE veyra_installation_identity(singleton INTEGER PRIMARY KEY,instance_id TEXT); CREATE TABLE provider_model_policies(id TEXT); CREATE TABLE resource_grants(id TEXT); CREATE TABLE settings(id TEXT);");
  db.exec(table);for(const t of triggers)db.exec(t);
+ db.exec("CREATE UNIQUE INDEX fixture_installation ON veyra_installation_identity(instance_id)");db.exec(fs.readFileSync(app+"/packages/ingenium-core/data/migrations/125_native_hosted_governance.sql","utf8"));
  db.exec("INSERT INTO organizations VALUES('org'); INSERT INTO users VALUES('user'),('other'); INSERT INTO projects VALUES('project','org',0); INSERT INTO organization_memberships VALUES('org','user','active'); INSERT INTO veyra_installation_identity VALUES(1,'installation');");
- const state={actor:"user",sealed:false,redeems:0,verifies:0,contexts:0,originals:0,failProof:false,afterRetain:undefined,beforeRetain:undefined};
+ const request={method:"POST",path:"/effects"};const state={archived:false,request,retirementProof:undefined,retirementHook:undefined,actor:"user",sealed:false,redeems:0,verifies:0,contexts:0,originals:0,failProof:false,afterRetain:undefined,beforeRetain:undefined};
  const key=Buffer.alloc(32,19),prep={schemaVersion:1,stage:"preparation",enrollmentRequestId:"enrollment",endpoint:"https://actual-native.example",certificatePem:"synthetic-public-certificate",certificateSha256:"a".repeat(64),pairingCode:"b".repeat(64),expectedAuthorityId:"authority"};
  db.prepare("INSERT INTO vault_items VALUES('item','project','org','user','user','native-pairing-credential',0,'{}',?)").run(crypto.encryptSecret(JSON.stringify(prep),key));
  const original={actorId:"user",installationId:"installation",enrollmentRequestId:"enrollment",hostedProjectId:"project",authorityId:"authority",grantId:"actual-grant",grantRevision:1,nativeOwner:{library_id:"actual-library",service_instance_id:"actual-service",project:{id:"native-project",revision:3,archived:false}}};
@@ -30,15 +31,17 @@ function fixture(){
  const backend={
  db:()=>db,transaction:work=>{db.exec("BEGIN IMMEDIATE");try{const result=work();db.exec("COMMIT");return result;}catch(e){db.exec("ROLLBACK");throw e;}},checkpoint(){},
  principal(){return {type:"user",id:state.actor,scopes:["user:*"],session:{id:"fixture-browser-session"}};},
- project(p,id){return id==="project"&&!!db.prepare("SELECT 1 FROM organization_memberships WHERE user_id=? AND organization_id='org' AND status='active'").get(p.id);},
+ project(p,id){return !state.archived&&id==="project"&&!!db.prepare("SELECT 1 FROM organization_memberships WHERE user_id=? AND organization_id='org' AND status='active'").get(p.id);},
+ retirementProject(p,id){return id==="project"&&!!db.prepare("SELECT 1 FROM organization_memberships WHERE user_id=? AND organization_id='org' AND status='active'").get(p.id);},
  owned(p,row){return row.owner_kind==="user"&&row.owner_user_id===p.id&&row.organization_id==="org";},
  vault:{isSealed:()=>state.sealed,decryptItem(project,id){assert.equal(project,"project");const row=db.prepare("SELECT encrypted FROM vault_items WHERE id=?").get(id);return crypto.decryptSecret(Buffer.from(row.encrypted),key).toString("utf8");},
+ deleteItem(project,id){assert.equal(project,"project");db.prepare("UPDATE vault_items SET access_policy=? WHERE id=?").run('{"mode":"deleted"}',id);},
  updateItem(project,id,value){assert.equal(project,"project");if(state.sealed)return;db.prepare("UPDATE vault_items SET encrypted=?,version=version+1 WHERE id=?").run(crypto.encryptSecret(value,key),id);}},
  async redeem(actual,actor,installation,project,retain){state.redeems++;assert.deepEqual(actual,prep);assert.equal(actor,"user");assert.equal(installation,"installation");assert.equal(project,"project");state.beforeRetain?.();retain(redeemed);state.afterRetain?.();if(state.failProof)throw Error("Native context unavailable");return credential;},
  async verify(value){state.verifies++;assert.deepEqual(value,redeemed);if(state.failProof)throw Error("Native context unavailable");return credential;},
- reader(value){assert.deepEqual(value,credential);return {original:value.original,async readContext(){state.contexts++;return {actual:"paired Native read fixture"};},async readOriginal(){state.originals++;return {actual:"paired Native original fixture"};}}}
+ reader(value){assert.deepEqual(value,credential);return {original:value.original,async readRetirement(){state.retirementHook?.();if(state.retirementProof instanceof Error)throw state.retirementProof;return state.retirementProof??{protocol:"node_hosted_retirement_v1",enrollment_request_id:"enrollment",actor_id:"user",installation_id:"installation",native_authority_id:"authority",native_owner:original.nativeOwner,grant:{id:"actual-grant",revision:2,revoked:true},live_pairings:0,live_grants:0,pending_effects:0};},async readContext(){state.contexts++;return {actual:"paired Native read fixture"};},async readOriginal(){state.originals++;return {actual:"paired Native original fixture"};}}}
  };
- const owner=createNodeNativePairingOwner({},backend),input={enrollmentRequestId:"enrollment",hostedProjectId:"project",preparationItemId:"item"};
+ const owner=createNodeNativePairingOwner(request,backend),input={enrollmentRequestId:"enrollment",hostedProjectId:"project",preparationItemId:"item"};
  return {db,state,owner,input,backend,credential,secret:()=>JSON.parse(backend.vault.decryptItem("project","item")),row:()=>db.prepare("SELECT * FROM provider_connections").get(),close(){db.close();key.fill(0);}};
 }
 test("real 096 connection SQL + actual vault AES-GCM: pair once, retain only encrypted same-item credential",async()=>{const f=fixture();try{
@@ -100,4 +103,69 @@ test("actual child-MCP resolution never decrypts a private Native pairing item",
 });
 test("requested hosted project must match actual owned vault row before irreversible Native pair",async()=>{const f=fixture();try{
  await assert.rejects(f.owner.pair({...f.input,hostedProjectId:"foreign"}),e=>e.code==="PAIRING_PROJECT_CHANGED");assert.equal(f.state.redeems,0);assert.equal(f.row(),undefined);
+}finally{f.close();}});
+function grant(f){
+ f.db.prepare("INSERT INTO native_hosted_governance_grants(id,enrollment_request_id,enrollment_hash,connection_id,owner_user_id,installation_id,native_library_id,native_service_instance_id,native_project_id,native_project_revision,hosted_project_id,visibility,revision,epoch,created_at) VALUES('node-grant','enrollment',?,'connection','user','installation','actual-library','actual-service','native-project',3,'project','project',1,'epoch','now')").run("d".repeat(64));
+}
+test("quiescence stops new use while preserving actual same-owner read-only receipt recovery",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});assert.equal(q.state,"quiescing");assert.equal(q.pendingEffects,0);
+ await assert.rejects(f.owner.custody.withOriginal("user","installation","enrollment",async()=>{}),e=>e.code==="NATIVE_ATTESTATION_UNAVAILABLE");
+ f.state.request.method="GET";f.state.request.path="/operations/original";await f.owner.custody.withOriginal("user","installation","enrollment",async reader=>{reader.assertCurrent();await reader.readContext();});assert.equal(f.state.contexts,1);
+ await assert.rejects(f.owner.retire("enrollment",{expectedRevision:q.revision-1}),e=>e.code==="PAIRING_CAS_CONFLICT");
+}finally{f.close();}});
+test("actual Native revocation proof + zero real125 effects logically retire existing rows without erasing originals/ciphertext",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision}),before=Buffer.from(f.db.prepare("SELECT encrypted FROM vault_items").get().encrypted);
+ const r=await f.owner.retire("enrollment",{expectedRevision:q.revision});assert.equal(r.state,"retired");assert.equal(r.physicalErasure,false);assert.equal(f.row().enabled,0);assert.equal(f.row().credential_item_id,null);
+ assert.ok(f.db.prepare("SELECT revoked_at FROM native_hosted_governance_grants").get().revoked_at);assert.equal(f.db.prepare("SELECT access_policy FROM vault_items").get().access_policy,'{"mode":"deleted"}');assert.deepEqual(Buffer.from(f.db.prepare("SELECT encrypted FROM vault_items").get().encrypted),before);
+ assert.equal(f.owner.status("enrollment").state,"retired");
+}finally{f.close();}});
+test("an executing actual125 effect prevents retirement; unknown absence is never written into terminal history",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);f.db.prepare("INSERT INTO native_hosted_governance_effects(operation_id,grant_id,actor_id,project_id,payload_hash,binding_hash,command_kind,state,created_at,updated_at) VALUES('unknown','node-grant','user','project',?,?,'archive','executing','now','now')").run("e".repeat(64),"f".repeat(64));
+ const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});assert.equal(q.pendingEffects,1);
+ await assert.rejects(f.owner.retire("enrollment",{expectedRevision:q.revision}),e=>e.code==="HOSTED_EFFECTS_UNRESOLVED");assert.equal(f.db.prepare("SELECT state FROM native_hosted_governance_effects").get().state,"executing");assert.equal(f.row().config_json.includes('"retirement":'),false);
+}finally{f.close();}});
+test("live/mismatched Native grants, active pairings, Native pending originals or failed proof do not authorize retirement",async()=>{for(const mutate of [p=>p.grant.revoked=false,p=>p.grant.id="foreign",p=>p.grant.revision=1,p=>p.live_pairings=1,p=>p.live_grants=1,p=>p.pending_effects=1,p=>p.native_owner.project.revision=9]){
+ const f=fixture();try{await f.owner.pair(f.input);grant(f);const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});
+ f.state.retirementProof={protocol:"node_hosted_retirement_v1",enrollment_request_id:"enrollment",actor_id:"user",installation_id:"installation",native_authority_id:"authority",native_owner:structuredClone(f.credential.original.nativeOwner),grant:{id:"actual-grant",revision:2,revoked:true},live_pairings:0,live_grants:0,pending_effects:0};mutate(f.state.retirementProof);
+ await assert.rejects(f.owner.retire("enrollment",{expectedRevision:q.revision}));assert.equal(f.owner.status("enrollment").state,"quiescing");assert.equal(f.db.prepare("SELECT revoked_at FROM native_hosted_governance_grants").get().revoked_at,null);assert.notEqual(f.row().credential_item_id,null);
+ }finally{f.close();}
+}});
+test("owner/version race during Native retirement proof cannot retire changed custody",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});f.state.retirementHook=()=>f.db.exec("UPDATE vault_items SET version=version+1");
+ await assert.rejects(f.owner.retire("enrollment",{expectedRevision:q.revision}),e=>e.code==="PAIRING_CAS_CONFLICT");assert.equal(f.owner.status("enrollment").state,"quiescing");
+}finally{f.close();}});
+test("actual Rust admin SQL preserves non-null unknown receipts and releases only matching completed retirement",()=>{
+ const source=fs.readFileSync(root+"/files/crates/adapters/src/utility_operations/hosted.rs","utf8"),sql=source.match(/const ADMIN_UNRESOLVED:&str=r#"([\s\S]*?)"#;/)[1],db=new DatabaseSync(":memory:");
+ try{db.exec("CREATE TABLE originals(id TEXT PRIMARY KEY,kind TEXT,original TEXT,result TEXT,created INTEGER)");const owner={library_id:"library",service_instance_id:"service",project:{id:"native",revision:2,primary_root:"C:/exact"}},account={account:{id:"account"}};
+ const original={protocol:"node_hosted_pairing_v1",command:{account:{enrollment_request_id:"enrollment",native_owner:owner,account_review:account}}};
+ db.prepare("INSERT INTO originals VALUES('source','remote_admin',?,?,0)").run(JSON.stringify(original),JSON.stringify({state:"unconfirmed"}));
+ const held=()=>db.prepare("SELECT EXISTS(SELECT 1 "+sql+") AS held").get().held;assert.equal(held(),1);
+ const resolution={protocol:"node_hosted_retirement_command_v1",private_owner:{enrollment_request_id:"enrollment",account_review:account,native_owner:structuredClone(owner)}},result={state:"completed",value:{node:{state:"retired",enrollmentRequestId:"enrollment"}}};
+ resolution.private_owner.native_owner.project.primary_root="C:/foreign";db.prepare("INSERT INTO originals VALUES('resolution','remote_admin',?,?,1)").run(JSON.stringify(resolution),JSON.stringify(result));assert.equal(held(),1);
+ resolution.private_owner.native_owner=owner;db.prepare("UPDATE originals SET original=? WHERE id='resolution'").run(JSON.stringify(resolution));assert.equal(held(),0);assert.equal(JSON.parse(db.prepare("SELECT result FROM originals WHERE id='source'").get().result).state,"unconfirmed");
+ }finally{db.close();}
+});
+test("actual Core lifecycle query holds active project/grant/unknown owner and clears after proven logical retirement",async()=>{const f=fixture();try{
+ const source=transpile(root+"/files/packages/ingenium-core/lib/tools/node-native-lifecycle.ts"),{assertNativeGovernanceLifecycleClear:clear}=await import(encode(source));
+ clear(f.db,"project");await f.owner.pair(f.input);grant(f);assert.throws(()=>clear(f.db,"project"),/CUSTODY/);clear(f.db,"foreign");
+ const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});assert.throws(()=>clear(f.db),/CUSTODY/);await f.owner.retire("enrollment",{expectedRevision:q.revision});clear(f.db,"project");clear(f.db);
+}finally{f.close();}});test("failed Native retirement read retains quiesced authority and encrypted credential",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});f.state.retirementProof=Error("TLS proof unavailable");
+ await assert.rejects(f.owner.retire("enrollment",{expectedRevision:q.revision}));assert.equal(f.owner.status("enrollment").state,"quiescing");assert.equal(f.row().credential_item_id,"item");
+}finally{f.close();}});
+test("quiescing during one-use redemption cannot reactivate custody or resend code",async()=>{const f=fixture();try{
+ f.state.beforeRetain=()=>f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});const r=await f.owner.pair(f.input);assert.equal(r.state,"quiescing");assert.equal(f.state.redeems,1);await f.owner.pair(f.input);assert.equal(f.state.redeems,1);assert.equal(f.secret().stage,"preparation");
+}finally{f.close();}});test("unpaired local reconciliation clears only exact local custody and preserves unknown remote sign-in outcome",()=>{
+ const source=fs.readFileSync(root+"/files/crates/adapters/src/utility_operations/hosted.rs","utf8"),sql=source.match(/const ADMIN_UNRESOLVED:&str=r#"([\s\S]*?)"#;/)[1],db=new DatabaseSync(":memory:");
+ try{db.exec("CREATE TABLE originals(id TEXT PRIMARY KEY,kind TEXT,original TEXT,result TEXT,created INTEGER)");const original={protocol:"node_hosted_account_v1",command:{enrollment_request_id:"enrollment",native_owner:{library_id:"library",service_instance_id:"old-service",project:null},account_review:{account:{id:"account"}}}};
+ db.prepare("INSERT INTO originals VALUES('source','remote_admin',?,?,0)").run(JSON.stringify(original),JSON.stringify({state:"unconfirmed"}));const held=()=>db.prepare("SELECT EXISTS(SELECT 1 "+sql+") held").get().held;assert.equal(held(),1);
+ const receipt={state:"completed",local_native_custody_released:true,remote_sign_in_outcome:"unconfirmed"},wrong={protocol:"node_hosted_local_account_reconciliation_v1",source_operation_id:"source",source_original:{...original,changed:true}};
+ db.prepare("INSERT INTO originals VALUES('local','remote_admin',?,?,1)").run(JSON.stringify(wrong),JSON.stringify(receipt));assert.equal(held(),1);
+ db.prepare("UPDATE originals SET original=? WHERE id='local'").run(JSON.stringify({...wrong,source_original:original}));assert.equal(held(),0);assert.equal(JSON.parse(db.prepare("SELECT result FROM originals WHERE id='source'").get().result).state,"unconfirmed");
+ }finally{db.close();}
+});test("historical private retirement works for archived project without restoring domain-effect authority",async()=>{const f=fixture();try{
+ await f.owner.pair(f.input);grant(f);f.state.archived=true;
+ await assert.rejects(f.owner.custody.withOriginal("user","installation","enrollment",async()=>{}));
+ const q=f.owner.quiesce("enrollment",{expectedRevision:f.row().revision});assert.equal(q.state,"quiescing");
+ assert.equal((await f.owner.retire("enrollment",{expectedRevision:q.revision})).state,"retired");
 }finally{f.close();}});

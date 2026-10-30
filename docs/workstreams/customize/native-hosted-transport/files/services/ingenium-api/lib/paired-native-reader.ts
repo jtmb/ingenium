@@ -35,7 +35,7 @@ function request(trust:TransportTrust,path:string,method:"GET"|"POST",query:Reco
 }
 function pairingCookie(headers:readonly string[]):string{
  let result:string|undefined;
- for(const raw of headers){const first=raw.split(";")[0];if(!first.startsWith("veyra_remote="))continue;
+ for(const raw of headers){const first=raw.split(";")[0];if(!first||!first.startsWith("veyra_remote="))continue;
   const value=first.slice("veyra_remote=".length),attrs=raw.split(";").slice(1).map(v=>v.trim().toLowerCase());
   if(result||!/^[a-f0-9]{64}$/.test(value)||!["secure","httponly","samesite=strict","path=/remote/"].every(v=>attrs.includes(v))||attrs.some(v=>v.startsWith("domain=")))return invalid();result=value;}
  return result??invalid();
@@ -72,6 +72,9 @@ export function createPairedNativeReader(credential:PairedNativeCredential){
  const original=structuredClone(credential.original),trust={endpoint:credential.endpoint,certificatePem:credential.certificatePem,certificateSha256:credential.certificateSha256},token=credential.token;
  return Object.freeze({original,
   readContext:()=>readContext({...trust,token},original.actorId,original.installationId,original.enrollmentRequestId),
+  async readRetirement(){
+   return (await request(trust,"/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/retirement","GET",{actor_id:original.actorId,installation_id:original.installationId},token)).body;
+  },
   async readOriginal(operationId:string,payloadHash:string){
    if(!id(operationId)||!/^[a-f0-9]{64}$/.test(payloadHash))return invalid();
    const path="/remote/v1/node-hosted/enrollments/"+encodeURIComponent(original.enrollmentRequestId)+"/originals/"+encodeURIComponent(operationId);

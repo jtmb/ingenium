@@ -11,6 +11,7 @@ virtual.set(core,virtual.get(core)+`
 export declare function execTransaction<T>(work:()=>T,retries?:number,mode?:"deferred"|"immediate"):T;
 export declare function checkpointAfterWrite():void;
 export declare namespace vault {type VaultActor={type:"compatibility"|"user"|"service"|"system";id?:string;requestId?:string};function isSealed():boolean;function decryptItem(projectId:string,itemId:string,actor?:VaultActor):string|null;function updateItem(projectId:string,itemId:string,value:string,actor?:VaultActor):void;}
+export declare namespace vault {function deleteItem(projectId:string,itemId:string,actor?:VaultActor):void;}
 export declare namespace authorization {type AuthorizationPermission="read"|"write"|"admin"|"execute";interface AuthorizationPrincipal {type:"browser-user"|"user-token"|"service-principal"|"runtime-service"|"compatibility";id:string;scopes:readonly string[];}interface OwnedResource {resourceType:"vault_folder"|"vault_item"|"provider_connection"|"mail_account";resourceId:string;organizationId:string;ownerKind:"user"|"organization";ownerUserId?:string|null;}function requireProjectPermission(p:AuthorizationPrincipal,id:string,resource:string,permission:AuthorizationPermission):{allowed:boolean;visible:boolean};function requireOwnedResourcePermission(p:AuthorizationPrincipal,r:OwnedResource,permission:AuthorizationPermission):{allowed:boolean;visible:boolean};}`);
 
 const auth=path.join(base,"__auth__.d.ts"),policy=path.join(base,"__policy__.d.ts"),csrf=path.join(base,"__csrf__.d.ts");
@@ -27,12 +28,14 @@ host.resolveModuleNames=(names,from)=>names.map(name=>{
  if(name.endsWith("/middleware/auth.js"))return {resolvedFileName:auth,extension:ts.Extension.Dts};
  if(name.endsWith("/authorization-policy.js"))return {resolvedFileName:policy,extension:ts.Extension.Dts};
  if(name.endsWith("/middleware/csrf.js"))return {resolvedFileName:csrf,extension:ts.Extension.Dts};
+ if(name==="../db.js"&&from.endsWith("/node-native-lifecycle.ts"))return {resolvedFileName:core,extension:ts.Extension.Dts};
+ if(name==="./hosted-governance.js"&&from.endsWith("/node-native-lifecycle.ts"))return {resolvedFileName:engine,extension:ts.Extension.Ts};
  if(name==="ingenium-core")return {resolvedFileName:core,extension:ts.Extension.Dts};
  if(name==="./routes/native-customize-context.js")return {resolvedFileName:context,extension:ts.Extension.Dts};
  return ts.resolveModuleName(name,from,options,host).resolvedModule??ts.resolveModuleName(name,path.join(app,"services/ingenium-api/__source_check__.ts"),options,host).resolvedModule;
 });
 host.writeFile=()=>{emitted++;throw new Error("No source check emission");};
-const files=[...["native-hosted-connection-owner.ts","node-native-pairing-custody.ts","paired-native-proof.ts","paired-native-reader.ts"].map(n=>path.join(base,n)),path.join(base,"routes/native-customize-pairings.ts"),path.join(base,"routes/native-customize.ts")];
+const files=[...["native-hosted-connection-owner.ts","node-native-pairing-custody.ts","paired-native-proof.ts","paired-native-reader.ts"].map(n=>path.join(base,n)),path.join(base,"routes/native-customize-pairings.ts"),path.join(base,"routes/native-customize.ts"),path.join(root,"files/packages/ingenium-core/lib/tools/node-native-lifecycle.ts")];
 const program=ts.createProgram([...files,core,context],options,host),diagnostics=ts.getPreEmitDiagnostics(program);
 for(const d of diagnostics){const where=d.file&&d.start!==undefined?d.file.fileName+":"+(d.file.getLineAndCharacterOfPosition(d.start).line+1)+": ":"";process.stderr.write(where+ts.flattenDiagnosticMessageText(d.messageText,"\n")+"\n");}
 console.log(JSON.stringify({privateNodeSourceFiles:files.length,contract:"Frozen Worker5 engine plus exact source auth/vault interfaces; no runtime auth stub; shared vault route remains Root compile gate",diagnostics:diagnostics.length,emitted}));

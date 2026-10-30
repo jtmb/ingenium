@@ -14,5 +14,7 @@ export function createNativePairingRouter(){
   if(!req.body||Object.keys(req.body).length)throw new HostedRefusal("INVALID_PAIRING_INSPECTION",422);
   return createNodeNativePairingOwner(req).recover(String(req.params.enrollmentRequestId));
  }));
+ router.post("/:enrollmentRequestId/quiesce",run(req=>createNodeNativePairingOwner(req).quiesce(String(req.params.enrollmentRequestId),req.body)));
+ router.post("/:enrollmentRequestId/retire",run(req=>createNodeNativePairingOwner(req).retire(String(req.params.enrollmentRequestId),req.body)));
  return router;
 }
