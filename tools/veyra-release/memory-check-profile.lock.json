@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "profile": "native-cargo-check-memory-existing-inputs-v2",
+  "extends": "native-cargo-check-existing-inputs-v1",
+  "proposalRevision": "eddbd5f218b40080b71928b79a6a1bc79850daed",
+  "nativeBaselineTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+  "stageBytes": 2147483648,
+  "sourceAllowanceBytes": 268435456,
+  "baselineLockSha256": "a7bb23ff65c5359cddd1f9e5f98a762070124424417808e3117fef746a368aee",
+  "expectedResolvedLockSha256": "a5b1f51eb57f93d553abe9d5d428db773fc4e4d43d55dd1269443a3af058fd07",
+  "lockStatus": "Expected exact graph specification only; no Cargo resolution performed; Root must resolve and compare actual raw lock",
+  "lockDelta": {
+    "addedPackage": {
+      "name": "veyra-memory",
+      "version": "0.1.0",
+      "dependencies": [
+        "serde",
+        "serde_json",
+        "sha2"
+      ]
+    },
+    "addedConsumerEdges": [
+      "veyra-adapters -> veyra-memory",
+      "veyra-service -> veyra-memory"
+    ],
+    "registryPackagesAddedOrChanged": 0
+  },
+  "manifests": [
+    {
+      "path": "Cargo.toml",
+      "beforeSha256": "fff5964b782a834da6f721eaa9ad1a5ace5bb85a95ea0bd282f92f98c5e66039",
+      "afterSha256": "eaea8832bacb74027fee855571261af75a8ac22b30a54c4e6fbdcc160d156ef8",
+      "changed": true
+    },
+    {
+      "path": "apps/service/Cargo.toml",
+      "beforeSha256": "1b2f0c355fceebb50dc0990d36b114885540f1d581606482ac8809d7b5deaa3e",
+      "afterSha256": "c6190b4dcb1c06c0233c737a8312a14423841324fb0f43241900ae9de06a8823",
+      "changed": true
+    },
+    {
+      "path": "apps/desktop/src-tauri/Cargo.toml",
+      "beforeSha256": "e4858798077c62426179401b01d7b9593493bd20bb67d714a386d0c0d93077f5",
+      "afterSha256": "e4858798077c62426179401b01d7b9593493bd20bb67d714a386d0c0d93077f5",
+      "changed": false
+    },
+    {
+      "path": "apps/legacy-dock/Cargo.toml",
+      "beforeSha256": "975e24a087400e8f0625f820fe06f7e54f5098334ef8f00f963389f6758c6226",
+      "afterSha256": "975e24a087400e8f0625f820fe06f7e54f5098334ef8f00f963389f6758c6226",
+      "changed": false
+    },
+    {
+      "path": "crates/adapters/Cargo.toml",
+      "beforeSha256": "5aabcaa2d40e26eeeaba5cfff79bed03d82c41d3f47b402a6328adee44fdfec6",
+      "afterSha256": "5c373ba8208a61f90dc685109f901f14fec2ce5c0acbc11dd32c067bdbd41e31",
+      "changed": true
+    },
+    {
+      "path": "crates/contracts/Cargo.toml",
+      "beforeSha256": "ba309e1f824b13b69d42d47d328889cf326768d34bff94e1d1f183d217b2de7b",
+      "afterSha256": "ba309e1f824b13b69d42d47d328889cf326768d34bff94e1d1f183d217b2de7b",
+      "changed": false
+    },
+    {
+      "path": "crates/core/Cargo.toml",
+      "beforeSha256": "005e5796b56f10568575756e1d2d959c179472c3e70a8456b966138956db65dd",
+      "afterSha256": "005e5796b56f10568575756e1d2d959c179472c3e70a8456b966138956db65dd",
+      "changed": false
+    },
+    {
+      "path": "crates/harness/Cargo.toml",
+      "beforeSha256": "4e5828c11b9e6aae620db43215fe54ce32049f6a095ad3d40ce3e251f3c54a71",
+      "afterSha256": "4e5828c11b9e6aae620db43215fe54ce32049f6a095ad3d40ce3e251f3c54a71",
+      "changed": false
+    },
+    {
+      "path": "crates/wsl-owner-helper/Cargo.toml",
+      "beforeSha256": "cbdb6102237ab650bbcb4195ee6c38ffbe20e3ca13116a5d97dddf1fa063b8d0",
+      "afterSha256": "cbdb6102237ab650bbcb4195ee6c38ffbe20e3ca13116a5d97dddf1fa063b8d0",
+      "changed": false
+    },
+    {
+      "path": "crates/veyra-memory/Cargo.toml",
+      "beforeSha256": null,
+      "afterSha256": "b5e7a3824ed4a17b81d49b07c1bc916e4920116da6c52094ed200f0c2d955b01",
+      "changed": true
+    }
+  ],
+  "newCrateManifestBytes": 204,
+  "newCrateManifestSha256": "b5e7a3824ed4a17b81d49b07c1bc916e4920116da6c52094ed200f0c2d955b01",
+  "newLibrarySourceBytes": 16940,
+  "newLibrarySourceInventory": [
+    {
+      "path": "crates/veyra-memory/src/lib.rs",
+      "bytes": 679,
+      "sha256": "21c4a73c6a25f69eeed798dcb9d4726ec8a9e6c64b5a8dd6120affa69f93f1ee"
+    },
+    {
+      "path": "crates/veyra-memory/src/snapshot.rs",
+      "bytes": 3488,
+      "sha256": "e7b992fe309576f334d30a520c469843e623d91d86d0146faae810d88770aabe"
+    },
+    {
+      "path": "crates/veyra-memory/src/state.rs",
+      "bytes": 8092,
+      "sha256": "8d5bdd85e8d30b9c11b1d27bf184cb944fa18312a00d9079ebb8bad6f044cf40"
+    },
+    {
+      "path": "crates/veyra-memory/src/types.rs",
+      "bytes": 4681,
+      "sha256": "ed99d107169736cce0cf0bbff42bdf0a3b54cd7ca733fcc8f245b087889fd764"
+    }
+  ],
+  "featureWitnesses": [
+    {
+      "package": "serde",
+      "unit": "serde-2e7442c4eb067551/lib-serde.json",
+      "features": [
+        "alloc",
+        "default",
+        "derive",
+        "rc",
+        "serde_derive",
+        "std"
+      ],
+      "requiredFeatures": [
+        "default",
+        "derive",
+        "serde_derive",
+        "std"
+      ],
+      "allowedFeatures": [
+        "alloc",
+        "default",
+        "derive",
+        "rc",
+        "serde_derive",
+        "std"
+      ],
+      "profile": "8979240926782815398",
+      "compiler": "17664546606611198464",
+      "flagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+      "fingerprintSha256": "fb548b1dddda13980733867c8f60169e930e7c410639122ac4d270db17621e36",
+      "compiledArtifact": "libserde-2e7442c4eb067551.rmeta",
+      "artifactBytes": 525960
+    },
+    {
+      "package": "serde_json",
+      "unit": "serde_json-5d4f944bbcd2ad4d/lib-serde_json.json",
+      "features": [
+        "default",
+        "raw_value",
+        "std"
+      ],
+      "requiredFeatures": [
+        "default",
+        "std"
+      ],
+      "allowedFeatures": [
+        "alloc",
+        "default",
+        "raw_value",
+        "std"
+      ],
+      "profile": "8979240926782815398",
+      "compiler": "17664546606611198464",
+      "flagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+      "fingerprintSha256": "ef0091f01dedebac2db6841c5545360dbac009d01eec436f8eaecee23530bb9e",
+      "compiledArtifact": "libserde_json-5d4f944bbcd2ad4d.rmeta",
+      "artifactBytes": 1067744
+    },
+    {
+      "package": "sha2",
+      "unit": "sha2-a3752a26a8a920cd/lib-sha2.json",
+      "features": [
+        "default",
+        "std"
+      ],
+      "requiredFeatures": [
+        "default",
+        "std"
+      ],
+      "allowedFeatures": [
+        "default",
+        "std"
+      ],
+      "profile": "8979240926782815398",
+      "compiler": "17664546606611198464",
+      "flagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+      "fingerprintSha256": "cc5d0af20e9e8bf6c9561806559952e07c72a1fbd06af3625c90f815faf8686a",
+      "compiledArtifact": "libsha2-a3752a26a8a920cd.rmeta",
+      "artifactBytes": 640108
+    },
+    {
+      "package": "serde_derive",
+      "unit": "serde_derive-e0400d55e3df06a8/lib-serde_derive.json",
+      "features": [
+        "default"
+      ],
+      "requiredFeatures": [
+        "default"
+      ],
+      "allowedFeatures": [
+        "default"
+      ],
+      "profile": "11528375766455597691",
+      "compiler": "17664546606611198464",
+      "flagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+      "fingerprintSha256": "db61c6c24f01fc2e702c12ecf96914041e877c7f5de147a07d1512d598bf5b23",
+      "compiledArtifact": "serde_derive-e0400d55e3df06a8.dll",
+      "artifactBytes": 2782208
+    }
+  ],
+  "uuidDelta": "None; immutable Memory crate declares no uuid dependency",
+  "hostCodegenDelta": "No new requested registry/host feature or package; existing serde_derive reused; new workspace metadata expected",
+  "actualResolutionOrBuildRun": false,
+  "installedRegistryManifestEvidence": [
+    {
+      "package": "serde",
+      "version": "1.0.229",
+      "sha256": "6883caefd46e86eb15d22d3a6d274ad304c5e7934ab70eb58d81b7c4a29ef9db",
+      "default": [
+        "std"
+      ],
+      "explicitMemoryFeatures": [
+        "derive"
+      ],
+      "deriveEnables": [
+        "serde_derive"
+      ]
+    },
+    {
+      "package": "serde_json",
+      "version": "1.0.151",
+      "sha256": "00b920255c320a278bf25b962b491263a19d8c90e12e4a91c1d823db71eabb2f",
+      "default": [
+        "std"
+      ],
+      "explicitMemoryFeatures": []
+    },
+    {
+      "package": "sha2",
+      "version": "0.10.9",
+      "sha256": "f5b86209df69360114aaee67a66c3fcd31d8c840b8f34b9ad383aacd63cd15da",
+      "default": [
+        "std"
+      ],
+      "explicitMemoryFeatures": [],
+      "stdEnables": [
+        "digest/std"
+      ],
+      "asmRequested": false
+    }
+  ]
+}
