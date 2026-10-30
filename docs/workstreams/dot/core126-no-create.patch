@@ -1,0 +1,129 @@
+--- a/services/ingenium-api/lib/restore-runtime-guard.ts
++++ b/services/ingenium-api/lib/restore-runtime-guard.ts
+@@ -26 +26 @@
+-    "OR (e.original_container_id IS NULL AND json_extract(e.retirement_proof,'$.kind')='core-no-create-effect-v1' " +
++    "OR (e.original_container_id IS NULL AND e.effect_fence='closed-no-create-v1' AND e.material_consumed_at IS NULL AND e.credential_id IS NULL AND e.result_json IS NULL AND json_extract(e.retirement_proof,'$.kind')='core-no-create-effect-v1' " +
+@@ -28 +28 @@
+-    "AND json_extract(e.retirement_proof,'$.runIdentityHash')=e.run_identity_hash))) " +
++    "AND json_extract(e.retirement_proof,'$.runIdentityHash')=e.run_identity_hash AND json_type(e.retirement_proof,'$.closedRevision')='integer' AND json_extract(e.retirement_proof,'$.closedRevision')>=1 AND json_extract(e.retirement_proof,'$.closedRevision')<=e.revision AND julianday(json_extract(e.retirement_proof,'$.closedAt')) IS NOT NULL AND NOT EXISTS(SELECT 1 FROM job_run_mcp_credentials c WHERE c.run_id=e.run_id)))) " +
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -10 +10 @@
+- const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb();
++ const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb(),fenceIssuer=randomUUID();
+@@ -14 +14 @@
+- const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
++ const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,effectFence:r.effect_fence??"untracked",retirementProof:r.retirement_proof?JSON.parse(r.retirement_proof):null,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
+@@ -44 +44 @@
+-  const allowed=new Set(["phase","original_container_id","credential_id","material_consumed_at","result_json","retirement_proof","outcome_consumed_at","container_removed_at"]);
++  const allowed=new Set(["phase","effect_fence","original_container_id","credential_id","material_consumed_at","result_json","retirement_proof","outcome_consumed_at","container_removed_at"]);
+@@ -49,0 +50,6 @@
++ const noCreateProof=c=>{
++  const {r,a}=c,p=a.retirementProof;
++  if(r.effect_fence!=="closed-no-create-v1"||r.phase!=="retired"||r.original_container_id||r.material_consumed_at||r.credential_id||r.result_json||db.prepare("SELECT 1 FROM job_run_mcp_credentials WHERE run_id=?").get(r.run_id)
++    ||!p||p.schemaVersion!==1||p.kind!=="core-no-create-effect-v1"||p.runId!==r.run_id||p.attemptId!==r.attempt_id||p.specHash!==r.spec_hash||p.runIdentityHash!==r.run_identity_hash||p.effectFence!==r.effect_fence||!Number.isSafeInteger(p.closedRevision)||p.closedRevision>r.revision||p.closedRevision<1||!Number.isFinite(Date.parse(p.closedAt)))fail("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
++  return p;
++ };
+@@ -59 +65 @@
+-   const a={runId:after.run.id,jobId:after.job.id,projectId:after.job.project_id,organizationId:after.job.organization_id,ownerUserId:after.runtime.ownerUserId,attemptId:id(),runtimeId:after.runtime.id,runtimeRevision:after.runtime.revision,provisioningRevision:profile.provisioningRevision,parentContainerId:after.runtime.backendContainerId,workspaceId:after.workspace.id,bindingHash:after.workspace.storageMappingHash,bindingEpoch:after.workspace.securityEpoch,jobRevision:after.run.job_revision,scheduleRevision:after.run.schedule_revision,grantRevision:after.run.authorization_revision,principalSecurityEpoch:after.principalEpoch,profileId:profile.id,profileHash:profile.hash,promptHash:sha(after.job.prompt_template),daemonId:profile.daemonId,imageId:profile.imageId,approvedScopes:[...profile.approvedScopes].sort(),resourceAdmissionId:profile.resourceAdmissionId,agentHash:sha(after.agentConfig),modelBindingHash:profile.modelBindingHash,model:profile.model,limits:profile.limits,projectName:profile.projectName,deadlineAt:deadline};a.specHash=sha(a);
++   const a={runId:after.run.id,jobId:after.job.id,projectId:after.job.project_id,organizationId:after.job.organization_id,ownerUserId:after.runtime.ownerUserId,attemptId:id(),runtimeId:after.runtime.id,runtimeRevision:after.runtime.revision,provisioningRevision:profile.provisioningRevision,parentContainerId:after.runtime.backendContainerId,workspaceId:after.workspace.id,bindingHash:after.workspace.storageMappingHash,bindingEpoch:after.workspace.securityEpoch,jobRevision:after.run.job_revision,scheduleRevision:after.run.schedule_revision,effectFenceIssuer:fenceIssuer,grantRevision:after.run.authorization_revision,principalSecurityEpoch:after.principalEpoch,profileId:profile.id,profileHash:profile.hash,promptHash:sha(after.job.prompt_template),daemonId:profile.daemonId,imageId:profile.imageId,approvedScopes:[...profile.approvedScopes].sort(),resourceAdmissionId:profile.resourceAdmissionId,agentHash:sha(after.agentConfig),modelBindingHash:profile.modelBindingHash,model:profile.model,limits:profile.limits,projectName:profile.projectName,deadlineAt:deadline};a.specHash=sha(a);
+@@ -62 +68 @@
+-    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:a.profileId,profile_hash:a.profileHash,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:"prepared",resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:originalJobRunIdentity(after.run),deadline_at:deadline,created_at:clock().toISOString(),updated_at:clock().toISOString()};
++    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:a.profileId,profile_hash:a.profileHash,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:"prepared",effect_fence:"open-v1",resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:originalJobRunIdentity(after.run),deadline_at:deadline,created_at:clock().toISOString(),updated_at:clock().toISOString()};
+@@ -66,2 +72,2 @@
+-  admit(runId,action,ctx){manager(ctx);if(!["launch","inspect","cancel","cleanup"].includes(action))fail("MANAGED_JOB_INVALID_ACTION");if(action==="cancel"&&hasCancelIntent(runId)&&read(runId).r.phase!=="retired")return write(()=>{const {r}=current(runId,"inspect");return r.phase==="cancel_requested"?read(runId).a:cas(r,{phase:"cancel_requested"});});return current(runId,action).a;},
+-  claimEffect(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch"),expected=key.kind==="create"?"prepared":key.kind==="start"?"created":null;if(!expected||r.phase!==expected||a.cancelRequested)return {accepted:false};const admission=cas(r,{phase:key.kind+"_intent"});return {accepted:true,admission};});},
++  admit(runId,action,ctx){manager(ctx);if(!["launch","inspect","cancel","cleanup"].includes(action))fail("MANAGED_JOB_INVALID_ACTION");if(action==="cancel"&&hasCancelIntent(runId)&&read(runId).r.phase!=="retired")return write(()=>{const {r}=current(runId,"inspect");return r.phase==="cancel_requested"?read(runId).a:cas(r,{phase:"cancel_requested"});});const c=current(runId,action);if(c.r.effect_fence==="closed-no-create-v1")noCreateProof(c);return c.a;},
++  claimEffect(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch"),expected=key.kind==="create"?"prepared":key.kind==="start"?"created":null;if(!expected||a.effectFenceIssuer!==fenceIssuer||r.phase!==expected||a.cancelRequested||(key.kind==="create"&&(r.effect_fence!=="material-admitted-v1"||!r.material_consumed_at||!r.credential_id))||(key.kind==="start"&&r.effect_fence!=="create-admitted-v1"))return {accepted:false};const admission=cas(r,{phase:key.kind+"_intent",...(key.kind==="create"?{effect_fence:"create-admitted-v1"}:{})});return {accepted:true,admission};});},
+@@ -71 +77,4 @@
+-  async launchMaterial(runId,key,ctx){manager(ctx);const before=fence(runId,key,"launch");if(before.r.phase!=="prepared"||before.r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
++  async launchMaterial(runId,key,ctx){manager(ctx);let before=fence(runId,key,"launch");if(before.r.phase!=="prepared"||before.r.effect_fence!=="open-v1"||before.a.effectFenceIssuer!==fenceIssuer||before.r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
++   // Accepted material requests are fenced BEFORE any await/credential work, even if their acknowledgement is lost.
++   write(()=>{const c=fence(runId,key,"launch");if(c.r.effect_fence!=="open-v1")fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");cas(c.r,{effect_fence:"material-admitted-v1"});});
++   before=current(runId,"launch");key={attemptId:before.a.attemptId,revision:before.r.revision,specHash:before.a.specHash};
+@@ -81 +90,10 @@
+-  recordRetired(runId,key,ctx){manager(ctx);return write(()=>{const {r,a,run}=fence(runId,key,"inspect"),p=key.proof;if(!p||Object.keys(p).sort().join("|")!=="attemptId|containerId|daemonId|exitCode|kind|runId|schemaVersion|specHash"||p.schemaVersion!==1||p.runId!==runId||p.attemptId!==a.attemptId||p.containerId!==r.original_container_id||p.daemonId!==a.daemonId||p.specHash!==a.specHash||p.kind!=="original-daemon-container-wait-join"||!Number.isInteger(p.exitCode))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");
++  closeNoCreate(runId,key,ctx){manager(ctx);return write(()=>{
++   const c=fence(runId,key,"inspect"),{r,a,run}=c;
++   if(r.effect_fence!=="open-v1"||a.effectFenceIssuer!==fenceIssuer||!["prepared","cancel_requested"].includes(r.phase)||r.original_container_id||r.material_consumed_at||r.credential_id||r.result_json||r.retirement_proof||db.prepare("SELECT 1 FROM job_run_mcp_credentials WHERE run_id=?").get(runId)||!["running","queued"].includes(run.status))fail("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
++   const proof={schemaVersion:1,kind:"core-no-create-effect-v1",runId,attemptId:a.attemptId,specHash:a.specHash,runIdentityHash:r.run_identity_hash,effectFence:"closed-no-create-v1",closedRevision:r.revision+1,closedAt:clock().toISOString()};
++   const cancelled=r.phase==="cancel_requested"||hasCancelIntent(runId);
++   cas(r,{effect_fence:"closed-no-create-v1",phase:"retired",retirement_proof:JSON.stringify(proof)});
++   if(cancelled)jobs.cancelJobRun(r.project_id,runId);else jobs.finishJobRun(r.project_id,runId,"failed",null);
++   const closed=current(runId,"inspect");noCreateProof(closed);return closed.a;
++  });},
++  recordRetired(runId,key,ctx){manager(ctx);return write(()=>{const {r,a,run}=fence(runId,key,"inspect"),p=key.proof;if(!["create-admitted-v1","untracked"].includes(r.effect_fence)||!r.original_container_id||!/^[a-f0-9]{64}$/.test(r.original_container_id)||!p||Object.keys(p).sort().join("|")!=="attemptId|containerId|daemonId|exitCode|kind|runId|schemaVersion|specHash"||p.schemaVersion!==1||p.runId!==runId||p.attemptId!==a.attemptId||p.containerId!==r.original_container_id||p.daemonId!==a.daemonId||p.specHash!==a.specHash||p.kind!=="original-daemon-container-wait-join"||!Number.isInteger(p.exitCode))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");
+@@ -88 +106 @@
+-  recordRemoved(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"cleanup");if(r.phase!=="retired"||!r.outcome_consumed_at||!r.retirement_proof)fail("MANAGED_JOB_CLEANUP_UNAVAILABLE");return cas(r,{container_removed_at:clock().toISOString()});});},
++  recordRemoved(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"cleanup");if(r.phase!=="retired"||r.effect_fence==="closed-no-create-v1"||!r.original_container_id||!r.outcome_consumed_at||!r.retirement_proof)fail("MANAGED_JOB_CLEANUP_UNAVAILABLE");return cas(r,{container_removed_at:clock().toISOString()});});},
+--- a/services/ingenium-api/lib/dot-v2/core126-http.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -13 +13 @@
+-   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|consumed|removed)$/.exec(request.path);
++   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$/.exec(request.path);
+@@ -20 +20 @@
+-   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired",removed:"recordRemoved"};
++   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired","no-create-close":"closeNoCreate",removed:"recordRemoved"};
+--- a/services/ingenium-api/lib/dot-v2/managed-job-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/managed-job-owner.mjs
+@@ -37 +37,7 @@
+-  const current=await fresh(a,"inspect"),c=await child(current);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
++  const current=await fresh(a,"inspect");
++  if(current.effectFence==="closed-no-create-v1"){
++   const p=current.retirementProof;
++   if(current.containerId!==null||!p||p.schemaVersion!==1||p.kind!=="core-no-create-effect-v1"||p.runId!==current.runId||p.attemptId!==current.attemptId||p.specHash!==current.specHash||p.effectFence!==current.effectFence||!Number.isSafeInteger(p.closedRevision)||p.closedRevision>current.revision)return unknown("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
++   return {state:"settled",code:"MANAGED_JOB_CREATE_NEVER_ADMITTED",proof:p};
++  }
++  const c=await child(current);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
+@@ -85,0 +92 @@
++    if(observed.proof.kind==="core-no-create-effect-v1")return observed;
+@@ -95 +102 @@
+-   try{let a=await admission(runId,"cancel");if(!a.cancelRequested)return unknown("MANAGED_JOB_CANCEL_INTENT_REQUIRED");const c=await child(a);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");a=await fresh(a,"cancel");
++   try{let a=await admission(runId,"cancel");if(a.effectFence==="closed-no-create-v1")return await settle(a);if(!a.cancelRequested)return unknown("MANAGED_JOB_CANCEL_INTENT_REQUIRED");if(a.effectFence==="open-v1"){a=await core.closeNoCreate(a);return await settle(a);}const c=await child(a);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");a=await fresh(a,"cancel");
+--- a/services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs
++++ b/services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs
+@@ -19,0 +20 @@
++  closeNoCreate:a=>request(a.runId,"no-create-close",key(a)),
+--- a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
++++ b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+@@ -26 +26 @@
+- effectFence?:ManagedEffectFence;retirementProof?:ManagedRetirementProof|null;
++ effectFenceIssuer?:string;effectFence?:ManagedEffectFence;retirementProof?:ManagedRetirementProof|null;
+@@ -44,0 +45 @@
++ closeNoCreate(admission:ManagedJobAdmission):Promise<ManagedJobAdmission>;
+@@ -109,0 +111 @@
++ closeNoCreate(runId:string,key:JournalKey,context:ManagerContext):ManagedJobAdmission;
+--- a/packages/ingenium-core/data/migrations/126_managed_job_execution.sql
++++ b/packages/ingenium-core/data/migrations/126_managed_job_execution.sql
+@@ -27,0 +28 @@
++  effect_fence TEXT NOT NULL DEFAULT 'untracked' CHECK(effect_fence IN ('untracked','open-v1','material-admitted-v1','create-admitted-v1','closed-no-create-v1')),
+@@ -112,0 +114,29 @@
++
++-- Never backfill old rows to open-v1. Only the NEW owner INSERT seeds proven open provenance.
++CREATE TRIGGER managed_job_effect_fence_monotonic BEFORE UPDATE ON job_run_managed_execution
++WHEN COALESCE((
++  NEW.effect_fence=OLD.effect_fence
++  OR (OLD.effect_fence='open-v1' AND NEW.effect_fence='material-admitted-v1' AND OLD.phase='prepared' AND NEW.phase='prepared')
++  OR (OLD.effect_fence='material-admitted-v1' AND NEW.effect_fence='create-admitted-v1' AND OLD.phase='prepared' AND NEW.phase='create_intent' AND OLD.material_consumed_at IS NOT NULL AND OLD.credential_id IS NOT NULL)
++  OR (OLD.effect_fence='open-v1' AND NEW.effect_fence='closed-no-create-v1' AND OLD.phase IN ('prepared','cancel_requested') AND NEW.phase='retired'
++    AND OLD.original_container_id IS NULL AND NEW.original_container_id IS NULL
++    AND OLD.material_consumed_at IS NULL AND NEW.material_consumed_at IS NULL
++    AND OLD.credential_id IS NULL AND NEW.credential_id IS NULL AND OLD.result_json IS NULL AND NEW.result_json IS NULL
++    AND NOT EXISTS(SELECT 1 FROM job_run_mcp_credentials c WHERE c.run_id=OLD.run_id)
++    AND json_extract(NEW.retirement_proof,'$.schemaVersion')=1
++    AND json_extract(NEW.retirement_proof,'$.kind')='core-no-create-effect-v1'
++    AND json_extract(NEW.retirement_proof,'$.runId')=OLD.run_id
++    AND json_extract(NEW.retirement_proof,'$.attemptId')=OLD.attempt_id
++    AND json_extract(NEW.retirement_proof,'$.specHash')=OLD.spec_hash
++    AND json_extract(NEW.retirement_proof,'$.runIdentityHash')=OLD.run_identity_hash
++    AND json_extract(NEW.retirement_proof,'$.effectFence')='closed-no-create-v1'
++    AND json_extract(NEW.retirement_proof,'$.closedRevision')=NEW.revision)
++),0)=0
++ OR (NEW.effect_fence IN ('open-v1','material-admitted-v1') AND NEW.phase NOT IN ('prepared','cancel_requested'))
++ OR (NEW.phase='create_intent' AND NEW.effect_fence!='create-admitted-v1')
++ OR (NEW.effect_fence='closed-no-create-v1' AND (NEW.phase!='retired' OR NEW.original_container_id IS NOT NULL OR NEW.material_consumed_at IS NOT NULL OR NEW.credential_id IS NOT NULL OR NEW.result_json IS NOT NULL))
++BEGIN SELECT RAISE(ABORT,'Managed effect admission fence is monotonic'); END;
++CREATE TRIGGER managed_job_credential_requires_material BEFORE INSERT ON job_run_mcp_credentials
++WHEN NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=NEW.run_id AND e.attempt_id=NEW.attempt_id
++  AND e.effect_fence='material-admitted-v1' AND e.phase='prepared' AND e.credential_id IS NULL)
++BEGIN SELECT RAISE(ABORT,'Original material admission is required'); END;

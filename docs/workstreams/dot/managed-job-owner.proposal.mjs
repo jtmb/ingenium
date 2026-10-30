@@ -34,7 +34,13 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
   if(response.status!==200||p.Id!==a.parentContainerId||p.Name!=="/"+runtimeName(a.runtimeId)||p.Image!==a.imageId||p.State?.Running!==true||p.State?.Health?.Status!=="healthy"||Object.entries(expected).some(([k,v])=>l[k]!==v))throw error("MANAGED_JOB_PARENT_CHANGED");
  };
  async function settle(a){
-  const current=await fresh(a,"inspect"),c=await child(current);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
+  const current=await fresh(a,"inspect");
+  if(current.effectFence==="closed-no-create-v1"){
+   const p=current.retirementProof;
+   if(current.containerId!==null||!p||p.schemaVersion!==1||p.kind!=="core-no-create-effect-v1"||p.runId!==current.runId||p.attemptId!==current.attemptId||p.specHash!==current.specHash||p.effectFence!==current.effectFence||!Number.isSafeInteger(p.closedRevision)||p.closedRevision>current.revision)return unknown("MANAGED_JOB_NO_CREATE_PROOF_UNAVAILABLE");
+   return {state:"settled",code:"MANAGED_JOB_CREATE_NEVER_ADMITTED",proof:p};
+  }
+  const c=await child(current);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
   if(c.State?.Running===true)return {state:"active",code:"MANAGED_JOB_CONTAINER_ACTIVE"};
   if(!["exited","dead"].includes(c.State?.Status))return unknown("MANAGED_JOB_CONTAINER_NOT_RETIRED");
   // Positive original-daemon wait join; absent/inspect-only/PID/leader/idle is never proof.
@@ -83,6 +89,7 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
    if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");
    try{let a=await admission(runId,"cleanup");if(!a.outcomeConsumed)return unknown("MANAGED_JOB_OUTCOME_NOT_CONSUMED");
     const observed=await settle(a);if(observed.state!=="settled")return observed;
+    if(observed.proof.kind==="core-no-create-effect-v1")return observed;
     a=await fresh(a,"cleanup");if(!a.outcomeConsumed)return unknown("MANAGED_JOB_OUTCOME_NOT_CONSUMED");
     const original=await child(a);if(!original||original.State?.Running!==false)return unknown("MANAGED_JOB_CLEANUP_UNCONFIRMED");
     const removed=await docker("DELETE",`/containers/${path(a.containerId)}?v=false`);
@@ -92,7 +99,7 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
   },
   async cancel(runId){
    if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");
-   try{let a=await admission(runId,"cancel");if(!a.cancelRequested)return unknown("MANAGED_JOB_CANCEL_INTENT_REQUIRED");const c=await child(a);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");a=await fresh(a,"cancel");
+   try{let a=await admission(runId,"cancel");if(a.effectFence==="closed-no-create-v1")return await settle(a);if(!a.cancelRequested)return unknown("MANAGED_JOB_CANCEL_INTENT_REQUIRED");if(a.effectFence==="open-v1"){a=await core.closeNoCreate(a);return await settle(a);}const c=await child(a);if(!c)return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");a=await fresh(a,"cancel");
     if(c.State?.Running===true){const stopped=await docker("POST",`/containers/${path(a.containerId)}/stop?t=5`);if(![204,304].includes(stopped.status))return unknown("MANAGED_JOB_CANCEL_PENDING");}
     return await settle(a);
    }catch(e){return unknown(e.code??"MANAGED_JOB_CANCEL_PENDING");}

@@ -17,6 +17,7 @@ export function createManagedJobCoreClient({apiUrl,managerToken,fetchOwner=fetch
   recordUnknown:(a,phase)=>request(a.runId,"unknown",{...key(a),phase}),
   recordRetired:(a,proof)=>request(a.runId,"retired",{...key(a),proof}),
   launchMaterial:a=>request(a.runId,"launch-material",key(a)),
+  closeNoCreate:a=>request(a.runId,"no-create-close",key(a)),
   recordRemoved:a=>request(a.runId,"removed",key(a)),
  });
 }

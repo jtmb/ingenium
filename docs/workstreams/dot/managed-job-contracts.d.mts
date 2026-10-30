@@ -23,7 +23,7 @@ export interface ManagedJobAdmission {
  specHash:string;daemonId:string;imageId:string;approvedScopes:string[];resourceAdmissionId:string;
  agentHash:string;modelBindingHash:string;model:string;limits:runtimes.RuntimeLimits;projectName:string;deadlineAt:string;
  phase:ManagedPhase;revision:number;containerId:string|null;cancelRequested:boolean;outcomeConsumed:boolean;
- effectFence?:ManagedEffectFence;retirementProof?:ManagedRetirementProof|null;
+ effectFenceIssuer?:string;effectFence?:ManagedEffectFence;retirementProof?:ManagedRetirementProof|null;
 }
 export interface ManagedLaunchMaterial {
  admission:ManagedJobAdmission;runId:string;attemptId:string;credentialRunId:string;
@@ -42,6 +42,7 @@ export interface ManagedJobCoreClient {
  recordRetired(admission:ManagedJobAdmission,proof:OriginalContainerRetirementProof):Promise<ManagedJobAdmission>;
  recordRemoved(admission:ManagedJobAdmission):Promise<ManagedJobAdmission>;
  launchMaterial(admission:ManagedJobAdmission):Promise<ManagedLaunchMaterial>;
+ closeNoCreate(admission:ManagedJobAdmission):Promise<ManagedJobAdmission>;
 }
 export interface DockerOwnerResponse {status:number;data:unknown}
 export type DockerOwnerRequest=(method:"GET"|"POST"|"DELETE",path:string,body?:object)=>Promise<DockerOwnerResponse>;
@@ -107,6 +108,7 @@ export interface Core126Owner {
  recordStarted(runId:string,key:JournalKey,context:ManagerContext):ManagedJobAdmission;
  recordUnknown(runId:string,key:JournalKey&{phase:"create"|"start"},context:ManagerContext):ManagedJobAdmission;
  launchMaterial(runId:string,key:JournalKey,context:ManagerContext):Promise<ManagedLaunchMaterial>;
+ closeNoCreate(runId:string,key:JournalKey,context:ManagerContext):ManagedJobAdmission;
  recordRetired(runId:string,key:JournalKey&{proof:OriginalContainerRetirementProof},context:ManagerContext):ManagedJobAdmission;
  consume(runId:string,context:ManagerContext):ManagedJobAdmission;
  recordRemoved(runId:string,key:JournalKey,context:ManagerContext):ManagedJobAdmission;

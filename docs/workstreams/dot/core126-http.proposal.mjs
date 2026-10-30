@@ -10,14 +10,14 @@ export function createCore126ManagerGuard({loadToken}){
 export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool}){
  return {
   async internal(request){
-   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|consumed|removed)$/.exec(request.path);
+   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$/.exec(request.path);
    if(!match)return null;const ctx=managerGuard.context(request),runId=match[1],operation=match[2];
    if(operation==="admission"&&request.method==="GET")return {data:owner.admit(runId,request.query?.action,ctx)};
    if(request.method!=="POST")throw Object.assign(Error("Method unavailable"),{status:405});
    const body=request.body;
    if(operation==="consumed"){if(body&&Object.keys(body).length)throw Object.assign(Error("Invalid consume request"),{status:422});return {data:owner.consume(runId,ctx)};}
    if(!body||typeof body!=="object"||Array.isArray(body)||Buffer.byteLength(JSON.stringify(body))>65536)throw Object.assign(Error("Invalid journal request"),{status:422});
-   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired",removed:"recordRemoved"};
+   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired","no-create-close":"closeNoCreate",removed:"recordRemoved"};
    if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
   },
   async runtime(request){

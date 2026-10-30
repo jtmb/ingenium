@@ -1,0 +1,47 @@
+{
+  "state": "unapplied monotonic no-create source delta",
+  "patchSha256": "1aaf6347ad7b5ddc4171512c4d5d287fdfbada273ae6c837d989323e04a2b70a",
+  "preimages": {
+    "services/ingenium-api/lib/restore-runtime-guard.ts": "b0fa04703fed81077274ce904d1846bfc4de3c2e19671449986a01831338f6ad",
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": "13ef5e99958ff91a9bd92a497a858efdd6bdb13473d94c753e9d36c392d1e3c0",
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "f7311334a633403abcdefe7c397c58ba5b2fd2eda0cb134f9af0d503b88837e7",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": "584497497a47dee53cb14d84e1062d368d0f6db73639587c89b82e4a0ee595a2",
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": "c9619927b974accb4d5d8c7df6125c810807f1b4fa54b19d8dc2d4569595eeb9",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "ce6e4e4f8e92bfed4ddc1925994e00a67e3ecc435d6c7229b242ba10b0baaa66",
+    "packages/ingenium-core/data/migrations/126_managed_job_execution.sql": "eb5a2f5820e8fc827c469a06a07428522214854ff5a52cca3321b54789c7b066"
+  },
+  "postimages": {
+    "services/ingenium-api/lib/restore-runtime-guard.ts": "7a515b12a84875f09e7def114f9c6e4a964d4877b4f9edd8d90a858ed7395695",
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": "516aa89067abbc869523e2b9cd02c12fc821c32677b9d3df9194d3d2ab18d1d8",
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "06e94e2bdaa4cb4a6c99042698f9f1d014279ad15718f0e8c9cdf75e0c36fc1b",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": "7bb13d31cf01fa0739f951616cdd89409eda5ee9182e5b49a6e695b18f802487",
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": "c451bb63f00fdaa36b4fb12afd3db5ea5adebb34cf241b407b463b5f19169000",
+    "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts": "0f0bb5424cb02c0f450193c3a241b47a2aacf08f6e421c7baa20127d5c2eec11",
+    "packages/ingenium-core/data/migrations/126_managed_job_execution.sql": "44532aace969cf4b76465d72fb14cb68341c269ac08433d77febc89a44adbc4a"
+  },
+  "tests": {
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --test docs/workstreams/dot/core126-sqlite.cpu.mjs docs/workstreams/dot/core126-enrollment.cpu.mjs docs/workstreams/dot/managed-job-owner.cpu.mjs",
+    "summary": "1..51\n# tests 51\n# suites 0\n# pass 51\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 295.603554",
+    "outputSha256": "defc620e3cff7983f6fd8b62be0b83a91509f427ab15dc3925e3b457af082bb5"
+  },
+  "typing": "044db4b0 seven concrete declarations accepted by Root; actual r3/r4 noEmit passed separately with Root closed-body fix; new method contract delta included",
+  "protectedRootChanges": [
+    "managed-job-child model validation/--model fix",
+    "runtime-manager closed input validation",
+    "api-server/Auth/Native shared files"
+  ],
+  "restoreBoundary": "Root must retain double managed-child restore barrier, quiesce old handlers and reconstitute owner for every DB restore; old open provenance stays unknown",
+  "conservativeGates": [
+    "Any accepted material request, even failed/ambiguous and without credential, remains quota-held",
+    "Any create/start effect/ack ambiguity remains quota-held",
+    "Legacy/untracked/reconstructed open rows cannot close or newly materialize",
+    "No missing-container/process/idle observation is proof"
+  ],
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "sharedWrites": false,
+    "runtimeObjects": false
+  }
+}
