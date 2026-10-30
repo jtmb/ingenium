@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "stage": "cached-cargo-source-check",
+  "observedAt": "2026-10-30T04:19:26.186Z",
+  "normalGatePreserved": true,
+  "allocation": {
+    "systemFreeBytes": 48321855488,
+    "linuxAllocatedBytes": 7143276544,
+    "destinationFreeBytes": 620609622016,
+    "nativeBudgetBytes": 11374851584
+  },
+  "cargo": {
+    "completeUnitAndBuildScriptCacheCertificate": false,
+    "offline": true,
+    "compilerBinaryAndSourceAliasBound": false,
+    "lastVerifiedPackages": [
+      "veyra-service"
+    ],
+    "incrementalDisabled": null,
+    "toolchainDeclarationsMatch": true,
+    "jobs": 1,
+    "dependencyPinsMatch": true
+  },
+  "stageAlignedPeakEvidence": false,
+  "frontend": {
+    "cacheRetained": false,
+    "emptyDeclaredOutputs": false,
+    "finalOutputBytes": 122949842,
+    "distBytes": 23669726,
+    "cacheBytes": 99280116,
+    "readonlyDependenciesQualified": false,
+    "identicalInputGraph": false
+  },
+  "references": [
+    "coordination/integration/native-speech-compile-r1.json",
+    "qualify-native-speech-compile-r1.mjs",
+    "coordination/integration/native-build-budget-review-r1.json",
+    "evidence/consumed-native-ui-output-cleanup.json"
+  ],
+  "pins": {
+    "cargoLock": "a7bb23ff65c5359cddd1f9e5f98a762070124424417808e3117fef746a368aee",
+    "packageLock": "e0749a3296e5a56e67dda0545a8ea6f321073dfb7ba7a139c44d88aff2236ddc",
+    "partialRustflagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+    "rustToolchain": "33b88122a255a699294430b8a7749841bafeca2d02f29d0e8c4a538c5ae688b7"
+  },
+  "scope": "Read-only metadata evidence; not a lease, actual peak trace or cache freshness certificate"
+}
