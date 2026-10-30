@@ -1,0 +1,182 @@
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -147,7 +147,7 @@
+     route: String,
+     query: Vec<(String, String)>,
+     headers: Vec<(String, String)>,
+-    body: Vec<u8>,
++    body:Arc<[u8]>,
+     input_sha256: String,
+ }
+ impl NativeWebOriginal {
+@@ -164,7 +164,7 @@
+         let input_sha256 = input_hash(&metadata, &body);
+         Ok(Self { native_engine_original:lease.native_engine_original.clone(),operation_id, binding_id: lease.binding_id.clone(),
+             invalidation_epoch: lease.invalidation_epoch.clone(), engine: lease.original.clone(),
+-            method, raw_target: target.into(), route, query, headers: content, body, input_sha256 })
++            method, raw_target: target.into(), route, query, headers: content, body:Arc::from(body), input_sha256 })
+     }
+     pub(crate) fn native_engine_original(&self)->&Arc<super::super::web_engine_retirement::NativeWebEngineOriginal>{&self.native_engine_original}
+     pub fn operation_id(&self) -> &str { &self.operation_id }
+@@ -175,6 +175,7 @@
+     pub fn query(&self) -> &[(String,String)] { &self.query }
+     pub fn headers(&self) -> &[(String,String)] { &self.headers }
+     pub fn body(&self) -> &[u8] { &self.body }
++    pub(crate) fn body_owner(&self)->Arc<[u8]>{self.body.clone()}
+     /// Only actual protocol-supplied IDs qualify. Permission/form object IDs,
+     /// command names, text hashes, and native request UUIDs never become this key.
+     pub fn stable_upstream_key(&self) -> Result<Option<String>, RuntimeError> {
+@@ -201,7 +202,7 @@
+     /// a renderer response. Restart JSON never recreates a live lease.
+     pub fn journal_original(&self) -> Value {
+         let mut scope=self.journal_scope();
+-        scope["body_bytes"]=json!(self.body);
++        scope["body_bytes"]=json!(self.body.as_ref());
+         scope
+     }
+     pub fn journal_scope(&self) -> Value {
+@@ -317,6 +318,7 @@
+         if files.contains_image().map_err(|_|local_error())?&&!engine.model.vision{return Err(local_error());}
+         files.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+         require_local_engine(&engine,&lease.binding,current)?;
++        drop(view); // readonly inspection finished; exact original bytes remain owned
+         match reserve(original,effective,files).map_err(|_|RuntimeError::Storage)?{
+             crate::projects::NativeWebReservation::Retained(receipt)=>Ok(LocalWebOriginalSubmission::Retained(receipt)),
+             crate::projects::NativeWebReservation::Fresh(dispatch)=>self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current).map(LocalWebOriginalSubmission::Sent),
+@@ -362,6 +364,7 @@
+                 ||(mime.starts_with("image/")&&!engine.model.vision){return Err(local_error());}
+         }
+         } // Windows forwards original URIs under the actual retained chain.
++        drop(body); // policy view ended; do not retain another full inline JSON string
+         let session=engine.client()?.session_in_project(lease.session_id(),&SessionQuery{
+             directory:lease.binding.directory().into(),..SessionQuery::default()})?;
+         let baseline=session.time.as_ref().map(|time|(time.updated,time.idle)).unwrap_or((0,None));
+@@ -400,7 +403,7 @@
+         files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+         if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
+         if let Some(read)=files_original.windows_read(){self.check_local_windows_web_read_locked(engine,lease,original,read,current)?;}
+-        let prepared=engine.client()?.prepare_original_web_prompt(lease.session_id(),original.raw_target(),original.headers(),effective.bytes())?;
++        let prepared=engine.client()?.prepare_original_web_prompt(lease.session_id(),original.raw_target(),original.headers(),effective.bytes_owner())?;
+         let outcome=slot.send_retained(prepared,inspected.upstream_message_id.clone())?;
+         let state=match outcome.admission(){"admitted"=>PromptState::Admitted,"rejected"=>PromptState::Rejected,_=>PromptState::Uncertain};
+         let acknowledged=if outcome.admission()=="admitted"{outcome.upstream_id().map(str::to_owned)}else{None};
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
+@@ -4,7 +4,7 @@
+ use serde::{Serialize,Deserialize};
+ use serde_json::Value;
+ use sha2::{Digest,Sha256};
+-use std::{collections::{BTreeMap,BTreeSet},ops::Range};
++use std::{collections::{BTreeMap,BTreeSet},ops::Range,sync::Arc};
+ use base64::{Engine as _,engine::general_purpose::STANDARD};
+
+ #[derive(Clone,Serialize,Deserialize)]
+@@ -28,13 +28,14 @@
+ }
+ /// Not Deserialize/Clone; constructed only by the verified lossless transform.
+ pub struct EffectiveWebBody {
+-    bytes:Vec<u8>,
++    bytes:Arc<[u8]>,
+     original_body_sha256:String,
+     effective_body_sha256:String,
+     transformations:Vec<WebUriTransformation>,
+ }
+ impl EffectiveWebBody {
+     pub fn bytes(&self)->&[u8]{&self.bytes}
++    pub(crate) fn bytes_owner(&self)->Arc<[u8]>{self.bytes.clone()}
+     pub fn original_body_sha256(&self)->&str{&self.original_body_sha256}
+     pub fn effective_body_sha256(&self)->&str{&self.effective_body_sha256}
+     pub fn transformations(&self)->&[WebUriTransformation]{&self.transformations}
+@@ -169,7 +170,7 @@
+     }
+     effective.extend_from_slice(&original[last..]);
+     if effective.len()>16*1024*1024||serde_json::from_slice::<Value>(&effective).map_err(|_|invalid())?!=expected{return Err(invalid())}
+-    Ok(EffectiveWebBody{original_body_sha256:hash(original),effective_body_sha256:hash(&effective),bytes:effective,transformations})
++    Ok(EffectiveWebBody{original_body_sha256:hash(original),effective_body_sha256:hash(&effective),bytes:Arc::from(effective),transformations})
+ }
+
+ #[cfg(test)]mod tests{
+@@ -204,5 +205,5 @@
+ /// WSL must use the explicit verified URI transformation instead.
+ pub(crate) fn identity_windows_web_body(original:&super::web_original::NativeWebOriginal,read:&super::web_original::NativeWindowsWebRead)->Result<EffectiveWebBody,String>{
+  if !read.matches_original(original){return Err(invalid());}
+- Ok(EffectiveWebBody{bytes:original.body().to_vec(),original_body_sha256:hash(original.body()),effective_body_sha256:hash(original.body()),transformations:Vec::new()})
+-}
++ Ok(EffectiveWebBody{bytes:original.body_owner(),original_body_sha256:hash(original.body()),effective_body_sha256:hash(original.body()),transformations:Vec::new()})
++}
+--- a/crates/adapters/src/opencode/local_web_transport.rs
++++ b/crates/adapters/src/opencode/local_web_transport.rs
+@@ -52,7 +52,7 @@
+ }
+ impl OpenCodeClient{
+  pub(crate) fn prepare_original_web_prompt(&self,session:&str,raw_target:&str,
+-  content_headers:&[(String,String)],effective_body:&[u8])->Result<OriginalWebPromptRequest,EngineError>{
++  content_headers:&[(String,String)],effective_body:Arc<[u8]>)->Result<OriginalWebPromptRequest,EngineError>{
+   validate_session(session)?;
+   let target=self.base.join(raw_target).map_err(|_|EngineError::InvalidEndpoint)?;
+   let rendered=format!("{}{}",target.path(),target.query().map(|q|format!("?{q}")).unwrap_or_default());
+@@ -71,7 +71,10 @@
+     ||(name=="content-encoding"&&value!="identity")||value.chars().any(char::is_control){return Err(EngineError::Malformed);}
+    request=request.header(name.as_str(),value.as_str());
+   }
+-  let request=request.body(effective_body.to_vec()).build().map_err(|_|EngineError::Transport)?;
++  let length=effective_body.len() as u64;
++  // Pinned blocking Body::sized owns this immutable Arc cursor and sends
++  // bounded chunks. It creates no full-size request copy or filesystem read.
++  let request=request.body(reqwest::blocking::Body::sized(std::io::Cursor::new(effective_body),length)).build().map_err(|_|EngineError::Transport)?;
+   let mut body=Vec::new();body.try_reserve_exact(LIMIT+1).map_err(|_|EngineError::Transport)?;
+   Ok(OriginalWebPromptRequest{http,request:Some(request),response:None,
+    observation:Arc::new(WebPromptObservation{status:None,content_type:None,body,phase:WebTransportPhase::Prepared,failure:None})})
+@@ -86,14 +89,39 @@
+   let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),None,Duration::from_secs(2)).unwrap();
+   let worker=thread::spawn(move||{
+    let(mut stream,_)=listener.accept().unwrap();let mut reader=BufReader::new(stream.try_clone().unwrap());
+-   loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}}
++   let mut length=0;
++   loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}
++    if let Some(value)=line.to_ascii_lowercase().strip_prefix("content-length:"){length=value.trim().parse::<usize>().unwrap();}}
++   let mut body=vec![0;length];reader.read_exact(&mut body).unwrap();
+    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999\r\nConnection: close\r\n\r\n{\"data\":").unwrap();
+    stream.flush().unwrap();
+   });
+-  let mut owned=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}").unwrap();
++  let mut owned=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],Arc::from(&b"{}"[..])).unwrap();
+   owned.execute_retained();worker.join().unwrap();
+   assert_eq!(owned.observation.status,Some(200));assert_eq!(owned.observation.body,b"{\"data\":");
+   assert!(owned.observation.phase==WebTransportPhase::Unknown);assert!(owned.response.is_some());
+   owned.execute_retained();assert_eq!(owned.observation.body,b"{\"data\":");
+  }
+ }
++
++#[cfg(test)]mod shared_body_tests{
++ use super::*;
++ use std::{io::{BufRead,BufReader,Write},net::TcpListener,thread};
++ #[test]fn actual_reader_body_keeps_same_owner_and_exact_wire_bytes(){
++  let listener=TcpListener::bind("127.0.0.1:0").unwrap();
++  let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),None,Duration::from_secs(2)).unwrap();
++  let expected:Arc<[u8]>=Arc::from(&br#"{ "text":"x", "metadata":{"future":true},"delivery":"queue" }"#[..]);
++  let peer_expected=expected.clone();
++  let worker=thread::spawn(move||{
++   let(mut stream,_)=listener.accept().unwrap();let mut reader=BufReader::new(stream.try_clone().unwrap());let mut length=0;
++   loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}
++    if let Some(value)=line.to_ascii_lowercase().strip_prefix("content-length:"){length=value.trim().parse::<usize>().unwrap();}}
++   let mut bytes=vec![0;length];reader.read_exact(&mut bytes).unwrap();assert_eq!(bytes,peer_expected.as_ref());
++   stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
++  });
++  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],expected.clone()).unwrap();
++  assert!(Arc::strong_count(&expected)>=2,"prepared actual reader must retain shared original bytes");
++  request.execute_retained();worker.join().unwrap();assert_eq!(request.observation.body,b"{}");
++  let mut close=RetainedWebTransportClose::retain(request);assert!(close.finish_until(std::time::Instant::now()+Duration::from_secs(3)).unwrap().is_some());
++ }
++}
+--- a/crates/adapters/src/opencode/local_web_transport/closure.rs
++++ b/crates/adapters/src/opencode/local_web_transport/closure.rs
+@@ -89,7 +89,7 @@
+    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap();stream.flush().unwrap();
+    let mut byte=[0u8;1];match reader.read(&mut byte){Ok(0)=>peer.store(true,std::sync::atomic::Ordering::Release),Err(e)if matches!(e.kind(),std::io::ErrorKind::ConnectionReset|std::io::ErrorKind::ConnectionAborted)=>peer.store(true,std::sync::atomic::Ordering::Release),other=>panic!("actual transport did not close: {other:?}")}
+   });
+-  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}").unwrap();request.execute_retained();
++  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],Arc::from(&b"{}"[..])).unwrap();request.execute_retained();
+   (request,server,eof)
+  }
+  #[test]fn actual_final_client_and_response_end_and_preserve_observation(){

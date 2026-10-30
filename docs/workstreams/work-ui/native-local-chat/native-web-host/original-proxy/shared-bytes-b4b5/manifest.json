@@ -1,0 +1,32 @@
+{
+  "base": "b4b5c353c702a4439fbdaef15a093819594eb22d",
+  "scope": "representation only; all hashes, quotas, history, auth and bounds unchanged; no activation",
+  "patch_sha256": "7e54d37dd6116f785f9925c582053a4718a586408aae594fdfa2ee01f132b079",
+  "patch_bytes": 12600,
+  "files": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_sha256": "9232ce62f9275dd7959e99ce5b328a76d9865d243f080615ef7e5f57e8166d30",
+      "postimage_sha256": "2c20e4c64be844d03202b5ab654e915257ba8c1690a15918a28881cd9ae968cd",
+      "bytes": 38019
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs",
+      "preimage_sha256": "46cb1c4d102aed70795acd4171f0206081fe7de2ee476a1d2582c29b20308162",
+      "postimage_sha256": "29b19512b463fb1ca99b982aab3585f3cfd9dcbcf4ece2c8094d9b55474ecf7d",
+      "bytes": 14313
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_web_transport.rs",
+      "preimage_sha256": "569f9f8952d639dcea29d45627ebc4e00bdb25ba3beb24a3d6387caee74938d5",
+      "postimage_sha256": "f0222a634db74b04a6bc79173e84c7f6c56b8713bfb016191ab2294d144c4f84",
+      "bytes": 7770
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_web_transport/closure.rs",
+      "preimage_sha256": "4eaceb4abda6affd8d15338e4ef4672953c65f861203805a8786d5d6f86554fe",
+      "postimage_sha256": "8ddd83489aeaafa920ef4fc6e7d521bfcf1ea9c37b7da010d5196df9c4fc76b9",
+      "bytes": 7786
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "scope": "CPU source/composition only; no compiler/runtime/RSS claim",
+  "passed": [
+    "captured raw bytes have one immutable shared owner",
+    "native JSON projection serializes exact slice without serde Arc feature",
+    "Windows identity effective body shares exact original allocation",
+    "actual prepared request receives same immutable effective owner",
+    "reqwest request streams owned shared bytes instead of full request copy",
+    "submit readonly JSON view ends before reserve/dispatch",
+    "dispatch readonly JSON view ends before preparing HTTP",
+    "complete original input hash framing unchanged",
+    "single-send/private-origin transport policies unchanged",
+    "existing wire bound unchanged",
+    "real TCP exact-byte/actual shared-owner fixture supplied",
+    "partial-response fixture drains request before deliberate truncation",
+    "all other Native source, auth, schema, quota/history and ownership code unchanged",
+    "exact delta reconstructs all4 source postimages",
+    "actual reader implementation remains exact prior-verified locked source",
+    "pinned sized reader uses requested8KiB producer buffer/channel path"
+  ],
+  "count": 16,
+  "new_rust_fixture_supplied": 1,
+  "rust_fixture_run": false,
+  "reqwest_reader": {
+    "version": "0.12.28",
+    "body_rs_sha256": "578d58f3c661a4c43b771e982bac1dd08a6fedaf98f8baacd096fbe0cad63f7a",
+    "lines": [
+      [
+        80,
+        82
+      ],
+      [
+        133,
+        145
+      ],
+      [
+        274,
+        351
+      ]
+    ],
+    "global_HTTP_buffer_bound_proved": false
+  },
+  "schema_or_caps_changed": false,
+  "history_pruned": false,
+  "activation": false,
+  "remaining": [
+    "Root compiler/real TCP review",
+    "source/provenance and WSL recompute copies",
+    "SQLite full transient BLOB binds",
+    "bounded ACK parsing/base64 verification",
+    "allocation8 active/history and replay disposition",
+    "coherent20MiB/image/skill/total peak qualification"
+  ]
+}

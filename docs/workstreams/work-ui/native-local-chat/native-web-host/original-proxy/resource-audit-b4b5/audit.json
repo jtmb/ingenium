@@ -1,0 +1,98 @@
+{
+  "base": "b4b5c353c702a4439fbdaef15a093819594eb22d",
+  "scope": "source-level capacity and actual SQLite fixtures; NOT runtime/RSS/20MiB acceptance",
+  "current_actual_batch_limit_bytes": 8388608,
+  "current_actual_text_limit_bytes": 1048576,
+  "attachments_blob": "69b2ee33fe4aea454849945092312ba4f0608c3e",
+  "attachments_sha256": "d6d7c8f7da54f8d9da6e6b11b7d405e84b00731c656eba01deec8a289db4fb15",
+  "inspected_source_sha256": {
+    "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs": "9232ce62f9275dd7959e99ce5b328a76d9865d243f080615ef7e5f57e8166d30",
+    "crates/adapters/src/opencode/local_web_transport.rs": "569f9f8952d639dcea29d45627ebc4e00bdb25ba3beb24a3d6387caee74938d5",
+    "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs": "46cb1c4d102aed70795acd4171f0206081fe7de2ee476a1d2582c29b20308162",
+    "crates/adapters/src/projects/local_web_originals.rs": "b947d9599d64c1e8e2ee2626bf00f22c78d7eb7f703149e499db243802b51ea9"
+  },
+  "owned_capacity_examples": [
+    {
+      "case": "Windows inline identity",
+      "decoded_source_bytes": 8388608,
+      "base64_bytes": 11184812,
+      "live_source_buffers": [
+        "original raw Vec",
+        "identity effective Vec",
+        "submit view Value string",
+        "dispatch body Value string",
+        "reqwest request Vec copy"
+      ],
+      "copy_count": 5,
+      "ack_capacity_bytes": 16777217,
+      "source_level_owned_capacity_floor_bytes": 72701277,
+      "actual_rss_measured": false,
+      "within_current_decoded_batch_limit": true
+    },
+    {
+      "case": "Windows inline identity",
+      "decoded_source_bytes": 20971520,
+      "base64_bytes": 27962028,
+      "live_source_buffers": [
+        "original raw Vec",
+        "identity effective Vec",
+        "submit view Value string",
+        "dispatch body Value string",
+        "reqwest request Vec copy"
+      ],
+      "copy_count": 5,
+      "ack_capacity_bytes": 16777217,
+      "source_level_owned_capacity_floor_bytes": 156587357,
+      "actual_rss_measured": false,
+      "within_current_decoded_batch_limit": false
+    }
+  ],
+  "provenance_hash_overlap": [
+    {
+      "decoded_source_bytes": 8388608,
+      "source_vec_bytes": 8388608,
+      "provenance_base64_bytes": 11184812,
+      "full_projection_hash_serde_vec_bytes_at_least": 11184812,
+      "source_level_overlap_bytes_at_least": 30758232
+    },
+    {
+      "decoded_source_bytes": 20971520,
+      "source_vec_bytes": 20971520,
+      "provenance_base64_bytes": 27962028,
+      "full_projection_hash_serde_vec_bytes_at_least": 27962028,
+      "source_level_overlap_bytes_at_least": 76895576
+    }
+  ],
+  "sql_counterexamples": {
+    "terminal_history_quota": {
+      "terminal_rows": 12,
+      "active_effects_in_fixture": 0,
+      "rejected_next_original": true,
+      "actual_trigger_error": "Web original payload replacement or retention budget refused",
+      "charged_historical_bytes": 50339016,
+      "raw_body_bytes_each": 1398160,
+      "ack_body_bytes_each": 1398306,
+      "all_history_preserved": true,
+      "scope": "actual frozen7 SQL only; simulated completed publications, NOT native auth/engine acceptance"
+    },
+    "lifetime_identity_cap": {
+      "closed_explicitly_forgotten_rows": 4096,
+      "remaining_payload_rows": 0,
+      "remaining_keys": 4096,
+      "rejected4097": true,
+      "actual_trigger_error": "Web original key or original operation refused",
+      "scope": "actual frozen7 SQL only; no real user data or privacy action"
+    }
+  },
+  "schema7_modified": false,
+  "schema8_implemented": false,
+  "runtime_or_models_run": false,
+  "cleanup": {
+    "disk_databases": [],
+    "in_memory_fixtures_closed": 2,
+    "temporary_files": [],
+    "removed_paths": [],
+    "removed_bytes": 0,
+    "no_disk_recovery_claim": true
+  }
+}
