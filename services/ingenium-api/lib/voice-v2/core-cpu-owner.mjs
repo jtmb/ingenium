@@ -116,4 +116,13 @@ export class CoreCpuOwner {
     const { identity, context, operation } = this.#original(input);
     return this.ledger.quarantineCpu(context, { operationId: identity.operationId, owner: this.scope.owner, identity, expectedCpuRevision: operation.cpu.revision, reason });
   }
+  releaseFinished(input) {
+    const { identity, operation } = this.#original(input);
+    if (operation.cpu?.phase !== 'terminal' || !operation.cpu.drained || !operation.cpu.resultFingerprint) fail('CPU_ORIGINAL_CONSUMER_PENDING');
+    this.#bindings.delete(identity.operationId);
+  }
+  releasePhysicallyRetired() {
+    if (!this.scope.physicalRetired) fail('CPU_PHYSICAL_RETIREMENT_REQUIRED');
+    this.#bindings.clear();
+  }
 }

@@ -71,9 +71,13 @@ test('Core result comparison is semantic across canonical DB key order and exact
   const operationId=randomUUID(),identity={instanceId:'fixture',bootId:f.boot,ownerId:f.owner.ownerId,ownerGeneration:1,requestId:operationId,operationId,generation:randomUUID(),kind:'transcribe',digest:'a'.repeat(64)};
   const row={original:{operationId,controlOperationId:f.controlId,cpuIdentity:identity},owner:f.owner,cpu:{identity,revision:3,phase:'terminal',drained:true,outcome:'completed',retentionId:randomUUID(),resultFingerprint:null}};
   f.rows.set(operationId,row);f.port.registerReserved({},row);
+  assert.throws(()=>f.port.releaseFinished(identity),/CPU_ORIGINAL_CONSUMER_PENDING/);
   const bytes=Buffer.from('exact fixture'),sha256=createHash('sha256').update(bytes).digest('hex');
   assert.deepEqual(await f.port.dispatch('result',{identity,status:200,contentType:'application/json',sha256,bytes:bytes.length},randomUUID()),{retained:true});
   f.port.validateResult(identity,{status:200,contentType:'application/json',bytes});assert.throws(()=>f.port.validateResult(identity,{status:200,contentType:'application/json',bytes:Buffer.from('changed')}));
+  f.port.releaseFinished(identity);
+  assert.throws(()=>f.port.validateResult(identity,{status:200,contentType:'application/json',bytes}),/CPU_CORE_ORIGINAL_UNAVAILABLE/);
+  assert.throws(()=>f.port.releasePhysicallyRetired(),/CPU_PHYSICAL_RETIREMENT_REQUIRED/);
 });
 test('renderer-shaped retirement booleans/owner nonce cannot instantiate an actual supervisor proof',()=>{
   const methods=['reserveControl','listControls','reserve','privateRead','retireOriginal','settle'];const ledger=Object.fromEntries(methods.map(name=>[name,()=>{throw new Error('no Core mutation');}]));

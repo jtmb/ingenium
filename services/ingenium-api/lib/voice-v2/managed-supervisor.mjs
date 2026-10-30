@@ -114,7 +114,9 @@ export class ManagedCpuSupervisor {
     const scope = this.#current; requested = validateScope(requested); turn = Object.freeze({ ...validateTurn(turn) });
     if (!scope?.ready || scope.closing || scope.processExited || !sameScope(scope.scope, requested)) fail('CPU_SCOPE_NOT_READY');
     if (scope.busy || scope.preparedHandle) fail('CPU_BUSY_BEFORE_ADMISSION');
-    if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || !Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now() || deadlineAt > scope.deadlineAt) fail('CPU_ORIGINAL_INVALID');
+    if (typeof requestId !== 'string' || !requestId || requestId.length > 160 || !Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now()) fail('CPU_ORIGINAL_INVALID');
+    deadlineAt = Math.min(deadlineAt, scope.deadlineAt);
+    if (deadlineAt <= Date.now()) fail('CPU_ORIGINAL_INVALID');
     const operationId = uuidFor('VEYRA-CORE-VOICE-OPERATION-V1\0' + canonical([requested, requestId, kind]));
     let payload;
     if (kind === 'transcribe') {
@@ -190,7 +192,15 @@ export class ManagedCpuSupervisor {
         }
       }
       throw error;
-    } finally { scope.busy = false; }
+    } finally {
+      // This exact request promise has returned; no pending promise/result bytes
+      // or original Request context need to live in the hot scope registry.
+      delete operation.requestOriginal;
+      try { scope.coreOwner.releaseFinished(identity); scope.operations.delete(identity.operationId); }
+      catch (retentionError) { if (!scope.physicalRetired) operation.consumerRetentionFailure ??= retentionError; }
+      scope.busy = false;
+      if (scope.physicalRetired) { scope.operations.clear(); this.#scopes.delete(scope.owner.ownerId); }
+    }
   }
   openScope(input) {
     if (this.#opening) return this.#opening.then(() => this.openScope(input));
@@ -353,6 +363,8 @@ export class ManagedCpuSupervisor {
     if (scope.exit?.code !== 0 || scope.exit.signal || !scope.treeProof) fail('CPU_ACTUAL_ORIGINAL_RETIREMENT_UNCONFIRMED');
     scope.physicalRetired = true; const proof = {}; this.#proofs.set(proof, { kind: 'physical', scope, retentionSeed: randomBytes(32).toString('hex') });
     this.ledger.retireOriginal(scope.contextFor(scope.context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof });
+    scope.coreOwner.releasePhysicallyRetired();
     await this.releaseCpu(scope.admission, proof, this); if (this.#current === scope) this.#current = null;
+    if (!scope.busy) { scope.operations.clear(); this.#scopes.delete(scope.owner.ownerId); }
   }
 }

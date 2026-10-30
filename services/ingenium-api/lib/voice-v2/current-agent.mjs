@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { VoiceError, sameScope, validateScope, validateTurn } from '../../../../packages/veyra-voice/session.mjs';
+import { agentInputFingerprint } from './core-operations.mjs';
 
 /** A stable native message ID, not a second operation ledger or conversation identity. */
 export function nativeVoiceMessageId(scope, operationId) {
@@ -12,8 +13,8 @@ export function nativeVoiceMessageId(scope, operationId) {
 /** Consumer of the existing authenticated native request dispatcher and conversation event owner. */
 export class CurrentAgentVoiceAdapter {
   #watches = new Map();
-  constructor({ request, resolveBinding, withBinding, observeTurn }) {
-    Object.assign(this, { request, resolveBinding, withBinding, observeTurn });
+  constructor({ request, resolveBinding, withBinding, observeTurn, observeControl }) {
+    Object.assign(this, { request, resolveBinding, withBinding, observeTurn, observeControl });
   }
   async #binding(context, scope, action, signal) {
     validateScope(scope); signal?.throwIfAborted();
@@ -55,43 +56,69 @@ export class CurrentAgentVoiceAdapter {
     if (admitted?.id !== id || admitted.sessionID !== binding.sessionId || (delivery !== 'prompt' && admitted.delivery !== delivery)) throw new VoiceError('VOICE_NATIVE_ADMISSION_UNKNOWN');
     return id;
   }
-  async submit({ context, scope, turn, text, delivery, signal, onEvent }) {
+  async submit({ context, scope, turn, text, delivery, signal, onEvent, originalOperation }) {
     validateTurn(turn);
     if (!['prompt', 'steer', 'queue'].includes(delivery) || typeof text !== 'string' || !text.trim() || [...text].length > 2000) throw new VoiceError('VOICE_TURN_INVALID');
     const binding = await this.#binding(context, scope, 'agent:prompt', signal);
     await this.#session(binding, scope, signal);
     if (typeof this.observeTurn !== 'function') throw new VoiceError('VOICE_AGENT_OBSERVER_UNAVAILABLE');
-    const promptId = nativeVoiceMessageId(scope, turn.requestId);
-    const key = promptId;
+    if (originalOperation && (!sameScope(originalOperation.scope, scope) || originalOperation.requestId !== turn.requestId
+      || originalOperation.turnGeneration !== turn.generation || originalOperation.kind !== 'voice-agent-turn'
+      || originalOperation.inputSha256 !== agentInputFingerprint({ scope, turn, text, delivery, parentOperationId: originalOperation.parentOperationId }))) throw new VoiceError('VOICE_CORE_ORIGINAL_CONFLICT');
+    const promptId = nativeVoiceMessageId(scope, originalOperation?.operationId ?? turn.requestId);
+    const key = nativeVoiceMessageId(scope, turn.requestId);
     if (this.#watches.has(key)) throw new VoiceError('VOICE_TURN_CONFLICT');
-    const watch = await this.observeTurn({ context, scope, turn, nativeSessionId: binding.sessionId, promptId, signal,
+    const watch = await this.observeTurn({ context, scope, turn, originalOperation, nativeSessionId: binding.sessionId, promptId, signal,
       onEvent: event => {
         if (signal?.aborted || !sameScope(event?.scope, scope) || event.nativeSessionId !== binding.sessionId || event.promptId !== promptId) return;
         if (event.type === 'tool') onEvent?.({ ...turn, scope, type: 'tool', callId: event.callId, label: event.label, status: event.status });
         else if (event.type === 'approval') onEvent?.({ ...turn, scope, type: 'approval', approvalId: event.approvalId, label: event.label });
       } });
+    Promise.resolve(watch?.result).catch(() => undefined);
+    Promise.resolve(watch?.ready).catch(() => undefined);
     if (!watch || typeof watch.ready?.then !== 'function' || typeof watch.result?.then !== 'function' || typeof watch.stop !== 'function' || typeof watch.ownsPermission !== 'function' || typeof watch.ownsExecution !== 'function') { watch?.stop?.(); throw new VoiceError('VOICE_AGENT_OBSERVER_UNAVAILABLE'); }
+    if (originalOperation && typeof watch.retirement?.then !== 'function') { watch.stop(); throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE'); }
+    watch.retirement?.catch(() => undefined);
     const record = { watch, voiceSessionId: turn.sessionId, scope };
     this.#watches.set(key, record);
     // The existing event owner subscribes before durable admission, as useOpenCodeChat does.
     void watch.result.catch(() => undefined);
     try {
       await watch.ready; signal?.throwIfAborted();
-      await this.#prompt(binding, scope, turn, { text, delivery, signal });
+      await this.#prompt(binding, scope, turn, { text, delivery, operationId: originalOperation?.operationId, signal });
       const result = await watch.result;
       signal?.throwIfAborted();
       if (!sameScope(result?.scope, scope) || result.nativeSessionId !== binding.sessionId || result.promptId !== promptId || result.outcome !== 'succeeded' || typeof result.text !== 'string' || !result.text.trim() || [...result.text].length > 32000) throw new VoiceError('VOICE_NATIVE_TURN_OUTCOME_UNKNOWN');
-      return { scope, requestId: turn.requestId, text: result.text, ...(result.usage === undefined ? {} : { usage: result.usage }) };
+      const retirementProof = originalOperation ? await watch.retirement : undefined;
+      if (originalOperation && (!retirementProof || typeof retirementProof !== 'object')) throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+      return { scope, requestId: turn.requestId, text: result.text, ...(retirementProof ? { retirementProof } : {}), ...(result.usage === undefined ? {} : { usage: result.usage }) };
     } finally { if (this.#watches.get(key) === record) this.#watches.delete(key); watch.stop(); }
   }
-  async steer({ context, scope, turn, text, delivery, operationId, signal }) {
+  async steer({ context, scope, turn, text, delivery, operationId, signal, originalOperation }) {
     validateTurn(turn);
     if (!['steer', 'queue'].includes(delivery) || typeof text !== 'string' || !text.trim() || [...text].length > 2000 || typeof operationId !== 'string' || !operationId.startsWith(`voice-control:${turn.sessionId}:`)) throw new VoiceError('VOICE_STEERING_INVALID');
     const binding = await this.#binding(context, scope, `agent:${delivery}`, signal);
     await this.#session(binding, scope, signal);
-    await this.#prompt(binding, scope, turn, { text, delivery, operationId, signal });
+    let observation;
+    if (originalOperation) {
+      if (!sameScope(originalOperation.scope, scope) || originalOperation.requestId !== operationId || originalOperation.turnGeneration !== turn.generation
+        || originalOperation.kind !== `voice-agent-${delivery}` || originalOperation.inputSha256 !== agentInputFingerprint({ scope, turn, text, delivery, parentOperationId: originalOperation.parentOperationId })
+        || typeof this.observeControl !== 'function') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+      observation = await this.observeControl({ context, scope, turn, originalOperation, nativeSessionId: binding.sessionId,
+        promptId: nativeVoiceMessageId(scope, originalOperation.operationId), signal });
+      if (typeof observation?.ready?.then !== 'function' || typeof observation?.retirement?.then !== 'function' || typeof observation?.stop !== 'function') {
+        observation?.stop?.(); throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+      }
+      observation.retirement.catch(() => undefined);
+    }
+    let retirementProof;
+    try {
+      if (observation) { await observation.ready; signal?.throwIfAborted(); }
+      await this.#prompt(binding, scope, turn, { text, delivery, operationId: originalOperation?.operationId ?? operationId, signal });
+      if (observation) { retirementProof = await observation.retirement; if (!retirementProof || typeof retirementProof !== 'object') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE'); }
+    } finally { observation?.stop(); }
     // Acceptance means durable inbox admission, never a completed tool/job claim.
-    return { accepted: true, requestId: turn.requestId, operationId, scope };
+    return { accepted: true, requestId: turn.requestId, operationId, scope, ...(retirementProof ? { retirementProof } : {}) };
   }
   async approve({ context, scope, turn, approvalId, decision, signal }) {
     validateTurn(turn);
