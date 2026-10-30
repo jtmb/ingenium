@@ -1,0 +1,1102 @@
+diff --git a/apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx b/apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx
+@@ -0,0 +1,111 @@
++import {afterEach,describe,expect,it,vi} from "vitest";
++import {act,cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
++import {HostedGovernance} from "./HostedGovernance";
++import {fixture,baseSkill,baseProposal,originalBinding} from "./__tests__/fixture";
++vi.mock("react-markdown",()=>({default:({children}:{children:string})=><pre>{children}</pre>}));
++vi.mock("remark-gfm",()=>({default:()=>undefined}));
++afterEach(cleanup);
++async function ready(){await screen.findByRole("button",{name:/release.*Installed.*disabled/});}
++async function edit(){fireEvent.click(await screen.findByRole("button",{name:/release.*Installed.*disabled/}));fireEvent.click(await screen.findByRole("button",{name:"Edit selected file"}));}
++function markdown(){return "---\nname: new-skill\ndescription: New\n---\n# New";}
++describe("portable original-bound hosted governance",()=>{
++  it("is visibly unavailable without an original transport and never invents an endpoint",()=>{
++    render(<HostedGovernance/>);expect(screen.getByText("Hosted governance unavailable")).toBeTruthy();
++  });
++  it("shows disabled installed metadata and preserves actual record IDs/revisions",async()=>{
++    const {transport,state}=fixture();render(<HostedGovernance transport={transport}/>);await ready();
++    fireEvent.click(screen.getByRole("button",{name:/release.*Installed.*disabled/}));
++    expect(await screen.findByText(/ID skill-id · revision 3/)).toBeTruthy();
++    expect(state.reads.some(c=>c.op==="catalog")).toBe(true);expect(state.sends.length).toBe(0);
++  });
++  it("retains the exact editor draft and source metadata after a proven owner refusal",async()=>{
++    const {transport,state}=fixture();state.send=async original=>({original,outcome:"refused",error:{status:403,message:"Save denied by owner"}});
++    render(<HostedGovernance transport={transport}/>);await ready();await edit();
++    fireEvent.change(screen.getByRole("textbox",{name:"Edit SKILL.md"}),{target:{value:"# Exact draft  \n"}});
++    fireEvent.click(screen.getByRole("button",{name:"Save exact draft"}));
++    await screen.findByText(/Save refused: Save denied by owner/);
++    expect((screen.getByRole("textbox",{name:"Edit SKILL.md"}) as HTMLTextAreaElement).value).toBe("# Exact draft  \n");
++    expect(state.sends.length).toBe(1);expect(state.sends[0].command).toMatchObject({op:"save",target:{id:baseSkill.id,revision:3},extra:{files:baseSkill.file_tree,tags:baseSkill.tags}});
++  });
++  it("blocks uncertain upload replay and inspects the exact retained original read-only",async()=>{
++    const {transport,state}=fixture();state.send=async original=>({original,outcome:"unknown",error:{message:"Network outcome unknown"}});
++    render(<HostedGovernance transport={transport}/>);await ready();fireEvent.click(screen.getByText("Upload a skill"));
++    fireEvent.change(screen.getByRole("textbox",{name:"Review Markdown"}),{target:{value:markdown()}});
++    fireEvent.click(screen.getByRole("button",{name:"Upload reviewed Markdown"}));
++    await screen.findByText(/Upload outcome is unknown/);
++    expect((screen.getByRole("button",{name:"Upload reviewed Markdown"}) as HTMLButtonElement).disabled).toBe(true);
++    fireEvent.click(screen.getByRole("button",{name:"Inspect last original receipt"}));
++    await waitFor(()=>expect(state.inspections.length).toBe(1));
++    expect(state.sends.length).toBe(1);expect(state.originals.length).toBe(1);
++  });
++  it("refuses an existing-name upload before the legacy upsert can clear references",async()=>{
++    const {transport,state}=fixture();render(<HostedGovernance transport={transport}/>);await ready();fireEvent.click(screen.getByText("Upload a skill"));
++    fireEvent.change(screen.getByRole("textbox",{name:"Review Markdown"}),{target:{value:"---\nname: release\ndescription: Replacement\n---\n# Replacement"}});
++    fireEvent.click(screen.getByRole("button",{name:"Upload reviewed Markdown"}));
++    await screen.findByText(/This name already exists/);expect(state.reservations.length).toBe(0);expect(state.sends.length).toBe(0);
++    expect(state.skills[0].file_tree).toBe(baseSkill.file_tree);
++  });
++  it("distinguishes acknowledged create from malformed response and does not offer another write",async()=>{
++    const {transport,state}=fixture();state.send=async original=>({original,outcome:"succeeded",value:{broken:true}});
++    render(<HostedGovernance transport={transport}/>);await ready();fireEvent.click(screen.getByText("Upload a skill"));
++    fireEvent.change(screen.getByRole("textbox",{name:"Review Markdown"}),{target:{value:markdown()}});
++    fireEvent.click(screen.getByRole("button",{name:"Upload reviewed Markdown"}));
++    await screen.findByText(/acknowledged creation, but/);
++    expect((screen.getByRole("button",{name:"Upload reviewed Markdown"}) as HTMLButtonElement).disabled).toBe(true);
++    expect(state.sends.length).toBe(1);
++  });
++  it("requires explicit grounded approval and retains reviewed proposal metadata in the original",async()=>{
++    const {transport,state}=fixture();render(<HostedGovernance transport={transport}/>);await ready();
++    fireEvent.click(screen.getByRole("button",{name:"Proposals",exact:true}));
++    fireEvent.click(await screen.findByRole("button",{name:/release.*update.*pending/}));
++    await screen.findByText("Current target");expect(screen.getByText(/Grounded observation/)).toBeTruthy();
++    fireEvent.click(screen.getByRole("button",{name:"Approve & apply"}));
++    expect(state.sends.length).toBe(0);
++    fireEvent.click(screen.getByRole("button",{name:"Confirm exact change"}));
++    await waitFor(()=>expect(state.sends.length).toBe(1));
++    expect(state.sends[0].command).toMatchObject({op:"approve",id:baseProposal.id,reviewed:{status:"pending",expectedRevision:3,updatedAt:baseProposal.updatedAt}});
++  });
++  it("shows trigger acknowledgement without claiming batch completion or changing model defaults",async()=>{
++    const {transport,state}=fixture();render(<HostedGovernance transport={transport}/>);await ready();
++    fireEvent.click(screen.getByRole("button",{name:"Synthesis",exact:true}));
++    const trigger=await screen.findByRole("button",{name:"Review synthesis trigger"});await waitFor(()=>expect((trigger as HTMLButtonElement).disabled).toBe(false));fireEvent.click(trigger);
++    fireEvent.click(screen.getByRole("button",{name:"Confirm exact change"}));
++    await screen.findByText(/Synthesis trigger acknowledged/);
++    expect(state.sends[0].command).toEqual({op:"synthesis-run"});expect(screen.getByText("No completion recorded")).toBeTruthy();
++    expect(state.sends.length).toBe(1);
++  });
++  it("keeps History selected across a new bound owner while discarding old proposal rows",async()=>{
++    const first=fixture(),second=fixture({...originalBinding,actorId:"next-actor",hostedProjectId:"next-hosted-project",apiProject:"next-namespace",epoch:"reader-2"});
++    first.state.proposals[0].status="rejected";second.state.proposals[0]={...second.state.proposals[0],status:"rejected",targetName:"New owner history"};
++    const view=render(<HostedGovernance transport={first.transport}/>);await ready();
++    fireEvent.click(screen.getByRole("button",{name:"Proposals",exact:true}));
++    fireEvent.click(await screen.findByRole("button",{name:/History/}));
++    await screen.findByRole("button",{name:/release.*update.*rejected/});
++    view.rerender(<HostedGovernance transport={second.transport}/>);
++    expect(await screen.findByRole("button",{name:/New owner history.*update.*rejected/})).toBeTruthy();
++    expect(screen.queryByRole("button",{name:/release.*update.*rejected/})).toBeNull();
++  });
++  it("prevents dispatch when a prepared original outlives the current reader",async()=>{
++    const {transport,state}=fixture();let finish!:()=>void;
++    state.reserveHook=()=>new Promise<void>(resolve=>{finish=resolve;});
++    const view=render(<HostedGovernance transport={transport}/>);await ready();await edit();
++    fireEvent.change(screen.getByRole("textbox",{name:"Edit SKILL.md"}),{target:{value:"# Wanted"}});
++    fireEvent.click(screen.getByRole("button",{name:"Save exact draft"}));
++    await waitFor(()=>expect(state.reservations.length).toBe(1));view.unmount();
++    await act(async()=>{finish();});expect(state.sends.length).toBe(0);expect(state.originals.length).toBe(1);
++  });
++});
++
++it("cannot display a late previous-owner catalog after a transport rebind",async()=>{
++  const first=fixture(),second=fixture({...originalBinding,actorId:"new-actor",hostedProjectId:"new-hosted",epoch:"new-reader"});
++  first.state.skills[0].name="Old private resource";
++  let complete!:(value:unknown)=>void;
++  first.state.reply=command=>command.op==="catalog"?new Promise(resolve=>{complete=resolve;}):first.response(command);
++  const view=render(<HostedGovernance transport={first.transport}/>);
++  await waitFor(()=>expect(first.state.reads.some(c=>c.op==="catalog")).toBe(true));
++  view.rerender(<HostedGovernance transport={second.transport}/>);
++  await ready();
++  await act(async()=>{complete(first.response({op:"catalog",kind:"skill",offset:0,limit:100}));});
++  expect(screen.queryByRole("button",{name:/Old private resource/})).toBeNull();
++  expect(screen.getByRole("button",{name:/release.*Installed.*disabled/})).toBeTruthy();
++});
+diff --git a/apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx b/apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx
+@@ -0,0 +1,193 @@
++import {useCallback,useEffect,useMemo,useRef,useState} from "react";
++import Markdown from "react-markdown";
++import remarkGfm from "remark-gfm";
++import type {Binding,BoundGovernanceTransport,CatalogRow,ModelProvider,OperationReceipt,ProposalCounts,ProposalDetail,ProposalPage,Skill,SynthesisStatus,WriteCommand,WriteOriginal} from "./contracts";
++import {bindingKey,createGovernanceClient,decodeSkill} from "./client";
++import * as decode from "./decoders";
++import {parseSkillUpload,runSkillSave,runSkillUpload,skillWriteBlocked,skillWriteFailure,verifySkillSave,verifySkillUpload,type SkillWriteResult} from "./skill-write-outcomes.mjs";
++import {adaptSkillResult,normalizeOriginalRefusal} from "./writeOutcome";
++import {proposalMatchesAction,receiptMatchesDraft,recoveredSaveResult,skillMatchesOriginal} from "./verification";
++import "./hosted-governance.css";
++export type HostedGovernanceProps={transport?:BoundGovernanceTransport;onOpenSkillInSession?:(skill:Skill,binding:Binding)=>void};
++type Tab="skills"|"archived"|"proposals"|"synthesis";
++const message=(e:unknown)=>skillWriteFailure(e).message;
++const json=(v:unknown)=>JSON.stringify(v,null,2);
++function MarkdownBody({text}:{text:string}) {return <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{a:({children,href})=><span>{children}{href?" ("+href+")":""}</span>,img:({alt,src})=><span>External image: {alt} ({src}) — no remote media request was made.</span>}}>{text}</Markdown>;}
++export function HostedGovernance({transport,onOpenSkillInSession}:HostedGovernanceProps) {
++  const [tab,setTab]=useState<Tab>("skills"),[view,setView]=useState<"open"|"history">("open");
++  let key:string;
++  try{if(!transport||!Array.isArray(transport.capabilities)||!["current","read","reserve","send","inspect","pending"].every(name=>typeof (transport as unknown as Record<string,unknown>)[name]==="function"))throw new Error("No complete original transport.");key=bindingKey(transport.binding);}
++  catch{return <section className="hg" role="status"><h2>Hosted governance unavailable</h2><p>An authenticated original transport and explicit actor/project/installation mapping are required.</p></section>;}
++  return <GovernanceOwner key={key} transport={transport} onOpenSkillInSession={onOpenSkillInSession} tab={tab} setTab={setTab} view={view} setView={setView}/>;
++}
++function GovernanceOwner({transport,onOpenSkillInSession,tab,setTab,view,setView}:HostedGovernanceProps&{transport:BoundGovernanceTransport;tab:Tab;setTab:(tab:Tab)=>void;view:"open"|"history";setView:(view:"open"|"history")=>void}) {
++  const alive=useRef(true),readEpoch=useRef(0),detailEpoch=useRef(0),proposalEpoch=useRef(0),pageEpoch=useRef(0),synthesisEpoch=useRef(0),writeLock=useRef(false),lastReceipt=useRef<OperationReceipt|null>(null),selectedId=useRef<string|null>(null),confirmButton=useRef<HTMLButtonElement>(null),confirmOrigin=useRef<HTMLElement|null>(null),statusRegion=useRef<HTMLDivElement>(null),skillHeading=useRef<HTMLHeadingElement>(null);
++  const client=useMemo(()=>createGovernanceClient(transport,()=>alive.current),[transport]),b=client.binding;
++  const [catalogLimit,setCatalogLimit]=useState(50),[archiveLimit,setArchiveLimit]=useState(50);
++  const [query,setQuery]=useState(""),[rows,setRows]=useState<CatalogRow[]|null>(null),[archived,setArchived]=useState<Skill[]|null>(null);
++  const [roots,setRoots]=useState<readonly WriteOriginal[]|null>(null),[receipt,setReceipt]=useState<OperationReceipt|null>(null),[barrier,setBarrier]=useState(false),[busy,setBusy]=useState(false);
++  const [error,setError]=useState(""),[notice,setNotice]=useState(""),[catalogError,setCatalogError]=useState(""),[archiveError,setArchiveError]=useState(""),[originalError,setOriginalError]=useState("");
++  const [skill,setSkill]=useState<Skill|null>(null),[file,setFile]=useState("SKILL.md"),[draft,setDraft]=useState(""),[editing,setEditing]=useState(false),[save,setSave]=useState<SkillWriteResult|null>(null);
++  const [upload,setUpload]=useState(""),[uploadResult,setUploadResult]=useState<SkillWriteResult|null>(null),[pending,setPending]=useState<WriteCommand|null>(null);
++  const [counts,setCounts]=useState<ProposalCounts|null>(null),[page,setPage]=useState<ProposalPage|null>(null),[proposalError,setProposalError]=useState(""),[detail,setDetail]=useState<ProposalDetail|null>(null);
++  const [reviewer,setReviewer]=useState(b.actorId),[reason,setReason]=useState(""),[status,setStatus]=useState<SynthesisStatus|null>(null),[models,setModels]=useState<ModelProvider[]|null>(null),[model,setModel]=useState(""),[session,setSession]=useState(""),[events,setEvents]=useState<decode.PipelineEvent[]|null>(null),[synthesisError,setSynthesisError]=useState("");
++  const blocked=busy||barrier||roots===null||roots.length>0||skillWriteBlocked(save)||skillWriteBlocked(uploadResult)||!client.current();
++  const selectedModelKnown=!model||!!models?.some(p=>p.models.some(m=>json([p.providerId,m.id])===model));
++  const can=(op:WriteCommand["op"])=>!blocked&&client.allowed(op);
++  const current=()=>alive.current&&client.current();
++  useEffect(()=>{setCatalogLimit(50);},[query]);
++  useEffect(()=>{if(pending)confirmButton.current?.focus();},[pending]);
++  useEffect(()=>{if(skill&&["skills","archived"].includes(tab))skillHeading.current?.focus();},[skill?.id,tab]);
++  function requestConfirmation(command:WriteCommand){if(blocked||!client.allowed(command.op))return;confirmOrigin.current=document.activeElement instanceof HTMLElement?document.activeElement:null;setPending(command);}
++  function cancelConfirmation(){setPending(null);queueMicrotask(()=>{if(current())confirmOrigin.current?.isConnected?confirmOrigin.current.focus():statusRegion.current?.focus();});}
++  const refreshOriginals=useCallback(async()=>{try{const value=await client.pending();if(current()){setRoots(value);setOriginalError("");}return value;}catch(e){if(current()){setRoots(null);setOriginalError(message(e));}throw e;}},[client]);
++  const reload=useCallback(async()=>{
++    const epoch=++readEpoch.current;let ok=true;
++    const matches=()=>current()&&readEpoch.current===epoch;
++    const results=await Promise.allSettled([client.catalog(),client.read({op:"archived"}),client.pending()]);
++    if(!matches())return false;
++    const [catalogResult,archivedResult,originals]=results;
++    if(catalogResult.status==="fulfilled"){setRows(catalogResult.value);setCatalogError("");}else{ok=false;setRows(null);setCatalogError(message(catalogResult.reason));}
++    if(archivedResult.status==="fulfilled"){try{const value=decode.data(archivedResult.value);if(!Array.isArray(value))throw new Error("Archived skill DTOs are unavailable.");const decoded=value.map(v=>decodeSkill(v,b));if(decoded.some(v=>!v.archived_at)||new Set(decoded.map(v=>v.id)).size!==decoded.length)throw new Error("Invalid archived identities.");setArchived(decoded);setArchiveError("");}catch(e){ok=false;setArchived(null);setArchiveError(message(e));}}
++    else{ok=false;setArchived(null);setArchiveError(message(archivedResult.reason));}
++    if(originals.status==="fulfilled"){setRoots(originals.value);setOriginalError("");}else{ok=false;setRoots(null);setOriginalError(message(originals.reason));}
++    return ok;
++  },[client]);
++  useEffect(()=>{alive.current=true;void reload();return()=>{alive.current=false;readEpoch.current++;detailEpoch.current++;proposalEpoch.current++;pageEpoch.current++;synthesisEpoch.current++;};},[client,reload]);
++  async function openSkill(name:string,expectedId?:string) {
++    const epoch=++detailEpoch.current;setError("");selectedId.current=null;setSkill(null);setEditing(false);
++    try{const value=await client.skill(name,expectedId);if(current()&&detailEpoch.current===epoch){selectedId.current=value.id;setSkill(value);setFile("SKILL.md");setDraft(value.content);}}
++    catch(e){if(current()&&detailEpoch.current===epoch)setError(message(e));}
++  }
++  function filesOf(value:Skill):Record<string,string> {
++    if(value.file_tree===null)return {};
++    try{const map:unknown=JSON.parse(value.file_tree);if(!decode.record(map)||Object.values(map).some(v=>typeof v!=="string"))throw new Error();return map as Record<string,string>;}catch{return {};}
++  }
++  function changeFile(path:string){if(blocked||!skill)return;setFile(path);setDraft(path==="SKILL.md"?skill.content:filesOf(skill)[path]);setEditing(false);}
++  async function write(command:WriteCommand):Promise<unknown> {
++    const value=await client.mutate(command);if(current()){lastReceipt.current=value;setReceipt(value);setBarrier(value.outcome!=="refused");}
++    if(value.outcome!=="succeeded")throw Object.assign(new Error(value.error?.message||"The original write outcome is unknown."),value.outcome==="refused"?{status:value.error?.status,code:value.error?.code,rootOutcome:"refused"}:{code:"UNKNOWN_WRITE"});
++    return value.value;
++  }
++  async function serialize<T>(action:()=>Promise<T>):Promise<T|undefined> {
++    if(writeLock.current)return;writeLock.current=true;setBusy(true);setError("");
++    try{return await action();}catch(e){if(current())setError(message(e));return undefined;}
++    finally{writeLock.current=false;if(current()){setBusy(false);void refreshOriginals().catch(()=>undefined);}}
++  }
++  function applySave(unchecked:SkillWriteResult){if(!current())return;const result=normalizeOriginalRefusal(unchecked);setSave(result);if(result.status==="verified"&&result.record){if(result.attempt&&selectedId.current===result.attempt.id){setSkill(result.record);setFile(result.attempt.path??"SKILL.md");setDraft(result.attempt?.text??result.record.content);setEditing(false);}if(receiptMatchesDraft(result,lastReceipt.current,"save"))setBarrier(false);}else if(skillWriteBlocked(result))setBarrier(true);}
++  async function saveDraft() {
++    if(!skill||!can("save"))return;
++    await serialize(async()=>applySave(await runSkillSave(skill,file,draft,b.apiProject,{write:async(name,payload)=>write({op:"save",name,filePath:file,target:{id:skill.id,revision:skill.revision},content:payload.content,extra:payload.extra}),read:async name=>client.skill(name)})));
++  }
++  async function submitUpload() {
++    if(!can("create")||rows===null||archived===null)return;
++    const parsed=parseSkillUpload(upload);if(parsed&&(rows.some(row=>row.name===parsed.name)||archived.some(row=>row.name===parsed.name))){setUploadResult({status:"validation-error",writeConfirmed:false,message:"No upload was submitted. This name already exists; edit that exact record to preserve its identity, references and metadata."});return;}
++    await serialize(async()=>{const raw=await runSkillUpload(upload,b.apiProject,{create:async value=>decodeSkill(decode.data(await write({op:"create",reviewedAbsent:true,...value})),b),refresh:reload});const result=adaptSkillResult(raw,lastReceipt.current);if(current()){setUploadResult(result);if(receiptMatchesDraft(result,lastReceipt.current,"upload"))setBarrier(skillWriteBlocked(result));}});
++  }
++  async function verifyDraft(which:"save"|"upload") {
++    await serialize(async()=>{
++      if(which==="save"&&save)applySave(await verifySkillSave(save,{read:async name=>client.skill(name)}));
++      else if(which==="upload"&&uploadResult){const result=await verifySkillUpload(uploadResult,{read:async name=>client.skill(name),refresh:reload});if(current()){setUploadResult(result);if(receiptMatchesDraft(result,lastReceipt.current,"upload"))setBarrier(skillWriteBlocked(result));}}
++    });
++  }
++  const loadProposals=useCallback(async(append=false,cursor?:string)=>{
++    const epoch=++pageEpoch.current;setProposalError("");
++    try{const [totals,result]=await Promise.all([client.read({op:"proposal-counts"}),client.read({op:"proposal-page",view,cursor})]);if(!current()||pageEpoch.current!==epoch)return;const next=decode.proposalPage(result);if(append&&next.pagination.hasMore&&next.pagination.nextCursor===cursor)throw new Error("Proposal pagination did not advance.");setCounts(decode.counts(totals));setPage(old=>({data:append&&old?[...old.data,...next.data.filter(row=>!old.data.some(v=>v.id===row.id))]:next.data,pagination:next.pagination}));}
++    catch(e){if(current()&&pageEpoch.current===epoch){setProposalError(message(e));if(!append)setPage(null);}}
++  },[client,view]);
++  useEffect(()=>{if(tab==="proposals"){setPage(null);void loadProposals();}return()=>{pageEpoch.current++;};},[tab,view,loadProposals]);
++  async function openProposal(id:string,enrich=true) {
++    const epoch=++proposalEpoch.current;setDetail(null);setProposalError("");
++    try{const value=decode.proposal(await client.read({op:"proposal",id,enrich}),b,id);if(current()&&proposalEpoch.current===epoch){setDetail(value);if(!enrich)setNotice("Basic proposal loaded without source enrichment. No denied read was retried.");}}
++    catch(e){if(current()&&proposalEpoch.current===epoch)setProposalError(message(e));}
++  }
++  const loadSynthesis=useCallback(async()=>{
++    const epoch=++synthesisEpoch.current;setSynthesisError("");
++    const all=await Promise.allSettled([client.read({op:"synthesis-status"}),client.read({op:"synthesis-models"}),client.read({op:"pipeline"})]);
++    if(!current()||synthesisEpoch.current!==epoch)return false;const messages:string[]=[];
++    try{if(all[0].status==="rejected")throw all[0].reason;setStatus(decode.synthesisStatus(all[0].value));}catch(e){setStatus(null);messages.push(message(e));}
++    try{if(all[1].status==="rejected")throw all[1].reason;setModels(decode.modelProviders(all[1].value));}catch(e){setModels(null);messages.push(message(e));}
++    try{if(all[2].status==="rejected")throw all[2].reason;setEvents(decode.pipeline(all[2].value,b));}catch(e){setEvents(null);messages.push(message(e));}
++    setSynthesisError(messages.join(" "));return messages.length===0;
++  },[client]);
++  useEffect(()=>{if(tab==="synthesis")void loadSynthesis();},[tab,loadSynthesis]);
++  async function confirm() {
++    if(!pending||blocked||!client.allowed(pending.op))return;const command=pending;setPending(null);queueMicrotask(()=>{if(current())statusRegion.current?.focus();});
++    await serialize(async()=>{
++      const response=await write(command);if(!current())return;
++      let verified=false;
++      if("name" in command){const actual=await client.skill(command.name,"target" in command?command.target.id:undefined);setSkill(actual);selectedId.current=actual.id;verified=skillMatchesOriginal(actual,command);}
++      else if(command.op==="synthesis-run"){const acknowledgement=decode.data(response);if(!decode.record(acknowledgement)||acknowledgement.status!=="started")throw new Error("The original owner acknowledged the request, but its trigger response is unverified. Inspect the original; no run was replayed.");const actual=decode.synthesisStatus(await client.read({op:"synthesis-status"}));if(current())setStatus(actual);verified=true;setNotice("Synthesis trigger acknowledged. Batch completion, proposal approval, persisted activation and fresh-chat use still require their own evidence.");}
++      else{const actual=decode.proposal(await client.read({op:"proposal",id:command.id}),b,command.id);setDetail(actual);verified=command.op==="approve"?actual.status==="applied":command.op==="reject"?actual.status==="rejected":["rolledBack","rolled_back"].includes(actual.status);}
++      if(!current())return;if(!verified)throw new Error("Write acknowledged, but the current target differs from the requested state. No replay was sent.");
++      if(!await reload())throw new Error("Write acknowledged, but catalog readback failed. Inspect the original before another write.");
++      if(current()){setBarrier(false);if(command.op!=="synthesis-run")setNotice("Write acknowledged and current target read back.");if(tab==="proposals")void loadProposals();if(tab==="synthesis")void loadSynthesis();}
++    });
++  }
++  async function inspect(original:WriteOriginal) {
++    await serialize(async()=>{const actual=await client.inspect(original);if(current()){lastReceipt.current=actual;setUploadResult(previous=>previous?adaptSkillResult(previous,actual):previous);setReceipt(previous=>previous?.original.id===actual.original.id?{...actual,error:previous.error??actual.error}:actual);setNotice(actual.outcome==="unknown"?"Original remains unknown; it was not replayed.":"Original owner receipt: "+actual.outcome+". Read back the target before another change.");setBarrier(actual.outcome!=="refused");}await refreshOriginals();});
++  }
++  async function refreshAfterAcknowledgement() {
++    await serialize(async()=>{
++      if(!receipt||receipt.outcome!=="succeeded")throw new Error("The original owner must first confirm or refuse the write. A refresh alone is not a receipt.");
++      const command=receipt.original.command;
++      if("name" in command){const actual=await client.skill(command.name,"target" in command?command.target.id:undefined);if(!skillMatchesOriginal(actual,command))throw new Error("Target differs from the acknowledged payload; retained drafts and original remain available.");if(command.op==="save"&&current()){const recovered=recoveredSaveResult(receipt,actual);setSave(previous=>receiptMatchesDraft(previous,receipt,"save")?{...recovered,failure:previous?.failure}:recovered);}if(command.op==="create"&&uploadResult&&current())setUploadResult(adaptSkillResult({...uploadResult,status:"verified",record:actual},receipt));}
++      else if(command.op==="synthesis-run"){const acknowledgement=decode.data(receipt.value);if(!decode.record(acknowledgement)||acknowledgement.status!=="started")throw new Error("A matching trigger acknowledgement is still required; status alone does not prove this original was accepted.");decode.synthesisStatus(await client.read({op:"synthesis-status"}));}
++      else {const actual=decode.proposal(await client.read({op:"proposal",id:command.id}),b,command.id);if(!proposalMatchesAction(actual.status,command.op))throw new Error("The current proposal differs from the acknowledged action.");}
++      if(await reload()&&current()){setBarrier(false);setNotice("Acknowledged original read back; no write was replayed.");}
++    });
++  }
++  const visible=rows?.filter(row=>[row.name,row.description].some(v=>v.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())));
++  function outcome(value:SkillWriteResult|null,which:"save"|"upload"){return value&&<div className="hg-outcome" role={value.status==="verified"?"status":"alert"} data-outcome={value.status}><p>{value.message}</p>{value.attempt?.text!==undefined&&<details><summary>Retained exact draft</summary><pre>{value.attempt.text}</pre></details>}{(skillWriteBlocked(value)||barrier&&receiptMatchesDraft(value,receipt,which))&&<button type="button" disabled={busy} onClick={()=>void verifyDraft(which)}>Verify stored {which}</button>}</div>;}
++  return <section className="hg" aria-label="Hosted skill governance">
++    <header><div><h1>Skills & governance</h1><p>{b.apiProject} · {b.visibility} · authenticated actor {b.actorId}</p></div><button type="button" disabled={busy} onClick={()=>void reload()}>Refresh authoritative metadata</button></header>
++    <details><summary>Original authority details</summary><dl><dt>Hosted project</dt><dd>{b.hostedProjectId}</dd><dt>Installation</dt><dd>{b.installationId}</dd><dt>Grant revision</dt><dd>{b.grantRevision}</dd><dt>Native project</dt><dd>{b.nativeProjectId??"Explicitly projectless"}</dd></dl></details>
++    <div ref={statusRegion} tabIndex={-1} aria-live="polite">{busy&&<p role="status">Processing the original operation or readback…</p>}</div>
++    {!client.current()&&<p role="alert">Hosted authority changed. Return through the current authenticated owner; original writes remain retained.</p>}
++    {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{originalError&&<p role="alert">{originalError}</p>}{outcome(uploadResult,"upload")}{(!skill||!["skills","archived"].includes(tab))&&outcome(save,"save")}
++    {roots&&roots.length>0&&<section aria-label="Retained original operations"><h2>Original operations need recovery</h2>{roots.map(root=><div key={root.id}><p>{root.command.op} · {root.id}</p><button type="button" disabled={busy} onClick={()=>void inspect(root)}>Inspect original receipt</button></div>)}</section>}
++    {receipt&&<details open={barrier}><summary>Last original: {receipt.outcome}</summary><p>{receipt.original.id} · {receipt.original.command.op}</p>{receipt.error&&<p>{receipt.error.message}</p>}<button type="button" disabled={busy} onClick={()=>void inspect(receipt.original)}>Inspect last original receipt</button><button type="button" disabled={busy||receipt.outcome!=="succeeded"} onClick={()=>void refreshAfterAcknowledgement()}>Read back acknowledged change</button></details>}
++    <nav aria-label="Governance views">{(["skills","archived","proposals","synthesis"] as const).map(value=><button type="button" key={value} aria-pressed={tab===value} onClick={()=>setTab(value)}>{value[0].toUpperCase()+value.slice(1)}</button>)}</nav>
++    <div hidden={tab!=="skills"}>
++      <h2>Installed skill metadata</h2>{catalogError&&<p role="alert">{catalogError}</p>}{rows===null&&!catalogError&&<p role="status">Loading full installed catalog…</p>}
++      <label>Search skills<input type="search" value={query} onChange={e=>setQuery(e.target.value)}/></label>
++      {visible?.length===0&&<p>No matching installed records returned by this owner.</p>}
++      <ul>{visible?.slice(0,catalogLimit).map(row=><li key={row.id}><button type="button" onClick={()=>{if(row.installed)void openSkill(row.name,row.id);else setNotice("Available catalog entry: "+row.name+". No installed source was opened; this owner has no configured catalog-install operation.");}}>{row.name} · {row.installed?"Installed":"Available"} · {row.installed?(row.enabled?"enabled":"disabled"):"not installed"} · revision {row.revision??"unavailable"}</button></li>)}</ul>
++      {visible&&visible.length>catalogLimit&&<button type="button" onClick={()=>setCatalogLimit(value=>value+50)}>Show more installed metadata</button>}
++      <details><summary>Upload a skill</summary><label>Review Markdown<textarea value={upload} onChange={e=>setUpload(e.target.value)} disabled={blocked}/></label>
++        <label>Read Markdown file<input type="file" accept=".md" disabled={blocked} onChange={e=>{const file=e.target.files?.[0];if(file)void file.text().then(value=>{if(current())setUpload(value);}).catch(cause=>{if(current())setError("File could not be read. No upload submitted: "+message(cause));});}}/></label>
++        <button type="button" disabled={!can("create")||rows===null||archived===null} onClick={()=>void submitUpload()}>Upload reviewed Markdown</button></details>
++    </div>
++    <div hidden={tab!=="archived"}><h2>Archived skills</h2>{archiveError&&<p role="alert">{archiveError}</p>}{archived===null&&!archiveError&&<p role="status">Loading archived records…</p>}<ul>{archived?.slice(0,archiveLimit).map(row=><li key={row.id}>{row.name} · revision {row.revision}<button type="button" onClick={()=>void openSkill(row.name,row.id)}>Review archived source</button><button type="button" disabled={!can("restore")} onClick={()=>requestConfirmation({op:"restore",name:row.name,target:{id:row.id,revision:row.revision}})}>Restore</button></li>)}</ul>{archived&&archived.length>archiveLimit&&<button type="button" onClick={()=>setArchiveLimit(value=>value+50)}>Show more archived records</button>}</div>
++    {skill&&<section hidden={!["skills","archived"].includes(tab)} aria-label={"Hosted skill "+skill.name}><header><h2 ref={skillHeading} tabIndex={-1}>{skill.name}</h2><button type="button" onClick={()=>{selectedId.current=null;setSkill(null);detailEpoch.current++;}}>Close skill preview</button></header>
++      <p>ID {skill.id} · revision {skill.revision} · {skill.archived_at?"archived":skill.enabled?"enabled":"disabled"} · always_apply {skill.always_apply}</p><p>{skill.description}</p>
++      <label>Skill file<select value={file} disabled={busy||skillWriteBlocked(save)} onChange={e=>changeFile(e.target.value)}><option>SKILL.md</option>{Object.keys(filesOf(skill)).map(path=><option key={path}>{path}</option>)}</select></label>
++      {editing?<label>Edit {file}<textarea aria-label={"Edit "+file} value={draft} disabled={busy||skillWriteBlocked(save)} onChange={e=>setDraft(e.target.value)}/></label>:<div className="hg-markdown"><MarkdownBody text={file==="SKILL.md"?skill.content:filesOf(skill)[file]||""}/></div>}
++      {!editing?<button type="button" disabled={!can("save")||!!skill.archived_at} onClick={()=>{setDraft(file==="SKILL.md"?skill.content:filesOf(skill)[file]||"");setEditing(true);}}>Edit selected file</button>:<button type="button" disabled={!can("save")} onClick={()=>void saveDraft()}>Save exact draft</button>}
++      {outcome(save,"save")}
++      <button type="button" disabled={!can(skill.archived_at?"restore":"archive")} onClick={()=>requestConfirmation({op:skill.archived_at?"restore":"archive",name:skill.name,target:{id:skill.id,revision:skill.revision}})}>{skill.archived_at?"Restore skill":"Archive skill"}</button>
++      <button type="button" disabled={!!skill.archived_at||!can(skill.enabled?"disable":"enable")} onClick={()=>requestConfirmation({op:skill.enabled?"disable":"enable",name:skill.name,target:{id:skill.id,revision:skill.revision}})}>{skill.enabled?"Disable skill":"Enable skill"}</button>
++      <button type="button" disabled={!onOpenSkillInSession||!skill.enabled||!!skill.archived_at||blocked} onClick={()=>{if(current())onOpenSkillInSession?.(skill,b);}}>Open in session composer</button>
++      {!onOpenSkillInSession&&<p>Native session selection is not connected. Persisted enablement does not prove fresh-chat activation.</p>}
++    </section>}
++    <div hidden={tab!=="proposals"}><h2>Grounded proposals</h2><div role="group" aria-label="Proposal status view">{(["open","history"] as const).map(value=><button type="button" key={value} aria-pressed={view===value} onClick={()=>{setView(value);setDetail(null);}}>{value==="open"?"Open":"History"}{counts?" ("+counts[value]+")":""}</button>)}<button type="button" onClick={()=>void loadProposals()}>Refresh proposals</button></div>
++      {proposalError&&<p role="alert">{proposalError}</p>}<ul>{page?.data.map(row=><li key={row.id}><button type="button" onClick={()=>void openProposal(row.id)}>{row.targetName} · {row.proposalType} · {row.status}</button><button type="button" onClick={()=>void openProposal(row.id,false)}>Basic proposal details for {row.targetName}</button></li>)}</ul>{page?.pagination.hasMore&&<button type="button" onClick={()=>void loadProposals(true,page.pagination.nextCursor??undefined)}>Load more {view} proposals</button>}
++      {detail&&<section aria-label={"Proposal "+detail.id}><h3>{detail.targetName} · {detail.status}</h3><p>Target ID {detail.targetSkillId??"new target"} · source project {detail.sourceProjectId??"none"} · source name {detail.sourceName??"none"}</p>{detail.proposalType==="merge"&&<p>Approving a merge updates the target and archives its source. Source administration permission and original source maintenance-lock ownership are required.</p>}<p>Expected revision {detail.expectedRevision??"new target"} · source revision {detail.expectedSourceRevision??"not provided"} · quality {detail.qualityScore} · novelty {detail.noveltyScore}</p>
++        <div className="hg-comparison"><section><h4>Current target</h4><p>Observed revision {detail.currentSkill?.revision??"unavailable"}</p><pre>{detail.currentSkill?.content??"No current target source supplied."}</pre></section><section><h4>Proposed state</h4><pre>{json(detail.proposedState)}</pre></section>{detail.sourceSkill&&<section><h4>Merge source: {detail.sourceSkill.name}</h4><p>Source project {detail.sourceSkill.projectId} · observed revision {detail.sourceSkill.revision}</p><pre>{detail.sourceSkill.content}</pre></section>}</div>
++        <details open><summary>Grounding evidence and observations</summary><pre>{json(detail.evidence)}</pre><pre>{json(detail.observations??detail.observationIds)}</pre></details>
++        <button type="button" disabled={!client.allowed("skill")||!detail.targetSkillId} onClick={()=>{setTab("skills");void openSkill(detail.targetName,detail.targetSkillId??undefined);}}>Review target skill</button>
++        <p>Review by {detail.reviewer??"not reviewed"} · {detail.reviewReason??"No review note"} · applied {detail.appliedAt??"not applied"}</p>
++        <label>Reviewer audit label<input disabled={busy||!!pending} value={reviewer} onChange={e=>setReviewer(e.target.value)}/></label><label>Review reason<textarea disabled={busy||!!pending} value={reason} onChange={e=>setReason(e.target.value)}/></label>
++        {(["approve","reject","rollback"] as const).map(op=><button type="button" key={op} disabled={!can(op)||!reviewer.trim()||(op==="rollback"?detail.status!=="applied":!["pending","draft"].includes(detail.status))||detail.proposalType==="merge"&&op!=="reject"&&!detail.sourceSkill} onClick={()=>requestConfirmation({op,id:detail.id,reviewed:{status:detail.status,updatedAt:detail.updatedAt,targetSkillId:detail.targetSkillId,sourceProjectId:detail.sourceProjectId,sourceName:detail.sourceName,expectedRevision:detail.expectedRevision,expectedSourceRevision:detail.expectedSourceRevision},reviewer,reason})}>{op==="approve"?"Approve & apply":op==="reject"?"Reject":"Roll back proposal"}</button>)}
++      </section>}
++    </div>
++    <div hidden={tab!=="synthesis"}><h2>Synthesis & activation evidence</h2><p>A successful trigger is not a completed batch. Review grounded proposals, approve explicitly, read persisted enabled metadata and verify in a fresh session.</p><button type="button" onClick={()=>void loadSynthesis()}>Refresh batch and pipeline</button>{synthesisError&&<p role="alert">{synthesisError}</p>}
++      {status&&<dl><dt>Pending observations</dt><dd>{status.pending_count}</dd><dt>Processed observations</dt><dd>{status.processed_count}</dd><dt>Last synthesis</dt><dd>{status.last_synthesis_at??"No completion recorded"}</dd><dt>Incomplete batch</dt><dd><pre>{status.incompleteBatch?json(status.incompleteBatch):"None reported"}</pre></dd></dl>}
++      <label>Synthesis model<select value={model} onChange={e=>setModel(e.target.value)}><option value="">Existing server-owned selection</option>{model&&!selectedModelKnown&&<option value={model}>Previous choice unavailable — choose explicitly</option>}{models?.flatMap(p=>p.models.map(m=><option key={json([p.providerId,m.id])} value={json([p.providerId,m.id])}>{p.label} · {m.label}</option>))}</select></label><label>Optional source session<input value={session} onChange={e=>setSession(e.target.value)}/></label>
++      <button type="button" disabled={!can("synthesis-run")||!status||!selectedModelKnown} onClick={()=>{const selection:string[]|null=model?JSON.parse(model):null;requestConfirmation({op:"synthesis-run",...(session?{sessionId:session}:{}),...(selection?{model:{providerId:selection[0],modelId:selection[1]}}:{})});}}>Review synthesis trigger</button>
++      <p>Manual model choices require the existing signed-in runtime owner. No saved provider/model/default is changed.</p>
++      <ol>{events?.map(event=><li key={event.id}><strong>{event.title}</strong> · {event.event_type} · {event.created_at}<p>{event.description}</p><details><summary>Recorded pipeline metadata</summary><pre>{json(event.data)}</pre></details></li>)}</ol>
++    </div>
++    {pending&&<form className="hg-confirm" aria-label="Confirm exact governance change" onSubmit={e=>{e.preventDefault();void confirm();}}><h2>Confirm {pending.op}</h2><p>Owner: {b.apiProject} · actor {b.actorId}</p><pre>{json(pending)}</pre><button ref={confirmButton} type="submit" disabled={blocked}>Confirm exact change</button><button type="button" disabled={busy} onClick={cancelConfirmation}>Cancel pending confirmation</button></form>}
++  </section>;
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/HostedGovernanceSlot.tsx b/apps/web/src/features/customize/hosted-governance/HostedGovernanceSlot.tsx
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/HostedGovernanceSlot.tsx
+@@ -0,0 +1,12 @@
++import type {BoundGovernanceTransport,Skill,Binding} from "./contracts";
++import {HostedGovernance} from "./HostedGovernance";
++import {bindingKey} from "./client";
++/** Presentation metadata from an EXISTING Root-minted original, never transport enrollment. */
++export function hostedGovernanceSlotFromOriginal(transport:BoundGovernanceTransport,
++  onOpenSkillInSession?:(skill:Skill,binding:Binding)=>void) {
++  try{bindingKey(transport.binding);if(!transport.current())return undefined;}catch{return undefined;}
++  const b=transport.binding;
++  return {serviceInstanceId:b.nativeServiceInstanceId,projectId:b.nativeProjectId,projectRevision:b.nativeProjectRevision,
++    actorId:b.actorId,installationId:b.installationId,hostedProjectId:b.hostedProjectId,
++    content:<HostedGovernance transport={transport} onOpenSkillInSession={onOpenSkillInSession}/>};
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts b/apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts
+@@ -0,0 +1,50 @@
++import type {Binding,BoundGovernanceTransport,Operation,OperationReceipt,ProposalDetail,ReadCommand,Skill,SynthesisStatus,WriteOriginal} from "../contracts";
++export const originalBinding:Binding={authorityId:"authority",connectionId:"connection",grantId:"grant",grantRevision:2,epoch:"reader-1",
++  nativeLibraryId:"library",nativeServiceInstanceId:"native-service",hostedServiceInstanceId:"hosted-service",
++  nativeProjectId:"native-project",nativeProjectRevision:4,actorId:"actor",installationId:"installation",hostedProjectId:"hosted-project",apiProject:"actual-namespace",visibility:"project"};
++export const baseSkill:Skill={id:"skill-id",project_id:"hosted-project",name:"release",description:"Release checks",content:"# Original",
++  category:"Delivery",tags:"release",always_apply:0,file_tree:JSON.stringify({"references/check.md":"# Reference"}),enabled:0,
++  revision:3,archived_at:null,created_at:"2026-10-30",updated_at:"2026-10-30"};
++export const baseProposal:ProposalDetail={id:"proposal-1",status:"pending",proposalType:"update",targetName:"release",sourceName:null,
++  qualityScore:.9,noveltyScore:.8,createdAt:"2026-10-30",updatedAt:"2026-10-30",projectId:"hosted-project",targetSkillId:"skill-id",
++  sourceProjectId:null,expectedRevision:3,expectedSourceRevision:null,proposedState:{description:"Proposed",content:"# Proposed"},
++  evidence:[{kind:"observation",id:12}],observationIds:[12],reviewer:null,reviewReason:null,appliedAt:null,rolledBackAt:null,
++  observations:[{id:12,contentPreview:"Grounded observation"}],currentSkill:{content:"# Original",revision:3}};
++export const baseStatus:SynthesisStatus={total_observations:4,pending_count:1,processed_count:3,trait_count:0,last_synthesis_at:null,incompleteBatch:null};
++/** Deterministic owner fixture only; no operational persistence or production authority. */
++export function fixture(binding:Binding=structuredClone(originalBinding)) {
++  const state:{active:boolean;skills:Skill[];proposals:ProposalDetail[];originals:WriteOriginal[];reads:ReadCommand[];sends:WriteOriginal[];
++    reservations:WriteOriginal[];inspections:WriteOriginal[];events:string[];
++    reply?: (c:ReadCommand)=>unknown|Promise<unknown>;send?: (o:WriteOriginal)=>OperationReceipt|Promise<OperationReceipt>;
++    inspect?: (o:WriteOriginal)=>OperationReceipt|Promise<OperationReceipt>;reserveHook?:()=>void|Promise<void>;
++  }={active:true,skills:[structuredClone({...baseSkill,project_id:binding.hostedProjectId})],proposals:[structuredClone({...baseProposal,projectId:binding.hostedProjectId})],
++    originals:[],reads:[],sends:[],reservations:[],inspections:[],events:[]};
++  const response=(c:ReadCommand):unknown=>{
++    switch(c.op){
++      case "catalog": {const rows=state.skills.filter(s=>!s.archived_at).map(s=>({id:s.id,kind:c.kind,name:s.name,description:s.description,category:s.category??"Local",visibility:binding.visibility,installed:true,enabled:!!s.enabled,archived:false,revision:s.revision,actions:[]}));return {scope:{kind:"project",projectId:binding.hostedProjectId},scopes:[binding.visibility],data:rows.slice(c.offset,c.offset+c.limit),pagination:{offset:c.offset,limit:c.limit,total:rows.length,hasMore:c.offset+c.limit<rows.length}};}
++      case "skill": {const row=state.skills.find(s=>s.name===c.name);if(!row)throw Object.assign(new Error("Not found"),{status:404});return {data:row};}
++      case "archived":return {data:state.skills.filter(s=>!!s.archived_at)};
++      case "proposal-counts":return {data:{open:state.proposals.filter(p=>["pending","draft"].includes(p.status)).length,history:state.proposals.filter(p=>!["pending","draft"].includes(p.status)).length,byStatus:{pending:1}}};
++      case "proposal-page":return {data:state.proposals.filter(p=>c.view==="open"?["pending","draft"].includes(p.status):!["pending","draft"].includes(p.status)),pagination:{nextCursor:null,hasMore:false}};
++      case "proposal":return {data:state.proposals.find(p=>p.id===c.id)};
++      case "synthesis-status":return {data:baseStatus};
++      case "synthesis-models":return {data:{providers:[{providerId:"existing-provider",label:"Existing provider",models:[{id:"existing-model",label:"Existing model"}]}]}};
++      case "pipeline":return {data:[{id:1,project_id:binding.hostedProjectId,event_type:"synthesis_started",event_source:"synthesis",title:"Started",created_at:"2026-10-30"}]};
++    }
++  };
++  const finish=(o:WriteOriginal,r:OperationReceipt)=>{if(r.outcome!=="unknown")state.originals=state.originals.filter(v=>v.id!==o.id);return r;};
++  const capabilities:Operation[]=["catalog","skill","archived","proposal-counts","proposal-page","proposal","synthesis-status","synthesis-models","pipeline","create","save","archive","restore","enable","disable","approve","reject","rollback","synthesis-run"];
++  const transport:BoundGovernanceTransport={binding,capabilities,current:()=>state.active,
++    async read(c,b){state.reads.push(structuredClone(c));const value=state.reply?await state.reply(c):response(c);return {binding:structuredClone(b),value:structuredClone(value)};},
++    async reserve(c,b){if(state.originals.length)throw new Error("Existing original");const o={id:"original-"+(state.reservations.length+1),binding:structuredClone(b),command:structuredClone(c)};state.events.push("reserve");state.originals.push(o);state.reservations.push(o);await state.reserveHook?.();return structuredClone(o);},
++    async send(o){state.events.push("send");state.sends.push(structuredClone(o));if(state.send)return finish(o,await state.send(o));const c=o.command;let value:unknown;
++      if(c.op==="create"){const created={...baseSkill,id:"created-"+state.skills.length,project_id:binding.hostedProjectId,name:c.name,description:c.description,content:c.content,revision:0,category:null,tags:null,file_tree:null,enabled:1,archived_at:null};state.skills.push(created);value={data:created};}
++      else if("name" in c){const skill=state.skills.find(s=>s.name===c.name);if(!skill)throw new Error("Fixture skill absent");skill.revision++;if(c.op==="save"){skill.content=c.content;skill.tags=c.extra.tags??null;skill.always_apply=c.extra.always_apply;if(c.extra.files!==undefined)skill.file_tree=c.extra.files;}else if(c.op==="archive")skill.archived_at="2026-10-30";else if(c.op==="restore")skill.archived_at=null;else skill.enabled=c.op==="enable"?1:0;value={data:skill};}
++      else if(c.op==="synthesis-run")value={data:{status:"started",message:"Trigger only"}};
++      else {const p=state.proposals.find(v=>v.id===c.id);if(!p)throw new Error("Fixture proposal absent");p.status=c.op==="approve"?"applied":c.op==="reject"?"rejected":"rolledBack";p.reviewer=c.reviewer;p.reviewReason=c.reason??null;p.appliedAt=c.op==="approve"?"2026-10-30":null;value={data:p};}
++      return finish(o,{original:structuredClone(o),outcome:"succeeded",value:structuredClone(value)});},
++    async inspect(o){state.inspections.push(o);return finish(o,state.inspect?await state.inspect(o):{original:o,outcome:"unknown",error:{message:"Original is still unknown"}});},
++    async pending(){return structuredClone(state.originals);}
++  };
++  return {state,transport,response};
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/client.ts b/apps/web/src/features/customize/hosted-governance/client.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/client.ts
+@@ -0,0 +1,125 @@
++import type {Binding, BoundGovernanceTransport, CatalogRow, Command, OperationReceipt, ReadCommand, Skill, WriteCommand, WriteOriginal} from "./contracts";
++const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
++const text = (v: unknown): v is string => typeof v === "string" && !!v.trim() && !/[\u0000-\u001f]/u.test(v);
++const int = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
++const nullable = (v: unknown) => v === null || typeof v === "string";
++const writes = new Set(["create","save","archive","restore","enable","disable","approve","reject","rollback","synthesis-run"]);
++const bindingFields=["authorityId","connectionId","grantId","grantRevision","epoch","nativeLibraryId","nativeServiceInstanceId","hostedServiceInstanceId","nativeProjectId","nativeProjectRevision","actorId","installationId","hostedProjectId","apiProject","visibility"];
++export function bindingKey(b: Binding): string {
++  if (!b || Object.keys(b).length!==bindingFields.length || Object.keys(b).some(key=>!bindingFields.includes(key)) || ![b.authorityId,b.connectionId,b.grantId,b.epoch,b.nativeLibraryId,b.nativeServiceInstanceId,b.hostedServiceInstanceId,b.actorId,b.installationId,b.hostedProjectId,b.apiProject].every(text)
++    || !int(b.grantRevision) || b.grantRevision < 1 || !["project","system"].includes(b.visibility)
++    || !(b.nativeProjectId === null && b.nativeProjectRevision === null || text(b.nativeProjectId) && int(b.nativeProjectRevision))) throw new Error("An explicit original hosted authority is required.");
++  return JSON.stringify([b.authorityId,b.connectionId,b.grantId,b.grantRevision,b.epoch,b.nativeLibraryId,b.nativeServiceInstanceId,b.hostedServiceInstanceId,b.nativeProjectId,b.nativeProjectRevision,b.actorId,b.installationId,b.hostedProjectId,b.apiProject,b.visibility]);
++}
++/** A reader refresh is not a new resource owner; Root still reauthorizes inspection. */
++export function recoveryOwnerKey(b:Binding):string {
++  bindingKey(b);
++  return JSON.stringify([b.nativeLibraryId,b.nativeServiceInstanceId,b.hostedServiceInstanceId,b.authorityId,b.connectionId,b.actorId,b.installationId,b.nativeProjectId,b.hostedProjectId,b.visibility]);
++}
++export function isWrite(command: Command): command is WriteCommand {return writes.has(command.op);}
++export function descriptor(c: Command, b: Binding): {method: "GET"|"POST"|"PATCH"; path: string; body?: unknown} {
++  bindingKey(b);
++  const fields:Record<string,readonly string[]>={catalog:["op","kind","offset","limit"],skill:["op","name"],archived:["op"],
++    "proposal-counts":["op"],"proposal-page":["op","view","cursor"],proposal:["op","id","enrich"],"synthesis-status":["op"],
++    "synthesis-models":["op"],pipeline:["op"],create:["op","reviewedAbsent","name","description","content"],
++    save:["op","name","filePath","target","content","extra"],archive:["op","name","target"],restore:["op","name","target"],
++    enable:["op","name","target"],disable:["op","name","target"],approve:["op","id","reviewed","reviewer","reason"],
++    reject:["op","id","reviewed","reviewer","reason"],rollback:["op","id","reviewed","reviewer","reason"],
++    "synthesis-run":["op","sessionId","model"]};
++  if(!obj(c)||!Object.hasOwn(fields,c.op)||Object.keys(c).some(key=>!fields[c.op].includes(key)))throw new Error("This governance operation is not allowlisted.");
++  const exactSubset=(value:unknown,keys:string[])=>obj(value)&&Object.keys(value).every(key=>keys.includes(key));
++  if("target" in c&&!exactSubset(c.target,["id","revision"])||"extra" in c&&!exactSubset(c.extra,["tags","always_apply","files"])
++    ||"reviewed" in c&&!exactSubset(c.reviewed,["status","updatedAt","targetSkillId","sourceProjectId","sourceName","expectedRevision","expectedSourceRevision"])
++    ||"model" in c&&c.model!==undefined&&!exactSubset(c.model,["providerId","modelId"]))throw new Error("Original command metadata is not allowlisted.");
++  const q = new URLSearchParams({project:b.apiProject}), esc=encodeURIComponent;
++  const name = (v: string) => {if(!text(v)||v.length>64||v==="."||v===".."||/[\\/\u0000]/u.test(v))throw new Error("Invalid exact skill name.");return esc(v);};
++  const id = (v: string) => {if(!text(v)||v.length>256||!/^[-A-Za-z0-9_]+$/.test(v))throw new Error("Invalid proposal identity.");return esc(v);};
++  if("target" in c&&(!obj(c.target)||!text(c.target.id)||!int(c.target.revision)))throw new Error("The reviewed skill identity and revision are required.");
++  if("reviewed" in c&&(!obj(c.reviewed)||!text(c.reviewed.status)||!text(c.reviewed.updatedAt)||!nullable(c.reviewed.targetSkillId)||!nullable(c.reviewed.sourceProjectId)||!nullable(c.reviewed.sourceName)||!(c.reviewed.expectedRevision===null||int(c.reviewed.expectedRevision))||!(c.reviewed.expectedSourceRevision===null||int(c.reviewed.expectedSourceRevision))))throw new Error("The original reviewed proposal metadata is required.");
++  switch(c.op) {
++    case "catalog": if(!["skill","plugin"].includes(c.kind)||!int(c.offset)||!int(c.limit)||c.limit<1||c.limit>100)throw new Error("Invalid catalog page.");q.set("kind",c.kind);q.set("visibility",b.visibility);q.set("offset",String(c.offset));q.set("limit",String(c.limit));return {method:"GET",path:"/api/v1/customize?"+q};
++    case "skill": return {method:"GET",path:"/api/v1/skills/"+name(c.name)+"?"+q};
++    case "archived": return {method:"GET",path:"/api/v1/skills/archived?"+q};
++    case "create": if(c.reviewedAbsent!==true)throw new Error("A reviewed absent target is required; legacy create can upsert.");if(typeof c.description!=="string"||typeof c.content!=="string")throw new Error("Invalid skill body.");name(c.name);return {method:"POST",path:"/api/v1/skills?"+q,body:{name:c.name,description:c.description,content:c.content}};
++    case "save": if(!text(c.filePath)||/[\\\u0000]/u.test(c.filePath)||c.filePath.split("/").some(p=>["",".",".."].includes(p)))throw new Error("Reviewed file metadata missing.");if(!("target" in c))throw new Error("Reviewed skill metadata missing.");name(c.name);if(typeof c.content!=="string"||!obj(c.extra)||!Number.isFinite(c.extra.always_apply)||c.extra.tags!==undefined&&typeof c.extra.tags!=="string"||c.extra.files!==undefined&&typeof c.extra.files!=="string")throw new Error("Invalid saved draft.");return {method:"PATCH",path:"/api/v1/skills/"+name(c.name)+"?"+q,body:{content:c.content,tags:c.extra.tags,always_apply:c.extra.always_apply,files:c.extra.files}};
++    case "archive": case "restore": case "enable": case "disable": if(!("target" in c))throw new Error("Reviewed skill metadata missing.");return {method:"POST",path:"/api/v1/skills/"+name(c.name)+"/"+c.op+"?"+q};
++    case "proposal-counts": return {method:"GET",path:"/api/v1/skills/proposals/counts?"+q};
++    case "proposal-page": if(!["open","history"].includes(c.view))throw new Error("Invalid proposal view.");q.set("view",c.view);q.set("limit","25");if(c.cursor){if(!text(c.cursor)||c.cursor.length>4096)throw new Error("Invalid proposal cursor.");q.set("cursor",c.cursor);}return {method:"GET",path:"/api/v1/skills/proposals/page?"+q};
++    case "proposal": if(c.enrich!==undefined&&typeof c.enrich!=="boolean")throw new Error("Invalid explicit enrichment choice.");if(c.enrich===false)q.set("enrich","false");return {method:"GET",path:"/api/v1/skills/proposals/"+id(c.id)+"?"+q};
++    case "approve": case "reject": case "rollback": if(!("reviewed" in c))throw new Error("Reviewed proposal metadata missing.");if(!text(c.reviewer)||c.reviewer.length>256||c.reason!==undefined&&typeof c.reason!=="string")throw new Error("A reviewer and valid reason are required.");return {method:"POST",path:"/api/v1/skills/proposals/"+id(c.id)+"/"+c.op+"?"+q,body:{reviewer:c.reviewer.trim(),reason:c.reason}};
++    case "synthesis-status": return {method:"GET",path:"/api/v1/synthesis/status?"+q};
++    case "synthesis-models": return {method:"GET",path:"/api/v1/synthesis/models?"+q};
++    case "synthesis-run": if(c.sessionId){if(!/^[-A-Za-z0-9_]{1,256}$/.test(c.sessionId))throw new Error("Invalid synthesis session.");q.set("session_id",c.sessionId);}if(c.model&&(!text(c.model.providerId)||c.model.providerId.length>256||!text(c.model.modelId)||c.model.modelId.length>256))throw new Error("Invalid selected model.");return {method:"POST",path:"/api/v1/synthesis/run?"+q,body:c.model?{model:{providerId:c.model.providerId,modelId:c.model.modelId}}:{}};
++    case "pipeline": q.set("limit","100");return {method:"GET",path:"/api/v1/pipeline/events?"+q};
++    default: throw new Error("This governance operation is not allowlisted.");
++  }
++}
++export function decodeSkill(value: unknown, binding: Binding): Skill {
++  if(!obj(value)||!text(value.id)||value.project_id!==binding.hostedProjectId||!text(value.name)||typeof value.description!=="string"||typeof value.content!=="string"||!int(value.revision)
++    || ![0,1].includes(Number(value.enabled))||typeof value.enabled!=="number"||!nullable(value.file_tree)||!nullable(value.tags)||!nullable(value.category)||!nullable(value.archived_at)
++    ||typeof value.always_apply!=="number"||typeof value.created_at!=="string"||typeof value.updated_at!=="string")throw new Error("The hosted skill differs from the original project DTO.");
++  if(value.file_tree!==null){let tree:unknown;try{tree=JSON.parse(value.file_tree as string);}catch{throw new Error("Hosted reference metadata is invalid; no source was edited.");}if(!obj(tree)||Object.values(tree).some(v=>typeof v!=="string"))throw new Error("Hosted reference metadata is invalid; no source was edited.");}
++  return value as Skill;
++}
++function canonical(v: unknown): string { return JSON.stringify(v, (_key,value) => value && typeof value === "object" && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).filter(([,v]) => v !== undefined).sort(([a],[b])=>a.localeCompare(b))) : value); }
++function originalMatches(v: WriteOriginal, command: WriteCommand, b: Binding): boolean {
++  return !!(v&&obj(v.command)&&typeof v.command.op==="string"&&Object.keys(v).length===3&&Object.keys(v).every(key=>["id","binding","command"].includes(key))&&text(v.id)&&bindingKey(v.binding)===bindingKey(b)&&canonical(v.command)===canonical(command));
++}
++export function createGovernanceClient(transport: BoundGovernanceTransport, viewIsCurrent: () => boolean = () => true) {
++  if(!transport||!Array.isArray(transport.capabilities)||!["current","read","reserve","send","inspect","pending"].every(name=>typeof (transport as unknown as Record<string,unknown>)[name]==="function"))throw new Error("The authenticated original-operation transport is incomplete; no request was submitted.");
++  const binding = Object.freeze(structuredClone(transport.binding)), key=bindingKey(binding);
++  let disposed=false, busy=false;
++  let held:WriteOriginal|null=null; // Ephemeral view barrier; durable retention belongs only to Root.
++  const current=()=>{try{return !disposed&&viewIsCurrent()&&transport.current()&&bindingKey(transport.binding)===key;}catch{return false;}};
++  const check=()=>{if(!current())throw Object.assign(new Error("Hosted authority changed; originals and drafts remain with their original owner."),{code:"STALE_AUTHORITY"});};
++  const allowed=(op: Command["op"])=>current()&&transport.capabilities.includes(op);
++  async function read(c: ReadCommand): Promise<unknown> {
++    check();descriptor(c,binding);if(!allowed(c.op))throw Object.assign(new Error("This hosted read is unavailable for the original grant."),{status:403});
++    const r=await transport.read(structuredClone(c),binding);check();if(bindingKey(r.binding)!==key)throw new Error("Cross-owner hosted response refused.");return structuredClone(r.value);
++  }
++  async function pending(): Promise<readonly WriteOriginal[]> {
++    check();const rows=await transport.pending(binding);check();
++    if(!Array.isArray(rows))throw new Error("Original-operation owner is unavailable.");
++    // Foreign originals are preserved by Root, never silently queried or released here.
++    for(const row of rows){if(!row||!originalMatches(row,row.command,row.binding)||recoveryOwnerKey(row.binding)!==recoveryOwnerKey(binding)||!isWrite(row.command))throw new Error("A foreign or malformed original requires owner recovery; writes are blocked.");descriptor(row.command,row.binding);}
++    const retained=held;const returned=retained?rows.find(row=>row.id===retained.id):undefined;if(retained&&returned&&!originalMatches(returned,retained.command,retained.binding))throw new Error("The retained original changed; no new write is allowed.");
++    if(held&&!rows.some(row=>row.id===held?.id))return [...rows,structuredClone(held)];
++    return rows;
++  }
++  function receipt(r: OperationReceipt, original: WriteOriginal): OperationReceipt {
++    if(!r||!originalMatches(r.original,original.command,original.binding)||r.original.id!==original.id||!["succeeded","refused","unknown"].includes(r.outcome))throw new Error("The operation receipt does not match its original.");
++    if(r.error&&(!obj(r.error)||typeof r.error.message!=="string"||r.error.status!==undefined&&!int(r.error.status)||r.error.code!==undefined&&typeof r.error.code!=="string"))throw new Error("Invalid public original error.");
++    return {original:structuredClone(original),outcome:r.outcome,...(r.value!==undefined?{value:structuredClone(r.value)}:{}),...(r.error?{error:{message:r.error.message.slice(0,600),...(r.error.status!==undefined?{status:r.error.status}:{}),...(r.error.code!==undefined?{code:r.error.code}:{})}}:{})};
++  }
++  async function mutate(c: WriteCommand): Promise<OperationReceipt> {
++    check();descriptor(c,binding);if(!allowed(c.op))throw Object.assign(new Error("This change is unavailable for the original grant."),{status:403});
++    if(busy)throw new Error("Another original is already being prepared.");busy=true;
++    try {
++      if((await pending()).length)throw new Error("An existing original must be inspected before another write.");
++      check();const original=structuredClone(await transport.reserve(structuredClone(c),binding));
++      if(!originalMatches(original,c,binding))throw new Error("The reserved original does not match the reviewed command.");
++      held=structuredClone(original);
++      // Root retained the original BEFORE dispatch. A stale view never sends it.
++      check();
++      try {const r=await transport.send(original);check();const verified=receipt(r,original);if(verified.outcome!=="unknown")held=null;return verified;}
++      catch(error){if(!current())throw error;return {original,outcome:"unknown",error:{message:error instanceof Error?error.message:"Dispatch outcome is unknown."}};}
++    } finally {busy=false;}
++  }
++  async function inspect(original: WriteOriginal) {
++    check();if(!originalMatches(original,original.command,original.binding)||recoveryOwnerKey(original.binding)!==recoveryOwnerKey(binding))throw new Error("Only this exact original resource owner can be inspected.");
++    const r=await transport.inspect(original);check();const verified=receipt(r,original);if(verified.outcome!=="unknown"&&held?.id===original.id)held=null;return verified;
++  }
++  async function catalog(kind: "skill"|"plugin"="skill"):Promise<CatalogRow[]> {
++    const rows:CatalogRow[]=[],seen=new Set<string>();let total:number|null=null;
++    for(let offset=0;offset<10000;offset+=100) {
++      const r=await read({op:"catalog",kind,offset,limit:100});
++      if(!obj(r)||!obj(r.scope)||r.scope.kind!=="project"||r.scope.projectId!==binding.hostedProjectId||!Array.isArray(r.scopes)||!r.scopes.includes(binding.visibility)||!obj(r.pagination)||!Array.isArray(r.data))throw new Error("Catalog scope differs from the bound owner.");
++      const p=r.pagination;if(p.offset!==offset||p.limit!==100||!int(p.total)||typeof p.hasMore!=="boolean"||r.data.length>100||total!==null&&p.total!==total)throw new Error("Unstable hosted pagination.");total=p.total;
++      for(const row of r.data){if(!obj(row)||!text(row.id)||seen.has(row.id)||row.kind!==kind||row.visibility!==binding.visibility||typeof row.name!=="string"||typeof row.description!=="string"||typeof row.category!=="string"||typeof row.installed!=="boolean"||typeof row.enabled!=="boolean"||typeof row.archived!=="boolean"||!row.installed&&(row.enabled||row.archived)||!Array.isArray(row.actions)||row.actions.some(a=>typeof a!=="string")||!(row.revision===null||int(row.revision)))throw new Error("Invalid hosted catalog row.");seen.add(row.id);rows.push(row as CatalogRow);}
++      if(!p.hasMore){if(rows.length!==total)throw new Error("Incomplete hosted catalog.");return rows;}if(!r.data.length||rows.length>=total)throw new Error("Hosted pagination did not advance.");
++    }throw new Error("Hosted catalog exceeds the bounded read limit.");
++  }
++  async function skill(name:string,expectedId?:string):Promise<Skill> {const r=await read({op:"skill",name});if(!obj(r))throw new Error("Skill response unavailable.");const s=decodeSkill(r.data,binding);if(s.name!==name||expectedId!==undefined&&s.id!==expectedId)throw new Error("Skill identity differs from the original request; refresh the catalog before review.");return s;}
++  return {binding,key,current,allowed,read,pending,mutate,inspect,catalog,skill,dispose(){disposed=true;}};
++}
++export type GovernanceClient=ReturnType<typeof createGovernanceClient>;
+diff --git a/apps/web/src/features/customize/hosted-governance/contracts.ts b/apps/web/src/features/customize/hosted-governance/contracts.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/contracts.ts
+@@ -0,0 +1,54 @@
++/** Existing hosted snake_case Skill DTO, not a new resource store. */
++export type Skill = {id: string; project_id: string; name: string; description: string; content: string;
++  category: string | null; tags: string | null; always_apply: number; file_tree: string | null; enabled: 0 | 1;
++  revision: number; archived_at: string | null; created_at: string; updated_at: string};
++export type CatalogRow = {id: string; kind: "skill" | "plugin"; name: string; description: string; category: string;
++  visibility: string; installed: boolean; enabled: boolean; archived: boolean; revision: number | null; actions: string[]};
++export type ProposalSummary = {id: string; status: string; proposalType: string; targetName: string; sourceName: string | null;
++  qualityScore: number; noveltyScore: number; createdAt: string};
++export type ProposalDetail = ProposalSummary & {projectId: string; targetSkillId: string | null; sourceProjectId: string | null;
++  expectedRevision: number | null; expectedSourceRevision: number | null; proposedState: Record<string, unknown>;
++  evidence: unknown[]; observationIds: unknown[]; reviewer: string | null; reviewReason: string | null;
++  updatedAt: string; appliedAt: string | null; rolledBackAt: string | null; observations?: {id: number; contentPreview?: string; source?: string}[];
++  currentSkill?: {content: string; revision: number} | null; sourceSkill?: {projectId:string; content: string; revision: number; name: string} | null};
++export type ProposalPage = {data: ProposalSummary[]; pagination: {nextCursor: string | null; hasMore: boolean}};
++export type ProposalCounts = {open: number; history: number; byStatus: Record<string, number>};
++export type SynthesisStatus = {total_observations: number; pending_count: number; processed_count: number; trait_count: number;
++  last_synthesis_at: string | null; incompleteBatch: null | {stage: string; observationCount: number; hasStoredProposalPlan: boolean;
++    errorCount: number; lastErrorCode: string | null; createdAt: string; updatedAt: string; leaseState: string}};
++export type ModelProvider = {providerId: string; label: string; models: {id: string; label: string}[]; defaultModel?: string};
++export type Binding = Readonly<{
++  authorityId: string; connectionId: string; grantId: string; grantRevision: number; epoch: string;
++  nativeLibraryId: string; nativeServiceInstanceId: string; hostedServiceInstanceId: string; nativeProjectId: string | null; nativeProjectRevision: number | null;
++  actorId: string; installationId: string; hostedProjectId: string; apiProject: string; visibility: "project" | "system";
++}>;
++export type ReadCommand =
++  | {op: "catalog"; kind: "skill" | "plugin"; offset: number; limit: number}
++  | {op: "skill"; name: string}
++  | {op: "archived"}
++  | {op: "proposal-counts"}
++  | {op: "proposal-page"; view: "open" | "history"; cursor?: string}
++  | {op: "proposal"; id: string; enrich?:boolean}
++  | {op: "synthesis-status"} | {op: "synthesis-models"} | {op: "pipeline"};
++export type WriteCommand =
++  | {op: "create"; reviewedAbsent:true; name: string; description: string; content: string}
++  | {op: "save"; name: string; filePath:string; target: {id:string;revision:number}; content: string; extra: {tags?: string; always_apply: number; files?: string}}
++  | {op: "archive" | "restore" | "enable" | "disable"; name: string; target: {id:string;revision:number}}
++  | {op: "approve" | "reject" | "rollback"; id: string; reviewed: {status:string;updatedAt:string;targetSkillId:string|null;sourceProjectId:string|null;sourceName:string|null;expectedRevision:number|null;expectedSourceRevision:number|null}; reviewer: string; reason?: string}
++  | {op: "synthesis-run"; sessionId?: string; model?: {providerId: string; modelId: string}};
++export type Command = ReadCommand | WriteCommand;
++export type Operation = Command["op"];
++export type WriteOriginal = Readonly<{id: string; binding: Binding; command: WriteCommand}>;
++export type OperationReceipt = Readonly<{original: WriteOriginal; outcome: "succeeded" | "refused" | "unknown";
++  value?: unknown; error?: {status?: number; code?: string; message: string}}>;
++/** Root owns authentication, grant checks, durable original retention and dispatch. */
++export interface BoundGovernanceTransport {
++  readonly binding: Binding;
++  readonly capabilities: readonly Operation[];
++  current(): boolean;
++  read(command: ReadCommand, binding: Binding): Promise<{binding: Binding; value: unknown}>;
++  reserve(command: WriteCommand, binding: Binding): Promise<WriteOriginal>;
++  send(original: WriteOriginal): Promise<OperationReceipt>;
++  inspect(original: WriteOriginal): Promise<OperationReceipt>;
++  pending(binding: Binding): Promise<readonly WriteOriginal[]>;
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/decoders.ts b/apps/web/src/features/customize/hosted-governance/decoders.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/decoders.ts
+@@ -0,0 +1,33 @@
++import type {Binding, ModelProvider, ProposalCounts, ProposalDetail, ProposalPage, ProposalSummary, SynthesisStatus} from "./contracts";
++export const record=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
++const integer=(v:unknown)=>typeof v==="number"&&Number.isSafeInteger(v)&&v>=0;
++const nullable=(v:unknown)=>v===null||typeof v==="string";
++export function data(value:unknown):unknown {if(!record(value)||!("data" in value))throw new Error("The hosted response has no data envelope.");return value.data;}
++function summary(v:unknown):v is ProposalSummary & Record<string,unknown> {return record(v)&&typeof v.id==="string"&&!!v.id&&typeof v.status==="string"&&typeof v.proposalType==="string"&&typeof v.targetName==="string"&&nullable(v.sourceName)&&typeof v.qualityScore==="number"&&Number.isFinite(v.qualityScore)&&typeof v.noveltyScore==="number"&&Number.isFinite(v.noveltyScore)&&typeof v.createdAt==="string";}
++export function counts(value:unknown):ProposalCounts {
++  const v=data(value);if(!record(v)||!integer(v.open)||!integer(v.history)||!record(v.byStatus)||Object.values(v.byStatus).some(n=>!integer(n)))throw new Error("Invalid hosted proposal totals.");return v as ProposalCounts;
++}
++export function proposalPage(value:unknown):ProposalPage {
++  if(!record(value)||!Array.isArray(value.data)||value.data.length>25||!value.data.every(summary)||new Set(value.data.map(v=>v.id)).size!==value.data.length||!record(value.pagination)||!nullable(value.pagination.nextCursor)||typeof value.pagination.hasMore!=="boolean"||value.pagination.hasMore&&!value.pagination.nextCursor)throw new Error("Invalid bounded proposal page.");
++  return value as ProposalPage;
++}
++export function proposal(value:unknown,b:Binding,id:string):ProposalDetail {
++  const v=data(value);if(!summary(v)||!record(v)||v.id!==id||v.projectId!==b.hostedProjectId||typeof v.updatedAt!=="string"||!record(v.proposedState)||!Array.isArray(v.evidence)||!Array.isArray(v.observationIds)||!(v.expectedRevision===null||integer(v.expectedRevision))||!(v.expectedSourceRevision===null||integer(v.expectedSourceRevision))||!nullable(v.targetSkillId)||!nullable(v.sourceProjectId)||!nullable(v.reviewer)||!nullable(v.reviewReason)||!nullable(v.appliedAt)||!nullable(v.rolledBackAt))throw new Error("Proposal differs from the original hosted project.");
++  if(v.currentSkill!==undefined&&v.currentSkill!==null&&(!record(v.currentSkill)||typeof v.currentSkill.content!=="string"||!integer(v.currentSkill.revision)))throw new Error("Invalid current skill comparison.");
++  if(v.sourceSkill!==undefined&&v.sourceSkill!==null&&(!record(v.sourceSkill)||v.sourceSkill.projectId!==v.sourceProjectId||typeof v.sourceSkill.content!=="string"||!integer(v.sourceSkill.revision)||typeof v.sourceSkill.name!=="string"))throw new Error("Invalid source skill comparison.");
++  if(v.observations!==undefined&&(!Array.isArray(v.observations)||v.observations.some(o=>!record(o)||!integer(o.id)||o.contentPreview!==undefined&&typeof o.contentPreview!=="string")))throw new Error("Invalid enriched observations.");
++  return v as ProposalDetail;
++}
++export function synthesisStatus(value:unknown):SynthesisStatus {
++  const v=data(value);if(!record(v)||!["total_observations","pending_count","processed_count","trait_count"].every(k=>integer(v[k]))||!nullable(v.last_synthesis_at))throw new Error("Invalid synthesis status.");
++  if(v.incompleteBatch!==null){const batch=v.incompleteBatch;if(!record(batch)||typeof batch.stage!=="string"||!integer(batch.observationCount)||!integer(batch.errorCount)||typeof batch.hasStoredProposalPlan!=="boolean"||!nullable(batch.lastErrorCode)||typeof batch.createdAt!=="string"||typeof batch.updatedAt!=="string"||typeof batch.leaseState!=="string")throw new Error("Invalid incomplete synthesis batch.");}
++  return v as SynthesisStatus;
++}
++export function modelProviders(value:unknown):ModelProvider[] {
++  const v=data(value);if(!record(v)||!Array.isArray(v.providers)||v.providers.some(p=>!record(p)||typeof p.providerId!=="string"||!p.providerId||typeof p.label!=="string"||!Array.isArray(p.models)||p.models.some(m=>!record(m)||typeof m.id!=="string"||!m.id||typeof m.label!=="string")))throw new Error("The actual synthesis model catalog is unavailable.");
++  return v.providers as ModelProvider[];
++}
++export type PipelineEvent={id:number;project_id:string;event_type:string;event_source:string;title:string;description?:string;data?:unknown;created_at:string};
++export function pipeline(value:unknown,b:Binding):PipelineEvent[] {
++  const rows=data(value);if(!Array.isArray(rows)||rows.length>100||rows.some(v=>!record(v)||!integer(v.id)||v.project_id!==b.hostedProjectId||typeof v.event_type!=="string"||typeof v.event_source!=="string"||typeof v.title!=="string"||v.description!==undefined&&typeof v.description!=="string"||typeof v.created_at!=="string"))throw new Error("Invalid original-project pipeline events.");return rows as PipelineEvent[];
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/governance.node.mjs b/apps/web/src/features/customize/hosted-governance/governance.node.mjs
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/governance.node.mjs
+@@ -0,0 +1,195 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import fs from "node:fs";
++import {createHash} from "node:crypto";
++import {fixture,baseSkill,baseProposal,baseStatus,originalBinding} from "./__tests__/fixture.ts";
++import {bindingKey,createGovernanceClient,decodeSkill,descriptor,recoveryOwnerKey} from "./client.ts";
++import * as decode from "./decoders.ts";
++import {adaptSkillResult,normalizeOriginalRefusal} from "./writeOutcome.ts";
++import {recoveredSaveResult,receiptMatchesDraft,skillMatchesOriginal} from "./verification.ts";
++import {runSkillSave,runSkillUpload,skillWriteBlocked,verifySkillSave} from "./skill-write-outcomes.mjs";
++const target={id:baseSkill.id,revision:baseSkill.revision};
++test("closed HTTP descriptors retain exact namespace and actual methods without an origin or token",()=>{
++  const b={...originalBinding,apiProject:"actual /?namespace"};
++  const r=descriptor({op:"save",filePath:"SKILL.md",name:"safe name",target,content:"# New",extra:{always_apply:0,files:baseSkill.file_tree}},b);
++  assert.equal(r.method,"PATCH");assert.equal(new URL("https://fixture.invalid"+r.path).searchParams.get("project"),b.apiProject);
++  assert.equal(r.path.split("?")[0],"/api/v1/skills/safe%20name");
++  assert.deepEqual(Object.keys(r.body).sort(),["always_apply","content","files","tags"]);assert.ok(!JSON.stringify(r).includes("expected_revision"));
++});
++test("unknown operations and unsafe identities cannot reserve or dispatch",async()=>{
++  const {transport,state}=fixture(),client=createGovernanceClient(transport);
++  await assert.rejects(client.mutate({op:"fetch-url",url:"https://untrusted.invalid"}),/allowlisted/);
++  await assert.rejects(client.mutate({op:"archive",name:"../escape",target}),/exact skill/);
++  await assert.rejects(client.mutate({op:"save",filePath:"SKILL.md",name:"release",content:"x",extra:{always_apply:0}}),/metadata/);
++  assert.equal(state.reservations.length,0);assert.equal(state.sends.length,0);
++});
++test("projectless native binding keeps the explicit real hosted owner and never picks a global project",()=>{
++  const b={...originalBinding,nativeProjectId:null,nativeProjectRevision:null};
++  assert.notEqual(bindingKey(b),bindingKey(originalBinding));
++  assert.equal(new URL("https://fixture.invalid"+descriptor({op:"archived"},b).path).searchParams.get("project"),b.apiProject);
++  assert.throws(()=>bindingKey({...b,actorId:""}),/original hosted/);
++  assert.throws(()=>bindingKey({...b,hostedProjectId:""}),/original hosted/);
++});
++test("a crossed read envelope is rejected without another source or retry",async()=>{
++  const {transport,state}=fixture();transport.read=async command=>{state.reads.push(command);return {binding:{...originalBinding,actorId:"other"},value:{data:baseSkill}};};
++  await assert.rejects(createGovernanceClient(transport).skill("release"),/Cross-owner/);assert.equal(state.reads.length,1);
++});
++test("revocation during a read never returns old protected rows",async()=>{
++  const {transport,state}=fixture();let complete;transport.read=()=>new Promise(resolve=>{complete=resolve;});
++  const action=createGovernanceClient(transport).skill("release");state.active=false;complete({binding:originalBinding,value:{data:baseSkill}});
++  await assert.rejects(action,/authority changed/);assert.equal(state.sends.length,0);
++});
++test("one retained original precedes dispatch and an unknown write is not replayed",async()=>{
++  const {transport,state}=fixture();state.send=async original=>({original,outcome:"unknown",error:{message:"Connection lost"}});
++  const client=createGovernanceClient(transport),first=await client.mutate({op:"archive",name:"release",target});
++  assert.equal(first.outcome,"unknown");assert.deepEqual(state.events,["reserve","send"]);
++  await client.inspect(first.original);assert.equal(state.inspections.length,1);assert.equal(state.sends.length,1);
++  await assert.rejects(client.mutate({op:"disable",name:"release",target}),/existing original/);assert.equal(state.reservations.length,1);
++});
++test("owner change after reservation retains the original but prevents dispatch",async()=>{
++  const {transport,state}=fixture();state.reserveHook=()=>{state.active=false;};
++  await assert.rejects(createGovernanceClient(transport).mutate({op:"archive",name:"release",target}),/authority changed/);
++  assert.equal(state.reservations.length,1);assert.equal(state.originals.length,1);assert.equal(state.sends.length,0);
++});
++test("a forged receipt cannot confirm another original",async()=>{
++  const {transport,state}=fixture();state.send=async original=>({original:{...original,id:"foreign"},outcome:"succeeded",value:{data:baseSkill}});
++  const result=await createGovernanceClient(transport).mutate({op:"archive",name:"release",target});
++  assert.equal(result.outcome,"unknown");assert.match(result.error.message,/does not match/);assert.equal(state.sends.length,1);
++});
++test("foreign pending originals block a new write without lookup or deletion",async()=>{
++  const {transport,state}=fixture();state.originals=[{id:"foreign",binding:{...originalBinding,installationId:"other"},command:{op:"archive",name:"release",target}}];
++  await assert.rejects(createGovernanceClient(transport).mutate({op:"archive",name:"release",target}),/foreign/);
++  assert.equal(state.inspections.length,0);assert.equal(state.reservations.length,0);assert.equal(state.originals.length,1);
++});
++test("capability denial is enforced before retaining a new original",async()=>{
++  const {transport,state}=fixture();transport.capabilities=["catalog"];
++  await assert.rejects(createGovernanceClient(transport).mutate({op:"archive",name:"release",target}),/unavailable/);
++  assert.equal(state.reservations.length,0);
++});
++test("binding mutation and local reader disposal fence both read and dispatch",async()=>{
++  const {transport,state}=fixture();let current=true;const client=createGovernanceClient(transport,()=>current);
++  current=false;await assert.rejects(client.skill("release"),/authority changed/);assert.equal(state.reads.length,0);
++  current=true;transport.binding={...transport.binding,hostedServiceInstanceId:"restarted"};
++  assert.equal(client.current(),false);await assert.rejects(client.mutate({op:"archive",name:"release",target}),/authority changed/);
++});
++test("full catalog preserves disabled installed metadata and original identifiers",async()=>{
++  const {transport,state}=fixture(),rows=await createGovernanceClient(transport).catalog();
++  assert.equal(rows[0].id,baseSkill.id);assert.equal(rows[0].installed,true);assert.equal(rows[0].enabled,false);assert.equal(rows[0].revision,3);
++  assert.deepEqual(state.reads.map(v=>v.op),["catalog"]);
++});
++test("crossed catalog scope and unstable pagination never become empty success",async()=>{
++  const {transport,state,response}=fixture();state.reply=c=>{const r=response(c);return c.op==="catalog"?{...r,scope:{kind:"project",projectId:"other"}}:r;};
++  await assert.rejects(createGovernanceClient(transport).catalog(),/scope differs/);
++  state.reply=c=>c.op==="catalog"?{scope:{kind:"project",projectId:originalBinding.hostedProjectId},scopes:["project"],data:[],pagination:{offset:c.offset,limit:100,total:2,hasMore:true}}:response(c);
++  await assert.rejects(createGovernanceClient(transport).catalog(),/did not advance/);
++});
++test("skill records cannot cross projects; reference edits keep body tags and neighbors",async()=>{
++  assert.throws(()=>decodeSkill({...baseSkill,project_id:"other"},originalBinding),/original project/);
++  const {transport,state}=fixture(),client=createGovernanceClient(transport);
++  const result=await runSkillSave(baseSkill,"references/check.md","# Changed",originalBinding.apiProject,{
++    write:async(name,payload)=>client.mutate({op:"save",filePath:"references/check.md",name,target,content:payload.content,extra:payload.extra}),read:name=>client.skill(name)});
++  assert.equal(result.status,"verified");assert.equal(state.skills[0].content,baseSkill.content);assert.equal(state.skills[0].tags,baseSkill.tags);
++  assert.equal(JSON.parse(state.skills[0].file_tree)["references/check.md"],"# Changed");assert.deepEqual(state.sends[0].command.target,target);
++});
++test("actual proposal IDs revisions comparisons and grounding survive decoding",()=>{
++  const p=decode.proposal({data:baseProposal},originalBinding,baseProposal.id);
++  assert.equal(p.targetSkillId,baseSkill.id);assert.equal(p.expectedRevision,3);assert.deepEqual(p.observationIds,[12]);assert.equal(p.currentSkill.content,"# Original");
++  assert.throws(()=>decode.proposal({data:{...baseProposal,projectId:"other"}},originalBinding,baseProposal.id),/original hosted/);
++  assert.throws(()=>decode.proposalPage({data:Array(26).fill(baseProposal),pagination:{hasMore:false,nextCursor:null}}),/bounded/);
++});
++test("proposal review metadata is retained but never invented in the legacy HTTP body",()=>{
++  const c={op:"approve",id:baseProposal.id,reviewed:{status:"pending",updatedAt:baseProposal.updatedAt,targetSkillId:baseProposal.targetSkillId,sourceProjectId:baseProposal.sourceProjectId,sourceName:baseProposal.sourceName,expectedRevision:3,expectedSourceRevision:null},reviewer:"Actual reviewer",reason:"Grounded"};
++  const r=descriptor(c,originalBinding);assert.equal(r.method,"POST");assert.deepEqual(r.body,{reviewer:"Actual reviewer",reason:"Grounded"});
++  assert.throws(()=>descriptor({...c,reviewed:undefined},originalBinding),/metadata is not allowlisted/);
++});
++test("synthesis acknowledgement is a trigger, not batch completion or a changed default",async()=>{
++  const {transport,state}=fixture(),receipt=await createGovernanceClient(transport).mutate({op:"synthesis-run"});
++  assert.equal(receipt.value.data.status,"started");assert.deepEqual(descriptor({op:"synthesis-run"},originalBinding).body,{});
++  assert.deepEqual(descriptor({op:"synthesis-run",model:{providerId:"existing-provider",modelId:"existing-model"}},originalBinding).body,{model:{providerId:"existing-provider",modelId:"existing-model"}});
++  assert.equal(decode.synthesisStatus({data:baseStatus}).pending_count,1);assert.equal(baseStatus.last_synthesis_at,null);assert.equal(state.sends.length,1);
++});
++test("model catalog and pipeline decode only original-owner metadata",()=>{
++  assert.equal(decode.modelProviders({data:{providers:[{providerId:"actual",label:"Actual",models:[{id:"model",label:"Model"}]}]}})[0].models[0].id,"model");
++  assert.throws(()=>decode.pipeline({data:[{id:1,project_id:"other",event_type:"synthesis_started",event_source:"synthesis",title:"Started",created_at:"now"}]},originalBinding),/original-project/);
++});
++test("Root confirmed create with malformed response remains confirmed and blocks replay",async()=>{
++  const result=await runSkillUpload("---\nname: new-skill\ndescription: New\n---\n# New",originalBinding.apiProject,{
++    create:async()=>{throw new Error("Malformed successful response");},refresh:async()=>true});
++  const command={op:"create",reviewedAbsent:true,name:"new-skill",description:"New",content:"# New"};
++  const adapted=adaptSkillResult(result,{original:{id:"known",binding:originalBinding,command},outcome:"succeeded",value:{bad:true}});
++  assert.equal(adapted.status,"saved-refresh-failed");assert.equal(adapted.writeConfirmed,true);assert.equal(skillWriteBlocked(adapted),true);
++});
++test("Root proven refusal without HTTP status is not misreported as an uncertain write",()=>{
++  const error=Object.assign(new Error("Verified permission refusal"),{rootOutcome:"refused"});
++  const value=normalizeOriginalRefusal({status:"unknown",message:"Unknown",failure:{original:error}});
++  assert.equal(value.status,"refused");assert.match(value.message,/permission refusal/);assert.equal(error.status,undefined);
++});
++test("C4 failed-save draft and first failure survive explicit read-only verification",async()=>{
++  const first=new Error("Readback offline");let writes=0;
++  const value=await runSkillSave(baseSkill,"SKILL.md","# Exact draft  \n",originalBinding.apiProject,{write:async()=>{writes++;},read:async()=>{throw first;}});
++  assert.equal(value.status,"saved-refresh-failed");assert.equal(value.attempt.text,"# Exact draft  \n");assert.equal(value.failure.original,first);
++  const retry=await verifySkillSave(value,{read:async()=>{throw new Error("Still offline");}});
++  assert.equal(retry.failure.original,first);assert.equal(writes,1);
++});
++test("copied C4 runtime remains byte-identical to the declared source helper",()=>{
++  const provenance=JSON.parse(fs.readFileSync(new URL("./helper-provenance.json",import.meta.url),"utf8"));
++  const bytes=fs.readFileSync(new URL("./skill-write-outcomes.mjs",import.meta.url));
++  assert.equal(createHash("sha256").update(bytes).digest("hex"),provenance.sha256);
++});
++
++test("malformed terminal receipts retain a local view barrier even if Root omits its pending row",async()=>{
++  const {transport,state}=fixture();state.send=async original=>({original:{...original,id:"wrong"},outcome:"succeeded"});
++  const client=createGovernanceClient(transport),first=await client.mutate({op:"archive",name:"release",target});
++  assert.equal(first.outcome,"unknown");assert.equal((await client.pending()).length,1);
++  await assert.rejects(client.mutate({op:"enable",name:"release",target}),/existing original/);
++  assert.equal(state.sends.length,1);
++});
++test("only a matching authoritative receipt resolves a retained uncertain original",async()=>{
++  const {transport,state}=fixture();state.send=async original=>({original,outcome:"unknown"});
++  const client=createGovernanceClient(transport),first=await client.mutate({op:"archive",name:"release",target});
++  state.inspect=async original=>({original,outcome:"succeeded",value:{data:baseSkill}});
++  await client.inspect(first.original);assert.equal((await client.pending()).length,0);assert.equal(state.sends.length,1);
++});
++test("an acknowledged original can refine verified upload evidence without losing its first failure",()=>{
++  const failure={original:new Error("Initial disconnect")},attempt={name:"new-skill",description:"New",content:"# New",project:originalBinding.apiProject};
++  const r=adaptSkillResult({status:"verified",writeConfirmed:false,message:"Original unknown",failure,attempt},
++    {original:{id:"known",binding:originalBinding,command:{op:"create",reviewedAbsent:true,name:attempt.name,description:attempt.description,content:attempt.content}},outcome:"succeeded"});
++  assert.equal(r.writeConfirmed,true);assert.equal(r.failure,failure);assert.match(r.message,/confirmed creation/);
++});
++
++test("reader refresh can inspect an unchanged original for the same resource owner without replay",async()=>{
++  const currentBinding={...originalBinding,epoch:"reader-2",nativeProjectRevision:5,grantRevision:3,apiProject:"renamed-namespace"};
++  const {transport,state}=fixture(currentBinding);
++  const original={id:"old-original",binding:structuredClone(originalBinding),command:{op:"archive",name:"release",target}};
++  state.originals=[original];state.inspect=async preserved=>({original:preserved,outcome:"succeeded"});
++  const client=createGovernanceClient(transport);
++  assert.equal((await client.pending())[0].binding.epoch,"reader-1");
++  await client.inspect(original);
++  assert.equal(state.sends.length,0);assert.equal(state.inspections[0].binding.apiProject,"actual-namespace");
++  assert.equal(recoveryOwnerKey(originalBinding),recoveryOwnerKey(currentBinding));
++});
++test("changed actor or actual project is foreign even if the reader epoch matches",()=>{
++  assert.notEqual(recoveryOwnerKey(originalBinding),recoveryOwnerKey({...originalBinding,actorId:"other"}));
++  assert.notEqual(recoveryOwnerKey(originalBinding),recoveryOwnerKey({...originalBinding,hostedProjectId:"other"}));
++});
++test("recovered exact reference draft verifies full saved payload and preserves original file selection",()=>{
++  const command={op:"save",name:"release",filePath:"references/check.md",target,content:baseSkill.content,extra:{tags:baseSkill.tags,always_apply:0,files:JSON.stringify({"references/check.md":"# Exact reference"})}};
++  const receipt={original:{id:"recovered",binding:originalBinding,command},outcome:"succeeded"};
++  const actual={...baseSkill,file_tree:command.extra.files,revision:4};
++  const result=recoveredSaveResult(receipt,actual);
++  assert.equal(result.attempt.path,"references/check.md");assert.equal(result.attempt.text,"# Exact reference");assert.equal(result.status,"verified");
++  assert.equal(skillMatchesOriginal({...actual,tags:"concurrent"},command),false);
++  assert.equal(receiptMatchesDraft(result,receipt,"save"),true);
++  assert.equal(receiptMatchesDraft(result,{...receipt,original:{...receipt.original,command:{op:"archive",name:"release",target}}},"save"),false);
++});
++test("public binding and closed command reject accidental private transport fields",()=>{
++  assert.throws(()=>bindingKey({...originalBinding,credential:"not-a-real-secret"}),/original hosted/);
++  assert.throws(()=>descriptor({op:"archived",url:"https://untrusted.invalid"},originalBinding),/allowlisted/);
++  assert.throws(()=>descriptor({op:"save",name:"release",filePath:"SKILL.md",target,content:"x",extra:{always_apply:0,headers:{}}},originalBinding),/not allowlisted/);
++});
++
++test("basic proposal detail is an explicit bounded choice, never an automatic denied-read fallback",()=>{
++  assert.equal(new URL("https://fixture.invalid"+descriptor({op:"proposal",id:baseProposal.id,enrich:false},originalBinding).path).searchParams.get("enrich"),"false");
++  assert.equal(new URL("https://fixture.invalid"+descriptor({op:"proposal",id:baseProposal.id},originalBinding).path).searchParams.has("enrich"),false);
++  assert.throws(()=>decode.proposal({data:{...baseProposal,sourceProjectId:"source",sourceSkill:{projectId:"wrong",name:"x",content:"private",revision:1}}},originalBinding,baseProposal.id),/source skill comparison/);
++});
+diff --git a/apps/web/src/features/customize/hosted-governance/helper-provenance.json b/apps/web/src/features/customize/hosted-governance/helper-provenance.json
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/helper-provenance.json
+@@ -0,0 +1,6 @@
++{
++  "policy": "Verbatim C4 runtime helper; local declaration imports only adapt the Skill type path",
++  "sha256": "0ad588c74e9f117b48481035aef4ace47bbe6da06c1fe5a815a60344cf8051cb",
++  "sourceCommit": "f8dabe72488391bc71e924905f1cf28368446505",
++  "source": "services/ingenium-dashboard/src/app/components/customize-v2/skill-write-outcomes.mjs"
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/hosted-governance.css b/apps/web/src/features/customize/hosted-governance/hosted-governance.css
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/hosted-governance.css
+@@ -0,0 +1,22 @@
++.hg { color: var(--text); background: var(--canvas); max-width: 72rem; min-width: 0; padding: 16px; line-height: 1.5; }
++.hg [hidden] { display: none !important; }
++.hg header, .hg nav { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
++.hg header { justify-content: space-between; }
++.hg h1 { font-size: 1.3rem; margin: 0; }.hg h2 { font-size: 1.05rem; }.hg h3,.hg h4 { font-size: 1rem; }
++.hg :is(button,input,select,textarea) { font: inherit; color: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--control); padding: 8px 10px; max-width: 100%; }
++.hg button { cursor: pointer; margin: 4px; }.hg button:disabled { opacity: .55; cursor: not-allowed; }
++.hg button[aria-pressed=true] { border-color: var(--accent); }
++.hg :is(button,input,select,textarea,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++.hg label { display: flex; flex-direction: column; gap: 5px; margin-block: 12px; }
++.hg textarea { min-height: 10rem; width: 100%; resize: vertical; font-family: Cascadia Mono,Consolas,monospace; box-sizing: border-box; }
++.hg input,.hg select { min-width: 0; }.hg input[type=file] { width: 100%; box-sizing: border-box; }
++.hg section,.hg details { margin-block: 16px; min-width: 0; }.hg summary { cursor: pointer; }
++.hg pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar); font-family: Cascadia Mono,Consolas,monospace; }
++.hg li { margin-block: 6px; overflow-wrap: anywhere; }.hg ul,.hg ol { padding-inline-start: 22px; }
++.hg dt { color: var(--muted); }.hg dd { margin-inline-start: 12px; overflow-wrap: anywhere; }
++.hg [role=alert] { border-inline-start: 3px solid var(--accent); padding: 10px 14px; overflow-wrap: anywhere; }
++.hg-outcome,.hg-confirm { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-block: 16px; }
++.hg-comparison { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,20rem),1fr)); gap: 16px; }
++.hg-markdown { overflow-wrap: anywhere; }.hg-markdown table { display: block; overflow: auto; }.hg-markdown img { max-width: 100%; height: auto; }
++@media (max-width: 600px) { .hg { padding: 10px; }.hg header { align-items: stretch; }.hg button { min-height: 40px; } }
++@media (prefers-reduced-motion: reduce) { .hg * { animation: none; transition: none; scroll-behavior: auto; } }
+diff --git a/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.d.mts b/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.d.mts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.d.mts
+@@ -0,0 +1,34 @@
++import type { Skill } from "./contracts";
++
++export interface SkillWriteFailure {
++  status: number | null; code: string | null; message: string; original: unknown; outcome: "refused" | "unknown";
++}
++export interface SkillWriteAttempt {
++  project: string; name: string; description?: string; content?: string;
++  id?: string; projectId?: string; path?: string; text?: string;
++}
++export interface SkillWriteResult {
++  status: "validation-error" | "refused" | "unknown" | "saved-refresh-failed" | "success" | "verified" | "conflict" | "read-error";
++  writeConfirmed: boolean; message: string; attempt?: SkillWriteAttempt;
++  failure?: SkillWriteFailure; lastVerificationFailure?: SkillWriteFailure; record?: Skill;
++}
++export interface UploadValue {name: string; description: string; content: string}
++export interface SkillSavePayload {content: string; extra: {tags?: string; always_apply: number; files?: string}}
++export function skillWriteFailure(error: unknown): SkillWriteFailure;
++export function parseSkillUpload(text: string): UploadValue | null;
++export function skillWriteBlocked(result: SkillWriteResult | null): boolean;
++export function skillResourcePath(name: string, project: string): string;
++export function skillSavePayload(skill: Skill, path: string, text: string): SkillSavePayload;
++export function runSkillUpload(text: string, project: string, ports: {
++  create(value: UploadValue, project: string): Promise<unknown>; refresh(): Promise<boolean>;
++}): Promise<SkillWriteResult>;
++export function verifySkillUpload(previous: SkillWriteResult, ports: {
++  read(name: string, project: string): Promise<Skill>; refresh(): Promise<boolean>;
++}): Promise<SkillWriteResult>;
++export function runSkillSave(skill: Skill, path: string, text: string, project: string, ports: {
++  write(name: string, payload: SkillSavePayload, project: string): Promise<unknown>;
++  read(name: string, project: string): Promise<Skill>;
++}): Promise<SkillWriteResult>;
++export function verifySkillSave(previous: SkillWriteResult, ports: {
++  read(name: string, project: string): Promise<Skill>;
++}): Promise<SkillWriteResult>;
+diff --git a/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.mjs b/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.mjs
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/skill-write-outcomes.mjs
+@@ -0,0 +1,141 @@
++const refusedStatuses = new Set([400, 401, 403, 404, 409, 413, 415, 422, 423, 429]);
++
++export function skillWriteFailure(error) {
++  const status = typeof error?.status === "number" ? error.status : null;
++  const code = typeof error?.code === "string" ? error.code : null;
++  const message = typeof error?.message === "string" && error.message
++    ? error.message.slice(0, 600) : "The service did not provide an error description.";
++  const cancelledBeforeSend = error?.name === "AbortError" &&
++    error.message === "Authentication confirmation was cancelled.";
++  return { status, code, message, original: error,
++    outcome: refusedStatuses.has(status) || cancelledBeforeSend ? "refused" : "unknown" };
++}
++
++export function parseSkillUpload(text) {
++  if (typeof text !== "string") return null;
++  // Retain the existing upload format and trimming behavior in this error-state fix.
++  const match = text.match(/^---\s*\nname:\s*(.+)\ndescription:\s*(.+)\n---\s*\n([\s\S]*)$/m);
++  if (!match) return null;
++  const name = match[1].trim();
++  if (!name || name.length > 64 || name === "." || name === ".." ||
++      name.includes("/") || name.includes("\\") || name.includes("\0")) return null;
++  return { name, description: match[2].trim(), content: match[3].trim() };
++}
++
++export function skillWriteBlocked(result) {
++  return Boolean(result && ["unknown", "saved-refresh-failed", "conflict"].includes(result.status));
++}
++
++export function skillResourcePath(name, project) {
++  if (!project?.trim() || !name) throw new Error("An exact skill and authorized project are required.");
++  return "/skills/" + encodeURIComponent(name) + "?project=" + encodeURIComponent(project);
++}
++
++function fileContent(skill, path) {
++  if (path === "SKILL.md") return skill?.content;
++  try {
++    const files = JSON.parse(skill?.file_tree ?? "null");
++    return files && typeof files === "object" && !Array.isArray(files) && Object.hasOwn(files, path)
++      ? files[path] : undefined;
++  } catch { return undefined; }
++}
++
++export function skillSavePayload(skill, path, text) {
++  let files = skill.file_tree ?? undefined;
++  if (path !== "SKILL.md") {
++    const tree = JSON.parse(files ?? "null");
++    if (!tree || typeof tree !== "object" || Array.isArray(tree) || !Object.hasOwn(tree, path)) {
++      throw new Error("The selected reference is missing from stored metadata. Reload before saving.");
++    }
++    files = JSON.stringify({ ...tree, [path]: text });
++  }
++  return {
++    content: path === "SKILL.md" ? text : skill.content,
++    extra: { tags: skill.tags ?? undefined, always_apply: skill.always_apply, files },
++  };
++}
++
++export async function runSkillUpload(text, project, ports) {
++  const value = parseSkillUpload(text);
++  if (!value || !project?.trim()) return { status: "validation-error", writeConfirmed: false,
++    message: "Invalid Markdown frontmatter. Use name: and description: before the skill body." };
++  const attempt = { ...value, project };
++  try {
++    const created = await ports.create(value, project);
++    if (typeof created?.id === "string") attempt.id = created.id;
++    if (typeof created?.project_id === "string") attempt.projectId = created.project_id;
++  }
++  catch (error) {
++    const failure = skillWriteFailure(error);
++    return { status: failure.outcome, writeConfirmed: false, attempt, failure,
++      message: failure.outcome === "refused"
++        ? "Upload refused by the service: " + failure.message
++        : "Upload outcome is unknown: " + failure.message + " Verify stored content before another write." };
++  }
++  try {
++    if (!await ports.refresh()) throw new Error("The active skill list could not be refreshed.");
++    return { status: "success", writeConfirmed: true, attempt, message: "Uploaded and reloaded." };
++  } catch (error) {
++    return { status: "saved-refresh-failed", writeConfirmed: true, attempt, failure: skillWriteFailure(error),
++      message: "The skill was created, but refresh failed. Verify stored content before another upload." };
++  }
++}
++
++export async function verifySkillUpload(previous, ports) {
++  if (!previous.attempt) return previous;
++  const attempt = previous.attempt;
++  try {
++    const record = await ports.read(attempt.name, attempt.project);
++    if (record?.name !== attempt.name || record.content !== attempt.content || record.description !== attempt.description ||
++        (attempt.id && record.id !== attempt.id) || (attempt.projectId && record.project_id !== attempt.projectId)) {
++      return { ...previous, status: "conflict", message: "Stored content differs from the submitted file. The upload has not been replayed." };
++    }
++    if (!await ports.refresh()) {
++      return { ...previous, status: "saved-refresh-failed", record,
++        message: "Stored content matches the file, but the list could not be refreshed. No upload was replayed." };
++    }
++    return { ...previous, status: "verified", record,
++      message: previous.writeConfirmed ? "Created skill verified and reloaded."
++        : "Stored content matches the submitted file. Original request outcome remains unconfirmed; no upload was replayed." };
++  } catch (error) {
++    return { ...previous, failure: previous.failure ?? skillWriteFailure(error), lastVerificationFailure: skillWriteFailure(error),
++      message: "Upload result is still unverified: " + skillWriteFailure(error).message + " No upload was replayed." };
++  }
++}
++
++export async function runSkillSave(skill, path, text, project, ports) {
++  const attempt = { name: skill.name, id: skill.id, projectId: skill.project_id, project, path, text };
++  let payload;
++  try { payload = skillSavePayload(skill, path, text); }
++  catch (error) { return { status: "validation-error", writeConfirmed: false, attempt,
++    failure: skillWriteFailure(error), message: "No save was submitted: " + skillWriteFailure(error).message }; }
++  try { await ports.write(skill.name, payload, project); }
++  catch (error) {
++    const failure = skillWriteFailure(error);
++    return { status: failure.outcome, writeConfirmed: false, attempt, failure,
++      message: failure.outcome === "refused" ? "Save refused: " + failure.message + " Your draft is retained."
++        : "Save outcome is unknown: " + failure.message + " Your draft is retained; verify before another write." };
++  }
++  const confirmed = { status: "saved-refresh-failed", writeConfirmed: true, attempt,
++    message: "Save accepted, but stored content could not be verified. Your draft is retained." };
++  return verifySkillSave(confirmed, ports);
++}
++
++export async function verifySkillSave(previous, ports) {
++  if (!previous.attempt) return previous;
++  const attempt = previous.attempt;
++  try {
++    const record = await ports.read(attempt.name, attempt.project);
++    if (record?.id !== attempt.id || record.project_id !== attempt.projectId ||
++        record.name !== attempt.name || fileContent(record, attempt.path) !== attempt.text) {
++      return { ...previous, status: previous.writeConfirmed ? "saved-refresh-failed" : "conflict",
++        message: "Stored content does not match this draft. The draft is retained and no save was replayed." };
++    }
++    return { ...previous, status: "verified", record,
++      message: previous.writeConfirmed ? "Saved and verified." : "Stored draft verified; no additional save was sent." };
++  } catch (error) {
++    return { ...previous, failure: previous.failure ?? skillWriteFailure(error), lastVerificationFailure: skillWriteFailure(error),
++      message: previous.writeConfirmed ? "Save accepted, but readback failed. Your draft is retained."
++        : "Save remains unverified. Your draft is retained; no additional save was sent." };
++  }
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/verification.ts b/apps/web/src/features/customize/hosted-governance/verification.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/verification.ts
+@@ -0,0 +1,34 @@
++import type {OperationReceipt,Skill,WriteCommand} from "./contracts";
++import type {SkillWriteResult} from "./skill-write-outcomes.mjs";
++const object=(v:unknown):v is Record<string,unknown>=>!!v&&typeof v==="object"&&!Array.isArray(v);
++function tree(v:string|null|undefined):Record<string,unknown>|null {try{const parsed:unknown=JSON.parse(v??"null");return object(parsed)?parsed:null;}catch{return null;}}
++function sameTree(a:string|null,b:string):boolean {const x=tree(a),y=tree(b);return !!(x&&y&&Object.keys(x).length===Object.keys(y).length&&Object.keys(x).every(k=>Object.hasOwn(y,k)&&x[k]===y[k]));}
++export function skillMatchesOriginal(skill:Skill,command:WriteCommand):boolean {
++  if(!("name" in command)||skill.name!==command.name)return false;
++  if(command.op==="create")return skill.content===command.content&&skill.description===command.description;
++  if(skill.id!==command.target.id)return false;
++  if(command.op==="save")return skill.content===command.content&&skill.always_apply===command.extra.always_apply
++    &&(command.extra.tags===undefined||skill.tags===command.extra.tags)
++    &&(command.extra.files===undefined||sameTree(skill.file_tree,command.extra.files));
++  if(command.op==="archive")return !!skill.archived_at;
++  if(command.op==="restore")return !skill.archived_at;
++  return skill.enabled===(command.op==="enable"?1:0);
++}
++export function proposalMatchesAction(status:string,op:"approve"|"reject"|"rollback"):boolean {
++  return op==="approve"?status==="applied":op==="reject"?status==="rejected":["rolledBack","rolled_back"].includes(status);
++}
++export function receiptMatchesDraft(result:SkillWriteResult|null,receipt:OperationReceipt|null,kind:"save"|"upload"):boolean {
++  const a=result?.attempt,c=receipt?.original.command;
++  if(!a||!c||receipt?.original.binding.apiProject!==a.project||!("name" in c)||c.name!==a.name)return false;
++  if(kind==="upload")return c.op==="create"&&c.content===a.content&&c.description===a.description;
++  if(c.op!=="save"||c.target.id!==a.id||c.filePath!==a.path)return false;
++  return a.path==="SKILL.md"?c.content===a.text:tree(c.extra.files)?.[a.path??""]===a.text;
++}
++export function recoveredSaveResult(receipt:OperationReceipt,skill:Skill):SkillWriteResult {
++  const c=receipt.original.command;
++  if(receipt.outcome!=="succeeded"||c.op!=="save"||skill.project_id!==receipt.original.binding.hostedProjectId||!skillMatchesOriginal(skill,c))throw new Error("The retained save target does not match its acknowledged payload.");
++  const text=c.filePath==="SKILL.md"?c.content:tree(c.extra.files)?.[c.filePath];
++  if(typeof text!=="string")throw new Error("The retained original has no exact selected-file draft.");
++  return {status:"verified",writeConfirmed:true,message:"Retained original payload and selected-file draft read back; no save was replayed.",
++    attempt:{id:c.target.id,projectId:skill.project_id,project:receipt.original.binding.apiProject,name:c.name,path:c.filePath,text},record:skill};
++}
+diff --git a/apps/web/src/features/customize/hosted-governance/writeOutcome.ts b/apps/web/src/features/customize/hosted-governance/writeOutcome.ts
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/customize/hosted-governance/writeOutcome.ts
+@@ -0,0 +1,22 @@
++
++import type {OperationReceipt} from "./contracts";
++import type {SkillWriteResult} from "./skill-write-outcomes.mjs";
++/** A Root success receipt is stronger than a malformed create-response body. */
++export function adaptSkillResult(value:SkillWriteResult,receipt:OperationReceipt|null):SkillWriteResult {
++  const result=normalizeOriginalRefusal(value),command=receipt?.original.command,attempt=result.attempt;
++  if(["unknown","verified"].includes(result.status)&&receipt?.outcome==="succeeded"&&command?.op==="create"&&attempt
++    &&command.name===attempt.name&&command.content===attempt.content&&command.description===attempt.description
++    &&receipt.original.binding.apiProject===attempt.project) {
++    if(result.status==="verified")return {...result,writeConfirmed:true,message:"Stored content verified and the original owner confirmed creation; no upload was replayed."};
++    return {...result,status:"saved-refresh-failed",writeConfirmed:true,
++      message:"The original owner acknowledged creation, but its response or readback could not be verified. Verify stored content before another upload."};
++  }
++  return result;
++}
++
++/** Explicit Root receipt proof adapts C4's HTTP-only classifier without inventing a status. */
++export function normalizeOriginalRefusal<T extends {status:string;message:string;failure?:{original?:unknown}}>(result:T):T {
++  const cause=result.failure?.original;
++  return result.status==="unknown"&&cause!==null&&typeof cause==="object"&&"rootOutcome" in cause&&cause.rootOutcome==="refused"
++    ? {...result,status:"refused",message:"The original owner refused this change: "+("message" in cause&&typeof cause.message==="string"?cause.message:"No write was confirmed.")} : result;
++}

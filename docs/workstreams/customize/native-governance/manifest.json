@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 1,
+  "baselineTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+  "canonicalization": "UTF-8 without BOM; CRLF to LF; otherwise bytes preserved",
+  "mode": "Canonical portable sources plus exact optional composition patch; no native mutation",
+  "files": [
+    {
+      "source": "packages/veyra-customize/hosted-governance/HostedGovernance.test.tsx",
+      "target": "apps/web/src/features/customize/hosted-governance/HostedGovernance.test.tsx",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "caafb79429855152f0cf658cbf18216c63269024991782df79d6827682dc70a0",
+      "bytes": 9211
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/HostedGovernance.tsx",
+      "target": "apps/web/src/features/customize/hosted-governance/HostedGovernance.tsx",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "21171207713817b3516042d34db9b7255896dfe453e8fa7fb467fa01016b1177",
+      "bytes": 31702
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/HostedGovernanceSlot.tsx",
+      "target": "apps/web/src/features/customize/hosted-governance/HostedGovernanceSlot.tsx",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "31604d170a4377055c31d88554f4c2836b75536df28c708c33e95e9cf4084b5b",
+      "bytes": 853
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/__tests__/fixture.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/__tests__/fixture.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "1682a108a74a4c4f7cfbd17447d305df53413013160c170bc2872a3025a1cf9c",
+      "bytes": 7099
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/client.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/client.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "93558bb194760b27c93a6fc4d856af301aba671860dd6d33990b845ed9ce7b4b",
+      "bytes": 17264
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/contracts.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/contracts.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "16a0b24125a8e5fd9853b35bde53ff184f1202be0306406cfb8c4ebd3e2266b2",
+      "bytes": 4694
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/decoders.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/decoders.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "accf94239e733f16e2e90f68d275ee3506e56157ad0850376237a1229976c747",
+      "bytes": 4960
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/governance.node.mjs",
+      "target": "apps/web/src/features/customize/hosted-governance/governance.node.mjs",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "b258a48cf549a08259f744ab1a7d61ec9212d4cda7aec55b27cf21627de4bdc4",
+      "bytes": 17753
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/helper-provenance.json",
+      "target": "apps/web/src/features/customize/hosted-governance/helper-provenance.json",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "23c0efd3f9b9b5a9785a32ccc6f7bd14f63e7e1b0d67f2a7cf072c3bd3885025",
+      "bytes": 345
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/hosted-governance.css",
+      "target": "apps/web/src/features/customize/hosted-governance/hosted-governance.css",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "c52ba50ea5010d25f96ec76b2581d190a2822965e6f7e6d90176ca895317164d",
+      "bytes": 2448
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/skill-write-outcomes.d.mts",
+      "target": "apps/web/src/features/customize/hosted-governance/skill-write-outcomes.d.mts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "744d7c4f50f14c2dd7469a4456990265154e1d1846a5fd819760193c3b0a0327",
+      "bytes": 2092
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/skill-write-outcomes.mjs",
+      "target": "apps/web/src/features/customize/hosted-governance/skill-write-outcomes.mjs",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "0ad588c74e9f117b48481035aef4ace47bbe6da06c1fe5a815a60344cf8051cb",
+      "bytes": 7575
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/verification.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/verification.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "78c2b9a6da437c7c57215ae9630c1798084fe079268d4a5682976dbcc4ba73bd",
+      "bytes": 2966
+    },
+    {
+      "source": "packages/veyra-customize/hosted-governance/writeOutcome.ts",
+      "target": "apps/web/src/features/customize/hosted-governance/writeOutcome.ts",
+      "precondition": "absent",
+      "preSha256": null,
+      "postSha256": "e50dfde48fcf44c080b2c0d07faaa1a3f4cc1fc473d7d991a805656ff11976db",
+      "bytes": 1714
+    }
+  ],
+  "composition": {
+    "path": "apps/web/src/features/customize/NativeCustomize.tsx",
+    "baselineBlob": "8252a01a0fa7c9c325a355df17e862357255126d",
+    "preSha256": "fa9918140201f9627b99c94b0eb61df87bc7e2971b07834286bad5f0ca1250fa",
+    "postSha256": "2a8a825767a7c687b574d76cc20e1c5e02fc695cbe492a2e72132dcf5c2bdd6e",
+    "addedLines": 8,
+    "removedLines": 1
+  },
+  "patches": {
+    "portable-source.patch": "2fad4fa6e0f5b650acd6cbd19b4ff7df0c92e0908dfc275222a925361df72e74",
+    "native-composition.patch": "fe60012a2c9583f36ff6221c311e340fa7c0e1ec328660f2fb89643a95b973e9"
+  },
+  "prerequisites": [
+    {
+      "path": "apps/web/src/features/customize/NativeCustomize.tsx",
+      "baselineBlob": "8252a01a0fa7c9c325a355df17e862357255126d",
+      "baselineCanonicalSha256": "fa9918140201f9627b99c94b0eb61df87bc7e2971b07834286bad5f0ca1250fa",
+      "observedCanonicalSha256": "fa9918140201f9627b99c94b0eb61df87bc7e2971b07834286bad5f0ca1250fa",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/customize/nativeCatalog.ts",
+      "baselineBlob": "6a3b99c7a0888310ac13ac6a2740c10145a9272a",
+      "baselineCanonicalSha256": "d473d9ed00c19917beca5302ae4666e5715559b792e8db401f3a7ab43ee11cc6",
+      "observedCanonicalSha256": "d473d9ed00c19917beca5302ae4666e5715559b792e8db401f3a7ab43ee11cc6",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/platform/gateway.ts",
+      "baselineBlob": "3f14643966703bf21e684d2ac67a1bc36da9f732",
+      "baselineCanonicalSha256": "fab30d1bdd9ce66030f5b908c9d8b8761dea0765b4da208e5f017d40983a943d",
+      "observedCanonicalSha256": "fab30d1bdd9ce66030f5b908c9d8b8761dea0765b4da208e5f017d40983a943d",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/remote-hosts/RemoteConnectionWorkspace.tsx",
+      "baselineBlob": "510dafaa37f062fd6b2e3d4f73e291a3439392a0",
+      "baselineCanonicalSha256": "e9971fdae976229638ceae4ec1a0ad0f6ad336eaa27410a99a278c5b76b13a0b",
+      "observedCanonicalSha256": "e9971fdae976229638ceae4ec1a0ad0f6ad336eaa27410a99a278c5b76b13a0b",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/remote-hosts/remoteWorkspaceRead.ts",
+      "baselineBlob": "c221efb8b26138cf70e18cd11923f2a772c4a488",
+      "baselineCanonicalSha256": "7831c1dd6d006e89e52991c125f74643a479b7aa70cc68698a5bed5212b6cbb0",
+      "observedCanonicalSha256": "7831c1dd6d006e89e52991c125f74643a479b7aa70cc68698a5bed5212b6cbb0",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/web/src/features/remote-hosts/remoteWorkspaceDiscovery.ts",
+      "baselineBlob": "9d8aadfbf01732d2a3e26cdb46f861106adf4dd0",
+      "baselineCanonicalSha256": "a3f14ca3374d24c4534b53e498cc7e4dcb0d3bb0f6274cf3a4be03998c20377f",
+      "observedCanonicalSha256": "a3f14ca3374d24c4534b53e498cc7e4dcb0d3bb0f6274cf3a4be03998c20377f",
+      "currentCanonicalMatchesBaseline": true
+    },
+    {
+      "path": "apps/service/src/routes/remote_control/proxy.rs",
+      "baselineBlob": "a2e63d498f66bbf2f02d0649a1cde7741c004cf9",
+      "baselineCanonicalSha256": "4e6f49bcd5e7059d244f9fb5708f64d56b73ac7cc72b9718d68723dd3eb51331",
+      "observedCanonicalSha256": "4e6f49bcd5e7059d244f9fb5708f64d56b73ac7cc72b9718d68723dd3eb51331",
+      "currentCanonicalMatchesBaseline": true
+    }
+  ],
+  "helper": {
+    "policy": "Verbatim C4 runtime helper; local declaration imports only adapt the Skill type path",
+    "sha256": "0ad588c74e9f117b48481035aef4ace47bbe6da06c1fe5a815a60344cf8051cb",
+    "sourceCommit": "f8dabe72488391bc71e924905f1cf28368446505",
+    "source": "services/ingenium-dashboard/src/app/components/customize-v2/skill-write-outcomes.mjs"
+  },
+  "generatedDisposableOutputs": [],
+  "removedPaths": [],
+  "removedBytes": 0,
+  "retainedConsumer": "Root reviewed integration, original bridge implementation, central type/UI tests and actual Native workflow acceptance",
+  "endCondition": "Keep minimal canonical source, patches, manifest and unique verification receipts; Root reconciles its own central outputs"
+}

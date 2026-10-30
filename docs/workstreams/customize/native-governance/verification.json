@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-30",
+  "owner": "01a18935-0723-7cc0-9ea1-5e70f5627cc5",
+  "boundary": "Source adapter delivery, not full goal/runtime/visual acceptance",
+  "tests": {
+    "protocol": {
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node --test packages/veyra-customize/hosted-governance/governance.node.mjs"
+    },
+    "syntax": {
+      "files": 9,
+      "diagnostics": 0
+    },
+    "pureStrictNoEmit": {
+      "files": 5,
+      "diagnostics": 0,
+      "emitted": 0
+    },
+    "portableReactStrictNoEmit": {
+      "files": 8,
+      "diagnostics": 0,
+      "emitted": 0,
+      "peers": "Read-only existing Native apps/web peer resolution"
+    },
+    "nativeReadOnlyPatchCheck": {
+      "passed": true,
+      "baselineTree": "a04ab38bd0e0c7b96f40689733cad3f2332b9a0b",
+      "patches": {
+        "portable-source.patch": "2fad4fa6e0f5b650acd6cbd19b4ff7df0c92e0908dfc275222a925361df72e74",
+        "native-composition.patch": "fe60012a2c9583f36ff6221c311e340fa7c0e1ec328660f2fb89643a95b973e9"
+      },
+      "prerequisiteDrift": []
+    },
+    "rendererCases": {
+      "supplied": 11,
+      "run": false,
+      "owner": "Coordinator central Native runner"
+    },
+    "rootSourceAuthRegression": {
+      "reportedCommit": "252bc93d",
+      "reportedPassed": 15,
+      "workerRun": false
+    }
+  },
+  "retained": {
+    "canonicalSourceFiles": 14,
+    "canonicalSourceBytes": 110676,
+    "consumer": "Root reviewed integration, original bridge implementation, central type/UI tests and actual Native workflow acceptance",
+    "endCondition": "Keep minimal canonical source, patches, manifest and unique verification receipts; Root reconciles its own central outputs"
+  },
+  "cleanup": {
+    "generatedDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "linuxRecoveryClaimed": false,
+    "windowsRecoveryClaimed": false,
+    "protected": [
+      "Native checkout/index",
+      "Root shared test caches",
+      "source/lockfiles",
+      "runtime/credentials/models",
+      "prior unique evidence"
+    ]
+  },
+  "remaining": [
+    "Root concrete authenticated original transport and actual actor/installation/project mapping",
+    "Atomic absent-create and reviewed-write checks in actual legacy owner; no pretend PATCH CAS",
+    "Original target/source maintenance locks retained privately",
+    "Full Native App types and renderer cases",
+    "Real authenticated persistence/workflow and screenshot acceptance",
+    "Actual synthesis batch, proposal approval, persisted activation, fresh-conversation use",
+    "Windows artifact and Linux cluster acceptance"
+  ]
+}

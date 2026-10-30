@@ -1,0 +1,6 @@
+{
+  "policy": "Verbatim C4 runtime helper; local declaration imports only adapt the Skill type path",
+  "sha256": "0ad588c74e9f117b48481035aef4ace47bbe6da06c1fe5a815a60344cf8051cb",
+  "sourceCommit": "f8dabe72488391bc71e924905f1cf28368446505",
+  "source": "services/ingenium-dashboard/src/app/components/customize-v2/skill-write-outcomes.mjs"
+}

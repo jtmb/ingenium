@@ -1,0 +1,35 @@
+diff --git a/apps/web/src/features/customize/NativeCustomize.tsx b/apps/web/src/features/customize/NativeCustomize.tsx
+--- a/apps/web/src/features/customize/NativeCustomize.tsx
++++ b/apps/web/src/features/customize/NativeCustomize.tsx
+@@ -3,6 +3,8 @@
+ import type { Project } from "@veyra/contracts";
+ import type { Gateway } from "../../platform/types";
+ import { decodeNativeCatalog, filterNativeEntries, hostedGovernanceMatches, nativeCatalogPath, nativeOwnerKey, type HostedGovernanceBinding, type NativeCatalog, type NativeEntry, type NativeKind } from "./nativeCatalog";
++import type { Binding as HostedBinding, BoundGovernanceTransport, Skill as HostedSkill } from "./hosted-governance/contracts";
++import { hostedGovernanceSlotFromOriginal } from "./hosted-governance/HostedGovernanceSlot";
+ import "./native-customize.css";
+
+ const Packages = lazy(() => import("../extensions/PluginPackages").then(m => ({default: m.PluginPackages})));
+@@ -18,6 +20,9 @@
+   renderLegacyWorkflows: (gateway: Gateway) => ReactNode;
+   /** Render only the coordinator's authenticated, owner-bound governance adapter. */
+   hostedGovernance?: HostedGovernanceBinding & Readonly<{content: ReactNode}>;
++  /** Already authenticated and retained by Root; this component cannot enroll a transport. */
++  hostedGovernanceTransport?: BoundGovernanceTransport;
++  onOpenHostedSkillInSession?: (skill: HostedSkill, binding: HostedBinding) => void;
+ }>;
+ const waiting: ReadState = {status: "loading"};
+ const names: Record<Panel, string> = {packages: "Plugin packages", skills: "Skill source editor", extensions: "MCP, tools & connections",
+@@ -26,9 +31,11 @@
+ export function NativeCustomize(props: Props) {
+   const [kind, setKind] = useState<NativeKind>("plugin");
+   const project = props.project;
++  const hostedGovernance = props.hostedGovernance ?? (props.hostedGovernanceTransport
++    ? hostedGovernanceSlotFromOriginal(props.hostedGovernanceTransport, props.onOpenHostedSkillInSession) : undefined);
+   const owner = project ? nativeOwnerKey({serviceInstanceId: props.serviceInstanceId, projectId: project.id, projectRevision: project.revision},
+     [project.primary_root, project.environment]) : JSON.stringify([props.serviceInstanceId, null]);
++  return <CustomizeOwner key={owner} {...props} hostedGovernance={hostedGovernance} kind={kind} setKind={setKind}/>;
+-  return <CustomizeOwner key={owner} {...props} kind={kind} setKind={setKind}/>;
+ }
+
+ function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance, kind, setKind}: Props & {kind: NativeKind; setKind: (kind: NativeKind) => void}) {

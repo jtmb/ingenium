@@ -1,0 +1,22 @@
+.hg { color: var(--text); background: var(--canvas); max-width: 72rem; min-width: 0; padding: 16px; line-height: 1.5; }
+.hg [hidden] { display: none !important; }
+.hg header, .hg nav { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.hg header { justify-content: space-between; }
+.hg h1 { font-size: 1.3rem; margin: 0; }.hg h2 { font-size: 1.05rem; }.hg h3,.hg h4 { font-size: 1rem; }
+.hg :is(button,input,select,textarea) { font: inherit; color: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--control); padding: 8px 10px; max-width: 100%; }
+.hg button { cursor: pointer; margin: 4px; }.hg button:disabled { opacity: .55; cursor: not-allowed; }
+.hg button[aria-pressed=true] { border-color: var(--accent); }
+.hg :is(button,input,select,textarea,summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hg label { display: flex; flex-direction: column; gap: 5px; margin-block: 12px; }
+.hg textarea { min-height: 10rem; width: 100%; resize: vertical; font-family: Cascadia Mono,Consolas,monospace; box-sizing: border-box; }
+.hg input,.hg select { min-width: 0; }.hg input[type=file] { width: 100%; box-sizing: border-box; }
+.hg section,.hg details { margin-block: 16px; min-width: 0; }.hg summary { cursor: pointer; }
+.hg pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--sidebar); font-family: Cascadia Mono,Consolas,monospace; }
+.hg li { margin-block: 6px; overflow-wrap: anywhere; }.hg ul,.hg ol { padding-inline-start: 22px; }
+.hg dt { color: var(--muted); }.hg dd { margin-inline-start: 12px; overflow-wrap: anywhere; }
+.hg [role=alert] { border-inline-start: 3px solid var(--accent); padding: 10px 14px; overflow-wrap: anywhere; }
+.hg-outcome,.hg-confirm { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-block: 16px; }
+.hg-comparison { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,20rem),1fr)); gap: 16px; }
+.hg-markdown { overflow-wrap: anywhere; }.hg-markdown table { display: block; overflow: auto; }.hg-markdown img { max-width: 100%; height: auto; }
+@media (max-width: 600px) { .hg { padding: 10px; }.hg header { align-items: stretch; }.hg button { min-height: 40px; } }
+@media (prefers-reduced-motion: reduce) { .hg * { animation: none; transition: none; scroll-behavior: auto; } }
