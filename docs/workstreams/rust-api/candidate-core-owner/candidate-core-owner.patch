@@ -1,0 +1,181 @@
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -1,3 +1,4 @@
++import {describeStoredManagedPurpose,requireProductionManagedPurpose} from './core126-purpose.mjs';
+ import {projectCore126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
+ import {createHash,randomUUID} from "node:crypto";
+ const sha=value=>createHash("sha256").update(typeof value==="string"?value:JSON.stringify(value)).digest("hex");
+@@ -12,7 +13,7 @@
+  const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
+  const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
+  const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
+- const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,effectFence:r.effect_fence??"untracked",retirementProof:r.retirement_proof?JSON.parse(r.retirement_proof):null,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
++ const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");requireProductionManagedPurpose(r);return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,effectFence:r.effect_fence??"untracked",retirementProof:r.retirement_proof?JSON.parse(r.retirement_proof):null,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
+  function base(selection,ctx){
+   same();const run=jobs.getJobRun(selection.projectId,selection.runId),job=run&&jobs.getJob(selection.projectId,run.job_id);
+   if(!run||!job||run.project_id!==selection.projectId||run.organization_id!==job.organization_id||run.job_id!==job.id||run.job_revision!==job.revision||run.schedule_revision!==job.schedule_revision||run.effective_service_principal_id!==job.service_principal_id||!jobs.isJobRunAuthorizationCurrent(run.project_id,run.id))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
+@@ -56,6 +57,14 @@
+  };
+  const manager=ctx=>{requireManager(ctx);same();};
+  return Object.freeze({
++  /** Private original-owner lookup only: data discrimination is never a grant. */
++  admissionPurpose(runId){const r=row(runId);if(!r)fail('MANAGED_JOB_NOT_FOUND');return describeStoredManagedPurpose(r);},
++  async prepareCandidateInert(selection,ctx){
++   if(Object.keys(selection).sort().join('|')!=='projectId|runId|runtimeId|workspaceId')fail('MANAGED_JOB_INVALID_SELECTION');
++   base(selection,ctx); // Reuse original permission, source, run, epochs and quota checks; no second claim.
++   // Root's real observation/source/canary constructor is not installed. A DTO or injected port cannot supply it.
++   fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
++  },
+   factsForImagePreparation(selection,ctx){
+    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
+    return base(selection,ctx);
+@@ -123,7 +132,7 @@
+   requireCancellationIntent(runId){if(!hasCancelIntent(runId)&&read(runId).r.phase!=="cancel_requested")fail("MANAGED_JOB_CANCEL_INTENT_REQUIRED");},
+   requireOriginalRetirementProof(runId,proof){const r=row(runId);if(!r?.retirement_proof||JSON.stringify(JSON.parse(r.retirement_proof))!==JSON.stringify(proof))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");},
+   requestCancel(runId,ctx){const c=read(runId),principal=ctx?.revalidate?.();if(!principal||!authorization.requireProjectPermission(principal,c.r.project_id,"jobs","write").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");const job=jobs.getJob(c.r.project_id,c.r.job_id);if(job.visibility==="private"&&(!["browser-user","user-token"].includes(principal.type)||principal.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");return write(()=>{const {r}=current(runId,"inspect");if(r.phase==="retired")return read(runId).a;return cas(r,{phase:"cancel_requested"});});},
+-  assignment(runId,credential){const {r,a,run}=current(runId,"launch");if(!credential||credential.kind!=="job-run"||credential.audience!=="job-run"||credential.runId!==runId||credential.attemptId!==a.attemptId||credential.id!==r.credential_id||credential.projectId!==a.projectId||credential.organizationId!==a.organizationId||credential.ownerUserId!==a.ownerUserId||credential.workspaceId!==a.workspaceId||credential.storageMappingHash!==a.bindingHash||credential.securityEpoch!==a.bindingEpoch||credential.servicePrincipalId!==run.effective_service_principal_id||!["start_intent","running"].includes(r.phase))fail("MANAGED_JOB_CREDENTIAL_DENIED");const job=jobs.getJob(r.project_id,r.job_id);return {runId,attemptId:a.attemptId,workspaceId:a.workspaceId,bindingHash:a.bindingHash,runtimeId:a.runtimeId,projectId:a.projectId,organizationId:a.organizationId,ownerUserId:a.ownerUserId,profileQualified:true,executable:"opencode",cwd:"/workspace",credentialBoundToOriginalRun:true,agent:job.agent,prompt:job.prompt_template,promptHash:a.promptHash,model:a.model};},
++  assignment(runId,credential){const {r,a,run}=current(runId,"launch");if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.kind!=="job-run"||credential.audience!=="job-run"||credential.runId!==runId||credential.attemptId!==a.attemptId||credential.id!==r.credential_id||credential.projectId!==a.projectId||credential.organizationId!==a.organizationId||credential.ownerUserId!==a.ownerUserId||credential.workspaceId!==a.workspaceId||credential.storageMappingHash!==a.bindingHash||credential.securityEpoch!==a.bindingEpoch||credential.servicePrincipalId!==run.effective_service_principal_id||!["start_intent","running"].includes(r.phase))fail("MANAGED_JOB_CREDENTIAL_DENIED");const job=jobs.getJob(r.project_id,r.job_id);return {runId,attemptId:a.attemptId,workspaceId:a.workspaceId,bindingHash:a.bindingHash,runtimeId:a.runtimeId,projectId:a.projectId,organizationId:a.organizationId,ownerUserId:a.ownerUserId,profileQualified:true,executable:"opencode",cwd:"/workspace",credentialBoundToOriginalRun:true,agent:job.agent,prompt:job.prompt_template,promptHash:a.promptHash,model:a.model};},
+   bootstrapAssignment(runId,credential){const assignment=this.assignment(runId,credential),{a}=current(runId,"launch");const facts=base({runId,projectId:a.projectId,runtimeId:a.runtimeId,workspaceId:a.workspaceId});const binding=Object.fromEntries(["runId","attemptId","runtimeId","projectId","organizationId","ownerUserId","workspaceId","bindingHash","bindingEpoch","profileHash","imageId","agentHash","deadlineAt"].map(k=>[k,a[k]]));return {binding,agent:assignment.agent,model:a.model,staticProfile:profiles.describeOriginalJobBootstrap(a,facts)};},
+   result(runId,input,credential){const assignment=this.assignment(runId,credential);if(!input||Object.keys(input).sort().join("|")!=="attemptId|result"||input.attemptId!==assignment.attemptId||!input.result||Object.keys(input.result).some(k=>!["exitCode","events","verifiedResponse"].includes(k))||!Number.isInteger(input.result.exitCode)||!Array.isArray(input.result.events)||input.result.events.length>128||Buffer.byteLength(JSON.stringify(input.result.events))>65536)fail("MANAGED_JOB_RESULT_DENIED");
+    const verifier=verifierFactory();for(const event of input.result.events){if(typeof event!=="string")fail("MANAGED_JOB_RESULT_DENIED");verifier.accept(event+"\n");}const verified=verifier.finish().verified===true;
+--- a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
++++ b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+@@ -102,7 +102,14 @@
+  credentials:ManagedCredentialPorts;profiles:Core126Profiles;requireManager(context:ManagerContext):void;
+  verifierFactory():ResponseVerifier;now?:()=>Date;id?:()=>string;
+ }
++export type ManagedAdmissionPurpose = Readonly<{purpose:'production';candidateIntentHash:null}> | Readonly<{purpose:'candidate-inert-v1';candidateIntentHash:string}>;
++/** Not constructed here. A DTO/hash or TypeScript brand is not a runtime original lease. */
++declare const originalCandidateLeaseBrand:unique symbol;
++export interface OriginalCandidateLease {readonly [originalCandidateLeaseBrand]:never}
+ export interface Core126Owner {
++ admissionPurpose(runId:string):ManagedAdmissionPurpose;
++ /** Closed until the original image/physical-parent/source/canary constructor is installed. No lease parameter. */
++ prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<never>;
+  /** Private Root composition only; these are never HTTP operations or permission grants. */
+  factsForImagePreparation(selection:Core126Selection,context:CoreActorContext):Core126Facts;
+  factsForOriginalImageCheck(runId:string):Core126Facts;
+--- a/packages/ingenium-core/lib/tools/mcp-credentials.ts
++++ b/packages/ingenium-core/lib/tools/mcp-credentials.ts
+@@ -534,7 +534,9 @@
+ 
+ // Append inside the existing mcp-credentials.ts owner, retaining its original private factories/imports.
+ // No legacy kind/audience union, table row, receipt, encryption key or workspace is rewritten.
++/** Only the existing production credential is currently issued/inspected. Candidate authority remains closed. */
+ export interface ManagedJobCredential {
++  purpose:'production';candidateIntentHash:null;
+   id:string;kind:"job-run";audience:"job-run";runId:string;attemptId:string;
+   servicePrincipalId:string;organizationId:string;projectId:string;ownerUserId:string;
+   workspaceId:string;storageMappingHash:string;securityEpoch:number;principalSecurityEpoch:number;
+@@ -568,6 +570,10 @@
+         AND json_extract(op.body,'$.runId')=e.run_id AND json_extract(op.body,'$.state')='cancel_requested')
+     `).get(timestamp,timestamp,runId,timestamp) as Record<string,unknown>|undefined;
+   if(!row||attemptId!==undefined&&row.attempt_id!==attemptId)return undefined;
++  // Persisted purpose only. SQL129 defaults old rows to production without changing encrypted bytes.
++  // A candidate DTO/hash is NOT a genuine original lease; no candidate credential can be issued here yet.
++  if(row.purpose==='candidate-inert-v1')return undefined;
++  if(row.purpose!=='production'||row.candidate_intent_json!==null||row.candidate_intent_hash!==null||typeof row.profile_id!=='string'||!row.profile_id||typeof row.profile_hash!=='string'||!/^[a-f0-9]{64}$/.test(row.profile_hash))return undefined;
+   const granted=db.prepare(`SELECT 1 FROM job_runs run JOIN jobs job ON job.id=run.job_id AND job.project_id=run.project_id
+     JOIN projects project ON project.id=run.project_id AND project.organization_id=run.organization_id AND project.archived_at IS NULL
+     JOIN automation_principal_grants grant_row ON grant_row.project_id=run.project_id AND grant_row.organization_id=run.organization_id
+@@ -589,7 +595,7 @@
+       principal_security_epoch,workspace_security_epoch,token_prefix,token_hash,encrypted_token,scopes_json,expires_at,created_at)
+       VALUES(?,?,?,'job-run','job-run',?,?,?,?,?,?,?,?,?)`).run(generated.id,input.runId,input.attemptId,row.effective_service_principal_id,
+         row.principal_epoch,row.workspace_epoch,generated.tokenPrefix,hashSecurityToken(generated.token),encrypted,JSON.stringify(a.approvedScopes),row.deadline_at,new Date().toISOString());
+-    return {id:generated.id,kind:"job-run" as const,audience:"job-run" as const,runId:input.runId,attemptId:input.attemptId,
++    return {purpose:"production" as const,candidateIntentHash:null,id:generated.id,kind:"job-run" as const,audience:"job-run" as const,runId:input.runId,attemptId:input.attemptId,
+       servicePrincipalId:String(row.effective_service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,
+       workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(row.workspace_epoch),principalSecurityEpoch:Number(row.principal_epoch),scopes:[...a.approvedScopes],expiresAt:String(row.deadline_at),token:generated.token};
+   });
+@@ -601,8 +607,8 @@
+   const db=getDb(process.env.INGENIUM_CORE_DB_PATH),credential=db.prepare("SELECT * FROM job_run_mcp_credentials WHERE token_hash=? AND kind='job-run' AND audience='job-run' AND revoked_at IS NULL AND expires_at>?")
+     .get(hashSecurityToken(token),now.toISOString()) as Record<string,unknown>|undefined;
+   if(!credential)return undefined;const binding=managedJobCredentialBinding(String(credential.run_id),String(credential.attempt_id),now);
+-  if(!binding||binding.row.principal_epoch!==credential.principal_security_epoch||binding.row.workspace_epoch!==credential.workspace_security_epoch||credential.service_principal_id!==binding.row.effective_service_principal_id||credential.scopes_json!==JSON.stringify(binding.a.approvedScopes)||binding.row.credential_id!==credential.id)return undefined;
+-  const a=binding.a;return {id:String(credential.id),kind:"job-run",audience:"job-run",runId:String(credential.run_id),attemptId:String(credential.attempt_id),servicePrincipalId:String(credential.service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(credential.workspace_security_epoch),principalSecurityEpoch:Number(credential.principal_security_epoch),scopes:[...a.approvedScopes],expiresAt:String(credential.expires_at)};
++  if(!binding||credential.purpose!=="production"||credential.candidate_intent_hash!==null||binding.row.principal_epoch!==credential.principal_security_epoch||binding.row.workspace_epoch!==credential.workspace_security_epoch||credential.service_principal_id!==binding.row.effective_service_principal_id||credential.scopes_json!==JSON.stringify(binding.a.approvedScopes)||binding.row.credential_id!==credential.id)return undefined;
++  const a=binding.a;return {purpose:"production",candidateIntentHash:null,id:String(credential.id),kind:"job-run",audience:"job-run",runId:String(credential.run_id),attemptId:String(credential.attempt_id),servicePrincipalId:String(credential.service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(credential.workspace_security_epoch),principalSecurityEpoch:Number(credential.principal_security_epoch),scopes:[...a.approvedScopes],expiresAt:String(credential.expires_at)};
+ }
+ export function revokeManagedJobCredential(runId:string):void {
+   execTransaction(()=>getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("UPDATE job_run_mcp_credentials SET revoked_at=? WHERE run_id=? AND revoked_at IS NULL").run(new Date().toISOString(),runId));checkpointAfterWrite();
+--- a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -68,6 +68,8 @@
+   if(!imageOwner)throw Object.assign(Error("Qualified original image owner unavailable"),{status:503});
+   return imageOwner.withFreshOriginalJobRole(facts,work);
+  };
++ const requireProductionPurpose=(runId:string)=>{const original=owner.admissionPurpose(runId);
++  if(original.purpose!=='production')throw Object.assign(Error('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE'),{status:503});};
+  const rawHandlers=createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list});
+  const withdrawOriginal=createCore126WithdrawalHandler({credentials:mcpCredentials});
+  const handlers:Core126Handlers={
+@@ -76,6 +78,7 @@
+    if(!runId)return rawHandlers.internal(request);
+    managerGuard.context(request); // Authenticate BEFORE original Core lookup or manager observations.
+    const needsImage=operation==="admission"&&request.query?.action==="launch"||["launch-material","effect-intent","created","started"].includes(operation??"");
++   if(needsImage)requireProductionPurpose(runId);
+    return needsImage?withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.internal(request)):rawHandlers.internal(request);
+   },
+   async runtime(request){
+@@ -83,7 +86,8 @@
+    const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\//.exec(request.path),runId=match?.[1];
+    if(!runId)return rawHandlers.runtime(request);
+    const header=request.headers.authorization,credential=mcpCredentials.inspectManagedJobCredential(typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"","job-run");
+-   if(!credential||credential.runId!==runId)throw Object.assign(Error("Original JobRun credential required"),{status:401});
++   if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.runId!==runId)throw Object.assign(Error("Original JobRun credential required"),{status:401});
++   requireProductionPurpose(runId);
+    return withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.runtime(request));
+   },
+  };
+--- a/services/ingenium-api/lib/dot-v2/core126-http.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -44,7 +44,7 @@
+    if(!match)return null;
+    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
+    const credential=credentials.inspectManagedJobCredential(token,"job-run");
+-   if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
++   if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
+    if(match[2]==="bootstrap-assignment"&&request.method==="GET"){
+     if(request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.["x-ingenium-job-attempt"]!==credential.attemptId)throw Object.assign(Error("Original JobRun bootstrap denied"),{status:401});
+     return {data:owner.bootstrapAssignment(match[1],credential)};
+@@ -71,7 +71,7 @@
+ /** A CLOSED per-tool Core policy decision, not a generic service principal returned to middleware. */
+ export function createCore126ToolAuthorizer({credentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog}){
+  return (credential,toolName,body)=>{
+-  if(credential.kind!=="job-run"||credential.audience!=="job-run"||!jobs.isJobRunAuthorizationCurrent(credential.projectId,credential.runId))throw Object.assign(Error("JobRun tool denied"),{status:403});
++  if(credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.kind!=="job-run"||credential.audience!=="job-run"||!jobs.isJobRunAuthorizationCurrent(credential.projectId,credential.runId))throw Object.assign(Error("JobRun tool denied"),{status:403});
+   const tool=toolCatalog?.getTool(toolName);if(!tool||tool.name!==toolName||typeof tool.category!=="string")throw Object.assign(Error("Qualified original tool catalog unavailable"),{status:503});
+   const policy=mcpAuthorizationPolicy.explicitMcpAuthorizationPolicy(toolName,tool.category);
+   // Preserve actual private-content policy: never impersonate the owner to unlock browser/user-token-only tools.
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-purpose.mjs
+@@ -0,0 +1,22 @@
++import {candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
++import {parseStrictJobJson} from './job-bootstrap-frame.mjs';
++const fail=code=>{throw Object.assign(Error(code),{code,status:503});};
++/** Persisted data discrimination ONLY. Never issues an original lease or approval. */
++export function describeStoredManagedPurpose(row){
++ if(!row||!['production','candidate-inert-v1'].includes(row.purpose))fail('MANAGED_JOB_PURPOSE_UNAVAILABLE');
++ if(row.purpose==='production'){
++  if(typeof row.profile_id!=='string'||!row.profile_id||typeof row.profile_hash!=='string'||!/^[a-f0-9]{64}$/.test(row.profile_hash)||row.candidate_intent_json!==null||row.candidate_intent_hash!==null)fail('MANAGED_JOB_PURPOSE_BINDING_UNAVAILABLE');
++  return Object.freeze({purpose:'production',candidateIntentHash:null});
++ }
++ if(row.profile_id!==null||row.profile_hash!==null||typeof row.candidate_intent_json!=='string'||Buffer.byteLength(row.candidate_intent_json)>65536||typeof row.candidate_intent_hash!=='string')fail('MANAGED_JOB_PURPOSE_BINDING_UNAVAILABLE');
++ const intent=parseStrictJobJson(Buffer.from(row.candidate_intent_json),65536);
++ if(candidateInertIntentHash(intent)!==row.candidate_intent_hash)fail('MANAGED_JOB_PURPOSE_BINDING_UNAVAILABLE');
++ const pairs=[[intent.run.runId,row.run_id],[intent.run.jobId,row.job_id],[intent.run.attemptId,row.attempt_id],[intent.run.runIdentityHash,row.run_identity_hash],[intent.run.jobRevision,row.job_revision],[intent.run.scheduleRevision,row.schedule_revision],[intent.run.promptHash,row.prompt_hash],[intent.scope.organizationId,row.organization_id],[intent.scope.projectId,row.project_id],[intent.scope.ownerUserId,row.owner_user_id],[intent.scope.workspaceId,row.workspace_id],[intent.scope.bindingHash,row.binding_hash],[intent.scope.bindingEpoch,row.binding_epoch],[intent.scope.grantRevision,row.grant_revision],[intent.parent.runtimeId,row.runtime_id],[intent.parent.containerId,row.parent_container_id],[intent.parent.daemonId,row.daemon_id],[intent.parent.provisioningRevision,row.provisioning_revision],[intent.imageId,row.image_id],[intent.resource.admissionId,row.resource_admission_id],[intent.resource.runtimeRevision,row.runtime_revision],[intent.expiresAt,row.deadline_at]];
++ if(pairs.some(([a,b])=>a!==b))fail('MANAGED_JOB_PURPOSE_BINDING_UNAVAILABLE');
++ return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:row.candidate_intent_hash});
++}
++export function requireProductionManagedPurpose(row){
++ const descriptor=describeStoredManagedPurpose(row);
++ if(descriptor.purpose!=='production')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
++ return descriptor;
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-purpose.d.mts
+@@ -0,0 +1,4 @@
++export type StoredManagedPurpose = Readonly<{purpose:'production';candidateIntentHash:null}> | Readonly<{purpose:'candidate-inert-v1';candidateIntentHash:string}>;
++/** Data validation, not admission authority. Input must be read by the original Core owner. */
++export function describeStoredManagedPurpose(row:Readonly<Record<string,unknown>>):StoredManagedPurpose;
++export function requireProductionManagedPurpose(row:Readonly<Record<string,unknown>>):Readonly<{purpose:'production';candidateIntentHash:null}>;

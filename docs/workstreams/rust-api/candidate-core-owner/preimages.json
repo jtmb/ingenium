@@ -1,0 +1,79 @@
+{
+  "base": "a2151e6b12c051efa751843d1f4db577ffd26388",
+  "scope": "Explicit-purpose refusal integration; real candidate constructor remains closed. Root owns SQL129 registration/canonical apply.",
+  "patchSha256": "fbe71fc2b5d85159596b7615838d45eaf51fca396ed40db1702dfe52a5e41192",
+  "changes": [
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "expectedAbsent": false,
+      "preimageSha256": "e10260de3b5845807b27b122e15a9b183ad1daae565a92dbd95ecc1c5376b611",
+      "proposedSha256": "3c4984f1efba39b6b321c1b2a6f7db863642bbfa8c2117ee876d38dcfa9917a1"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "expectedAbsent": false,
+      "preimageSha256": "9f42d00f8d02c3e30bdb3cf8ded142048495a81dfa98ba3ba361aff1a284d84e",
+      "proposedSha256": "69954d2bc09a1f60a87bc50fb1ea135dd7e39bd607c61efbcef1d9894529c13a"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "3d59e328985cac1bce532d2de8e8dd65bb4a90a7f5e1013c3df06e767235e2a2",
+      "proposedSha256": "541c86dd2488e9917068372ed9a1653f0e4f5e7540a38d24889a5e6173a07ed0"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "32136a8e4b418b4506729ace16f85977f60ce0c8c2d600955be9edabc7174e55",
+      "proposedSha256": "c984b1bc8a10e6f182823142a6c3f64501482e906db6ac45c599519f071b0ef6"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+      "expectedAbsent": false,
+      "preimageSha256": "48c9485708a39f16b1788a796814e2eae445ec9173537fd6f6b4064b20dcc101",
+      "proposedSha256": "dbaccea339d8c9f6cbee96acfa10b489e5b26e4e7f13a4608d0d5453063b591e"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "d865891ca7678458ec9872e5d108cdef31e7a913bf217e806d091b7420fc9bda"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-purpose.d.mts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "65c7532ee2c786bec8c6664ad3d2f27305435221578f1df3f85bcc57b5b8bb4c"
+    }
+  ],
+  "referenceInputs": [
+    {
+      "path": "packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql",
+      "sha256": "62c72c6e6c2dee158e7730ae4a9dba2d7a29a8726384b046909ad153ff9ab11b"
+    },
+    {
+      "path": "docs/workstreams/packaging/core126-candidate-fixture-audit.md",
+      "sha256": "83da91b1b3dd8da529c290f56273f8e4fcbac5ebeb1d3b29382d6a4714435711"
+    },
+    {
+      "path": "docs/workstreams/packaging/core126-candidate-fixture-audit-inputs.json",
+      "sha256": "fd4f3b7d4c36c0e80b7358cfb285322078fd79617836513a6c26ce0fb1dfb76a"
+    },
+    {
+      "path": "tools/veyra-release/core126-candidate-intent.mjs",
+      "sha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1"
+    },
+    {
+      "path": "tools/veyra-release/core126-candidate-intent.d.mts",
+      "sha256": "eba8d947516daf06df9b7351f92114082346161fdde1c0f1843c4abdd1b09f78"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "sha256": "c4948687cd6903bcd37836d524c282fd29c778806131a06ebda5e8d72972838c"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8"
+    }
+  ]
+}

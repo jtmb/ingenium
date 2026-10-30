@@ -1,0 +1,9 @@
+import {createRequire} from 'node:module';import {resolve} from 'node:path';import {changes} from './proposal.mjs';
+const root=process.argv[2];if(!root?.startsWith('/'))throw Error('Explicit existing integration dependency owner required');
+const ts=createRequire(resolve(root,'package.json'))('typescript'),virtual=new Map(changes(root).map(c=>[resolve(root,c.path),c.after]));
+const options={strict:true,noUncheckedIndexedAccess:true,noUnusedLocals:true,noUnusedParameters:true,noImplicitReturns:true,noEmit:true,incremental:false,skipLibCheck:true,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.NodeNext,moduleResolution:ts.ModuleResolutionKind.NodeNext,esModuleInterop:true,resolveJsonModule:true,types:['node'],typeRoots:[resolve(root,'node_modules/@types')],baseUrl:root,paths:{'ingenium-core':['packages/ingenium-core/lib/index.ts'],'ingenium-core/lib/*':['packages/ingenium-core/lib/*']}};
+options.paths['ingenium-core/lib/*']=['packages/ingenium-core/lib/*.ts'];
+const host=ts.createCompilerHost(options),read=host.readFile.bind(host),exists=host.fileExists.bind(host);
+host.readFile=p=>virtual.get(resolve(p))??read(p);host.fileExists=p=>virtual.has(resolve(p))||exists(p);host.writeFile=()=>{throw Error('No compiler output authorized');};
+const program=ts.createProgram([resolve(root,'packages/ingenium-core/lib/tools/mcp-credentials.ts'),resolve(root,'services/ingenium-api/lib/dot-v2/core126-actual-factory.ts')],options,host),errors=ts.getPreEmitDiagnostics(program);
+for(const e of errors.slice(0,25))console.log((e.file?.fileName??'')+' '+ts.flattenDiagnosticMessageText(e.messageText,'\n'));if(errors.length){console.log('Diagnostics '+errors.length);process.exitCode=1;}else console.log('PASS strict in-memory proposed Core credential/API factory and actual reachable Core/API source types; no emit/build/runtime');
