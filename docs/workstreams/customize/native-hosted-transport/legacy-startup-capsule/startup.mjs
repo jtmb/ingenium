@@ -35,8 +35,8 @@ export function runParent(m,manifestSha256){
  }
  // Current generation retries use only the immutable retained capture/close chain, NEVER121/132 imports.
  const finalObserved=state.compatibilityStarted?state.compatibilityObserved:state.observed,finalClosed=state.compatibilityStarted?state.compatibilityClosed:state.closed;need(finalObserved&&finalClosed,'LAST_PRE133_OWNER_UNCONFIRMED');const observation=finalObserved.value.observation;
- need(allowsCurrent(observation.disposition),observation.disposition==='genuine-empty-cohort'?'EMPTY_COHORT_ACTIVE_SELECTION_CONTRACT_OPEN':observation.disposition.toUpperCase().replaceAll('-','_'));
- const legacy=finalObserved.value.legacyCapture;need(legacy&&observation.identity.state==='present','ACTUAL_V1_CAPTURE_AND_INSTALLATION_REQUIRED');let legacyPin;
+ need(allowsCurrent(observation.disposition),observation.disposition.toUpperCase().replaceAll('-','_'));
+ const legacy=finalObserved.value.legacyCapture;need(legacy&&observation.identity.state==='present'&&legacy.selectorProvenance?.entryPoint==='installation-location-observation'&&legacy.selectorProvenance.activeProjectTransitionAuthorized===false,'ACTUAL_INSTALLATION_CAPTURE_AND_IDENTITY_REQUIRED');let legacyPin;
  const p=journalPath(m,'legacy-capture.json');if(fs.existsSync(p)){const bytes=trustedBytes(p);need(stable(JSON.parse(bytes))===stable(legacy),'LEGACY_CAPTURE_ALREADY_DIFFERENT');legacyPin={path:p,sha256:sha(bytes)};}else legacyPin=writeEvent(m,'legacy-capture.json',legacy);sealReadable(m,p);
  if(!state.started){verifyCurrent(m);writeEvent(m,'current-may-have-started.json',{manifestSha256,protocol:'current-core-upgrade-may-have-started-v1',closedSha256:finalClosed.sha256,closeStage:state.compatibilityStarted?'prospective132':'original121',legacyCapture:legacyPin,disposition:observation.disposition});state=existingState(m,manifestSha256);}
  else need(stable(state.started.value.legacyCapture)===stable(legacyPin),'CAPSULE_CAPTURE_HANDOFF_CHANGED');

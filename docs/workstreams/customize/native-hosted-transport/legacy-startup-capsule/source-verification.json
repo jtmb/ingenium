@@ -1,7 +1,7 @@
 {
   "sourceOnly": true,
-  "workerSyntaxChecksPassed": 7,
-  "sourceTestsScheduledGroups": 6,
+  "workerSyntaxChecksPassed": 8,
+  "sourceTestsScheduledGroups": 7,
   "sourceTestsExecuted": false,
   "exactOriginalPublicInputsVerified": {
     "jsFiles": 5,
@@ -18,5 +18,13 @@
   "sourceProposalReadyForIntegrationReview": true,
   "productionReady": false,
   "fullReleaseComplete": false,
-  "newDisposablePaths": []
+  "newDisposablePaths": [],
+  "parentQualification": {
+    "receiptSha256": "9be16f7c5458698a69dd04c7ef6c9d2d2df55f8f7320ee26a286c5873f1cde42",
+    "syntheticOnly": true,
+    "sourceInstallationEntryQualified": true,
+    "all175OriginalTablesPreserved": true,
+    "exactProductionRuntimeQualified": false,
+    "workerDidNotExecute": true
+  }
 }

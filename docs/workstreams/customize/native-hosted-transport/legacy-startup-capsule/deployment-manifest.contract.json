@@ -52,7 +52,7 @@
     "apiSha256": null,
     "files": []
   },
-  "readiness": "JS125SQL available; old runtime package/native equivalence, explicit132 qualification, zero-active/archived transition and Root deployment contracts remain open",
+  "readiness": "actual121 public source and prospective132 installation-entry r2 synthetic qualification passed; production runtime/custody/gid/journal/current-code gates remain",
   "compatibility": {
     "role": "prospective-compatibility132",
     "root": null,
@@ -70,11 +70,12 @@
       "reference": null,
       "sha256": null,
       "availableActualSourceReceipt": {
-        "reference": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/compat132-qualification/receipt.json",
-        "sha256": "0d1d979949a42ff14c672288892e9c65ba852f38870428e203b6a3c30197ca5c",
+        "reference": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/compat132-qualification/receipt-r2.json",
+        "sha256": "9be16f7c5458698a69dd04c7ef6c9d2d2df55f8f7320ee26a286c5873f1cde42",
         "syntheticOnly": true,
         "node": "v22.23.1",
-        "notExactLiveNativeBinaryQualification": true
+        "notExactLiveNativeBinaryQualification": true,
+        "installationEntryForAll3CohortsQualified": true
       }
     },
     "files": [],
@@ -88,6 +89,6 @@
   },
   "captureHelper": {
     "modulePath": null,
-    "sha256": "4ac3a6121c8fff3a51029e7e0ff37d37cfc4610e269397ac2a9a5eca6773a90e"
+    "sha256": "d989679b769cabd8789581a1207d05dd96d1e82f011215695db1387ff40140aa"
   }
 }

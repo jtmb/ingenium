@@ -6,7 +6,7 @@
     {
       "sourceFile": "contract.mjs",
       "targetPath": "scripts/legacy-startup-capsule/contract.mjs",
-      "sha256": "20b84b4510433a75b3fa16e72b5feace8606d64ae012520cf8bb98af1442b27f"
+      "sha256": "9a846ba32a397df5d4ce5a8bbce589302b71c0f20f57d9a73725c92826e3224b"
     },
     {
       "sourceFile": "original-static-pins.mjs",
@@ -21,12 +21,12 @@
     {
       "sourceFile": "capture-original.mjs",
       "targetPath": "scripts/legacy-startup-capsule/capture-original.mjs",
-      "sha256": "22245dc916430c5d81d0143a072037b197c552800e7ce6ac820c84903ec18495"
+      "sha256": "31c8b714bc3b184275e8ed770d0b126696737c014045c5eca35eb9d957020eb2"
     },
     {
       "sourceFile": "startup.mjs",
       "targetPath": "scripts/legacy-startup-capsule/startup.mjs",
-      "sha256": "8a7f401f00cc30ec0d54135bdd11ff3d5a0d489d31b7239c228d4b77efd4b873"
+      "sha256": "de30f9f820b1ca758c7c88a5b2ef957142eaaf3e606d00bd9d7849dce2a92f7d"
     },
     {
       "sourceFile": "api-after-capture.mjs",
@@ -36,26 +36,37 @@
     {
       "sourceFile": "../capture-legacy-plugin-owner.mjs",
       "targetPath": "scripts/legacy-startup-capsule/capture-legacy-plugin-owner.mjs",
-      "sha256": "4ac3a6121c8fff3a51029e7e0ff37d37cfc4610e269397ac2a9a5eca6773a90e"
+      "sha256": "d989679b769cabd8789581a1207d05dd96d1e82f011215695db1387ff40140aa"
     }
   ],
   "sourceInputs": {
     "actualJsReceiptSha256": "9c05fd0324bcbe3d53d142ebed2ff37bbdfe7d13a553d3154b8651d0b1bd8fb9",
     "actualSqlReceiptSha256": "f38050fcce3b93cbe5ce390f792159d5ae2cbe5555cd4ce6b05b84877c807ec1",
     "prospective132RecipeSha256": "01a715509159ebe6d3c02a08d77463b2f81931f1ca3dfab2cc11a41fab9a8171",
-    "actualSourceQualification": "Root coordination/compat132-qualification/receipt.json, synthetic only; no production native equivalence"
+    "actualSourceQualification": {
+      "reference": "Root coordination/compat132-qualification/receipt-r2.json",
+      "sha256": "9be16f7c5458698a69dd04c7ef6c9d2d2df55f8f7320ee26a286c5873f1cde42",
+      "actualInstallationCaptures": [
+        "active-archived",
+        "empty-global-only",
+        "archived-only"
+      ],
+      "syntheticOnly": true,
+      "notExactLiveNativeBinaryQualification": true
+    },
+    "helperPostimageSha256": "d989679b769cabd8789581a1207d05dd96d1e82f011215695db1387ff40140aa"
   },
-  "sourceTestGroupsScheduled": 6,
+  "sourceTestGroupsScheduled": 7,
   "sourceTestsExecutedByWorker": false,
   "missingInputs": [
     "full transitive package/native asset equivalence and exact production runtime qualification",
     "actual API gid/supplementary groups",
     "Root actual exclusive custody, durable root-owned journal and current code module pins",
-    "standalone/fresh-install/future-ack hook contract and zero-active selection owner"
+    "true zero-global roster variant source exists but actual qualification remains open"
   ],
   "newDisposableOutputs": [],
   "noRuntimeOrDbOrBuildOrCleanupRun": true,
-  "syntaxCheckFiles": 7,
+  "syntaxCheckFiles": 8,
   "syntaxOnly": true,
   "actualSourcePinsVerified": {
     "js": 5,
