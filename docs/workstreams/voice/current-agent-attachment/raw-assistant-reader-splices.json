@@ -1,0 +1,49 @@
+{
+  "kind": "original-raw-assistant-reader-exact-splices-v1",
+  "applied": false,
+  "runtimeQualified": false,
+  "encoding": "UTF8; UTF16 codeunit offsets; exact descending preimage checks",
+  "newHelpers": [
+    "raw-assistant-wire.mjs",
+    "raw-assistant-wire.d.mts"
+  ],
+  "files": [
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "preimageSha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6",
+      "postimageSha256": "6bf381d5cefa22e6c1267f913ce3904a1627b8b5a074eaf2ea248d42ccb91658",
+      "edits": [
+        {
+          "name": "raw-helper-imports",
+          "offset": 119,
+          "before": "import { createHash } from \"node:crypto\";",
+          "after": "import { createHash } from \"node:crypto\";\nimport {RAW_ASSISTANT_LIMITS,consumeBoundedRawJson,validateRawSessionPayload,validateRawAssistantPayload} from \"./voice-v2/raw-assistant-wire.mjs\";\nimport type {RawSessionSelection,RawAssistantSnapshot,RawJsonBody} from \"./voice-v2/raw-assistant-wire.mjs\";"
+        },
+        {
+          "name": "append-owned-raw-reader-or-unavailable-producer",
+          "offset": 93554,
+          "before": "",
+          "afterFile": "raw-opencode-client.additions.ts",
+          "afterFileSha256": "58a53c6140546c156e764c3ee80c62195a8479009ffb96be5398cf9fcee6def9",
+          "prefix": "\n"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "preimageSha256": "fcee2630d751296df3efb4bf9f45e7d3176187d0102041f9432ef8853d9bbd46",
+      "postimageSha256": "53bd5b736b8e58856f3bc6a8621b9d59743136c97c73ea581596f68ecb47bf3b",
+      "edits": [
+        {
+          "name": "append-owned-raw-reader-or-unavailable-producer",
+          "offset": 13972,
+          "before": "",
+          "afterFile": "raw-request-context.additions.ts",
+          "afterFileSha256": "58e8dfdebd1a7607e416a838768c032ed9654214319ff8a957967eea01996656",
+          "prefix": "\n"
+        }
+      ]
+    }
+  ],
+  "productionObservationConstructor": "Unavailable: actual private call incarnation and immutable plan owner missing. No Core134 admission."
+}

@@ -1,0 +1,143 @@
+{
+  "kind": "bounded-original-raw-assistant-reader-source-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "9b5366601354ef6edb487073b84eb6567037604a",
+  "applied": false,
+  "runtimeQualified": false,
+  "compiled": false,
+  "testsAuthored": {
+    "wireParserDataFixtures": 13,
+    "actualClientAuthorityNegatives": 5
+  },
+  "testsExecuted": 0,
+  "sourceInputs": [
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "bytes": 93818,
+      "sha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "bytes": 13972,
+      "sha256": "fcee2630d751296df3efb4bf9f45e7d3176187d0102041f9432ef8853d9bbd46"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "bytes": 1770,
+      "sha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79"
+    },
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "bytes": 15173,
+      "sha256": "d7e7145bc530fdf71f81d00bae36dc74c5e2c79ce69ec8fd41bdce3c34f2d69b"
+    }
+  ],
+  "pinnedUpstreamCommit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "primaryTextSources": [
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/session.ts",
+      "utf8TextBytes": 36107,
+      "sha256": "9f78f4c34732adcd7fe87c3968ee28de9078b82494114b6a73053bd80c0ab5c1"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/message.ts",
+      "utf8TextBytes": 3658,
+      "sha256": "abdb0f6c8573eb2b7c606f47056b2b82108e23dde3834140d7709816b8015b38"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-message.ts",
+      "utf8TextBytes": 11926,
+      "sha256": "9b5cfce6c69bb4987771bdbbb36f6af09c76c5d166ca9da764b052f7c92a4e1a"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session.ts",
+      "utf8TextBytes": 2387,
+      "sha256": "5d44b69285d63d86be834bd7fb5db67eec80308215216a2791a30f9515eb58f5"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/location.ts",
+      "utf8TextBytes": 1216,
+      "sha256": "cc899b5b9430c1edf62f353c8f49611a382511a544c09889e2da24f9ab2ddec4"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/model.ts",
+      "utf8TextBytes": 5738,
+      "sha256": "a90c419508aa0d81b5e992508052c49fe9cd2714aca9303bfdc4f71435aabfe7"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/agent.ts",
+      "utf8TextBytes": 1938,
+      "sha256": "eb227878ba3f002daad5f1012c7f555fa4d4b69c39e3c969225708ace780a1a5"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/handlers/session.ts",
+      "utf8TextBytes": 26743,
+      "sha256": "89baae70d0c411a2f61a7ca5d4b586180e52889227437828a7016700cece692e"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "raw-assistant-wire.mjs",
+      "bytes": 9475,
+      "sha256": "b125c50a2130f4de37feca93e05b05f36404dfbf3571fd5ee1d476e2e5ec14aa"
+    },
+    {
+      "path": "raw-assistant-wire.d.mts",
+      "bytes": 1650,
+      "sha256": "87a649b35e8f693e704a4a02c834af8d471016c0e8bb35f9e97419961e848891"
+    },
+    {
+      "path": "raw-assistant-wire.test.mjs",
+      "bytes": 9971,
+      "sha256": "134d0d931b4ef5bc44ec6a66f0589049ef35ccb30ff890882c855441c4ea8d13"
+    },
+    {
+      "path": "raw-assistant-client-negative.test.ts",
+      "bytes": 2531,
+      "sha256": "121d3c003eccf39a2eb52d9e00ef9a2d416228018bb9c89da489962aab90d501"
+    },
+    {
+      "path": "raw-opencode-client.additions.ts",
+      "bytes": 8030,
+      "sha256": "58a53c6140546c156e764c3ee80c62195a8479009ffb96be5398cf9fcee6def9"
+    },
+    {
+      "path": "raw-request-context.additions.ts",
+      "bytes": 1203,
+      "sha256": "58e8dfdebd1a7607e416a838768c032ed9654214319ff8a957967eea01996656"
+    },
+    {
+      "path": "raw-assistant-reader-splices.json",
+      "bytes": 2141,
+      "sha256": "1d94c2e459de548bd3e1b3095a6c4a44796889d9c0409708419461a60626b528"
+    },
+    {
+      "path": "raw-assistant-reader-review.md",
+      "bytes": 9324,
+      "sha256": "8f92532201a667213b45423016486765d190642fb916fc7fe74a73e2a1ac3b15"
+    }
+  ],
+  "validation": [
+    "Unexecuted toolV8 syntax body compile for twoMJS files",
+    "Exact source/import/append references and proposed wholefilepostimage hashes",
+    "JSON/manifest/gitdiffchecks"
+  ],
+  "constructorStatus": "Unavailable before network/Core effects: genuine active attachment incarnation and immutable plan original absent",
+  "capabilityMeaning": "Exact actual HTTP body EOF provenance only; no call/plan/permission/goal/agent retirement authority",
+  "productionPorts": "Actual captured Nodefetch; no injected fetch/response/hash/text/proof factory",
+  "runtimeCopy": "Existing copy-domain-runtime recursively includes nontest voice-v2 MJS; actual packaging/build reviewRoot",
+  "gates": [
+    "Root actual source apply/typechecks and all authored tests",
+    "Original NodeHTTP byte/deadline/abort/bodyjoin/opaque lifetime qualification",
+    "Actual private call+plan owner and before/after/admission assertions",
+    "Core134 source/claims/tombstone SQL/migrator/restore preservation",
+    "Actual attached call/CPU/audio acceptance; globalfenceinactive"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "generatedRuntimeArtifacts": [],
+    "retained": "Minimal source/negativefixtures/recipe/receipt for Root actual integration and qualification; protected13Native drafts preserved",
+    "primaryTextDownloads": "In-memory text reads only; no downloaded source snapshots or binary/cache outputs"
+  }
+}
