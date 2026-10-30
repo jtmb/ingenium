@@ -1,4 +1,4 @@
-# Installed Dot authority and API integration proposal
+# Installed veyra-bot authority and API integration proposal
 
 Source-only checkpoint for Root integration, not Phase 1 completion. The 13-target patch checks against the Root preimages recorded in dot-installed-integration.json. Preserve concurrent Root changes; apply the minimal patch, never replace shared files wholesale from proposal snapshots.
 

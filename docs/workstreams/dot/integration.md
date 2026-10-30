@@ -1,4 +1,4 @@
-# Dot integration contract and remaining gates
+# veyra-bot integration contract and remaining gates
 
 This consumer proposal follows the coordinator-owned `docs/contracts/veyra-parallel-v1.md` read from the coordinator checkout on 2026-10-29. It does not replace ProjectRef, ExecutionBinding, MemoryPolicy, task/job/event or authorization authorities.
 

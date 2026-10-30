@@ -1,10 +1,14 @@
-# Veyra Dot and automation integration slice
+# veyra-bot and automation integration slice
 
 Status: implemented source slice, pending coordinator integration/acceptance. This does not close F46/F47/F48, a delivery phase or the full release goal. The existing 74 dispositions, 47 visual baselines, 20 Settings categories and 11 Windows rows remain intact.
 
+Current product name: **veyra-bot**, exactly. Legacy `Dot`/`dot-v2` symbols, paths, SQL and recorded checkpoint identities are compatibility details. Suggestions, approved follow-ups, scheduling, notifications, queue and history remain in scope. VS Code is removed from Veyra; Packaging8 prepares that bounded removal and Root owns shared integration.
+
+Current candidate source checkpoint: `4552bbd5d76fcdbcfa439ede5b2e1d4eda65ba96`, with 25 source-only fixtures and a checked 19-target proposal. The next source gates are Root's original SQL131 waiting-child/readiness/material CAS, same-owner private Core RPC/retained attach, exact source/image copier closure and strict Core/API integration. Actual same-child readiness, native behavior, eighteen real image protocol cases, original retirement, independent image approval, Windows/cluster and phases1–7 acceptance remain open. See [candidate-waiting-bootstrap.md](candidate-waiting-bootstrap.md).
+
 ## Behavior
 
-Dot stores inspectable suggestions separately from explicitly approved follow-ups. Each suggestion carries source provenance, exact owner/org/project/conversation/execution scope, capabilities, expiry and a compare-and-swap revision. Approval binds an already authorized task template with the same prompt and scope. A suggestion does not create a job or start work. `collectProactiveSuggestions` consumes explicitly enabled, scope-authorized API source adapters; it checks authorization before discovery, rechecks source/memory policy, and persists a stable source identity. Repeated events and service reconstruction reuse the suggestion, including its dismissed state. Changed content for an unchanged source revision is a conflict. It starts no timer, model call or extraction. One live follow-up owns a job; no existing template is silently enabled, changed or broadened.
+veyra-bot stores inspectable suggestions separately from explicitly approved follow-ups. Each suggestion carries source provenance, exact owner/org/project/conversation/execution scope, capabilities, expiry and a compare-and-swap revision. Approval binds an already authorized task template with the same prompt and scope. A suggestion does not create a job or start work. `collectProactiveSuggestions` consumes explicitly enabled, scope-authorized API source adapters; it checks authorization before discovery, rechecks source/memory policy, and persists a stable source identity. Repeated events and service reconstruction reuse the suggestion, including its dismissed state. Changed content for an unchanged source revision is a conflict. It starts no timer, model call or extraction. One live follow-up owns a job; no existing template is silently enabled, changed or broadened.
 
 The workspace component shows suggestions, review/schedule controls, follow-ups, pause/resume/cancel, operation history, the existing event queue and internal notifications. It takes authenticated initial data and Server Actions from its host. It remounts on exact scope change and requires status refresh after a transport-unknown mutation. The component is not wired to a route in this branch; no empty fixture is presented as live production data.
 
@@ -12,7 +16,7 @@ Schedules support once at canonical UTC time, fixed UTC intervals, and daily/wee
 
 Cancellation persists intent before calling the existing owned-run cancellation path. A request remains pending while the runner is active or its outcome is unknown. Reconstructing the service reconciles the original run identity; it never invents a replacement run. Existing startup recovery remains responsible for actual processes and interrupted runs.
 
-Notifications are persisted internal inbox entries, deduplicated by operation identity. Successful unchanged heartbeats stay quiet; meaningful changes, failures, blocked execution and unknown outcomes follow the selected notification policy. Reading an inbox entry persists its read state. There is no external notification transport or messaging permission grant in Dot.
+Notifications are persisted internal inbox entries, deduplicated by operation identity. Successful unchanged heartbeats stay quiet; meaningful changes, failures, blocked execution and unknown outcomes follow the selected notification policy. Reading an inbox entry persists its read state. There is no external notification transport or messaging permission grant in veyra-bot.
 
 ## Source map
 

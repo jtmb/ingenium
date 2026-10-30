@@ -1,0 +1,28 @@
+--- a/services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx
++++ b/services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx
+@@ -34,7 +34,7 @@
+  async function refresh() {
+   setPending(true);
+   try{setSnapshot(await refreshAction());setUncertain(false);setError(null);setSelected(null);}
+-  catch{setError("Dot could not refresh. Your previous request may still be pending.");}
++  catch{setError("veyra-bot could not refresh. Your previous request may still be pending.");}
+   finally{setPending(false);}
+  }
+  const disabled=pending||uncertain;
+@@ -45,7 +45,7 @@
+   </header>
+   {error&&<p role="alert" className="rounded-lg border border-amber-500 p-3 text-sm">{error}</p>}
+   <section aria-labelledby="dot-suggestions"><h2 id="dot-suggestions" className="mb-3 text-lg font-medium">Suggestions</h2>
+-   {!snapshot.suggestions.some(s=>s.state==="proposed")&&<p className="text-sm text-[var(--color-text-muted)]">No suggestions for this scope. Dot will surface relevant follow-ups here.</p>}
++   {!snapshot.suggestions.some(s=>s.state==="proposed")&&<p className="text-sm text-[var(--color-text-muted)]">No suggestions for this scope. veyra-bot will surface relevant follow-ups here.</p>}
+    <div className="grid gap-3 sm:grid-cols-2">{snapshot.suggestions.filter(s=>s.state==="proposed").map(s=><article key={s.id} className="min-w-0 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+     <h3 className="font-medium">{s.title}</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm text-[var(--color-text-secondary)]">{s.prompt}</p><p className="mt-3 break-all text-xs text-[var(--color-text-muted)]">Source: {s.source.kind} · {s.source.reference}</p>
+     <p className="mt-2 text-xs text-[var(--color-text-muted)]">Capabilities: {s.capabilities.join(", ")||"None"}</p>
+@@ -80,6 +80,6 @@
+   <section aria-labelledby="dot-history"><h2 id="dot-history" className="mb-3 text-lg font-medium">Operation history</h2>{!snapshot.operations.length&&<p className="text-sm text-[var(--color-text-muted)]">No operations yet.</p>}<ol className="space-y-2">{snapshot.operations.map(op=><li key={op.id} className="rounded-lg border border-[var(--color-border)] p-3 text-sm"><p>{operationLabel(op.state)}</p><p className="mt-1 break-all text-xs text-[var(--color-text-muted)]">{op.scheduledFor} · {op.runId??"No run started"}{op.code?` · ${op.code}`:""}</p></li>)}</ol></section>
+   <section aria-labelledby="dot-queue"><h2 id="dot-queue" className="mb-3 text-lg font-medium">Event queue</h2><p className="mb-2 text-xs text-[var(--color-text-muted)]">From the existing job event queue.</p>{!snapshot.queue.length&&<p className="text-sm text-[var(--color-text-muted)]">No queued events in this scope.</p>}<ul>{snapshot.queue.map(e=><li key={e.id} className="break-all py-2 text-sm">{e.state} · {e.id}</li>)}</ul></section>
+   <section aria-labelledby="dot-notifications"><h2 id="dot-notifications" className="mb-3 text-lg font-medium">Notifications</h2>{!snapshot.notifications.length&&<p className="text-sm text-[var(--color-text-muted)]">No updates need your attention.</p>}<ul className="space-y-2">{snapshot.notifications.map(n=><li key={n.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] p-3"><span className="text-sm">{n.title}</span>{!n.read&&<button className={control} disabled={disabled} onClick={()=>void send({type:"read",id:n.id,revision:n.revision})}>Mark read</button>}</li>)}</ul></section>
+-  <nav aria-label="More Dot records" className="flex flex-wrap gap-2">{Object.entries(snapshot.nextCursors).filter(([,cursor])=>cursor).map(([section,cursor])=><button key={section} className={control} disabled={pending} onClick={()=>void (async()=>{setPending(true);try{setSnapshot(await loadMoreAction(section as keyof DotSnapshot["nextCursors"],cursor!));}catch{setError("Could not load more records.");}finally{setPending(false);}})()}>More {section}</button>)}</nav>
++  <nav aria-label="More veyra-bot records" className="flex flex-wrap gap-2">{Object.entries(snapshot.nextCursors).filter(([,cursor])=>cursor).map(([section,cursor])=><button key={section} className={control} disabled={pending} onClick={()=>void (async()=>{setPending(true);try{setSnapshot(await loadMoreAction(section as keyof DotSnapshot["nextCursors"],cursor!));}catch{setError("Could not load more records.");}finally{setPending(false);}})()}>More {section}</button>)}</nav>
+  </main>;
+ }

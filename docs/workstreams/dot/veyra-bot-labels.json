@@ -1,0 +1,32 @@
+{
+  "name": "veyra-bot",
+  "scope": "User-facing labels/current docs only; technical Dot paths/SQL/symbols retained",
+  "target": "services/ingenium-dashboard/src/app/components/dot-v2/DotWorkspace.tsx",
+  "preimageSha256": "8bfaa4febbc067042f090c26a9dba59326519c035679ed134ff3fd631afe1ce8",
+  "postimageSha256": "518c1e75aced8933a2ec0ae650104ec74ffcf456851121c72949ea1b41bd9ddc",
+  "patchSha256": "76b846448c1e70a640294233dbb9322e6b155db318ed71c89f09c9c974a3512b",
+  "replacements": [
+    {
+      "before": "Dot could not refresh.",
+      "after": "veyra-bot could not refresh."
+    },
+    {
+      "before": "Dot will surface relevant follow-ups here.",
+      "after": "veyra-bot will surface relevant follow-ups here."
+    },
+    {
+      "before": "aria-label=\"More Dot records\"",
+      "after": "aria-label=\"More veyra-bot records\""
+    }
+  ],
+  "applyCheckExit": 0,
+  "validation": "Exact minimal label diff inspected; no build/runtime/CU; behavior tests unnecessary for string-only labels",
+  "frozenCandidatePatchSha256": "4bc26ae03d291aeb71ac367c81a68a163644d7173ea2ed71ec3c8e5ee261f180",
+  "vscode": "Packaging8 bounded removal; Root shared application; not changed here",
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retained": "Minimal labels patch/receipt and current docs for Root integration"
+  }
+}

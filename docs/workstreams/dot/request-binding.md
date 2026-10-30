@@ -1,4 +1,4 @@
-# Request-local Dot composition
+# Request-local veyra-bot composition
 
 This source milestone implements the frozen `docs/contracts/veyra-request-integration-v1.md` boundary. It does not activate a scheduler, runner, source listener, notification transport or root route. The full Veyra acceptance goal remains open.
 
