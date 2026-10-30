@@ -167,7 +167,7 @@ export class DotService {
       this.require(actor,scope,"dispatch",f.capabilities);
       this.suggestion(actor,scope,f.suggestionId);
       const job = this.jobs.readAuthorizedJob(actor,scope,f.jobId);
-      if (scopeKey(job.scope) !== scopeKey(scope) || job.revision !== f.jobRevision || job.scheduleRevision !== f.scheduleRevision || !job.enabled || job.cron) throw new DotError("DOT_JOB_BINDING_CHANGED");
+      if (scopeKey(job.scope) !== scopeKey(scope) || job.revision !== f.jobRevision || job.scheduleRevision !== f.scheduleRevision || !job.enabled || job.cron || job.capabilities.some(capability=>!f.capabilities.includes(capability))) throw new DotError("DOT_JOB_BINDING_CHANGED");
       const now = this.now(), plan = planDue(f.schedule,f.cursor,now,f.missedPolicy);
       const operations: Operation[] = [];
       const due = f.missedPolicy === "all" ? plan.due.slice(0,1) : plan.due;

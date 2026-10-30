@@ -176,5 +176,23 @@
     "centralCoveragePending": "Real revoked membership plus unrelated authorized recovery and denied prefix over 1-record batch",
     "fixturePreservation": "Original actual-core-test-K4gOv9 untouched and not opened/deleted by worker",
     "firstFailureLogSHA256": "f4058aadd1f81bd7ba3d888e3c722bc92b4f198a87574529dc32b7da4f59864a"
+  },
+  "requestComposition": {
+    "contract": "veyra-request-integration-v1",
+    "cpu": {
+      "passed": 70,
+      "failed": 0,
+      "skipped": 1,
+      "skipReason": "SQLite disk fixture explicitly excluded; in-memory-only allocation",
+      "outputSha256": "db5fbc8a264a3f787e030c2ab6618c0c1ca1cef577ddbac3371064c3de831569"
+    },
+    "requestAuthorityCases": 14,
+    "coreBindingCases": 19,
+    "syntax": "6 changed API modules and boundary test source passed node --check",
+    "centralBoundary": "Fresh-factory/error-forwarding source added; not executed by worker",
+    "integratedTypecheck": "Pending shared modules and coordinator compiler",
+    "runnerOwner": "Mandatory qualified placement/capability/process-settlement interface; no defaults",
+    "productionAcceptance": "Open; prior 17/17 actual-core suite predates these changes",
+    "cleanup": "No disposable output created; no removal/Windows recovery claimed"
   }
 }

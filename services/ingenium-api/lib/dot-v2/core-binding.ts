@@ -3,7 +3,7 @@ import { DotRepository, scopeKey, type Database } from "./repository.js";
 import { DotService, DotError, type BoundJob } from "./service.js";
 
 export interface CoreJob {
-  id:string;project_id:string;organization_id:string;owner_kind:"user"|"organization";owner_user_id?:string|null;
+  id:string;project_id:string;organization_id:string;visibility?:"private"|"organization";owner_kind:"user"|"organization";owner_user_id?:string|null;
   service_principal_id:string;agent:string;prompt_template:string;timeout_minutes:number;
   revision:number;schedule_revision:number;enabled:boolean;schedule_cron?:string|null;
 }
@@ -134,7 +134,9 @@ export function createCoreDotRuntime(core:CoreDotPorts,authorization:Authorizati
           service.get(actor,op.scope,"suggestion",followup.suggestionId);
           const current=repository.get<Followup>("followup",followup.id,op.scope);
           if(!current||current.state!=="active"||current.jobId!==id)throw new DotError("DOT_FOLLOWUP_NOT_ACTIVE");
-          job=readJob(actor,op.scope,id,"dispatch").job;
+          const admittedJob=readJob(actor,op.scope,id,"dispatch");
+          if(admittedJob.admission.capabilities.some(capability=>!followup.capabilities.includes(capability)))throw new DotError("DOT_JOB_BINDING_CHANGED");
+          job=admittedJob.job;
           if(job.revision!==run.job_revision||job.schedule_revision!==run.schedule_revision||job.service_principal_id!==run.effective_service_principal_id||!core.jobs.isJobRunAuthorizationCurrent(projectId,run.id))throw new DotError("DOT_RUN_AUTHORIZATION_REVOKED");
         }catch(error){
           // No launcher was called: only this newly claimed, exact run may be cancelled.

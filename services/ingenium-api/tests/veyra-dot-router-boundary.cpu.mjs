@@ -12,7 +12,7 @@ import { DotService, DotError } from "../lib/dot-v2/service.ts";
 const expressPath=process.env.VEYRA_DOT_TEST_EXPRESS;
 test("in-process Express/SQLite router boundary with sockets disabled",{skip:!expressPath},async t=>{
  const express=createRequire(import.meta.url)(expressPath);
- const {createDotRouter}=await import("../lib/dot-v2/router.ts");
+ const {createDotRouter,createRequestDotRouter}=await import("../lib/dot-v2/router.ts");
  const listen=Server.prototype.listen,connect=Socket.prototype.connect;
  Server.prototype.listen=function(){throw Error("Router boundary tests cannot listen");};
  Socket.prototype.connect=function(){throw Error("Router boundary tests cannot connect");};
@@ -22,7 +22,15 @@ test("in-process Express/SQLite router boundary with sockets disabled",{skip:!ex
  const actor={id:"owner",organizationId:"org"};let failure=false,sequence=0;
  const transaction=fn=>{db.exec("BEGIN IMMEDIATE");try{const result=fn();db.exec("COMMIT");return result;}catch(error){db.exec("ROLLBACK");throw error;}};
  const service=new DotService(new DotRepository(db,transaction),{require(){if(failure)throw Error("private SQL diagnostic");},requireSource(){},canReadMemory(){return true;}},{readAuthorizedJob(){throw new DotError("DOT_NOT_FOUND");},claim(){throw Error("No job execution in router tests");},requestCancellation(){},inspect(){return "unknown";}},()=>"2026-10-29T00:00:00.000Z",()=>`boundary-${++sequence}`);
- const app=express();app.use("/api/v1/dot",createDotRouter(service,req=>{if(req.get("x-fixture-deny")==="1")throw new DotError("DOT_FORBIDDEN");return {actor,scope};},{page:()=>({data:[],nextCursor:null})}));
+ const app=express();let factoryCalls=0;
+ app.use("/api/v1/dot/request",createRequestDotRouter(req=>{
+  factoryCalls++;const id=req.get("x-fixture-owner")??"owner";
+  if(id==="unavailable")throw Object.assign(Error("Placement owner unavailable"),{status:503,code:"PLACEMENT_UNAVAILABLE"});
+  if(id==="revoked")throw new DotError("DOT_REQUEST_UNAUTHENTICATED");
+  return {service,context:{actor:{...actor,id},scope:{...scope,ownerUserId:id}},queue:{page:()=>({data:[{id,state:"pending",projectId:"project"}],nextCursor:null})}};
+ }));
+ app.use("/api/v1/dot",createDotRouter(service,req=>{if(req.get("x-fixture-deny")==="1")throw new DotError("DOT_FORBIDDEN");return {actor,scope};},{page:()=>({data:[],nextCursor:null})}));
+ app.use((error,_req,res,_next)=>res.status(error.status??500).json({error:{code:error.code??"INTERNAL_ERROR"}}));
  async function request(method,path,body,headers={}){
   return new Promise((resolve,reject)=>{
    const socket=new Duplex({read(){},write(_chunk,_encoding,done){done();}});
@@ -32,6 +40,13 @@ test("in-process Express/SQLite router boundary with sockets disabled",{skip:!ex
    app.handle(req,res,error=>{clearTimeout(timer);socket.destroy();reject(error??Error("Route not handled"));});
   });
  }
+ await t.test("request factory is fresh and existing owner errors retain their middleware semantics",async()=>{
+  const before=factoryCalls;
+  for(const owner of ["one","two"]){const result=await request("GET","/request/queue",undefined,{"x-fixture-owner":owner});assert.equal(result.status,200);assert.equal(result.body.data[0].id,owner);}
+  assert.equal(factoryCalls,before+2);
+  const unavailable=await request("GET","/request/suggestions",undefined,{"x-fixture-owner":"unavailable"});assert.equal(unavailable.status,503);assert.equal(unavailable.body.error.code,"PLACEMENT_UNAVAILABLE");
+  const revoked=await request("GET","/request/suggestions",undefined,{"x-fixture-owner":"revoked"});assert.equal(revoked.status,401);assert.equal(revoked.body.error.code,"DOT_REQUEST_UNAUTHENTICATED");
+ });
  for(const collection of ["suggestions","followups","operations","notifications","queue"]){
   await t.test(`${collection}: actual route 200, 422, 403 and sanitized 500`,async()=>{
    const ok=await request("GET","/"+collection);assert.equal(ok.status,200);assert.equal(ok.headers["cache-control"],"no-store");assert.ok("nextCursor" in ok.body);
