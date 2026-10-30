@@ -1,0 +1,459 @@
+diff --git a/services/ingenium-api/lib/dot-v2/dot-job-policy.mjs b/services/ingenium-api/lib/dot-v2/dot-job-policy.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/dot-job-policy.mjs
+@@ -0,0 +1,42 @@
++import {createHash} from 'node:crypto';
++const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
++const unavailable=()=>{throw Object.assign(Error('DOT_CAPABILITIES_UNAVAILABLE'),{code:'DOT_CAPABILITIES_UNAVAILABLE'});};
++const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
++/** Read-only approval/comparison descriptor. It is never a bearer, tool list or grant. */
++export function createOriginalDotJobPolicy({getDb,jobs,agents,jobProviders}){
++ function describe(projectId,jobId,ownerUserId){
++  if(!uuid.test(jobId))unavailable();const db=getDb(),job=jobs.getJob(projectId,jobId);
++  if(!job||job.id!==jobId||job.project_id!==projectId||!job.enabled||job.owner_kind==='user'&&job.owner_user_id!==ownerUserId||job.visibility==='private'&&job.owner_user_id!==ownerUserId)unavailable();
++  const authority=db.prepare(`SELECT principal.id,principal.organization_id,principal.security_epoch,
++   grant_row.id AS grant_id,grant_row.revision AS grant_revision,grant_row.permission,
++   owner.security_epoch AS owner_epoch,m.role AS organization_role,pm.role AS project_role
++   FROM service_principals principal JOIN automation_principal_grants grant_row
++    ON grant_row.service_principal_id=principal.id AND grant_row.organization_id=principal.organization_id
++    AND grant_row.project_id=? AND grant_row.permission='execute' AND grant_row.status='active'
++   JOIN projects project ON project.id=grant_row.project_id AND project.organization_id=principal.organization_id AND project.archived_at IS NULL
++   JOIN users owner ON owner.id=? AND owner.status='active'
++   JOIN organization_memberships m ON m.organization_id=project.organization_id AND m.user_id=owner.id AND m.status='active'
++   LEFT JOIN project_memberships pm ON pm.project_id=project.id AND pm.user_id=owner.id
++   WHERE principal.id=? AND principal.organization_id=? AND principal.status='active'`).get(projectId,ownerUserId,job.service_principal_id,job.organization_id);
++  if(!authority||!['owner','admin'].includes(authority.organization_role)&&!(authority.organization_role!=='viewer'&&authority.project_role==='editor'))unavailable();
++  const provider=jobProviders.getJobProvider(projectId,jobId);if(!provider?.authorized)unavailable();
++  const rows=db.prepare(`SELECT connection.id,connection.revision,connection.owner_kind,connection.organization_id,
++   connection.provider_type,connection.provider_key,connection.config_json,
++   grant_row.id AS grant_id,grant_row.revision AS grant_revision,grant_row.permissions_json,grant_row.expires_at
++   FROM provider_connections connection JOIN resource_grants grant_row
++    ON grant_row.resource_id=connection.id AND grant_row.resource_type='provider_connection'
++    AND grant_row.organization_id=? AND grant_row.grantee_kind='service' AND grant_row.grantee_id=?
++   WHERE connection.enabled=1 AND connection.owner_kind IN ('organization','installation')
++    AND (connection.organization_id=? OR connection.owner_kind='installation')
++    AND (connection.provider_type<>'native' OR connection.id=?)
++    AND grant_row.revoked_at IS NULL AND (grant_row.expires_at IS NULL OR grant_row.expires_at>?)
++    AND EXISTS(SELECT 1 FROM json_each(grant_row.permissions_json) WHERE value IN ('*','read','execute','admin'))
++   ORDER BY connection.id LIMIT 2`).all(job.organization_id,job.service_principal_id,job.organization_id,'job-native:'+jobId,new Date().toISOString());
++  if(rows.length!==1)unavailable();
++  const models=db.prepare('SELECT purpose,model_id,revision FROM provider_model_policies WHERE connection_id=? ORDER BY purpose').all(rows[0].id);
++  const agentHash=hash(agents.getJobAgentConfig(projectId,job.agent));
++  const policyHash=hash({schemaVersion:1,jobId,projectId,ownerUserId,job,authority,provider,providerApproval:rows[0],models,agentHash});
++  if(getDb()!==db)unavailable();return Object.freeze({jobId,descriptor:'dot-job-policy:v1:'+jobId+':'+policyHash});
++ }
++ return Object.freeze({describe,require(projectId,ownerUserId,descriptor){const match=/^dot-job-policy:v1:([a-f0-9-]{36}):([a-f0-9]{64})$/.exec(descriptor);if(!match||describe(projectId,match[1],ownerUserId).descriptor!==descriptor)unavailable();return match[1];}});
++}
+diff --git a/services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts b/services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts
+@@ -0,0 +1,2 @@
++import type {getDb,jobs,agents,jobProviders} from "ingenium-core";
++export declare function createOriginalDotJobPolicy(ports:{getDb:typeof getDb;jobs:Pick<typeof jobs,"getJob">;agents:Pick<typeof agents,"getJobAgentConfig">;jobProviders:Pick<typeof jobProviders,"getJobProvider">}):Readonly<{describe(projectId:string,jobId:string,ownerUserId:string):Readonly<{jobId:string;descriptor:string}>;require(projectId:string,ownerUserId:string,descriptor:string):string}>;
+diff --git a/services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs b/services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs
+@@ -0,0 +1,85 @@
++import {createHash} from 'node:crypto';
++const digest=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
++const unavailable=code=>{throw Object.assign(Error(code),{code,status:503});};
++const text=v=>typeof v==='string'&&v.length>0&&v.length<=512&&v===v.trim()&&!/[\u0000-\u001f\u007f]/.test(v);
++/** Read-only reconstruction of an existing approved delegation. This returns
++ * facts, not an HTTP principal, token, permission grant or launch readiness. */
++export function createOriginalDotApprovedScopeReader(ports){
++ const leases=new WeakMap();
++ function approved(projectId,jobId){
++  const db=ports.getDb(),rows=db.prepare("SELECT id,organization_id,owner_user_id,scope_key,revision,body FROM veyra_dot_records WHERE kind='followup' AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.jobId')=? AND json_extract(body,'$.state')!='cancelled' LIMIT 2").all(projectId,jobId);
++  if(rows.length!==1)unavailable('DOT_APPROVAL_UNAVAILABLE');const f=JSON.parse(rows[0].body),scope=f.scope;
++  if(!Number.isSafeInteger(f.revision)||f.revision<0||rows[0].revision!==f.revision||f.state!=='active'||!scope||scope.projectId!==projectId||f.jobId!==jobId||rows[0].id!==f.id||rows[0].organization_id!==scope.organizationId||rows[0].owner_user_id!==scope.ownerUserId||rows[0].scope_key!==ports.scopeKey(scope))unavailable('DOT_APPROVAL_UNAVAILABLE');
++  const row=db.prepare("SELECT id,organization_id,owner_user_id,scope_key,revision,body FROM veyra_dot_records WHERE kind='suggestion' AND id=? AND scope_key=?").get(f.suggestionId,rows[0].scope_key),suggestion=row&&JSON.parse(row.body);
++  if(!row||!suggestion||!Number.isSafeInteger(suggestion.revision)||suggestion.revision<1||row.revision!==suggestion.revision||suggestion.state!=='approved'||suggestion.id!==f.id||row.organization_id!==scope.organizationId||row.owner_user_id!==scope.ownerUserId||ports.scopeKey(suggestion.scope)!==ports.scopeKey(scope))unavailable('DOT_APPROVAL_UNAVAILABLE');
++  const policy=ports.jobPolicy.describe(projectId,jobId,scope.ownerUserId),job=ports.jobs.getJob(projectId,jobId);
++  if(!job||job.revision!==f.jobRevision||job.schedule_revision!==f.scheduleRevision||job.prompt_template!==suggestion.prompt||job.schedule_cron||!Array.isArray(f.capabilities)||!f.capabilities.includes(policy.descriptor)||!suggestion.capabilities?.includes(policy.descriptor))unavailable('DOT_APPROVED_POLICY_CHANGED');
++  const {cursor:_progressCursor,...approvedFollowup}=f;
++  // Cursor progress is not a new approval; the original followup revision still pins pause/resume/cancel.
++  return {db,followup:f,suggestion,scope,job,approvalDigest:digest([approvedFollowup,row]),rowDigests:{followup:{id:f.id,revision:f.revision,rowDigest:digest(rows[0])},suggestion:{id:suggestion.id,revision:suggestion.revision,rowDigest:digest(row)}}};
++ }
++ const sourceChat=(admission)=>{
++  const {scope,suggestion}=admission,source=suggestion.source,ref=ports.parseReference(source.reference);
++  if(source.kind==='memory')unavailable('DOT_MEMORY_AUTONOMOUS_DELEGATION_UNAVAILABLE');
++  let id=scope.conversationId??ref.chatId;
++  if(source.kind==='event'){const event=ports.trustedJobEvents.getTrustedJobEvent(scope.projectId,ref.id);id=event?.payload?.targetConversationId??event?.payload?.conversationId;}
++  if(!text(id)||source.kind==='user'&&ref.chatId!==id||scope.conversationId!==null&&id!==scope.conversationId)unavailable('DOT_SOURCE_REVOKED');
++  const chat=ports.contextConversations.getContextConversation(scope.projectId,id);let meta;try{meta=JSON.parse(chat?.metadata);}catch{unavailable('DOT_SOURCE_REVOKED');}
++  if(!chat||chat.id!==id||chat.project_id!==scope.projectId||chat.organization_id!==scope.organizationId||chat.owner_user_id!==scope.ownerUserId||chat.visibility!=='private'||meta?.source!=='opencode-chat'||!text(meta.sourceRuntimeId)||!text(meta.sourceSessionId)||!ports.conversationIsActive(scope.projectId,id))unavailable('DOT_SOURCE_REVOKED');
++  return {id,chat,meta,ref};
++ };
++ function verifySource(a,execution,source){
++  const {scope,suggestion}=a,{id,chat,meta,ref}=source;
++  if(meta.sourceRuntimeId!==execution.runtimeId)unavailable('DOT_SOURCE_REVOKED');
++  const matches=ports.findSourceIds(execution,meta.sourceSessionId);
++  if(matches.length!==1||matches[0].id!==id||!ports.conversationIsActive(scope.projectId,id))unavailable('DOT_SOURCE_REVOKED');
++  if(suggestion.source.kind==='user'){
++   const m=ports.contextConversations.getContextMessage(scope.projectId,id,ref.id);let mm;try{mm=JSON.parse(m?.metadata);}catch{unavailable('DOT_SOURCE_REVOKED');}
++   if(!m||m.id!==ref.id||m.project_id!==scope.projectId||m.conversation_id!==id||m.role!=='user'||m.content_hash!==ref.hash||createHash('sha256').update(m.content).digest('hex')!==ref.hash||mm?.source!=='opencode-chat'||mm.sourceRuntimeId!==execution.runtimeId||mm.sourceSessionId!==meta.sourceSessionId)unavailable('DOT_SOURCE_REVOKED');
++  }else if(suggestion.source.kind==='event'){
++   const e=ports.trustedJobEvents.getTrustedJobEvent(scope.projectId,ref.id);if(!e||e.project_id!==scope.projectId||e.schema_version!==1||e.producer!=='context.maintenance'||ports.eventDigest(e,meta.sourceSessionId)!==ref.hash)unavailable('DOT_SOURCE_REVOKED');
++  }else unavailable('DOT_SOURCE_REVOKED');
++  return digest(chat);
++ }
++ return Object.freeze({async resolve(projectId,jobId){
++  const a=approved(projectId,jobId),source=sourceChat(a),{scope}=a,w=ports.runtimes.getAuthorizedWorkspace(scope.executionBindingId);
++  if(!w||w.status!=='authorized'||!Number.isSafeInteger(w.securityEpoch)||w.securityEpoch<0||!text(w.storagePath)||createHash('sha256').update(w.id+'\0'+w.storagePath).digest('hex')!==w.storageMappingHash||w.organizationId!==scope.organizationId||w.projectId!==projectId||w.ownerUserId!==scope.ownerUserId)unavailable('DOT_EXECUTION_UNAVAILABLE');
++  const installation=a.db.prepare('SELECT instance_id FROM veyra_installation_identity WHERE singleton=1').get();if(!installation)unavailable('DOT_EXECUTION_UNAVAILABLE');
++  // Every currently supported user/event source has an original Context runtime ID. No latest/adopt fallback.
++  const ids=[{id:source.meta.sourceRuntimeId}];
++  if(ids.length>16)unavailable('DOT_EXECUTION_AMBIGUOUS');const matches=[];
++  for(const {id}of ids){
++   const r=ports.runtimes.getRuntimeInstance(id),now=ports.now();
++   if(!r||r.workspaceId!==w.id||r.projectId!==projectId||r.organizationId!==scope.organizationId||r.ownerUserId!==scope.ownerUserId||r.securityEpoch!==w.securityEpoch||!['READY','IDLE'].includes(r.state)||!Number.isSafeInteger(r.revision)||r.revision<0||[r.absoluteExpiresAt,r.idleExpiresAt].some(t=>!Number.isFinite(Date.parse(t))||Date.parse(t)<=now)||r.leaseExpiresAt!==null&&(!Number.isFinite(Date.parse(r.leaseExpiresAt))||Date.parse(r.leaseExpiresAt)<=now))continue;
++   const observation=await ports.inspectPlacement(r.id);
++   const placement=ports.qualifyPlacement({organizationId:w.organizationId,ownerUserId:w.ownerUserId,projectId,workspaceId:w.id,bindingHash:w.storageMappingHash,bindingEpoch:w.securityEpoch,runtimeId:r.id,runtimeRevision:r.revision,backendName:r.backendName,backendContainerId:r.backendContainerId,now:ports.now()},observation,installation.instance_id);
++   if(!placement)continue;const execution={organizationId:w.organizationId,ownerUserId:w.ownerUserId,projectId,workspaceId:w.id,bindingHash:w.storageMappingHash,bindingEpoch:w.securityEpoch,status:'authorized',runtimeId:r.id,mode:'runtime',hostId:placement.hostId,environmentId:placement.environmentId,available:true};
++   if(ports.fingerprint(execution,scope.conversationId===null?null:source.meta.sourceSessionId)!==scope.executionBindingFingerprint)continue;
++   if(JSON.stringify(ports.runtimes.getRuntimeInstance(id))!==JSON.stringify(r)||JSON.stringify(ports.runtimes.getAuthorizedWorkspace(w.id))!==JSON.stringify(w))unavailable('DOT_EXECUTION_REBOUND');
++   verifySource(a,execution,source);matches.push({execution,expiresAt:placement.expiresAt,runtime:structuredClone(r),workspace:structuredClone(w),observation:structuredClone(observation),installationId:installation.instance_id});
++  }
++  if(matches.length!==1)unavailable(matches.length?'DOT_EXECUTION_AMBIGUOUS':'DOT_EXECUTION_UNAVAILABLE');
++  const final=approved(projectId,jobId),after=sourceChat(final);
++  if(final.db!==a.db||final.approvalDigest!==a.approvalDigest||digest(after.chat)!==digest(source.chat))unavailable('DOT_APPROVAL_REBOUND');
++  if(matches[0].expiresAt<=ports.now())unavailable('DOT_EXECUTION_UNAVAILABLE');
++  verifySource(final,matches[0].execution,after);
++  const token=Object.freeze({followupId:a.followup.id,scope:Object.freeze(structuredClone(scope)),execution:Object.freeze({...matches[0].execution}),placementExpiresAt:matches[0].expiresAt,automationPrincipalId:a.job.service_principal_id,approvalDigest:a.approvalDigest,rowDigests:Object.freeze(final.rowDigests)});
++  leases.set(token,{db:a.db,projectId,jobId,approvalDigest:a.approvalDigest,sourceDigest:digest(after.chat),jobRevision:a.followup.jobRevision,scheduleRevision:a.followup.scheduleRevision,...matches[0]});return token;
++ },
++ revalidate(token){
++  const lease=leases.get(token);if(!lease||ports.getDb()!==lease.db)unavailable('DOT_APPROVAL_CONTEXT_UNAVAILABLE');
++  const a=approved(lease.projectId,lease.jobId),source=sourceChat(a),runtime=ports.runtimes.getRuntimeInstance(lease.runtime.id),workspace=ports.runtimes.getAuthorizedWorkspace(lease.workspace.id);
++  if(a.approvalDigest!==lease.approvalDigest||digest(source.chat)!==lease.sourceDigest||JSON.stringify(runtime)!==JSON.stringify(lease.runtime)||JSON.stringify(workspace)!==JSON.stringify(lease.workspace))unavailable('DOT_APPROVAL_REBOUND');
++  const placement=ports.qualifyPlacement({organizationId:workspace.organizationId,ownerUserId:workspace.ownerUserId,projectId:workspace.projectId,workspaceId:workspace.id,bindingHash:workspace.storageMappingHash,bindingEpoch:workspace.securityEpoch,runtimeId:runtime.id,runtimeRevision:runtime.revision,backendName:runtime.backendName,backendContainerId:runtime.backendContainerId,now:ports.now()},lease.observation,lease.installationId);
++  if(!placement||placement.expiresAt<=ports.now()||ports.fingerprint(lease.execution,a.scope.conversationId===null?null:source.meta.sourceSessionId)!==a.scope.executionBindingFingerprint)unavailable('DOT_EXECUTION_UNAVAILABLE');
++  verifySource(a,lease.execution,source);
++  return Object.freeze({followupId:a.followup.id,scope:Object.freeze(structuredClone(a.scope)),execution:Object.freeze({...lease.execution}),automationPrincipalId:a.job.service_principal_id,approvalDigest:a.approvalDigest,rowDigests:Object.freeze(a.rowDigests)});
++ },
++ operationEvidence(token,runId){
++  const current=this.revalidate(token),lease=leases.get(token),rows=lease.db.prepare("SELECT id,organization_id,owner_user_id,scope_key,revision,body FROM veyra_dot_records WHERE kind='operation' AND scope_key=? AND json_extract(body,'$.followupId')=? AND json_extract(body,'$.runId')=? LIMIT 2").all(ports.scopeKey(current.scope),current.followupId,runId);
++  if(rows.length!==1)unavailable('DOT_RUN_BINDING_CHANGED');const row=rows[0],operation=JSON.parse(row.body),run=ports.jobs.getJobRun(lease.projectId,runId);
++  if(!Number.isSafeInteger(operation.revision)||operation.revision<0||!['claimed','running','cancel_requested','unknown','success','failed','cancelled'].includes(operation.state)||row.id!==operation.id||row.revision!==operation.revision||row.organization_id!==current.scope.organizationId||row.owner_user_id!==current.scope.ownerUserId||ports.scopeKey(operation.scope)!==row.scope_key||operation.followupId!==current.followupId||operation.runId!==runId||!run||run.id!==runId||run.job_id!==lease.jobId||run.project_id!==lease.projectId||run.organization_id!==current.scope.organizationId||run.effective_service_principal_id!==current.automationPrincipalId||run.job_revision!==lease.jobRevision||run.schedule_revision!==lease.scheduleRevision||!ports.jobs.isJobRunAuthorizationCurrent(lease.projectId,runId))unavailable('DOT_RUN_BINDING_CHANGED');
++  return Object.freeze({...current,operation:Object.freeze({id:operation.id,revision:operation.revision,rowDigest:digest(row),state:operation.state}),runId,runIdentityHash:ports.runIdentity(run)});
++ }
++ });
++}
+diff --git a/services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts b/services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts
+@@ -0,0 +1,16 @@
++import type {getDb,jobs,runtimes,contextConversations,trustedJobEvents} from "ingenium-core";
++import type {DotScope} from "../../../../packages/veyra-automation/contracts.js";
++import type {RequestExecutionFacts} from "./request-binding.js";
++import type {scopeKey} from "./repository.js";
++import type {dotExecutionFingerprint,dotEventDigest} from "./request-binding.js";
++import type {createOriginalDotJobPolicy} from "./dot-job-policy.mjs";
++import type {inspectManagedRuntimePlacement} from "../runtime-manager-client.js";
++import type {qualifyManagedRuntimePlacement} from "../runtime-placement-contract.js";
++export declare function createOriginalDotApprovedScopeReader(ports:{getDb:typeof getDb;jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent">;runtimes:Pick<typeof runtimes,"getAuthorizedWorkspace"|"getRuntimeInstance">;contextConversations:Pick<typeof contextConversations,"getContextConversation"|"getContextMessage">;trustedJobEvents:Pick<typeof trustedJobEvents,"getTrustedJobEvent">;jobPolicy:ReturnType<typeof createOriginalDotJobPolicy>;scopeKey:typeof scopeKey;parseReference(value:string):{id:string;hash:string;chatId?:string};inspectPlacement:typeof inspectManagedRuntimePlacement;qualifyPlacement:typeof qualifyManagedRuntimePlacement;fingerprint:typeof dotExecutionFingerprint;eventDigest:typeof dotEventDigest;runIdentity(run:NonNullable<ReturnType<typeof jobs.getJobRun>>):string;now():number;findSourceIds(execution:RequestExecutionFacts,engineSessionId:string):{id:string}[];conversationIsActive(projectId:string,contextId:string):boolean}):Readonly<{
++ resolve(projectId:string,jobId:string):Promise<OriginalDotApprovalLease>;
++ revalidate(lease:OriginalDotApprovalLease):OriginalDotApprovalFacts;
++ operationEvidence(lease:OriginalDotApprovalLease,runId:string):OriginalDotApprovalFacts & Readonly<{operation:Readonly<{id:string;revision:number;rowDigest:string;state:string}>;runId:string;runIdentityHash:string}>;
++}>;
++declare const originalApprovalLease:unique symbol;
++export interface OriginalDotApprovalFacts {readonly followupId:string;readonly scope:Readonly<DotScope>;readonly execution:Readonly<RequestExecutionFacts>;readonly automationPrincipalId:string;readonly approvalDigest:string;readonly rowDigests:Readonly<{followup:{id:string;revision:number;rowDigest:string};suggestion:{id:string;revision:number;rowDigest:string}}>}
++export interface OriginalDotApprovalLease extends OriginalDotApprovalFacts {readonly [originalApprovalLease]:true;readonly placementExpiresAt:number;}
+diff --git a/services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts b/services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts
+@@ -0,0 +1,21 @@
++import {getDb,jobs,agents,jobProviders,runtimes,contextConversations,trustedJobEvents} from "ingenium-core";
++import {inspectManagedRuntimePlacement} from "../runtime-manager-client.js";
++import {qualifyManagedRuntimePlacement} from "../runtime-placement-contract.js";
++import {findRequestChatSourceIds,isRequestChatConversationActive} from "../projects-v2/request-chat-source.mjs";
++import {dotExecutionFingerprint,dotEventDigest,dotSourceReference} from "./request-binding.js";
++import {originalJobRunIdentity} from "./core126-owner.mjs";
++import {scopeKey} from "./repository.js";
++import {createOriginalDotJobPolicy} from "./dot-job-policy.mjs";
++import {createOriginalDotApprovedScopeReader,type OriginalDotApprovalLease} from "./dot-approved-scope.mjs";
++/** No HTTP request/session/cookie/token is retained by this read-only owner. */
++export const installedDotApprovedScopeReader=createOriginalDotApprovedScopeReader({getDb,jobs,runtimes,contextConversations,trustedJobEvents,
++ jobPolicy:createOriginalDotJobPolicy({getDb,jobs,agents,jobProviders}),scopeKey,
++ parseReference(value){const parsed=JSON.parse(value) as Parameters<typeof dotSourceReference>[0];if(dotSourceReference(parsed)!==value)throw Error("DOT_SOURCE_REVOKED");return parsed;},
++ inspectPlacement:inspectManagedRuntimePlacement,qualifyPlacement:qualifyManagedRuntimePlacement,fingerprint:dotExecutionFingerprint,runIdentity:originalJobRunIdentity,eventDigest:dotEventDigest,now:Date.now,
++ findSourceIds(execution,engineSessionId){if(!execution.projectId)throw Error("DOT_PROJECTLESS_UNBOUND");return findRequestChatSourceIds((sql,parameters)=>getDb().prepare<string[]>(sql).all(...parameters) as {id:string}[],{...execution,projectId:execution.projectId},engineSessionId);},
++ conversationIsActive(projectId,contextId){return isRequestChatConversationActive((sql,parameters)=>getDb().prepare<string[]>(sql).get(...parameters) as {event_type:string}|undefined,projectId,contextId);},
++});
++
++/** Synchronous final-write revalidation: only a lease minted by the original reader is accepted. */
++export const revalidateInstalledDotApproval=(lease:OriginalDotApprovalLease)=>installedDotApprovedScopeReader.revalidate(lease);
++export const readInstalledDotOperationEvidence=(lease:OriginalDotApprovalLease,runId:string)=>installedDotApprovedScopeReader.operationEvidence(lease,runId);
+diff --git a/services/ingenium-api/lib/dot-v2/installed-dot-http.ts b/services/ingenium-api/lib/dot-v2/installed-dot-http.ts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/installed-dot-http.ts
+@@ -0,0 +1,79 @@
++import {Router,type Request,type Response,type NextFunction} from "express";
++import {randomUUID} from "node:crypto";
++import {authorization,getDb,logger,projects,jobs,agents,jobProviders} from "ingenium-core";
++import {toAuthorizationPrincipal} from "../authorization-policy.js";
++import {revalidateRequestIdentity} from "../request-identity.js";
++import {launchManagedJobRun,cancelManagedJobRun,inspectManagedJobRun} from "../runtime-manager-client.js";
++import {withManagedRequestPlacement} from "../runtime-placement.js";
++import {dotErrorResponse} from "./commands.js";
++import {RequestExecutionError} from "../projects-v2/request-execution.js";
++import {resolveRequestExecution} from "../projects-v2/request-execution.js";
++import {createOriginalDotJobPolicy} from "./dot-job-policy.mjs";
++import {actualManagedJobOwner} from "./core126-runtime.js";
++import {createManagedDotExecution} from "./managed-dot-execution.mjs";
++import {createCoreRequestDotSession,type DotQualifiedRunnerOwner} from "./request-session.js";
++import {createRequestDotRouter} from "./router.js";
++import {DotError} from "./service.js";
++import type {DotRequestSelection} from "./request-binding.js";
++import type {CoreDotOptions} from "./core-binding.js";
++const jobPolicy=createOriginalDotJobPolicy({getDb,jobs,agents,jobProviders});
++const text=(v:unknown):v is string=>typeof v==="string"&&v.length>0&&v.length<=256&&v===v.trim()&&!/[\u0000-\u001f\u007f]/.test(v);
++/** No body-selected scope, projectless/global fallback or request-authority retention. */
++export function selectInstalledDotRequest(request:Request):DotRequestSelection {
++ if(!revalidateRequestIdentity(request))throw new DotError("DOT_REQUEST_UNAUTHENTICATED");
++ const query=request.query;
++ if(Object.keys(query).some(key=>!["project","workspaceId","runtimeId","chatId","limit","cursor"].includes(key))||!text(query.project)||!text(query.workspaceId)||!text(query.runtimeId)||(query.chatId!==undefined&&!text(query.chatId)))throw new DotError("DOT_VALIDATION");
++ const project=projects.getProject(query.project);if(!project||project.archived_at)throw new DotError("DOT_FORBIDDEN");
++ return {projectId:project.id,workspaceId:query.workspaceId,runtimeId:query.runtimeId,chatId:query.chatId??null};
++}
++/** Descriptors compare original current policy; they do not grant a tool or approve an image. */
++export function installedDotRequestRunner(request:Request,selected:DotRequestSelection):DotQualifiedRunnerOwner {
++ return {
++  requireCapabilities(principal,execution,capabilities){
++   for(const capability of capabilities){if(capability.startsWith("dot-job-policy:")){if(!execution.projectId)throw new DotError("DOT_CAPABILITIES_UNAVAILABLE");try{jobPolicy.require(execution.projectId,execution.ownerUserId,capability);}catch{throw new DotError("DOT_CAPABILITIES_UNAVAILABLE");}continue;}const match=/^([a-z][a-z0-9-]*):(read|write|execute|admin)$/.exec(capability);if(!match||!execution.projectId)throw new DotError("DOT_CAPABILITIES_UNAVAILABLE");
++    const permission=match[2] as "read"|"write"|"execute"|"admin";
++    const decision=authorization.requireProjectPermission(toAuthorizationPrincipal(principal),execution.projectId,match[1]!,permission);
++    if(!decision.allowed||decision.organizationId!==execution.organizationId)throw new DotError("DOT_FORBIDDEN");
++   }
++  },
++  assertExecutionSupported(execution,job){
++   // Scope compatibility only; not an image approval or launch-readiness claim.
++   if(execution.mode!=="runtime"||execution.available!==true||execution.projectId!==job.project_id||execution.organizationId!==job.organization_id)throw new DotError("DOT_EXECUTION_UNAVAILABLE");
++  },
++  capabilitiesForJob(job){const execution=resolveRequestExecution(request,{projectId:selected.projectId,workspaceId:selected.workspaceId,runtimeId:selected.runtimeId});try{return [jobPolicy.describe(job.project_id,job.id,execution.ownerUserId).descriptor];}catch{throw new DotError("DOT_CAPABILITIES_UNAVAILABLE");}},
++  inspectSettlement(){return "unknown";}, // Sync settlement is never used by the async session and never infers success.
++ };
++}
++export function createInstalledDotRequestSession(request:Request){
++ const selected=selectInstalledDotRequest(request);
++ const original=()=>actualManagedJobOwner().executionPorts({revalidate:()=>{const current=revalidateRequestIdentity(request);return current?toAuthorizationPrincipal(current.principal):null;}},selected);
++ const asyncExecution=createManagedDotExecution({core:{
++  inTransaction:()=>getDb().inTransaction,
++  prepareManagedExecution:(...args)=>original().prepareManagedExecution(...args),
++  requireOriginalRun:(...args)=>original().requireOriginalRun(...args),
++  requireCancellationIntent:(...args)=>original().requireCancellationIntent(...args),
++  requireOriginalRetirementProof:(...args)=>original().requireOriginalRetirementProof(...args),
++ },manager:{launchManagedJobRun,cancelManagedJobRun,inspectManagedJobRun}});
++ const options:CoreDotOptions={nestedCheckpointPolicy:"deferred-by-core-v1",asyncExecution,now:()=>new Date().toISOString(),id:randomUUID,onDiagnostic:event=>{logger.warn("dot",event.code,{phase:event.phase,runId:event.runId});}};
++ return createCoreRequestDotSession(request,selected,installedDotRequestRunner(request,selected),options);
++}
++/** Mount only behind original auth, project-policy and CSRF middleware. */
++export function createInstalledDotRouter(){
++ const router=Router();
++ router.use((request,response,next)=>{response.setHeader("Cache-Control","no-store");try{const selected=selectInstalledDotRequest(request);void withManagedRequestPlacement(request,{projectId:selected.projectId,workspaceId:selected.workspaceId,runtimeId:selected.runtimeId},()=>{next();}).catch(next);}catch(error){next(error);}});
++ router.get("/job-policy/:id",(request,response,next)=>{try{
++  const session=createInstalledDotRequestSession(request),scope=session.context.scope;
++  if(!scope.projectId)throw new DotError("DOT_PROJECTLESS_UNBOUND");
++  session.service.page(session.context.actor,scope,"operation","",1);
++  const job=jobs.getJob(scope.projectId,request.params.id!);
++  if(!job||job.owner_kind==="user"&&job.owner_user_id!==scope.ownerUserId||job.visibility==="private"&&job.owner_user_id!==scope.ownerUserId)throw new DotError("DOT_FORBIDDEN");
++  try{response.json({data:jobPolicy.describe(scope.projectId,job.id,scope.ownerUserId)});}catch{throw new DotError("DOT_CAPABILITIES_UNAVAILABLE");}
++ }catch(error){next(error);}});
++ router.use(createRequestDotRouter(createInstalledDotRequestSession));
++ router.use((error:unknown,_request:Request,response:Response,next:NextFunction)=>{
++  if(error instanceof DotError){const result=dotErrorResponse(error);response.status(result.status).json(result.body);return;}
++  if(error instanceof RequestExecutionError){response.status(error.status).json({error:{code:error.code,message:"Dot execution binding unavailable"}});return;}
++  if(error&&typeof error==="object"&&"status" in error&&error.status===503){response.status(503).json({error:{code:"DOT_EXECUTION_UNAVAILABLE",message:"Dot execution unavailable"}});return;}
++  next(error);
++ });return router;
++}
+diff --git a/services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts b/services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts
+@@ -0,0 +1,19 @@
++import {getDb} from "ingenium-core";
++import type {CoreDotRuntime} from "./core-binding.js";
++import {installedDotApprovedScopeReader} from "./installed-dot-approved-scope.js";
++import {DotError} from "./service.js";
++/** Existing scheduler consumes only this interface. No timer, task queue, database
++ * opener, credential owner or request closure is created by this interlock. */
++export type DotSchedulerRuntime=Pick<CoreDotRuntime,"usesAsyncExecution"|"ownsJob"|"dispatchJob"|"recoverOperations"|"recoverOperationsAsync">;
++const unavailable=():never=>{throw new DotError("DOT_AUTONOMOUS_CORE_DELEGATION_UNAVAILABLE");};
++/** Concrete unavailable-state interlock, not a working autonomous execution owner.
++ * Original approved scope/policy facts are reconstructed; the private Core prepare/read
++ * delegation and private Memory source authorization constructors remain missing.
++ * Durable Dot-bound jobs must never fall through to the ordinary cron runner. */
++export const installedDotSchedulerInterlock:DotSchedulerRuntime={
++ usesAsyncExecution:true,
++ ownsJob(projectId,jobId){return !!getDb().prepare("SELECT 1 FROM veyra_dot_records WHERE kind='followup' AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.jobId')=? AND json_extract(body,'$.state')!='cancelled' LIMIT 1").get(projectId,jobId);},
++ async dispatchJob(projectId,jobId,isActive){if(!isActive())return;await installedDotApprovedScopeReader.resolve(projectId,jobId);if(!isActive())return;unavailable();},
++ recoverOperations(){return unavailable();},
++ async recoverOperationsAsync(){return unavailable();},
++};
+diff --git a/services/ingenium-api/scripts/api-server.ts b/services/ingenium-api/scripts/api-server.ts
+--- a/services/ingenium-api/scripts/api-server.ts
++++ b/services/ingenium-api/scripts/api-server.ts
+@@ -1,3 +1,5 @@
++import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
++import {installedDotSchedulerInterlock} from "../lib/dot-v2/installed-dot-scheduler.js";
+ import express from "express";
+ import {createCore126Ingress} from "../lib/dot-v2/core126-ingress.js";
+ import {actualManagedJobHandlers,installActualManagedJobOwner} from "../lib/dot-v2/core126-runtime.js";
+@@ -222,6 +224,7 @@
+ app.use("/api/v1/opencode", runtimeOpenCodeContext, opencodeRouter);
+ app.use("/api/v1/extraction", extractionRouter);
+ app.use("/api/v1/jobs", jobsRouter);
++app.use("/api/v1/dot",createInstalledDotRouter());
+ 
+ app.use("/api/v1/services/cloudflare", cloudflareRouter);
+ app.use("/api/v1/services", servicesRouter);
+@@ -296,7 +299,7 @@
+   });
+ 
+   if (shouldStartBackgroundSchedulers()) {
+-    startScheduler(config.port);
++    startScheduler(config.port,installedDotSchedulerInterlock);
+     startBackupScheduler();
+   } else {
+     logger.info("api", "Background schedulers disabled by API test/maintenance mode");
+diff --git a/services/ingenium-api/lib/authorization-policy.ts b/services/ingenium-api/lib/authorization-policy.ts
+--- a/services/ingenium-api/lib/authorization-policy.ts
++++ b/services/ingenium-api/lib/authorization-policy.ts
+@@ -75,6 +75,11 @@
+ 
+ export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
+   const route = `${req.method} ${req.path}`;
++  // Dot's request-local service rechecks each command's original private source,
++  // jobs write/execute and capability policy. This outer read admission is never a command grant.
++  const dotRead=req.method==="GET"&&/^\/api\/v1\/dot\/(?:(?:suggestions|followups|operations|notifications)(?:\/[^/]+)?|queue|job-policy\/[^/]+)$/.test(req.path);
++  if(dotRead||req.method==="POST"&&req.path==="/api/v1/dot/commands")return {action:"jobs.dot."+(dotRead?"read":"command"),resource:"jobs",permission:"read",target:"project",sensitive:true};
++
+   const nativePairing = req.method === "POST" && /^\/api\/v1\/native-customize\/pairings(?:\/[^/]+\/(?:inspect|quiesce|retire))?$/.test(req.path)
+     || req.method === "GET" && /^\/api\/v1\/native-customize\/pairings\/[^/]+$/.test(req.path);
+   if(nativePairing)return {action:"native-pairing."+permissionFor(req as Request),resource:"vault",permission:permissionFor(req as Request),target:"native-governance",browserSessionOnly:true,sensitive:req.method==="POST"};
+diff --git a/services/ingenium-api/lib/scheduler.ts b/services/ingenium-api/lib/scheduler.ts
+--- a/services/ingenium-api/lib/scheduler.ts
++++ b/services/ingenium-api/lib/scheduler.ts
+@@ -1,4 +1,4 @@
+-import type { CoreDotRuntime } from "./dot-v2/core-binding.js";
++import type { DotSchedulerRuntime } from "./dot-v2/installed-dot-scheduler.js";
+ import { settings, projects, logger, extraction, synthesis, jobs, jobEventDeliveries, maintenanceLocks, checkpointAfterWrite, usage } from "ingenium-core";
+ import { executeJobRun, recoverExpiredEventAttempt, recoverVaultSecretRunDirectories } from "./job-runner.js";
+ import { getUsageSyncInterval, syncUsageFromOpenCode } from "./usage-sync.js";
+@@ -43,7 +43,7 @@
+ const EVENT_JOB_TICK_MS = 10_000;
+ 
+ let schedulerRunning = false;
+-let dotRuntime: CoreDotRuntime | undefined;
++let dotRuntime: DotSchedulerRuntime | undefined;
+ let schedulerGeneration = 0;
+ const scheduledTimeouts = new Set<ReturnType<typeof setTimeout>>();
+ const renewalIntervals = new Set<ReturnType<typeof setInterval>>();
+@@ -508,7 +508,7 @@
+   });
+ }
+ 
+-export function startScheduler(port: number, dot?: CoreDotRuntime): void {
++export function startScheduler(port: number, dot?: DotSchedulerRuntime): void {
+   if (schedulerRunning) {
+     logger.warn("scheduler", "Scheduler start ignored because it is already running");
+     return;
+diff --git a/services/ingenium-api/tests/veyra-dot-installed-authority.fixture.mjs b/services/ingenium-api/tests/veyra-dot-installed-authority.fixture.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/tests/veyra-dot-installed-authority.fixture.mjs
+@@ -0,0 +1,26 @@
++import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync,existsSync} from 'node:fs';import {resolve,dirname} from 'node:path';import {pathToFileURL} from 'node:url';import {stripTypeScriptTypes} from 'node:module';import {createHash} from 'node:crypto';
++const root=process.env.VEYRA_DOT_PROPOSAL_SOURCE_ROOT;if(!root)throw Error('Actual source root required');const actual=process.env.VEYRA_DOT_INSTALLED_ACTUAL==='1',asModule=s=>`data:text/javascript;base64,${Buffer.from(s).toString('base64')}`,cache=new Map();
++function tsModule(path){if(cache.has(path))return cache.get(path);const source=stripTypeScriptTypes(readFileSync(path,'utf8')).replace(/from (["'])(\.[^"']+)\1/g,(_m,q,spec)=>{let target=resolve(dirname(path),spec);if(!existsSync(target)&&target.endsWith('.js'))target=target.slice(0,-3)+'.ts';return 'from '+q+(target.endsWith('.ts')?tsModule(target):pathToFileURL(target).href)+q;});const url=asModule(source);cache.set(path,url);return url;}
++const policy=await import(actual?pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2/dot-job-policy.mjs')).href:asModule(readFileSync(new URL('./dot-job-policy.proposal.mjs',import.meta.url),'utf8'))),approved=await import(actual?pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs')).href:asModule(readFileSync(new URL('./dot-approved-scope.proposal.mjs',import.meta.url),'utf8'))),placement=await import(tsModule(resolve(root,'services/ingenium-api/lib/runtime-placement-contract.ts'))),dot=await import(tsModule(resolve(root,'services/ingenium-api/lib/dot-v2/request-binding.ts'))),repository=await import(tsModule(resolve(root,'services/ingenium-api/lib/dot-v2/repository.ts'))),chatSource=await import(pathToFileURL(resolve(root,'services/ingenium-api/lib/projects-v2/request-chat-source.mjs')).href);
++const id=n=>`10000000-0000-4000-8000-${String(n).padStart(12,'0')}`,hash=v=>createHash('sha256').update(v).digest('hex');
++function extractFunction(source,name){const start=source.indexOf('export function '+name+'(');assert.ok(start>=0);const lineEnd=source.indexOf('\n',start);if(source.slice(start,lineEnd).trim().endsWith('}'))return source.slice(start,lineEnd);return source.slice(start,source.indexOf('\n}',start)+2);}
++function fixture(){const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE projects(id TEXT,organization_id TEXT,archived_at TEXT);CREATE TABLE users(id TEXT,status TEXT,security_epoch INTEGER);CREATE TABLE service_principals(id TEXT,organization_id TEXT,status TEXT,security_epoch INTEGER);CREATE TABLE automation_principal_grants(id TEXT,organization_id TEXT,project_id TEXT,service_principal_id TEXT,permission TEXT,status TEXT,revision INTEGER);CREATE TABLE organization_memberships(organization_id TEXT,user_id TEXT,status TEXT,role TEXT);CREATE TABLE project_memberships(project_id TEXT,user_id TEXT,role TEXT);CREATE TABLE provider_connections(id TEXT,revision INTEGER,owner_kind TEXT,organization_id TEXT,provider_type TEXT,provider_key TEXT,config_json TEXT,credential_item_id TEXT,enabled INTEGER);CREATE TABLE resource_grants(id TEXT,organization_id TEXT,resource_type TEXT,resource_id TEXT,grantee_kind TEXT,grantee_id TEXT,permissions_json TEXT,expires_at TEXT,revoked_at TEXT,revision INTEGER);CREATE TABLE provider_model_policies(connection_id TEXT,purpose TEXT,model_id TEXT,revision INTEGER);CREATE TABLE veyra_dot_records(kind TEXT,id TEXT,organization_id TEXT,owner_user_id TEXT,scope_key TEXT,body TEXT,revision INTEGER);CREATE TABLE veyra_installation_identity(singleton INTEGER,instance_id TEXT);CREATE TABLE context_conversations(id TEXT,project_id TEXT,organization_id TEXT,owner_user_id TEXT,visibility TEXT,metadata TEXT);CREATE TABLE context_messages(id TEXT,project_id TEXT,conversation_id TEXT,role TEXT,content TEXT,content_hash TEXT,metadata TEXT);CREATE TABLE context_checkpoint_audit_events(project_id TEXT,conversation_id TEXT,event_type TEXT,archive_sequence INTEGER);`);
++ const ids={job:id(1),project:id(2),org:id(3),owner:id(4),principal:id(5),workspace:id(6),runtime:id(7),context:id(8),message:id(9),suggestion:id(10)},now=Date.now();
++ const job={id:ids.job,project_id:ids.project,organization_id:ids.org,owner_kind:'user',owner_user_id:ids.owner,visibility:'private',service_principal_id:ids.principal,name:'fixture',agent:'fixture-agent',prompt_template:'Fixture bounded task.',timeout_minutes:5,revision:2,schedule_revision:3,enabled:true,schedule_cron:null,vault_references:[]},agent={description:'Fixture',mode:'primary',system:'Fixture only.',hidden:false,permissions:[{action:'*',resource:'*',effect:'deny'}]};
++ db.prepare('INSERT INTO projects VALUES(?,?,NULL)').run(ids.project,ids.org);db.prepare('INSERT INTO users VALUES(?,?,?)').run(ids.owner,'active',4);db.prepare('INSERT INTO service_principals VALUES(?,?,?,?)').run(ids.principal,ids.org,'active',1);db.prepare('INSERT INTO automation_principal_grants VALUES(?,?,?,?,?,?,?)').run(id(11),ids.org,ids.project,ids.principal,'execute','active',1);db.prepare('INSERT INTO organization_memberships VALUES(?,?,?,?)').run(ids.org,ids.owner,'active','owner');
++ const connection='job-native:'+ids.job;db.prepare('INSERT INTO provider_connections VALUES(?,?,?,?,?,?,?,?,?)').run(connection,1,'organization',ids.org,'native','opencode',JSON.stringify({kind:'anonymous-zen-job',jobId:ids.job,modelId:'fixture-free'}),null,1);db.prepare('INSERT INTO resource_grants VALUES(?,?,?,?,?,?,?,?,?,?)').run(id(12),ids.org,'provider_connection',connection,'service',ids.principal,'["execute"]',null,null,1);db.prepare('INSERT INTO provider_model_policies VALUES(?,?,?,?)').run(connection,'available','fixture-free',1);
++ const runs=new Map();const jobs={getJobRun:(_project,id)=>runs.get(id),isJobRunAuthorizationCurrent:()=>true,getJob:(project,jobId)=>project===ids.project&&jobId===ids.job?structuredClone(job):undefined},source=readFileSync(resolve(root,'packages/ingenium-core/lib/tools/job-providers.ts'),'utf8');const raw=stripTypeScriptTypes('const MODEL_ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;const JOB_NATIVE_PROVIDER_ID="opencode";'+['nativeJobConnectionId','parseAnonymousJobProvider','getJobProvider'].map(name=>extractFunction(source,name)).join('\n')).replaceAll('export ','');const getJobProvider=new Function('getDb','getJob',raw+';return getJobProvider;')(()=>db,jobs.getJob);
++ const jobPolicy=policy.createOriginalDotJobPolicy({getDb:()=>db,jobs,agents:{getJobAgentConfig:()=>structuredClone(agent)},jobProviders:{getJobProvider}});
++ const workspace={id:ids.workspace,organizationId:ids.org,projectId:ids.project,ownerUserId:ids.owner,status:'authorized',securityEpoch:2,storagePath:'/fixture'};workspace.storageMappingHash=hash(workspace.id+'\0'+workspace.storagePath);
++ const runtime={id:ids.runtime,workspaceId:ids.workspace,organizationId:ids.org,projectId:ids.project,ownerUserId:ids.owner,securityEpoch:2,state:'READY',revision:4,leaseExpiresAt:null,backendName:'ingenium-runtime-'+ids.runtime.replaceAll('-',''),backendContainerId:'b'.repeat(64),absoluteExpiresAt:new Date(now+60000).toISOString(),idleExpiresAt:new Date(now+60000).toISOString()};
++ const labels={'com.ingenium.managed':'runtime-manager','com.ingenium.runtime.id':ids.runtime,'org.opencontainers.image.revision':'a'.repeat(40),'com.ingenium.runtime.organization':ids.org,'com.ingenium.runtime.owner':ids.owner,'com.ingenium.runtime.project':ids.project,'com.ingenium.runtime.workspace':ids.workspace,'com.ingenium.runtime.storage':workspace.storageMappingHash,'com.ingenium.runtime.security-epoch':'2','com.ingenium.runtime.revision':'4'};
++ const observation=placement.observeManagedRuntime({Id:runtime.backendContainerId,Name:'/'+runtime.backendName,Config:{Labels:labels},State:{Status:'running',Health:{Status:'healthy'}}},'fixture-daemon',now),installationId='f'.repeat(32);db.prepare('INSERT INTO veyra_installation_identity VALUES(1,?)').run(installationId);
++ const engine='engine-distinct-from-context',meta=JSON.stringify({source:'opencode-chat',sourceRuntimeId:ids.runtime,sourceSessionId:engine}),content='Original fixture source.',contentHash=hash(content);db.prepare('INSERT INTO context_conversations VALUES(?,?,?,?,?,?)').run(ids.context,ids.project,ids.org,ids.owner,'private',meta);db.prepare('INSERT INTO context_messages VALUES(?,?,?,?,?,?,?)').run(ids.message,ids.project,ids.context,'user',content,contentHash,meta);
++ const execution={organizationId:ids.org,ownerUserId:ids.owner,projectId:ids.project,workspaceId:ids.workspace,bindingHash:workspace.storageMappingHash,bindingEpoch:2,status:'authorized',runtimeId:ids.runtime,mode:'runtime',hostId:observation.hostId,environmentId:'managed-runtime-v1:'+installationId,available:true},scope={organizationId:ids.org,ownerUserId:ids.owner,projectId:ids.project,executionBindingId:ids.workspace,executionBindingFingerprint:dot.dotExecutionFingerprint(execution,engine),conversationId:ids.context};
++ const descriptor=jobPolicy.describe(ids.project,ids.job,ids.owner).descriptor,suggestion={id:ids.suggestion,revision:1,state:'approved',scope,prompt:job.prompt_template,capabilities:[descriptor],source:{kind:'user',reference:dot.dotSourceReference({id:ids.message,hash:contentHash,chatId:ids.context})}},followup={id:ids.suggestion,revision:0,suggestionId:ids.suggestion,state:'active',scope,jobId:ids.job,jobRevision:2,scheduleRevision:3,capabilities:[descriptor]};
++ for(const [kind,value]of [['suggestion',suggestion],['followup',followup]])db.prepare('INSERT INTO veyra_dot_records VALUES(?,?,?,?,?,?,?)').run(kind,value.id,ids.org,ids.owner,repository.scopeKey(scope),JSON.stringify(value),value.revision);
++ let inspectCalls=0,afterInspect,clock=now;const reader=approved.createOriginalDotApprovedScopeReader({getDb:()=>db,jobs,runtimes:{getAuthorizedWorkspace:id=>id===ids.workspace?structuredClone(workspace):undefined,getRuntimeInstance:id=>id===runtime.id?structuredClone(runtime):undefined},contextConversations:{getContextConversation:(project,id)=>db.prepare('SELECT * FROM context_conversations WHERE project_id=? AND id=?').get(project,id),getContextMessage:(project,chat,id)=>db.prepare('SELECT * FROM context_messages WHERE project_id=? AND conversation_id=? AND id=?').get(project,chat,id)},trustedJobEvents:{getTrustedJobEvent:()=>undefined},jobPolicy,scopeKey:repository.scopeKey,parseReference:value=>{const parsed=JSON.parse(value);assert.equal(dot.dotSourceReference(parsed),value);return parsed;},inspectPlacement:async()=>{inspectCalls++;afterInspect?.();return structuredClone(observation);},qualifyPlacement:placement.qualifyManagedRuntimePlacement,fingerprint:dot.dotExecutionFingerprint,runIdentity:r=>hash(JSON.stringify([r.id,r.job_id,r.project_id,r.effective_service_principal_id])),eventDigest:dot.dotEventDigest,now:()=>clock,findSourceIds:(e,session)=>chatSource.findRequestChatSourceIds((sql,params)=>db.prepare(sql).all(...params),e,session),conversationIsActive:(project,id)=>chatSource.isRequestChatConversationActive((sql,params)=>db.prepare(sql).get(...params),project,id)});
++ return {db,ids,job,jobs,runs,agent,jobPolicy,descriptor,reader,scope,execution,workspace,runtime,observation,installationId,getJobProvider,inspectCalls:()=>inspectCalls,setAfterInspect:fn=>afterInspect=fn,advance:ms=>clock+=ms};
++}
++
++export {fixture,dot,repository,placement,tsModule,asModule,root,actual,id};
+diff --git a/services/ingenium-api/tests/veyra-dot-installed-authority.test.mjs b/services/ingenium-api/tests/veyra-dot-installed-authority.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/tests/veyra-dot-installed-authority.test.mjs
+@@ -0,0 +1,13 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {fixture,id,repository} from './veyra-dot-installed-authority.fixture.mjs';
++test('original metadata owner produces closed job-bound policy hash without grant/secret/tool authority',()=>{const f=fixture();try{assert.ok(f.descriptor.length<=128);assert.match(f.descriptor,new RegExp('^dot-job-policy:v1:'+f.ids.job+':[a-f0-9]{64}$'));assert.equal(f.jobPolicy.require(f.ids.project,f.ids.owner,f.descriptor),f.ids.job);assert.throws(()=>f.jobPolicy.require(id(99),f.ids.owner,f.descriptor));assert.equal(f.db.prepare('SELECT COUNT(*) n FROM resource_grants').get().n,1);}finally{f.db.close();}});
++for(const [name,change]of [
++ ['automation grant revoked',f=>f.db.exec("UPDATE automation_principal_grants SET status='revoked'")],['automation grant revision',f=>f.db.exec('UPDATE automation_principal_grants SET revision=revision+1')],['principal epoch',f=>f.db.exec('UPDATE service_principals SET security_epoch=security_epoch+1')],['principal revoked',f=>f.db.exec("UPDATE service_principals SET status='revoked'")],['owner epoch',f=>f.db.exec('UPDATE users SET security_epoch=security_epoch+1')],['owner membership revoked',f=>f.db.exec("UPDATE organization_memberships SET status='revoked'")],['owner disabled',f=>f.db.exec("UPDATE users SET status='disabled'")],['provider grant revoked',f=>f.db.exec("UPDATE resource_grants SET revoked_at='2000-01-01'")],['provider grant expired',f=>f.db.exec("UPDATE resource_grants SET expires_at='2000-01-01'")],['provider model changed',f=>f.db.exec("UPDATE provider_model_policies SET model_id='changed',revision=2")],['agent policy changed',f=>f.agent.permissions.push({action:'read',resource:'*',effect:'allow'})],['job changed',f=>f.job.prompt_template='Changed original prompt']])test(`current ${name} invalidates stored approval descriptor`,()=>{const f=fixture();try{change(f);assert.throws(()=>f.jobPolicy.require(f.ids.project,f.ids.owner,f.descriptor));}finally{f.db.close();}});
++test('approved scope reconstruction uses original source runtime/fresh placement/exact existing fingerprint and does not write',async()=>{const f=fixture();try{const before=f.db.prepare('SELECT total_changes() n').get().n,result=await f.reader.resolve(f.ids.project,f.ids.job);assert.deepEqual(result.execution,f.execution);assert.deepEqual(result.scope,f.scope);assert.equal(result.automationPrincipalId,f.ids.principal);assert.equal(f.inspectCalls(),1);assert.equal('principal' in result,false);assert.equal('token' in result,false);assert.equal(f.db.prepare('SELECT total_changes() n').get().n,before);}finally{f.db.close();}});
++for(const [name,change]of [
++ ['archived source',f=>f.db.prepare('INSERT INTO context_checkpoint_audit_events VALUES(?,?,?,?)').run(f.ids.project,f.ids.context,'conversation_archived',1)],['ambiguous source',f=>f.db.prepare('INSERT INTO context_conversations SELECT ?,project_id,organization_id,owner_user_id,visibility,metadata FROM context_conversations').run(id(77))],['foreign source owner',f=>f.db.exec("UPDATE context_conversations SET owner_user_id='foreign'")],['wrong source runtime no adopt',f=>f.db.exec("UPDATE context_conversations SET metadata=json_set(metadata,'$.sourceRuntimeId','missing-original-runtime')")],['source session rebound',f=>f.db.exec("UPDATE context_conversations SET metadata=json_set(metadata,'$.sourceSessionId','rebound-engine')")],['expired runtime lease',f=>f.runtime.leaseExpiresAt='2000-01-01'],['changed workspace path without hash',f=>f.workspace.storagePath='/foreign'],['runtime binding rebound',f=>{f.runtime.securityEpoch++;f.workspace.securityEpoch++;}],['paused approval',f=>f.db.exec("UPDATE veyra_dot_records SET body=json_set(body,'$.state','paused') WHERE kind='followup'")],['memory source requires explicit Core delegation',f=>f.db.exec("UPDATE veyra_dot_records SET body=json_set(body,'$.source.kind','memory') WHERE kind='suggestion'")]])test(`approved scope rejects ${name} before any claim`,async()=>{const f=fixture();try{change(f);await assert.rejects(f.reader.resolve(f.ids.project,f.ids.job));assert.equal(f.db.prepare("SELECT COUNT(*) n FROM veyra_dot_records WHERE kind='operation'").get().n,0);}finally{f.db.close();}});
++test('policy/approval/runtime/source are rechecked after asynchronous original placement observation',async()=>{for(const change of [f=>f.db.exec('UPDATE service_principals SET security_epoch=security_epoch+1'),f=>f.db.exec("UPDATE veyra_dot_records SET revision=revision+1,body=json_set(body,'$.revision',1,'$.state','paused') WHERE kind='followup'"),f=>f.runtime.revision++,f=>f.db.exec("UPDATE context_messages SET content='changed'"),f=>f.advance(6000)]){const f=fixture();try{f.setAfterInspect(()=>change(f));await assert.rejects(f.reader.resolve(f.ids.project,f.ids.job));assert.equal(f.db.prepare("SELECT COUNT(*) n FROM veyra_dot_records WHERE kind='operation'").get().n,0);}finally{f.db.close();}}});
++
++test('synchronous revalidation accepts only original private lease and rechecks actual policy/source before final writes',async()=>{const f=fixture();try{const lease=await f.reader.resolve(f.ids.project,f.ids.job);assert.equal(f.reader.revalidate(lease).approvalDigest,lease.approvalDigest);assert.throws(()=>f.reader.revalidate(JSON.parse(JSON.stringify(lease))));f.db.exec('UPDATE service_principals SET security_epoch=security_epoch+1');assert.throws(()=>f.reader.revalidate(lease));}finally{f.db.close();}});
++test('cursor progress is not approval but current full row digests are exposed; pause/resume revision invalidates lease',async()=>{const f=fixture();try{const lease=await f.reader.resolve(f.ids.project,f.ids.job);f.db.exec("UPDATE veyra_dot_records SET body=json_set(body,'$.cursor','progressed') WHERE kind='followup'");const current=f.reader.revalidate(lease);assert.equal(current.approvalDigest,lease.approvalDigest);assert.notEqual(current.rowDigests.followup.rowDigest,lease.rowDigests.followup.rowDigest);f.db.exec("UPDATE veyra_dot_records SET revision=revision+1,body=json_set(body,'$.revision',1) WHERE kind='followup'");assert.throws(()=>f.reader.revalidate(lease));}finally{f.db.close();}});
++test('operation evidence binds exact persisted operation and original run under the same source/policy lease',async()=>{const f=fixture();try{const lease=await f.reader.resolve(f.ids.project,f.ids.job),runId=id(80),run={id:runId,job_id:f.ids.job,project_id:f.ids.project,organization_id:f.ids.org,effective_service_principal_id:f.ids.principal,job_revision:2,schedule_revision:3,status:'running'};f.runs.set(runId,run);const operation={id:'original-operation',revision:0,followupId:f.ids.suggestion,runId,state:'claimed',scope:f.scope};f.db.prepare('INSERT INTO veyra_dot_records VALUES(?,?,?,?,?,?,?)').run('operation',operation.id,f.ids.org,f.ids.owner,repository.scopeKey(f.scope),JSON.stringify(operation),0);const evidence=f.reader.operationEvidence(lease,runId);assert.equal(evidence.operation.id,operation.id);assert.equal(evidence.runId,runId);assert.match(evidence.operation.rowDigest,/^[a-f0-9]{64}$/);assert.throws(()=>f.reader.operationEvidence(lease,id(81)));run.schedule_revision=99;assert.throws(()=>f.reader.operationEvidence(lease,runId));}finally{f.db.close();}});
++test('synchronous lease refuses stale placement or changed source without network refresh',async()=>{for(const change of [f=>f.advance(6000),f=>f.db.exec("UPDATE context_messages SET content_hash='changed'")]){const f=fixture();try{const lease=await f.reader.resolve(f.ids.project,f.ids.job),calls=f.inspectCalls();change(f);assert.throws(()=>f.reader.revalidate(lease));assert.equal(f.inspectCalls(),calls);}finally{f.db.close();}}});
+diff --git a/services/ingenium-api/tests/veyra-dot-installed-http.test.mjs b/services/ingenium-api/tests/veyra-dot-installed-http.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/tests/veyra-dot-installed-http.test.mjs
+@@ -0,0 +1,38 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {resolve} from 'node:path';import {createRequire} from 'node:module';import {stripTypeScriptTypes} from 'node:module';import {AsyncLocalStorage} from 'node:async_hooks';import {randomUUID,createHash,timingSafeEqual} from 'node:crypto';import {pathToFileURL} from 'node:url';
++import {fixture,dot,repository,placement,tsModule,root,actual} from './veyra-dot-installed-authority.fixture.mjs';
++const require=createRequire(resolve(root,'services/ingenium-api/package.json')),express=require('express');
++const read=f=>readFileSync(resolve(root,f),'utf8'),body=source=>stripTypeScriptTypes(source).replace(/^import [\s\S]*?;\n/gm,'').replace(/^export \{[\s\S]*?\} from ["'][^"']+["'];?\n/gm,'').replaceAll('export ','');
++const service=await import(tsModule(resolve(root,'services/ingenium-api/lib/dot-v2/service.ts'))),core=await import(tsModule(resolve(root,'services/ingenium-api/lib/dot-v2/core-binding.ts'))),commands=await import(tsModule(resolve(root,'services/ingenium-api/lib/dot-v2/commands.ts'))),executionOwner=await import(pathToFileURL(resolve(root,'services/ingenium-api/lib/projects-v2/request-execution-owner.mjs')).href),canonical=await import(pathToFileURL(resolve(root,'services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs')).href),chatSource=await import(pathToFileURL(resolve(root,'services/ingenium-api/lib/projects-v2/request-chat-source.mjs')).href),managed=await import(pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs')).href);
++const routerBody=body(read('services/ingenium-api/lib/dot-v2/router.ts')),createRequestDotRouter=new Function('Router','executeDotCommand','dotErrorResponse','DotError',routerBody+';return createRequestDotRouter;')(express.Router,commands.executeDotCommand,commands.dotErrorResponse,service.DotError);
++function harness(){const f=fixture();f.runtime.leaseExpiresAt=null;f.db.exec('CREATE TABLE content_shares(organization_id TEXT,resource_type TEXT,resource_id TEXT,grantee_kind TEXT,grantee_id TEXT,revoked_at TEXT,permission TEXT);CREATE UNIQUE INDEX dot_fixture_record ON veyra_dot_records(kind,id)');let ownerCalls=0,starts=0,placementCalls=0,revoked=false;
++ const authzBody=body(read('packages/ingenium-core/lib/tools/authorization.ts')),authorization=new Function('getDb','execTransaction','checkpointAfterWrite','randomUUID',authzBody+';return {requireProjectPermission,requireContentPermission,requireOrganizationPermission};')(()=>f.db,work=>work(),()=>{},randomUUID);
++ const policySource=read('services/ingenium-api/lib/authorization-policy.ts'),start=policySource.indexOf('export function toAuthorizationPrincipal('),end=policySource.indexOf('\n}',start)+2,toAuthorizationPrincipal=new Function(body(policySource.slice(start,end))+';return toAuthorizationPrincipal;')();
++ const csrfToken='f'.repeat(43);
++ const principal={type:'user',id:f.ids.owner,scopes:['user:*'],session:{id:'fixture-admitted-session',security_epoch:4,csrf_hash:createHash('sha256').update(csrfToken).digest('hex')}};
++ const authSource=read('packages/ingenium-core/lib/tools/authentication.ts');const extract=name=>{const start=authSource.indexOf('export function '+name+'(');assert.ok(start>=0);return authSource.slice(start,authSource.indexOf('\n}',start)+2);};
++ const verifySessionCsrf=new Function('getDb','createHash','timingSafeEqual',body(extract('hashSecurityToken')+'\n'+extract('verifySessionCsrf'))+';return verifySessionCsrf;')(()=>f.db,createHash,timingSafeEqual);
++ class FixtureAppError extends Error{constructor(message,code,statusCode){super(message);this.code=code;this.statusCode=statusCode;}}
++ const csrf=new Function('authentication','config','AppError',body(read('services/ingenium-api/lib/middleware/csrf.ts'))+';return csrfMiddleware;')({verifySessionCsrf},{dashboardOrigins:['https://dot.fixture.invalid']},FixtureAppError);
++ const revalidateRequestIdentity=request=>!revoked&&request.principal?.id===principal.id?{principal:structuredClone(principal)}:null;
++ const contextConversations={getContextConversation:(project,id)=>f.db.prepare('SELECT * FROM context_conversations WHERE project_id=? AND id=?').get(project,id),getContextMessage:(project,chat,id)=>f.db.prepare('SELECT * FROM context_messages WHERE project_id=? AND conversation_id=? AND id=?').get(project,chat,id)};
++ const runtimes={getAuthorizedWorkspace:id=>id===f.ids.workspace?structuredClone(f.workspace):undefined,getRuntimeInstance:id=>id===f.ids.runtime?structuredClone(f.runtime):undefined},getDb=()=>f.db,explicitMemory={resolveExplicitMemoryScope:()=>({organizationId:f.ids.org,ownerUserId:f.ids.owner,projectId:f.ids.project,workspaceId:f.ids.workspace}),readExplicitMemory:()=>undefined};
++ const projectsModule=new Function('createCanonicalRequestChatResolver','createRequestExecutionResolvers','RequestExecutionError','findRequestChatSourceIds','isRequestChatConversationActive','authorization','contextConversations','explicitMemory','getDb','runtimes','revalidateRequestIdentity','toAuthorizationPrincipal','deploymentMode',body(read('services/ingenium-api/lib/projects-v2/request-execution.ts'))+';return {resolveRequestExecution,resolveRequestContextChatBinding,installRequestExecutionPlacementResolver};')(canonical.createCanonicalRequestChatResolver,executionOwner.createRequestExecutionResolvers,executionOwner.RequestExecutionError,chatSource.findRequestChatSourceIds,chatSource.isRequestChatConversationActive,authorization,contextConversations,explicitMemory,getDb,runtimes,revalidateRequestIdentity,toAuthorizationPrincipal,()=> 'control-plane');
++ const runtimePlacement=new Function('AsyncLocalStorage','authorization','explicitMemory','getDb','runtimes','toAuthorizationPrincipal','revalidateRequestIdentity','inspectManagedRuntimePlacement','qualifyManagedRuntimePlacement','installRequestExecutionPlacementResolver','RequestExecutionError',body(read('services/ingenium-api/lib/runtime-placement.ts'))+';return withManagedRequestPlacement;')(AsyncLocalStorage,authorization,explicitMemory,getDb,runtimes,toAuthorizationPrincipal,revalidateRequestIdentity,async()=>{placementCalls++;return f.observation;},placement.qualifyManagedRuntimePlacement,projectsModule.installRequestExecutionPlacementResolver,executionOwner.RequestExecutionError);
++ const jobs={...f.jobs,getJobRun:()=>undefined,startJobRun(){starts++;throw Error('No new claim expected');},cancelJobRun(){throw Error('No cancellation without original run');},isJobRunAuthorizationCurrent:()=>true};
++ const sessionModule=new Function('authorization','contextConversations','explicitMemory','getDb','execTransaction','checkpointAfterWrite','jobs','jobEventDeliveries','trustedJobEvents','toAuthorizationPrincipal','revalidateRequestIdentity','resolveRequestExecution','resolveRequestContextChatBinding','createRequestMemorySession','executeJobRun','killRunProcess','createCoreDotRuntime','DotError','scopeKey','createRequestDotBinding',body(read('services/ingenium-api/lib/dot-v2/request-session.ts'))+';return createCoreRequestDotSession;')(authorization,contextConversations,explicitMemory,getDb,work=>{f.db.exec('BEGIN');try{const result=work();f.db.exec('COMMIT');return result;}catch(error){f.db.exec('ROLLBACK');throw error;}},()=>{},jobs,{listJobEventDeliveries:()=>({data:[],nextCursor:null})},{getTrustedJobEvent:()=>undefined},toAuthorizationPrincipal,revalidateRequestIdentity,projectsModule.resolveRequestExecution,projectsModule.resolveRequestContextChatBinding,()=>{throw Error('No Memory fixture source');},()=>{throw Error('No job execution expected');},()=>{throw Error('No process expected');},core.createCoreDotRuntime,service.DotError,repository.scopeKey,dot.createRequestDotBinding);
++ const source=actual?read('services/ingenium-api/lib/dot-v2/installed-dot-http.ts'):readFileSync(new URL('./installed-dot-http.proposal.ts',import.meta.url),'utf8');
++ const http=new Function('Router','randomUUID','authorization','getDb','logger','projects','jobs','agents','jobProviders','toAuthorizationPrincipal','revalidateRequestIdentity','launchManagedJobRun','cancelManagedJobRun','inspectManagedJobRun','withManagedRequestPlacement','dotErrorResponse','RequestExecutionError','resolveRequestExecution','createOriginalDotJobPolicy','actualManagedJobOwner','createManagedDotExecution','createCoreRequestDotSession','createRequestDotRouter','DotError',body(source)+';return {createInstalledDotRouter,createInstalledDotRequestSession,selectInstalledDotRequest};')(express.Router,randomUUID,authorization,getDb,{warn(){}},{getProject:name=>name==='fixture-project'?{id:f.ids.project,organization_id:f.ids.org}:undefined},jobs,{getJobAgentConfig:()=>structuredClone(f.agent)},{getJobProvider:f.getJobProvider},toAuthorizationPrincipal,revalidateRequestIdentity,()=>{throw Error('No manager launch');},()=>{throw Error('No manager cancel');},()=>{throw Error('No manager inspect');},runtimePlacement,commands.dotErrorResponse,executionOwner.RequestExecutionError,projectsModule.resolveRequestExecution,()=>f.jobPolicy,()=>{ownerCalls++;throw Object.assign(Error('No approved image owner'),{status:503});},managed.createManagedDotExecution,sessionModule,createRequestDotRouter,service.DotError);
++ const router=http.createInstalledDotRouter();
++ function call(method,path,body,extra={}){return new Promise(resolve=>{const request={method,url:path,originalUrl:path,headers:{origin:'https://dot.fixture.invalid','x-ingenium-ui':'dashboard','x-csrf-token':csrfToken},query:{project:'fixture-project',workspaceId:f.ids.workspace,runtimeId:f.ids.runtime,chatId:f.ids.context},principal:structuredClone(principal),body,...extra};Object.defineProperty(request,'path',{get(){return new URL(request.url,'http://fixture.invalid').pathname;}});const response={statusCode:200,headers:{},setHeader(k,v){this.headers[k.toLowerCase()]=v;},status(code){this.statusCode=code;return this;},json(value){resolve({status:this.statusCode,body:value,headers:this.headers});return this;},end(){resolve({status:this.statusCode,headers:this.headers});}};request.res=response;request.get=name=>request.headers[name.toLowerCase()];try{csrf(request,response,()=>router.handle(request,response,error=>resolve({error,status:error?500:404})));}catch(error){resolve({status:error.statusCode??500,body:{error:{code:error.code}}});}});}
++ return {...f,call,http,router,counts:()=>({ownerCalls,starts,placementCalls}),revoke:()=>revoked=true,setScopes:scopes=>principal.scopes=scopes};
++}
++test('actual Express Dot router reads history with original request/placement but no approved image owner',async()=>{const f=harness();try{const result=await f.call('GET','/followups');assert.equal(result.status,200,result.error?.message??JSON.stringify(result.body));assert.equal(result.body.data.length,1);assert.equal(result.headers['cache-control'],'no-store');assert.equal(f.counts().ownerCalls,0);assert.equal(f.counts().placementCalls,1);assert.equal(f.counts().starts,0);}finally{f.db.close();}});
++test('authorized source suggestion and explicit job-policy fingerprint read work without image execution',async()=>{const f=harness();try{const source=JSON.parse(f.db.prepare("SELECT body FROM veyra_dot_records WHERE kind='suggestion'").get().body).source;f.db.prepare('DELETE FROM veyra_dot_records').run();const policy=await f.call('GET','/job-policy/'+f.ids.job);assert.equal(policy.status,200,policy.error?.message??JSON.stringify(policy.body));assert.equal(policy.body.data.descriptor,f.descriptor);const result=await f.call('POST','/commands',{type:'propose',input:{title:'Fixture suggestion',prompt:f.job.prompt_template,source,capabilities:[f.descriptor],expiresAt:new Date(Date.now()+60000).toISOString()}});assert.equal(result.status,201,result.error?.message??JSON.stringify(result.body));assert.equal(result.body.data.scope.conversationId,f.ids.context);const list=await f.call('GET','/suggestions');assert.equal(list.status,200);assert.equal(list.body.data.length,1);assert.equal(f.counts().ownerCalls,0);assert.equal(f.counts().starts,0);}finally{f.db.close();}});
++test('approval records exact existing job policy without claiming or approving an image',async()=>{const f=harness();try{const source=JSON.parse(f.db.prepare("SELECT body FROM veyra_dot_records WHERE kind='suggestion'").get().body).source;f.db.prepare('DELETE FROM veyra_dot_records').run();const suggestion=await f.call('POST','/commands',{type:'propose',input:{title:'Fixture',prompt:f.job.prompt_template,source,capabilities:[f.descriptor],expiresAt:new Date(Date.now()+120000).toISOString()}});assert.equal(suggestion.status,201,suggestion.error?.message??JSON.stringify(suggestion.body));const response=await f.call('POST','/commands',{type:'approve',id:suggestion.body.data.id,revision:0,input:{jobId:f.ids.job,schedule:{kind:'once',at:new Date(Date.now()+60000).toISOString()},missedPolicy:'latest',notificationPolicy:'meaningful'}});assert.equal(response.status,200);assert.deepEqual(response.body.data.capabilities,[f.descriptor]);assert.equal(f.counts().starts,0);assert.equal(f.counts().ownerCalls,0);assert.equal(f.db.prepare("SELECT COUNT(*) n FROM veyra_dot_records WHERE kind='operation'").get().n,0);}finally{f.db.close();}});
++test('request identity/selection loss rejects before original placement or private rows',async()=>{for(const extra of [{principal:undefined},{query:{project:'fixture-project',workspaceId:'x',runtimeId:'r',scope:'forged'}},{query:{project:['fixture-project'],workspaceId:'x',runtimeId:'r'}}]){const f=harness();try{const result=await f.call('GET','/followups',undefined,extra);assert.ok([401,422].includes(result.status));assert.equal(f.counts().ownerCalls,0);assert.equal(f.counts().placementCalls,0);}finally{f.db.close();}}});
++test('current permission/source/provider revocation rejects commands and does not mint another claim',async()=>{for(const mutate of [f=>f.db.exec("UPDATE organization_memberships SET status='revoked'"),f=>f.db.exec("UPDATE provider_connections SET enabled=0"),f=>f.db.prepare('INSERT INTO context_checkpoint_audit_events VALUES(?,?,?,?)').run(f.ids.project,f.ids.context,'conversation_archived',1)]){const f=harness();try{mutate(f);const result=await f.call('GET','/job-policy/'+f.ids.job);assert.ok([403,404,503].includes(result.status),result.error?.message??JSON.stringify(result.body));assert.equal(f.counts().ownerCalls,0);assert.equal(f.counts().starts,0);}finally{f.db.close();}}});
++test('scheduler consumes durable Dot ownership and never falls into original cron claim while Core delegation is missing',async()=>{const f=harness();try{const interlockSource=actual?read('services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts'):readFileSync(new URL('./installed-dot-scheduler.proposal.ts',import.meta.url),'utf8');const interlock=new Function('getDb','installedDotApprovedScopeReader','DotError',body(interlockSource)+';return installedDotSchedulerInterlock;')(()=>f.db,f.reader,service.DotError);assert.equal(interlock.ownsJob(f.ids.project,f.ids.job),true);const scheduler=read('services/ingenium-api/lib/scheduler.ts'),start=scheduler.indexOf('async function runJobScheduler('),end=scheduler.indexOf('async function runEventJobScheduler',start);assert.ok(start>=0&&end>start);const tasks=[],logs=[];let claims=0,executes=0;const run=new Function('isSchedulerActive','recoverVaultSecretRunDirectories','logger','dotRuntime','projects','jobs','matchesCron','trackTask','executeJobRun','jobEventDeliveries','scheduleJobTick',stripTypeScriptTypes(scheduler.slice(start,end))+';return runJobScheduler;')(()=>true,async()=>{}, {warn:(...args)=>logs.push(args),debug(){},info(){},error(){}},interlock,{listProjects:()=>[{id:f.ids.project,archived_at:null}]},{listJobs:()=>[f.job],orderJobsForFairDispatch:j=>j,startJobRun:()=>{claims++;throw Error('No claim');}},()=>true,promise=>{tasks.push(promise);return promise;},()=>{executes++;return Promise.resolve();},{sanitizeJobEventText:v=>v},()=>{});await run(1);await Promise.allSettled(tasks);assert.equal(claims,0);assert.equal(executes,0);assert.ok(logs.some(args=>args[0]==='dot-scheduler'));assert.equal(f.db.prepare("SELECT COUNT(*) n FROM veyra_dot_records WHERE kind='operation'").get().n,0);}finally{f.db.close();}});
++
++test('original browser CSRF owner rejects missing/cross-origin Dot commands before placement or mutation',async()=>{for(const headers of [{origin:'https://dot.fixture.invalid'},{origin:'https://foreign.invalid','x-csrf-token':'f'.repeat(43)}]){const f=harness();try{const result=await f.call('POST','/commands',{type:'dismiss',id:f.ids.suggestion,revision:0},{headers});assert.equal(result.status,403);assert.equal(result.body.error.code,'CSRF_REJECTED');assert.equal(f.counts().placementCalls,0);assert.equal(f.counts().ownerCalls,0);}finally{f.db.close();}}});
++test('outer jobs.read admission does not grant Dot write/execute to a read-only request',async()=>{const f=harness();try{f.setScopes(['jobs:read','context:read','projects:read']);const result=await f.call('POST','/commands',{type:'dismiss',id:f.ids.suggestion,revision:0});assert.equal(result.status,403);assert.equal(result.body.error.code,'DOT_FORBIDDEN');assert.equal(f.counts().starts,0);assert.equal(f.counts().ownerCalls,0);}finally{f.db.close();}});
++test('exact route policy and API source hook preserve auth/CSRF and original scheduler lifecycle',()=>{const raw=actual?read('services/ingenium-api/lib/authorization-policy.ts'):readFileSync(new URL('./authorization-policy-dot.proposal.ts',import.meta.url),'utf8'),policy=new Function('authentication','authorization','projects','securityAudit','AppError','isRuntimeGatewayPrivateRequest',body(raw)+';return policyForRequest;')({}, {}, {}, {}, class{},()=>false);for(const path of ['/api/v1/dot/suggestions','/api/v1/dot/operations/one','/api/v1/dot/queue','/api/v1/dot/job-policy/one'])assert.deepEqual(policy({method:'GET',path}),{action:'jobs.dot.read',resource:'jobs',permission:'read',target:'project',sensitive:true});assert.equal(policy({method:'POST',path:'/api/v1/dot/commands'}).permission,'read');assert.equal(policy({method:'GET',path:'/api/v1/dot/unknown'}),undefined);assert.equal(policy({method:'POST',path:'/api/v1/dot/suggestions'}),undefined);const api=actual?read('services/ingenium-api/scripts/api-server.ts'):readFileSync(new URL('./api-server-dot.proposal.ts',import.meta.url),'utf8');for(const gate of ['app.use(authMiddleware)','app.use(csrfMiddleware)','app.use(authorizationMiddleware)'])assert.ok(api.indexOf(gate)<api.indexOf('app.use("/api/v1/dot",createInstalledDotRouter())'));assert.ok(api.includes('startScheduler(config.port,installedDotSchedulerInterlock)'));const scheduler=actual?read('services/ingenium-api/lib/scheduler.ts'):readFileSync(new URL('./scheduler-dot.proposal.ts',import.meta.url),'utf8');assert.ok(scheduler.includes('trackTask(dot.dispatchJob'));assert.ok(scheduler.includes('isSchedulerActive(generation)'));});

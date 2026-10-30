@@ -1,0 +1,28 @@
+# Installed Dot authority and API integration proposal
+
+Source-only checkpoint for Root integration, not Phase 1 completion. The 13-target patch checks against the Root preimages recorded in dot-installed-integration.json. Preserve concurrent Root changes; apply the minimal patch, never replace shared files wholesale from proposal snapshots.
+
+## Original Core integration contract
+
+1. In installed-dot-scheduler dispatchJob, after `await installedDotApprovedScopeReader.resolve(projectId,jobId)` and the second `isActive()`, construct the original private purpose-bound Core approved-Dot context and existing CoreDotRuntime. Do this before service reconcile/claim. Never pass or retain HTTP request/session/cookie/CSRF/AuthPrincipal, create a second scheduler/journal, invent user scopes, claim a run twice, or inject a positive ready/settlement result. The current interlock throws before claim and preserves durable Dot ownership against ordinary cron fallback.
+2. `revalidateInstalledDotApproval(lease)` is synchronous and network-free for the existing final Core transaction. Only original-reader WeakMap leases are accepted; serialized clones fail. It rechecks original DB identity, original current approved Followup/Suggestion, job-bound policy, principal/grant/owner epochs and memberships, source/archive rules, unchanged workspace/runtime snapshots and still-fresh original placement observation/fingerprint. Root must bind all returned scope/execution axes, actual automationPrincipalId and approvalDigest to its private context, and revalidate again at each original effect/final write.
+3. `approvalDigest` hashes original approved Followup with only progress cursor excluded plus exact Suggestion row. Followup revision remains pinned: pause/resume/cancel invalidates admission. `rowDigests` expose current full rows separately: followup and suggestion each `{id,revision,rowDigest}`. Row digest is SHA256(JSON.stringify(original SELECT row)), columns exactly `id,organization_id,owner_user_id,scope_key,revision,body`. Cursor progress changes full rowDigest while preserving approvalDigest.
+4. After the existing original JobRun and Dot operation claim, `readInstalledDotOperationEvidence(lease,runId)` synchronously revalidates and requires exactly one matching original persisted operation, full scope/owner/org, followup/run identity, original run current authorization and job/schedule/principal revisions. It returns current facts plus operation `{id,revision,rowDigest,state}`, runId and `runIdentityHash` from original Core126 `originalJobRunIdentity`. Root owns persisting immutable delegation IDs/digest ONLY in the new autonomous path. Do not alter legacy admission JSON/specHash behavior.
+5. This reader admits active dispatch only. Self-reducing cancellation after approval withdrawal needs Root's separate purpose-bound original persisted admission path, not relaxed active-source/approval checks. Private Memory-source autonomous delegation remains explicitly unavailable until original Core125 current enabled/useMemory/chat policy/hash/version/tombstone authorization exists. User/event sources require exact original canonical Context and original runtime metadata; no latest-session adoption.
+6. Actual manager/image/profile/grant/resource/result owners retain original current checks and immutable image capability qualification before effects. A policy descriptor is an approval comparison fingerprint, never an execution grant, tool allowlist or image-readiness result.
+
+## HTTP and scheduler boundary
+
+Mount the request-local router after existing auth, CSRF, authorization and rate limit middleware. Actual `withManagedRequestPlacement` supplies fresh request ALS placement before synchronous Dot work. Reads/suggestions/history/approval do not initialize the managed image owner. Original command-specific permissions and source policy remain enforced even though the outer finite route policy admits jobs:read. No request closure enters the scheduler. Existing lifecycle/generation/trackTask ownership remains intact.
+
+## Validation and remaining acceptance
+
+38/38 focused source/in-memory checks pass, including actual installed Express Router, original browser CSRF, authorization SQL, placement qualifier, canonical source owners and scheduler source path. This is not full login, strict API/Core compilation, live manager/container execution, recovery/cancellation, model operation, UI screenshots, Windows or cluster acceptance. Root rerun after applying:
+
+`VEYRA_DOT_PROPOSAL_SOURCE_ROOT=<actual Root> VEYRA_DOT_INSTALLED_ACTUAL=1 /home/brajam/.local/bin/node --experimental-strip-types --test services/ingenium-api/tests/veyra-dot-installed-authority.test.mjs services/ingenium-api/tests/veyra-dot-installed-http.test.mjs`
+
+The scheduler fixture intentionally checks the temporary unavailable interlock. When Root replaces it with real original delegation, replace that assertion with original authority/revocation/claim tests; do not keep unavailable as accepted autonomous behavior.
+
+## Storage reconciliation
+
+Owner: Dot session6. All durable proposal/test/patch/receipt source remains within the existing approved C-backed WSL task root `/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845`. No build, install, cache, download, scratch, socket, service, runtime/container, desktop or model output was created. Removed paths: none; measured removed bytes: 0. Retained consumer: Root review/integration; end condition: integration or explicit versioned supersession. Original source, prior receipts, failure witnesses, user data and credentials remain protected. Regeneration: versioned source plus exact focused command above; patch pre/post hashes recorded in the adjacent receipt.

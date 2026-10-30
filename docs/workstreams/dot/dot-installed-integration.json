@@ -1,0 +1,117 @@
+{
+  "owner": "Dot session6 / 01a18935-103f-7432-98b0-cd2c51f8c8ab",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalStorage": "existing authorized C-backed WSL Ubuntu filesystem; no new output root",
+  "sourceOnly": true,
+  "rootHeadObserved": "45cf7b9c227cab49878b8c92eac1fee895ba496f",
+  "patchSha256": "6c1213dbbce6b998084dcbfdbacab6ec8d2c08b5dbc29d91ae7b731ae4ca8807",
+  "applyCheckExit": 0,
+  "targets": [
+    {
+      "source": "dot-job-policy.proposal.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "0ab7360153ad50f87df5759275593ed4da48f99f1dc5bcacad6885e39b936136"
+    },
+    {
+      "source": "dot-job-policy.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "fd8d7042ecaa02c77a746b64bda8a0b40755822b7c63b748fb1c21ea9954c27f"
+    },
+    {
+      "source": "dot-approved-scope.proposal.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "9baccc0a8ec748ad0679070826162155dd3c92b2d223938fead79ba83463322a"
+    },
+    {
+      "source": "dot-approved-scope.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "9752a7b4f9fe36402e7d639fca5e78cf9508d999bbffb5542e7e4b6f5bb3fe43"
+    },
+    {
+      "source": "installed-dot-approved-scope.proposal.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "preimageSha256": null,
+      "postimageSha256": "fc6ef51d4e71ca58b50cd66ee3b5caebca183bb2d39f3f096dd63d03c65f6365"
+    },
+    {
+      "source": "installed-dot-http.proposal.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+      "preimageSha256": null,
+      "postimageSha256": "d93f7787bb523b217747cb1a1cd59bf40681eb07a2dfb4af024b16705e444814"
+    },
+    {
+      "source": "installed-dot-scheduler.proposal.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "preimageSha256": null,
+      "postimageSha256": "f421139c6fb7abcfe81f15a630aed13fc107e1352f58516c6e41de8f13db7e0c"
+    },
+    {
+      "source": "api-server-dot.proposal.ts",
+      "target": "services/ingenium-api/scripts/api-server.ts",
+      "preimageSha256": "45a07ddd6fbe87a309bbc297b19b67c9b0dbebdc32ccb3c847895b49d1489ced",
+      "postimageSha256": "19ba47e0114f6c0d5299e4cc546d347bb0741bb5d52bf5aafa1e8a15ca828b01"
+    },
+    {
+      "source": "authorization-policy-dot.proposal.ts",
+      "target": "services/ingenium-api/lib/authorization-policy.ts",
+      "preimageSha256": "f581e3b59e3a7c2dc251265625e42af4569acbb993591943a2a85e15df7ade82",
+      "postimageSha256": "ea923e5a072820a4ca9391a85c8fe7cddd31753c13e35af5cb5d9113d9fce3d9"
+    },
+    {
+      "source": "scheduler-dot.proposal.ts",
+      "target": "services/ingenium-api/lib/scheduler.ts",
+      "preimageSha256": "63751c3335c798aae261249d717151b04fa1b26942c1c0664cfc915c6c2b8a04",
+      "postimageSha256": "405df007d16a26dc9ffef110c00032884ebfd6ad8d5638725a7bbdb3c2569890"
+    },
+    {
+      "source": "veyra-dot-installed-authority.fixture.mjs",
+      "target": "services/ingenium-api/tests/veyra-dot-installed-authority.fixture.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "b576dcada8a3fdb18e8b776f3425cf73387fe6bb25ce26fefd80f98298cd9b4c"
+    },
+    {
+      "source": "veyra-dot-installed-authority.test.mjs",
+      "target": "services/ingenium-api/tests/veyra-dot-installed-authority.test.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "ff573a2939a3aef2c3625fd48d25f001114b53efff3d8c8c46407cb8499e5898"
+    },
+    {
+      "source": "veyra-dot-installed-http.test.mjs",
+      "target": "services/ingenium-api/tests/veyra-dot-installed-http.test.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "f72762f39753d3c284adf9b027e090807207bfa0346340f136165fd48442c572"
+    }
+  ],
+  "validation": {
+    "tests": 38,
+    "pass": 38,
+    "fail": 0,
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --experimental-strip-types --test docs/workstreams/dot/veyra-dot-installed-authority.test.mjs docs/workstreams/dot/veyra-dot-installed-http.test.mjs",
+    "limits": "CPU/source/in-memory SQLite and Express Router; no service, socket, build, image, model, desktop, deployment or live autonomous acceptance"
+  },
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retained": "Versioned proposal, patch, focused tests and compact receipt required by Root integration; end condition: integration or explicit source supersession",
+    "protected": "Root original source, existing receipts/failure witnesses, user runtime/data/credentials/models untouched"
+  },
+  "remaining": [
+    "Root original purpose-bound Core approved-Dot context/prepare/read/cancel and final-transaction revalidation",
+    "Private Memory source autonomous delegation",
+    "Real autonomous runtime composition replacing interlock",
+    "Strict Core/API validation and actual runtime/workflow/platform acceptance"
+  ],
+  "initialFailure": {
+    "tests": 29,
+    "pass": 25,
+    "fail": 4,
+    "cause": "Expanded HTTP source fixture omitted original authorization SQL content_shares table",
+    "repair": "Added empty original-schema fixture table; no production permission guard relaxed"
+  },
+  "initialPatchFormatFailure": "New-file mode header omitted; corrected before application; original Root untouched"
+}
