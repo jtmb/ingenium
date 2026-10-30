@@ -55,6 +55,82 @@ $recordCaptureNew=@'
             local_original,
 '@
 ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' $recordCapture $recordCaptureNew
+ReplaceOnce 'apps/service/src/routes.rs' 'mod provider;' ('mod provider;'+[char]10+'pub(crate) use provider::memory_admission::MemorySynthesisAdmission;')
+ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod queue;' ('mod queue;'+[char]10+'pub(super) mod memory_admission;'+[char]10+'pub(super) mod memory_synthesis;')
+ReplaceOnce 'apps/service/src/inference/mod.rs' 'mod request;' ('mod request;'+[char]10+'pub(crate) mod request_purpose;')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' 'use super::{' ('mod memory;'+[char]10+'pub(crate) use memory::QueuedMemory;'+[char]10+'use super::{')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,') ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,'+[char]10+'    memory: memory::MemoryBook,')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        if book.entries.len() >= 128 {' '        if book.entries.len() + book.memory.entries.len() >= 128 {'
+$memoryReplay=@'
+        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}
+        if payload.call_id().is_some_and(|id|book.memory.entries.iter().any(|e|e.admission.original().operation_id==id)){
+            return Err(GatewayError::Conflict)
+        }
+'@
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        let retained_bytes = book' ($memoryReplay+[char]10+'        let retained_bytes = book')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        if book.dispatching.is_some() {' ('        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}'+[char]10+'        if book.dispatching.is_some() || book.memory.reserved.is_some() || book.memory.earlier_waiting(entry.id)? {')
+$dispatch=@'
+        Ok(book
+            .dispatching
+            .map(|id| book.entries[id].grant.turn_id.clone()))
+'@
+$dispatchNew=@'
+        if let Some(id)=book.memory.reserved{return Ok(Some(book.memory.entries[id].admission.original().operation_id.clone()))}
+        Ok(book
+            .dispatching
+            .map(|id| book.entries[id].grant.turn_id.clone()))
+'@
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' $dispatch $dispatchNew
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        // Called without an entry guard.' ('        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}'+[char]10+'        // Called without an entry guard.')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        for prior in &book.entries[..entry.id] {' ('        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}'+[char]10+'        if book.memory.earlier_waiting(entry.id)?{return Ok(false)}'+[char]10+'        for prior in &book.entries[..entry.id] {')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        Ok(!book.entries.is_empty() || !book.closed_tasks.is_empty())' '        Ok(!book.entries.is_empty() || !book.memory.entries.is_empty() || !book.closed_tasks.is_empty())'
+ReplaceOnce 'crates/adapters/src/provider_attempts.rs' 'mod types;' ('mod types;'+[char]10+'mod memory;'+[char]10+'pub use memory::{MemoryAttemptMetadata,MemoryAttemptYielded};')
+ReplaceOnce 'crates/adapters/src/provider_attempts.rs' '            n if n > 2 => return Err(ProviderAttemptStoreError::NewerSchema),' ('            3 => validate_database(&tx)?,'+[char]10+'            n if n > 3 => return Err(ProviderAttemptStoreError::NewerSchema),')
+$beforeCommit=@'
+        validate_database(&tx)?;
+        tx.commit()?;
+'@
+$beforeCommitNew=@'
+        let version:i64=tx.pragma_query_value(None,"user_version",|r|r.get(0))?;
+        if version==2{tx.execute_batch(include_str!("provider_attempts/0003.sql"))?;}
+        validate_database(&tx)?;
+        tx.commit()?;
+'@
+ReplaceOnce 'crates/adapters/src/provider_attempts.rs' $beforeCommit $beforeCommitNew
+ReplaceOnce 'crates/adapters/src/provider_attempts.rs' '        1 | 2 => validate_database(connection),' '        1 | 2 | 3 => validate_database(connection),'
+ReplaceOnce 'crates/adapters/src/provider_attempts.rs' '        n if n > 2 => Err(ProviderAttemptStoreError::NewerSchema),' '        n if n > 3 => Err(ProviderAttemptStoreError::NewerSchema),'
+ReplaceOnce 'crates/adapters/src/provider_attempts/validation.rs' '    if version > 2 {' ('    if version==3{return super::memory::validate_schema_v3(connection);}'+[char]10+'    if version > 3 {')
+$databaseEnd=@'
+            decode_row(row)?;
+        }
+    }
+    Ok(())
+'@
+$databaseEndNew=@'
+            decode_row(row)?;
+        }
+    }
+    if version==3{super::memory::validate_rows(connection)?;}
+    Ok(())
+'@
+ReplaceOnce 'crates/adapters/src/provider_attempts/validation.rs' $databaseEnd $databaseEndNew
+# Unconditional child extends SAME journal, not the cfg(test) source carrier.
+ReplaceOnce 'apps/service/src/routes/provider/journal.rs' 'use crate::inference::GatewayError;' ('mod memory;'+[char]10+'use crate::inference::GatewayError;')
+$startup=@'
+                let startup = match store.pending(None, 1) {
+                    Ok(records) if records.is_empty() => Ok(()),
+                    Ok(_) => Err(GatewayError::RequestBusy),
+                    Err(_) => Err(GatewayError::RuntimeUnavailable),
+                };
+'@
+$startupNew=@'
+                let startup = match (store.pending(None, 1),store.pending_memory()) {
+                    (Ok(records),Ok(false)) if records.is_empty() => Ok(()),
+                    (Ok(_),Ok(_)) => Err(GatewayError::RequestBusy),
+                    _ => Err(GatewayError::RuntimeUnavailable),
+                };
+'@
+ReplaceOnce 'apps/service/src/routes/provider/journal.rs' $startup $startupNew
 # Projects owns the ONE canonical scoped bounded-recent client extension.
 # Do not add a memory-specific OpenCodeClient implementation here.
 ReplaceOnce 'apps/service/src/routes/goal_runtime.rs' 'mod controls;' ('mod controls;'+[char]10+'mod learned;')
@@ -137,6 +213,14 @@ $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e
  authority='Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority';
  local_original_contract='Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill';
  local_original_gate='Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance';
+ memory_purpose=@{
+  status='closed contract/factory/queue/journal source only; original native producers unsupported; NOT connected generation';
+  owner='SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases';
+  native_engine_changes='none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs';
+  ingress='internal MemorySynthesis only; no public/general prompt or utility HTTP route';
+  unsupported=@('registry Memory candidate/final slot claim','acquisition Memory originals without Task grants','matching retained result/native retirement and lease yield','original productivity two-phase invocation after real producer is installed');
+  audit='closed-synthesis-purpose.md';
+ };
  apply_gate='Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance';
 };operations=$ops}
 foreach($path in ($ops.path|Select-Object -Unique)){

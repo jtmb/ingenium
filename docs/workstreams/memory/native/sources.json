@@ -11,16 +11,16 @@
     "source": "crates/veyra-memory/tests/domain.rs",
     "target": "crates/veyra-memory/tests/domain.rs",
     "required_preimage": "absent",
-    "sha256": "fbce777db66f7b6c9257314e9a10b908cbbb026245fa2164a395d77814e836e2",
-    "bytes": 3527,
+    "sha256": "513ba61f28006c5fc95da9d753cdf18ebbddbaa428479f146e909ed37a9a2043",
+    "bytes": 6056,
     "transform": null
   },
   {
     "source": "crates/veyra-memory/src/lib.rs",
     "target": "crates/veyra-memory/src/lib.rs",
     "required_preimage": "absent",
-    "sha256": "21c4a73c6a25f69eeed798dcb9d4726ec8a9e6c64b5a8dd6120affa69f93f1ee",
-    "bytes": 679,
+    "sha256": "c07b88887714a68407c6c20bde93690aa7539f5317eb2bbf44ce64ac6b23c734",
+    "bytes": 716,
     "transform": null
   },
   {
@@ -35,8 +35,16 @@
     "source": "crates/veyra-memory/src/state.rs",
     "target": "crates/veyra-memory/src/state.rs",
     "required_preimage": "absent",
-    "sha256": "8d5bdd85e8d30b9c11b1d27bf184cb944fa18312a00d9079ebb8bad6f044cf40",
-    "bytes": 8092,
+    "sha256": "89268b58cf19811e70952d5c6237841cd1384f99afcaadd2fc991094d7383f1c",
+    "bytes": 8937,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/src/synthesis.rs",
+    "target": "crates/veyra-memory/src/synthesis.rs",
+    "required_preimage": "absent",
+    "sha256": "26c861786714331fe8f97da96cf318cc8ceb7f356f51a298d2e595216a4074de",
+    "bytes": 5900,
     "transform": null
   },
   {
@@ -48,11 +56,51 @@
     "transform": null
   },
   {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/request_purpose.rs",
+    "target": "apps/service/src/inference/request_purpose.rs",
+    "required_preimage": "absent",
+    "sha256": "0506b037387fa97c8bc045e60ccb583c055905af98498c6ffaf13b2d25ab89c8",
+    "bytes": 2460,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/memory.rs",
+    "target": "apps/service/src/inference/provider_queue/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "053f089bfb7b8e5ab6e77319c91ecfb3c8e47aef69670f1d5ee86b7af78ec7f7",
+    "bytes": 4397,
+    "transform": null
+  },
+  {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/goal_runtime/learned.rs",
     "target": "apps/service/src/routes/goal_runtime/learned.rs",
     "required_preimage": "absent",
-    "sha256": "ef5ab41246ec1e34aca9d1ac6e29a77631ee858da0b8d481a93548f73f43264c",
-    "bytes": 11439,
+    "sha256": "70329df5e68c633ab85924ebef29dd2c880daf1bcb2c3b22671edc5c7e81d71e",
+    "bytes": 13481,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_admission.rs",
+    "target": "apps/service/src/routes/provider/memory_admission.rs",
+    "required_preimage": "absent",
+    "sha256": "489a3863daa76566c0a785e6f8f6f1bd143b6ffe35a7e9218b55758f72cf1fd4",
+    "bytes": 5776,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_synthesis.rs",
+    "target": "apps/service/src/routes/provider/memory_synthesis.rs",
+    "required_preimage": "absent",
+    "sha256": "f8ba8e88de674c6d06fe2f2e90d0bc64301745716836f16def0ccce290b27be5",
+    "bytes": 1656,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/journal/memory.rs",
+    "target": "apps/service/src/routes/provider/journal/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "9f418a599d837709c91d3a33b942e00b5e367e7e68157233999a6ee465fd4dc7",
+    "bytes": 1003,
     "transform": null
   },
   {
@@ -75,16 +123,16 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "required_preimage": "absent",
-    "sha256": "aefcea93ccb657606debdd4980c0832877be78efa5c58406146ceccb1c0e55ff",
-    "bytes": 8710,
+    "sha256": "e27cceebd2a7415edc8983dc9f54b2018055144d37aa3b43612dce371e38a412",
+    "bytes": 9841,
     "transform": null
   },
   {
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
     "required_preimage": "absent",
-    "sha256": "1f0aa89319b8ce2871e6e971e218703c08e77f2f4a9b934dfe8bfc98ca3455cf",
-    "bytes": 1731,
+    "sha256": "f6880ebbb6b9a731a9beec8fcd654386afe899d5a58506546f46371f339fa073",
+    "bytes": 4051,
     "transform": null
   },
   {
@@ -93,6 +141,22 @@
     "required_preimage": "absent",
     "sha256": "13e9e8abf7b733663c4e9001a3988cf209cc5b4805ca4e5d6b5d62e746a9709a",
     "bytes": 6344,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/provider_attempts/0003.sql",
+    "target": "crates/adapters/src/provider_attempts/0003.sql",
+    "required_preimage": "absent",
+    "sha256": "3215a160932c54be593a6c1d9ee04acccf513f3102cef80b59aa3f22081cf390",
+    "bytes": 978,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/provider_attempts/memory.rs",
+    "target": "crates/adapters/src/provider_attempts/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "020aa53ca80940eb501c90c13b55c19d8dc9f71bca160bad341f7f1a817dd138",
+    "bytes": 7186,
     "transform": null
   },
   {

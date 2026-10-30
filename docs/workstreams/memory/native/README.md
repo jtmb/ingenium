@@ -5,7 +5,7 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
-proposal.json contains 27 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 48 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
@@ -74,12 +74,11 @@ checks and durable prompt capture; no new whole-chat fence exists.
 
 ## Verification and open gates
 
-Executed: four Node tests of the actual JS adapter (policy/idle preservation,
-lost-policy response, lost-forget response, failed custody before send), one
-source-manifest test (5/5 pass). Original eddbd5f2 verified 25 preimages;
-shared-client reconciliation removed one; three additive local-original owner
-edits bring the current proposal to 27.
-Five domain and seven Native source-helper cases authored, **not executed**.
+Executed: four actual JS adapter tests, one source-manifest test, and five
+in-memory SQLite tests of the actual proposed same-journal migration: 10/10.
+Current preparation verifies 48 unique pinned preimages. Eight domain cases,
+two synthesis budget/UUID cases and seven Native source-helper cases authored,
+**not executed**.
 No Cargo/rustc/npm/install/build, model, service, desktop control or inference.
 
 Remaining integration gates, not claimed:
@@ -89,15 +88,21 @@ Remaining integration gates, not claimed:
    verifies the combined shared-client/owner module wiring, compiles Rust,
    typechecks and renders React. The actual export is bound in source; this
    worker has not compiled or exercised it.
-2. Connect concrete Goals.capture_learning/accept_learning methods through the
-   original completed-turn/productivity worker and actual model owner. The
-   closed synthesis-purpose request/result API is missing from the pinned
-   provider contracts; see completed-learning-boundary.md for exact evidence
-   and the required two-phase flow. No invented model dispatch or scheduler.
+2. Review the closed MemorySynthesis contract in closed-synthesis-purpose.md:
+   genuine opaque admission, exact refresh/forget-before-generate checks,
+   bounded immutable payload/result, distinct purpose in the SAME queue Book,
+   tagged transport correlation and content-free SAME-journal schema3. No fake
+   Task/Project and no Windows inference engine source/binary changes. The
+   original registry/native-acquisition/known-result producers remain
+   unsupported, and the original productivity worker invocation is not
+   installed. Synthesis returns the explicit unsupported producer before any
+   effect. This foundation does not claim connected generation.
 3. Review/apply additive LocalPromptOriginal and PromptRecord.local_original
    capture at the actual original writer. Frozen LocalOperation remains intact.
    Old Project/ownerless originals are not converted or backfilled. Reconcile
    constructor, receipt/lookup and rollback writer preservation before acceptance.
+   local-prompt-lookup-contract.json supplies the finite owner-bound journal-only
+   read projection; Root owns actual local route/gateway composition.
 4. Verify existing backup/delete orchestration includes the additive file.
    Privacy export includes learned state. The suppression-preserving pure merge
    is not a mounted restore endpoint. Cross-custodian import requires original
@@ -115,7 +120,7 @@ evaluated its reviewed source in the existing process without changing execution
 policy. Source manifest hashes can be recomputed from listed paths without
 generated dependencies. Adapter check:
 
-    node --test tests/veyra-memory-native-adapter.test.mjs
+    node --test tests/veyra-memory-native-adapter.test.mjs tests/veyra-memory-native-purpose.test.mjs
 
 All output remains in the existing C-backed Ubuntu VHDX task root. Source,
 minimal proposal JSON and one TAP receipt are retained for Root's review.

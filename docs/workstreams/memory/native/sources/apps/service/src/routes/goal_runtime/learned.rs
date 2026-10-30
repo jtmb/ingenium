@@ -61,16 +61,40 @@ impl Goals{
   if guard.is_none(){*guard=Some(GoalStore::open(&self.directory)?)}
   let db=guard.as_ref().ok_or("Goal store unavailable")?;let learned=db.learned()?;
   let (stamp,messages)=runtime.memory_recent(store,owner,chat).map_err(|_|"Completed source unavailable")?;
-  CompletedSnapshot::capture(stamp.clone(),chat.into(),messages,now,&learned.policy(&stamp.scope).map_err(|e|e.to_string())?,&learned.chat(&stamp.scope,chat).map_err(|e|e.to_string())?).map_err(|e|e.to_string())
+  let snapshot=CompletedSnapshot::capture(stamp.clone(),chat.into(),messages,now,&learned.policy(&stamp.scope).map_err(|e|e.to_string())?,&learned.chat(&stamp.scope,chat).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+  learned.can_generate(&snapshot).map_err(|e|e.to_string())?;Ok(snapshot)
  }
  pub(in crate::routes) fn accept_learning(&self,store:&ProjectStore,owner:&NativeMemoryOwner,runtime:&LiveRuntime,snapshot:&CompletedSnapshot,operation:&str,entry:LearnedEntry)->Result<Receipt,String>{
+  owner.verify_chat(store,&snapshot.chat_id)?;
+  if owner.scope()!=&snapshot.stamp.scope{return Err("Original learning scope changed".into())}
   let mut guard=self.store.lock().map_err(|_|"Goal store unavailable")?;
   if self.retained_journal_uncertain.load(Ordering::SeqCst){return Err("Goal storage unresolved".into())}
   let db=guard.as_mut().ok_or("Original learning store unavailable")?;
+  let hash=veyra_memory::fingerprint(&("learn",snapshot,operation,&entry)).map_err(|e|e.to_string())?;
+  if let Some(receipt)=db.learned()?.receipt(&snapshot.stamp.scope,operation,&hash).map_err(|e|e.to_string())?{return Ok(receipt)}
   let ids=snapshot.messages.iter().map(|m|m.source.message_id.clone()).collect::<Vec<_>>();
   let (stamp,current)=runtime.memory_refresh(store,owner,&snapshot.chat_id,&ids).map_err(|_|"Original source changed or unavailable")?;
   owner.verify(store)?;
   db.change_learned(|state|state.accept(snapshot,&stamp,&current,operation,entry))
+ }
+ pub(in crate::routes) fn learning_receipt(&self,snapshot:&CompletedSnapshot,operation:&str,entry:&LearnedEntry)->Result<Option<Receipt>,String>{
+  let guard=self.store.lock().map_err(|_|"Goal store unavailable")?;
+  if self.retained_journal_uncertain.load(Ordering::SeqCst){return Err("Goal storage unresolved".into())}
+  let db=guard.as_ref().ok_or("Original learning store unavailable")?;
+  let hash=veyra_memory::fingerprint(&("learn",snapshot,operation,entry)).map_err(|e|e.to_string())?;
+  db.learned()?.receipt(&snapshot.stamp.scope,operation,&hash).map_err(|e|e.to_string())
+ }
+ pub(in crate::routes) fn verify_learning(&self,store:&ProjectStore,owner:&NativeMemoryOwner,runtime:&LiveRuntime,snapshot:&CompletedSnapshot)->Result<(),String>{
+  let guard=self.store.lock().map_err(|_|"Goal store unavailable")?;
+  if self.retained_journal_uncertain.load(Ordering::SeqCst){return Err("Goal storage unresolved".into())}
+  let db=guard.as_ref().ok_or("Original learning store unavailable")?;
+  let learned=db.learned()?;
+  let ids=snapshot.messages.iter().map(|m|m.source.message_id.clone()).collect::<Vec<_>>();
+  let (stamp,current)=runtime.memory_refresh(store,owner,&snapshot.chat_id,&ids).map_err(|_|"Original source changed or unavailable")?;
+  snapshot.verify(&stamp,&current,&learned.policy(&snapshot.stamp.scope).map_err(|e|e.to_string())?,
+   &learned.chat(&snapshot.stamp.scope,&snapshot.chat_id).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+  learned.can_generate(snapshot).map_err(|e|e.to_string())?;
+  owner.verify_chat(store,&snapshot.chat_id)
  }
 }
 fn validate(db:&GoalStore,store:&ProjectStore,owner:&NativeMemoryOwner,runtime:&LiveRuntime,a:&LearnedAdmission)->Result<(),String>{

@@ -3,20 +3,33 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
-    "status": "bound-in-source-awaiting-Native-integration-review",
+    "owner": "Root/Projects",
     "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
     "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
     "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
-    "owner": "Root/Projects",
+    "status": "bound-in-source-awaiting-Native-integration-review",
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
     "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
-    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent"
+    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
+    "memory_purpose": {
+      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
+      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
+      "unsupported": [
+        "registry Memory candidate/final slot claim",
+        "acquisition Memory originals without Task grants",
+        "matching retained result/native retirement and lease yield",
+        "original productivity two-phase invocation after real producer is installed"
+      ],
+      "audit": "closed-synthesis-purpose.md",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
+      "status": "closed contract/factory/queue/journal source only; original native producers unsupported; NOT connected generation"
+    },
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance"
   },
   "operations": [
     {
@@ -96,6 +109,132 @@
       "preimage_sha256": "5b827915417ac52cd909be76f1852c0941621492db5df8f7b8dfd504f63b52da",
       "find": "        let record = PromptRecord {\n            original: original.cloned(),",
       "replacement": "        // Requires the already-composed Projects8b local owner parameter.\n        // Old retained records return above; no backfill or fresh recapture.\n        if local.is_some() && original.is_some(){return Err(RuntimeError::Binding)}\n        let local_original=match local{\n            Some((binding,current))=>Some(memory::local_original::capture(\n                self,&engine,binding,current,&before,request_id,text,files,skill_ids,require_idle)?),\n            None=>None,\n        };\n        let record = PromptRecord {\n            original: original.cloned(),\n            local_original,"
+    },
+    {
+      "path": "apps/service/src/routes.rs",
+      "preimage_sha256": "11033d9c478b38691cc181d4437baabeadebcb34f582cd35bbdeca7f00ea36ea",
+      "find": "mod provider;",
+      "replacement": "mod provider;\npub(crate) use provider::memory_admission::MemorySynthesisAdmission;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "mod queue;",
+      "replacement": "mod queue;\npub(super) mod memory_admission;\npub(super) mod memory_synthesis;"
+    },
+    {
+      "path": "apps/service/src/inference/mod.rs",
+      "preimage_sha256": "6b8119cee9737897c9ac97288ae892853934a46a574d78b2be301039b7ee37d8",
+      "find": "mod request;",
+      "replacement": "mod request;\npub(crate) mod request_purpose;"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "use super::{",
+      "replacement": "mod memory;\npub(crate) use memory::QueuedMemory;\nuse super::{"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "struct Book {\n    entries: Vec<Arc<QueuedProvider>>,",
+      "replacement": "struct Book {\n    entries: Vec<Arc<QueuedProvider>>,\n    memory: memory::MemoryBook,"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        if book.entries.len() >= 128 {",
+      "replacement": "        if book.entries.len() + book.memory.entries.len() >= 128 {"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        let retained_bytes = book",
+      "replacement": "        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}\n        if payload.call_id().is_some_and(|id|book.memory.entries.iter().any(|e|e.admission.original().operation_id==id)){\n            return Err(GatewayError::Conflict)\n        }\n        let retained_bytes = book"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        if book.dispatching.is_some() {",
+      "replacement": "        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}\n        if book.dispatching.is_some() || book.memory.reserved.is_some() || book.memory.earlier_waiting(entry.id)? {"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        Ok(book\n            .dispatching\n            .map(|id| book.entries[id].grant.turn_id.clone()))",
+      "replacement": "        if let Some(id)=book.memory.reserved{return Ok(Some(book.memory.entries[id].admission.original().operation_id.clone()))}\n        Ok(book\n            .dispatching\n            .map(|id| book.entries[id].grant.turn_id.clone()))"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        // Called without an entry guard.",
+      "replacement": "        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}\n        // Called without an entry guard."
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        for prior in &book.entries[..entry.id] {",
+      "replacement": "        if book.memory.unknown()?{return Err(GatewayError::RuntimeUnavailable)}\n        if book.memory.earlier_waiting(entry.id)?{return Ok(false)}\n        for prior in &book.entries[..entry.id] {"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "        Ok(!book.entries.is_empty() || !book.closed_tasks.is_empty())",
+      "replacement": "        Ok(!book.entries.is_empty() || !book.memory.entries.is_empty() || !book.closed_tasks.is_empty())"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts.rs",
+      "preimage_sha256": "681e857a27f0af9ee17e5ebff4d705a404673df4fa6c6259abb8c9640ff2417d",
+      "find": "mod types;",
+      "replacement": "mod types;\nmod memory;\npub use memory::{MemoryAttemptMetadata,MemoryAttemptYielded};"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts.rs",
+      "preimage_sha256": "681e857a27f0af9ee17e5ebff4d705a404673df4fa6c6259abb8c9640ff2417d",
+      "find": "            n if n > 2 => return Err(ProviderAttemptStoreError::NewerSchema),",
+      "replacement": "            3 => validate_database(&tx)?,\n            n if n > 3 => return Err(ProviderAttemptStoreError::NewerSchema),"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts.rs",
+      "preimage_sha256": "681e857a27f0af9ee17e5ebff4d705a404673df4fa6c6259abb8c9640ff2417d",
+      "find": "        validate_database(&tx)?;\n        tx.commit()?;",
+      "replacement": "        let version:i64=tx.pragma_query_value(None,\"user_version\",|r|r.get(0))?;\n        if version==2{tx.execute_batch(include_str!(\"provider_attempts/0003.sql\"))?;}\n        validate_database(&tx)?;\n        tx.commit()?;"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts.rs",
+      "preimage_sha256": "681e857a27f0af9ee17e5ebff4d705a404673df4fa6c6259abb8c9640ff2417d",
+      "find": "        1 | 2 => validate_database(connection),",
+      "replacement": "        1 | 2 | 3 => validate_database(connection),"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts.rs",
+      "preimage_sha256": "681e857a27f0af9ee17e5ebff4d705a404673df4fa6c6259abb8c9640ff2417d",
+      "find": "        n if n > 2 => Err(ProviderAttemptStoreError::NewerSchema),",
+      "replacement": "        n if n > 3 => Err(ProviderAttemptStoreError::NewerSchema),"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts/validation.rs",
+      "preimage_sha256": "2b1cdec33a417939e4be012f2d74b81b3f705760658a9ebead11576241be61b3",
+      "find": "    if version > 2 {",
+      "replacement": "    if version==3{return super::memory::validate_schema_v3(connection);}\n    if version > 3 {"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts/validation.rs",
+      "preimage_sha256": "2b1cdec33a417939e4be012f2d74b81b3f705760658a9ebead11576241be61b3",
+      "find": "            decode_row(row)?;\n        }\n    }\n    Ok(())",
+      "replacement": "            decode_row(row)?;\n        }\n    }\n    if version==3{super::memory::validate_rows(connection)?;}\n    Ok(())"
+    },
+    {
+      "path": "apps/service/src/routes/provider/journal.rs",
+      "preimage_sha256": "87875498511ba097b10821ecefc21ff96b513785a80a35b722eeeb85c44f7cfd",
+      "find": "use crate::inference::GatewayError;",
+      "replacement": "mod memory;\nuse crate::inference::GatewayError;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/journal.rs",
+      "preimage_sha256": "87875498511ba097b10821ecefc21ff96b513785a80a35b722eeeb85c44f7cfd",
+      "find": "                let startup = match store.pending(None, 1) {\n                    Ok(records) if records.is_empty() => Ok(()),\n                    Ok(_) => Err(GatewayError::RequestBusy),\n                    Err(_) => Err(GatewayError::RuntimeUnavailable),\n                };",
+      "replacement": "                let startup = match (store.pending(None, 1),store.pending_memory()) {\n                    (Ok(records),Ok(false)) if records.is_empty() => Ok(()),\n                    (Ok(_),Ok(_)) => Err(GatewayError::RequestBusy),\n                    _ => Err(GatewayError::RuntimeUnavailable),\n                };"
     },
     {
       "path": "apps/service/src/routes/goal_runtime.rs",

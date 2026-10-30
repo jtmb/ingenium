@@ -4,6 +4,19 @@ use veyra_memory::{ExecutionStamp,CompletedMessage,SourceRef,Role,content_hash,f
 mod source;
 pub(super) mod local_original;
 impl LiveRuntime {
+ pub fn memory_synthesis_model(&self,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<(ExecutionStamp,veyra_contracts::ModelBinding,veyra_memory::SynthesisModel),RuntimeError>{
+  owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
+  let engine=self.lock_engine_for_directory(owner.directory())?;
+  Self::memory_verify_owner(&engine,store,owner,chat)?;
+  let session=engine.client()?.session_in_project(chat,&SessionQuery{directory:owner.directory().into(),..SessionQuery::default()})?;
+  if session.id!=chat{return Err(RuntimeError::Binding)}
+  let stamp=self.memory_stamp_locked(&engine,store,owner,&session)?;
+  let binding=veyra_contracts::ModelBinding{profile_id:engine.model.id.clone(),quant:engine.model.quant.clone(),
+   context:veyra_contracts::ContextSize::try_from(engine.model.context).map_err(|_|RuntimeError::Binding)?};
+  let model=veyra_memory::SynthesisModel{profile_id:engine.model.id.clone(),model_id:engine.model.id.clone(),
+   quant:engine.model.quant.clone(),context_tokens:engine.model.context};
+  Self::memory_verify_owner(&engine,store,owner,chat)?;Ok((stamp,binding,model))
+ }
  fn memory_verify_owner(engine:&OwnedEngine,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<(),RuntimeError>{
   owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
   if let Some(binding)=owner.private_binding(){

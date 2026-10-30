@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "status": "source-proposed-native-route-and-gateway-Root-owned",
+  "method": "GET",
+  "path": "/v1/local-workspaces/{workspace}/sessions/{session}/prompts/{requestUUID}",
+  "authority": "existing protected local bearer/no-Origin middleware; genuine sealed private binding; actual current ProjectStore registry and committed private session reference",
+  "runtimeMethod": "LiveRuntime::local_prompt_original_receipt(&ProjectStore, &NativeMemoryOwner, chat, requestUUID)",
+  "behavior": "original prompt-record read only; no current engine/transcript/status inference, mutation, replay, new original or adoption of old engine/service epoch",
+  "responseFields": ["request_id", "session_id", "message_id", "request_sha256", "original", "admission", "state"],
+  "canonicalHash": "original LocalOperationRequest serialized by Native serde_json, as captured before the actual prompt effect; hash is checked again at lookup",
+  "states": {
+    "admitted": "only actual persisted PromptState::Admitted",
+    "rejected": "only actual persisted PromptState::Rejected",
+    "uncertain": "Intent/Uncertain persist admission=uncertain,state=unknown; keep UI locked"
+  },
+  "absent": "None proves only absence of a matching retained record, never unsent/rejected or permission to replay",
+  "legacyOrMixedOwner": "refuse; do not fabricate LocalPromptOriginal for old ownerless or Project records",
+  "returnedProjectionMaxBytes": 4194304,
+  "gateway": "Root finite allowlist only; no wildcard proxy, caller-selected upstream method/URL/headers or new credential"
+}

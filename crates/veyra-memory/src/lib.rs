@@ -3,9 +3,11 @@
 mod snapshot;
 mod state;
 mod types;
+mod synthesis;
 pub use snapshot::*;
 pub use state::*;
 pub use types::*;
+pub use synthesis::*;
 use sha2::{Digest,Sha256};
 pub fn fingerprint<T:serde::Serialize>(value:&T)->Result<String,MemoryError>{
     let bytes=serde_json::to_vec(value).map_err(|_|MemoryError::Invalid)?;

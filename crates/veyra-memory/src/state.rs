@@ -5,6 +5,18 @@ const MAX_ENTRIES:usize=256;
 fn chat_key(scope:&NativeScope,chat:&str)->Result<String,MemoryError>{if !id(chat){return Err(MemoryError::Invalid)}fingerprint(&(scope,chat))}
 fn suppression(scope:&NativeScope,kind:&str,value:&str)->Result<String,MemoryError>{fingerprint(&(scope,kind,value))}
 impl LearnedState {
+ /// State-only prerequisite, not canonical source or model-dispatch authority.
+ /// Called by the actual owner after capture and every exact refresh, before
+ /// any model attempt so forgotten/processed inputs do not generate again.
+ pub fn can_generate(&self,snapshot:&CompletedSnapshot)->Result<(),MemoryError>{
+  let scope=&snapshot.stamp.scope;
+  snapshot.verify(&snapshot.stamp,&snapshot.messages,&self.policy(scope)?,&self.chat(scope,&snapshot.chat_id)?)?;
+  if self.processed_inputs.contains(&snapshot.input_hash()?){return Err(MemoryError::AlreadyProcessed)}
+  if self.processed_inputs.len()>=4096{return Err(MemoryError::Capacity)}
+  for source in snapshot.sources(){
+   if self.suppressions.contains(&suppression(scope,"source",&fingerprint(&(&source.chat_id,&source.message_id))?)?){return Err(MemoryError::Forgotten)}
+  }Ok(())
+ }
  pub fn policy(&self,scope:&NativeScope)->Result<Policy,MemoryError>{Ok(self.policies.get(&scope.key()?).map(|v|v.policy.clone()).unwrap_or_default())}
  pub fn chat(&self,scope:&NativeScope,chat:&str)->Result<ChatPolicy,MemoryError>{Ok(self.chats.get(&chat_key(scope,chat)?).map(|v|v.policy.clone()).unwrap_or_default())}
  pub fn receipt(&self,scope:&NativeScope,operation:&str,request_hash:&str)->Result<Option<Receipt>,MemoryError>{
