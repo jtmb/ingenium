@@ -27,6 +27,27 @@ export function scopeKey(scope) {
 export const DEFAULT_MEMORY_POLICY = Object.freeze({ revision: 0, enabled: true, generate: false, useMemory: true, externalContext: false });
 export const DEFAULT_CHAT_MEMORY_POLICY = Object.freeze({ revision: 0, useMemory: true, contribute: false });
 
+function selectSourceReadCandidates(memory, key, rows, maxSources) {
+  const refs = new Map(), selected = []; let deferredForSourceBudget = 0;
+  for (const row of rows) {
+    if (memory.suppressed(key, 'memory', row.id) || memory.suppressed(key, 'content', row.content_hash)) continue;
+    const sources = JSON.parse(row.provenance_json).sources;
+    if (!Array.isArray(sources) || sources.length < 1 || sources.length > 32) fail('SOURCE_UNAVAILABLE');
+    if (sources.some(ref => memory.suppressed(key, 'source', ref.id))) continue;
+    const additions = new Map();
+    for (const ref of sources) {
+      text(ref.id); text(ref.chatId); text(ref.contentHash, 64);
+      if (!/^[a-f0-9]{64}$/.test(ref.contentHash)) fail('SOURCE_UNAVAILABLE');
+      const refKey = JSON.stringify([ref.chatId, ref.id, ref.contentHash]);
+      if (!refs.has(refKey)) additions.set(refKey, Object.freeze({ id: ref.id, chatId: ref.chatId, contentHash: ref.contentHash }));
+    }
+    if (refs.size + additions.size > maxSources) { deferredForSourceBudget++; continue; }
+    for (const [refKey, ref] of additions) refs.set(refKey, ref);
+    selected.push({ ...row });
+  }
+  return { refs, selected, deferredForSourceBudget };
+}
+
 /** Uses the API's existing SQLite connection. Never opens a DB or starts a scheduler.
  * authorize must recheck membership, host/workspace/chat binding and capability on every call.
  * sources must resolve authoritative transcript hashes/revocation, never caller assertions.
@@ -181,32 +202,51 @@ export class MemoryLifecycle {
     const rows = policy.enabled && policy.useMemory && chat.useMemory
       ? this.db.prepare(`SELECT id,version,content_hash,provenance_json FROM veyra_memory_recall WHERE scope_key=? AND state='active'
           ORDER BY updated_at DESC,id LIMIT ? OFFSET ?`).all(key, limit, offset) : [];
-    const refs = new Map(), selected = []; let deferredForSourceBudget = 0;
-    for (const row of rows) {
-      if (this.suppressed(key, 'memory', row.id) || this.suppressed(key, 'content', row.content_hash)) continue;
-      const sources = JSON.parse(row.provenance_json).sources;
-      if (!Array.isArray(sources) || sources.length < 1 || sources.length > 32) fail('SOURCE_UNAVAILABLE');
-      if (sources.some(ref => this.suppressed(key, 'source', ref.id))) continue;
-      const additions = new Map();
-      for (const ref of sources) {
-        text(ref.id); text(ref.chatId); text(ref.contentHash, 64);
-        if (!/^[a-f0-9]{64}$/.test(ref.contentHash)) fail('SOURCE_UNAVAILABLE');
-        const refKey = JSON.stringify([ref.chatId, ref.id, ref.contentHash]);
-        if (!refs.has(refKey)) additions.set(refKey, Object.freeze({ id: ref.id, chatId: ref.chatId, contentHash: ref.contentHash }));
-      }
-      if (refs.size + additions.size > maxSources) { deferredForSourceBudget++; continue; }
-      for (const [refKey, ref] of additions) refs.set(refKey, ref);
-      selected.push({ ...row });
-    }
+    const { refs, selected, deferredForSourceBudget } = selectSourceReadCandidates(this, key, rows, maxSources);
     const plan = Object.freeze({ schemaVersion: 1, scopeHash: digest(key), chatId, offset, limit, scanCount: rows.length,
       selectedMemoryCount: selected.length, deferredForSourceBudget, hasMore: rows.length === limit && !!this.db.prepare(`SELECT 1 FROM veyra_memory_recall WHERE scope_key=? AND state='active' ORDER BY updated_at DESC,id LIMIT 1 OFFSET ?`).get(key, offset + limit),
       sourceRefs: Object.freeze([...refs.values()]) });
-    sourceReadPlans.set(plan, { memory: this, key, chatId, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, selected });
+    sourceReadPlans.set(plan, { purpose: 'recall', memory: this, key, chatId, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, selected });
     return plan;
+  }
+  planInspectionSources(scope, { candidateOffset = 0, limit = 25, maxSources = 32 } = {}) {
+    const key = this.access(scope, 'read');
+    integer(limit, 1, 100); integer(candidateOffset, 0, Number.MAX_SAFE_INTEGER - limit); integer(maxSources, 1, 32);
+    // Inspection is management, independent of injection/contribution opt-outs.
+    const rows = this.db.prepare(`SELECT id,version,content_hash,provenance_json FROM veyra_memory_recall WHERE scope_key=? AND state='active'
+      ORDER BY updated_at DESC,id LIMIT ? OFFSET ?`).all(key, limit, candidateOffset);
+    const { refs, selected, deferredForSourceBudget } = selectSourceReadCandidates(this, key, rows, maxSources);
+    const hasMore = rows.length === limit && !!this.db.prepare(`SELECT 1 FROM veyra_memory_recall WHERE scope_key=? AND state='active'
+      ORDER BY updated_at DESC,id LIMIT 1 OFFSET ?`).get(key, candidateOffset + limit);
+    const plan = Object.freeze({ schemaVersion: 1, scopeHash: digest(key), candidateOffset, limit, scanCount: rows.length,
+      selectedMemoryCount: selected.length, deferredForSourceBudget, hasMore, sourceRefs: Object.freeze([...refs.values()]) });
+    sourceReadPlans.set(plan, { purpose: 'inspection', memory: this, key, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, selected });
+    return plan;
+  }
+  inspectSourcePlan(scope, plan) {
+    const key = this.access(scope, 'read'), saved = sourceReadPlans.get(plan);
+    if (!saved || saved.purpose !== 'inspection' || saved.memory !== this || saved.key !== key
+      || saved.bindingHash !== scope.bindingHash || saved.bindingEpoch !== scope.bindingEpoch) fail('SOURCE_UNAVAILABLE');
+    let rows = [];
+    if (saved.selected.length) {
+      const placeholders = saved.selected.map(() => '?').join(',');
+      rows = this.db.prepare(`SELECT * FROM veyra_memory_recall WHERE scope_key=? AND state='active' AND id IN (${placeholders}) ORDER BY updated_at DESC,id`)
+        .all(key, ...saved.selected.map(row => row.id))
+        .filter(row => saved.selected.some(prior => row.id === prior.id && row.version === prior.version
+          && row.content_hash === prior.content_hash && row.provenance_json === prior.provenance_json))
+        .filter(row => !this.suppressed(key, 'memory', row.id) && !this.suppressed(key, 'content', row.content_hash))
+        .filter(row => { const provenance = JSON.parse(row.provenance_json); return !provenance.sources.some(ref => this.suppressed(key, 'source', ref.id))
+          && this.sourceAvailable(scope, provenance); });
+    }
+    const items = rows.map(row => ({ id: row.id, content: row.content, version: row.version, provenance: JSON.parse(row.provenance_json) }));
+    return { items, sourceWindow: { candidateOffset: plan.candidateOffset, limit: plan.limit, scanned: plan.scanCount,
+      selected: plan.selectedMemoryCount, returned: items.length, unavailableMemoryCount: saved.selected.length - items.length,
+      deferredForSourceBudget: plan.deferredForSourceBudget, hasMore: plan.hasMore,
+      nextCandidateOffset: plan.hasMore ? plan.candidateOffset + plan.limit : null } };
   }
   withSourceReadPlan(scope, chatId, plan, work) {
     const key = this.access(scope, 'read', text(chatId)), saved = sourceReadPlans.get(plan);
-    if (!saved || saved.memory !== this || saved.key !== key || saved.chatId !== chatId
+    if (!saved || saved.purpose !== 'recall' || saved.memory !== this || saved.key !== key || saved.chatId !== chatId
       || saved.bindingHash !== scope.bindingHash || saved.bindingEpoch !== scope.bindingEpoch || typeof work !== 'function'
       || sourceReadWindows.has(this)) fail('SOURCE_UNAVAILABLE');
     sourceReadWindows.set(this, saved);

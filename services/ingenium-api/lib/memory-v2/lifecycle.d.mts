@@ -42,9 +42,23 @@ export interface SourceReadPlan {
   readonly deferredForSourceBudget:number; readonly hasMore:boolean;
   readonly sourceRefs:readonly Readonly<SourceRef & {chatId:string}>[];
 }
+declare const inspectionSourcePlan: unique symbol;
+export interface InspectionSourcePlan {
+  readonly [inspectionSourcePlan]: true; readonly schemaVersion:1; readonly scopeHash:string;
+  readonly candidateOffset:number; readonly limit:number; readonly scanCount:number; readonly selectedMemoryCount:number;
+  readonly deferredForSourceBudget:number; readonly hasMore:boolean;
+  readonly sourceRefs:readonly Readonly<SourceRef & {chatId:string}>[];
+}
+export interface InspectionSourcePage {
+  items:Pick<RecallItem,'id'|'content'|'version'|'provenance'>[];
+  sourceWindow:{candidateOffset:number;limit:number;scanned:number;selected:number;returned:number;
+    unavailableMemoryCount:number;deferredForSourceBudget:number;hasMore:boolean;nextCandidateOffset:number|null};
+}
 export class MemoryLifecycle {
   constructor(adapter: { db: SqlConnection; authorize: (scope: MemoryScope, permission: MemoryPermission, chatId: string | null) => boolean;
     sources: (scope: MemoryScope, chatId: string, id: string) => SourceState | null; checkpoint: () => void; runTransaction?: <T>(work: () => T) => T; clock?: () => string });
+  planInspectionSources(scope:MemoryScope,input?:{candidateOffset?:number;limit?:number;maxSources?:number}):InspectionSourcePlan;
+  inspectSourcePlan(scope:MemoryScope,plan:InspectionSourcePlan):InspectionSourcePage;
   planSourceReads(scope:MemoryScope,chatId:string,input?:{offset?:number;limit?:number;maxSources?:number}):SourceReadPlan;
   withSourceReadPlan<T>(scope:MemoryScope,chatId:string,plan:SourceReadPlan,work:()=>T):T;
   scopePolicy(scope: MemoryScope): ScopePolicy;
