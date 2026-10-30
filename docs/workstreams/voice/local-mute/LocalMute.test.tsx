@@ -41,7 +41,7 @@ function setup(audio=false,permission?:Promise<unknown>) {
     if(method==="GET"&&path==="/v1/voice/status")return protocol;
     if(method==="GET"&&path==="/v1/voice/owner?session_id=working-chat")return freshOwner;
     const utterance={id:turnId,state:audio?"awaiting_playback":"awaiting_reply",transcript:"Original active prompt",children:audio?[{...child}]:[],speech_operation_id:audio?childId:null,wav_base64:audio?btoa(String.fromCharCode(...bytes)):null};
-    if(method==="GET"&&path===`/v1/voice/sessions/${sessionId}`)return{id:sessionId,project_id:"project",session_id:"working-chat",state:audio?"speaking":"awaiting_reply",owner,voice:"af_sky",send_transcripts:true,read_replies:true,utterances:[utterance],active_utterance_id:turnId};
+    if(method==="GET"&&path===`/v1/voice/sessions/${sessionId}`)return{id:sessionId,project_id:"project",session_id:"working-chat",state:audio?"speaking":"awaiting_reply",owner,voice:"af_sky",send_transcripts:true,read_replies:true,utterances:[utterance],active_utterance_id:turnId,turn_request_id:turnId};
     if(method==="GET"&&path===`/v1/voice/sessions/${sessionId}/utterances/${turnId}`)return utterance;
     if(method==="POST"&&path===`/v1/voice/sessions/${sessionId}/utterances/${turnId}/playback`){
       const input=body as {claim_id:string;played:boolean};child.playback_id=input.claim_id;child.playback_state=input.played?"played":"claimed";return{...utterance,children:[{...child}]};

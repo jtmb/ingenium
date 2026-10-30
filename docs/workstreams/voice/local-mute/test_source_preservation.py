@@ -9,6 +9,11 @@ def section(source, start, end):
     return source[begin:source.index(end,begin)]
 
 class SourcePreservation(unittest.TestCase):
+    def test_fixture_has_native_original_turn_join_required_before_capture(self):
+        fixture = proposal.outputs['apps/web/src/features/voice-ui/LocalMute.test.tsx']
+        self.assertIn('active_utterance_id:turnId,turn_request_id:turnId',fixture)
+        self.assertIn('state.state !== "listening" && !text(state.turn_request_id)',after)
+
     def test_playback_claim_and_ended_ack_implementation_are_byte_exact(self):
         self.assertEqual(section(before,'  const playReply =','  const accept ='),section(after,'  const playReply =','  const accept ='))
 

@@ -1,0 +1,10 @@
+{
+  "path": "apps/web/src/features/voice-ui/LocalMute.test.tsx",
+  "beforeSha256": "9580062f114de4a42a5229fbe03c31d2e6443c2224f14d171f5d989ccae6ecb5",
+  "afterSha256": "736723b8b294f8bccd7f65ed340c2f7b24f9982378eb44fcdfdc10150a59cbae",
+  "patchSha256": "28f6a33302766472de891bbf7ca0ee95e10e30c8354bc73a0df94096eab2800e",
+  "rootFailureLog": "coordination/integration/native-voice-local-mute-semantics-r1.log",
+  "cause": "Fixture omitted actual Native SessionView.turn_request_id, so original VAD guard refused the frame before capture",
+  "runtimeChanges": 0,
+  "nativeComponentRerun": "Root-owned, not run here"
+}

@@ -118,3 +118,14 @@ integrated checkpoint exists. Other files are durable source/tests/recipes.
 All protected originals, frozen packaging files/index, data/models/Stratus and
 cleanup-refused targets remain preserved. No Linux/Windows disk recovery or VHDX
 compaction is claimed.
+
+Root's first actual component run passed17/18, with the retention case failing
+before it reached capture: the fixture omitted `turn_request_id`, which Native
+always projects from `record.last_turn`. The preserved VAD guard refuses frames
+from an active non-listening session lacking that original turn join. The smallest
+correction adds only `turn_request_id: turnId` to the fixture. Use
+`retention-fixture-correction.patch` against the applied e5 input; its provenance
+records before/after hashes and the untouched first failure log. The full canonical
+patch/provenance are also regenerated from the corrected fixture. Eight source
+checks pass, including the native turn-join fixture guard; actual component rerun
+remains Root-owned. The runtime VAD/owner/claim/capture code was not weakened.

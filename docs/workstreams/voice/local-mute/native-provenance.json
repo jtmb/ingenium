@@ -30,7 +30,7 @@
     {
       "path": "apps/web/src/features/voice-ui/LocalMute.test.tsx",
       "beforeSha256": null,
-      "afterSha256": "9580062f114de4a42a5229fbe03c31d2e6443c2224f14d171f5d989ccae6ecb5"
+      "afterSha256": "736723b8b294f8bccd7f65ed340c2f7b24f9982378eb44fcdfdc10150a59cbae"
     },
     {
       "path": "apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx",
@@ -38,5 +38,5 @@
       "afterSha256": "2a959031743209363a465e43e20fb05384ae401f8943935a07f87f4dfbf3a120"
     }
   ],
-  "patchSha256": "3bc0523dc11e018f89c544d631ec739b6106d3ac4dc45052e509b1bdecdcff46"
+  "patchSha256": "864b4520d84cd23ca066ff41c5cc3b8f40299df736cea5149cc36dab13410a16"
 }
