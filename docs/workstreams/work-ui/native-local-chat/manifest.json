@@ -46,6 +46,41 @@
       "sha256": "c0ee61babe09e269634842a7ca112cdb0aa1b194fadbec3290767ac4bccf1d8f"
     },
     {
+      "path": "native-web-host/auth-bootstrap/README.md",
+      "bytes": 7580,
+      "sha256": "1582bdaf998e146b17a8d1fcb6947332fe0ec8a0c0278492ceb8f49c53815d28"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/api-evidence.json",
+      "bytes": 4322,
+      "sha256": "e4122b8849c12e2a07e538b54c769d52acfaf3945e888012e098d4f4f88228eb"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/auth-from-2c.patch",
+      "bytes": 17385,
+      "sha256": "92fab587f3796d2b8efd32250ce6c24f2d434a1817c2a3beb3e6660997d9832a"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/integration-inputs.json",
+      "bytes": 613,
+      "sha256": "f4dd9efe4903c6a0c273bee1a8b5610a6875078eb9225f086a69570427b1f600"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/prepare-integration.py",
+      "bytes": 2460,
+      "sha256": "1edaac0e3a79601c23058b3e47ef15806046de4b9a31ce87e128af83e37e6104"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/sources/apps/desktop/src-tauri/src/local_web_auth.rs",
+      "bytes": 16769,
+      "sha256": "27f23b95a2d725bcf4ca8d17446df88747ca33a3de1e0161d12b25d49f9c8278"
+    },
+    {
+      "path": "native-web-host/auth-bootstrap/verify-api.py",
+      "bytes": 3289,
+      "sha256": "f75f7edf36ba7b930be65df151fc1fc13d7e1396fbccf9b8f415eebc4d4d0016"
+    },
+    {
       "path": "native-web-host/child-delta-inputs.json",
       "bytes": 2437,
       "sha256": "1a5dfc4fb003025aaa3ce126533336427e05033b55f760fb80e3df7e0979fb4c"

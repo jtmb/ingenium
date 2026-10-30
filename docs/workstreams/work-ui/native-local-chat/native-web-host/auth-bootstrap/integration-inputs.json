@@ -1,0 +1,9 @@
+{
+  "base": "2c74413ef0bfe2fc1b4d826493d1276326ee936e",
+  "existing_host_lf_sha256": "934fdc5b2be3303500d713b2ae9e6933e2979324a4a56b790ccc2a0677ceeb8f",
+  "existing_host_output_lf_sha256": "6bb182bcdee1a318fe66a9fbe4303ce117e0100bbf21b2d100701c28baec780d",
+  "new_auth_source_sha256": "27f23b95a2d725bcf4ca8d17446df88747ca33a3de1e0161d12b25d49f9c8278",
+  "bytes": 17385,
+  "sha256": "92fab587f3796d2b8efd32250ce6c24f2d434a1817c2a3beb3e6660997d9832a",
+  "application": "Root reconciles current imported host; exact preimage and --unidiff-zero. No full host copy, service factory, Cargo, lock or command change."
+}

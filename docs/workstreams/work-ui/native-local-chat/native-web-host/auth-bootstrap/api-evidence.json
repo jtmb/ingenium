@@ -1,0 +1,117 @@
+{
+  "status": "cached API declarations checked; NOT Rust compilation/runtime/auth or redirect qualification",
+  "records": [
+    {
+      "path": "/mnt/c/Users/james/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/Veyra-MVP-native/cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-sys-0.39.1/src/bindings.rs",
+      "sha256": "be4a5291da4946ca04630dc9b6adbff5e13e61d39d205b08aff450339f30e1e5",
+      "bytes": 1694472,
+      "declarations": [
+        {
+          "declaration": "impl ICoreWebView2_22",
+          "line": 41922
+        },
+        {
+          "declaration": "pub unsafe fn AddWebResourceRequestedFilterWithRequestSourceKinds",
+          "line": 41923
+        },
+        {
+          "declaration": "pub unsafe fn RemoveWebResourceRequestedFilterWithRequestSourceKinds",
+          "line": 41943
+        },
+        {
+          "declaration": "pub unsafe fn add_WebResourceRequested",
+          "line": 1682
+        },
+        {
+          "declaration": "pub unsafe fn remove_WebResourceRequested\\(&self, token: i64\\)",
+          "line": 1699
+        },
+        {
+          "declaration": "pub unsafe fn add_BasicAuthenticationRequested",
+          "line": 39789
+        },
+        {
+          "declaration": "pub unsafe fn remove_BasicAuthenticationRequested",
+          "line": 39806
+        },
+        {
+          "declaration": "pub unsafe fn RequestedSourceKind",
+          "line": 38445
+        },
+        {
+          "declaration": "pub unsafe fn SetHeader",
+          "line": 22453
+        },
+        {
+          "declaration": "pub unsafe fn RemoveHeader",
+          "line": 22467
+        },
+        {
+          "declaration": "pub unsafe fn CreateWebResourceResponse",
+          "line": 14438
+        },
+        {
+          "declaration": "pub unsafe fn SetResponse",
+          "line": 38245
+        },
+        {
+          "declaration": "pub unsafe fn SetCancel\\(&self, cancel: bool\\)",
+          "line": 3751
+        },
+        {
+          "declaration": "COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL",
+          "line": 998
+        }
+      ]
+    },
+    {
+      "path": "/mnt/c/Users/james/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/Veyra-MVP-native/cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-0.39.1/src/callback.rs",
+      "sha256": "65b1d5e6e5e56a3f8e5a0cae656172ca5a80ac13d0156a2813093284dc1e2048",
+      "bytes": 19809,
+      "declarations": [
+        {
+          "declaration": "pub struct WebResourceRequestedEventHandler",
+          "line": 340
+        },
+        {
+          "declaration": "pub struct BasicAuthenticationRequestedEventHandler",
+          "line": 483
+        }
+      ]
+    },
+    {
+      "path": "/mnt/c/Users/james/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/Veyra-MVP-native/cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/webview2-com-macros-0.8.1/src/lib.rs",
+      "sha256": "3e0fb6feaaea5811a304205b8eaba424a5763947143fc27357f0106db3681ed3",
+      "bytes": 8428,
+      "declarations": [
+        {
+          "declaration": "pub fn create",
+          "line": 87
+        },
+        {
+          "declaration": "-> #interface",
+          "line": 89
+        }
+      ]
+    },
+    {
+      "path": "/mnt/c/Users/james/AppData/Local/Packages/OpenAI.Codex_2p2nqsd0c76g0/LocalCache/Local/Veyra-MVP-native/cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/windows-0.62.2/Cargo.toml",
+      "sha256": "1faa29a77d208ba8b39979243819dbf07fb10a6e075420c8a847d5eca108db4a",
+      "bytes": 31766,
+      "declarations": [
+        {
+          "declaration": "version = \"0\\.62\\.2\"",
+          "line": 16
+        }
+      ]
+    }
+  ],
+  "auth_source_sha256": "27f23b95a2d725bcf4ca8d17446df88747ca33a3de1e0161d12b25d49f9c8278",
+  "rust_fixtures": "five supplied, not executed by worker",
+  "unsupported_proof": [
+    "resource requested args have no redirect-chain flag; navigation IsRedirected is not a subresource credential gate",
+    "Basic response credential setters are never used; actual no-browser-auth-cache/runtime proof remains open",
+    "all-source filter and source-kind declarations do not establish installed-browser HTTP/SW/WebSocket delivery coverage"
+  ],
+  "output_scope": "one existing task root; no upstream/cache source copies"
+}
