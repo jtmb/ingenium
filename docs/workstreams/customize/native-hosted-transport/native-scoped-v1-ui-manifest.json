@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "sources": [
+    {
+      "path": "apps/web/src/features/customize/NativeCustomize.tsx",
+      "preimageSha256": "2a8a825767a7c687b574d76cc20e1c5e02fc695cbe492a2e72132dcf5c2bdd6e",
+      "postimageSha256": "1e8175e57fbbb362c70e4bcf2c2cb5ace20da15286b32e75943b4788ea924b33"
+    },
+    {
+      "path": "apps/web/src/platform/customizeScopedV1.ts",
+      "newFile": true,
+      "postimageSha256": "7dbe78e040f40764f7b4dc302ce523c52308732479f8d48ec5d79bdb3f065b2d",
+      "preimageSha256": null
+    },
+    {
+      "path": "apps/web/src/features/customize/ScopedCustomize.tsx",
+      "newFile": true,
+      "postimageSha256": "685f2a717385d9aef30572d210fbbddd97f6475de997cf43ecbb0aff4be7b39c",
+      "preimageSha256": null
+    }
+  ]
+}

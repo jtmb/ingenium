@@ -1,3 +1,4 @@
+import {committedPluginProjectionPaths,createPositivePluginProjectionOwner,PluginProjectionTransitionRequired} from 'ingenium-core/lib/tools/plugin-projection-transition';
 /** Request-bound composition: original cookie/CSRF + private paired TLS + original Core writer. */
 import {Router,type Request,type Response,type NextFunction} from 'express';
 import {z} from 'zod';
@@ -45,18 +46,23 @@ async function paired<T>(req:Request,parentGrantId:string,work:(reader:NativePro
   current();return work(reader,binding,organization,current);
  });
 }
-function offer(req:Request,binding:Row){
+function offer(req:Request,binding:Row,live=false){
  const projectId=binding.hostedProjectId,scopes:ScopedVisibility[]=['project','personal','public'];
  if(binding.visibility==='system')scopes.push('system');
- const verbs:ScopedVerb[]=[...scopedReadVerbs];
- if(allow(req,projectId,'plugin','admin')||allow(req,projectId,'skill','admin'))verbs.push('publish','connect');
- // Actual source/project authorization is checked again for every selected operation.
- if(allow(req,projectId,'plugin','admin'))verbs.push('withdraw','restore-source','revise-plugin-source','archive-plugin','restore-plugin','reconcile-plugin-projection','reconcile-local-metadata');
- if(allow(req,projectId,'plugin','admin')&&allow(req,projectId,'plugin','execute'))verbs.push('activate-plugin','deactivate-plugin');
- return {scopes,verbs};
+ const verbs:ScopedVerb[]=[...scopedReadVerbs],pluginAdmin=allow(req,projectId,'plugin','admin'),skillAdmin=allow(req,projectId,'skill','admin');
+ let namespaceAvailable=projectRow(projectId).is_global===1;
+ if(!namespaceAvailable){try{committedPluginProjectionPaths(projectId);namespaceAvailable=true;}catch{namespaceAvailable=false;}}
+ if(pluginAdmin||skillAdmin){verbs.push('publish');if(namespaceAvailable)verbs.push('connect');}
+ if(pluginAdmin){verbs.push('withdraw','restore-source','revise-plugin-source','reconcile-local-metadata');if(namespaceAvailable)verbs.push('archive-plugin','restore-plugin','reconcile-plugin-projection');}
+ if(pluginAdmin&&namespaceAvailable&&allow(req,projectId,'plugin','execute'))verbs.push('activate-plugin','deactivate-plugin');
+ const p=req.principal,recent=p?.type==='user'&&!!p.session&&authentication.hasRecentStepUp(p.session);
+ const sensitive=new Set<ScopedVerb>(['publish','activate-plugin','withdraw','restore-source','revise-plugin-source','reconcile-plugin-projection','reconcile-local-metadata']);
+ return {scopes,verbs:live&&!recent?verbs.filter(v=>!sensitive.has(v)):verbs};
 }
 function currentConsent(row:Row,proof:ReturnType<typeof verifyScopedProof>,binding:Row,check:()=>void){
  check();const now=getDb().prepare('SELECT * FROM customize_native_consents WHERE id=?').get(row.id) as Row|undefined;
+ const parentProject=projectRow(binding.hostedProjectId);
+ need(now&&now.organization_id===parentProject.organization_id&&now.hosted_project_id===binding.hostedProjectId&&now.parent_grant_id===binding.grantId&&now.enrollment_request_id===proof.context.enrollment_request_id&&now.native_custodian_grant_id===(proof.context.grant as Row|undefined)?.id&&scopedRequestHash(JSON.parse(now.original_json))===now.request_sha256,'SCOPED_CONSENT_OWNER_CHANGED');
  need(now&&!now.revoked_at&&now.revision===row.revision&&now.request_sha256===row.request_sha256&&proof.consentRevision===row.revision&&proof.requestSha256===row.request_sha256&&scopedRequestHash(proof.original)===row.request_sha256&&scopedRequestHash(proof.original.baseBinding)===scopedRequestHash(binding),'SCOPED_CONSENT_CHANGED');
 }
 function scopedAuthority(req:Request,row:Row,proof:ReturnType<typeof verifyScopedProof>,binding:Row,check:()=>void,nativeRequestSha256?:string){
@@ -78,10 +84,18 @@ export function createNativeScopedCustomizeRouter(){
  const run=(work:(req:Request,res:Response)=>Promise<unknown>|unknown)=>async(req:Request,res:Response,next:NextFunction)=>{
   res.set('Cache-Control','no-store');try{session(req,res);res.json({data:await work(req,res)});}catch(e){
    if(e instanceof HostedRefusal||e instanceof customizeCatalog.CustomizeCatalogRefusal){res.status(e.status).json({error:{code:e.code,message:'Scoped Customize request refused'}});return;}
+   if(e instanceof PluginProjectionTransitionRequired){res.status(409).json({error:{code:e.code,message:'Project namespace requires its original owner'}});return;}
    if(e instanceof z.ZodError){res.status(422).json({error:{code:'INVALID_SCOPED_CONTRACT',message:'Use the explicit versioned consent contract'}});return;}next(e);
   }
  };
- router.get('/offer',run(req=>{const q=z.object({parentGrantId:parent}).strict().parse(req.query);return paired(req,q.parentGrantId,async(_reader,binding,project,check)=>{check();return {protocol:SCOPED_PROTOCOL,baseBinding:binding,organizationId:project.organization_id,selection:offer(req,binding),requiresSeparateConsent:true};});}));
+ /** Deliberate browser administrator transition. No Native proof/renderer grant can invoke this owner. */
+ const transitionOwner=(req:Request,write=false)=>{const p=req.principal;need(p?.type==='user'&&p.session,'BROWSER_SESSION_REQUIRED',401);if(write)need(authentication.hasRecentStepUp(p.session),'RECENT_STEP_UP_REQUIRED',403);return createPositivePluginProjectionOwner(toAuthorizationPrincipal(p));};
+ const transitionSelection=z.object({mode:z.enum(['fresh-project','captured-legacy-cohort']),projectId:uuid,configOrigin:z.enum(['new-empty','database-project','reviewed-legacy-raw'])}).strict();
+ router.post('/plugin-namespace/review',run(req=>{const q=transitionSelection.parse(req.body);return transitionOwner(req).review(q.mode,q.projectId,q.configOrigin);}));
+ router.post('/plugin-namespace/apply',run(req=>transitionOwner(req,true).apply(transitionSelection.extend({operationId:uuid,reviewSha256:hash}).strict().parse(req.body))));
+ router.post('/plugin-namespace/reconcile',run(req=>transitionOwner(req,true).reconcile(z.object({operationId:uuid,sourceOperationId:uuid,sourcePayloadSha256:hash}).strict().parse(req.body))));
+ router.get('/plugin-namespace/operations/:id',run(req=>transitionOwner(req).inspect(uuid.parse(req.params.id))));
+ router.get('/offer',run(req=>{const q=z.object({parentGrantId:parent}).strict().parse(req.query);return paired(req,q.parentGrantId,async(_reader,binding,project,check)=>{check();return {protocol:SCOPED_PROTOCOL,baseBinding:binding,organizationId:project.organization_id,selection:offer(req,binding),recentStepUp:req.principal?.type==='user'&&!!req.principal.session&&authentication.hasRecentStepUp(req.principal.session),requiresSeparateConsent:true};});}));
  router.post('/consents',run(async req=>{
   const body=ScopedConsentRequestSchema.parse(req.body),p=req.principal;need(p?.type==='user'&&p.session&&authentication.hasRecentStepUp(p.session),'STEP_UP_REQUIRED',403);
   return paired(req,body.parentGrantId,async(reader,binding,project,check)=>{
@@ -94,6 +108,14 @@ export function createNativeScopedCustomizeRouter(){
     if(old){need(old.owner_user_id===p.id&&old.installation_id===instance()&&old.request_sha256===body.requestSha256&&old.parent_grant_id===body.parentGrantId,'SCOPED_CONSENT_REUSE_CONFLICT');need(!old.revoked_at,'SCOPED_CONSENT_REVOKED');return ScopedNodeReceiptSchema.parse(JSON.parse(old.registration_json));}
     getDb().prepare('INSERT INTO customize_native_consents(id,owner_user_id,installation_id,parent_grant_id,enrollment_request_id,organization_id,hosted_project_id,native_custodian_grant_id,original_json,request_sha256,registration_json,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(body.consentId,p.id,instance(),body.parentGrantId,body.enrollmentRequestId,project.organization_id,binding.hostedProjectId,reader.original.grantId,JSON.stringify(proof.original),body.requestSha256,JSON.stringify(receipt),new Date().toISOString());return receipt;
    },1,'immediate');checkpointAfterWrite();return result;
+  });
+ }));
+ router.get('/consents/:consentId/context',run(async req=>{
+  const q=z.object({requestSha256:hash,consentRevision:z.coerce.number().int().min(1)}).strict().parse(req.query),row=ownedConsent(req,String(req.params.consentId));
+  need(q.requestSha256===row.request_sha256&&q.consentRevision===row.revision,'SCOPED_CONSENT_CHANGED');
+  return paired(req,row.parent_grant_id,async(reader,binding,_project,check)=>{
+   const proof=verifyScopedProof(await reader.readScopedConsent(row.id,'domain'),reader.original,{consentId:row.id,requestSha256:row.request_sha256,purpose:'domain'});currentConsent(row,proof,binding,check);
+   const available=offer(req,binding,true);return {protocol:SCOPED_PROTOCOL,consentId:row.id,consentRevision:row.revision,consentRequestSha256:row.request_sha256,baseBinding:binding,selection:proof.original.selection,capabilities:proof.effectiveVerbs.filter(v=>available.verbs.includes(v)),localProfileRevision:proof.localProfileRevision,parentProfileRevision:proof.parentProfileRevision};
   });
  }));
  // Metadata recovery is same-account only. It never establishes current Native/domain authority.

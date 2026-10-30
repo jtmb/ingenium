@@ -1,0 +1,347 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "requires": "Root actual9a8976a +8019c20 SQL133 chain. Supersedes185f guard-only proposal. Apply exact rows; never bulk-copy historical files/.",
+  "nodeSources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/projects.ts",
+      "preimageSha256": "00a0e9c8bbe2acfe9cf2ea832803e41ac40a1fe614b78023168a3b61db698816",
+      "postimageSha256": "28133d3e9bcca1e3c4806cb15fddcbce40367aee7931585a646597bf4675b40d",
+      "replacements": [
+        {
+          "before": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";",
+          "after": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";\nimport type {AuthorizationPrincipal} from \"./authorization.js\";\nimport {recordProjectCreationInCurrentTransaction} from \"./plugin-projection-transition.js\";"
+        },
+        {
+          "before": "organizationId = BOOTSTRAP_ORGANIZATION_ID): Project {",
+          "after": "organizationId = BOOTSTRAP_ORGANIZATION_ID, principal?:AuthorizationPrincipal): Project {"
+        },
+        {
+          "before": "    // Auto-load global skills into new project",
+          "after": "    if(principal&&!isGlobal)recordProjectCreationInCurrentTransaction(principal,id);\n    // Auto-load global skills into new project"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/configs.ts",
+      "preimageSha256": "6c25f44e15b0b41a6bf12809fdedef8c3ad240e4eda075e8cfb4cbbbea7288ea",
+      "postimageSha256": "2abd543f73c2f0a76d07c8aa75c62f4cf93a1e74d4c8c98ee01a73733dd8cc27",
+      "replacements": [
+        {
+          "before": "import { resolve } from \"node:path\";",
+          "after": "import { resolve } from \"node:path\";\nimport {createHash} from \"node:crypto\";\nimport {readProjectionBytes,exactUtf8} from \"./plugin-projection-materialize.js\";"
+        },
+        {
+          "before": "export function saveConfig(projectId: string, type: \"project\" | \"global\", content: string): Config {\n  const config",
+          "after": "export function saveConfig(projectId: string, type: \"project\" | \"global\", content: string): Config {\n  if(type===\"project\")getConfigPath(projectId);\n  const config"
+        },
+        {
+          "before": "    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? \"./data\");\n    const now = new Date().toISOString();\n    const existing = db.prepare(\"SELECT * FROM configs WHERE project_id = ? AND type = ?\").get(projectId, type) as Config | undefined;\n    if (existing) {\n      db.prepare(\"UPDATE configs SET content = ?, updated_at = ? WHERE id = ?\").run(content, now, existing.id);\n    } else {\n      const id = \"config_\" + Date.now() + \"_\" + Math.random().toString(36).slice(2, 8);\n      db.prepare(\"INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)\").run(id, projectId, type, content, now, now);\n    }\n",
+          "after": "    saveConfigInCurrentTransaction(projectId,type,content);\n    const db=getDb(process.env.INGENIUM_CORE_DB_PATH??\"./data\");\n"
+        },
+        {
+          "before": "/**\n * Read config from the filesystem",
+          "after": "/** Same original DB owner, for a caller already retaining the actual outer Core transaction. */\nexport function saveConfigInCurrentTransaction(projectId:string,type:\"project\"|\"global\",content:string):Config{\n if(!getDb().inTransaction)throw new Error(\"Core config transaction required\");\nconst db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? \"./data\");\n    const now = new Date().toISOString();\n    const existing = db.prepare(\"SELECT * FROM configs WHERE project_id = ? AND type = ?\").get(projectId, type) as Config | undefined;\n    if (existing) {\n      db.prepare(\"UPDATE configs SET content = ?, updated_at = ? WHERE id = ?\").run(content, now, existing.id);\n    } else {\n      const id = \"config_\" + Date.now() + \"_\" + Math.random().toString(36).slice(2, 8);\n      db.prepare(\"INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)\").run(id, projectId, type, content, now, now);\n    }\n return getDb().prepare(\"SELECT * FROM configs WHERE project_id=? AND type=?\").get(projectId,type) as Config;\n}\n/** Actual resolved config reader shared by migration readback and the normal agent-config consumer. */\nexport function readConfigProjection(projectId:string,type:\"project\"|\"global\"):{path:string;content:string;sha256:string}|undefined{\n const path=type===\"global\"?resolve(resolveProjectBase(projectId),\"opencode.jsonc\"):getConfigPath(projectId);\n const bytes=readProjectionBytes(path);if(!bytes)return undefined;\n try{return {path,content:exactUtf8(bytes),sha256:createHash(\"sha256\").update(bytes).digest(\"hex\")};}finally{bytes.fill(0);}\n}\n/**\n * Read config from the filesystem"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/agents.ts",
+      "preimageSha256": "bf2230970004420be9c88752f08b6e0a23888c9e3581cb95760420ccee035ec3",
+      "postimageSha256": "21810c92e30b556a0d32dd572a60d66181f43cce5d99990ce5f6d4a7d554ad11",
+      "replacements": [
+        {
+          "before": "import { getConfigPath } from \"./paths.js\";",
+          "after": "import { getConfigPath } from \"./paths.js\";\nimport {managedPluginConfigPathIfPresent} from \"./plugin-projection-transition.js\";\nimport {readConfigProjection} from \"./configs.js\";\nimport {parsePluginConfiguration} from \"./plugin-config-text.js\";"
+        },
+        {
+          "before": "function readProjectConfig(projectId: string): Record<string, unknown> {",
+          "after": "function readProjectConfig(projectId: string): Record<string, unknown> {\n  if(managedPluginConfigPathIfPresent(projectId)){const actual=readConfigProjection(projectId,\"project\");if(!actual)throw new Error(\"Managed project runtime config is missing\");return parsePluginConfiguration(actual.content);}"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+      "preimageSha256": "ca8a912e3a41008e493178932c13a8ff03354fba046bd54f17ed63643fb01459",
+      "postimageSha256": "db1083e08a49a6c99f89a68ec89f08e109f104a7da1dba4bc689fd874dba7a4d",
+      "replacements": [
+        {
+          "before": "db:ReturnType<typeof getDb>,projectId?:string):void{",
+          "after": "db:ReturnType<typeof getDb>,projectId?:string,allowedCustomOriginals:readonly string[]=[]):void{"
+        },
+        {
+          "before": "if(db.prepare(\"SELECT 1 FROM customize_commands WHERE result_json IS NULL\"+customizeScope+\" LIMIT 1\").get(...(projectId===undefined?[]:[projectId])))",
+          "after": "if(db.prepare(\"SELECT 1 FROM customize_commands WHERE result_json IS NULL\"+customizeScope+(allowedCustomOriginals.length?\" AND id NOT IN (\"+allowedCustomOriginals.map(()=>\"?\").join(\",\")+\")\":\"\")+\" LIMIT 1\").get(...(projectId===undefined?[]:[projectId]),...allowedCustomOriginals))"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/projects.ts",
+      "preimageSha256": "8742778ec4d7429660a18577407e12993ccd6d579376349867a9cfcb94c29e99",
+      "postimageSha256": "6d30b0d6fdae9a2634a654913e454bfb6aa69ab478794c7313ea1727c5526a1f",
+      "replacements": [
+        {
+          "before": "import { authorizeProjectRestoreTarget } from \"../authorization-policy.js\";",
+          "after": "import { authorizeProjectRestoreTarget,toAuthorizationPrincipal } from \"../authorization-policy.js\";\nimport {createPositivePluginProjectionOwner} from \"ingenium-core/lib/tools/plugin-projection-transition\";\nimport {randomUUID} from \"node:crypto\";"
+        },
+        {
+          "before": "  const project = projects.createProject(name, false, typeof organization_id === \"string\" ? organization_id : undefined);",
+          "after": "  const existedBeforeCreate=projects.getProject(name);\n  const creator=req.principal?.type===\"user\"?toAuthorizationPrincipal(req.principal):undefined;\n  const project = projects.createProject(name, false, typeof organization_id === \"string\" ? organization_id : undefined,creator);\n  if(!existedBeforeCreate&&creator?.type===\"browser-user\"){\n    try{const owner=createPositivePluginProjectionOwner(creator),review=owner.review(\"fresh-project\",project.id,\"new-empty\");\n    const receipt=owner.apply({operationId:randomUUID(),mode:\"fresh-project\",projectId:project.id,configOrigin:\"new-empty\",reviewSha256:review.reviewSha256});\n    if(receipt.outcome!==\"succeeded\"){res.status(503).json({data:project,error:{code:\"PROJECT_NAMESPACE_INITIALIZATION_UNCONFIRMED\",message:\"Project data is retained; inspect its original initialization before plugin use\"},original:receipt});return;}}catch(e){res.status(503).json({data:project,error:{code:\"PROJECT_NAMESPACE_INITIALIZATION_REFUSED\",message:\"Project data is retained; review its namespace before plugin use\",reason:e instanceof Error&&/^[A-Z][A-Z0-9_]{1,120}$/.test(e.message)?e.message:\"PRIVATE_OWNER_REVIEW_REQUIRED\"}});return;}\n  }"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/paths.ts",
+      "preimageSha256": "3e5960ca04df4e71fc1342b074bc44a527bfae0482635af1f975dd9da1d5a712",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/paths.ts",
+      "postimageSha256": "23a788496af98a92f0a48d735c62ac2ea89415111fbc50e9fd2ddc5ebe21b823"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+      "preimageSha256": "4090316f3a721007dffe1e45d15ffe1027d0ecefcc41464820cf9fa0bacde03f",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+      "postimageSha256": "1cc6e745b428e0ccbfeed0bfbc9698be6ab7baa17a603828d2d4144fdbbf49c5"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+      "preimageSha256": null,
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+      "postimageSha256": "ee16e5b4544cf397c146fb87ad93a03d7149b3d56b6e613d36e891723e4c5f2c"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-materialize.ts",
+      "preimageSha256": null,
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-materialize.ts",
+      "postimageSha256": "be92a2228b7f29861e15b23b0a3d2432430e60a6879b57aa97bfb020f5a69429"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "preimageSha256": "0c5bba402d65a2f971f9e9ea047006c39772476db13949aa252819487470dc65",
+      "sourceFile": "files/services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "postimageSha256": "d09b04cb87779856b1120b43010c3fc8288951d99eafb5ba5d45c7cf63ded91c"
+    },
+    {
+      "path": "services/ingenium-api/lib/authorization-policy.ts",
+      "preimageSha256": "49be0ef7bf16328b79b9097bf7b2f9ace86922491bb68c8d1dac00311dd44a15",
+      "sourceFile": "files/services/ingenium-api/lib/authorization-policy.ts",
+      "postimageSha256": "5855e736a994a20571b01011e912bbc80cb953ab2141d38f9b69aa3895fbfd27"
+    }
+  ],
+  "nativeSources": [
+    {
+      "path": "crates/adapters/src/remote_control.rs",
+      "preimageSha256": "036822ec679d8c11ab87975ed1d60f54308764c48408abf797dc2b1970eacef4",
+      "postimageSha256": "88a5729f732df0ebc9583dc46f6ac5993082e25746476a8d5bf25c1e49a31eb7",
+      "replacements": [
+        {
+          "before": "    connection_attempts: BTreeMap<String, Value>,",
+          "after": "    connection_attempts: BTreeMap<String, Value>,\n    #[serde(default)]\n    scoped_customize_v1: BTreeMap<String, hosted::customize_scoped_v1::contracts::Consent>,"
+        },
+        {
+          "before": "            connection_attempts: BTreeMap::new(),",
+          "after": "            connection_attempts: BTreeMap::new(),\n            scoped_customize_v1: BTreeMap::new(),"
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted.rs",
+      "preimageSha256": "431b5c14399f74608418d7719382be645b22ef0c16a1fc5862e2fc701694891d",
+      "postimageSha256": "565b7c8f99b02d07c6b65d9c24199287a83cd048cf7c5ce98b3d505928ad4654",
+      "replacements": [
+        {
+          "before": "pub mod lifecycle;",
+          "after": "pub mod lifecycle;\npub mod customize_scoped_v1;"
+        },
+        {
+          "before": "pub struct Enrollment {",
+          "after": "pub struct Enrollment {\n #[serde(default,skip_serializing_if=\"Option::is_none\")]pub customize_scoped_v1_owner:Option<String>,"
+        },
+        {
+          "before": "let enrollment=Enrollment{protocol:",
+          "after": "let enrollment=Enrollment{customize_scoped_v1_owner:None,protocol:"
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted/wire.rs",
+      "preimageSha256": "1d26d023a11db20bf3197559b0ce1fad616191500c075427e0e3b6409f4bd3b7",
+      "postimageSha256": "0d9c05215d979ee6d04a09beb73d568c6a232667d9939daf8388dd0cd7467299",
+      "replacements": [
+        {
+          "before": "fn canonical(v:&Value)",
+          "after": "pub(super) fn canonical(v:&Value)"
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/account_vault/node_hosted.rs",
+      "preimageSha256": "607d1434f100380dac09a56895d243b77379bb577738f77b8e66cb351d0b240a",
+      "postimageSha256": "10b6f71ca3cfd7aa86fbca530407e964a87996e31e27df5d208406a70b88fd63",
+      "replacements": [
+        {
+          "before": "use super::*;",
+          "after": "use super::*;\nmod scoped_step_up;"
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/access_profiles.rs",
+      "preimageSha256": "2954cf5770b87ce134514cc91107a846fde777f0ba279bc3d05990aca7821828",
+      "postimageSha256": "dd0ec8bcf4dc39a5fd7657a895e0f6d1e33ee64dd9dd3f7e42f94744582c9f3d",
+      "replacements": [
+        {
+          "before": "| \"hosted_enrollment\" | \"hosted_governance_read\"",
+          "after": "| \"hosted_enrollment\" | \"hosted_governance_read\" | \"customize_scoped_v1_read\""
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/utility_operations/hosted.rs",
+      "preimageSha256": "8ead94dc90ea4a2577ad3c7651a1efd7c2652b7621749f931daeda9fc7a20a9f",
+      "postimageSha256": "b124a2191f9a7e6b836122585a172f59bf3cc7f73b24a914d706a0362585ced6",
+      "replacements": [
+        {
+          "before": "json_extract(o.original,'$.original.binding.nativeProjectId') IS ?",
+          "after": "COALESCE(json_extract(o.original,'$.original.binding.nativeProjectId'),json_extract(o.original,'$.original.baseBinding.nativeProjectId')) IS ?"
+        },
+        {
+          "before": "json_extract(o.original,'$.original.binding.grantId')=? OR json_extract(o.original,'$.original.binding.connectionId')=? OR json_extract(o.original,'$.private_owner.enrollment_request_id')=?",
+          "after": "COALESCE(json_extract(o.original,'$.original.binding.grantId'),json_extract(o.original,'$.original.baseBinding.grantId'))=? OR COALESCE(json_extract(o.original,'$.original.binding.connectionId'),json_extract(o.original,'$.original.baseBinding.connectionId'))=? OR json_extract(o.original,'$.private_owner.enrollment_request_id')=? OR json_extract(o.original,'$.original.consentId')=?"
+        },
+        {
+          "before": "params![id,id,id]",
+          "after": "params![id,id,id,id]"
+        },
+        {
+          "before": "params![original_id,original_id,original_id]",
+          "after": "params![original_id,original_id,original_id,original_id]"
+        },
+        {
+          "before": "IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1')",
+          "after": "IN ('node_hosted_account_v1','node_hosted_pairing_v1','node_hosted_retirement_command_v1','customize_scoped_consent_command_v1','customize_scoped_consent_reconciliation_v1','customize_scoped_consent_revocation_v1')",
+          "count": 2
+        },
+        {
+          "before": "\"#;\nconst ADMIN_PROJECT",
+          "after": " AND NOT EXISTS(\n  SELECT 1 FROM originals r WHERE r.kind='remote_admin'\n   AND json_extract(r.original,'$.protocol')='customize_scoped_consent_reconciliation_v1'\n   AND json_extract(r.result,'$.state')='completed'\n   AND json_extract(r.result,'$.value.registration_confirmed')=1\n   AND json_extract(r.result,'$.value.proof')='actual_Node_registration_fresh_parent_and_managed_profiles'\n   AND json_extract(r.original,'$.private_owner.enrollment_request_id')=json_extract(o.original,'$.private_owner.enrollment_request_id')\n   AND json_extract(r.original,'$.private_owner.account_review.account.id')=json_extract(o.original,'$.private_owner.account_review.account.id')\n   AND json_extract(r.original,'$.private_owner.native_owner')=json_extract(o.original,'$.private_owner.native_owner')\n   AND ((json_extract(o.original,'$.protocol')='customize_scoped_consent_command_v1'\n    AND json_extract(r.original,'$.source_operation_id')=o.id AND json_extract(r.original,'$.source_original')=o.original)\n    OR (json_extract(o.original,'$.protocol')='customize_scoped_consent_reconciliation_v1'\n    AND json_extract(r.original,'$.source_operation_id')=json_extract(o.original,'$.source_operation_id')\n    AND json_extract(r.original,'$.source_original')=json_extract(o.original,'$.source_original')))\n )\n AND NOT EXISTS(\n  SELECT 1 FROM originals r WHERE r.kind='remote_admin'\n   AND json_extract(r.original,'$.protocol')='customize_scoped_consent_revocation_v1'\n   AND json_extract(r.result,'$.state')='completed'\n   AND json_extract(r.result,'$.value.local_consent_revoked')=1 AND json_extract(r.result,'$.value.local_profile_revoked')=1\n   AND json_extract(r.result,'$.value.node.revoked')=1\n   AND json_extract(r.result,'$.value.node.consentId')=json_extract(r.original,'$.command.consentId')\n   AND json_extract(r.original,'$.command.consentId')=CASE WHEN json_extract(o.original,'$.protocol')='customize_scoped_consent_command_v1' THEN json_extract(o.original,'$.command.operationId') ELSE json_extract(o.original,'$.command.consentId') END\n   AND json_extract(o.original,'$.protocol') IN ('customize_scoped_consent_command_v1','customize_scoped_consent_reconciliation_v1','customize_scoped_consent_revocation_v1')\n   AND json_extract(r.original,'$.private_owner.enrollment_request_id')=json_extract(o.original,'$.private_owner.enrollment_request_id')\n   AND json_extract(r.original,'$.private_owner.account_review.account.id')=json_extract(o.original,'$.private_owner.account_review.account.id')\n   AND json_extract(r.original,'$.private_owner.native_owner')=json_extract(o.original,'$.private_owner.native_owner')\n )\n\"#;\nconst ADMIN_PROJECT"
+        }
+      ]
+    },
+    {
+      "path": "apps/service/src/routes/remote_control.rs",
+      "preimageSha256": "d19052ac718afa7e59a7c264c850d72f77b449ef64b29302d68dfbd4385cb8aa",
+      "postimageSha256": "24208e86eb8b73c51c9541d12e77f1a670ebd54c8317886b1d95f9df6f2de6ee",
+      "replacements": [
+        {
+          "before": "mod hosted_governance;",
+          "after": "mod hosted_governance;\nmod customize_scoped_v1;"
+        },
+        {
+          "before": ".nest(\"/connections/{id}/hosted-governance\", hosted_governance::router())",
+          "after": ".nest(\"/connections/{id}/hosted-governance\", hosted_governance::router())\n        .nest(\"/connections/{id}/customize-scoped-v1\", customize_scoped_v1::router())"
+        }
+      ]
+    },
+    {
+      "path": "apps/service/src/routes/remote_control/hosted_governance.rs",
+      "preimageSha256": "2984f6464bdd5a1e81add943e2887dbcd55d48dd994b8ea862b554be5778cee9",
+      "postimageSha256": "a08543a7b2cd6578847d293f21f4bc5066347dc836e355e8af1cdd3bb1278615",
+      "replacements": [
+        {
+          "before": "fn native_owner(",
+          "after": "pub(super) fn native_owner("
+        },
+        {
+          "before": "fn current(",
+          "after": "pub(super) fn current("
+        },
+        {
+          "before": "async fn retained(",
+          "after": "pub(super) async fn retained("
+        },
+        {
+          "before": "\"node_hosted_retirement_command_v1\",\"node_hosted_local_account_reconciliation_v1\"]",
+          "after": "\"node_hosted_retirement_command_v1\",\"node_hosted_local_account_reconciliation_v1\",\"customize_scoped_consent_command_v1\",\"customize_scoped_consent_reconciliation_v1\",\"customize_scoped_consent_revocation_v1\"]"
+        },
+        {
+          "before": ".or_else(||row[\"original\"][\"source_original\"][\"command\"][\"native_owner\"][\"library_id\"].as_str())",
+          "after": ".or_else(||row[\"original\"][\"private_owner\"][\"native_owner\"][\"library_id\"].as_str()).or_else(||row[\"original\"][\"source_original\"][\"command\"][\"native_owner\"][\"library_id\"].as_str())"
+        }
+      ]
+    },
+    {
+      "path": "apps/service/src/routes/remote_control/proxy.rs",
+      "preimageSha256": "e098380344d65b355a3b2b7d8a72acb864a79ffc6075151dd95a1f4a92bdcc17",
+      "postimageSha256": "66892a1ec8154063e9eaf0b2f1a6cbfe8ac50186ba1de3b10be7879fd8d19197",
+      "replacements": [
+        {
+          "before": ".merge(super::hosted_governance::paired_router())",
+          "after": ".merge(super::hosted_governance::paired_router())\n        .merge(super::customize_scoped_v1::paired_router())"
+        }
+      ]
+    },
+    {
+      "path": "crates/adapters/src/account_vault/node_hosted/scoped_step_up.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/crates/adapters/src/account_vault/node_hosted/scoped_step_up.rs",
+      "postimageSha256": "8f9851d936f312ae04d3b2c82f622079bdb087e849c5acc097b90c540f15a57e"
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted/customize_scoped_v1/contracts.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/crates/adapters/src/remote_control/hosted/customize_scoped_v1/contracts.rs",
+      "postimageSha256": "c7bd4fddd4e680e5fa9489d6cf2942394b7ca6f981d07170a246650bd10d6a6d"
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted/customize_scoped_v1/mod.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/crates/adapters/src/remote_control/hosted/customize_scoped_v1/mod.rs",
+      "postimageSha256": "0205184a01efd616d1e72cd2aa8c7b7d5d7032e77f49922cbe3ab227b5476882"
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted/customize_scoped_v1/policy.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/crates/adapters/src/remote_control/hosted/customize_scoped_v1/policy.rs",
+      "postimageSha256": "1f4ef351bc4a6090f851120c363acd1eb9dffcc6b48726f405623697e1b7bf8e"
+    },
+    {
+      "path": "crates/adapters/src/remote_control/hosted/customize_scoped_v1/wire.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/crates/adapters/src/remote_control/hosted/customize_scoped_v1/wire.rs",
+      "postimageSha256": "58ed3c67a392467d2b60fdd340f2ee15bad5344a8fdcb0d3689d3a7587bcaeee"
+    },
+    {
+      "path": "apps/service/src/routes/remote_control/customize_scoped_v1.rs",
+      "preimageSha256": null,
+      "sourceFile": "files/apps/service/src/routes/remote_control/customize_scoped_v1.rs",
+      "postimageSha256": "a06c5efdbf473e797636421edf6fa0b7e3de9d271ac14362fc9e02425903c8c3"
+    },
+    {
+      "path": "apps/web/src/features/customize/NativeCustomize.tsx",
+      "preimageSha256": "2a8a825767a7c687b574d76cc20e1c5e02fc695cbe492a2e72132dcf5c2bdd6e",
+      "postimageSha256": "1e8175e57fbbb362c70e4bcf2c2cb5ace20da15286b32e75943b4788ea924b33",
+      "sourceFile": "files/apps/web/src/features/customize/NativeCustomize.tsx"
+    },
+    {
+      "path": "apps/web/src/platform/customizeScopedV1.ts",
+      "newFile": true,
+      "postimageSha256": "7dbe78e040f40764f7b4dc302ce523c52308732479f8d48ec5d79bdb3f065b2d",
+      "preimageSha256": null,
+      "sourceFile": "files/apps/web/src/platform/customizeScopedV1.ts"
+    },
+    {
+      "path": "apps/web/src/features/customize/ScopedCustomize.tsx",
+      "newFile": true,
+      "postimageSha256": "685f2a717385d9aef30572d210fbbddd97f6475de997cf43ecbb0aff4be7b39c",
+      "preimageSha256": null,
+      "sourceFile": "files/apps/web/src/features/customize/ScopedCustomize.tsx"
+    }
+  ],
+  "nativeSourceHashNormalization": "LF only; never normalize database, original inputs or evidence",
+  "openAcceptance": [
+    "Root actual compiled Core migration/creation/repair with genuine authorization",
+    "Rust type compilation and actual Native consent/step-up/profile/journal/TLS qualification",
+    "Actual UI screenshots/workflows and two-store unknown/persistence/revocation",
+    "Managed job/plugin execution and providers remain independent gates"
+  ]
+}

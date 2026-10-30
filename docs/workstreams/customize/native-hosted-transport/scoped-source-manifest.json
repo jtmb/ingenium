@@ -10,7 +10,7 @@
     {
       "path": "packages/ingenium-core/lib/tools/paths.ts",
       "preimageSha256": "501991f83cdaba44a643cd23023d815825fdda72db2c6ee899b8eb4033e369ca",
-      "postimageSha256": "3e5960ca04df4e71fc1342b074bc44a527bfae0482635af1f975dd9da1d5a712"
+      "postimageSha256": "935542e843289bac2f759411ac2e10e7b63837a28f7536957d45e0fb7628e532"
     },
     {
       "path": "packages/ingenium-core/lib/index.ts",
@@ -25,7 +25,7 @@
     {
       "path": "services/ingenium-api/lib/authorization-policy.ts",
       "preimageSha256": "ea923e5a072820a4ca9391a85c8fe7cddd31753c13e35af5cb5d9113d9fce3d9",
-      "postimageSha256": "49be0ef7bf16328b79b9097bf7b2f9ace86922491bb68c8d1dac00311dd44a15"
+      "postimageSha256": "424b4976800ebfe866a14c73aeff89dbb8c14a40be35ef17b275bcc35cf4e94d"
     },
     {
       "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
@@ -35,12 +35,12 @@
     {
       "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
       "newFile": true,
-      "postimageSha256": "41e9c624fb2a65ad90d4d9068cb43133154f2c683ddd1f091942041e068e67bb"
+      "postimageSha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09"
     },
     {
       "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
       "newFile": true,
-      "postimageSha256": "4090316f3a721007dffe1e45d15ffe1027d0ecefcc41464820cf9fa0bacde03f"
+      "postimageSha256": "1cc6e745b428e0ccbfeed0bfbc9698be6ab7baa17a603828d2d4144fdbbf49c5"
     },
     {
       "path": "packages/ingenium-core/lib/tools/plugin-config-text.ts",
@@ -75,7 +75,7 @@
     {
       "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
       "newFile": true,
-      "postimageSha256": "0c5bba402d65a2f971f9e9ea047006c39772476db13949aa252819487470dc65"
+      "postimageSha256": "25bac53f8f7edee8c70def8108f7f8e6da0892a93a49ed3ed56418823539b691"
     },
     {
       "path": "services/ingenium-api/lib/paired-native-reader.ts",
@@ -86,6 +86,11 @@
       "path": "services/ingenium-api/lib/node-native-pairing-custody.ts",
       "preimageSha256": "c09d4338bbf98ca0876b5c72e8c27f99016298c63551aed3279806e66484235a",
       "postimageSha256": "88ac772e292760d02b94aa55039a291da269c2138c4a0db11c43a4dea2702668"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+      "newFile": true,
+      "postimageSha256": "c77b53c6755bc68ebe43047f810a60fdc0ca26db06c81a1eeb8e9ae59adaf913"
     }
   ]
 }

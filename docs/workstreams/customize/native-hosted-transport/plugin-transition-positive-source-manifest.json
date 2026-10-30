@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/plugins.ts",
+      "preimageSha256": "864bf20923d1e2b114a407ce4daff7c4397b0a8a956ec7c08f233b8aed3c5da4",
+      "postimageSha256": "21cf90ab1a6500fc044148a9eef8cec125a04bcb6b23d766c3e46309048449e4"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/paths.ts"
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "preimageSha256": "eeb37db490aecb0516fa72b7b8df41a3bf7e0f2e322c6fc4698779ae13fb9c33",
+      "postimageSha256": "32908f76e48792236dca10069d50e2d7da4438920173098725c3bd5faf841bda"
+    },
+    {
+      "path": "services/ingenium-api/scripts/api-server.ts",
+      "preimageSha256": "3ffbb929802883bda600dbc40394780180ee024383ace2a3011c944363942166",
+      "postimageSha256": "5d355e752fb79174154f879e05e6a81fc748c0198efc4a36bdaeb76c9f289c88"
+    },
+    {
+      "path": "services/ingenium-api/lib/authorization-policy.ts",
+      "preimageSha256": "ea923e5a072820a4ca9391a85c8fe7cddd31753c13e35af5cb5d9113d9fce3d9",
+      "postimageSha256": "424b4976800ebfe866a14c73aeff89dbb8c14a40be35ef17b275bcc35cf4e94d"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+      "preimageSha256": "ca8a912e3a41008e493178932c13a8ff03354fba046bd54f17ed63643fb01459",
+      "postimageSha256": "db1083e08a49a6c99f89a68ec89f08e109f104a7da1dba4bc689fd874dba7a4d",
+      "replacements": [
+        {
+          "before": "db:ReturnType<typeof getDb>,projectId?:string):void{",
+          "after": "db:ReturnType<typeof getDb>,projectId?:string,allowedCustomOriginals:readonly string[]=[]):void{"
+        },
+        {
+          "before": "if(db.prepare(\"SELECT 1 FROM customize_commands WHERE result_json IS NULL\"+customizeScope+\" LIMIT 1\").get(...(projectId===undefined?[]:[projectId])))",
+          "after": "if(db.prepare(\"SELECT 1 FROM customize_commands WHERE result_json IS NULL\"+customizeScope+(allowedCustomOriginals.length?\" AND id NOT IN (\"+allowedCustomOriginals.map(()=>\"?\").join(\",\")+\")\":\"\")+\" LIMIT 1\").get(...(projectId===undefined?[]:[projectId]),...allowedCustomOriginals))"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+      "newFile": true,
+      "postimageSha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+      "newFile": true,
+      "postimageSha256": "1cc6e745b428e0ccbfeed0bfbc9698be6ab7baa17a603828d2d4144fdbbf49c5"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-config-text.ts",
+      "newFile": true,
+      "postimageSha256": "28ecf126e36f84556c1d210ffb0852796f44522a0a20b4a9b769968eb271c0d5"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-reconciliation.ts",
+      "newFile": true,
+      "postimageSha256": "56e842b1d195dcc86144f5df90dcde753641085582b911f719c6127534925ad0"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
+      "newFile": true,
+      "postimageSha256": "f495504a64bd0b8256b246bc095345d5037773d2a3495648196e86b396fd68ab"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "newFile": true,
+      "postimageSha256": "0204d7975e9ea06419fc5db82bb559212a09987642f14ed33ec2187f9792b572"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/customize-scoped-v1-contracts.ts",
+      "newFile": true,
+      "postimageSha256": "d139f7f68aaefdd7de8e2b6688e0027d5c62c19a6d342bb7b321ae176fa47901"
+    },
+    {
+      "path": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+      "newFile": true,
+      "postimageSha256": "2fd945e90299950e000cac11b37545f99191a0672f87768dba757a0cef8e986b"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "newFile": true,
+      "postimageSha256": "25bac53f8f7edee8c70def8108f7f8e6da0892a93a49ed3ed56418823539b691"
+    },
+    {
+      "path": "services/ingenium-api/lib/paired-native-reader.ts",
+      "preimageSha256": "efb00f645734f3d626e667d4251e98176a197e2022c064e0d7b27ba923b5a7c6",
+      "postimageSha256": "7bc967099af80b05ce9bc7c0dc287831c85630a64189538dd668912585ed0fcd"
+    },
+    {
+      "path": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "preimageSha256": "c09d4338bbf98ca0876b5c72e8c27f99016298c63551aed3279806e66484235a",
+      "postimageSha256": "88ac772e292760d02b94aa55039a291da269c2138c4a0db11c43a4dea2702668"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/projects.ts",
+      "preimageSha256": "00a0e9c8bbe2acfe9cf2ea832803e41ac40a1fe614b78023168a3b61db698816",
+      "postimageSha256": "28133d3e9bcca1e3c4806cb15fddcbce40367aee7931585a646597bf4675b40d",
+      "replacements": [
+        {
+          "before": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";",
+          "after": "import { getDb, execTransaction, checkpointAfterWrite } from \"../db.js\";\nimport type {AuthorizationPrincipal} from \"./authorization.js\";\nimport {recordProjectCreationInCurrentTransaction} from \"./plugin-projection-transition.js\";"
+        },
+        {
+          "before": "organizationId = BOOTSTRAP_ORGANIZATION_ID): Project {",
+          "after": "organizationId = BOOTSTRAP_ORGANIZATION_ID, principal?:AuthorizationPrincipal): Project {"
+        },
+        {
+          "before": "    // Auto-load global skills into new project",
+          "after": "    if(principal&&!isGlobal)recordProjectCreationInCurrentTransaction(principal,id);\n    // Auto-load global skills into new project"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/configs.ts",
+      "preimageSha256": "6c25f44e15b0b41a6bf12809fdedef8c3ad240e4eda075e8cfb4cbbbea7288ea",
+      "postimageSha256": "2abd543f73c2f0a76d07c8aa75c62f4cf93a1e74d4c8c98ee01a73733dd8cc27",
+      "replacements": [
+        {
+          "before": "import { resolve } from \"node:path\";",
+          "after": "import { resolve } from \"node:path\";\nimport {createHash} from \"node:crypto\";\nimport {readProjectionBytes,exactUtf8} from \"./plugin-projection-materialize.js\";"
+        },
+        {
+          "before": "export function saveConfig(projectId: string, type: \"project\" | \"global\", content: string): Config {\n  const config",
+          "after": "export function saveConfig(projectId: string, type: \"project\" | \"global\", content: string): Config {\n  if(type===\"project\")getConfigPath(projectId);\n  const config"
+        },
+        {
+          "before": "    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? \"./data\");\n    const now = new Date().toISOString();\n    const existing = db.prepare(\"SELECT * FROM configs WHERE project_id = ? AND type = ?\").get(projectId, type) as Config | undefined;\n    if (existing) {\n      db.prepare(\"UPDATE configs SET content = ?, updated_at = ? WHERE id = ?\").run(content, now, existing.id);\n    } else {\n      const id = \"config_\" + Date.now() + \"_\" + Math.random().toString(36).slice(2, 8);\n      db.prepare(\"INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)\").run(id, projectId, type, content, now, now);\n    }\n",
+          "after": "    saveConfigInCurrentTransaction(projectId,type,content);\n    const db=getDb(process.env.INGENIUM_CORE_DB_PATH??\"./data\");\n"
+        },
+        {
+          "before": "/**\n * Read config from the filesystem",
+          "after": "/** Same original DB owner, for a caller already retaining the actual outer Core transaction. */\nexport function saveConfigInCurrentTransaction(projectId:string,type:\"project\"|\"global\",content:string):Config{\n if(!getDb().inTransaction)throw new Error(\"Core config transaction required\");\nconst db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? \"./data\");\n    const now = new Date().toISOString();\n    const existing = db.prepare(\"SELECT * FROM configs WHERE project_id = ? AND type = ?\").get(projectId, type) as Config | undefined;\n    if (existing) {\n      db.prepare(\"UPDATE configs SET content = ?, updated_at = ? WHERE id = ?\").run(content, now, existing.id);\n    } else {\n      const id = \"config_\" + Date.now() + \"_\" + Math.random().toString(36).slice(2, 8);\n      db.prepare(\"INSERT INTO configs (id, project_id, type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)\").run(id, projectId, type, content, now, now);\n    }\n return getDb().prepare(\"SELECT * FROM configs WHERE project_id=? AND type=?\").get(projectId,type) as Config;\n}\n/** Actual resolved config reader shared by migration readback and the normal agent-config consumer. */\nexport function readConfigProjection(projectId:string,type:\"project\"|\"global\"):{path:string;content:string;sha256:string}|undefined{\n const path=type===\"global\"?resolve(resolveProjectBase(projectId),\"opencode.jsonc\"):getConfigPath(projectId);\n const bytes=readProjectionBytes(path);if(!bytes)return undefined;\n try{return {path,content:exactUtf8(bytes),sha256:createHash(\"sha256\").update(bytes).digest(\"hex\")};}finally{bytes.fill(0);}\n}\n/**\n * Read config from the filesystem"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/agents.ts",
+      "preimageSha256": "bf2230970004420be9c88752f08b6e0a23888c9e3581cb95760420ccee035ec3",
+      "postimageSha256": "21810c92e30b556a0d32dd572a60d66181f43cce5d99990ce5f6d4a7d554ad11",
+      "replacements": [
+        {
+          "before": "import { getConfigPath } from \"./paths.js\";",
+          "after": "import { getConfigPath } from \"./paths.js\";\nimport {managedPluginConfigPathIfPresent} from \"./plugin-projection-transition.js\";\nimport {readConfigProjection} from \"./configs.js\";\nimport {parsePluginConfiguration} from \"./plugin-config-text.js\";"
+        },
+        {
+          "before": "function readProjectConfig(projectId: string): Record<string, unknown> {",
+          "after": "function readProjectConfig(projectId: string): Record<string, unknown> {\n  if(managedPluginConfigPathIfPresent(projectId)){const actual=readConfigProjection(projectId,\"project\");if(!actual)throw new Error(\"Managed project runtime config is missing\");return parsePluginConfiguration(actual.content);}"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/projects.ts",
+      "preimageSha256": "8742778ec4d7429660a18577407e12993ccd6d579376349867a9cfcb94c29e99",
+      "postimageSha256": "6d30b0d6fdae9a2634a654913e454bfb6aa69ab478794c7313ea1727c5526a1f",
+      "replacements": [
+        {
+          "before": "import { authorizeProjectRestoreTarget } from \"../authorization-policy.js\";",
+          "after": "import { authorizeProjectRestoreTarget,toAuthorizationPrincipal } from \"../authorization-policy.js\";\nimport {createPositivePluginProjectionOwner} from \"ingenium-core/lib/tools/plugin-projection-transition\";\nimport {randomUUID} from \"node:crypto\";"
+        },
+        {
+          "before": "  const project = projects.createProject(name, false, typeof organization_id === \"string\" ? organization_id : undefined);",
+          "after": "  const existedBeforeCreate=projects.getProject(name);\n  const creator=req.principal?.type===\"user\"?toAuthorizationPrincipal(req.principal):undefined;\n  const project = projects.createProject(name, false, typeof organization_id === \"string\" ? organization_id : undefined,creator);\n  if(!existedBeforeCreate&&creator?.type===\"browser-user\"){\n    try{const owner=createPositivePluginProjectionOwner(creator),review=owner.review(\"fresh-project\",project.id,\"new-empty\");\n    const receipt=owner.apply({operationId:randomUUID(),mode:\"fresh-project\",projectId:project.id,configOrigin:\"new-empty\",reviewSha256:review.reviewSha256});\n    if(receipt.outcome!==\"succeeded\"){res.status(503).json({data:project,error:{code:\"PROJECT_NAMESPACE_INITIALIZATION_UNCONFIRMED\",message:\"Project data is retained; inspect its original initialization before plugin use\"},original:receipt});return;}}catch(e){res.status(503).json({data:project,error:{code:\"PROJECT_NAMESPACE_INITIALIZATION_REFUSED\",message:\"Project data is retained; review its namespace before plugin use\",reason:e instanceof Error&&/^[A-Z][A-Z0-9_]{1,120}$/.test(e.message)?e.message:\"PRIVATE_OWNER_REVIEW_REQUIRED\"}});return;}\n  }"
+        }
+      ]
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-materialize.ts"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { getDb } from "../db.js";
 import { resolve } from "node:path";
+import {committedPluginProjectionPaths,managedPluginConfigPathIfPresent} from "./plugin-projection-transition.js";
 
 /**
  * Resolve the project root for disk operations.
@@ -65,7 +66,7 @@ export function getPluginsBase(projectId?: string): string {
   if (projectId) {
     const project = getDb().prepare("SELECT path,is_global FROM projects WHERE id=? AND archived_at IS NULL").get(projectId) as {path:string;is_global:number}|undefined;
     if (!project) throw new Error("Active project required for plugin storage");
-    if (!project.is_global) return resolve(project.path,".opencode","plugins");
+    if (!project.is_global) return committedPluginProjectionPaths(projectId).pluginBase;
   }
   const base = resolveProjectBase(projectId);
   if (isGlobal(projectId)) return resolve(base, "plugins");
@@ -83,6 +84,7 @@ export function getCommandsBase(projectId?: string): string {
 }
 
 export function getConfigPath(projectId?: string): string {
+  if(projectId){const project=getDb().prepare("SELECT is_global FROM projects WHERE id=? AND archived_at IS NULL").get(projectId) as {is_global:number}|undefined;if(!project)throw new Error("Active config project required");if(project.is_global===0){const managed=managedPluginConfigPathIfPresent(projectId);if(managed)return managed;}}
   const base = resolveProjectBase(projectId);
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const project = projectId ? db.prepare(
@@ -98,6 +100,6 @@ export function getConfigPath(projectId?: string): string {
 /** Plugin config follows its registered workspace, independent of installation settings. */
 export function getPluginConfigPath(projectId?:string):string {
  if(projectId){const project=getDb().prepare("SELECT path,is_global FROM projects WHERE id=? AND archived_at IS NULL").get(projectId) as {path:string;is_global:number}|undefined;
- if(!project)throw new Error("Active project required for plugin configuration");if(!project.is_global)return resolve(project.path,"opencode.json");}
+ if(!project)throw new Error("Active project required for plugin configuration");if(!project.is_global)return committedPluginProjectionPaths(projectId).configPath;}
  return getConfigPath(projectId);
 }

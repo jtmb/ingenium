@@ -1,0 +1,30 @@
+{
+  "sourceOnly": true,
+  "nodeStrict": {
+    "rootFiles": 22,
+    "actualSourceFiles": 642,
+    "diagnostics": 0,
+    "emitted": 0
+  },
+  "nativeUiStrict": {
+    "rootFiles": 3,
+    "actualSourceFiles": 218,
+    "diagnostics": 0,
+    "emitted": 0
+  },
+  "rust": {
+    "parsedSources": 15,
+    "actualHookPreimagesVerified": 9,
+    "edition": 2024,
+    "compiled": false,
+    "emittedFiles": 0
+  },
+  "pureContractsPassed": 30,
+  "nativeCustodySqlControlsPassed": 62,
+  "filesystemControlsPassed": 14,
+  "filesystemScratchRemovedBytes": 446,
+  "filesystemScratchRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/customize/plugin-transition-fs-controls",
+  "windowsRecoveryClaimed": false,
+  "actualNativeOrCoreRuntimeAcceptance": false,
+  "fullPhaseOrReleaseComplete": false
+}
