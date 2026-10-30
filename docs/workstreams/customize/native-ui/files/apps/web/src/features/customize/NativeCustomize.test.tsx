@@ -78,3 +78,15 @@ it("admits an explicitly projectless hosted owner without synthesizing native pr
   expect(screen.getByText("Authenticated private governance fixture")).toBeTruthy();
   expect(request).not.toHaveBeenCalled();
 });
+
+it("preserves the Skills page preference while project-owned rows are replaced", async () => {
+  request.mockImplementation(async (_method: string, path: string) => reply(path, new URL("https://fixture.invalid" + path).searchParams.get("project_id") || ""));
+  const view = render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
+  fireEvent.click(screen.getByRole("button", {name: "Skills", exact: true}));
+  await screen.findByRole("heading", {name: "Skills", exact: true});
+  await screen.findAllByRole("button", {name: "Release, Project source", exact: true});
+  view.rerender(<NativeCustomize gateway={gateway} project={{...project, id: "next-project"}} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
+  expect(screen.getByRole("heading", {name: "Skills", exact: true})).toBeTruthy();
+  await waitFor(() => expect(request.mock.calls.some(([,path]) => String(path).includes("project_id=next-project"))).toBe(true));
+  await screen.findAllByRole("button", {name: "Release, Project source", exact: true});
+});

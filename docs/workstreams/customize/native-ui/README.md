@@ -64,7 +64,7 @@ Worker evidence: nine dependency-free semantic tests passed against the real DTO
 Coordinator recipe after application, using existing locked dependencies and the original approved output/cache/TEMP policy:
 
 - node --test apps/web/src/features/customize/nativeCatalog.node.mjs (Node22+ source type stripping).
-- Existing native Vitest run selecting NativeCustomize.test.tsx: six semantic cases for disabled registration, unavailable scopes/no extra calls, retained editor draft, explicit-null no read, stale-owner response fencing and foreign hosted governance refusal and explicit-null hosted composition (the six tests combine some assertions).
+- Existing native Vitest run selecting NativeCustomize.test.tsx: seven semantic cases for disabled registration, unavailable scopes/no extra calls, retained editor draft, explicit-null no read, stale-owner response fencing and foreign hosted governance refusal and explicit-null hosted composition (the seven tests combine some assertions).
 - Full apps/web TypeScript noEmit; preserve old NativeWorkDesktop/Work/sidebar/owner tests.
 - Actual native Work navigation to Plugins and Skills, supported project read, scope denial, native package discover/review/install/disable/unregister/rollback, guarded skill create/edit/remove with exact readback and pending-original recovery.
 - Authenticated hosted bridge archive/restore/proposals/synthesis/activation/fresh-chat workflow with real IDs and owner denial/maintenance lock/auth-expiry/unknown-outcome controls.
@@ -78,3 +78,5 @@ Regenerate source hashes and the reviewed add-only patch without touching native
     node docs/workstreams/customize/native-ui/prepare-delivery.mjs --source <actual-native-source-filesystem-path> --git-root <same-checkout-Windows-Git-path> --git-executable <existing-Windows-git.exe>
 
 When invoked from WSL, use the actual /home path for --source, the paired //wsl.localhost/Ubuntu/home path for --git-root, and /mnt/c/Program Files/Git/cmd/git.exe as the explicit executable. Quote paths with spaces. The script refuses any existing target, unexpected target prefix or source link. It reads the declared tree and compares canonical prerequisite bytes; it does not apply/stage a patch, alter native files or configure Git globally. It writes only canonical delivery source, native-customize.patch and manifest.json in this directory.
+
+The selected Plugins/Skills page is presentation state above the keyed native owner. Switching projects preserves that page while remounting all project data, selected resources, editor drafts and pending UI outcomes behind the new exact owner. A seventh component case verifies Skills stays selected while reads move to the new project; the existing stale-response case remains unchanged.

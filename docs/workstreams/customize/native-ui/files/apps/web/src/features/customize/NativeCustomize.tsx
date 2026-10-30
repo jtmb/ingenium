@@ -24,14 +24,15 @@ const names: Record<Panel, string> = {packages: "Plugin packages", skills: "Skil
   instructions: "Instructions & references", engine: "Engine settings", legacy: "Other Customize workflows", hosted: "Hosted skill governance"};
 
 export function NativeCustomize(props: Props) {
+  const [kind, setKind] = useState<NativeKind>("plugin");
   const project = props.project;
   const owner = project ? nativeOwnerKey({serviceInstanceId: props.serviceInstanceId, projectId: project.id, projectRevision: project.revision},
     [project.primary_root, project.environment]) : JSON.stringify([props.serviceInstanceId, null]);
-  return <CustomizeOwner key={owner} {...props}/>;
+  return <CustomizeOwner key={owner} {...props} kind={kind} setKind={setKind}/>;
 }
 
-function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance}: Props) {
-  const [kind, setKind] = useState<NativeKind>("plugin"), [query, setQuery] = useState("");
+function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance, kind, setKind}: Props & {kind: NativeKind; setKind: (kind: NativeKind) => void}) {
+  const [query, setQuery] = useState("");
   const [scope, setScope] = useState("project"), [expanded, setExpanded] = useState(false), [limit, setLimit] = useState(50);
   const [pluginRead, setPluginRead] = useState<ReadState>(waiting), [skillRead, setSkillRead] = useState<ReadState>(waiting);
   const [refresh, setRefresh] = useState(0), [selected, setSelected] = useState<NativeEntry | null>(null);

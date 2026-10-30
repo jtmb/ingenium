@@ -8,15 +8,15 @@
       "path": "apps/web/src/features/customize/NativeCustomize.test.tsx",
       "precondition": "absent",
       "preSha256": null,
-      "postSha256": "b37209bb1df4593cb30c55f000e5b087bd34dcea073ffcb1cdb0f984e6d21bf3",
-      "bytes": 6663
+      "postSha256": "267bb316ab6add9536737e6ba2b59b03100e9fa0a2d58f371c3da5b49c85c76f",
+      "bytes": 7778
     },
     {
       "path": "apps/web/src/features/customize/NativeCustomize.tsx",
       "precondition": "absent",
       "preSha256": null,
-      "postSha256": "857a21513c545aaa22d13453c89f52416e598bf296d08c2d9b63d4afda08ec9e",
-      "bytes": 15270
+      "postSha256": "93bf5c939b885adbaf2a671eda9e0b1fa70b146bcbdf1cfbbc528602cda170e9",
+      "bytes": 15381
     },
     {
       "path": "apps/web/src/features/customize/native-customize.css",
@@ -130,7 +130,7 @@
       "currentCanonicalMatchesBaseline": true
     }
   ],
-  "patchSha256": "cfe21277fa83b90282c52b52a1ff4ce13fceb2d80fd2a9dec11b93912ae72767",
+  "patchSha256": "db91587b43f42ebb1c0032fa26d920a8e573bfba013af678f5a3e9131ce44ee8",
   "generatedDisposableOutputs": [],
   "requiredConsumer": "Coordinator reviewed application, native semantic tests and browser/native qualification",
   "endCondition": "Keep minimal durable source/patch/manifest receipts; coordinator reconciles its own build outputs"

@@ -46,13 +46,17 @@
     },
     {
       "sourceMutation": false,
-      "outcome": "PASS on final explicit-null patch cfe21277fa83b90282c52b52a1ff4ce13fceb2d80fd2a9dec11b93912ae72767; existing native source/index unchanged",
+      "outcome": "PASS on final page-preserving patch db91587b43f42ebb1c0032fa26d920a8e573bfba013af678f5a3e9131ce44ee8; native source/index unchanged",
       "name": "Native add-only patch preflight",
       "command": "Windows Git apply --check with exact per-command safe.directory/core.longpaths"
+    },
+    {
+      "name": "Native page preference source correction",
+      "outcome": "Selected Plugins/Skills state preserved above owner boundary; added seventh component case; changed TS syntax PASS; central seven-case execution pending"
     }
   ],
   "pending": [
-    "Coordinator six native component cases",
+    "Coordinator seven native component cases",
     "Full native TypeScript noEmit",
     "Root/App/Work slot application",
     "Actual browser/native screenshots and lifecycle qualification",

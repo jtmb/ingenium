@@ -2,7 +2,7 @@ diff --git a/apps/web/src/features/customize/NativeCustomize.test.tsx b/apps/web
 new file mode 100644
 --- /dev/null
 +++ b/apps/web/src/features/customize/NativeCustomize.test.tsx
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,92 @@
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 +import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 +import { useState } from "react";
@@ -83,11 +83,23 @@ new file mode 100644
 +  expect(screen.getByText("Authenticated private governance fixture")).toBeTruthy();
 +  expect(request).not.toHaveBeenCalled();
 +});
++
++it("preserves the Skills page preference while project-owned rows are replaced", async () => {
++  request.mockImplementation(async (_method: string, path: string) => reply(path, new URL("https://fixture.invalid" + path).searchParams.get("project_id") || ""));
++  const view = render(<NativeCustomize gateway={gateway} project={project} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++  fireEvent.click(screen.getByRole("button", {name: "Skills", exact: true}));
++  await screen.findByRole("heading", {name: "Skills", exact: true});
++  await screen.findAllByRole("button", {name: "Release, Project source", exact: true});
++  view.rerender(<NativeCustomize gateway={gateway} project={{...project, id: "next-project"}} connected serviceInstanceId="service" renderLegacyWorkflows={legacy}/>);
++  expect(screen.getByRole("heading", {name: "Skills", exact: true})).toBeTruthy();
++  await waitFor(() => expect(request.mock.calls.some(([,path]) => String(path).includes("project_id=next-project"))).toBe(true));
++  await screen.findAllByRole("button", {name: "Release, Project source", exact: true});
++});
 diff --git a/apps/web/src/features/customize/NativeCustomize.tsx b/apps/web/src/features/customize/NativeCustomize.tsx
 new file mode 100644
 --- /dev/null
 +++ b/apps/web/src/features/customize/NativeCustomize.tsx
-@@ -0,0 +1,176 @@
+@@ -0,0 +1,177 @@
 +import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 +import { ArrowLeft, BookOpen, Check, Package, Plus, RefreshCw, Search, Settings2 } from "lucide-react";
 +import type { Project } from "@veyra/contracts";
@@ -114,14 +126,15 @@ new file mode 100644
 +  instructions: "Instructions & references", engine: "Engine settings", legacy: "Other Customize workflows", hosted: "Hosted skill governance"};
 +
 +export function NativeCustomize(props: Props) {
++  const [kind, setKind] = useState<NativeKind>("plugin");
 +  const project = props.project;
 +  const owner = project ? nativeOwnerKey({serviceInstanceId: props.serviceInstanceId, projectId: project.id, projectRevision: project.revision},
 +    [project.primary_root, project.environment]) : JSON.stringify([props.serviceInstanceId, null]);
-+  return <CustomizeOwner key={owner} {...props}/>;
++  return <CustomizeOwner key={owner} {...props} kind={kind} setKind={setKind}/>;
 +}
 +
-+function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance}: Props) {
-+  const [kind, setKind] = useState<NativeKind>("plugin"), [query, setQuery] = useState("");
++function CustomizeOwner({gateway, project, connected, serviceInstanceId, renderLegacyWorkflows, hostedGovernance, kind, setKind}: Props & {kind: NativeKind; setKind: (kind: NativeKind) => void}) {
++  const [query, setQuery] = useState("");
 +  const [scope, setScope] = useState("project"), [expanded, setExpanded] = useState(false), [limit, setLimit] = useState(50);
 +  const [pluginRead, setPluginRead] = useState<ReadState>(waiting), [skillRead, setSkillRead] = useState<ReadState>(waiting);
 +  const [refresh, setRefresh] = useState(0), [selected, setSelected] = useState<NativeEntry | null>(null);
