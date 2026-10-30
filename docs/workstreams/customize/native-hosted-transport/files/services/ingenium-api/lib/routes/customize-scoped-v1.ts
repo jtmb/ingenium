@@ -9,7 +9,7 @@ import {createNativeCustomizeContextOwner,type VerifiedNativeContextOwner} from 
 import {contextProof,type NativeOwner} from '../paired-native-proof.js';
 import type {NativeProofReader} from '../native-hosted-connection-owner.js';
 import {verifyScopedProof,verifyScopedOriginal} from '../customize-scoped-v1-proof.js';
-import {authMiddleware} from '../middleware/auth.js';
+import {authMiddleware,authenticateRequestWithoutActivity} from '../middleware/auth.js';
 import {csrfMiddleware} from '../middleware/csrf.js';
 import {toAuthorizationPrincipal} from '../authorization-policy.js';
 type Row=Record<string,any>;
@@ -89,12 +89,16 @@ export function createNativeScopedCustomizeRouter(){
   }
  };
  /** Deliberate browser administrator transition. No Native proof/renderer grant can invoke this owner. */
- const transitionOwner=(req:Request,write=false)=>{const p=req.principal;need(p?.type==='user'&&p.session,'BROWSER_SESSION_REQUIRED',401);if(write)need(authentication.hasRecentStepUp(p.session),'RECENT_STEP_UP_REQUIRED',403);return createPositivePluginProjectionOwner(toAuthorizationPrincipal(p));};
+ const withTransitionOwner=(req:Request,write:boolean,work:(owner:ReturnType<typeof createPositivePluginProjectionOwner>)=>unknown)=>{
+  const original=req.principal;need(original?.type==='user'&&original.session,'BROWSER_SESSION_REQUIRED',401);const actorId=original.id,sessionId=original.session.id;
+  const assertCurrent=()=>{authenticateRequestWithoutActivity(req);csrfMiddleware(req,{} as Response,()=>{});const p=req.principal;need(p?.type==='user'&&p.session&&p.id===actorId&&p.session.id===sessionId,'BROWSER_SESSION_CHANGED',401);if(write)need(authentication.hasRecentStepUp(p.session),'RECENT_STEP_UP_REQUIRED',403);};
+  assertCurrent();const result=work(createPositivePluginProjectionOwner(toAuthorizationPrincipal(original),assertCurrent));assertCurrent();return result;
+ };
  const transitionSelection=z.object({mode:z.enum(['fresh-project','captured-legacy-cohort']),projectId:uuid,configOrigin:z.enum(['new-empty','database-project','reviewed-legacy-raw'])}).strict();
- router.post('/plugin-namespace/review',run(req=>{const q=transitionSelection.parse(req.body);return transitionOwner(req).review(q.mode,q.projectId,q.configOrigin);}));
- router.post('/plugin-namespace/apply',run(req=>transitionOwner(req,true).apply(transitionSelection.extend({operationId:uuid,reviewSha256:hash}).strict().parse(req.body))));
- router.post('/plugin-namespace/reconcile',run(req=>transitionOwner(req,true).reconcile(z.object({operationId:uuid,sourceOperationId:uuid,sourcePayloadSha256:hash}).strict().parse(req.body))));
- router.get('/plugin-namespace/operations/:id',run(req=>transitionOwner(req).inspect(uuid.parse(req.params.id))));
+ router.post('/plugin-namespace/review',run(req=>withTransitionOwner(req,false,owner=>{const q=transitionSelection.parse(req.body);return owner.review(q.mode,q.projectId,q.configOrigin);})));
+ router.post('/plugin-namespace/apply',run(req=>withTransitionOwner(req,true,owner=>owner.apply(transitionSelection.extend({operationId:uuid,reviewSha256:hash}).strict().parse(req.body)))));
+ router.post('/plugin-namespace/reconcile',run(req=>withTransitionOwner(req,true,owner=>owner.reconcile(z.object({operationId:uuid,sourceOperationId:uuid,sourcePayloadSha256:hash}).strict().parse(req.body)))));
+ router.get('/plugin-namespace/operations/:id',run(req=>withTransitionOwner(req,false,owner=>owner.inspect(uuid.parse(req.params.id)))));
  router.get('/offer',run(req=>{const q=z.object({parentGrantId:parent}).strict().parse(req.query);return paired(req,q.parentGrantId,async(_reader,binding,project,check)=>{check();return {protocol:SCOPED_PROTOCOL,baseBinding:binding,organizationId:project.organization_id,selection:offer(req,binding),recentStepUp:req.principal?.type==='user'&&!!req.principal.session&&authentication.hasRecentStepUp(req.principal.session),requiresSeparateConsent:true};});}));
  router.post('/consents',run(async req=>{
   const body=ScopedConsentRequestSchema.parse(req.body),p=req.principal;need(p?.type==='user'&&p.session&&authentication.hasRecentStepUp(p.session),'STEP_UP_REQUIRED',403);

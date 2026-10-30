@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "base": "Root actual applied74d61b63 positive manifest; exact canonical preimages",
+  "sources": [
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "preimageSha256": "d09b04cb87779856b1120b43010c3fc8288951d99eafb5ba5d45c7cf63ded91c",
+      "postimageSha256": "88ed24ffc3b3350f6e5bd1231428d84816e91e090e5b35ad4164ff0b7cb944fe",
+      "sourceFile": "files/services/ingenium-api/lib/routes/customize-scoped-v1.ts"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+      "preimageSha256": "ee16e5b4544cf397c146fb87ad93a03d7149b3d56b6e613d36e891723e4c5f2c",
+      "postimageSha256": "89506d17ec74df3086d07d485f463075af2b70dd0425448759f71f7273098e19",
+      "sourceFile": "files/packages/ingenium-core/lib/tools/plugin-projection-transition.ts"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/projects.ts",
+      "preimageSha256": "6d30b0d6fdae9a2634a654913e454bfb6aa69ab478794c7313ea1727c5526a1f",
+      "postimageSha256": "7a530c8de1447f68c2028e51bc6c83e66c05c97d3be69fcfd33219691790f88a",
+      "replacements": [
+        {
+          "before": "import {randomUUID} from \"node:crypto\";",
+          "after": "import {randomUUID} from \"node:crypto\";\nimport {authenticateRequestWithoutActivity} from \"../middleware/auth.js\";\nimport {csrfMiddleware} from \"../middleware/csrf.js\";\nimport {AppError} from \"../middleware/errors.js\";"
+        },
+        {
+          "before": "  const creator=req.principal?.type===\"user\"?toAuthorizationPrincipal(req.principal):undefined;",
+          "after": "  const creator=req.principal?.type===\"user\"?toAuthorizationPrincipal(req.principal):undefined;\n  const initializerSessionId=req.principal?.type===\"user\"?req.principal.session?.id:undefined;"
+        },
+        {
+          "before": "    try{const owner=createPositivePluginProjectionOwner(creator),review=owner.review(\"fresh-project\",project.id,\"new-empty\");",
+          "after": "    const assertInitializerCurrent=()=>{authenticateRequestWithoutActivity(req);csrfMiddleware(req,res,()=>{});const p=req.principal;if(p?.type!==\"user\"||!p.session||p.id!==creator.id||p.session.id!==initializerSessionId)throw new AppError(\"Authentication is required\",\"UNAUTHORIZED\",401);};\n    assertInitializerCurrent();\n    try{const owner=createPositivePluginProjectionOwner(creator,assertInitializerCurrent),review=owner.review(\"fresh-project\",project.id,\"new-empty\");"
+        },
+        {
+          "before": "    if(receipt.outcome!==\"succeeded\"){res.status(503)",
+          "after": "    assertInitializerCurrent();if(receipt.outcome!==\"succeeded\"){res.status(503)"
+        },
+        {
+          "before": "return;}}catch(e){res.status(503)",
+          "after": "return;}}catch(e){assertInitializerCurrent();res.status(503)"
+        }
+      ]
+    }
+  ],
+  "verification": {
+    "strictRootFiles": 3,
+    "actualDependencySources": 422,
+    "diagnostics": 0,
+    "emittedFiles": 0,
+    "staticRegressionControlsPassed": 5,
+    "runtimeHttpAcceptance": false,
+    "buildsOrServicesRun": false,
+    "newScratchPaths": []
+  }
+}

@@ -1,0 +1,25 @@
+/** Static regression checks only: no server, principal, session, credential, receipt or store is created. */
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {createRequire} from 'node:module';import {createHash} from 'node:crypto';
+const here=path.dirname(fileURLToPath(import.meta.url)),app='/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes';
+const ts=createRequire(import.meta.url)(app+'/node_modules/typescript/lib/typescript.js');
+const core=fs.readFileSync(here+'/files/packages/ingenium-core/lib/tools/plugin-projection-transition.ts','utf8'),route=fs.readFileSync(here+'/files/services/ingenium-api/lib/routes/customize-scoped-v1.ts','utf8');
+function parse(s){const n=ts.createSourceFile('proposal.ts',s,ts.ScriptTarget.Latest,true);assert.equal(n.parseDiagnostics.length,0);return n;}
+function named(source,name){let found;function walk(n){if(found)return;if(n.name?.getText()===name&&(ts.isFunctionDeclaration(n)||ts.isVariableDeclaration(n)||ts.isMethodDeclaration(n))){found=n;return;}ts.forEachChild(n,walk);}walk(parse(source));assert.ok(found,'missing owner boundary '+name);return found.getText();}
+function before(text,a,b){assert.ok(text.includes(a)&&text.includes(b)&&text.indexOf(a)<text.indexOf(b),a+' must precede '+b);}
+test('browser transition wrapper re-resolves actual session without activity, checks CSRF/actor/session/step-up and response',()=>{
+ const wrapper=named(route,'withTransitionOwner'),current=named(wrapper,'assertCurrent');before(current,'authenticateRequestWithoutActivity(req)','csrfMiddleware(req');assert.match(current,/p\.id===actorId&&p\.session\.id===sessionId/);assert.match(current,/if\(write\)need\(authentication\.hasRecentStepUp\(p\.session\)/);assert.match(wrapper,/assertCurrent\(\);const result=work\(createPositivePluginProjectionOwner\(toAuthorizationPrincipal\(original\),assertCurrent\)\);assertCurrent\(\);return result/);
+});
+test('all four explicit transition routes bind current request and only effects require recent step-up',()=>{
+ for(const [verb,selector,write]of [['post','review',false],['post','apply',true],['post','reconcile',true],['get','operations/:id',false]])assert.ok(route.includes("router."+verb+"('/plugin-namespace/"+selector+"',run(req=>withTransitionOwner(req,"+write+','));
+});
+test('Core checks current HTTP owner before originals, inside transaction, before every target and before commit',()=>{
+ for(const name of ['inspect','review','apply','reconcile'])assert.match(named(core,name),/\{assertRequestCurrent\(\);|\{\s+assertRequestCurrent\(\);/);
+ const execute=named(core,'execute');assert.match(execute,/execTransaction\(\(\)=>\{\s+assertRequestCurrent\(\)/);assert.match(execute,/for\(const target of plan\.targets\)\{assertRequestCurrent\(\);/);before(execute,'assertRequestCurrent();currentActor(principal','finish(sourceId,value)');
+ const apply=named(core,'apply');assert.match(apply,/execTransaction\(\(\)=>\{\s+assertRequestCurrent\(\);currentActor/);const repair=named(core,'reconcile');assert.match(repair,/execTransaction\(\(\)=>\{assertRequestCurrent\(\);currentActor/);
+});
+test('inspect and terminal reconciliation use entire immutable source plan, including repair source ownership',()=>{
+ const scope=named(core,'inspectionPlan'),inspect=named(core,'inspect'),repair=named(core,'reconcile');assert.match(scope,/sourceOperationId,principal\.id,installationId\(\)/);assert.match(scope,/source\.payload_sha256===original\.request\.sourcePayloadSha256/);assert.match(scope,/payloadHash\(snapshot\)===preimage!\.snapshot_sha256/);assert.match(scope,/plugin-projection-private-plan-v1/);assert.match(inspect,/currentActor\(principal,plan\.projects\.map\(p=>p\.id\),plan\.mode==='captured-legacy-cohort'\)/);assert.ok(!inspect.includes('request?.projectId'));before(repair,'const inspectionScope=inspectionPlan(source!)','if(source!.result_json)');before(repair,'currentActor(principal,inspectionScope.projects.map','if(source!.result_json)');
+});
+test('actual canonical new-project initializer hook uses the same session owner and never hides revocation behind503',()=>{
+ const m=JSON.parse(fs.readFileSync(here+'/plugin-transition-browser-auth-manifest.json')),r=m.sources.find(r=>r.path==='services/ingenium-api/lib/routes/projects.ts');let s=fs.readFileSync(app+'/'+r.path,'utf8');assert.equal(createHash('sha256').update(s).digest('hex'),r.preimageSha256);for(const e of r.replacements){assert.equal(s.split(e.before).length,2);s=s.replace(e.before,e.after);}assert.equal(createHash('sha256').update(s).digest('hex'),r.postimageSha256);parse(s);assert.match(s,/createPositivePluginProjectionOwner\(creator,assertInitializerCurrent\)/);assert.match(s,/p\.id!==creator\.id\|\|p\.session\.id!==initializerSessionId/);assert.match(s,/catch\(e\)\{assertInitializerCurrent\(\);res\.status\(503\)/);assert.match(s,/assertInitializerCurrent\(\);if\(receipt\.outcome!==/);
+});
