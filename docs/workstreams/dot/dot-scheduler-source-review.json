@@ -1,0 +1,49 @@
+{
+  "review": "Root-requested bounded Dot source review",
+  "sourceOnly": true,
+  "sources": {
+    "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts": "38af882cd69c2bdd90e149eb24ec97c404d57290018270019cda8a9d5187cea3",
+    "services/ingenium-api/lib/dot-v2/core-binding.ts": "c228a7f593895aefbd0a0d463f3c90ef8f51c0d3d9bc981d7751177e08b05ea9",
+    "services/ingenium-api/lib/dot-v2/installed-dot-http.ts": "d4f80d165d7f7707f567c9d26ab8012d20b821141c4a78a93ad1430437e0d82e",
+    "services/ingenium-api/lib/dot-v2/dot-original-context.ts": "bbfbe8bff9391ee0eabc35e16382b27d6e3991a8f5bb6a3fd3c693bed036eea8"
+  },
+  "finding": {
+    "priority": "P2",
+    "path": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+    "lines": "229-245",
+    "title": "Isolate per-operation recovery errors to avoid starvation",
+    "trigger": "Persistent ordinary Error/503 from original context or manager inspection for first row A; healthy pending B follows in same bounded page",
+    "reason": "Cursor advances to page last row before processing; first unclassified error aborts remaining page; after wrap same A aborts again",
+    "repair": "Keep failure closed; isolate and diagnose each operation, or advance cursor only as rows are attempted"
+  },
+  "actualSourceWitness": {
+    "calls": [
+      "A",
+      "A",
+      "A"
+    ],
+    "errors": [
+      {
+        "message": "retained runtime unavailable",
+        "status": 503
+      },
+      {
+        "message": "retained runtime unavailable",
+        "status": 503
+      },
+      {
+        "message": "retained runtime unavailable",
+        "status": 503
+      }
+    ],
+    "healthyOperationBAttempted": false
+  },
+  "witnessLimits": "Actual recoverOperationsAsync source stripped in memory, inert service/DB mocks; no authority or live runtime acceptance",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Compact source hashes and unique failure witness for Root fix review",
+    "sharedWrites": false
+  }
+}
