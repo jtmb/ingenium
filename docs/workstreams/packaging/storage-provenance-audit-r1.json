@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "owner": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "at": "2026-10-30T20:20:38.595Z",
+  "scope": "Read-only receipt/provenance audit; own docs/status writes only",
+  "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "ceilingBytes": 21474836480,
+  "reservationRequestedByCoordinatorBytes": 2415919104,
+  "provablyEligibleTargets": [],
+  "removed": [],
+  "removedBytes": 0,
+  "windowsRecoveryClaimed": false,
+  "records": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/node_modules",
+      "linuxAllocatedBytes": 530472960,
+      "decision": "Retain: relocated same installed tree; composed frontend production, normal gate and final browser consumers not closed by reviewed compiler pass."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/apps/web/node_modules",
+      "linuxAllocatedBytes": 3792896,
+      "decision": "Retain: workspace dependencies; no current last-consumer closure established."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/native-ui-dependencies",
+      "linuxAllocatedBytes": 6823936,
+      "decision": "Protected: exact prior failed safety check unexpected staging source/evidence."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/target",
+      "linuxAllocatedBytes": 1288814592,
+      "decision": "Protected: prior exact ENOTEMPTY cleanup failure; no alias or child retry."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/tmp",
+      "linuxAllocatedBytes": 28901376,
+      "decision": "Retain: heterogeneous browser/upload/compiler state; no per-target last-consumer closure or complete provenance established."
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/cache",
+      "linuxAllocatedBytes": 1380352,
+      "decision": "Retain: aggregate only; no per-target current consumer closure established."
+    }
+  ],
+  "dependencyProvenance": {
+    "inode": 832961,
+    "isSymlink": false,
+    "oldPath": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/native-ui-dependencies/node_modules",
+    "oldPathState": "ENOENT",
+    "copyCreated": false,
+    "sourceLockSha256": "e0749a3296e5a56e67dda0545a8ea6f321073dfb7ba7a139c44d88aff2236ddc",
+    "sourceManifestSha256": "e32f6993116f9c3e731a9739d41491dbf4f84d5424534a377e6148a8ff3dcd1f",
+    "regeneration": "Node24.18/npm11 locked npm ci --ignore-scripts --include=dev --include=optional --no-audit --no-fund; optional Windows inputs per native-ui-windows-platform-input-r2.json; all caches/TEMP/build AppData scoped to approved existing pair with fresh guards",
+    "priorGenerationCleanupNotAuthority": "2026-10-29T14:09 cleanup predates current22:56 installation/23:02 relocation"
+  },
+  "liveGate": {
+    "receipt": "coordination/integration/native-reviewed-check-gate-r15.json",
+    "at": "2026-10-30T13:10:30.651Z",
+    "passed": true,
+    "compilerStarted": true,
+    "code": 0,
+    "caution": "Current receipt supersedes stale failed-check assumption; no current paired reservation recomputed by worker."
+  },
+  "limits": [
+    "No process/container/mount/Windows handle final checks performed; Root owns them.",
+    "Full Phase du encountered permission denial at coordination/voice/cpu-qualification/private; no retry or body access; aggregate incomplete and not used for budget admission.",
+    "No fresh paired allocation or Windows free-space admission claimed; receipt allocations are historical.",
+    "No credential/private capture bodies read. No install/build/runtime/start/stop/deletion or cap/root change.",
+    "Protected native Windows target/cargo-home/cache-node and prior .next refusals remain excluded.",
+    "Actual API/Core dist and application dependencies retain integration/image/browser consumers. Runtime/mail state, models, original sources and unique failure witnesses remain protected."
+  ],
+  "evidence": [
+    {
+      "relativePath": "output-ownership.json",
+      "bytes": 16104,
+      "sha256": "f6e74aa32da68ed5f58033a59005766f5f3807aba1a63a27fa44513d3b09cf16"
+    },
+    {
+      "relativePath": "coordination/integration/native-build-budget-review-r1.json",
+      "bytes": 6727,
+      "sha256": "6a394bc840ca2664b42c76b152becf10479eb02a767ff432eacfed2baccaac22"
+    },
+    {
+      "relativePath": "coordination/integration/native-dependency-relocation.json",
+      "bytes": 1721,
+      "sha256": "61fbcd1a571e968a3326c036160f575c46619db4840617a7bafe00f0fab0ab0a"
+    },
+    {
+      "relativePath": "coordination/integration/native-ui-dependencies-lease.json",
+      "bytes": 6791,
+      "sha256": "f0d2a5cfc6f8ecde9b172d05919490e1c64d2c17ac000ad9c54321ba6154067e"
+    },
+    {
+      "relativePath": "coordination/integration/native-ui-windows-platform-input-r2.json",
+      "bytes": 2221,
+      "sha256": "3cf0a9087b0618a4f4e2e5962b3554ffdbb1ea7d3b2dd971d0f16eb2b0ad4408"
+    },
+    {
+      "relativePath": "coordination/integration/native-reviewed-check-gate-r15.json",
+      "bytes": 546,
+      "sha256": "b5193278e429d29fcf2086f67e0d8f15a1a715114482a145f484d86be28a0b13"
+    },
+    {
+      "relativePath": "coordination/integration/core-runtime-build-ownership-r1.json",
+      "bytes": 1072,
+      "sha256": "6678c3ee33cf542153500d88289556fd96c6e228a14dbe4a1543a58cd7b7d046"
+    },
+    {
+      "relativePath": "evidence/native-dependency-staging-cleanup.json",
+      "bytes": 457,
+      "sha256": "63ddf54deee6d9b5b4a181013e5ff612ae11ee5178a3c67f522fe4977bb8f2a3"
+    },
+    {
+      "relativePath": "evidence/native-obsolete-output-cleanup.json",
+      "bytes": 11660,
+      "sha256": "307e536a1d24ab5a9ff885c8afac28bed6718f1534e6ca8437c2ce28a5453637"
+    },
+    {
+      "relativePath": "evidence/native-node-cache-cleanup-refused.json",
+      "bytes": 462,
+      "sha256": "752468a4927972372b4cb9ee5ee9b06c4ff2cec20fbc3c524a7dd49643595b75"
+    },
+    {
+      "relativePath": "evidence/native-consumed-compiler-cleanup-refused.json",
+      "bytes": 1201,
+      "sha256": "57b7c124f87e987567d56e3e7896fc36ad3f70fd65499a753938ab7f6aaa2af0"
+    },
+    {
+      "relativePath": "evidence/native-zoom-node-dependency-cleanup-reconciled.json",
+      "bytes": 2809,
+      "sha256": "8b14ee57eef67e5e7d353146cbbedb139adb84c8da0bc7550deee08903e5549d"
+    }
+  ],
+  "cleanup": {
+    "generated": [
+      "docs/workstreams/packaging/storage-provenance-audit-r1.json",
+      "docs/workstreams/packaging/storage-provenance-audit-r1.md",
+      "coordination/packaging/status.json (existing updated)"
+    ],
+    "retainedReason": "Minimal durable source audit for coordinator review; no disposable scratch/dependencies/build output created."
+  }
+}
