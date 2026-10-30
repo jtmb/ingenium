@@ -72,3 +72,5 @@ SQL131 source proposal: [lifecycle and closed gates](candidate-lifecycle-sql131.
 Original manager waiting/readiness: [source owner and exact HMAC/remaining gates](candidate-original-manager.md), [nine-target patch](candidate-original-manager.patch), [receipt](candidate-original-manager.json). Fresh same-child challenge; issuer and final empty-scope retirement remain closed.
 
 Lossless composition of frozen waiting/readiness and finite response: [lineage, apply paths and original-lease review](candidate-composed.md), [current-Root11-target patch](candidate-composed-root.patch), [receipt](candidate-composed.json). 48source fixtures; all actual18case/full-release gates remain open.
+
+Composed custody hardening: [signed custody contract and two application paths](candidate-composed-custody.md), [two-target delta](candidate-composed-custody-delta.patch), [hardened direct Root patch](candidate-composed-custody-root.patch), [receipt](candidate-composed-custody.json). 50source fixtures; actual verifier/lease binding remains Root-owned.

@@ -1,0 +1,191 @@
+{
+  "sourceOnly": true,
+  "runtimeCasesRun": 0,
+  "priorComposedCommit": "6edde3a32696bc2e34d1e6a4f6d580af2dadf990",
+  "priorComposedRootPatchSha256": "e1baf7a784819e70b99be6b87906d7e220158e2a85f3543a8cae3c0498f912b0",
+  "frozenWaitingCommit": "597cf298fe5711dcee0d00aa2be1f9f4dc0e4209",
+  "frozenFiniteCommit": "3c0e7016dd26218cd81cfcda328d53aa0e6633cd",
+  "patches": [
+    {
+      "base": "delta",
+      "patch": "candidate-composed-custody-delta.patch",
+      "targets": 2,
+      "sha256": "32b0fcc4be9fa2dc3efc2e9d64c38365aa2f6a7e2fd5ae47ccc1878c386ff443",
+      "bytes": 8650
+    },
+    {
+      "base": "root",
+      "patch": "candidate-composed-custody-root.patch",
+      "targets": 11,
+      "sha256": "7f8149a932d4ca1c7f167cdaa9ae224b1b716e8328e925f5dfd718e4396f50a5",
+      "bytes": 75471
+    }
+  ],
+  "targets": [
+    {
+      "target": "scripts/runtime-entrypoint.sh",
+      "source": "runtime-entrypoint-candidate.proposal.sh",
+      "originalRootPreimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "currentRootPreimageSha256": "cbab8b30da0b5f182426098c5598804b672c10f62747dd5c86e219f73d9d96a6",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02",
+      "hardenedPostimageSha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02",
+      "bytes": 5138
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "source": "candidate-composed-bootstrap.proposal.mjs",
+      "originalRootPreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "currentRootPreimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "a2b38ee4a33f6cecf98b6861368a6aa21b36e501b25bf1166ee94c1d2f1509cd",
+      "hardenedPostimageSha256": "a2b38ee4a33f6cecf98b6861368a6aa21b36e501b25bf1166ee94c1d2f1509cd",
+      "bytes": 10266
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "source": "candidate-carrier-readiness.d.mts",
+      "originalRootPreimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "currentRootPreimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "hardenedPostimageSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "bytes": 2843
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "source": "candidate-carrier-readiness.proposal.mjs",
+      "originalRootPreimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "currentRootPreimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "hardenedPostimageSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "bytes": 12399
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "source": "candidate-composed-loopback.d.mts",
+      "originalRootPreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "currentRootPreimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "2f9a03f015a40194aac56a7b9722b5421c7bc32bcff99a88e2106e8dbc8921dd",
+      "hardenedPostimageSha256": "2f9a03f015a40194aac56a7b9722b5421c7bc32bcff99a88e2106e8dbc8921dd",
+      "bytes": 1485
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "source": "candidate-composed-loopback.proposal.mjs",
+      "originalRootPreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "currentRootPreimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "3c5028809396e146bd547cdc3c5d06ed32f596e73eadf050a13d912210a38046",
+      "hardenedPostimageSha256": "3c5028809396e146bd547cdc3c5d06ed32f596e73eadf050a13d912210a38046",
+      "bytes": 8247
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "source": "candidate-composed-custody-owner.d.mts",
+      "originalRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageExists": false,
+      "priorComposedPostimageSha256": "4cced16b0071ca83916ffa5271f62c649bde5bb72e3620dbd227c7891a6856ba",
+      "hardenedPostimageSha256": "572ce33cf8a9ffe8494a00f7ada8e3dc4ff1956858091e11bf1b13ff8a2e12b3",
+      "bytes": 1329
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "source": "candidate-composed-custody-owner.proposal.mjs",
+      "originalRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageExists": false,
+      "priorComposedPostimageSha256": "3b53980ec1288d21c77911ab852508afc51d660dbda1f139abc593aac906e49b",
+      "hardenedPostimageSha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83",
+      "bytes": 26193
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+      "source": "candidate-response-program.d.mts",
+      "originalRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageExists": false,
+      "priorComposedPostimageSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "hardenedPostimageSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "bytes": 1278
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+      "source": "candidate-response-program.proposal.mjs",
+      "originalRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "currentRootPreimageExists": false,
+      "priorComposedPostimageSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "hardenedPostimageSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "bytes": 11948
+    },
+    {
+      "target": "services/ingenium-api/scripts/runtime-manager.ts",
+      "source": "runtime-manager-candidate-waiting.proposal.ts",
+      "originalRootPreimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "currentRootPreimageSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "currentRootPreimageExists": true,
+      "priorComposedPostimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "hardenedPostimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "bytes": 29102
+    }
+  ],
+  "emitted": {
+    "js": 5,
+    "types": 5,
+    "failures": 0
+  },
+  "shellSyntax": 0,
+  "actualRootApplyCheck": {
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "writes": 3,
+  "validation": {
+    "sourceFixturePass": 50,
+    "sourceFixtureFail": 0,
+    "stdoutSha256": "28866cbc58884588a8575e499115582cff9beb611704e6d9ea1b934de94544dd",
+    "testSourceSha256": "134e2e959b63f888ea5305ac38458e8587d8c71258ce28110899ebe0150a3344",
+    "command": "node --experimental-vm-modules --experimental-strip-types --test docs/workstreams/dot/candidate-composed-custody.test.mjs",
+    "limits": "48 composition/source lease controls +7signed manager code paths under synthetic VM transport tested by independent test-only HMAC/custody verifier +emitted artifact control. Not actual Root API verifier/private brand/auth/CAS/runtime/18cases.",
+    "fixtureRepair": "Nested data-module fixture export newline and literal import.meta replacement errors failed before execution; encoded suffix and preserved literal rewrite token. No production source/guard changed."
+  },
+  "remaining": [
+    "Root actual fixed verifier exact signed custody+outer equality+original retained API lease binding before minting opaque handle/CAS",
+    "All prior identity/source/placement/deadline/revision/freshness/auth/child/attach rules unchanged",
+    "No reconstruction/adoption/reprepare after restart",
+    "Credential/frame/material issuance remains closed; actual native18cases/full-release/qualified retirement/image/Windows/cluster gates remain open"
+  ],
+  "cleanup": {
+    "owner": "veyra-bot existing worker slice",
+    "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "existing authorized C-backed WSL",
+    "generatedPaths": [
+      "docs/workstreams/dot/README.md",
+      "docs/workstreams/dot/candidate-composed-custody-delta.patch",
+      "docs/workstreams/dot/candidate-composed-custody-freeze.py",
+      "docs/workstreams/dot/candidate-composed-custody-owner.d.mts",
+      "docs/workstreams/dot/candidate-composed-custody-owner.proposal.mjs",
+      "docs/workstreams/dot/candidate-composed-custody-root.patch",
+      "docs/workstreams/dot/candidate-composed-custody.json",
+      "docs/workstreams/dot/candidate-composed-custody.md",
+      "docs/workstreams/dot/candidate-composed-custody.test.mjs"
+    ],
+    "regeneration": "python3 docs/workstreams/dot/candidate-composed-custody-freeze.py; --check-only writes0",
+    "protected": "Frozen597cf/3c0/6edde chains and actual Root source/SQL hardening/credentials/tokens/lockfiles/failure witnesses unchanged",
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retainedConsumer": "Root exact composed hardening integration/review; minimal source/patch/generator/fixtures/hash lineage/receipt/docs"
+  },
+  "artifactWhitespace": {
+    "candidate-composed-custody-delta.patch": [],
+    "candidate-composed-custody-root.patch": [
+      6,
+      418
+    ]
+  }
+}
