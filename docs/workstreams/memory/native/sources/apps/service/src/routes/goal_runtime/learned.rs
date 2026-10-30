@@ -17,6 +17,11 @@ impl LearnedAdmission{
   }Ok(())
  }
 }
+impl MemoryAdmission{
+ pub(in crate::routes) fn has_retained_context(&self)->bool{
+  !self.entries.is_empty()||self.learned.as_ref().is_some_and(|m|!m.entries.is_empty())
+ }
+}
 impl Goals{
  pub(in crate::routes) fn capture_native_memory(&self,store:&ProjectStore,owner:&NativeMemoryOwner,runtime:&LiveRuntime,project:&str,chat:&str,selections:&[veyra_contracts::MemorySelection])->Result<MemoryAdmission,String>{
   let mut memory=self.capture_memory(project,chat,selections)?;

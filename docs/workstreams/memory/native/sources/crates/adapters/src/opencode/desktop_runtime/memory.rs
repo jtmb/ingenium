@@ -1,6 +1,8 @@
 use super::*;
 use crate::{native_memory_owner::NativeMemoryOwner,projects::ProjectStore};
 use veyra_memory::{ExecutionStamp,CompletedMessage,SourceRef,Role,content_hash,fingerprint};
+mod source;
+pub(super) mod local_original;
 impl LiveRuntime {
  fn memory_verify_owner(engine:&OwnedEngine,store:&ProjectStore,owner:&NativeMemoryOwner,chat:&str)->Result<(),RuntimeError>{
   owner.verify_chat(store,chat).map_err(|_|RuntimeError::Binding)?;
@@ -81,29 +83,41 @@ impl LiveRuntime {
   if records.is_none(){*records=Some(load_prompt_records(&self.storage.join("prompt-admissions.json"))?)}
   let records=records.as_ref().ok_or(RuntimeError::Storage)?;
   let mut selected=vec![];
-  for pair in messages.chunks(2){
-   if pair.len()!=2{return Err(RuntimeError::Binding)}
-   let (u,a)=(&pair[0],&pair[1]);
-   if u.kind!="user"||a.kind!="assistant"||a.parent_id.as_deref()!=Some(u.id.as_str())||a.error.is_some()||
-      a.finish.as_deref()!=Some("stop")||u.session_id!=chat||a.session_id!=chat{return Err(RuntimeError::Binding)}
+  for (user,assistant) in source::candidate_pairs(messages,chat)?{
+   let (u,a)=(&messages[user],&messages[assistant]);
    let completed=a.time.as_ref().and_then(|v|v.get("completed")).and_then(Value::as_u64).ok_or(RuntimeError::Binding)?;
-   let record=records.values().find(|r|r.message_id==u.id&&r.session_id==chat&&r.state==PromptState::Admitted).ok_or(RuntimeError::Binding)?;
-   let original=record.original.as_ref().ok_or(RuntimeError::Binding)?;
-   if original.library_id!=stamp.scope.library_id||original.engine_project_id!=stamp.engine_project_id||original.project.primary_root!=owner.directory()||
-      !matches!(&stamp.scope.namespace,veyra_memory::NativeNamespace::Project{project_id} if *project_id==original.project.id)||
-      fingerprint(&original.project.environment).map_err(|_|RuntimeError::Binding)?!=stamp.scope.execution_id{return Err(RuntimeError::Binding)}
+   let Some((request,record))=records.iter().find(|(_,r)|r.message_id==u.id&&r.session_id==chat&&r.state==PromptState::Admitted) else{continue};
    // Completed tool-bearing turns and original injected files/skills/memory/hooks
    // are conservatively external. No proof is inferred from today's settings.
-   let external=!original.files.as_array().is_some_and(Vec::is_empty)||!original.skill_ids.is_empty()||
-    !original.memory.is_null()||!original.hooks.as_object().is_some_and(|h|h.is_empty())||
-    pair.iter().any(|m|m.content.iter().any(|p|matches!(p,super::super::TimelineContent::Tool{..})));
-   for (m,role) in [(u,Role::User),(a,Role::Assistant)]{
+   let tool_bearing=[u,a].iter().any(|m|m.content.iter().any(|p|matches!(p,super::super::TimelineContent::Tool{..})));
+   let (external,revisions)=match (&record.original,&record.local_original){
+    (Some(original),None)=>{
+     if original.request_id!=*request||original.library_id!=stamp.scope.library_id||original.engine_project_id!=stamp.engine_project_id||original.project.primary_root!=owner.directory()||
+        !matches!(&stamp.scope.namespace,veyra_memory::NativeNamespace::Project{project_id} if *project_id==original.project.id)||
+        fingerprint(&original.project.environment).map_err(|_|RuntimeError::Binding)?!=stamp.scope.execution_id{continue}
+     let Some(external)=source::external(original,tool_bearing) else{continue};
+     (external,[fingerprint(&(u,original)),fingerprint(&(a,original))])
+    },
+    (None,Some(original))=>{
+     let native=&original.request.owner;
+     if original.request.request_id!=*request||native.installation_id!=stamp.scope.library_id||native.custodian_key!=stamp.scope.os_custodian_id||
+        original.engine_project_id!=stamp.engine_project_id||original.session["id"]!=chat||
+        !matches!(&stamp.scope.namespace,veyra_memory::NativeNamespace::Projectless{namespace_id} if *namespace_id==native.workspace_id)||
+        !matches!(&original.request.operation,veyra_contracts::local_workspaces::LocalOperation::AgentTurn{session_id,..} if session_id==chat)||
+        fingerprint(&native.environment).map_err(|_|RuntimeError::Binding)?!=stamp.scope.execution_id||
+        fingerprint(&original.request).map_err(|_|RuntimeError::Binding)?!=original.operation_request_sha256{continue}
+     let Some(external)=source::external_local(original,tool_bearing) else{continue};
+     (external,[fingerprint(&(u,original)),fingerprint(&(a,original))])
+    },
+    _=>continue, // Legacy ownerless records and mixed owners never acquire scope.
+   };
+   for ((m,role),revision) in [(u,Role::User),(a,Role::Assistant)].into_iter().zip(revisions){
     let text=m.text.clone().ok_or(RuntimeError::Binding)?;
-    let revision=fingerprint(&(m,original)).map_err(|_|RuntimeError::Binding)?;
+    let revision=revision.map_err(|_|RuntimeError::Binding)?;
     selected.push(CompletedMessage{source:SourceRef{chat_id:chat.into(),message_id:m.id.clone(),role,content_hash:content_hash(&text),revision,turn_id:u.id.clone(),terminal_id:a.id.clone()},
      text,completed_ms:completed,terminal:true,external_context:Some(external)});
    }
   }
-  Ok(selected)
+  if selected.is_empty(){return Err(RuntimeError::Binding)}Ok(selected)
  }
 }

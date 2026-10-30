@@ -30,6 +30,31 @@ ReplaceOnce 'crates/adapters/src/goal_store.rs' '    uncertain: bool,' ('    lea
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, uncertain: false })' ('        let learned = learned::load(directory)?;'+[char]10+'        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, learned, uncertain: false })')
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '        value["retained_task_goals"]' ('        value["learned_memory_v1"] = serde_json::to_value(&self.learned).map_err(|_|"Learned memory export failed")?;'+[char]10+'        value["retained_task_goals"]')
 ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' 'mod prompt_original;' ('mod prompt_original;'+[char]10+'mod memory;')
+ReplaceOnce 'crates/contracts/src/lib.rs' 'pub use prompt_originals::*;' ('pub use prompt_originals::*;'+[char]10+'mod local_prompt_original;'+[char]10+'pub use local_prompt_original::*;')
+$record=@'
+struct PromptRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    original: Option<veyra_contracts::PromptOriginal>,
+'@
+ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' $record ($record+[char]10+'    #[serde(default, skip_serializing_if = "Option::is_none")]'+[char]10+'    local_original: Option<veyra_contracts::LocalPromptOriginal>,')
+$recordCapture=@'
+        let record = PromptRecord {
+            original: original.cloned(),
+'@
+$recordCaptureNew=@'
+        // Requires the already-composed Projects8b local owner parameter.
+        // Old retained records return above; no backfill or fresh recapture.
+        if local.is_some() && original.is_some(){return Err(RuntimeError::Binding)}
+        let local_original=match local{
+            Some((binding,current))=>Some(memory::local_original::capture(
+                self,&engine,binding,current,&before,request_id,text,files,skill_ids,require_idle)?),
+            None=>None,
+        };
+        let record = PromptRecord {
+            original: original.cloned(),
+            local_original,
+'@
+ReplaceOnce 'crates/adapters/src/opencode/desktop_runtime.rs' $recordCapture $recordCaptureNew
 # Projects owns the ONE canonical scoped bounded-recent client extension.
 # Do not add a memory-specific OpenCodeClient implementation here.
 ReplaceOnce 'apps/service/src/routes/goal_runtime.rs' 'mod controls;' ('mod controls;'+[char]10+'mod learned;')
@@ -67,9 +92,10 @@ $preview=@'
 $previewNew=@'
         let native_owner=veyra_adapters::native_memory_owner::NativeMemoryOwner::project(
             projects.as_ref().ok_or(RuntimeError::Storage)?,&project,&state.instance_id).map_err(|_|binding())?;
-        let memory=Some(state.goals.capture_native_memory(
+        let captured_memory=state.goals.capture_native_memory(
             projects.as_ref().ok_or(RuntimeError::Storage)?,&native_owner,&state.live_agent.runtime,
-            &project.id,&id,&input.memory_selection).map_err(|_|binding())?);
+            &project.id,&id,&input.memory_selection).map_err(|_|binding())?;
+        let memory=captured_memory.has_retained_context().then_some(captured_memory);
 '@
 ReplaceOnce 'apps/service/src/routes/live_agent/main_prompt.rs' $preview $previewNew
 $submit=@'
@@ -109,6 +135,8 @@ $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e
  superseded='eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply';
  contract='ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output';
  authority='Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority';
+ local_original_contract='Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill';
+ local_original_gate='Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance';
  apply_gate='Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance';
 };operations=$ops}
 foreach($path in ($ops.path|Select-Object -Unique)){

@@ -51,8 +51,8 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/goal_runtime/learned.rs",
     "target": "apps/service/src/routes/goal_runtime/learned.rs",
     "required_preimage": "absent",
-    "sha256": "e1f7f4667a26ad9ddba4dc5f467d9b869af45d259c436ff23e4a2f6cf0a2a8bc",
-    "bytes": 11263,
+    "sha256": "ef5ab41246ec1e34aca9d1ac6e29a77631ee858da0b8d481a93548f73f43264c",
+    "bytes": 11439,
     "transform": null
   },
   {
@@ -75,8 +75,32 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "target": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
     "required_preimage": "absent",
-    "sha256": "dc215af0dd508abfa79848f40679e3359cac7851f73a63fe1b8389d1dac97d69",
-    "bytes": 7716,
+    "sha256": "aefcea93ccb657606debdd4980c0832877be78efa5c58406146ceccb1c0e55ff",
+    "bytes": 8710,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
+    "target": "crates/adapters/src/opencode/desktop_runtime/memory/local_original.rs",
+    "required_preimage": "absent",
+    "sha256": "1f0aa89319b8ce2871e6e971e218703c08e77f2f4a9b934dfe8bfc98ca3455cf",
+    "bytes": 1731,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory/source.rs",
+    "target": "crates/adapters/src/opencode/desktop_runtime/memory/source.rs",
+    "required_preimage": "absent",
+    "sha256": "13e9e8abf7b733663c4e9001a3988cf209cc5b4805ca4e5d6b5d62e746a9709a",
+    "bytes": 6344,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/contracts/src/local_prompt_original.rs",
+    "target": "crates/contracts/src/local_prompt_original.rs",
+    "required_preimage": "absent",
+    "sha256": "2bb86ea102367f6d46251fc835d5e652c9a7ad7e877226767d8c1f13db550b2c",
+    "bytes": 787,
     "transform": null
   },
   {
@@ -94,8 +118,8 @@
     "sha256": "e43c847385614225977bb5c30581f0535e1ee4943ef744a666b1a4db5a5023fc",
     "bytes": 5481,
     "transform": {
-      "replacement": "../memoryController.mjs",
-      "find": "../controller.mjs"
+      "find": "../controller.mjs",
+      "replacement": "../memoryController.mjs"
     }
   },
   {

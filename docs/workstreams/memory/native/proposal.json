@@ -4,16 +4,18 @@
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
     "status": "bound-in-source-awaiting-Native-integration-review",
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
-    "owner": "Root/Projects",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
-    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
     "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
+    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
     "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
+    "owner": "Root/Projects",
+    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
     "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent"
   },
   "operations": [
@@ -78,6 +80,24 @@
       "replacement": "mod prompt_original;\nmod memory;"
     },
     {
+      "path": "crates/contracts/src/lib.rs",
+      "preimage_sha256": "983c1aa10457e222c0a041580865ff63a8a1779e9342a792b37550e86451f616",
+      "find": "pub use prompt_originals::*;",
+      "replacement": "pub use prompt_originals::*;\nmod local_prompt_original;\npub use local_prompt_original::*;"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "5b827915417ac52cd909be76f1852c0941621492db5df8f7b8dfd504f63b52da",
+      "find": "struct PromptRecord {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    original: Option<veyra_contracts::PromptOriginal>,",
+      "replacement": "struct PromptRecord {\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    original: Option<veyra_contracts::PromptOriginal>,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    local_original: Option<veyra_contracts::LocalPromptOriginal>,"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "5b827915417ac52cd909be76f1852c0941621492db5df8f7b8dfd504f63b52da",
+      "find": "        let record = PromptRecord {\n            original: original.cloned(),",
+      "replacement": "        // Requires the already-composed Projects8b local owner parameter.\n        // Old retained records return above; no backfill or fresh recapture.\n        if local.is_some() && original.is_some(){return Err(RuntimeError::Binding)}\n        let local_original=match local{\n            Some((binding,current))=>Some(memory::local_original::capture(\n                self,&engine,binding,current,&before,request_id,text,files,skill_ids,require_idle)?),\n            None=>None,\n        };\n        let record = PromptRecord {\n            original: original.cloned(),\n            local_original,"
+    },
+    {
       "path": "apps/service/src/routes/goal_runtime.rs",
       "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
       "find": "mod controls;",
@@ -129,7 +149,7 @@
       "path": "apps/service/src/routes/live_agent/main_prompt.rs",
       "preimage_sha256": "31d9f9f4aacd9df3143b6d8671e48c4d406878110392ce8cb139364e575c6b33",
       "find": "        let memory = if input.memory_selection.is_empty() {\n            None\n        } else {\n            Some(\n                state\n                    .goals\n                    .capture_memory(&project.id, &id, &input.memory_selection)\n                    .map_err(|_| binding())?,\n            )\n        };",
-      "replacement": "        let native_owner=veyra_adapters::native_memory_owner::NativeMemoryOwner::project(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&project,&state.instance_id).map_err(|_|binding())?;\n        let memory=Some(state.goals.capture_native_memory(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&native_owner,&state.live_agent.runtime,\n            &project.id,&id,&input.memory_selection).map_err(|_|binding())?);"
+      "replacement": "        let native_owner=veyra_adapters::native_memory_owner::NativeMemoryOwner::project(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&project,&state.instance_id).map_err(|_|binding())?;\n        let captured_memory=state.goals.capture_native_memory(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&native_owner,&state.live_agent.runtime,\n            &project.id,&id,&input.memory_selection).map_err(|_|binding())?;\n        let memory=captured_memory.has_retained_context().then_some(captured_memory);"
     },
     {
       "path": "apps/service/src/routes/live_agent/main_prompt.rs",

@@ -5,7 +5,7 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
-proposal.json contains 24 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 27 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
@@ -54,13 +54,14 @@ memory adds no wildcard gateway, remote route or arbitrary upstream proxy.
 The eddbd5f2 memory-specific client insertion remains superseded; do not apply.
 
 Canonical OpenCode requests one latest page of at most 32 messages, never
-follows a cursor and never uses unbounded context/history. Capture requires
-complete adjacent user/terminal-assistant pairs, original prompt provenance and
-a 6-hour default idle interval (policy permits 1–48). It refuses partial,
-multi-assistant, unowned, errored and unrecognized terminal turns. It never
-invents completion or external=false. Original files, skills, memories, hooks
-and canonical tool-bearing turns conservatively count as external context.
-Missing provenance is unavailable.
+follows a cursor and never uses unbounded context/history. Capture selects
+complete adjacent user/terminal-assistant pairs with original provenance and a
+6-hour default idle interval (policy permits 1–48). Unmatched offset records,
+unrelated multi-assistant/tool records and unfinished later tails do not reject
+earlier verified pairs. Foreign sessions/duplicate IDs refuse the page. Missing
+provenance never becomes external=false. Actual injected files, skills, retained
+memory entries, hook actions and canonical tool-bearing pairs count as external;
+empty admission/HookConfig wrappers do not. New empty previews retain null.
 
 The pure Rust domain bounds text, preserves exact bytes, retains source
 hashes/revisions and model/input provenance, requires separate generation/use/
@@ -76,8 +77,9 @@ checks and durable prompt capture; no new whole-chat fence exists.
 Executed: four Node tests of the actual JS adapter (policy/idle preservation,
 lost-policy response, lost-forget response, failed custody before send), one
 source-manifest test (5/5 pass). Original eddbd5f2 verified 25 preimages;
-the reconciled proposal has 24 because the duplicate client insertion is removed.
-Five Rust tests authored, **not executed**.
+shared-client reconciliation removed one; three additive local-original owner
+edits bring the current proposal to 27.
+Five domain and seven Native source-helper cases authored, **not executed**.
 No Cargo/rustc/npm/install/build, model, service, desktop control or inference.
 
 Remaining integration gates, not claimed:
@@ -87,11 +89,15 @@ Remaining integration gates, not claimed:
    verifies the combined shared-client/owner module wiring, compiles Rust,
    typechecks and renders React. The actual export is bound in source; this
    worker has not compiled or exercised it.
-2. Connect concrete Goals.capture_learning/accept_learning methods to the
-   existing generation/model owner. No model dispatcher or scheduler is added.
-3. Mount projectless prompt originals only when their original owner supports
-   them: pinned PromptOriginal requires a real Project. Private controls never
-   fabricate a Project.
+2. Connect concrete Goals.capture_learning/accept_learning methods through the
+   original completed-turn/productivity worker and actual model owner. The
+   closed synthesis-purpose request/result API is missing from the pinned
+   provider contracts; see completed-learning-boundary.md for exact evidence
+   and the required two-phase flow. No invented model dispatch or scheduler.
+3. Review/apply additive LocalPromptOriginal and PromptRecord.local_original
+   capture at the actual original writer. Frozen LocalOperation remains intact.
+   Old Project/ownerless originals are not converted or backfilled. Reconcile
+   constructor, receipt/lookup and rollback writer preservation before acceptance.
 4. Verify existing backup/delete orchestration includes the additive file.
    Privacy export includes learned state. The suppression-preserving pure merge
    is not a mounted restore endpoint. Cross-custodian import requires original
