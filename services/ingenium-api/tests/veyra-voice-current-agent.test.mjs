@@ -40,7 +40,9 @@ test('stable native identity is derived from the full binding and durable operat
 });
 test('native prompt subscribes before admission and never switches model, agent or permissions', async () => {
   const fixture = setup(), events = [];
-  assert.equal((await fixture.adapter.availability({}, scope)).state, 'available');
+  const capability = await fixture.adapter.availability({}, scope);
+  assert.equal(capability.state, 'unavailable');
+  assert.equal(capability.reason, 'VOICE_HOSTED_ORIGINAL_SETTLEMENT_NOT_EXPOSED');
   const running = fixture.adapter.submit({ scope, turn, text: 'Continue the current work', delivery: 'prompt', onEvent: event => events.push(event) }); await tick();
   const observeIndex = fixture.calls.findIndex(call => call[0] === 'observe');
   const promptIndex = fixture.calls.findIndex(call => call[0] === 'request' && call[1].endsWith('/prompt'));

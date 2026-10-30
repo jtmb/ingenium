@@ -77,6 +77,7 @@ export class VoiceService {
       if (session.active !== turn) throw new VoiceError('VOICE_TURN_CANCELLED');
       if (typeof this.operations.claim === 'function') this.operations.claim(reservation);
       session.agentOperationId = reservation.operationId ?? null;
+      session.agentReservation = reservation;
       const result = await this.agent.submit({ ...envelope, context, scope: session.scope, originalOperation: reservation.original, onEvent: event => {
         if (session.active === turn && !envelope.signal?.aborted && sameScope(event.scope, session.scope) && event.requestId === turn.requestId) envelope.onEvent?.({ ...event, ...turn, scope: session.scope });
       } });
@@ -84,6 +85,7 @@ export class VoiceService {
       if (!sameScope(result.scope, session.scope) || result.requestId !== turn.requestId || typeof result.text !== 'string' || [...result.text].length > 32000) throw new VoiceError('VOICE_RESULT_SCOPE_MISMATCH');
       await this.operations.settle({ context, scope: session.scope, requestId: turn.requestId, reservation, outcome: 'completed', result, proof: result.retirementProof });
       settled = true;
+      if (reservation.original && typeof this.agent.finalizeOriginal === 'function') await this.agent.finalizeOriginal(reservation.original);
       if (session.active !== turn || envelope.signal?.aborted) throw new VoiceError('VOICE_TURN_CANCELLED');
       session.agentCompleted = true; session.resultText = result.text; session.agentOperationId = reservation.operationId ?? null;
       const { retirementProof: _privateProof, ...publicResult } = result;
@@ -167,6 +169,7 @@ export class VoiceService {
       const ack = await this.agent.steer({ ...envelope, context, scope: session.scope, originalOperation: reservation.original });
       if (ack?.accepted !== true || ack.requestId !== envelope.turn.requestId || !sameScope(ack.scope, session.scope)) throw new VoiceError('VOICE_STEERING_OUTCOME_UNKNOWN');
       await this.operations.settle({ context, scope: session.scope, requestId: envelope.operationId, reservation, outcome: 'completed', proof: ack.retirementProof }); settled = true;
+      if (reservation.original && typeof this.agent.finalizeOriginal === 'function') await this.agent.finalizeOriginal(reservation.original);
       const { retirementProof: _privateProof, ...publicAck } = ack;
       return { ...publicAck, operationId: envelope.operationId };
     } catch (error) {
@@ -181,11 +184,19 @@ export class VoiceService {
     session.resultText = null;
     session.state = 'interrupting';
     try {
-      const ack = await this.agent.interrupt({ ...envelope, context, scope: session.scope });
+      const alreadyRetired = session.agentReservation?.original && this.operations.isRetired?.(session.agentReservation) === true;
+      const ack = alreadyRetired ? { acknowledged: true, requestId: envelope.turn.requestId, scope: session.scope }
+        : await this.agent.interrupt({ ...envelope, context, scope: session.scope, originalOperation: session.agentReservation?.original });
       if (ack?.acknowledged !== true || ack.requestId !== envelope.turn.requestId || !sameScope(ack.scope, session.scope)) throw new VoiceError('VOICE_INTERRUPT_UNKNOWN');
+      if (session.agentReservation?.original && !alreadyRetired) {
+        if (typeof this.operations.retire !== 'function') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+        await this.operations.retire(session.agentReservation, ack.retirementProof);
+        if (typeof this.agent.finalizeOriginal === 'function') await this.agent.finalizeOriginal(session.agentReservation.original);
+      }
       if (this.#sessions.get(envelope.turn.sessionId) !== session || session.state !== 'interrupting') throw new VoiceError('VOICE_SCOPE_EXPIRED');
       session.state = 'ready';
-      return ack;
+      const { retirementProof: _privateProof, ...publicAck } = ack;
+      return publicAck;
     } catch (error) { session.state = 'retired'; throw error; }
   }
   async complete(context, envelope) {

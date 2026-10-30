@@ -1,5 +1,10 @@
 # Current engine conversation adapter and Work mount
 
+Lifecycle correction, 2026-10-30: the pinned hosted public API does not expose
+original execution capture/settlement. See [the primary-source audit](managed-cpu/hosted-original-lifecycle.md).
+The adapter now reports working-agent availability as unavailable for this transport;
+old generic session ACK/activity checks below do not establish Core original retirement.
+
 Coordinator follow-up, 2026-10-29. The original voice commits through `32fae958` were accepted for integration and passed coordinator API/dashboard noEmit checks. This follow-up adds the engine consumer port and Work mount without shared router/context/schema edits, device access or runtime/model work. The new files require their own coordinator noEmit/integration check.
 
 ## Contracts actually inspected

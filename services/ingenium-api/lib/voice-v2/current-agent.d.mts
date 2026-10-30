@@ -21,6 +21,9 @@ export interface NativeVoiceObservation {
   /** Actual original-owner proof, validated independently by Core. Required for
    * SQL128 admission. Completion/result/usage are not this promise. */
   retirement?: Promise<object>;
+  /** Actual original constructor's target-specific interrupt+join. The public
+   * session interrupt endpoint does not implement this capability. */
+  interruptOriginal?(input: { signal?: AbortSignal }): Promise<object>;
   ready: Promise<void>;
   result: Promise<{ scope: VoiceScope; nativeSessionId: string; promptId: string; outcome: 'succeeded' | 'failed' | 'interrupted'; text: string; usage?: unknown }>;
   ownsPermission(id: string): boolean;
@@ -42,6 +45,7 @@ export class CurrentAgentVoiceAdapter {
   submit(request: NativeVoiceRequest & { text: string; delivery: 'prompt' | 'steer' | 'queue'; onEvent?(event: unknown): void }): Promise<{ scope: VoiceScope; requestId: string; text: string; usage?: unknown; retirementProof?: object }>;
   steer(request: NativeVoiceRequest & { text: string; delivery: 'steer' | 'queue'; operationId: string }): Promise<{ accepted: true; requestId: string; operationId: string; scope: VoiceScope; retirementProof?: object }>;
   approve(request: NativeVoiceRequest & { approvalId: string; decision: 'allow-once' | 'deny' }): Promise<void>;
-  interrupt(request: NativeVoiceRequest): Promise<{ acknowledged: true; requestId: string; scope: VoiceScope }>;
+  interrupt(request: NativeVoiceRequest): Promise<{ acknowledged: true; requestId: string; scope: VoiceScope; retirementProof?: object }>;
   closeVoice(request: { context?: unknown; scope: VoiceScope; sessionId: string }): Promise<void>;
+  finalizeOriginal(original: voiceOperations.VoiceOriginal): Promise<void>;
 }

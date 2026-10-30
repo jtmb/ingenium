@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "sourceCommit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "conclusion": "Pinned public HTTP transport has no original-targeted execution capture/post-finalizer settlement proof",
+  "primarySources": [
+    {
+      "path": "packages/core/src/session/execution.ts",
+      "gitBlob": "557065f74e08ce602d3c795215a437f67339533e",
+      "bytes": 9195
+    },
+    {
+      "path": "packages/core/src/session/run-coordinator.ts",
+      "gitBlob": "9c4ba4b09a972748ead1144a66848ac2ea015d6a",
+      "bytes": 9065
+    },
+    {
+      "path": "packages/core/src/session/session.ts",
+      "gitBlob": "cd7a3b0b42626cba0eeabf458ceea73cf5750dac",
+      "bytes": 15666
+    },
+    {
+      "path": "packages/core/src/session/inbox.ts",
+      "gitBlob": "3688575e2e9333055c19b4c029c8de5ddd6df2fe",
+      "bytes": 18736
+    },
+    {
+      "path": "packages/core/src/session/runner/step.ts",
+      "gitBlob": "be8b11547f498d986c2791427afa0eb0b99af9ba",
+      "bytes": 13281
+    },
+    {
+      "path": "packages/core/src/session/subagent-job.ts",
+      "gitBlob": "f8e7503fbd0a1c56c086af94b2e9db073aeb6aa5",
+      "bytes": 2353
+    },
+    {
+      "path": "packages/server/src/handlers/session.ts",
+      "gitBlob": "c0d819dd728035695f116cdf27804b495e72e4d6"
+    }
+  ],
+  "installedSources": [
+    {
+      "path": "node_modules/@opencode/protocol/dist/groups/session.js",
+      "version": "2.0.11",
+      "sha256": "4aaf76e9a0777063e1679ce3e060fb57c7a475a008fb18f4f6498730e6960bdf",
+      "bytes": 31671
+    },
+    {
+      "path": "node_modules/@opencode/schema/dist/session-event.js",
+      "version": "2.0.11",
+      "sha256": "46aecfdecf4a41e7b8aef8e451cc35ae968d7d55e514e831ae1f8f489186a4b9",
+      "bytes": 18806
+    },
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "sha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6",
+      "bytes": 93818
+    },
+    {
+      "path": "services/ingenium-dashboard/src/lib/use-opencode-chat.ts",
+      "sha256": "87f4378fa2d3a681885cee2c040edbedba74744413ccb6160f43f044392a7654",
+      "bytes": 72052
+    }
+  ],
+  "schemaCorroboration": {
+    "rootReceipts": [
+      "coordination/integration/running-opencode-schema-r3.json",
+      "coordination/integration/running-opencode-schema-r4.json"
+    ],
+    "upstreamRawSha256": "2fa254eff9933cf357e61fe918a2b4f8ccfda5e750fcb4299134f9685beab28a",
+    "upstreamRawBytes": 249841,
+    "retainedReceiptsAreSelectedProjections": true
+  },
+  "processOrModelLaunched": false,
+  "liveSessionRead": false,
+  "upstreamWritten": false,
+  "runtimeQualified": false,
+  "remoteSourceCopiesRetained": false
+}

@@ -4,6 +4,7 @@ import { CoreVoiceOperations, agentResultFingerprint, agentInputFingerprint } fr
 import { ManagedCpuSpeech } from '../lib/voice-v2/managed-cpu-speech.mjs';
 import { VoiceService } from '../lib/voice-v2/service.mjs';
 import { CurrentAgentVoiceAdapter, nativeVoiceMessageId } from '../lib/voice-v2/current-agent.mjs';
+import { hostedOpenCodeLifecycle, requireHostedOriginalRetirement } from '../lib/voice-v2/hosted-lifecycle.mjs';
 
 const scope = { actorId:'actor',accountId:'account',organizationId:'org',projectId:'project',conversationId:'actual-selected',runtimeId:'runtime',executionBindingId:'binding',executionRevision:'revision',agentId:'agent' };
 const turn = { sessionId:'call',turnId:1,generation:3,requestId:'voice:call:1' };
@@ -23,6 +24,7 @@ function fixture() {
     const row={original,owner:o,state:'reserved',revision:0};rows.set(original.operationId,row);return {accepted:true,fresh:true,operation:row};},
     read(_c,id){return rows.get(id);},cas(_c,r){const row=rows.get(r.operationId);assert.equal(row.state,r.from);assert.equal(row.revision,r.expectedRevision);calls.push(['claim',r]);row.state=r.to;row.revision++;return row;},
     settle(_c,r){assert.equal(r.proof,proof);const row=rows.get(r.operationId);assert.equal(row.state,'running');calls.push(['settle',r]);row.state='terminal';row.resultFingerprint=r.resultFingerprint;return row;},
+    retireOriginal(_c,r){assert.equal(r.physicalProof,proof);calls.push(['retire',r]);const row=rows.get(r.operationId);row.resourceRetired=true;return row;},
     quarantine(_c,id){calls.push(['unknown',id]);const row=rows.get(id);row.state='terminal';row.outcome='unknown';return row;}};
   const operations=new CoreVoiceOperations({ledger,bindOriginal:()=>({context:{original:true},owner,deadlineAt:Date.now()+30000})});
   return {operations,rows,calls,proof};
@@ -81,13 +83,13 @@ test('CPU session release runs even when agent cleanup fails; failed original is
 
 test('current-agent Core path refuses absent proof producer before prompt and waits actual retained proof separately from result',async()=>{
   for(const hasProofProducer of [false,true]){
-    const retirement=deferred(), proof={}, prompts=[];let observation;
+    const retirement=deferred(), proof={}, prompts=[];let observation,stops=0;
     const originalOperation={operationId:'00000000-0000-4000-8000-000000000001',scope,requestId:turn.requestId,turnGeneration:3,kind:'voice-agent-turn',parentOperationId:null,
       inputSha256:agentInputFingerprint({scope,turn,text:'prompt',delivery:'prompt'})};
     const binding={verified:true,scope,sessionId:scope.conversationId,directory:'/existing',protocol:'opencode-v2.0.11'};
     const adapter=new CurrentAgentVoiceAdapter({resolveBinding:async()=>binding,withBinding:async(_b,work)=>work(),
       observeTurn:async input=>{observation=input;return {ready:Promise.resolve(),result:Promise.resolve({scope,nativeSessionId:scope.conversationId,promptId:input.promptId,outcome:'succeeded',text:'actual result'}),
-        ...(hasProofProducer?{retirement:retirement.promise}:{}),stop(){},ownsPermission(){return false;},ownsExecution(){return true;}};},
+        ...(hasProofProducer?{retirement:retirement.promise}:{}),stop(){stops++;},ownsPermission(){return false;},ownsExecution(){return true;}};},
       request:async(path,options)=>{if(path.endsWith('/prompt')){prompts.push(options.body);return {data:{id:options.body.id,sessionID:scope.conversationId}};}
         return {data:{id:scope.conversationId,location:{directory:'/existing'},agent:scope.agentId,model:{id:'selected',providerID:'existing'}}};}});
     const running=adapter.submit({scope,turn,text:'prompt',delivery:'prompt',originalOperation});
@@ -95,6 +97,9 @@ test('current-agent Core path refuses absent proof producer before prompt and wa
     let resolved=false;running.then(()=>{resolved=true;});await tick();assert.equal(resolved,false);assert.equal(prompts.length,1);
     assert.equal(observation.originalOperation,originalOperation);assert.equal(prompts[0].id,nativeVoiceMessageId(scope,originalOperation.operationId));
     retirement.resolve(proof);assert.equal((await running).retirementProof,proof);
+    assert.equal(stops,0);
+    await assert.rejects(adapter.closeVoice({scope,sessionId:turn.sessionId}),/VOICE_ORIGINAL_RETIREMENT_UNCONFIRMED/);
+    await adapter.finalizeOriginal(originalOperation);assert.equal(stops,1);
   }
 });
 
@@ -107,4 +112,27 @@ test('CPU transcription uses a separate durable request namespace and unavailabl
   await assert.rejects(speech.transcribe({context:{},scope,turn,deadlineAt:Date.now()+1000,pcm:new Uint8Array(8000)}),/VOICE_TRANSCRIPTION_UNKNOWN/);
   assert.equal(executed.length,1);assert.equal(reserved.length,1);
   assert.match(reserved[0].requestId,/^voice-stt:[a-f0-9]{64}$/);assert.notEqual(reserved[0].requestId,turn.requestId);
+});
+
+test('pinned public transport stays unavailable; Core interrupt never falls back to generic session ACK or idle',async()=>{
+  assert.equal(hostedOpenCodeLifecycle.originalRetirementAvailable,false);
+  assert.throws(()=>requireHostedOriginalRetirement(),/VOICE_HOSTED_ORIGINAL_SETTLEMENT_NOT_EXPOSED/);
+  let requests=0;
+  const adapter=new CurrentAgentVoiceAdapter({resolveBinding:async()=>{requests++;throw Error('must not open generic HTTP');},request:async()=>{requests++;},withBinding:async(_b,run)=>run()});
+  await assert.rejects(adapter.interrupt({scope,turn,originalOperation:{operationId:'original'}}),/VOICE_ORIGINAL_INTERRUPT_UNAVAILABLE/);
+  assert.equal(requests,0);
+});
+
+test('generic positive interrupt acknowledgement cannot reopen Core-backed session without original proof',async()=>{
+  const f=fixture(), result=deferred();
+  const service=new VoiceService({authorize:async()=>({allowed:true,scope}),operations:f.operations,speech:{health:async()=>{}},
+    agent:{submit:()=>result.promise,interrupt:async input=>{assert.equal(input.originalOperation.operationId,f.calls[0][1].operationId);return {acknowledged:true,scope,requestId:turn.requestId};}}});
+  await service.open({}, {scope,sessionId:turn.sessionId,mode:'conversation'});
+  const running=service.submit({}, {scope,turn,text:'prompt',delivery:'prompt'});const outcome=assert.rejects(running,/VOICE_TURN_CANCELLED/);
+  await tick();
+  await assert.rejects(service.interrupt({}, {scope,turn}),/VOICE_ORIGINAL_RETIREMENT_REQUIRED/);
+  await assert.rejects(service.submit({}, {scope,turn:{...turn,turnId:2,requestId:'voice:call:2'},text:'next',delivery:'prompt'}),/VOICE_SCOPE_EXPIRED/);
+  assert.equal(f.calls.some(call=>call[0]==='retire'),false);
+  result.resolve({scope,requestId:turn.requestId,text:'late result',retirementProof:f.proof});await outcome;
+  assert.equal(f.calls.at(-1)[0],'unknown');
 });

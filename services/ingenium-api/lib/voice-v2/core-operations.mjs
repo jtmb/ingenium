@@ -25,7 +25,7 @@ export const agentInputFingerprint = ({ scope, turn, text, delivery, parentOpera
 export class CoreVoiceOperations {
   #originals = new WeakMap();
   constructor({ ledger, bindOriginal }) {
-    if (['reserve', 'read', 'cas', 'settle', 'quarantine'].some(method => typeof ledger?.[method] !== 'function') || typeof bindOriginal !== 'function') fail('VOICE_CORE_BINDING_REQUIRED');
+    if (['reserve', 'read', 'cas', 'settle', 'quarantine', 'retireOriginal'].some(method => typeof ledger?.[method] !== 'function') || typeof bindOriginal !== 'function') fail('VOICE_CORE_BINDING_REQUIRED');
     Object.assign(this, { ledger, bindOriginal, contract: 'veyra-core-voice-128' });
   }
   reserve({ context, scope, turn, requestId, kind, text, delivery, parentOperationId = null, deadlineAt }) {
@@ -50,6 +50,16 @@ export class CoreVoiceOperations {
     const retained = this.#owned(handle), { binding, operation } = retained;
     retained.operation = this.ledger.cas(binding.context, { operationId: operation.original.operationId, expectedRevision: operation.revision,
       owner: binding.owner, from: 'reserved', to: 'running' });
+  }
+  retire(reservation, proof) {
+    const { binding, original } = this.#owned(reservation);
+    if (!proof || typeof proof !== 'object') fail('VOICE_ORIGINAL_RETIREMENT_REQUIRED');
+    return this.ledger.retireOriginal(binding.context, { operationId: original.operationId, owner: binding.owner, physicalProof: proof });
+  }
+  isRetired(reservation) {
+    const { binding, original } = this.#owned(reservation);
+    const operation = this.ledger.read(binding.context, original.operationId);
+    return Boolean(operation && sameScope(operation.original.scope, original.scope) && operation.retired === true && operation.retentionId);
   }
   settle({ reservation, outcome, result, proof }) {
     const retained = this.#owned(reservation), { binding, original } = retained;

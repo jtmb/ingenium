@@ -21,5 +21,7 @@ export class CoreVoiceOperations<C> {
   readonly contract: 'veyra-core-voice-128';
   reserve(input: AgentOriginalRequest<C>): AgentOperationHandle;
   claim(handle: AgentOperationHandle): void;
+  retire(handle: AgentOperationHandle, proof: object): voiceOperations.VoiceMetadata;
+  isRetired(handle: AgentOperationHandle): boolean;
   settle(input: { reservation: AgentOperationHandle; outcome: 'completed' | 'unknown'; result?: { scope: VoiceScope; requestId: string; text: string }; proof?: object }): voiceOperations.VoiceMetadata;
 }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { VoiceError, sameScope, validateScope, validateTurn } from '../../../../packages/veyra-voice/session.mjs';
 import { agentInputFingerprint } from './core-operations.mjs';
+import { hostedOpenCodeLifecycle } from './hosted-lifecycle.mjs';
 
 /** A stable native message ID, not a second operation ledger or conversation identity. */
 export function nativeVoiceMessageId(scope, operationId) {
@@ -13,6 +14,7 @@ export function nativeVoiceMessageId(scope, operationId) {
 /** Consumer of the existing authenticated native request dispatcher and conversation event owner. */
 export class CurrentAgentVoiceAdapter {
   #watches = new Map();
+  #controls = new Map();
   constructor({ request, resolveBinding, withBinding, observeTurn, observeControl }) {
     Object.assign(this, { request, resolveBinding, withBinding, observeTurn, observeControl });
   }
@@ -40,7 +42,9 @@ export class CurrentAgentVoiceAdapter {
       const binding = await this.#binding(context, scope, 'voice:inspect-agent', signal);
       await this.#session(binding, scope, signal);
       if (typeof this.observeTurn !== 'function') throw new VoiceError('VOICE_AGENT_OBSERVER_UNAVAILABLE');
-      return { state: 'available', reason: null, scope, protocol: binding.protocol, duplex: 'half-duplex', preservesSessionModel: true };
+      // The pinned public HTTP protocol lacks original-targeted settlement.
+      // Merely injecting an event observer does not qualify that capability.
+      return { state: 'unavailable', reason: hostedOpenCodeLifecycle.reason, scope, protocol: binding.protocol, duplex: 'half-duplex', preservesSessionModel: true };
     } catch (error) {
       return { state: 'unavailable', reason: error instanceof VoiceError ? error.code : 'VOICE_AGENT_UNAVAILABLE', duplex: 'half-duplex', preservesSessionModel: true };
     }
@@ -79,7 +83,7 @@ export class CurrentAgentVoiceAdapter {
     if (!watch || typeof watch.ready?.then !== 'function' || typeof watch.result?.then !== 'function' || typeof watch.stop !== 'function' || typeof watch.ownsPermission !== 'function' || typeof watch.ownsExecution !== 'function') { watch?.stop?.(); throw new VoiceError('VOICE_AGENT_OBSERVER_UNAVAILABLE'); }
     if (originalOperation && typeof watch.retirement?.then !== 'function') { watch.stop(); throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE'); }
     watch.retirement?.catch(() => undefined);
-    const record = { watch, voiceSessionId: turn.sessionId, scope };
+    const record = { watch, voiceSessionId: turn.sessionId, scope, originalOperation };
     this.#watches.set(key, record);
     // The existing event owner subscribes before durable admission, as useOpenCodeChat does.
     void watch.result.catch(() => undefined);
@@ -92,7 +96,12 @@ export class CurrentAgentVoiceAdapter {
       const retirementProof = originalOperation ? await watch.retirement : undefined;
       if (originalOperation && (!retirementProof || typeof retirementProof !== 'object')) throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
       return { scope, requestId: turn.requestId, text: result.text, ...(retirementProof ? { retirementProof } : {}), ...(result.usage === undefined ? {} : { usage: result.usage }) };
-    } finally { if (this.#watches.get(key) === record) this.#watches.delete(key); watch.stop(); }
+    } finally {
+      // A returned/failed HTTP consumer is not the original's retirement.
+      // Core-backed resources remain captured until the caller's real Core
+      // verifier accepts the proof and explicitly finalizes this same original.
+      if (!originalOperation) { if (this.#watches.get(key) === record) this.#watches.delete(key); watch.stop(); }
+    }
   }
   async steer({ context, scope, turn, text, delivery, operationId, signal, originalOperation }) {
     validateTurn(turn);
@@ -104,19 +113,21 @@ export class CurrentAgentVoiceAdapter {
       if (!sameScope(originalOperation.scope, scope) || originalOperation.requestId !== operationId || originalOperation.turnGeneration !== turn.generation
         || originalOperation.kind !== `voice-agent-${delivery}` || originalOperation.inputSha256 !== agentInputFingerprint({ scope, turn, text, delivery, parentOperationId: originalOperation.parentOperationId })
         || typeof this.observeControl !== 'function') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+      if (this.#controls.has(originalOperation.operationId)) throw new VoiceError('VOICE_TURN_CONFLICT');
       observation = await this.observeControl({ context, scope, turn, originalOperation, nativeSessionId: binding.sessionId,
         promptId: nativeVoiceMessageId(scope, originalOperation.operationId), signal });
       if (typeof observation?.ready?.then !== 'function' || typeof observation?.retirement?.then !== 'function' || typeof observation?.stop !== 'function') {
         observation?.stop?.(); throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
       }
       observation.retirement.catch(() => undefined);
+      this.#controls.set(originalOperation.operationId, { watch: observation, originalOperation, voiceSessionId: turn.sessionId, scope });
     }
     let retirementProof;
     try {
       if (observation) { await observation.ready; signal?.throwIfAborted(); }
       await this.#prompt(binding, scope, turn, { text, delivery, operationId: originalOperation?.operationId ?? operationId, signal });
       if (observation) { retirementProof = await observation.retirement; if (!retirementProof || typeof retirementProof !== 'object') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE'); }
-    } finally { observation?.stop(); }
+    } finally { if (!originalOperation) observation?.stop(); }
     // Acceptance means durable inbox admission, never a completed tool/job claim.
     return { accepted: true, requestId: turn.requestId, operationId, scope, ...(retirementProof ? { retirementProof } : {}) };
   }
@@ -146,8 +157,20 @@ export class CurrentAgentVoiceAdapter {
       await this.#call(binding, this.#path(binding, `/inbox/${encodeURIComponent(item.id)}`), { method: 'DELETE', signal });
     }
   }
-  async interrupt({ context, scope, turn, signal }) {
+  async interrupt({ context, scope, turn, signal, originalOperation }) {
     validateTurn(turn);
+    if (originalOperation) {
+      const record = this.#watches.get(nativeVoiceMessageId(scope, turn.requestId));
+      // Public session.interrupt acknowledges acceptance before finalizers. It
+      // cannot target this retained original and must never be its fallback.
+      if (!record || record.originalOperation !== originalOperation || !sameScope(record.scope, scope)
+        || typeof record.watch.interruptOriginal !== 'function') throw new VoiceError('VOICE_ORIGINAL_INTERRUPT_UNAVAILABLE');
+      const retirementProof = await record.watch.interruptOriginal({ signal });
+      if (!retirementProof || typeof retirementProof !== 'object') throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNAVAILABLE');
+      // VoiceService submits this opaque proof to the actual Core verifier;
+      // this acknowledgement alone grants no retirement or next-turn admission.
+      return { acknowledged: true, requestId: turn.requestId, scope, retirementProof };
+    }
     const binding = await this.#binding(context, scope, 'agent:interrupt', signal);
     await this.#cancelInbox(binding, scope, turn.sessionId, turn.requestId, signal);
     const before = await this.#call(binding, '/api/session/active', { signal });
@@ -164,6 +187,8 @@ export class CurrentAgentVoiceAdapter {
     return { acknowledged: true, requestId: turn.requestId, scope };
   }
   async closeVoice({ context, scope, sessionId }) {
+    if ([...this.#watches.values(), ...this.#controls.values()].some(record => record.originalOperation
+      && record.voiceSessionId === sessionId && sameScope(record.scope, scope))) throw new VoiceError('VOICE_ORIGINAL_RETIREMENT_UNCONFIRMED');
     const binding = await this.#binding(context, scope, 'voice:close');
     await this.#cancelInbox(binding, scope, sessionId);
     if ((await this.#ownedInbox(binding, scope, sessionId)).length) throw new VoiceError('VOICE_NATIVE_INBOX_UNKNOWN');
@@ -171,5 +196,16 @@ export class CurrentAgentVoiceAdapter {
       if (record.voiceSessionId === sessionId && sameScope(record.scope, scope)) { record.watch.stop(); this.#watches.delete(key); }
     }
     // The caller already fences/interrupts its active turn. Never delete the working engine session.
+  }
+  /** Call only AFTER the actual Core verifier accepted this original's proof.
+   * This releases local retained handles; it does not create physical proof. */
+  async finalizeOriginal(originalOperation) {
+    const control = this.#controls.get(originalOperation.operationId);
+    const key = nativeVoiceMessageId(originalOperation.scope, originalOperation.requestId);
+    const record = control ?? this.#watches.get(key);
+    if (!record || record.originalOperation !== originalOperation) throw new VoiceError('VOICE_ORIGINAL_HANDLE_UNAVAILABLE');
+    await record.watch.stop();
+    if (control) this.#controls.delete(originalOperation.operationId);
+    else if (this.#watches.get(key) === record) this.#watches.delete(key);
   }
 }
