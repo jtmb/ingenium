@@ -62,3 +62,5 @@ Existing runner settlement source proposal: [settlement-proposal.md](settlement-
 Managed original-JobRun container and async execution proposal: [managed-job-protocol.md](managed-job-protocol.md).
 
 Core126 owner, explicit credential audience and endpoint implementation: [core126-implementation.md](core126-implementation.md).
+
+Original verifier contract follow-on: [candidate-bootstrap-verifier-r3.md](candidate-bootstrap-verifier-r3.md) explicitly replaces only the r2 candidate bootstrap declaration with the existing ResponseVerifier type. Earlier frozen artifacts remain preserved.

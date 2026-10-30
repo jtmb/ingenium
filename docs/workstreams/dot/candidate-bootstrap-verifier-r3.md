@@ -1,0 +1,7 @@
+# Original ResponseVerifier declaration correction r3
+
+This explicit one-target follow-on supersedes only the r2 candidate-bootstrap-runtime.d.mts declaration. It imports and returns the SAME original `ResponseVerifier` from managed-job-contracts.mjs. That existing contract accepts Buffer|string, matching actual JobResponseVerification and original child stdout. The previous independently written Uint8Array callback signature rejected the original class in Root's composed strict API check. No casts, fake adapter, behavior or runtime authority were added.
+
+The corrected source is candidate-bootstrap-runtime-r3.d.mts; minimal patch and exact pre/post hashes are adjacent. Its bytes equal Root's actual canonical correction and reverse application check passes. Parser-only check passes; actual strict API composition remains Root-owned. The r1/r2 sources, patches and frozen receipts remain unchanged for exact prior reproduction; r3 explicitly replaces this one declared postimage.
+
+Root reports the genuine candidate Core private brand is implemented separately from production. Remaining source gates are SQL131 actual waiting/readiness/material CAS, manager retained duplex attach/private Core RPC, copier/image closure and semantic composition; real startup/native/18-case/Core negative/retirement/independent approval/platform and phases1–7 release gates remain open. No build/runtime/shared write or disposable output; removed paths none, removed bytes0. Minimal durable declaration source/patch/receipt is retained for Root integration.

@@ -1,0 +1,24 @@
+{
+  "kind": "explicit original ResponseVerifier declaration follow-on r3",
+  "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+  "priorCorrectedPatchSha256": "0cc5ca65f38a93c4c223a8a78dbe8f02b900fc96d458474b908f570c5d379cf6",
+  "preimageSha256": "47f4502a17c01829a0c3e4c75bf9c06aff24abc94c33671010357a9d6613b5c2",
+  "postimageSha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7",
+  "patchSha256": "4d173a8176a58d671636a3eb65dda75f1eec2b04ff00a60b23849c4db33b2ca3",
+  "originalContractPath": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+  "originalContractSha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b",
+  "reason": "Original ResponseVerifier.accept is Buffer|string; previous new declaration widened the callback parameter to Uint8Array and rejected actual JobResponseVerification under strict function compatibility",
+  "validation": {
+    "exactRootCanonicalBytes": true,
+    "reverseApplyCheckExit": 0,
+    "declarationParserExit": 0,
+    "strictSemanticCheck": "Root owns actual composed API strict check; no build performed here"
+  },
+  "preservation": "r1/r2 source/patch/receipt are unchanged; this one target explicitly supersedes r2 declaration postimage",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Minimal declaration delta/receipt for Root original verifier contract integration"
+  }
+}

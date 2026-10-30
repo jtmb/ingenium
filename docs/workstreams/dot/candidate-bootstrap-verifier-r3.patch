@@ -1,0 +1,10 @@
+--- a/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts
++++ b/services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts
+@@ -1,5 +1,6 @@
+ import type {Readable,Writable} from "node:stream";
+ import type {spawn} from "node:child_process";
+-export function runOriginalCandidateBootstrap(options:{binding:unknown;validateOriginalProtectedDeployment():unknown|Promise<unknown>;verifierFactory():{accept(value:Uint8Array):void;finish():{verified:boolean}};environment?:NodeJS.ProcessEnv;stdin?:Readable;stdout?:Writable;spawn?:typeof spawn}):Promise<number>;
++import type {ResponseVerifier} from "./managed-job-contracts.mjs";
++export function runOriginalCandidateBootstrap(options:{binding:unknown;validateOriginalProtectedDeployment():unknown|Promise<unknown>;verifierFactory():ResponseVerifier;environment?:NodeJS.ProcessEnv;stdin?:Readable;stdout?:Writable;spawn?:typeof spawn}):Promise<number>;
+ export function assertCandidateBootstrapAssignment(value:unknown,binding:unknown,environment:NodeJS.ProcessEnv):unknown;
+ export function assertCandidateExecutionAssignment(value:unknown,expected:unknown,binding:unknown):unknown;
