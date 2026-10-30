@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "sourceFiles": 11,
+  "checks": [
+    {
+      "command": "node --test live-acceptance.test.mjs scoped-contract.test.mjs plugin-config-text.test.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "65122be525d6caef75f7abbbbf47249020abcca611f1e0b03807fff22575a970",
+      "summary": [
+        "# tests 21",
+        "# pass 21",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "command": "node check-scoped-source.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "11b1af2dc399ad8313ff6a3112218e4b8e027106a9ad5c61d3e4b2df00ef6ef9",
+      "summary": [
+        "{\"strictRootFiles\":10,\"actualSourceFiles\":630,\"diagnostics\":0,\"emitted\":0}"
+      ]
+    }
+  ],
+  "runtime": "UNRUN: real original global/workspace files, service/engine, auth/TLS/DPAPI/lifecycle/UI/restore/executor acceptance remain Root owned.",
+  "cleanup": {
+    "newScratch": [],
+    "removedPaths": [],
+    "retained": "Reviewed source/contracts/recipes and minimal receipts only; Root application/runtime acceptance is remaining consumer",
+    "latestHistoricalCompaction": {
+      "path": "portable-compat.patch",
+      "beforeBytes": 19749,
+      "afterBytes": 654,
+      "reducedBytes": 19095,
+      "exactSource": "9e505aa3d95a675ba7d55d231c5bccc455fdc833:docs/workstreams/customize/native-hosted-transport/portable-compat.patch",
+      "sha256": "0e2afe89af2393ce391f02b338de11c3da288a9f66385fdee0bb326fd43cedee"
+    },
+    "physicalVolume": "Existing C-backed Ubuntu VHDX task root; no Windows recovery claim"
+  }
+}

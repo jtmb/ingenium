@@ -6,6 +6,7 @@ import {getPluginsBase,getPluginConfigPath,isGlobal} from './paths.js';
 import {existsSync,lstatSync,readFileSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
+import {parsePluginConfiguration} from './plugin-config-text.js';
 let commandId:string|undefined;
 export const pluginProjectionStrict=()=>commandId!==undefined;
 export function withPluginCommand<T>(id:string,work:()=>T):T{
@@ -51,7 +52,7 @@ export function verifyProjection(row:PluginRecord):void{
  if(active){
   if(!existsSync(file)||!lstatSync(file).isFile()||lstatSync(file).nlink!==1||createHash('sha256').update(readFileSync(file)).digest('hex')!==createHash('sha256').update(row.source_content??'').digest('hex'))throw new Error('Plugin source projection differs');
  }else if(existsSync(file))throw new Error('Inactive plugin projection remains');
- const config=existsSync(configPath)?JSON.parse(readFileSync(configPath,'utf8')):{};
+ const config=existsSync(configPath)?parsePluginConfiguration(readFileSync(configPath,'utf8')):{};
  if(!config||typeof config!=='object'||Array.isArray(config))throw new Error('Invalid plugin configuration projection');
  const rel=isGlobal(row.project_id)?'plugins/'+row.file_path:'.opencode/plugins/'+row.file_path;
  const entries=[...(Array.isArray(config.plugins)?config.plugins:[]),...(Array.isArray(config.plugin)?config.plugin:[])];

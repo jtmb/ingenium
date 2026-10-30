@@ -5,7 +5,7 @@
     {
       "path": "packages/ingenium-core/lib/tools/plugins.ts",
       "preimageSha256": "864bf20923d1e2b114a407ce4daff7c4397b0a8a956ec7c08f233b8aed3c5da4",
-      "postimageSha256": "f51341befe6b7078e03f7982d6b379c828ae939c7a4cdc8bff60349987284ff5"
+      "postimageSha256": "21cf90ab1a6500fc044148a9eef8cec125a04bcb6b23d766c3e46309048449e4"
     },
     {
       "path": "packages/ingenium-core/lib/tools/paths.ts",
@@ -40,7 +40,12 @@
     {
       "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
       "newFile": true,
-      "postimageSha256": "ee1eacc7656e2199bfafcd838ec5b8fc07ffd1b5f8a00fda4a0b11bc9bc567ba"
+      "postimageSha256": "5f706d5baff88d503dbb2fa3ce4838852de9aac4b1857a78efd45cf7a159c064"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-config-text.ts",
+      "newFile": true,
+      "postimageSha256": "28ecf126e36f84556c1d210ffb0852796f44522a0a20b4a9b769968eb271c0d5"
     },
     {
       "path": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",

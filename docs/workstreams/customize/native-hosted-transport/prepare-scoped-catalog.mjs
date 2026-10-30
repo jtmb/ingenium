@@ -26,6 +26,19 @@ proposal('packages/ingenium-core/lib/tools/plugins.ts',pre=>{
  edit('      if (updates.source_content !== undefined) {','      if (!existing.enabled) { checkpointAfterWrite(); return db.prepare("SELECT * FROM plugins WHERE id = ?").get(existing.id) as Plugin; }\n      if (updates.source_content !== undefined) {');
  const start=s.indexOf('export function deletePlugin('),end=s.indexOf('\n/**',start);if(start<0||end<0)throw Error('Delete boundary');s=s.slice(0,start)+'export function deletePlugin(projectId: string, name: string): boolean {\n  return Boolean(archivePlugin(projectId,name));\n}\n'+s.slice(end);
  for(const fn of ['updatePluginDescription','enablePlugin','disablePlugin','createPlugin','updatePlugin']){const at=s.indexOf('export function '+fn+'('),body=s.indexOf('): ',at),brace=s.indexOf('{',body);if(at<0||body<0||brace<0)throw Error('Writer signature '+fn);s=s.slice(0,brace+1)+'\n  assertPluginCommandClear(projectId);'+s.slice(brace+1);}
+ const begin=s.indexOf('export function addPluginToConfig('),finish=s.indexOf('/** List all plugins registered',begin);if(begin<0||finish<0)throw Error('Original plugin config owner boundary');
+ s=s.slice(0,begin)+`export function addPluginToConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,true);}
+export function removePluginFromConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,false);}
+function syncPluginConfig(filePath:string,projectId:string|undefined,enabled:boolean):void{
+ validatePluginPath(filePath,projectId);const target=getPluginConfigPath(projectId);validateProjectionPath(target);
+ if(!existsSync(target)&&!enabled)return;
+ const before=existsSync(target)?readFileSync(target,'utf8'):'{}'+String.fromCharCode(10);
+ const rel=isGlobal(projectId)?'plugins/'+filePath:'.opencode/plugins/'+filePath;
+ const after=editPluginConfiguration(before,rel,enabled);
+ if(after!==before){mkdirSync(dirname(target),{recursive:true});writeFileSync(target,after);}
+}
+`+s.slice(finish);
+ s=s.replace('import { z } from "zod";','import { z } from "zod";\nimport {editPluginConfiguration} from "./plugin-config-text.js";');
  return s;
 });
 proposal('packages/ingenium-core/lib/tools/paths.ts',pre=>{
@@ -47,5 +60,5 @@ proposal('packages/ingenium-core/lib/tools/node-native-lifecycle.ts',pre=>{
  const at='export function assertNativeGovernanceLifecycleClear(db:ReturnType<typeof getDb>,projectId?:string):void{';if(!pre.includes(at)||pre.includes('CUSTOMIZE_ORIGINAL_REQUIRES_RECONCILIATION'))throw Error('Lifecycle hook preimage');
  return pre.replace(at,at+'\n const customizeScope=projectId===undefined?"":" AND project_id=?";\n if(db.prepare("SELECT 1 FROM customize_commands WHERE result_json IS NULL"+customizeScope+" LIMIT 1").get(...(projectId===undefined?[]:[projectId])))throw new Error("CUSTOMIZE_ORIGINAL_REQUIRES_RECONCILIATION");');
 });
-for(const rel of ['packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql','packages/ingenium-core/lib/tools/plugin-lifecycle.ts','packages/ingenium-core/lib/tools/customize-catalog-owner.ts','services/ingenium-api/lib/routes/customize-scoped.ts']){const text=fs.readFileSync(here+'/files/'+rel,'utf8');rows.push({path:rel,newFile:true,postimageSha256:hash(text)});}
+for(const rel of ['packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql','packages/ingenium-core/lib/tools/plugin-lifecycle.ts','packages/ingenium-core/lib/tools/plugin-config-text.ts','packages/ingenium-core/lib/tools/customize-catalog-owner.ts','services/ingenium-api/lib/routes/customize-scoped.ts']){const text=fs.readFileSync(here+'/files/'+rel,'utf8');rows.push({path:rel,newFile:true,postimageSha256:hash(text)});}
 fs.writeFileSync(here+'/scoped-source-manifest.json',JSON.stringify({schemaVersion:1,status:'Source proposal only; Root application and acceptance pending',sources:rows},null,2)+'\n');console.log(JSON.stringify(rows));

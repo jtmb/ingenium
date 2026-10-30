@@ -4,6 +4,7 @@ import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "
 import { resolve, relative, isAbsolute, dirname } from "node:path";
 import { getPluginsBase, getPluginConfigPath, isGlobal } from "./paths.js";
 import { z } from "zod";
+import {editPluginConfiguration} from "./plugin-config-text.js";
 import {assertPluginCommandClear,validateProjectionPath,archive as archivePlugin} from "./plugin-lifecycle.js";
 
 export const pluginDescriptionSchema = z.string().max(2000).refine((value) => !value.includes("\0"), "Description must not contain NUL");
@@ -70,51 +71,16 @@ function validatePluginPath(filePath: string, projectId?: string): string {
  * - Global:  `plugins/<filePath>`
  * - Project: `.opencode/plugins/<filePath>`
  */
-export function addPluginToConfig(filePath: string, projectId?: string): void {
-  const isGlobalProject = isGlobal(projectId);
-  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
-  try {
-    const configPath = getPluginConfigPath(projectId);
-    validateProjectionPath(configPath);
-    if (!existsSync(configPath)) { mkdirSync(dirname(configPath), {recursive:true}); writeFileSync(configPath, "{}\n", {flag:"wx"}); }
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    const entries = [...new Map([
-      ...(Array.isArray(config.plugins) ? config.plugins : []),
-      ...(Array.isArray(config.plugin) ? config.plugin : []),
-    ].map((entry) => [JSON.stringify(entry), entry])).values()];
-    if (!entries.includes(rel)) entries.push(rel);
-    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
-      config.plugins = entries;
-      delete config.plugin;
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    }
-  } catch (error) { throw error; }
+export function addPluginToConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,true);}
+export function removePluginFromConfig(filePath:string,projectId?:string):void{syncPluginConfig(filePath,projectId,false);}
+function syncPluginConfig(filePath:string,projectId:string|undefined,enabled:boolean):void{
+ validatePluginPath(filePath,projectId);const target=getPluginConfigPath(projectId);validateProjectionPath(target);
+ if(!existsSync(target)&&!enabled)return;
+ const before=existsSync(target)?readFileSync(target,'utf8'):'{}'+String.fromCharCode(10);
+ const rel=isGlobal(projectId)?'plugins/'+filePath:'.opencode/plugins/'+filePath;
+ const after=editPluginConfiguration(before,rel,enabled);
+ if(after!==before){mkdirSync(dirname(target),{recursive:true});writeFileSync(target,after);}
 }
-
-/**
- * Remove a plugin entry from opencode.json's `plugins` array.
- * Mirror of addPluginToConfig — keeps the disk config in sync when a plugin is deleted or disabled.
- */
-export function removePluginFromConfig(filePath: string, projectId?: string): void {
-  const isGlobalProject = isGlobal(projectId);
-  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
-  try {
-    const configPath = getPluginConfigPath(projectId);
-    validateProjectionPath(configPath);
-    if (!existsSync(configPath)) { mkdirSync(dirname(configPath), {recursive:true}); writeFileSync(configPath, "{}\n", {flag:"wx"}); }
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    const entries = [...new Map([
-      ...(Array.isArray(config.plugins) ? config.plugins : []),
-      ...(Array.isArray(config.plugin) ? config.plugin : []),
-    ].map((entry) => [JSON.stringify(entry), entry])).values()].filter((entry) => entry !== rel);
-    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
-      config.plugins = entries;
-      delete config.plugin;
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
-    }
-  } catch (error) { if (existsSync(getPluginConfigPath(projectId))) throw error; }
-}
-
 /** List all plugins registered for a project. */
 export function listPlugins(projectId: string): Plugin[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
