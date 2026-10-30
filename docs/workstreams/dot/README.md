@@ -64,3 +64,5 @@ Managed original-JobRun container and async execution proposal: [managed-job-pro
 Core126 owner, explicit credential audience and endpoint implementation: [core126-implementation.md](core126-implementation.md).
 
 Original verifier contract follow-on: [candidate-bootstrap-verifier-r3.md](candidate-bootstrap-verifier-r3.md) explicitly replaces only the r2 candidate bootstrap declaration with the existing ResponseVerifier type. Earlier frozen artifacts remain preserved.
+
+Finite positive candidate provider follow-on: [candidate-finite-program.md](candidate-finite-program.md) adds a case-bound one/two-request inert SSE program and exact candidate-only agent projection. It preserves default503, actual Core/CLI verification authority and all live/18-case/retirement gates.

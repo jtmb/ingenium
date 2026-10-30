@@ -1,0 +1,93 @@
+{
+  "upstreamCommit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "upstreamVersion": "2.0.11",
+  "sourcePinEvidence": "Root supplied Projects2 docs/workstreams/projects/native-web-files/upstream.json",
+  "files": [
+    {
+      "path": "package.json",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/package.json",
+      "bytes": 7406,
+      "sha256": "bc6c4a372af3ca9b4eb47bf41ce7adb6d9c10bcb061faa60fc65c3bf7b083356"
+    },
+    {
+      "path": "packages/core/package.json",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/package.json",
+      "bytes": 5019,
+      "sha256": "791c322eb8be665d99933ed6f4245c1769d5ed5892c8a8ecc1f122b8f20057d2"
+    },
+    {
+      "path": "bun.lock",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/bun.lock",
+      "bytes": 1104733,
+      "sha256": "15aed6fc0a4e48ecfc9ba89271254705036f4de528c49f2ab6d10ef9393c966e"
+    },
+    {
+      "path": "patches/@ai-sdk%2Fopenai-compatible@2.0.41.patch",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/patches/@ai-sdk%252Fopenai-compatible@2.0.41.patch",
+      "bytes": 1768,
+      "sha256": "b26cf35cfbeb627144c9d03eb1cd3f101022970e8e011071aae5d3e65d353acb"
+    },
+    {
+      "path": "packages/core/src/aisdk-native.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/aisdk-native.ts",
+      "bytes": 13977,
+      "sha256": "d186d8cc662e30ed9db1d4e68566f0b56f272504141d953d6b921dcccc19d547"
+    },
+    {
+      "path": "packages/core/src/provider.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/provider.ts",
+      "bytes": 20579,
+      "sha256": "1a65da992d966211f242bddc4356bf3b9f8b3bc9a424ae22da5ee9e2d1930177"
+    },
+    {
+      "path": "packages/ai/src/providers/openai-compatible.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/ai/src/providers/openai-compatible.ts",
+      "bytes": 2004,
+      "sha256": "035d2a12f88d83f99fc9f48e57c4dc686d4309b70fef58cb957b7c73b8e1e61f"
+    },
+    {
+      "path": "packages/ai/src/protocols/openai-compatible-chat.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/ai/src/protocols/openai-compatible-chat.ts",
+      "bytes": 909,
+      "sha256": "9dada2acf6128c5f4711d2116d1a54a62a694521a2f36b7a69455f1c1d7cdedb"
+    },
+    {
+      "path": "packages/ai/src/protocols/openai-chat.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/ai/src/protocols/openai-chat.ts",
+      "bytes": 48664,
+      "sha256": "6a8f457cbe5115298549ae03f8d671d7acfc015a0c30fd1db575bd352837ef5b"
+    },
+    {
+      "path": "packages/ai/src/protocols/shared.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/ai/src/protocols/shared.ts",
+      "bytes": 16890,
+      "sha256": "f8292dbaef15f8c937253e7cb954f9658853b47201fac3ef3c466672d2e2292c"
+    },
+    {
+      "path": "packages/core/src/tool/mcp.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/tool/mcp.ts",
+      "bytes": 6453,
+      "sha256": "27766cf6f5ec17ec2c0e1806734123ea573731a633ab9b6bf1b31536fd0b730a"
+    },
+    {
+      "path": "packages/core/src/tool/runtime.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/tool/runtime.ts",
+      "bytes": 12174,
+      "sha256": "0ec9775990c6abc01ed1d61e12c87da1abfedf4c3bf7cf6261b3bdd3c088c03d"
+    }
+  ],
+  "resolvedDevSdk": {
+    "name": "@ai-sdk/openai-compatible",
+    "version": "2.0.41",
+    "lockDeclaredIntegrity": "sha512-kNAGINk71AlOXx10Dq/PXw4t/9XjdK8uxfpVElRwtSFMdeSiLVt58p9TPx4/FJD+hxZuVhvxYj9r42osxWq79g==",
+    "tarballDownloaded": false,
+    "integrityVerifiedAgainstTarball": false,
+    "upstreamPatch": "patches/@ai-sdk%2Fopenai-compatible@2.0.41.patch",
+    "patchEffect": "Preserves whole error object instead of error.message; not used as the native runtime parser proof"
+  },
+  "actualPinnedRuntimeSourceChain": "core/aisdk-native.ts rewrites SDK spelling to @opencode/ai/providers/openai-compatible; provider routes through openai-compatible-chat to OpenAIChat.protocol; body.stream literal true; actual SSE tool delta/finish_reason/DONE parser",
+  "toolNames": "Core MCP server ingenium namespace + original ingenium_project_detail flattens to ingenium_ingenium_project_detail",
+  "toolResultLowering": "Actual text content joined newline; provider next tool.content must hash-match original proxy response text",
+  "binaryCommitRelation": "Not established by worker; same manifest version/source commit is not binary correspondence proof; Root/Projects2 actual binary/image evidence required",
+  "storage": "Exact upstream files read only in memory, including bounded1.1MiB lock; no package install/tarball/tree/source copies persisted; only this compact metadata receipt"
+}

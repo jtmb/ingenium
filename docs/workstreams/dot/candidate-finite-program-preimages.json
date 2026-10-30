@@ -1,0 +1,17 @@
+[
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+    "preimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+    "postimageSha256": "280a1dc1f5afdffa10d9c904338720759f83b03a3551389ee48ad20ce2ead626"
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+    "preimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+    "postimageSha256": "834faab308463699f0a4879b837e61430fb7823e800dc9e4fee3ace888fb0aec"
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+    "preimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+    "postimageSha256": "3ab1a6f8dc9d72ee8cf7861a7de9679303c3c199e08f8e098a6e3162a00f8e87"
+  }
+]

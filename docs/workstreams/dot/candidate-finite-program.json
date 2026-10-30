@@ -1,0 +1,103 @@
+{
+  "kind": "finite original candidate inert provider source proposal",
+  "patchSha256": "10897bb951e72f3ed0961614b03d62505c29e7490449beb49b310e1e8001df3e",
+  "patchBytes": 31268,
+  "serializedArtifactChecks": {
+    "artifacts": 5,
+    "syntaxFailures": 0
+  },
+  "targets": [
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+      "source": "candidate-response-program.proposal.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "bytes": 11948
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+      "source": "candidate-response-program.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "bytes": 1278
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "source": "candidate-loopback-program.proposal.mjs",
+      "preimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "postimageSha256": "280a1dc1f5afdffa10d9c904338720759f83b03a3551389ee48ad20ce2ead626",
+      "bytes": 7743
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "source": "candidate-bootstrap-program.proposal.mjs",
+      "preimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "postimageSha256": "834faab308463699f0a4879b837e61430fb7823e800dc9e4fee3ace888fb0aec",
+      "bytes": 10207
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "source": "candidate-loopback-program.d.mts",
+      "preimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "postimageSha256": "3ab1a6f8dc9d72ee8cf7861a7de9679303c3c199e08f8e098a6e3162a00f8e87",
+      "bytes": 1428
+    }
+  ],
+  "sourceOnly": true,
+  "runtimeCasesRun": 0,
+  "remaining": [
+    "Original Core probeProgram source/case binding and candidate-only projection install/agentHash refresh",
+    "Candidate result schema/probeObservation corroboration",
+    "Exact closure/copier and strict API/Core checks",
+    "Pinned binary/commit relation and real native provider/parser/tool/Core result/CLI verifier/retirement cases",
+    "Independent image approval and phases1-7 acceptance"
+  ],
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Minimal authored source, lossless delta, tests and source metadata/receipt for Root integration; no upstream tree/package copies"
+  },
+  "owner": "veyra-bot worker legacy Dot session6",
+  "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalStorage": "Existing authorized C-backed WSL; preserved",
+  "applyCheckExit": 0,
+  "validation": {
+    "sourceFixturePass": 29,
+    "sourceFixtureFail": 0,
+    "stdoutSha256": "b491e5e5c7dc09f20953fc9058f3d19691bc952770347db1e53304a6f5dbcadd",
+    "testSourceSha256": "59ca37c7e40b56d1da293b21ff43abb0135e4fb68c7d753b32b93ead8c747993",
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes NODE_COMPILE_CACHE= /home/brajam/.local/bin/node --experimental-strip-types --test docs/workstreams/dot/candidate-response-program.test.mjs",
+    "limits": "In-memory/VM/inert transport fixtures and actual original CLI verifier source; no pinned Effect parser/native binary/Core HTTP/readiness/tool/process/18-case execution"
+  },
+  "reviewedActualDependencies": [
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "sha256": "0ef220c2eb05a244704874719cf9829af3809047fed34afa13a77ab5fc5d2b67"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "sha256": "9459006f6964abbadba314e17a700e89896a6ccc7b25aff291de9899884088c1"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "sha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb"
+    },
+    {
+      "path": "services/ingenium-api/lib/job-response-verification.ts",
+      "sha256": "d5a023e1e6e91bf24ef7d8ac7734f3df330e307ab1f083b6bca1399ccadc0c46"
+    }
+  ],
+  "upstreamEvidence": "candidate-program-upstream.json; binary/commit relation remains unestablished",
+  "toolAgentProjection": "candidate-positive-agent-projection.json; exact candidate-only original install required",
+  "interfaces": [
+    "Original candidate bootstrap-assignment optional probeProgram, derived from persisted case/intent and current agent",
+    "Candidate-only result optional probeObservation bounded metadata, never authority/pass/verified",
+    "Root actual candidate-only agent/source/hash/grant installation",
+    "Closure/copier and strict semantic API/Core"
+  ]
+}

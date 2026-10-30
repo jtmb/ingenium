@@ -1,0 +1,30 @@
+{
+  "kind": "candidate-only proposed original canary agent projection; NOT installed or granted",
+  "caseId": "job-broker-route",
+  "agentConfig": {
+    "description": "Core126 qualification canary",
+    "mode": "primary",
+    "system": "Qualification canary only.",
+    "hidden": false,
+    "permissions": [
+      {
+        "action": "*",
+        "resource": "*",
+        "effect": "deny"
+      },
+      {
+        "action": "read",
+        "resource": "/workspace/canary",
+        "effect": "allow"
+      },
+      {
+        "action": "ingenium_ingenium_project_detail",
+        "resource": "*",
+        "effect": "allow"
+      }
+    ]
+  },
+  "originalJsonHash": "3b59a870b86d40e771f05be6d88c35d19d80d0098bac4054c971e0b5ba963c90",
+  "baseAgentHash": "d98e0101b3d493ca543781924c6724ca2e20fc956cafad2cfdeeb2ce41f32f62",
+  "remaining": "Root original Core agent/source owner installation and refreshed actual agentHash/protected selection; actual native/Core tool grants and cases remain open"
+}
