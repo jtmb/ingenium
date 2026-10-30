@@ -50,8 +50,8 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1441,
-      "sha256": "253254e9f4a11ecc9f4b1b983e5c91576354e1888ee6c99bba17df24a50d8f11"
+      "bytes": 1491,
+      "sha256": "4d8d842a2d4c50b6e36a8995719815d6c1e144da67da44f3bc4c6d4c3e764b1d"
     },
     {
       "path": "README.md",
@@ -102,7 +102,42 @@
       "path": "selected-state-review.md",
       "bytes": 8423,
       "sha256": "7af6e32542286df976a16c77b1b1c26ba3cd4211deb41e3be2e739802f311608"
+    },
+    {
+      "path": "voice-attachment-maintenance-splices.json",
+      "bytes": 2384,
+      "sha256": "83be3f4b7595ec6d0cdd611876ed6781ffcb8a5fa6f1401667d87ba50287d4e9"
+    },
+    {
+      "path": "voice-attachment-restore-receipt.json",
+      "bytes": 2778,
+      "sha256": "276ebb69dfaddffcb913c2fa9ac2a3cd8ffe92d14333708af9da4dc263ca9e30"
+    },
+    {
+      "path": "voice-attachment-restore-review.md",
+      "bytes": 6623,
+      "sha256": "c1199500db7c6f1cbeddf187850da93223505cc2dafb0d3835ac0978433ce8dc"
+    },
+    {
+      "path": "voice-attachment-restore-splices.json",
+      "bytes": 3094,
+      "sha256": "15edcef276a63da25f90d2b20bd94421ee9325286fb5500e4e0fc5742571b6c3"
+    },
+    {
+      "path": "voice-attachment-restore.d.mts",
+      "bytes": 941,
+      "sha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9"
+    },
+    {
+      "path": "voice-attachment-restore.mjs",
+      "bytes": 9834,
+      "sha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3"
+    },
+    {
+      "path": "voice-attachment-restore.test.mjs",
+      "bytes": 10523,
+      "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 102034
+  "totalContentBytes": 138261
 }

@@ -1,0 +1,75 @@
+{
+  "kind": "voice-attachment-restore-proposal-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "6bf10bdf2d8d0632ed876e7c7e7e19d791e90e38",
+  "applied": false,
+  "runtimeQualified": false,
+  "testsAuthored": 20,
+  "testsExecuted": 0,
+  "validation": [
+    "Unexecuted V8 body syntax parse of helper and tests",
+    "Exact3Core/2maintenance preimage splices composed in memory only",
+    "JSON/source manifest verification and git diff checks"
+  ],
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/backups.ts",
+      "sha256": "444f4984a15b918db60112c7aa7e9e3df2e92ea28622df048689b48fdb14dc66"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/132_voice_attachment_deliveries.sql",
+      "sha256": "ae6daaf3b9f1b98265b138be6ed3a4d5c9e052df56b0ba2f06b0bfc674788a0d"
+    },
+    {
+      "path": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "sha256": "28df5a632f7f6ca366fdaf37278a9e0e1fee75d1706683926ea2f17764088dcd"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "voice-attachment-restore.mjs",
+      "bytes": 9834,
+      "sha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3"
+    },
+    {
+      "path": "voice-attachment-restore.d.mts",
+      "bytes": 941,
+      "sha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9"
+    },
+    {
+      "path": "voice-attachment-restore.test.mjs",
+      "bytes": 10523,
+      "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
+    },
+    {
+      "path": "voice-attachment-restore-splices.json",
+      "bytes": 3094,
+      "sha256": "15edcef276a63da25f90d2b20bd94421ee9325286fb5500e4e0fc5742571b6c3"
+    },
+    {
+      "path": "voice-attachment-maintenance-splices.json",
+      "bytes": 2384,
+      "sha256": "83be3f4b7595ec6d0cdd611876ed6781ffcb8a5fa6f1401667d87ba50287d4e9"
+    },
+    {
+      "path": "voice-attachment-restore-review.md",
+      "bytes": 6623,
+      "sha256": "c1199500db7c6f1cbeddf187850da93223505cc2dafb0d3835ac0978433ce8dc"
+    }
+  ],
+  "backupsPostimageSha256": "a2626fea9bf4aefda42eca88368a6f3717ef98b27fef8ec28ec8e3a01026537b",
+  "gates": [
+    "Root actual signed older-snapshot regression",
+    "Root original Core strict build/test",
+    "Original maintenance pre-destructive validator and safe old-journal upgrade",
+    "Full journal16MiB combined budget before write",
+    "Global selection ownership and actual call/audio acceptance"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Reviewed minimal source needed by Root actual integration/verification; prior13Native drafts protected",
+    "generatedRuntimeArtifacts": []
+  },
+  "maintenancePostimageSha256": "d844f25c617d1e3300dc566cc2bccbe9efeed060e8e849887590d2ed47ece6aa"
+}

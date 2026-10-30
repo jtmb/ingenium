@@ -1,0 +1,28 @@
+{
+  "kind": "voice-attachment-restore-three-splices-v1",
+  "applied": false,
+  "source": "packages/ingenium-core/lib/tools/backups.ts",
+  "preimageSha256": "444f4984a15b918db60112c7aa7e9e3df2e92ea28622df048689b48fdb14dc66",
+  "postimageSha256": "a2626fea9bf4aefda42eca88368a6f3717ef98b27fef8ec28ec8e3a01026537b",
+  "encoding": "UTF-8; offsets UTF-16 code units; apply descending with exact preimage checks",
+  "edits": [
+    {
+      "name": "capsule-type-and-static-import",
+      "offset": 103428,
+      "before": "export type RestoreExecutionCapsule = {\n  explicitMemoryForgets: ExplicitMemoryForgetLedger;\n  /** Absent only in maintenance journals written before learned memory shipped. */\n  learnedMemorySuppressions?: LearnedMemorySuppressionLedger;\n  plan: StoredRestorePlan;\n  legacyRevisions: StoredPlanRevision[];\n  legacyAuthorizations: StoredAuthorization[];\n  stage: RestoreStage;\n  legacyReceipts: Array<Record<string, unknown>>;\n  executionAuthorization: StoredExecutionAuthorization;\n  run: StoredExecutionRun;\n  items: StoredExecutionItem[];\n  executionReceipts: Array<Record<string, unknown>>;\n  phaseEvents: StoredExecutionPhaseEvent[];\n  sourceRecord: BackupRecord;\n  safetyRecord: BackupRecord | null;\n};",
+      "after": "export type RestoreExecutionCapsule = {\n  explicitMemoryForgets: ExplicitMemoryForgetLedger;\n  /** Absent only in maintenance journals written before learned memory shipped. */\n  learnedMemorySuppressions?: LearnedMemorySuppressionLedger;\n  /** Missing legacy capsule metadata refuses restore; never assume empty. */\n  voiceAttachmentDeliveries?: import(\"./voice-attachment-restore.mjs\").VoiceAttachmentRestoreLedger;\n  plan: StoredRestorePlan;\n  legacyRevisions: StoredPlanRevision[];\n  legacyAuthorizations: StoredAuthorization[];\n  stage: RestoreStage;\n  legacyReceipts: Array<Record<string, unknown>>;\n  executionAuthorization: StoredExecutionAuthorization;\n  run: StoredExecutionRun;\n  items: StoredExecutionItem[];\n  executionReceipts: Array<Record<string, unknown>>;\n  phaseEvents: StoredExecutionPhaseEvent[];\n  sourceRecord: BackupRecord;\n  safetyRecord: BackupRecord | null;\n};\nimport { captureVoiceAttachmentRestoreLedger, mergeVoiceAttachmentRestoreLedger } from \"./voice-attachment-restore.mjs\";\nexport { validateVoiceAttachmentRestoreLedger } from \"./voice-attachment-restore.mjs\";"
+    },
+    {
+      "name": "capture-current-original-deliveries",
+      "offset": 135774,
+      "before": "    learnedMemorySuppressions: captureLearnedMemorySuppressions(db),",
+      "after": "    learnedMemorySuppressions: captureLearnedMemorySuppressions(db),\n    voiceAttachmentDeliveries: captureVoiceAttachmentRestoreLedger(db),"
+    },
+    {
+      "name": "merge-original-deliveries-in-existing-transaction",
+      "offset": 138290,
+      "before": "    mergeExplicitMemoryForgetLedger(db, capsule.explicitMemoryForgets);",
+      "after": "    mergeVoiceAttachmentRestoreLedger(db, capsule.voiceAttachmentDeliveries);\n    mergeExplicitMemoryForgetLedger(db, capsule.explicitMemoryForgets);"
+    }
+  ]
+}

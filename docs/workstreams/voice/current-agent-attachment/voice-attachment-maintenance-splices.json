@@ -1,0 +1,22 @@
+{
+  "kind": "voice-attachment-maintenance-preflight-splices-v1",
+  "applied": false,
+  "source": "services/ingenium-api/scripts/restore-maintenance.ts",
+  "preimageSha256": "28df5a632f7f6ca366fdaf37278a9e0e1fee75d1706683926ea2f17764088dcd",
+  "postimageSha256": "d844f25c617d1e3300dc566cc2bccbe9efeed060e8e849887590d2ed47ece6aa",
+  "encoding": "UTF-8; UTF-16 code unit offsets; apply descending with exact preimage checks",
+  "edits": [
+    {
+      "name": "normal-journal-ledger-and-complete-byte-preflight",
+      "offset": 11964,
+      "before": "function writeJournal(root: string, runId: string, phase: Phase, capsule: backups.RestoreExecutionCapsule, targets: TargetMetadata): void {\n  const unsigned = { version: 1 as const, runId, phase, capsule, targets };\n  const journal: Journal = { ...unsigned, hmac: signJournal(journalPayload(unsigned)) };\n  atomicWrite(root, JOURNAL_FILE, canonicalJson(journal));\n}",
+      "after": "function writeJournal(root: string, runId: string, phase: Phase, capsule: backups.RestoreExecutionCapsule, targets: TargetMetadata): void {\n  // Original maintenance owner must capture a current complete ledger before\n  // any swap. Valid metadata grants no new restore/source authority.\n  try { backups.validateVoiceAttachmentRestoreLedger(capsule.voiceAttachmentDeliveries); }\n  catch { throw new MaintenanceError(\"JOURNAL_INVALID\"); }\n  const unsigned = { version: 1 as const, runId, phase, capsule, targets };\n  const journal: Journal = { ...unsigned, hmac: signJournal(journalPayload(unsigned)) };\n  const serialized = canonicalJson(journal);\n  if (Buffer.byteLength(serialized, \"utf8\") > MAX_JOURNAL_BYTES) throw new MaintenanceError(\"JOURNAL_INVALID\");\n  atomicWrite(root, JOURNAL_FILE, serialized);\n}"
+    },
+    {
+      "name": "verified-journal-ledger-before-crash-recovery-effects",
+      "offset": 13753,
+      "before": "  return journal as Journal;",
+      "after": "  // HMAC has been verified above. Refuse BEFORE recover() can touch rollback\n  // files, sidecars, target metadata, journals or restored users. Missing legacy\n  // fields require original-owner verified rollback-DB upgrade, never emptiness.\n  try { backups.validateVoiceAttachmentRestoreLedger(journal.capsule.voiceAttachmentDeliveries); }\n  catch { throw new MaintenanceError(\"JOURNAL_INVALID\"); }\n  return journal as Journal;"
+    }
+  ]
+}
