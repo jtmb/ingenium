@@ -1,0 +1,107 @@
+{
+  "scope": "source proposal; no compiler/runtime acceptance",
+  "patch_sha256": "94e664c8e9aabbb517e1244fdf4514a04acf4ceae955acedff5515c603f77fc7",
+  "patch_bytes": 110107,
+  "files": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_blob": "2f641d8acc7b40740438921c8ba49e66ae78c205",
+      "preimage_sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2",
+      "postimage_sha256": "54b0ce0dc0046d2f84bb2dc0b6d8b477cd9ee38492b781f31dbcd33a262c6a14",
+      "bytes": 36233
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "preimage_blob": "e59edc26f922453ce5487c9dfdda187c6e347a28",
+      "preimage_sha256": "47deec3e83c258b8f921d5388e588565ca279951dac5572ceaf6ae842d11e013",
+      "postimage_sha256": "960b54038ac5c1ba7e357cd17442aceaa46195d1384fd06cbbb724fc550c0948",
+      "bytes": 21662
+    },
+    {
+      "path": "crates/adapters/src/projects/local_workspaces.rs",
+      "preimage_blob": "cf6068c75c5faab29002e971127c6f35928e15e0",
+      "preimage_sha256": "3a894f0d4b38c2b542a928879106d6e2e7de78cec491c3e750a7ec2a60b13fc5",
+      "postimage_sha256": "f5c47fbbe0796514b53e4df0c402d50688dc0297d70c60c489d4f33fcfd6cab7",
+      "bytes": 22818
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_blob": "da38f6c53cab4e35fe8505132ba18bf6250fd616",
+      "preimage_sha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817",
+      "postimage_sha256": "d2397761907455819cd0480d3d7e52171f701de73f3d7b2d5e77da0a29c591cc",
+      "bytes": 144327
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "preimage_blob": "4c761df22b5fad2e97771b9cae6433d67b681bc4",
+      "preimage_sha256": "876e1f2bdc5ca675a3ec293c0cd7ec1e33fe5e3edfa737bfda6a58c180201d42",
+      "postimage_sha256": "964e28dba9c9f8d99a1f436535104e8c488835990814ffc45c1c7530150ae0d1",
+      "bytes": 3349
+    },
+    {
+      "path": "crates/adapters/src/opencode/mod.rs",
+      "preimage_blob": "36591fea667e082b58b2ef782d6ae8089b32464d",
+      "preimage_sha256": "ea74d8ce2f22459a816c3c34f4e48c873cc6914013509bdfad1492598786aa40",
+      "postimage_sha256": "4f274fa0c78ce79247437d2914e4c87df88d6c48111351cbe19581c158efce4f",
+      "bytes": 31310
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "preimage_blob": "d392e0e432910513379eee0496edf357a582883f",
+      "preimage_sha256": "d1e51f7157e9f7ae0ad0499050dd5d3c80108ee4f99836406486449a58885114",
+      "postimage_sha256": "2247b18f4e9daf6ad2155e7938a4e2a2269ec0abb43badfc32399d0fa700dcfe",
+      "bytes": 10028
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "preimage_blob": "7e19f95f72f653b7645821f5db8b0c4aa01194b3",
+      "preimage_sha256": "218a0a42be6ac82adde892fe622513226c423305c78b02125366de3474732ffe",
+      "postimage_sha256": "b24010bb3a90de4a3be56861314df3d5658c4e733c4bd360b9ba80d7ceb440f6",
+      "bytes": 17091
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "preimage_blob": "a1f1e2902d93926bedf3bd98bc4596409060ab0a",
+      "preimage_sha256": "d56fda3eb6973bcfbd91c66c87b49e4af797fd731956a3f71dedf997334488c6",
+      "postimage_sha256": "590dd8b107831b58a4b3716aea69aaaca60a8d6ca804819c10b14be8271bbc6a",
+      "bytes": 56122
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/local_web_auth.rs",
+      "preimage_blob": "343b5113997a42a750ddf369ff9f52ae02fde28a",
+      "preimage_sha256": "9e7d967c40aaaba72a6cc5c842afcd2f0932f83d24a232c941b28df2eeb4809c",
+      "postimage_sha256": "c29900c4b08a72ec99a9f64255f817912123d8145d6e2dc55c9f46c0ef696c4f",
+      "bytes": 18122
+    },
+    {
+      "path": "crates/adapters/src/projects/0007.sql",
+      "preimage_blob": null,
+      "postimage_sha256": "8f982a230ab85923d9e6a7595129377f093044b1e86ed2490376df7dc7283af2",
+      "bytes": 10738
+    },
+    {
+      "path": "crates/adapters/src/projects/local_web_originals.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "0386f495484114a486aa4337b137644fe61612d92bf8d716fe4a5f1bd3510ad1",
+      "bytes": 21071
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "f3f23901e14d07d9fe4ebefb4e12810634e6ed930cf72caf46017ddab7d47726",
+      "bytes": 13677
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_event_policy.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "0d46a37179f2d72f85f2895ffe817d4bd9cf317dfe89e5e4be5614e0649fe6d7",
+      "bytes": 10304
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_web_transport.rs",
+      "preimage_blob": null,
+      "postimage_sha256": "96c6ce9459e7d698fa4e1eb2b606db3f23a0828f758023e05c4779d63f138251",
+      "bytes": 5738
+    }
+  ]
+}

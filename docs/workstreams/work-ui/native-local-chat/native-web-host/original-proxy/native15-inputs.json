@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "records": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "blob": "2f641d8acc7b40740438921c8ba49e66ae78c205",
+      "bytes": 19202,
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2"
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "blob": "e59edc26f922453ce5487c9dfdda187c6e347a28",
+      "bytes": 21520,
+      "sha256": "47deec3e83c258b8f921d5388e588565ca279951dac5572ceaf6ae842d11e013"
+    },
+    {
+      "path": "crates/adapters/src/projects/local_workspaces.rs",
+      "blob": "cf6068c75c5faab29002e971127c6f35928e15e0",
+      "bytes": 22961,
+      "sha256": "3a894f0d4b38c2b542a928879106d6e2e7de78cec491c3e750a7ec2a60b13fc5"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "blob": "da38f6c53cab4e35fe8505132ba18bf6250fd616",
+      "bytes": 143884,
+      "sha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "blob": "4c761df22b5fad2e97771b9cae6433d67b681bc4",
+      "bytes": 3280,
+      "sha256": "876e1f2bdc5ca675a3ec293c0cd7ec1e33fe5e3edfa737bfda6a58c180201d42"
+    },
+    {
+      "path": "crates/adapters/src/opencode/mod.rs",
+      "blob": "36591fea667e082b58b2ef782d6ae8089b32464d",
+      "bytes": 31285,
+      "sha256": "ea74d8ce2f22459a816c3c34f4e48c873cc6914013509bdfad1492598786aa40"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "blob": "d392e0e432910513379eee0496edf357a582883f",
+      "bytes": 3287,
+      "sha256": "d1e51f7157e9f7ae0ad0499050dd5d3c80108ee4f99836406486449a58885114"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "blob": "7e19f95f72f653b7645821f5db8b0c4aa01194b3",
+      "bytes": 15798,
+      "sha256": "218a0a42be6ac82adde892fe622513226c423305c78b02125366de3474732ffe"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "blob": "a1f1e2902d93926bedf3bd98bc4596409060ab0a",
+      "bytes": 55354,
+      "sha256": "d56fda3eb6973bcfbd91c66c87b49e4af797fd731956a3f71dedf997334488c6"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/local_web_auth.rs",
+      "blob": "343b5113997a42a750ddf369ff9f52ae02fde28a",
+      "bytes": 16766,
+      "sha256": "9e7d967c40aaaba72a6cc5c842afcd2f0932f83d24a232c941b28df2eeb4809c"
+    }
+  ],
+  "behavior_inputs": [
+    {
+      "path": "crates/adapters/src/projects/0006.sql",
+      "blob": "116197cb124e91c08d20077d1dd1557db228b4f9",
+      "sha256": "971f65f481f820435105fa5c824f4136e0583df11a8fbece2d2020d9a7bbaa30",
+      "bytes": 3903
+    }
+  ]
+}

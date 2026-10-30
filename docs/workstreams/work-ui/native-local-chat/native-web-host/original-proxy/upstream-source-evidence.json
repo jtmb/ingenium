@@ -1,0 +1,89 @@
+{
+  "upstream_commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "scope": "small pinned source reads only; neither binaries nor runtime qualification",
+  "sources": [
+    {
+      "name": "cli/app-assets",
+      "blob": "6586773a93af0a226762fc7df9216a49aa9ed14e",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/app-assets.ts"
+    },
+    {
+      "name": "cli/web-ui",
+      "blob": "4378dd8d07515119e9192c085f83e8a61a0325a5",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/services/web-ui.ts"
+    },
+    {
+      "name": "cli/server-process",
+      "blob": "efb3ebae509c96d17e60574e1848befa3f2bbd14",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/cli/src/server-process.ts"
+    },
+    {
+      "name": "server/pty",
+      "blob": "4e8f922edbbf9cd20a84b331149681f7a4f23899",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/handlers/pty.ts"
+    },
+    {
+      "name": "server/event",
+      "blob": "af1d26b5e41d9ffac73b0c159e5d47b4b37ea706",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/handlers/event.ts"
+    },
+    {
+      "name": "server/event-feed",
+      "blob": "f22c393fe2968cd44604383fb176e523d5eb34b6",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/event-feed.ts"
+    },
+    {
+      "name": "schema/session-event",
+      "blob": "bb8a56e454c2d014f39156294cf0628b81d8a019",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-event.ts"
+    },
+    {
+      "name": "schema/permission",
+      "blob": "e978c9463292bed65d427536ca4e2b4549664aec",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/permission.ts"
+    },
+    {
+      "name": "schema/form",
+      "blob": "5093660b2a9a72ebf7b1500e4a4f84a107f5a8e0",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/form.ts"
+    },
+    {
+      "name": "schema/pty",
+      "blob": "b2da9093f0fb38a75abdc64ca1fb8d5d11cc6f84",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/pty.ts"
+    },
+    {
+      "name": "schema/location",
+      "blob": "205329e5fcaf99a87664599f289b462b9b878347",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/location.ts"
+    },
+    {
+      "name": "schema/prompt",
+      "blob": "d458f8283ff8996b78af5ffdf34bbf5a9f0473ed",
+      "url": "https://api.github.com/repos/anomalyco/opencode/contents/packages/schema/src/prompt.ts?ref=9eb6902aaf3c35ce985b67c605a775992249066b"
+    },
+    {
+      "name": "schema/session-inbox",
+      "blob": "361c0c492ce81aaea18fa31d36d3b00dc8d13c7b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-inbox.ts"
+    },
+    {
+      "name": "core/session-prompt",
+      "blob": "80878f354dd682311e518cac132f46b61df77523",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/session/prompt.ts"
+    },
+    {
+      "name": "core/image",
+      "blob": "a19d3fa884c6337e3aa740daac619a2ebc1d2ab7",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/image.ts"
+    },
+    {
+      "name": "core/image-photon",
+      "blob": "9723edba926c8e99da51277c452457316e6c9c37",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/image/photon.ts"
+    }
+  ],
+  "ack_bound": "Image.State limits mutable; image normalization and skill preparation precede materialized SessionInbox.User reply. Actual expansion/no-transform authority required; current fixed reservation is unqualified for general images/skills/20MiB.",
+  "sse": "Actual global stream, fixed heartbeat and server.connected; exact saved session/PTY ownership needed before raw frame relay.",
+  "pty": "Actual original PTY/location ticket/custom-header/Origin and binary/meta/cursor/close lifecycle; not generic GET forwarding."
+}

@@ -23,6 +23,7 @@ pub struct LocalWebLease {
     original: OriginalEngine,
     binding_id: String,
     invalidation_epoch: String,
+    engine_stop:Arc<AtomicBool>,
     revoked: AtomicBool,
 }
 impl LocalWebLease {
@@ -30,7 +31,15 @@ impl LocalWebLease {
     pub fn invalidation_epoch(&self) -> &str { &self.invalidation_epoch }
     pub fn owner(&self) -> &LocalWorkspaceOwner { &self.original.owner }
     pub fn session_id(&self) -> &str { &self.original.session_id }
-    pub fn revoked(&self) -> bool { self.revoked.load(Ordering::Acquire) }
+    pub fn revoked(&self) -> bool { self.revoked.load(Ordering::Acquire)||self.engine_stop.load(Ordering::Acquire) }
+    pub fn directory(&self)->&str{&self.original.directory}
+    pub fn engine_project_id(&self)->&str{&self.original.project_id}
+    pub(crate) fn matches_saved_workspace_engine(&self,projection:&Value)->bool{
+        let mut expected=json!(&self.original);let mut actual=projection.clone();
+        let Some(expected)=expected.as_object_mut()else{return false};
+        let Some(actual)=actual.as_object_mut()else{return false};
+        expected.remove("session_id");actual.remove("session_id");expected==actual
+    }
     /// Revocation only. It does not close a child, release a proxy/profile,
     /// acknowledge callback detachment, or terminate the retained engine.
     pub fn revoke(&self) { self.revoked.store(true, Ordering::Release); }
@@ -57,6 +66,19 @@ fn observe(engine: &OwnedEngine, binding: &LocalWorkspaceBinding, session: &str,
 }
 
 impl LiveRuntime {
+    pub fn observe_original_web_pty(&self,lease:&LocalWebLease,saved:&crate::projects::SavedNativeWebPty,
+        current:&dyn Fn()->Result<(),String>)->Result<Value,RuntimeError>{
+        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+        let observed=observe(&engine,&lease.binding,lease.session_id(),self.credentials_revision(),current)?;
+        if observed!=lease.original||lease.revoked(){return Err(local_error());}
+        let reply:Value=super::super::super::decode(engine.client()?.request_query(reqwest::Method::GET,
+            &["api","pty",saved.id()],&[("location[directory]",lease.binding.directory().into())],None)?)?;
+        if reply.pointer("/location/directory").and_then(Value::as_str)!=Some(lease.binding.directory())
+            ||!reply.get("data").is_some_and(|info|saved.matches_info(info)){return Err(local_error());}
+        require_local_engine(&engine,&lease.binding,current)?;
+        if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
+        Ok(reply)
+    }
     /// Service's current callback MUST also recheck require_local_session on the
     /// original ProjectStore, not merely LocalWorkspaceBinding::verify_current.
     pub fn mint_local_web_lease(&self, binding: Arc<LocalWorkspaceBinding>, session: &str,
@@ -71,7 +93,7 @@ impl LiveRuntime {
         hash.update(nonce.as_bytes());
         hash.update(serde_json::to_vec(&original).map_err(|_| RuntimeError::Storage)?);
         let invalidation_epoch = format!("{:x}", hash.finalize());
-        Ok(LocalWebLease { binding, original, binding_id, invalidation_epoch,
+        Ok(LocalWebLease { binding, original, binding_id, invalidation_epoch,engine_stop:engine.monitor_stop.clone(),
             revoked: AtomicBool::new(false) })
     }
 
@@ -117,6 +139,7 @@ pub struct NativeWebOriginal {
     invalidation_epoch: String,
     engine: OriginalEngine,
     method: Method,
+    raw_target: String,
     route: String,
     query: Vec<(String, String)>,
     headers: Vec<(String, String)>,
@@ -129,20 +152,42 @@ impl NativeWebOriginal {
         if lease.revoked() || body.len() > 16 * 1024 * 1024 { return Err(local_error()); }
         let (method, route, query, content) = request_parts(method,target,headers,&body,&lease.original.directory)?;
         let operation_id = uuid::Uuid::new_v4().to_string();
-        let metadata = serde_json::to_vec(&(lease.binding_id(), lease.invalidation_epoch(),
-            &lease.original, method.as_str(), &route, &query, &content)).map_err(|_| RuntimeError::Storage)?;
+        // Lease IDs are observation handles, not input identity. A native
+        // reattachment to the same original owner+engine must reconcile a
+        // stable upstream ID against the same exact input, never replay it.
+        let metadata = serde_json::to_vec(&(&lease.original, method.as_str(), target,
+            &route, &query, &content)).map_err(|_| RuntimeError::Storage)?;
         let input_sha256 = input_hash(&metadata, &body);
         Ok(Self { operation_id, binding_id: lease.binding_id.clone(),
             invalidation_epoch: lease.invalidation_epoch.clone(), engine: lease.original.clone(),
-            method, route, query, headers: content, body, input_sha256 })
+            method, raw_target: target.into(), route, query, headers: content, body, input_sha256 })
     }
     pub fn operation_id(&self) -> &str { &self.operation_id }
     pub fn input_sha256(&self) -> &str { &self.input_sha256 }
     pub fn method(&self) -> &Method { &self.method }
+    pub fn raw_target(&self) -> &str { &self.raw_target }
     pub fn route(&self) -> &str { &self.route }
     pub fn query(&self) -> &[(String,String)] { &self.query }
     pub fn headers(&self) -> &[(String,String)] { &self.headers }
     pub fn body(&self) -> &[u8] { &self.body }
+    /// Only actual protocol-supplied IDs qualify. Permission/form object IDs,
+    /// command names, text hashes, and native request UUIDs never become this key.
+    pub fn stable_upstream_key(&self) -> Result<Option<String>, RuntimeError> {
+        if self.method != Method::POST { return Ok(None); }
+        let prefix = if self.route == format!("/api/session/{}/prompt",self.session_id())
+            || self.route == format!("/api/session/{}/shell",self.session_id()) { "msg_" }
+            else if self.route == "/api/session" { "ses_" } else { return Ok(None); };
+        let value: Value = serde_json::from_slice(&self.body).map_err(|_|local_error())?;
+        let Some(id) = value.get("id") else { return Ok(None); };
+        let id = id.as_str().filter(|s|s.starts_with(prefix) && s.len()>prefix.len() && s.len()<=160
+            && s.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-')).ok_or_else(local_error)?;
+        // Stable across native/proxy reattachment and process/service restarts.
+        // Full input/engine/owner changes still conflict with the retained hash.
+        let owner = self.owner();
+        let key = serde_json::to_vec(&(&owner.installation_id,&owner.custodian_key,
+            &owner.workspace_id,&owner.environment,self.session_id(),self.route(),id)).map_err(|_|RuntimeError::Storage)?;
+        Ok(Some(input_hash(b"veyra-upstream-web-id-v1",&key)))
+    }
     pub fn owner(&self) -> &LocalWorkspaceOwner { &self.engine.owner }
     pub fn session_id(&self) -> &str { &self.engine.session_id }
     pub fn binding_id(&self) -> &str { &self.binding_id }
@@ -150,10 +195,15 @@ impl NativeWebOriginal {
     /// Exact serializable journal projection, private writer only. This is not
     /// a renderer response. Restart JSON never recreates a live lease.
     pub fn journal_original(&self) -> Value {
+        let mut scope=self.journal_scope();
+        scope["body_bytes"]=json!(self.body);
+        scope
+    }
+    pub fn journal_scope(&self) -> Value {
         json!({"operation_id":self.operation_id,"binding_id":self.binding_id,
             "invalidation_epoch":self.invalidation_epoch,"engine":self.engine,
-            "method":self.method.as_str(),"route":self.route,"query":self.query,
-            "headers":self.headers,"body_bytes":self.body,"input_sha256":self.input_sha256})
+            "method":self.method.as_str(),"raw_target":self.raw_target,"route":self.route,"query":self.query,
+            "headers":self.headers,"input_sha256":self.input_sha256})
     }
 }
 
@@ -194,7 +244,7 @@ fn request_parts(method: &str, target: &str, headers: &[(String,String)], body: 
         Ok((method,path.into(),query,content))
 }
 fn input_hash(metadata: &[u8], body: &[u8]) -> String {
-    let mut hash = Sha256::new(); hash.update(b"veyra-original-web-request-v1\0");
+    let mut hash = Sha256::new(); hash.update(b"veyra-original-web-request-v2\0");
     hash.update((metadata.len() as u64).to_be_bytes()); hash.update(metadata);
     hash.update((body.len() as u64).to_be_bytes()); hash.update(body);
     format!("{:x}", hash.finalize())
@@ -209,10 +259,174 @@ pub struct LocalWebPromptInspection {
     pub resume: Option<bool>,
     pub skill_ids: Vec<String>,
 }
+pub struct LocalWebPromptOutcome {
+    operation_id:String,input_sha256:String,owner:LocalWorkspaceOwner,session_id:String,upstream_id:Option<String>,
+    admission:&'static str,status:u16,content_type:Option<String>,body:Vec<u8>,
+}
+pub enum LocalWebOriginalSubmission {
+    Sent(LocalWebPromptOutcome),
+    Retained(veyra_contracts::local_workspaces::LocalOperationReceipt),
+}
+impl LocalWebPromptOutcome {
+    pub fn operation_id(&self)->&str{&self.operation_id}
+    pub fn input_sha256(&self)->&str{&self.input_sha256}
+    pub fn owner(&self)->&LocalWorkspaceOwner{&self.owner}
+    pub fn session_id(&self)->&str{&self.session_id}
+    pub fn upstream_id(&self)->Option<&str>{self.upstream_id.as_deref()}
+    pub fn admission(&self)->&str{self.admission}
+    pub fn status(&self)->u16{self.status}
+    pub fn content_type(&self)->Option<&str>{self.content_type.as_deref()}
+    pub fn body(&self)->&[u8]{&self.body}
+}
 impl LiveRuntime {
+    /// The reservation callback is the real service ProjectStore writer only.
+    /// Its Fresh witness cannot be forged by a renderer/DTO/positive callback.
+    /// Keep this exact original engine lock across resolver capture, DB fence,
+    /// final guard checks and the single actual upstream request.
+    pub fn submit_local_web_prompt_original<F>(&self,lease:&LocalWebLease,original:NativeWebOriginal,
+        current:&dyn Fn()->Result<(),String>,reserve:F)->Result<LocalWebOriginalSubmission,RuntimeError>
+    where F:FnOnce(NativeWebOriginal,super::web_materialization::EffectiveWebBody,crate::opencode::attachments::NativeWebFilesOriginal)->Result<crate::projects::NativeWebReservation,String>{
+        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+        self.inspect_local_web_prompt_locked(&engine,lease,&original,current)?;
+        let session=engine.client()?.session_in_project(lease.session_id(),&SessionQuery{
+            directory:lease.binding.directory().into(),..SessionQuery::default()})?;
+        let view:Value=serde_json::from_slice(original.body()).map_err(|_|local_error())?;
+        let files=crate::opencode::attachments::resolve_local_web_files(&lease.binding,&session,
+            original.operation_id(),original.input_sha256(),&view,current).map_err(|_|local_error())?;
+        let effective=super::web_materialization::materialize_resolved_web_files(original.body(),&files).map_err(|_|local_error())?;
+        if files.contains_image()&&!engine.model.vision{return Err(local_error());}
+        files.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+        require_local_engine(&engine,&lease.binding,current)?;
+        match reserve(original,effective,files).map_err(|_|RuntimeError::Storage)?{
+            crate::projects::NativeWebReservation::Retained(receipt)=>Ok(LocalWebOriginalSubmission::Retained(receipt)),
+            crate::projects::NativeWebReservation::Fresh(dispatch)=>self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current).map(LocalWebOriginalSubmission::Sent),
+        }
+    }
+    /// The actual original service coordinator retains its serial/ModelWork and
+    /// actual resolver handle guard through this call. The move-only dispatch
+    /// witness comes ONLY from the ProjectStore original transaction/fence.
+    /// This method holds the SAME retained engine across final checks, original
+    /// PromptRecord capture and exactly ONE full effective-body HTTP send.
+    pub fn dispatch_local_web_prompt_once(&self,lease:&LocalWebLease,
+        dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
+    )->Result<LocalWebPromptOutcome,RuntimeError>{
+        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+        self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current)
+    }
+    fn dispatch_local_web_prompt_locked(&self,engine:&OwnedEngine,lease:&LocalWebLease,
+        dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
+    )->Result<LocalWebPromptOutcome,RuntimeError>{
+        let (original,effective,files_original)=dispatch.into_parts();
+        let inspected=self.inspect_local_web_prompt_locked(&engine,lease,&original,current)?;
+        files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+        if effective.original_body_sha256()!=format!("{:x}",Sha256::digest(original.body()))
+            || original.engine!=lease.original || lease.revoked(){return Err(local_error());}
+        let body:Value=serde_json::from_slice(effective.bytes()).map_err(|_|local_error())?;
+        let files=body.get("files").map(|v|v.as_array().ok_or_else(local_error)).transpose()?;
+        let text=body.get("text").map(|v|v.as_str().ok_or_else(local_error)).transpose()?.unwrap_or("");
+        if text.len()>1_000_000||(text.trim().is_empty()&&files.is_none_or(|f|f.is_empty()))
+            ||files.is_some_and(|f|f.len()>32){return Err(local_error());}
+        use base64::{Engine as _,engine::general_purpose::STANDARD};
+        let mut total=0usize;
+        for file in files.into_iter().flatten(){
+            let uri=file.get("uri").and_then(Value::as_str).ok_or_else(local_error)?;
+            let (header,data)=uri.strip_prefix("data:").and_then(|s|s.split_once(',')).ok_or_else(local_error)?;
+            let mime=header.strip_suffix(";base64").ok_or_else(local_error)?;
+            let bytes=STANDARD.decode(data).map_err(|_|local_error())?;
+            total=total.checked_add(bytes.len()).ok_or_else(local_error)?;
+            if total>8*1024*1024||STANDARD.encode(&bytes)!=data{return Err(local_error());}
+            let (actual,_)=crate::attachments::sniff_for_prompt(&bytes).map_err(|_|local_error())?;
+            if actual!=mime||!["image/png","image/jpeg","image/webp","text/plain"].contains(&mime)
+                ||(mime.starts_with("image/")&&!engine.model.vision){return Err(local_error());}
+        }
+        let session=engine.client()?.session_in_project(lease.session_id(),&SessionQuery{
+            directory:lease.binding.directory().into(),..SessionQuery::default()})?;
+        let baseline=session.time.as_ref().map(|time|(time.updated,time.idle)).unwrap_or((0,None));
+        let operation=original.operation_id().to_owned();
+        let reference=json!({"operation_id":operation,"input_sha256":original.input_sha256(),
+            "original_body_sha256":effective.original_body_sha256(),"effective_body_sha256":effective.effective_body_sha256(),
+            "owner":original.owner(),"engine":original.engine,"session":session,
+            "upstream_message_id":inspected.upstream_message_id,"delivery":inspected.delivery,"resume":inspected.resume,
+            "transformation_map_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(effective.transformations()).map_err(|_|RuntimeError::Storage)?))});
+        let mut all=self.prompts.lock().map_err(|_|RuntimeError::Storage)?;
+        if all.is_none(){*all=Some(load_prompt_records(&self.storage.join("prompt-admissions.json"))?);}
+        let records=all.as_mut().ok_or(RuntimeError::Storage)?;
+        if records.contains_key(&operation)||records.values().any(|r|r.session_id==lease.session_id()&&matches!(r.state,PromptState::Intent|PromptState::Uncertain)){
+            return Err(RuntimeError::AdmissionPending);
+        }
+        let mut active=self.active_turns.lock().map_err(|_|RuntimeError::Storage)?;
+        if active.get(lease.session_id()).is_some_and(|turn|turn.admission_pending){return Err(RuntimeError::AdmissionPending);}
+        let previous=active.get(lease.session_id()).copied();
+        let make_record=|message:String,state:PromptState|PromptRecord{
+            original:None,local_original:None,web_original:Some(reference.clone()),
+            session_id:lease.session_id().into(),message_id:message,digest:original.input_sha256().into(),state,
+            baseline:Some(baseline),directory:Some(lease.binding.directory().into()),environment:Some(engine.environment.clone()),
+            skill_ids:inspected.skill_ids.clone()};
+        // Actual UI prompt IDs are retained, never replaced by a native ID.
+        // A genuine no-ID request remains durably original in allocation7; if
+        // its acknowledgement is lost, no invented PromptRecord ID is written.
+        if let Some(id)=&inspected.upstream_message_id{
+            records.insert(operation.clone(),make_record(id.clone(),PromptState::Intent));
+            fs::create_dir_all(&self.storage).map_err(|_|RuntimeError::Storage)?;
+            crate::service_registration::restrict_directory(&self.storage).map_err(|_|RuntimeError::Storage)?;
+            persist_prompt_records(&self.storage.join("prompt-admissions.json"),records)?;
+        }
+        active.insert(lease.session_id().into(),ActiveTurn{baseline:previous.map(|t|t.baseline).unwrap_or(baseline),admission_pending:true});
+        drop(active);
+        require_local_engine(&engine,&lease.binding,current)?;
+        files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+        if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
+        let sent=engine.client()?.send_original_web_prompt_once(lease.session_id(),original.raw_target(),original.headers(),effective.bytes());
+        let (state,acknowledged)=match &sent{
+            Ok(response) if response.status==200=>{
+                let value:Option<Value>=serde_json::from_slice(&response.body).ok();
+                let receipt=value.as_ref().and_then(|v|v.get("data"));
+                let id=receipt.and_then(|v|v.get("id")).and_then(Value::as_str).filter(|id|id.starts_with("msg_")&&id.len()>4&&id.len()<=160&&id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'));
+                if receipt.and_then(|v|v.get("sessionID")).and_then(Value::as_str)==Some(lease.session_id())
+                    &&receipt.and_then(|v|v.get("type")).and_then(Value::as_str)==Some("user")
+                    &&id.is_some()&&inspected.upstream_message_id.as_deref().is_none_or(|expected|id==Some(expected)){
+                    (PromptState::Admitted,id.map(str::to_owned))
+                }else{(PromptState::Uncertain,None)}
+            },
+            Ok(response) if matches!(response.status,400|401|403|404)=>(PromptState::Rejected,None),
+            _=>(PromptState::Uncertain,None)
+        };
+        let upstream_id=acknowledged.clone().or(inspected.upstream_message_id.clone());
+        if let Some(record)=records.get_mut(&operation){record.state=state;}
+        else if let Some(id)=acknowledged{
+            records.insert(operation.clone(),make_record(id,state));
+        }
+        if records.contains_key(&operation){
+            fs::create_dir_all(&self.storage).map_err(|_|RuntimeError::Storage)?;
+            crate::service_registration::restrict_directory(&self.storage).map_err(|_|RuntimeError::Storage)?;
+            persist_prompt_records(&self.storage.join("prompt-admissions.json"),records)?;
+        }
+        let mut active=self.active_turns.lock().map_err(|_|RuntimeError::Storage)?;
+        match state{
+            PromptState::Admitted=>{if let Some(turn)=active.get_mut(lease.session_id()){turn.admission_pending=false;}},
+            PromptState::Rejected=>{if let Some(previous)=previous{active.insert(lease.session_id().into(),previous);}else{active.remove(lease.session_id());}},
+            _=>{}
+        }
+        drop(active);
+        // Keep any positive original acknowledgement durably under its old
+        // identity even if current custody subsequently refuses publication.
+        if require_local_engine(&engine,&lease.binding,current).is_err()||self.credentials_revision()!=lease.original.revision
+            ||files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).is_err(){
+            lease.revoke();return Err(local_error());
+        }
+        let response=sent.map_err(|_|RuntimeError::Unavailable("Original Web prompt outcome remains unknown; no request was repeated"))?;
+        Ok(LocalWebPromptOutcome{operation_id:operation,input_sha256:original.input_sha256().into(),owner:original.owner().clone(),session_id:lease.session_id().into(),upstream_id,
+            admission:match state{PromptState::Admitted=>"admitted",PromptState::Rejected=>"rejected",_=>"uncertain"},
+            status:response.status,content_type:response.content_type,body:response.body})
+    }
     pub fn inspect_local_web_prompt(&self, lease: &LocalWebLease, original: &NativeWebOriginal,
         current: &dyn Fn() -> Result<(), String>) -> Result<LocalWebPromptInspection, RuntimeError> {
         self.check_local_web_lease(lease, current)?;
+        let engine = self.lock_engine_for_directory(lease.binding.directory())?;
+        self.inspect_local_web_prompt_locked(&engine,lease,original,current)
+    }
+    fn inspect_local_web_prompt_locked(&self, engine:&OwnedEngine, lease:&LocalWebLease,
+        original:&NativeWebOriginal,current:&dyn Fn()->Result<(),String>) -> Result<LocalWebPromptInspection,RuntimeError> {
         if original.binding_id != lease.binding_id || original.invalidation_epoch != lease.invalidation_epoch
             || original.engine != lease.original || original.method != Method::POST
             || original.route != format!("/api/session/{}/prompt", lease.session_id())
@@ -230,7 +444,6 @@ impl LiveRuntime {
         let skills = object.get("skills").map(|v|v.as_array().ok_or_else(local_error)).transpose()?;
         let skill_ids = skills.into_iter().flatten().map(|v|v.get("id").and_then(Value::as_str).map(str::to_owned).ok_or_else(local_error)).collect::<Result<Vec<_>,_>>()?;
         if !references::valid_skill_selection(&skill_ids) { return Err(local_error()); }
-        let engine = self.lock_engine_for_directory(lease.binding.directory())?;
         let observed = observe(&engine, &lease.binding, lease.session_id(), self.credentials_revision(), current)?;
         if observed != lease.original || lease.revoked() { return Err(local_error()); }
         let session = engine.client()?.session_in_project(lease.session_id(), &SessionQuery {
@@ -279,6 +492,15 @@ mod tests {
         assert_ne!(input_hash(b"a", b"bc"), input_hash(b"ab", b"c"));
         assert_ne!(input_hash(b"route", br#"{"text":"x"}"#), input_hash(b"route", br#"{ "text": "x" }"#));
         assert_ne!(input_hash(b"first-session", b"x"), input_hash(b"other-session", b"x"));
+    }
+    #[test] fn exact_raw_target_spelling_is_bound_even_when_decoded_queries_match() {
+        let first="/api/session/ses_actual/prompt?opaque=a+b";
+        let second="/api/session/ses_actual/prompt?opaque=a%20b";
+        let a=request_parts("POST",first,&[],b"{}","/private").unwrap();
+        let b=request_parts("POST",second,&[],b"{}","/private").unwrap();
+        assert_eq!(a.2,b.2);
+        assert_ne!(input_hash(first.as_bytes(),b"{}"),input_hash(second.as_bytes(),b"{}"));
+        assert_ne!(input_hash(b"/a?x=%2f",b"{}"),input_hash(b"/a?x=%2F",b"{}"));
     }
     #[test] fn full_prompt_bytes_are_not_rewritten_by_route_or_scope_validation() {
         let body = br#"{ "id":"msg_original","text":"hello","files":[{"uri":"data:text/plain;base64,AA==","name":"x","mention":{"start":0,"end":1}}],"skills":[{"id":"skill_x","name":"x"}],"agents":[{"name":"build"}],"metadata":{"model":{"modelID":"actual","providerID":"veyra"},"attachments":[{"unique":"retain"}]},"parts":[{"type":"future","value":"retain"}],"delivery":"queue","resume":false }"#;

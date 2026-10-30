@@ -102,8 +102,18 @@
     },
     {
       "path": "native-web-host/original-proxy/README.md",
-      "bytes": 13145,
-      "sha256": "20df06243e97384dffc3df2ffb7da2dc103ebf7bb42b99926265be4544781c4a"
+      "bytes": 13502,
+      "sha256": "d72fb56f95aa84dc429f90a967752a7d1ea31fab31b37cb77ce207b2e12ce742"
+    },
+    {
+      "path": "native-web-host/original-proxy/SOURCE-CHECKPOINT.md",
+      "bytes": 12077,
+      "sha256": "a5d5a4f9c642afa2360fe0ad0d03fba2ef8739241f9ebd809b364f0f5f876b79"
+    },
+    {
+      "path": "native-web-host/original-proxy/advance-native15.py",
+      "bytes": 13128,
+      "sha256": "1e92943e98b7c7a45528059a1b5c0b59d77198e063fb13f037cd7a65354385ab"
     },
     {
       "path": "native-web-host/original-proxy/assemble.py",
@@ -114,6 +124,21 @@
       "path": "native-web-host/original-proxy/assembly-manifest.json",
       "bytes": 2188,
       "sha256": "f287bacc0afaff7c1a77ffd4adef8791f6ca5f2ad4f8a5db79ab23a4a0215091"
+    },
+    {
+      "path": "native-web-host/original-proxy/native15-inputs.json",
+      "bytes": 2715,
+      "sha256": "906b6a9baa73acaaf0a4d5f6b96f3c2058b40b57cbcf7f684135bcbedc155eee"
+    },
+    {
+      "path": "native-web-host/original-proxy/native15-manifest.json",
+      "bytes": 4913,
+      "sha256": "675e604716bc900510cdecda7a21aaa0f45979a54b0198ed2e710e57499dca40"
+    },
+    {
+      "path": "native-web-host/original-proxy/native15-originals.patch",
+      "bytes": 110107,
+      "sha256": "94e664c8e9aabbb517e1244fdf4514a04acf4ceae955acedff5515c603f77fc7"
     },
     {
       "path": "native-web-host/original-proxy/original-proxy.patch",
@@ -131,14 +156,54 @@
       "sha256": "8d0e8e16676bce014117aa3486a97d3a2e4f25bd87a1735db2a2ca73cee19ab1"
     },
     {
+      "path": "native-web-host/original-proxy/progress-checkpoint.json",
+      "bytes": 3781,
+      "sha256": "24bc3c32362d17288e795130a1365c57c8f6e7f3fabf69135772064c42a7ac4c"
+    },
+    {
       "path": "native-web-host/original-proxy/sources/apps/service/src/routes/local_workspaces/web_original.rs",
-      "bytes": 3287,
-      "sha256": "d1e51f7157e9f7ae0ad0499050dd5d3c80108ee4f99836406486449a58885114"
+      "bytes": 10028,
+      "sha256": "2247b18f4e9daf6ad2155e7938a4e2a2269ec0abb43badfc32399d0fa700dcfe"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_event_policy.rs",
+      "bytes": 10304,
+      "sha256": "0d46a37179f2d72f85f2895ffe817d4bd9cf317dfe89e5e4be5614e0649fe6d7"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs",
+      "bytes": 13677,
+      "sha256": "f3f23901e14d07d9fe4ebefb4e12810634e6ed930cf72caf46017ddab7d47726"
     },
     {
       "path": "native-web-host/original-proxy/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
-      "bytes": 19202,
-      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2"
+      "bytes": 36233,
+      "sha256": "54b0ce0dc0046d2f84bb2dc0b6d8b477cd9ee38492b781f31dbcd33a262c6a14"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/opencode/local_web_transport.rs",
+      "bytes": 5738,
+      "sha256": "96c6ce9459e7d698fa4e1eb2b606db3f23a0828f758023e05c4779d63f138251"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/projects/0007.sql",
+      "bytes": 10738,
+      "sha256": "8f982a230ab85923d9e6a7595129377f093044b1e86ed2490376df7dc7283af2"
+    },
+    {
+      "path": "native-web-host/original-proxy/sources/crates/adapters/src/projects/local_web_originals.rs",
+      "bytes": 21071,
+      "sha256": "0386f495484114a486aa4337b137644fe61612d92bf8d716fe4a5f1bd3510ad1"
+    },
+    {
+      "path": "native-web-host/original-proxy/test_migration7.py",
+      "bytes": 8987,
+      "sha256": "659dd93cd7d9c5983f481476199a853c70cdbfa120cd87b4dac24a30ff0170ad"
+    },
+    {
+      "path": "native-web-host/original-proxy/upstream-source-evidence.json",
+      "bytes": 4499,
+      "sha256": "0977b673e3612ee3314fe8308b1eaa6b59cc01c142c0a74747bb28eb9711748a"
     },
     {
       "path": "native-web-host/original-proxy/verification.json",

@@ -1,0 +1,1513 @@
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -23,6 +23,7 @@
+     original: OriginalEngine,
+     binding_id: String,
+     invalidation_epoch: String,
++    engine_stop:Arc<AtomicBool>,
+     revoked: AtomicBool,
+ }
+ impl LocalWebLease {
+@@ -30,7 +31,15 @@
+     pub fn invalidation_epoch(&self) -> &str { &self.invalidation_epoch }
+     pub fn owner(&self) -> &LocalWorkspaceOwner { &self.original.owner }
+     pub fn session_id(&self) -> &str { &self.original.session_id }
+-    pub fn revoked(&self) -> bool { self.revoked.load(Ordering::Acquire) }
++    pub fn revoked(&self) -> bool { self.revoked.load(Ordering::Acquire)||self.engine_stop.load(Ordering::Acquire) }
++    pub fn directory(&self)->&str{&self.original.directory}
++    pub fn engine_project_id(&self)->&str{&self.original.project_id}
++    pub(crate) fn matches_saved_workspace_engine(&self,projection:&Value)->bool{
++        let mut expected=json!(&self.original);let mut actual=projection.clone();
++        let Some(expected)=expected.as_object_mut()else{return false};
++        let Some(actual)=actual.as_object_mut()else{return false};
++        expected.remove("session_id");actual.remove("session_id");expected==actual
++    }
+     /// Revocation only. It does not close a child, release a proxy/profile,
+     /// acknowledge callback detachment, or terminate the retained engine.
+     pub fn revoke(&self) { self.revoked.store(true, Ordering::Release); }
+@@ -57,6 +66,19 @@
+ }
+
+ impl LiveRuntime {
++    pub fn observe_original_web_pty(&self,lease:&LocalWebLease,saved:&crate::projects::SavedNativeWebPty,
++        current:&dyn Fn()->Result<(),String>)->Result<Value,RuntimeError>{
++        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
++        let observed=observe(&engine,&lease.binding,lease.session_id(),self.credentials_revision(),current)?;
++        if observed!=lease.original||lease.revoked(){return Err(local_error());}
++        let reply:Value=super::super::super::decode(engine.client()?.request_query(reqwest::Method::GET,
++            &["api","pty",saved.id()],&[("location[directory]",lease.binding.directory().into())],None)?)?;
++        if reply.pointer("/location/directory").and_then(Value::as_str)!=Some(lease.binding.directory())
++            ||!reply.get("data").is_some_and(|info|saved.matches_info(info)){return Err(local_error());}
++        require_local_engine(&engine,&lease.binding,current)?;
++        if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
++        Ok(reply)
++    }
+     /// Service's current callback MUST also recheck require_local_session on the
+     /// original ProjectStore, not merely LocalWorkspaceBinding::verify_current.
+     pub fn mint_local_web_lease(&self, binding: Arc<LocalWorkspaceBinding>, session: &str,
+@@ -71,7 +93,7 @@
+         hash.update(nonce.as_bytes());
+         hash.update(serde_json::to_vec(&original).map_err(|_| RuntimeError::Storage)?);
+         let invalidation_epoch = format!("{:x}", hash.finalize());
+-        Ok(LocalWebLease { binding, original, binding_id, invalidation_epoch,
++        Ok(LocalWebLease { binding, original, binding_id, invalidation_epoch,engine_stop:engine.monitor_stop.clone(),
+             revoked: AtomicBool::new(false) })
+     }
+
+@@ -117,6 +139,7 @@
+     invalidation_epoch: String,
+     engine: OriginalEngine,
+     method: Method,
++    raw_target: String,
+     route: String,
+     query: Vec<(String, String)>,
+     headers: Vec<(String, String)>,
+@@ -129,20 +152,42 @@
+         if lease.revoked() || body.len() > 16 * 1024 * 1024 { return Err(local_error()); }
+         let (method, route, query, content) = request_parts(method,target,headers,&body,&lease.original.directory)?;
+         let operation_id = uuid::Uuid::new_v4().to_string();
+-        let metadata = serde_json::to_vec(&(lease.binding_id(), lease.invalidation_epoch(),
+-            &lease.original, method.as_str(), &route, &query, &content)).map_err(|_| RuntimeError::Storage)?;
++        // Lease IDs are observation handles, not input identity. A native
++        // reattachment to the same original owner+engine must reconcile a
++        // stable upstream ID against the same exact input, never replay it.
++        let metadata = serde_json::to_vec(&(&lease.original, method.as_str(), target,
++            &route, &query, &content)).map_err(|_| RuntimeError::Storage)?;
+         let input_sha256 = input_hash(&metadata, &body);
+         Ok(Self { operation_id, binding_id: lease.binding_id.clone(),
+             invalidation_epoch: lease.invalidation_epoch.clone(), engine: lease.original.clone(),
+-            method, route, query, headers: content, body, input_sha256 })
++            method, raw_target: target.into(), route, query, headers: content, body, input_sha256 })
+     }
+     pub fn operation_id(&self) -> &str { &self.operation_id }
+     pub fn input_sha256(&self) -> &str { &self.input_sha256 }
+     pub fn method(&self) -> &Method { &self.method }
++    pub fn raw_target(&self) -> &str { &self.raw_target }
+     pub fn route(&self) -> &str { &self.route }
+     pub fn query(&self) -> &[(String,String)] { &self.query }
+     pub fn headers(&self) -> &[(String,String)] { &self.headers }
+     pub fn body(&self) -> &[u8] { &self.body }
++    /// Only actual protocol-supplied IDs qualify. Permission/form object IDs,
++    /// command names, text hashes, and native request UUIDs never become this key.
++    pub fn stable_upstream_key(&self) -> Result<Option<String>, RuntimeError> {
++        if self.method != Method::POST { return Ok(None); }
++        let prefix = if self.route == format!("/api/session/{}/prompt",self.session_id())
++            || self.route == format!("/api/session/{}/shell",self.session_id()) { "msg_" }
++            else if self.route == "/api/session" { "ses_" } else { return Ok(None); };
++        let value: Value = serde_json::from_slice(&self.body).map_err(|_|local_error())?;
++        let Some(id) = value.get("id") else { return Ok(None); };
++        let id = id.as_str().filter(|s|s.starts_with(prefix) && s.len()>prefix.len() && s.len()<=160
++            && s.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-')).ok_or_else(local_error)?;
++        // Stable across native/proxy reattachment and process/service restarts.
++        // Full input/engine/owner changes still conflict with the retained hash.
++        let owner = self.owner();
++        let key = serde_json::to_vec(&(&owner.installation_id,&owner.custodian_key,
++            &owner.workspace_id,&owner.environment,self.session_id(),self.route(),id)).map_err(|_|RuntimeError::Storage)?;
++        Ok(Some(input_hash(b"veyra-upstream-web-id-v1",&key)))
++    }
+     pub fn owner(&self) -> &LocalWorkspaceOwner { &self.engine.owner }
+     pub fn session_id(&self) -> &str { &self.engine.session_id }
+     pub fn binding_id(&self) -> &str { &self.binding_id }
+@@ -150,10 +195,15 @@
+     /// Exact serializable journal projection, private writer only. This is not
+     /// a renderer response. Restart JSON never recreates a live lease.
+     pub fn journal_original(&self) -> Value {
++        let mut scope=self.journal_scope();
++        scope["body_bytes"]=json!(self.body);
++        scope
++    }
++    pub fn journal_scope(&self) -> Value {
+         json!({"operation_id":self.operation_id,"binding_id":self.binding_id,
+             "invalidation_epoch":self.invalidation_epoch,"engine":self.engine,
+-            "method":self.method.as_str(),"route":self.route,"query":self.query,
+-            "headers":self.headers,"body_bytes":self.body,"input_sha256":self.input_sha256})
++            "method":self.method.as_str(),"raw_target":self.raw_target,"route":self.route,"query":self.query,
++            "headers":self.headers,"input_sha256":self.input_sha256})
+     }
+ }
+
+@@ -194,7 +244,7 @@
+         Ok((method,path.into(),query,content))
+ }
+ fn input_hash(metadata: &[u8], body: &[u8]) -> String {
+-    let mut hash = Sha256::new(); hash.update(b"veyra-original-web-request-v1\0");
++    let mut hash = Sha256::new(); hash.update(b"veyra-original-web-request-v2\0");
+     hash.update((metadata.len() as u64).to_be_bytes()); hash.update(metadata);
+     hash.update((body.len() as u64).to_be_bytes()); hash.update(body);
+     format!("{:x}", hash.finalize())
+@@ -209,10 +259,174 @@
+     pub resume: Option<bool>,
+     pub skill_ids: Vec<String>,
+ }
++pub struct LocalWebPromptOutcome {
++    operation_id:String,input_sha256:String,owner:LocalWorkspaceOwner,session_id:String,upstream_id:Option<String>,
++    admission:&'static str,status:u16,content_type:Option<String>,body:Vec<u8>,
++}
++pub enum LocalWebOriginalSubmission {
++    Sent(LocalWebPromptOutcome),
++    Retained(veyra_contracts::local_workspaces::LocalOperationReceipt),
++}
++impl LocalWebPromptOutcome {
++    pub fn operation_id(&self)->&str{&self.operation_id}
++    pub fn input_sha256(&self)->&str{&self.input_sha256}
++    pub fn owner(&self)->&LocalWorkspaceOwner{&self.owner}
++    pub fn session_id(&self)->&str{&self.session_id}
++    pub fn upstream_id(&self)->Option<&str>{self.upstream_id.as_deref()}
++    pub fn admission(&self)->&str{self.admission}
++    pub fn status(&self)->u16{self.status}
++    pub fn content_type(&self)->Option<&str>{self.content_type.as_deref()}
++    pub fn body(&self)->&[u8]{&self.body}
++}
+ impl LiveRuntime {
++    /// The reservation callback is the real service ProjectStore writer only.
++    /// Its Fresh witness cannot be forged by a renderer/DTO/positive callback.
++    /// Keep this exact original engine lock across resolver capture, DB fence,
++    /// final guard checks and the single actual upstream request.
++    pub fn submit_local_web_prompt_original<F>(&self,lease:&LocalWebLease,original:NativeWebOriginal,
++        current:&dyn Fn()->Result<(),String>,reserve:F)->Result<LocalWebOriginalSubmission,RuntimeError>
++    where F:FnOnce(NativeWebOriginal,super::web_materialization::EffectiveWebBody,crate::opencode::attachments::NativeWebFilesOriginal)->Result<crate::projects::NativeWebReservation,String>{
++        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
++        self.inspect_local_web_prompt_locked(&engine,lease,&original,current)?;
++        let session=engine.client()?.session_in_project(lease.session_id(),&SessionQuery{
++            directory:lease.binding.directory().into(),..SessionQuery::default()})?;
++        let view:Value=serde_json::from_slice(original.body()).map_err(|_|local_error())?;
++        let files=crate::opencode::attachments::resolve_local_web_files(&lease.binding,&session,
++            original.operation_id(),original.input_sha256(),&view,current).map_err(|_|local_error())?;
++        let effective=super::web_materialization::materialize_resolved_web_files(original.body(),&files).map_err(|_|local_error())?;
++        if files.contains_image()&&!engine.model.vision{return Err(local_error());}
++        files.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
++        require_local_engine(&engine,&lease.binding,current)?;
++        match reserve(original,effective,files).map_err(|_|RuntimeError::Storage)?{
++            crate::projects::NativeWebReservation::Retained(receipt)=>Ok(LocalWebOriginalSubmission::Retained(receipt)),
++            crate::projects::NativeWebReservation::Fresh(dispatch)=>self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current).map(LocalWebOriginalSubmission::Sent),
++        }
++    }
++    /// The actual original service coordinator retains its serial/ModelWork and
++    /// actual resolver handle guard through this call. The move-only dispatch
++    /// witness comes ONLY from the ProjectStore original transaction/fence.
++    /// This method holds the SAME retained engine across final checks, original
++    /// PromptRecord capture and exactly ONE full effective-body HTTP send.
++    pub fn dispatch_local_web_prompt_once(&self,lease:&LocalWebLease,
++        dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
++    )->Result<LocalWebPromptOutcome,RuntimeError>{
++        let engine=self.lock_engine_for_directory(lease.binding.directory())?;
++        self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current)
++    }
++    fn dispatch_local_web_prompt_locked(&self,engine:&OwnedEngine,lease:&LocalWebLease,
++        dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
++    )->Result<LocalWebPromptOutcome,RuntimeError>{
++        let (original,effective,files_original)=dispatch.into_parts();
++        let inspected=self.inspect_local_web_prompt_locked(&engine,lease,&original,current)?;
++        files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
++        if effective.original_body_sha256()!=format!("{:x}",Sha256::digest(original.body()))
++            || original.engine!=lease.original || lease.revoked(){return Err(local_error());}
++        let body:Value=serde_json::from_slice(effective.bytes()).map_err(|_|local_error())?;
++        let files=body.get("files").map(|v|v.as_array().ok_or_else(local_error)).transpose()?;
++        let text=body.get("text").map(|v|v.as_str().ok_or_else(local_error)).transpose()?.unwrap_or("");
++        if text.len()>1_000_000||(text.trim().is_empty()&&files.is_none_or(|f|f.is_empty()))
++            ||files.is_some_and(|f|f.len()>32){return Err(local_error());}
++        use base64::{Engine as _,engine::general_purpose::STANDARD};
++        let mut total=0usize;
++        for file in files.into_iter().flatten(){
++            let uri=file.get("uri").and_then(Value::as_str).ok_or_else(local_error)?;
++            let (header,data)=uri.strip_prefix("data:").and_then(|s|s.split_once(',')).ok_or_else(local_error)?;
++            let mime=header.strip_suffix(";base64").ok_or_else(local_error)?;
++            let bytes=STANDARD.decode(data).map_err(|_|local_error())?;
++            total=total.checked_add(bytes.len()).ok_or_else(local_error)?;
++            if total>8*1024*1024||STANDARD.encode(&bytes)!=data{return Err(local_error());}
++            let (actual,_)=crate::attachments::sniff_for_prompt(&bytes).map_err(|_|local_error())?;
++            if actual!=mime||!["image/png","image/jpeg","image/webp","text/plain"].contains(&mime)
++                ||(mime.starts_with("image/")&&!engine.model.vision){return Err(local_error());}
++        }
++        let session=engine.client()?.session_in_project(lease.session_id(),&SessionQuery{
++            directory:lease.binding.directory().into(),..SessionQuery::default()})?;
++        let baseline=session.time.as_ref().map(|time|(time.updated,time.idle)).unwrap_or((0,None));
++        let operation=original.operation_id().to_owned();
++        let reference=json!({"operation_id":operation,"input_sha256":original.input_sha256(),
++            "original_body_sha256":effective.original_body_sha256(),"effective_body_sha256":effective.effective_body_sha256(),
++            "owner":original.owner(),"engine":original.engine,"session":session,
++            "upstream_message_id":inspected.upstream_message_id,"delivery":inspected.delivery,"resume":inspected.resume,
++            "transformation_map_sha256":format!("{:x}",Sha256::digest(serde_json::to_vec(effective.transformations()).map_err(|_|RuntimeError::Storage)?))});
++        let mut all=self.prompts.lock().map_err(|_|RuntimeError::Storage)?;
++        if all.is_none(){*all=Some(load_prompt_records(&self.storage.join("prompt-admissions.json"))?);}
++        let records=all.as_mut().ok_or(RuntimeError::Storage)?;
++        if records.contains_key(&operation)||records.values().any(|r|r.session_id==lease.session_id()&&matches!(r.state,PromptState::Intent|PromptState::Uncertain)){
++            return Err(RuntimeError::AdmissionPending);
++        }
++        let mut active=self.active_turns.lock().map_err(|_|RuntimeError::Storage)?;
++        if active.get(lease.session_id()).is_some_and(|turn|turn.admission_pending){return Err(RuntimeError::AdmissionPending);}
++        let previous=active.get(lease.session_id()).copied();
++        let make_record=|message:String,state:PromptState|PromptRecord{
++            original:None,local_original:None,web_original:Some(reference.clone()),
++            session_id:lease.session_id().into(),message_id:message,digest:original.input_sha256().into(),state,
++            baseline:Some(baseline),directory:Some(lease.binding.directory().into()),environment:Some(engine.environment.clone()),
++            skill_ids:inspected.skill_ids.clone()};
++        // Actual UI prompt IDs are retained, never replaced by a native ID.
++        // A genuine no-ID request remains durably original in allocation7; if
++        // its acknowledgement is lost, no invented PromptRecord ID is written.
++        if let Some(id)=&inspected.upstream_message_id{
++            records.insert(operation.clone(),make_record(id.clone(),PromptState::Intent));
++            fs::create_dir_all(&self.storage).map_err(|_|RuntimeError::Storage)?;
++            crate::service_registration::restrict_directory(&self.storage).map_err(|_|RuntimeError::Storage)?;
++            persist_prompt_records(&self.storage.join("prompt-admissions.json"),records)?;
++        }
++        active.insert(lease.session_id().into(),ActiveTurn{baseline:previous.map(|t|t.baseline).unwrap_or(baseline),admission_pending:true});
++        drop(active);
++        require_local_engine(&engine,&lease.binding,current)?;
++        files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
++        if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
++        let sent=engine.client()?.send_original_web_prompt_once(lease.session_id(),original.raw_target(),original.headers(),effective.bytes());
++        let (state,acknowledged)=match &sent{
++            Ok(response) if response.status==200=>{
++                let value:Option<Value>=serde_json::from_slice(&response.body).ok();
++                let receipt=value.as_ref().and_then(|v|v.get("data"));
++                let id=receipt.and_then(|v|v.get("id")).and_then(Value::as_str).filter(|id|id.starts_with("msg_")&&id.len()>4&&id.len()<=160&&id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'));
++                if receipt.and_then(|v|v.get("sessionID")).and_then(Value::as_str)==Some(lease.session_id())
++                    &&receipt.and_then(|v|v.get("type")).and_then(Value::as_str)==Some("user")
++                    &&id.is_some()&&inspected.upstream_message_id.as_deref().is_none_or(|expected|id==Some(expected)){
++                    (PromptState::Admitted,id.map(str::to_owned))
++                }else{(PromptState::Uncertain,None)}
++            },
++            Ok(response) if matches!(response.status,400|401|403|404)=>(PromptState::Rejected,None),
++            _=>(PromptState::Uncertain,None)
++        };
++        let upstream_id=acknowledged.clone().or(inspected.upstream_message_id.clone());
++        if let Some(record)=records.get_mut(&operation){record.state=state;}
++        else if let Some(id)=acknowledged{
++            records.insert(operation.clone(),make_record(id,state));
++        }
++        if records.contains_key(&operation){
++            fs::create_dir_all(&self.storage).map_err(|_|RuntimeError::Storage)?;
++            crate::service_registration::restrict_directory(&self.storage).map_err(|_|RuntimeError::Storage)?;
++            persist_prompt_records(&self.storage.join("prompt-admissions.json"),records)?;
++        }
++        let mut active=self.active_turns.lock().map_err(|_|RuntimeError::Storage)?;
++        match state{
++            PromptState::Admitted=>{if let Some(turn)=active.get_mut(lease.session_id()){turn.admission_pending=false;}},
++            PromptState::Rejected=>{if let Some(previous)=previous{active.insert(lease.session_id().into(),previous);}else{active.remove(lease.session_id());}},
++            _=>{}
++        }
++        drop(active);
++        // Keep any positive original acknowledgement durably under its old
++        // identity even if current custody subsequently refuses publication.
++        if require_local_engine(&engine,&lease.binding,current).is_err()||self.credentials_revision()!=lease.original.revision
++            ||files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).is_err(){
++            lease.revoke();return Err(local_error());
++        }
++        let response=sent.map_err(|_|RuntimeError::Unavailable("Original Web prompt outcome remains unknown; no request was repeated"))?;
++        Ok(LocalWebPromptOutcome{operation_id:operation,input_sha256:original.input_sha256().into(),owner:original.owner().clone(),session_id:lease.session_id().into(),upstream_id,
++            admission:match state{PromptState::Admitted=>"admitted",PromptState::Rejected=>"rejected",_=>"uncertain"},
++            status:response.status,content_type:response.content_type,body:response.body})
++    }
+     pub fn inspect_local_web_prompt(&self, lease: &LocalWebLease, original: &NativeWebOriginal,
+         current: &dyn Fn() -> Result<(), String>) -> Result<LocalWebPromptInspection, RuntimeError> {
+         self.check_local_web_lease(lease, current)?;
++        let engine = self.lock_engine_for_directory(lease.binding.directory())?;
++        self.inspect_local_web_prompt_locked(&engine,lease,original,current)
++    }
++    fn inspect_local_web_prompt_locked(&self, engine:&OwnedEngine, lease:&LocalWebLease,
++        original:&NativeWebOriginal,current:&dyn Fn()->Result<(),String>) -> Result<LocalWebPromptInspection,RuntimeError> {
+         if original.binding_id != lease.binding_id || original.invalidation_epoch != lease.invalidation_epoch
+             || original.engine != lease.original || original.method != Method::POST
+             || original.route != format!("/api/session/{}/prompt", lease.session_id())
+@@ -230,7 +444,6 @@
+         let skills = object.get("skills").map(|v|v.as_array().ok_or_else(local_error)).transpose()?;
+         let skill_ids = skills.into_iter().flatten().map(|v|v.get("id").and_then(Value::as_str).map(str::to_owned).ok_or_else(local_error)).collect::<Result<Vec<_>,_>>()?;
+         if !references::valid_skill_selection(&skill_ids) { return Err(local_error()); }
+-        let engine = self.lock_engine_for_directory(lease.binding.directory())?;
+         let observed = observe(&engine, &lease.binding, lease.session_id(), self.credentials_revision(), current)?;
+         if observed != lease.original || lease.revoked() { return Err(local_error()); }
+         let session = engine.client()?.session_in_project(lease.session_id(), &SessionQuery {
+@@ -280,6 +493,15 @@
+         assert_ne!(input_hash(b"route", br#"{"text":"x"}"#), input_hash(b"route", br#"{ "text": "x" }"#));
+         assert_ne!(input_hash(b"first-session", b"x"), input_hash(b"other-session", b"x"));
+     }
++    #[test] fn exact_raw_target_spelling_is_bound_even_when_decoded_queries_match() {
++        let first="/api/session/ses_actual/prompt?opaque=a+b";
++        let second="/api/session/ses_actual/prompt?opaque=a%20b";
++        let a=request_parts("POST",first,&[],b"{}","/private").unwrap();
++        let b=request_parts("POST",second,&[],b"{}","/private").unwrap();
++        assert_eq!(a.2,b.2);
++        assert_ne!(input_hash(first.as_bytes(),b"{}"),input_hash(second.as_bytes(),b"{}"));
++        assert_ne!(input_hash(b"/a?x=%2f",b"{}"),input_hash(b"/a?x=%2F",b"{}"));
++    }
+     #[test] fn full_prompt_bytes_are_not_rewritten_by_route_or_scope_validation() {
+         let body = br#"{ "id":"msg_original","text":"hello","files":[{"uri":"data:text/plain;base64,AA==","name":"x","mention":{"start":0,"end":1}}],"skills":[{"id":"skill_x","name":"x"}],"agents":[{"name":"build"}],"metadata":{"model":{"modelID":"actual","providerID":"veyra"},"attachments":[{"unique":"retain"}]},"parts":[{"type":"future","value":"retain"}],"delivery":"queue","resume":false }"#;
+         let before = body.to_vec();
+--- a/crates/adapters/src/projects.rs
++++ b/crates/adapters/src/projects.rs
+@@ -1,5 +1,7 @@
+ //! Transactional workspace storage, owned by the single Veyra service.
+ mod local_workspaces;
++mod local_web_originals;
++pub use local_web_originals::{NativeWebDispatch,NativeWebReservation,NativeWebAcknowledgement,SavedNativeWebPty};
+ pub use local_workspaces::LocalWorkspaceRecord;
+ mod backup;
+ mod close;
+@@ -220,7 +222,7 @@
+         let connection = Connection::open_with_flags(path,
+             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+         connection.busy_timeout(std::time::Duration::from_secs(2))?;
+-        if ![SCHEMA_VERSION, 6].contains(&schema_version(&connection)?) { return Err(StoreError::Corrupt); }
++        if ![SCHEMA_VERSION, 6, 7].contains(&schema_version(&connection)?) { return Err(StoreError::Corrupt); }
+         read_project(&connection, &normalized_id(id)?)
+     }
+
+--- a/crates/adapters/src/projects/local_workspaces.rs
++++ b/crates/adapters/src/projects/local_workspaces.rs
+@@ -49,8 +49,8 @@
+   custody.prepare_database(path).map_err(|_|StoreError::Invalid)?;
+   let probe=Connection::open(path)?;
+   let version=schema_version(&probe)?;
+-  if version>6{return Err(StoreError::NewerSchema);}drop(probe);
+-  let mut store=if version==6 {
++  if version>7{return Err(StoreError::NewerSchema);}drop(probe);
++  let mut store=if version==6 || version==7 {
+    let connection=Connection::open(path)?;
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
+@@ -68,7 +68,7 @@
+     params![installation_id,custody.scheme(),custody.subject(),custody.physical(),custody.key(),before])?;
+    tx.execute("INSERT INTO local_migration_receipts VALUES(6,?,?,?)",params![installation_id,custody.key(),before])?;
+    if digest_legacy(&tx)?!=before{return Err(StoreError::Corrupt);}
+-  }else if current!=6{return Err(StoreError::Corrupt);}
++  }else if current!=6 && current!=7{return Err(StoreError::Corrupt);}
+   // Every restart compares actual OS and original physical-root custody. A
+   // different account/root/library cannot acquire old data by reopening it.
+   let actual:(String,String,String,String,String)=tx.query_row(
+@@ -78,14 +78,13 @@
+    {return Err(StoreError::Conflict);}
+   let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM local_migration_receipts r JOIN local_installation i ON i.installation_id=r.installation_id AND i.custodian_key=r.custodian_key AND i.legacy_manifest_sha256=r.legacy_manifest_sha256 WHERE r.version=6)",[],|r|r.get(0))?;
+   if !valid{return Err(StoreError::Corrupt);}
+-  let expected=Connection::open_in_memory()?;
+-  expected.execute_batch(include_str!("0006.sql"))?;
+-  fn ddl(db:&Connection)->Result<Vec<(String,String)>,StoreError>{
+-   let mut statement=db.prepare("SELECT name,sql FROM sqlite_master WHERE name LIKE 'local_%' AND sql IS NOT NULL ORDER BY name")?;
+-   let values=statement.query_map([],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<Vec<_>,_>>()?;
+-   Ok(values)
+-  }
+-  if ddl(&tx)?!=ddl(&expected)?{return Err(StoreError::Corrupt);}
++  if schema_version(&tx)?==6 {
++   super::local_web_originals::validate_allocated_schema(&tx,6)?;
++   let before=digest_legacy(&tx)?;
++   tx.execute_batch(include_str!("0007.sql"))?;
++   if digest_legacy(&tx)?!=before{return Err(StoreError::Corrupt);}
++  }
++  super::local_web_originals::validate_allocated_schema(&tx,7)?;
+   custody.verify().map_err(|_|StoreError::Conflict)?;tx.commit()?;
+   store.local_custody=Some(custody);store.local_installation_id=Some(installation_id.into());Ok(store)
+  }
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -30,7 +30,9 @@
+ const START_TIMEOUT: Duration = Duration::from_secs(15);
+ mod creation;
+ mod local_workspaces;
+-pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection};
++pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission};
++pub use local_workspaces::web_materialization::{EffectiveWebBody,WebUriReplacement,WebUriTransformation,materialize_web_uri_spans,materialize_resolved_web_files};
++pub use local_workspaces::web_event_policy::{WebEventDecision,NativeSseFrames,project_local_web_event};
+ mod prompt_original;
+ mod memory;
+ mod review_result;
+@@ -365,6 +367,8 @@
+     original: Option<veyra_contracts::PromptOriginal>,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     local_original: Option<veyra_contracts::LocalPromptOriginal>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    web_original: Option<Value>,
+     session_id: String,
+     message_id: String,
+     digest: String,
+@@ -2395,6 +2399,7 @@
+         let record = PromptRecord {
+             original: original.cloned(),
+             local_original,
++            web_original:None,
+             session_id: id.into(),
+             message_id: format!("msg_{}", uuid::Uuid::new_v4().simple()),
+             digest,
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs
+@@ -2,6 +2,8 @@
+ use super::*;
+ mod conversations;
+ pub(super) mod web_original;
++pub(super) mod web_materialization;
++pub(super) mod web_event_policy;
+ use crate::local_execution::LocalWorkspaceBinding;
+ use veyra_contracts::local_workspaces::LocalEnvironment;
+ fn local_error()->RuntimeError{RuntimeError::Binding}
+--- a/crates/adapters/src/opencode/mod.rs
++++ b/crates/adapters/src/opencode/mod.rs
+@@ -26,6 +26,7 @@
+ pub(crate) mod input_validation;
+ mod location;
+ mod local_conversations;
++mod local_web_transport;
+ pub use location::EngineProjectIdentity;
+ pub mod owned_wsl;
+ pub mod provider_config;
+--- a/apps/service/src/routes/local_workspaces/web_original.rs
++++ b/apps/service/src/routes/local_workspaces/web_original.rs
+@@ -2,6 +2,105 @@
+ //! command is installed here: only the private proxy constructor may call it.
+ use super::*;
+ use veyra_adapters::opencode::desktop_runtime::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection};
++use veyra_adapters::{opencode::desktop_runtime::{LocalWebPromptOutcome,LocalWebOriginalSubmission},projects::NativeWebAcknowledgement};
++
++#[derive(Default)]
++struct PendingState {outcomes:Vec<Arc<LocalWebPromptOutcome>>,fused:bool}
++/// Publication completions only, not another Run or execution queue. The
++/// original worker enrolls its actual response before its join result can be
++/// dropped on HTTP disconnect. Writer faults retain exact private bytes.
++#[derive(Default)]
++pub(super) struct WebPending {state:Mutex<PendingState>}
++impl WebPending {
++    fn enroll(&self,outcome:LocalWebPromptOutcome)->Result<(),String>{
++        let outcome=Arc::new(outcome);
++        match self.state.lock(){
++            Ok(mut state)=>{
++                if state.outcomes.iter().any(|old|old.operation_id()==outcome.operation_id()){state.fused=true;}
++                state.outcomes.push(outcome);
++                if state.fused{Err("Original Web response publication is fused; exact outcomes retained".into())}else{Ok(())}
++            },
++            Err(poison)=>{
++                // Retention-only poison recovery. Never authorize a request or
++                // publish guessed state through a poisoned registry.
++                let mut state=poison.into_inner();state.fused=true;state.outcomes.push(outcome);
++                Err("Original Web response registry is poisoned; exact outcome retained".into())
++            }
++        }
++    }
++    pub(super) fn check_empty(&self)->Result<(),String>{
++        let state=self.state.lock().map_err(|_|"Original Web response registry poisoned")?;
++        if state.fused||!state.outcomes.is_empty(){return Err("Original Web response publication remains retained".into())}Ok(())
++    }
++    pub(super) fn flush(&self,service:&ServiceState,deadline:Instant)->Result<(),String>{
++        let mut writer=service.projects.try_lock().map_err(|_|"Original Web response writer busy")?;
++        let store=writer.as_mut().ok_or("Original Web response writer retired")?;
++        let mut pending=self.state.lock().map_err(|_|"Original Web response registry poisoned")?;
++        if pending.fused{return Err("Original Web response registry fused; preserve all outcomes".into())}
++        let mut failed=false;let mut index=0;
++        while index<pending.outcomes.len(){
++            if Instant::now()>=deadline{failed=true;break;}
++            if store.acknowledge_native_web_prompt(&pending.outcomes[index],&service.instance_id).is_ok(){pending.outcomes.remove(index);}
++            else{failed=true;index+=1;}
++        }
++        if failed||!pending.outcomes.is_empty(){return Err("Original Web responses remain retained for the original writer".into())}Ok(())
++    }
++}
++
++/// Called only by the native-authenticated private proxy. No public /operations
++/// DTO/route is added. Uses the SAME service serial as main_prompt/model work.
++pub(in crate::routes) async fn submit_prompt(state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,
++    lease:Arc<LocalWebLease>,original:NativeWebOriginal)->Result<NativeWebAcknowledgement,String>{
++    let serial=tokio::time::timeout(Duration::from_secs(5),state.serial.clone().lock_owned()).await
++        .map_err(|_|"Original Web admission is busy; no effect admitted")?;
++    tokio::task::spawn_blocking(move||{
++        let _serial=serial;
++        check(&state,&binding,&lease)?;
++        if state.local_workspaces.web.check_empty().is_err(){
++            state.local_workspaces.web.flush(&state,Instant::now()+Duration::from_secs(5))?;
++        }
++        let operation=original.operation_id().to_owned();
++        // Exact stable retry reads before today's skills/model/file capture.
++        let retained={
++            let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
++            let store=writer.as_ref().ok_or("Original Web writer retired")?;
++            store.lookup_native_web_original(&original,&state.instance_id).map_err(|_|"Original Web request conflicts")?
++        };
++        if let Some(retained)=retained{
++            let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
++            return writer.as_ref().ok_or("Original Web writer retired")?.read_native_web_acknowledgement(binding.owner(),lease.session_id(),&retained.request_id,&state.instance_id)
++                .map_err(|_|"Original Web response read refused")?.ok_or_else(||"Original Web outcome or forgotten response remains unavailable; no effect repeated".into());
++        }
++        if state.draining.load(Ordering::Acquire)||*state.shutdown.borrow(){return Err("Original Web admission closed".into());}
++        state.local_workspaces.web.check_empty()?;
++        if state.model_work.check_idle_until(Instant::now()+Duration::from_secs(5)).is_err()
++            ||state.model_operation_workers.has_retained()!=Ok(false){return Err("Finish original model ownership before Web input".into());}
++        {
++            let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
++            writer.as_ref().ok_or("Original Web writer retired")?.require_no_unknown_native_web_original(&binding.owner().workspace_id)
++                .map_err(|_|"Reconcile original Web uncertainty before another effect")?;
++        }
++        let current=||check_saved(&state,&binding,lease.session_id());
++        let result=state.live_agent.submit_local_web_prompt_original(&lease,original,&current,|original,effective,files|{
++            // Nonblocking writer acquisition preserves existing engine/catalog
++            // lock order; Root's original store, never a positive port/boolean.
++            let mut writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
++            writer.as_mut().ok_or("Original Web writer retired")?.reserve_native_web_original(original,effective,files,&state.instance_id)
++                .map_err(|_|"Original Web transaction/fence refused".into())
++        })?;
++        let settled_operation=match result{
++            LocalWebOriginalSubmission::Sent(outcome)=>{
++                state.local_workspaces.web.enroll(outcome)?;
++                state.local_workspaces.web.flush(&state,Instant::now()+Duration::from_secs(5))?;
++                operation
++            },
++            LocalWebOriginalSubmission::Retained(receipt)=>receipt.request_id
++        };
++        let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
++        writer.as_ref().ok_or("Original Web writer retired")?.read_native_web_acknowledgement(binding.owner(),lease.session_id(),&settled_operation,&state.instance_id)
++            .map_err(|_|"Original Web response read refused")?.ok_or_else(||"Original Web outcome remains unknown; no effect repeated".into())
++    }).await.map_err(|_|"Original Web worker ended; preserve original uncertainty")?
++}
+
+ /// Same original store for every callback. No callback supplied by a renderer,
+ /// alternate writer, cached boolean, descriptor or downstream proxy port.
+--- a/apps/service/src/routes/local_workspaces.rs
++++ b/apps/service/src/routes/local_workspaces.rs
+@@ -25,6 +25,7 @@
+  terminals:veyra_adapters::interactive_terminal::LocalTerminals,
+  git:git::GitWorkers,
+  custodies:Arc<veyra_adapters::local_custody::LocalCustodyOriginals>,
++ web:Arc<web_original::WebPending>,
+ }
+ impl Runtime {
+  pub(super) fn from_store(store:&veyra_adapters::projects::ProjectStore)->Self{
+@@ -36,7 +37,8 @@
+   self.terminals.finish_until(deadline).map_err(|_|"private terminal originals remain retained")?;
+   self.git.finish_until(deadline)?;
+   if self.git.has_wsl_witnesses()?{return Err("persist actual WSL closure witnesses before donor retirement".into());}
+-  self.custodies.finish_until(deadline)
++  self.custodies.finish_until(deadline)?;
++  self.web.check_empty()
+  }
+ }
+ pub(super) fn router()->Router<Arc<ServiceState>>{
+@@ -118,7 +120,11 @@
+  })}))
+ }
+ async fn operation(State(state):State<Arc<ServiceState>>,Extension(actor):Extension<LocalRequest>,Json(body):Json<LocalOperationRequest>)->Response{
+- let result=tokio::task::spawn_blocking(move||->Result<Value,String>{
++  let serial=if matches!(body.operation,LocalOperation::SessionCreate{..}|LocalOperation::AgentTurn{..}|LocalOperation::SessionSelectModel{..}|LocalOperation::SessionSelectAgent{..}){
++   match tokio::time::timeout(Duration::from_secs(5),state.serial.clone().lock_owned()).await{Ok(guard)=>Some(guard),Err(_)=>return reply(Err("original model admission busy".into()))}
++  }else{None};
++  let result=tokio::task::spawn_blocking(move||->Result<Value,String>{
++   let _serial=serial;
+   actor.check(&state)?;
+   if !canonical(&body.request_id){return Err("invalid original UUID".into());}
+   // Exact process cleanup remains reachable after new workspace admission closes.
+@@ -137,6 +143,11 @@
+    (state.model_work.check_idle_until(Instant::now()+Duration::from_secs(5)).is_err() ||
+     state.model_operation_workers.has_retained()!=Ok(false)){return Err("finish original model ownership before private coding work".into());}
+   let (fresh,binding)=with_store(&state,|store|{
++   if store.local_receipt(&body.request_id).map_err(|_|"original receipt unavailable")?.is_some(){
++    if !store.reserve_local_operation(&body,&state.instance_id).map_err(|_|"original conflict")?{return Ok((false,None));}
++    return Err("retained original cannot become fresh".into());
++   }
++   if matches!(body.operation,LocalOperation::SessionCreate{..}|LocalOperation::AgentTurn{..}|LocalOperation::SessionSelectModel{..}|LocalOperation::SessionSelectAgent{..}){store.require_no_unknown_native_web_original(&body.owner.workspace_id).map_err(|_|"reconcile original Web input before native mutation")?;}
+    if !store.reserve_local_operation(&body,&state.instance_id).map_err(|_|"original conflict")?{return Ok((false,None));}
+    let binding=LocalWorkspaceBinding::acquire(store,&body.owner,&state.instance_id)?;
+    if let LocalOperation::AgentTurn{session_id,..}|LocalOperation::SessionInterrupt{session_id}|LocalOperation::SessionSelectModel{session_id,..}|LocalOperation::SessionSelectAgent{session_id,..}=&body.operation{store.require_local_session(&body.owner.workspace_id,session_id).map_err(|_|"session is not owned by this private original")?;}
+@@ -209,8 +220,10 @@
+
+ /// Root replaces the shared retirement call with this exact typed hook.
+ pub(super) fn finish_with_registry(state:&ServiceState,deadline:Instant)->Result<(),String>{
+- state.local_workspaces.terminals.finish_until(deadline).map_err(|_|"private terminal originals retained")?;
+- state.local_workspaces.git.finish_until(deadline)?;
+- with_store(state,|store|state.local_workspaces.git.persist_wsl(&mut |closed|store.record_local_wsl_git_closed(closed).map_err(|_|"actual WSL closure persistence refused".into())))?;
+- state.local_workspaces.custodies.finish_until(deadline)
+-}
++ let web=state.local_workspaces.web.flush(state,deadline);
++ let terminals=state.local_workspaces.terminals.finish_until(deadline).map_err(|_|"private terminal originals retained".to_owned());
++ let git=state.local_workspaces.git.finish_until(deadline);
++ let witnesses=with_store(state,|store|state.local_workspaces.git.persist_wsl(&mut |closed|store.record_local_wsl_git_closed(closed).map_err(|_|"actual WSL closure persistence refused".into())));
++ let custody=state.local_workspaces.custodies.finish_until(deadline);
++ web.and(terminals).and(git).and(witnesses).and(custody).and(state.local_workspaces.web.check_empty())
++}
+--- a/apps/service/src/routes/live_agent.rs
++++ b/apps/service/src/routes/live_agent.rs
+@@ -55,6 +55,10 @@
+     replies: veyra_adapters::public_reply_store::ReplyStore,
+ }
+ impl LiveAgent {
++    pub(super) fn submit_local_web_prompt_original<F>(&self,lease:&veyra_adapters::opencode::desktop_runtime::LocalWebLease,original:veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,current:&dyn Fn()->Result<(),String>,reserve:F)->Result<veyra_adapters::opencode::desktop_runtime::LocalWebOriginalSubmission,String>
++    where F:FnOnce(veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,veyra_adapters::opencode::desktop_runtime::EffectiveWebBody,veyra_adapters::opencode::attachments::NativeWebFilesOriginal)->Result<veyra_adapters::projects::NativeWebReservation,String>{
++        self.runtime.submit_local_web_prompt_original(lease,original,current,reserve).map_err(|_|"Original Web prompt outcome unavailable; no effect repeated".into())
++    }
+     pub(super) fn mint_local_web_lease(&self,binding:std::sync::Arc<veyra_adapters::local_execution::LocalWorkspaceBinding>,session:&str,current:&dyn Fn()->Result<(),String>)->Result<veyra_adapters::opencode::desktop_runtime::LocalWebLease,String>{
+         self.runtime.mint_local_web_lease(binding,session,current).map_err(|_|"original private Web lease unavailable".into())
+     }
+--- a/apps/desktop/src-tauri/src/local_web_auth.rs
++++ b/apps/desktop/src-tauri/src/local_web_auth.rs
+@@ -54,6 +54,14 @@
+     if raw.len()>32768{return false;}
+     Url::parse(raw).is_ok_and(|url|matches!(url.scheme(),"http"|"https")&&url.username().is_empty()&&url.password().is_none()&&url.fragment().is_none()&&url.origin()==expected.origin())
+ }
++fn exact_resource_origin(expected:&Url,raw:&str,context:COREWEBVIEW2_WEB_RESOURCE_CONTEXT)->bool{
++    if exact_origin(expected,raw){return true;}
++    if context.0!=COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET.0||raw.len()>32768{return false;}
++    let Ok(mut url)=Url::parse(raw)else{return false;};
++    let mapped=match (url.scheme(),expected.scheme()){("ws","http")=>"http",("wss","https")=>"https",_=>return false};
++    if url.set_scheme(mapped).is_err(){return false;}
++    exact_origin(expected,url.as_str())
++}
+ fn block(args:&ICoreWebView2WebResourceRequestedEventArgs,env:&ICoreWebView2Environment)->WinResult<()>{unsafe{
+     let response=env.CreateWebResourceResponse(None::<&IStream>,403,w!("Forbidden"),w!("Cache-Control: no-store\r\nContent-Length: 0\r\n"))?;
+     args.SetResponse(&response)
+@@ -74,8 +82,9 @@
+         strip(&headers)?; // before every check, including foreign/cancelled requests
+         let mut raw=PWSTR::null();request.Uri(&mut raw)?;
+         let uri=CoTaskMemPWSTR::from(raw).to_string();
++        let mut context=COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;args.ResourceContext(&mut context)?;
+         if !sender_matches(sender,original)||!flags.enabled.load(Ordering::Acquire)||flags.cancelled.load(Ordering::Acquire)
+-            ||!lease.current()||!lease.no_redirect_proxy_current()||!exact_origin(lease.proxy_origin(),&uri)
++            ||!lease.current()||!lease.no_redirect_proxy_current()||!exact_resource_origin(lease.proxy_origin(),&uri,context)
+         {return block(&args,env);}
+         // Require modern source classification too: no legacy worker fallback.
+         let args2:ICoreWebView2WebResourceRequestedEventArgs2=args.cast()?;
+@@ -196,6 +205,14 @@
+         assert!(exact_origin(&expected,"http://127.0.0.1:48123/api/session?cursor=opaque"));
+         for uri in ["http://127.0.0.1:48124/api/session","https://127.0.0.1:48123/api/session","http://localhost:48123/api/session","http://user:password@127.0.0.1:48123/","http://127.0.0.1.example:48123/","http://127.0.0.1:48123/#fragment"]{assert!(!exact_origin(&expected,uri));}
+     }
++    #[test]fn websocket_scheme_equivalence_requires_actual_native_websocket_context(){
++        let expected=Url::parse("http://127.0.0.1:48123/").unwrap();
++        assert!(exact_resource_origin(&expected,"ws://127.0.0.1:48123/api/pty/pty_actual/connect",COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET));
++        assert!(!exact_resource_origin(&expected,"ws://127.0.0.1:48123/api/pty/pty_actual/connect",COREWEBVIEW2_WEB_RESOURCE_CONTEXT_FETCH));
++        for raw in ["wss://127.0.0.1:48123/","ws://localhost:48123/","ws://127.0.0.1:48124/","ws://name:secret@127.0.0.1:48123/","ws://127.0.0.1:48123/#fragment"]{
++            assert!(!exact_resource_origin(&expected,raw,COREWEBVIEW2_WEB_RESOURCE_CONTEXT_WEBSOCKET));
++        }
++    }
+     #[test]fn failed_add_keeps_observed_token_but_never_guesses_ownership(){let mut slot=Token::Adding;slot.finish_add(77,false);let mut calls=0;assert!(!slot.remove(|_|{calls+=1;true}));assert_eq!(calls,0);assert!(!slot.gone());}
+     #[test]fn successful_cleanup_removes_exact_token_once(){let mut slot=Token::Known(91);let mut seen=Vec::new();assert!(slot.remove(|token|{seen.push(token);true}));assert!(slot.remove(|token|{seen.push(token);true}));assert_eq!(seen,vec![91]);}
+     #[test]fn unknown_removal_is_retained_without_a_second_native_effect(){let mut slot=Token::Known(19);let mut calls=0;assert!(!slot.remove(|_|{calls+=1;false}));assert!(!slot.remove(|_|{calls+=1;true}));assert_eq!(calls,1);assert!(!slot.gone());}
+--- /dev/null
++++ b/crates/adapters/src/projects/0007.sql
+@@ -0,0 +1,124 @@
++-- Native allocation 7. Original ProjectStore transaction only. No new writer.
++-- BEFORE INSERT guards are essential: REPLACE can suppress DELETE triggers
++-- with recursive_triggers=OFF, even while foreign_keys=ON.
++CREATE TRIGGER local_installation_no_replace BEFORE INSERT ON local_installation
++WHEN EXISTS(SELECT 1 FROM local_installation WHERE singleton=NEW.singleton OR installation_id=NEW.installation_id OR custodian_key=NEW.custodian_key)
++BEGIN SELECT RAISE(ABORT,'local installation replacement refused'); END;
++CREATE TRIGGER local_migration_receipts_no_replace BEFORE INSERT ON local_migration_receipts
++WHEN EXISTS(SELECT 1 FROM local_migration_receipts WHERE version=NEW.version)
++BEGIN SELECT RAISE(ABORT,'local migration replacement refused'); END;
++CREATE TRIGGER local_workspace_no_replace BEFORE INSERT ON local_workspaces
++WHEN EXISTS(SELECT 1 FROM local_workspaces WHERE id=NEW.id)
++BEGIN SELECT RAISE(ABORT,'local workspace replacement refused'); END;
++CREATE TRIGGER local_operation_no_replace BEFORE INSERT ON local_workspace_operations
++WHEN EXISTS(SELECT 1 FROM local_workspace_operations WHERE id=NEW.id)
++BEGIN SELECT RAISE(ABORT,'local operation replacement refused'); END;
++
++-- Minimal immutable identity ledger survives explicit payload forgetting.
++-- stable_key is NULL for genuinely no-ID operations, never content-derived.
++CREATE TABLE local_web_original_keys (
++ operation_id TEXT PRIMARY KEY NOT NULL,
++ stable_key TEXT UNIQUE,
++ input_sha256 TEXT NOT NULL CHECK(length(input_sha256)=64),
++ effective_sha256 TEXT NOT NULL CHECK(length(effective_sha256)=64),
++ intake_bytes INTEGER NOT NULL CHECK(intake_bytes BETWEEN 0 AND 16777216),
++ retained_bytes INTEGER NOT NULL CHECK(retained_bytes BETWEEN intake_bytes AND 67108864),
++ FOREIGN KEY(operation_id) REFERENCES local_workspace_operations(id)
++);
++CREATE TABLE local_web_original_payloads (
++ operation_id TEXT PRIMARY KEY NOT NULL,
++ method TEXT NOT NULL CHECK(method IN ('POST','PUT','PATCH','DELETE')),
++ raw_target TEXT NOT NULL,
++ content_headers_json TEXT NOT NULL,
++ scope_engine_json TEXT NOT NULL,
++ raw_body BLOB NOT NULL,
++ effective_body BLOB NOT NULL CHECK(length(effective_body)<=16777216),
++ transformations_json TEXT NOT NULL CHECK(length(CAST(transformations_json AS BLOB))<=65536),
++ files_original_json TEXT NOT NULL CHECK(length(CAST(files_original_json AS BLOB))<=16777216),
++ FOREIGN KEY(operation_id) REFERENCES local_web_original_keys(operation_id)
++);
++CREATE TABLE local_web_original_forget_receipts (
++ operation_id TEXT PRIMARY KEY NOT NULL,
++ input_sha256 TEXT NOT NULL CHECK(length(input_sha256)=64),
++ forget_request_id TEXT NOT NULL UNIQUE,
++ FOREIGN KEY(operation_id) REFERENCES local_web_original_keys(operation_id)
++);
++-- Captured source bytes are BLOBs, content-addressed inside this SAME original
++-- operation/writer. JSON maps retain only hashes/selection/path identities.
++CREATE TABLE local_web_original_sources (
++ operation_id TEXT NOT NULL,
++ source_sha256 TEXT NOT NULL CHECK(length(source_sha256)=64),
++ source_bytes BLOB NOT NULL CHECK(length(source_bytes)<=8388608),
++ PRIMARY KEY(operation_id,source_sha256),
++ FOREIGN KEY(operation_id) REFERENCES local_web_original_payloads(operation_id) DEFERRABLE INITIALLY DEFERRED
++);
++CREATE TABLE local_web_original_acknowledgements (
++ operation_id TEXT PRIMARY KEY NOT NULL,
++ input_sha256 TEXT NOT NULL CHECK(length(input_sha256)=64),
++ status INTEGER NOT NULL CHECK(status BETWEEN 100 AND 599 AND status NOT BETWEEN 300 AND 399),
++ content_headers_json TEXT NOT NULL CHECK(length(CAST(content_headers_json AS BLOB))<=16384),
++ body_sha256 TEXT NOT NULL CHECK(length(body_sha256)=64),
++ body BLOB NOT NULL CHECK(length(body)<=16777216),
++ retained_bytes INTEGER NOT NULL CHECK(retained_bytes=length(CAST(content_headers_json AS BLOB))+length(body)+64),
++ FOREIGN KEY(operation_id) REFERENCES local_web_original_payloads(operation_id)
++);
++CREATE TRIGGER local_web_keys_insert_guard BEFORE INSERT ON local_web_original_keys
++WHEN EXISTS(SELECT 1 FROM local_web_original_keys WHERE operation_id=NEW.operation_id OR (NEW.stable_key IS NOT NULL AND stable_key=NEW.stable_key))
++ OR NOT EXISTS(SELECT 1 FROM local_workspace_operations WHERE id=NEW.operation_id AND kind='native_web_original' AND state='intent' AND request_sha256=NEW.input_sha256)
++ OR (SELECT count(*) FROM local_web_original_keys)>=4096
++BEGIN SELECT RAISE(ABORT,'Web original key or original operation refused'); END;
++CREATE TRIGGER local_web_keys_no_update BEFORE UPDATE ON local_web_original_keys
++BEGIN SELECT RAISE(ABORT,'Web original identity is immutable'); END;
++CREATE TRIGGER local_web_keys_no_delete BEFORE DELETE ON local_web_original_keys
++BEGIN SELECT RAISE(ABORT,'Web original identity must survive forgetting'); END;
++CREATE TRIGGER local_web_payload_insert_guard BEFORE INSERT ON local_web_original_payloads
++WHEN EXISTS(SELECT 1 FROM local_web_original_payloads WHERE operation_id=NEW.operation_id)
++ OR EXISTS(SELECT 1 FROM local_web_original_forget_receipts WHERE operation_id=NEW.operation_id)
++ OR NOT EXISTS(SELECT 1 FROM local_web_original_keys k JOIN local_workspace_operations o ON o.id=k.operation_id
++   WHERE k.operation_id=NEW.operation_id AND o.kind='native_web_original' AND o.state='intent'
++   AND k.intake_bytes=length(CAST(NEW.method AS BLOB))+length(CAST(NEW.raw_target AS BLOB))+length(CAST(NEW.content_headers_json AS BLOB))+length(CAST(NEW.scope_engine_json AS BLOB))+length(NEW.raw_body)
++   AND k.retained_bytes=k.intake_bytes+length(NEW.effective_body)+length(CAST(NEW.transformations_json AS BLOB))+length(CAST(NEW.files_original_json AS BLOB))
++     +(SELECT COALESCE(sum(length(source_bytes)+64),0) FROM local_web_original_sources WHERE operation_id=NEW.operation_id))
++ OR (SELECT COALESCE(sum(k.retained_bytes+COALESCE(a.retained_bytes,16793664)),0) FROM local_web_original_keys k JOIN local_web_original_payloads p ON p.operation_id=k.operation_id LEFT JOIN local_web_original_acknowledgements a ON a.operation_id=k.operation_id)
++   +(SELECT retained_bytes FROM local_web_original_keys WHERE operation_id=NEW.operation_id)+16793664>67108864
++BEGIN SELECT RAISE(ABORT,'Web original payload replacement or retention budget refused'); END;
++CREATE TRIGGER local_web_payload_no_update BEFORE UPDATE ON local_web_original_payloads
++BEGIN SELECT RAISE(ABORT,'Web original payload is immutable'); END;
++CREATE TRIGGER local_web_payload_delete_guard BEFORE DELETE ON local_web_original_payloads
++WHEN NOT EXISTS(SELECT 1 FROM local_web_original_forget_receipts f JOIN local_web_original_keys k ON k.operation_id=f.operation_id
++ JOIN local_workspace_operations o ON o.id=k.operation_id WHERE f.operation_id=OLD.operation_id
++ AND f.input_sha256=k.input_sha256 AND o.state IN ('committed','denied'))
++BEGIN SELECT RAISE(ABORT,'Web original needs exact explicit terminal forgetting receipt'); END;
++CREATE TRIGGER local_web_forget_insert_guard BEFORE INSERT ON local_web_original_forget_receipts
++WHEN EXISTS(SELECT 1 FROM local_web_original_forget_receipts WHERE operation_id=NEW.operation_id OR forget_request_id=NEW.forget_request_id)
++ OR NOT EXISTS(SELECT 1 FROM local_web_original_keys k JOIN local_workspace_operations o ON o.id=k.operation_id
++ WHERE k.operation_id=NEW.operation_id AND k.input_sha256=NEW.input_sha256 AND o.state IN ('committed','denied'))
++BEGIN SELECT RAISE(ABORT,'Web original forgetting refused for unknown or conflicting original'); END;
++CREATE TRIGGER local_web_forget_no_update BEFORE UPDATE ON local_web_original_forget_receipts
++BEGIN SELECT RAISE(ABORT,'Web original forgetting receipt is immutable'); END;
++CREATE TRIGGER local_web_forget_no_delete BEFORE DELETE ON local_web_original_forget_receipts
++BEGIN SELECT RAISE(ABORT,'Web original forgetting receipt must survive'); END;
++CREATE TRIGGER local_web_sources_insert_guard BEFORE INSERT ON local_web_original_sources
++WHEN EXISTS(SELECT 1 FROM local_web_original_sources WHERE operation_id=NEW.operation_id AND source_sha256=NEW.source_sha256)
++ OR EXISTS(SELECT 1 FROM local_web_original_payloads WHERE operation_id=NEW.operation_id)
++ OR EXISTS(SELECT 1 FROM local_web_original_forget_receipts WHERE operation_id=NEW.operation_id)
++ OR NOT EXISTS(SELECT 1 FROM local_web_original_keys k JOIN local_workspace_operations o ON o.id=k.operation_id WHERE k.operation_id=NEW.operation_id AND o.kind='native_web_original' AND o.state='intent')
++BEGIN SELECT RAISE(ABORT,'Web captured source replacement or late insertion refused'); END;
++CREATE TRIGGER local_web_sources_no_update BEFORE UPDATE ON local_web_original_sources
++BEGIN SELECT RAISE(ABORT,'Web captured source is immutable'); END;
++CREATE TRIGGER local_web_sources_delete_guard BEFORE DELETE ON local_web_original_sources
++WHEN NOT EXISTS(SELECT 1 FROM local_web_original_forget_receipts f JOIN local_web_original_keys k ON k.operation_id=f.operation_id JOIN local_workspace_operations o ON o.id=k.operation_id WHERE f.operation_id=OLD.operation_id AND f.input_sha256=k.input_sha256 AND o.state IN ('committed','denied'))
++BEGIN SELECT RAISE(ABORT,'Web captured source requires explicit terminal forgetting'); END;
++CREATE TRIGGER local_web_ack_insert_guard BEFORE INSERT ON local_web_original_acknowledgements
++WHEN EXISTS(SELECT 1 FROM local_web_original_acknowledgements WHERE operation_id=NEW.operation_id)
++ OR EXISTS(SELECT 1 FROM local_web_original_forget_receipts WHERE operation_id=NEW.operation_id)
++ OR NOT EXISTS(SELECT 1 FROM local_web_original_keys k JOIN local_workspace_operations o ON o.id=k.operation_id WHERE k.operation_id=NEW.operation_id AND k.input_sha256=NEW.input_sha256 AND o.kind='native_web_original' AND o.state='unknown')
++ OR NEW.retained_bytes>16793664
++ OR (SELECT COALESCE(sum(k.retained_bytes+CASE WHEN k.operation_id=NEW.operation_id THEN NEW.retained_bytes ELSE COALESCE(a.retained_bytes,16793664) END),0) FROM local_web_original_keys k JOIN local_web_original_payloads p ON p.operation_id=k.operation_id LEFT JOIN local_web_original_acknowledgements a ON a.operation_id=k.operation_id)>67108864
++BEGIN SELECT RAISE(ABORT,'Web acknowledgement replacement, owner or retention budget refused'); END;
++CREATE TRIGGER local_web_ack_no_update BEFORE UPDATE ON local_web_original_acknowledgements
++BEGIN SELECT RAISE(ABORT,'Web original acknowledgement is immutable'); END;
++CREATE TRIGGER local_web_ack_delete_guard BEFORE DELETE ON local_web_original_acknowledgements
++WHEN NOT EXISTS(SELECT 1 FROM local_web_original_forget_receipts f JOIN local_web_original_keys k ON k.operation_id=f.operation_id JOIN local_workspace_operations o ON o.id=k.operation_id WHERE f.operation_id=OLD.operation_id AND f.input_sha256=k.input_sha256 AND o.state IN ('committed','denied'))
++BEGIN SELECT RAISE(ABORT,'Web acknowledgement requires explicit terminal forgetting'); END;
++PRAGMA user_version=7;
+--- /dev/null
++++ b/crates/adapters/src/projects/local_web_originals.rs
+@@ -0,0 +1,247 @@
++//! Native-only original admission in the existing ProjectStore connection.
++//! No renderer DTO, alternate database, adapter journal, or second run queue.
++use super::*;
++use crate::opencode::desktop_runtime::{NativeWebOriginal,EffectiveWebBody};
++use crate::opencode::attachments::NativeWebFilesOriginal;
++use veyra_contracts::local_workspaces::LocalOperationReceipt;
++
++/// A move-only witness created only after the actual original writer committed
++/// exact input + the existing operation's unknown fence in ONE transaction.
++pub struct NativeWebDispatch { original: NativeWebOriginal, effective:EffectiveWebBody,files:NativeWebFilesOriginal }
++impl NativeWebDispatch {
++    pub(crate) fn into_parts(self) -> (NativeWebOriginal,EffectiveWebBody,NativeWebFilesOriginal) { (self.original,self.effective,self.files) }
++}
++pub enum NativeWebReservation { Fresh(NativeWebDispatch), Retained(LocalOperationReceipt) }
++/// Actual private original response only; never a public operation receipt or
++/// deserializable replay/send permit.
++pub struct NativeWebAcknowledgement {status:u16,headers:Vec<(String,String)>,body:Vec<u8>}
++pub struct SavedNativeWebPty {id:String,pid:u64,definition:serde_json::Value}
++impl SavedNativeWebPty {
++    pub fn id(&self)->&str{&self.id}
++    pub fn matches_info(&self,info:&serde_json::Value)->bool{
++        info.get("id").and_then(serde_json::Value::as_str)==Some(self.id.as_str())
++            &&info.get("pid").and_then(serde_json::Value::as_u64)==Some(self.pid)
++            &&["command","args","cwd"].iter().all(|key|info.get(*key)==self.definition.get(*key))
++    }
++}
++impl NativeWebAcknowledgement {
++    pub fn status(&self)->u16{self.status}
++    pub fn headers(&self)->&[(String,String)]{&self.headers}
++    pub fn body(&self)->&[u8]{&self.body}
++}
++
++pub(super) fn validate_allocated_schema(db:&Connection, version:u32)->Result<(),StoreError>{
++    let expected=Connection::open_in_memory()?;
++    expected.execute_batch(include_str!("0006.sql"))?;
++    if version==7 { expected.execute_batch(include_str!("0007.sql"))?; }
++    else if version!=6 { return Err(StoreError::Corrupt); }
++    fn ddl(db:&Connection)->Result<Vec<(String,String)>,StoreError>{
++        let mut query=db.prepare("SELECT name,sql FROM sqlite_master WHERE name LIKE 'local_%' AND sql IS NOT NULL ORDER BY name")?;
++        let values=query.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<Vec<_>,_>>()?;
++        Ok(values)
++    }
++    if ddl(db)?!=ddl(&expected)? { return Err(StoreError::Corrupt); }
++    Ok(())
++}
++
++impl ProjectStore {
++    /// Saved creation acknowledgement is necessary but not a current process
++    /// permit. The runtime must query the SAME original engine's retained PTY
++    /// object before a ticket/upgrade/control; no PID adoption is performed.
++    pub fn saved_native_web_pty(&self,binding:&crate::local_execution::LocalWorkspaceBinding,
++        lease:&crate::opencode::desktop_runtime::LocalWebLease,pty:&str,instance:&str)->Result<SavedNativeWebPty,StoreError>{
++        binding.verify_current(self,instance).map_err(|_|StoreError::Conflict)?;
++        if binding.owner()!=lease.owner()||lease.revoked()||binding.directory()!=lease.directory(){return Err(StoreError::Conflict);}
++        self.require_local_session(&binding.owner().workspace_id,lease.session_id())?;
++        if !pty.starts_with("pty_")||pty.len()>160||!pty.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'){return Err(StoreError::Invalid);}
++        let mut query=self.connection.prepare("SELECT p.scope_engine_json,a.body FROM local_web_original_payloads p JOIN local_web_original_acknowledgements a ON a.operation_id=p.operation_id JOIN local_workspace_operations o ON o.id=p.operation_id JOIN local_web_original_keys k ON k.operation_id=o.id WHERE o.workspace_id=? AND json_extract(o.result_json,'$.upstream_id')=? AND json_extract(p.scope_engine_json,'$.route')='/api/pty' AND o.kind='native_web_original' AND o.state='committed' AND a.status=200 AND a.input_sha256=k.input_sha256 AND p.method='POST'")?;
++        let rows=query.query_map(params![&binding.owner().workspace_id,pty],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Vec<u8>>(1)?)))?;
++        for row in rows{
++            let (scope,body)=row?;let scope:serde_json::Value=serde_json::from_str(&scope).map_err(|_|StoreError::Corrupt)?;
++            if scope.get("route").and_then(serde_json::Value::as_str)!=Some("/api/pty")
++                ||!scope.get("engine").is_some_and(|s|lease.matches_saved_workspace_engine(s)){continue;}
++            let body:serde_json::Value=serde_json::from_slice(&body).map_err(|_|StoreError::Corrupt)?;
++            if body.pointer("/data/id").and_then(serde_json::Value::as_str)!=Some(pty){continue;}
++            if body.pointer("/location/directory").and_then(serde_json::Value::as_str)!=Some(binding.directory()){return Err(StoreError::Corrupt);}
++            let definition=body.get("data").cloned().ok_or(StoreError::Corrupt)?;
++            let pid=definition.get("pid").and_then(serde_json::Value::as_u64).filter(|p|*p>0).ok_or(StoreError::Corrupt)?;
++            return Ok(SavedNativeWebPty{id:pty.into(),pid,definition});
++        }
++        Err(StoreError::NotFound)
++    }
++    /// Read original identity BEFORE consulting today's skill/file/model
++    /// selection. Never turn an old unknown, missing ack or forgotten payload
++    /// into a fresh effect. Stable ID conflict binds the COMPLETE raw input.
++    pub fn lookup_native_web_original(&self,original:&NativeWebOriginal,instance:&str)->Result<Option<LocalOperationReceipt>,StoreError>{
++        self.check_local_owner(original.owner(),instance)?;
++        self.require_local_session(&original.owner().workspace_id,original.session_id())?;
++        let stable=original.stable_upstream_key().map_err(|_|StoreError::Invalid)?;
++        let row:Option<(String,String)>=self.connection.query_row(
++            "SELECT operation_id,input_sha256 FROM local_web_original_keys WHERE operation_id=? OR (? IS NOT NULL AND stable_key=?)",
++            params![original.operation_id(),stable,stable],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
++        let Some((id,hash))=row else{return Ok(None)};
++        if hash!=original.input_sha256(){return Err(StoreError::Conflict);}
++        let receipt=self.local_receipt(&id)?.ok_or(StoreError::Corrupt)?;
++        if receipt.owner!=*original.owner(){return Err(StoreError::Conflict);}
++        Ok(Some(receipt))
++    }
++    pub fn require_no_unknown_native_web_original(&self,workspace:&str)->Result<(),StoreError>{
++        self.local_custody()?;
++        let pending:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM local_workspace_operations WHERE workspace_id=? AND kind='native_web_original' AND state IN ('intent','unknown'))",[workspace],|r|r.get(0))?;
++        if pending{return Err(StoreError::Conflict);}Ok(())
++    }
++    pub fn read_native_web_acknowledgement(&self,owner:&veyra_contracts::local_workspaces::LocalWorkspaceOwner,
++        session:&str,operation:&str,instance:&str)->Result<Option<NativeWebAcknowledgement>,StoreError>{
++        use sha2::{Digest,Sha256};
++        self.check_local_owner(owner,instance)?;self.require_local_session(&owner.workspace_id,session)?;
++        let receipt=self.local_receipt(operation)?.ok_or(StoreError::NotFound)?;
++        if receipt.owner.installation_id!=owner.installation_id||receipt.owner.custodian_key!=owner.custodian_key
++            ||receipt.owner.workspace_id!=owner.workspace_id||receipt.owner.environment!=owner.environment{return Err(StoreError::Conflict);}
++        let row:Option<(String,i64,String,String,Vec<u8>,String)>=self.connection.query_row(
++            "SELECT a.input_sha256,a.status,a.content_headers_json,a.body_sha256,a.body,p.scope_engine_json FROM local_web_original_acknowledgements a JOIN local_web_original_payloads p ON p.operation_id=a.operation_id WHERE a.operation_id=?",
++            [operation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
++        let Some((input,status,headers,body_hash,body,scope))=row else{return Ok(None)};
++        let scope:serde_json::Value=serde_json::from_str(&scope).map_err(|_|StoreError::Corrupt)?;
++        if input!=receipt.request_sha256||format!("{:x}",Sha256::digest(&body))!=body_hash
++            ||scope.pointer("/engine/session_id").and_then(serde_json::Value::as_str)!=Some(session){return Err(StoreError::Corrupt);}
++        let headers:Vec<(String,String)>=serde_json::from_str(&headers).map_err(|_|StoreError::Corrupt)?;
++        if headers.len()>1||headers.iter().any(|(k,v)|k!="content-type"||v.chars().any(char::is_control)){return Err(StoreError::Corrupt);}
++        Ok(Some(NativeWebAcknowledgement{status:u16::try_from(status).map_err(|_|StoreError::Corrupt)?,headers,body}))
++    }
++
++    /// Exact actual response + the SAME original minimal settlement commit
++    /// together. Caller retains the sealed actual outcome until this succeeds;
++    /// a writer/IO fault must never drop it, re-POST, or fabricate settlement.
++    pub fn acknowledge_native_web_prompt(&mut self,outcome:&crate::opencode::desktop_runtime::LocalWebPromptOutcome,instance:&str)->Result<(),StoreError>{
++        use sha2::{Digest,Sha256};
++        self.check_local_owner(outcome.owner(),instance)?;
++        self.require_local_session(&outcome.owner().workspace_id,outcome.session_id())?;
++        let receipt=self.local_receipt(outcome.operation_id())?.ok_or(StoreError::NotFound)?;
++        if receipt.owner!=*outcome.owner()||receipt.request_sha256!=outcome.input_sha256(){return Err(StoreError::Conflict);}
++        let headers=outcome.content_type().map(|v|vec![("content-type".to_owned(),v.to_owned())]).unwrap_or_default();
++        if headers.iter().any(|(_,v)|v.chars().any(char::is_control)){return Err(StoreError::Invalid);}
++        let headers=serde_json::to_string(&headers).map_err(|_|StoreError::Invalid)?;
++        let hash=format!("{:x}",Sha256::digest(outcome.body()));
++        let retained=headers.len().checked_add(outcome.body().len()).and_then(|n|n.checked_add(64)).ok_or(StoreError::Invalid)?;
++        if headers.len()>16384||outcome.body().len()>16*1024*1024{return Err(StoreError::Invalid);}
++        let prior:Option<(String,i64,String,String)>=self.connection.query_row(
++            "SELECT input_sha256,status,content_headers_json,body_sha256 FROM local_web_original_acknowledgements WHERE operation_id=?",
++            [outcome.operation_id()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
++        if let Some(prior)=prior{
++            if prior!=(outcome.input_sha256().into(),i64::from(outcome.status()),headers,hash){return Err(StoreError::Conflict);}return Ok(());
++        }
++        let summary=serde_json::json!({"admission":outcome.admission(),"upstream_id":outcome.upstream_id(),"status":outcome.status()});
++        let summary=serde_json::to_string(&summary).map_err(|_|StoreError::Invalid)?;
++        let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        tx.execute("INSERT INTO local_web_original_acknowledgements VALUES(?,?,?,?,?,?,?)",
++            params![outcome.operation_id(),outcome.input_sha256(),outcome.status(),headers,hash,outcome.body(),retained as i64])?;
++        let sql=if ["admitted","rejected"].contains(&outcome.admission()){
++            "UPDATE local_workspace_operations SET state='committed',result_json=? WHERE id=? AND state='unknown'"
++        }else{"UPDATE local_workspace_operations SET result_json=? WHERE id=? AND state='unknown'"};
++        if tx.execute(sql,params![summary,outcome.operation_id()])?!=1{return Err(StoreError::Conflict);}
++        tx.commit()?;Ok(())
++    }
++
++    /// Caller retains original ModelWork/queue/creation/cancellation admission
++    /// before this call and through its single guarded dispatch. This method
++    /// does not manufacture that admission from a caller boolean or descriptor.
++    pub fn reserve_native_web_original(&mut self, original:NativeWebOriginal,effective:EffectiveWebBody, files:NativeWebFilesOriginal, instance:&str)->Result<NativeWebReservation,StoreError>{
++        self.check_local_owner(original.owner(),instance)?;
++        self.require_local_session(&original.owner().workspace_id,original.session_id())?;
++        if !uuid::Uuid::parse_str(original.operation_id()).is_ok_and(|id|!id.is_nil()&&id.to_string()==original.operation_id())
++            || !matches!(original.method().as_str(),"POST"|"PUT"|"PATCH"|"DELETE") { return Err(StoreError::Invalid); }
++        let stable=original.stable_upstream_key().map_err(|_|StoreError::Invalid)?;
++        // Reconciliation lookup precedes every fresh admission. It never
++        // repeats the original HTTP effect, including old intent/unknown rows.
++        let prior:Option<(String,String)>=self.connection.query_row(
++            "SELECT operation_id,input_sha256 FROM local_web_original_keys WHERE operation_id=? OR (? IS NOT NULL AND stable_key=?)",
++            params![original.operation_id(),stable,stable],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
++        if let Some((id,hash))=prior {
++            if hash!=original.input_sha256(){return Err(StoreError::Conflict);}
++            let receipt=self.local_receipt(&id)?.ok_or(StoreError::Corrupt)?;
++            if receipt.owner!=*original.owner(){return Err(StoreError::Conflict);}
++            return Ok(NativeWebReservation::Retained(receipt));
++        }
++        // Preserve exact received body independently from metadata JSON so its
++        // byte budget is not inflated by a JSON array encoding of every byte.
++        let scope=original.journal_scope();
++        let scope=serde_json::to_string(&scope).map_err(|_|StoreError::Invalid)?;
++        let headers=serde_json::to_string(original.headers()).map_err(|_|StoreError::Invalid)?;
++        let size=original.method().as_str().len().checked_add(original.raw_target().len())
++            .and_then(|n|n.checked_add(headers.len())).and_then(|n|n.checked_add(scope.len()))
++            .and_then(|n|n.checked_add(original.body().len())).ok_or(StoreError::Invalid)?;
++        if size>16*1024*1024{return Err(StoreError::Invalid);}
++        use sha2::{Digest,Sha256};
++        if format!("{:x}",Sha256::digest(original.body()))!=effective.original_body_sha256(){return Err(StoreError::Invalid);}
++        let transformations=serde_json::to_string(effective.transformations()).map_err(|_|StoreError::Invalid)?;
++        if transformations.len()>65536{return Err(StoreError::Invalid);}
++        let verified=crate::opencode::desktop_runtime::materialize_resolved_web_files(original.body(),&files).map_err(|_|StoreError::Conflict)?;
++        if verified.bytes()!=effective.bytes()||verified.effective_body_sha256()!=effective.effective_body_sha256()
++            ||serde_json::to_vec(verified.transformations()).map_err(|_|StoreError::Invalid)?!=serde_json::to_vec(effective.transformations()).map_err(|_|StoreError::Invalid)?{return Err(StoreError::Conflict);}
++        let binding=crate::local_execution::LocalWorkspaceBinding::acquire(self,original.owner(),instance).map_err(|_|StoreError::Conflict)?;
++        files.check_current(&binding,original.session_id(),original.operation_id(),original.input_sha256(),&||{
++            self.check_local_owner(original.owner(),instance).map_err(|_|"original Web owner changed")?;
++            self.require_local_session(&original.owner().workspace_id,original.session_id()).map_err(|_|"original Web session changed")?;Ok(())
++        }).map_err(|_|StoreError::Conflict)?;
++        let mut provenance=files.journal_original();
++        let mut sources=std::collections::BTreeMap::<String,Vec<u8>>::new();
++        let full_provenance_hash=format!("{:x}",Sha256::digest(serde_json::to_vec(&provenance).map_err(|_|StoreError::Invalid)?));
++        // Lossless compact projection: URI values already survive at exact JSON
++        // pointers in raw/effective bodies. Retain hashes/pointers/source bytes
++        // instead of duplicating large data URIs in a third JSON copy.
++        if let Some(entries)=provenance.get_mut("files").and_then(serde_json::Value::as_array_mut){
++            for entry in entries{
++                let object=entry.as_object_mut().ok_or(StoreError::Invalid)?;
++                use base64::{Engine as _,engine::general_purpose::STANDARD};
++                let encoded=object.remove("source_bytes_base64").and_then(|v|v.as_str().map(str::to_owned)).ok_or(StoreError::Invalid)?;
++                let bytes=STANDARD.decode(&encoded).map_err(|_|StoreError::Invalid)?;
++                let source_hash=object.get("source_sha256").and_then(serde_json::Value::as_str).ok_or(StoreError::Invalid)?.to_owned();
++                if format!("{:x}",Sha256::digest(&bytes))!=source_hash||STANDARD.encode(&bytes)!=encoded{return Err(StoreError::Conflict);}
++                if let Some(previous)=sources.insert(source_hash.clone(),bytes.clone()){if previous!=bytes{return Err(StoreError::Conflict);}}
++                object.insert("source_blob_sha256".into(),serde_json::json!(source_hash));
++                for field in ["original_uri","effective_uri"]{
++                    let uri=object.remove(field).and_then(|v|v.as_str().map(str::to_owned)).ok_or(StoreError::Invalid)?;
++                    object.insert(format!("{field}_sha256"),serde_json::json!(format!("{:x}",Sha256::digest(uri.as_bytes()))));
++                }
++            }
++        }
++        provenance["full_projection_sha256"]=serde_json::json!(full_provenance_hash);
++        let provenance=serde_json::to_string(&provenance).map_err(|_|StoreError::Invalid)?;
++        if provenance.len()>16*1024*1024{return Err(StoreError::Invalid);}
++        let source_bytes=sources.values().try_fold(0usize,|sum,bytes|sum.checked_add(bytes.len()+64)).ok_or(StoreError::Invalid)?;
++        let retained=size.checked_add(effective.bytes().len()).and_then(|n|n.checked_add(transformations.len())).and_then(|n|n.checked_add(provenance.len())).and_then(|n|n.checked_add(source_bytes)).ok_or(StoreError::Invalid)?;
++        let owner=serde_json::to_string(original.owner()).map_err(|_|StoreError::Invalid)?;
++        let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        let count:i64=tx.query_row("SELECT count(*) FROM local_workspace_operations",[],|r|r.get(0))?;
++        if count>=4096{return Err(StoreError::Invalid);}
++        let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM local_workspace_operations WHERE workspace_id=? AND kind='native_web_original' AND state IN ('intent','unknown'))",
++            [&original.owner().workspace_id],|r|r.get(0))?;
++        if pending{return Err(StoreError::Conflict);}
++        tx.execute("INSERT INTO local_workspace_operations VALUES(?,?,?,?,?,'intent',NULL)",
++            params![original.operation_id(),original.owner().workspace_id,owner,original.input_sha256(),"native_web_original"])?;
++        tx.execute("INSERT INTO local_web_original_keys VALUES(?,?,?,?,?,?)",
++            params![original.operation_id(),stable,original.input_sha256(),effective.effective_body_sha256(),size as i64,retained as i64])?;
++        for (hash,bytes) in sources{tx.execute("INSERT INTO local_web_original_sources VALUES(?,?,?)",params![original.operation_id(),hash,bytes])?;}
++        tx.execute("INSERT INTO local_web_original_payloads VALUES(?,?,?,?,?,?,?,?,?)",
++            params![original.operation_id(),original.method().as_str(),original.raw_target(),headers,scope,original.body(),effective.bytes(),transformations,provenance])?;
++        if tx.execute("UPDATE local_workspace_operations SET state='unknown' WHERE id=? AND state='intent'",[original.operation_id()])?!=1{return Err(StoreError::Conflict);}
++        tx.commit()?;
++        Ok(NativeWebReservation::Fresh(NativeWebDispatch{original,effective,files}))
++    }
++
++    /// Explicit native privacy action only, after positive original terminal
++    /// settlement. No auto-expiry/prune and no unknown-input destruction. This
++    /// is logical payload forgetting, not a claim of SQLite/backup erasure.
++    pub fn forget_native_web_payload(&mut self,operation:&str,expected_hash:&str,forget_request:&str,instance:&str)->Result<(),StoreError>{
++        if !uuid::Uuid::parse_str(forget_request).is_ok_and(|id|!id.is_nil()&&id.to_string()==forget_request){return Err(StoreError::Invalid);}
++        let receipt=self.local_receipt(operation)?.ok_or(StoreError::NotFound)?;
++        self.check_local_owner(&receipt.owner,instance)?;
++        if receipt.request_sha256!=expected_hash || !["committed","denied"].contains(&receipt.state.as_str()){return Err(StoreError::Conflict);}
++        let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
++        tx.execute("INSERT INTO local_web_original_forget_receipts VALUES(?,?,?)",params![operation,expected_hash,forget_request])?;
++        tx.execute("DELETE FROM local_web_original_acknowledgements WHERE operation_id=?",[operation])?;
++        tx.execute("DELETE FROM local_web_original_sources WHERE operation_id=?",[operation])?;
++        if tx.execute("DELETE FROM local_web_original_payloads WHERE operation_id=?",[operation])?!=1{return Err(StoreError::Conflict);}
++        tx.commit()?;Ok(())
++    }
++}
+--- /dev/null
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
+@@ -0,0 +1,201 @@
++//! Lossless JSON data transformation only. This module grants no file authority.
++//! Actual retained-handle materialization and current owner checks remain the
++//! original resolver's responsibility; data supplied here is not a dispatch port.
++use serde::{Serialize,Deserialize};
++use serde_json::Value;
++use sha2::{Digest,Sha256};
++use std::{collections::{BTreeMap,BTreeSet},ops::Range};
++use base64::{Engine as _,engine::general_purpose::STANDARD};
++
++#[derive(Clone,Serialize,Deserialize)]
++#[serde(deny_unknown_fields)]
++pub struct WebUriReplacement {
++    pub file_index:usize,
++    pub original_uri_sha256:String,
++    pub captured_bytes_sha256:String,
++    pub effective_uri:String,
++    /// Actual captured basename only, when original file-branch name was absent.
++    pub default_name:Option<String>,
++}
++#[derive(Clone,Serialize)]
++pub struct WebUriTransformation {
++    pub file_index:usize,
++    pub original_uri_sha256:String,
++    pub original_literal_sha256:String,
++    pub captured_bytes_sha256:String,
++    pub effective_uri_sha256:String,
++    pub default_name:Option<String>,
++}
++/// Not Deserialize/Clone; constructed only by the verified lossless transform.
++pub struct EffectiveWebBody {
++    bytes:Vec<u8>,
++    original_body_sha256:String,
++    effective_body_sha256:String,
++    transformations:Vec<WebUriTransformation>,
++}
++impl EffectiveWebBody {
++    pub fn bytes(&self)->&[u8]{&self.bytes}
++    pub fn original_body_sha256(&self)->&str{&self.original_body_sha256}
++    pub fn effective_body_sha256(&self)->&str{&self.effective_body_sha256}
++    pub fn transformations(&self)->&[WebUriTransformation]{&self.transformations}
++}
++fn hash(bytes:&[u8])->String{format!("{:x}",Sha256::digest(bytes))}
++fn invalid()->String{"Original Web URI transformation is ambiguous or invalid".into()}
++
++/// Only the actual retained resolver can construct this input proof. The
++/// public replacement-data helper itself never grants filesystem authority.
++pub fn materialize_resolved_web_files(original:&[u8],resolved:&crate::opencode::attachments::NativeWebFilesOriginal)->Result<EffectiveWebBody,String>{
++    let view:Value=serde_json::from_slice(original).map_err(|_|invalid())?;
++    let projection=resolved.journal_original();
++    if projection.get("prompt_view_sha256").and_then(Value::as_str)!=Some(hash(&serde_json::to_vec(&view).map_err(|_|invalid())?).as_str()){return Err(invalid())}
++    let mut replacements=Vec::new();
++    for file in resolved.replacements(){
++        let pointer=file.json_pointer();
++        let index=pointer.strip_prefix("/files/").and_then(|p|p.strip_suffix("/uri")).and_then(|p|p.parse::<usize>().ok()).ok_or_else(invalid)?;
++        if pointer!=format!("/files/{index}/uri")||view.pointer(pointer).and_then(Value::as_str)!=Some(file.original_uri()){return Err(invalid())}
++        let (_,data)=file.effective_uri().split_once(',').ok_or_else(invalid)?;
++        let bytes=STANDARD.decode(data).map_err(|_|invalid())?;
++        replacements.push(WebUriReplacement{file_index:index,original_uri_sha256:hash(file.original_uri().as_bytes()),captured_bytes_sha256:hash(&bytes),effective_uri:file.effective_uri().into(),default_name:file.fallback_name().map(str::to_owned)});
++    }
++    materialize_web_uri_spans(original,&replacements)
++}
++
++#[derive(Clone,Copy)]
++enum At { Root, Files, File(usize), Other }
++struct Scanner<'a>{input:&'a[u8],offset:usize,nodes:usize,uris:BTreeMap<usize,Range<usize>>,file_ends:BTreeMap<usize,(usize,bool)>}
++impl Scanner<'_>{
++    fn ws(&mut self){while self.input.get(self.offset).is_some_and(|b|matches!(b,b' '|b'\n'|b'\r'|b'\t')){self.offset+=1;}}
++    fn expect(&mut self,byte:u8)->Result<(),String>{self.ws();if self.input.get(self.offset)!=Some(&byte){return Err(invalid())}self.offset+=1;Ok(())}
++    fn string(&mut self)->Result<Range<usize>,String>{
++        self.ws();let start=self.offset;
++        if self.input.get(start)!=Some(&b'"'){return Err(invalid())}self.offset+=1;
++        loop{match self.input.get(self.offset){
++            Some(b'"')=>{self.offset+=1;break},
++            Some(b'\\')=>{self.offset+=2;if self.offset>self.input.len(){return Err(invalid())}},
++            Some(_)=>self.offset+=1,None=>return Err(invalid())
++        }}
++        // serde validates UTF8, escape sequences, surrogate pairs and controls.
++        serde_json::from_slice::<String>(&self.input[start..self.offset]).map_err(|_|invalid())?;
++        Ok(start..self.offset)
++    }
++    fn value(&mut self,at:At,depth:usize)->Result<(),String>{
++        self.nodes+=1;if depth>64||self.nodes>200_000{return Err(invalid())}self.ws();
++        match self.input.get(self.offset){
++            Some(b'{')=>{
++                self.offset+=1;self.ws();if self.input.get(self.offset)==Some(&b'}'){
++                    if let At::File(index)=at{self.file_ends.insert(index,(self.offset,false));}
++                    self.offset+=1;return Ok(())}
++                let mut keys=BTreeSet::new();
++                loop{
++                    let keyspan=self.string()?;let key:String=serde_json::from_slice(&self.input[keyspan]).map_err(|_|invalid())?;
++                    if keys.len()>=4096||!keys.insert(key.clone()){return Err(invalid())}
++                    self.expect(b':')?;self.ws();
++                    if let At::File(index)=at {if key=="uri"{
++                        let span=self.string()?;
++                        if self.uris.insert(index,span).is_some(){return Err(invalid())}
++                    }else{self.value(At::Other,depth+1)?;}}
++                    else{self.value(if matches!(at,At::Root)&&key=="files"{At::Files}else{At::Other},depth+1)?;}
++                    self.ws();match self.input.get(self.offset){Some(b',')=>self.offset+=1,Some(b'}')=>{
++                        if let At::File(index)=at{self.file_ends.insert(index,(self.offset,true));}
++                        self.offset+=1;break},_=>return Err(invalid())}
++                }
++            },
++            Some(b'[')=>{
++                self.offset+=1;self.ws();if self.input.get(self.offset)==Some(&b']'){self.offset+=1;return Ok(())}
++                let mut index=0;
++                loop{self.value(if matches!(at,At::Files){At::File(index)}else{At::Other},depth+1)?;index+=1;self.ws();
++                    match self.input.get(self.offset){Some(b',')=>self.offset+=1,Some(b']')=>{self.offset+=1;break},_=>return Err(invalid())}}
++            },
++            Some(b'"')=>{self.string()?;},
++            Some(_)=>{
++                let start=self.offset;
++                while self.input.get(self.offset).is_some_and(|b|!matches!(b,b','|b']'|b'}'|b' '|b'\n'|b'\r'|b'\t')){self.offset+=1;}
++                if start==self.offset{return Err(invalid())}
++            },None=>return Err(invalid())
++        }Ok(())
++    }
++}
++
++pub fn materialize_web_uri_spans(original:&[u8],replacements:&[WebUriReplacement])->Result<EffectiveWebBody,String>{
++    if original.len()>16*1024*1024||replacements.len()>32{return Err(invalid())}
++    let before:Value=serde_json::from_slice(original).map_err(|_|invalid())?;
++    if !before.is_object(){return Err(invalid())}
++    let mut scanner=Scanner{input:original,offset:0,nodes:0,uris:BTreeMap::new(),file_ends:BTreeMap::new()};
++    scanner.value(At::Root,0)?;scanner.ws();if scanner.offset!=original.len(){return Err(invalid())}
++    let mut expected=before.clone();let mut seen=BTreeSet::new();let mut edits=Vec::new();let mut transformations=Vec::new();
++    let mut decoded_total=0usize;
++    for replacement in replacements {
++        if !seen.insert(replacement.file_index)||replacement.captured_bytes_sha256.len()!=64
++            || !replacement.captured_bytes_sha256.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())
++            || !replacement.effective_uri.starts_with("data:") {return Err(invalid())}
++        let (header,data)=replacement.effective_uri.strip_prefix("data:").and_then(|s|s.split_once(',')).ok_or_else(invalid)?;
++        let mime=header.strip_suffix(";base64").ok_or_else(invalid)?;
++        if !["image/png","image/jpeg","image/webp","text/plain"].contains(&mime){return Err(invalid())}
++        let captured=STANDARD.decode(data).map_err(|_|invalid())?;
++        decoded_total=decoded_total.checked_add(captured.len()).ok_or_else(invalid)?;
++        if STANDARD.encode(&captured)!=data||hash(&captured)!=replacement.captured_bytes_sha256||decoded_total>8*1024*1024{return Err(invalid())}
++        let (observed_mime,_)=crate::attachments::sniff_for_prompt(&captured).map_err(|_|invalid())?;
++        if observed_mime!=mime{return Err(invalid())}
++        let span=scanner.uris.get(&replacement.file_index).ok_or_else(invalid)?.clone();
++        let previous:String=serde_json::from_slice(&original[span.clone()]).map_err(|_|invalid())?;
++        if hash(previous.as_bytes())!=replacement.original_uri_sha256{return Err(invalid())}
++        let uri=expected.get_mut("files").and_then(Value::as_array_mut).and_then(|files|files.get_mut(replacement.file_index))
++            .and_then(Value::as_object_mut).and_then(|file|file.get_mut("uri")).ok_or_else(invalid)?;
++        if uri.as_str()!=Some(previous.as_str()){return Err(invalid())}
++        *uri=Value::String(replacement.effective_uri.clone());
++        if let Some(name)=&replacement.default_name {
++            if !previous.starts_with("file://")||name.is_empty()||name.len()>4096||name.chars().any(char::is_control){return Err(invalid())}
++            let file=expected.get_mut("files").and_then(Value::as_array_mut).and_then(|files|files.get_mut(replacement.file_index))
++                .and_then(Value::as_object_mut).ok_or_else(invalid)?;
++            if file.contains_key("name"){return Err(invalid())}
++            file.insert("name".into(),Value::String(name.clone()));
++            let (end,comma)=scanner.file_ends.get(&replacement.file_index).ok_or_else(invalid)?;
++            let mut insertion=if *comma{b",\"name\":".to_vec()}else{b"\"name\":".to_vec()};
++            insertion.extend_from_slice(&serde_json::to_vec(name).map_err(|_|invalid())?);
++            edits.push((*end..*end,insertion));
++        }
++        let literal=serde_json::to_vec(&replacement.effective_uri).map_err(|_|invalid())?;
++        transformations.push(WebUriTransformation{file_index:replacement.file_index,
++            original_uri_sha256:replacement.original_uri_sha256.clone(),original_literal_sha256:hash(&original[span.clone()]),
++            captured_bytes_sha256:replacement.captured_bytes_sha256.clone(),effective_uri_sha256:hash(replacement.effective_uri.as_bytes()),default_name:replacement.default_name.clone()});
++        if previous!=replacement.effective_uri{edits.push((span,literal));}
++    }
++    edits.sort_by_key(|(span,_)|span.start);
++    let mut effective=Vec::new();let mut last=0;
++    for (span,literal) in edits {
++        if span.start<last{return Err(invalid())}
++        effective.extend_from_slice(&original[last..span.start]);effective.extend_from_slice(&literal);last=span.end;
++        if effective.len()>16*1024*1024{return Err(invalid())}
++    }
++    effective.extend_from_slice(&original[last..]);
++    if effective.len()>16*1024*1024||serde_json::from_slice::<Value>(&effective).map_err(|_|invalid())?!=expected{return Err(invalid())}
++    Ok(EffectiveWebBody{original_body_sha256:hash(original),effective_body_sha256:hash(&effective),bytes:effective,transformations})
++}
++
++#[cfg(test)]mod tests{
++    use super::*;
++    fn replacement(uri:&str)->WebUriReplacement{WebUriReplacement{file_index:0,original_uri_sha256:hash(uri.as_bytes()),captured_bytes_sha256:hash(b"x"),effective_uri:"data:text/plain;base64,eA==".into(),default_name:None}}
++    #[test]fn patches_only_original_uri_literal_and_preserves_unknown_fields_order_and_whitespace(){
++        let raw=br#"{ "files" : [ { "unknown":1.00,"uri" : "file:///private/a?start=2&end=3", "mention":{"start":0,"end":2,"text":"@a"}} ], "parts":[{"future":true}],"metadata":{"comments":["retain"]},"delivery":"queue","resume":false }"#;
++        let result=materialize_web_uri_spans(raw,&[replacement("file:///private/a?start=2&end=3")]).unwrap();
++        let expected=String::from_utf8(raw.to_vec()).unwrap().replace("\"file:///private/a?start=2&end=3\"","\"data:text/plain;base64,eA==\"");
++        assert_eq!(result.bytes(),expected.as_bytes());assert_ne!(result.original_body_sha256(),result.effective_body_sha256());
++    }
++    #[test]fn duplicate_keys_anywhere_or_wrong_original_hash_are_refused(){
++        for raw in [br#"{"files":[{"uri":"a","uri":"b"}]}"#.as_slice(),br#"{"files":[],"files":[]}"#.as_slice(),br#"{"metadata":{"x":1,"x":2}}"#.as_slice()]{assert!(materialize_web_uri_spans(raw,&[]).is_err());}
++        assert!(materialize_web_uri_spans(br#"{"files":[{"uri":"file:///wrong"}]}"#,&[replacement("file:///original")]).is_err());
++    }
++    #[test]fn no_transform_is_byte_exact_and_duplicate_indexes_are_refused(){
++        let raw=br#"{ "files":[], "unicode":"\uD83D\uDE00", "n":1e+02 }"#;
++        assert_eq!(materialize_web_uri_spans(raw,&[]).unwrap().bytes(),raw);
++        let raw=br#"{"files":[{"uri":"file:///a"}]}"#;
++        assert!(materialize_web_uri_spans(raw,&[replacement("file:///a"),replacement("file:///a")]).is_err());
++    }
++    #[test]fn basename_default_is_only_inserted_when_original_file_name_is_absent(){
++        let raw=br#"{"files":[{"uri":"file:///private/a", "mention":{"text":"@a"}}],"future":true}"#;
++        let mut change=replacement("file:///private/a");change.default_name=Some("a".into());
++        let result=materialize_web_uri_spans(raw,&[change.clone()]).unwrap();
++        let parsed:Value=serde_json::from_slice(result.bytes()).unwrap();assert_eq!(parsed["files"][0]["name"],"a");
++        assert!(materialize_web_uri_spans(br#"{"files":[{"uri":"file:///private/a","name":"original"}]}"#,&[change]).is_err());
++    }
++}
+--- /dev/null
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_event_policy.rs
+@@ -0,0 +1,176 @@
++//! Pinned event projection, not a global raw SSE forwarder. Raw accepted frame
++//! bytes are relayed unchanged. Volatile disconnects are never called replay.
++use super::web_original::LocalWebLease;
++use crate::{local_execution::LocalWorkspaceBinding,projects::{ProjectStore,StoreError}};
++use serde_json::Value;
++
++const SESSION_EVENTS:&[&str]=&[
++    "session.created",
++    "session.agent.selected",
++    "session.model.selected",
++    "session.moved",
++    "session.renamed",
++    "session.permissions",
++    "session.viewed",
++    "session.message.content.updated",
++    "session.usage.recorded",
++    "session.usage.updated",
++    "session.deleted",
++    "session.forked",
++    "session.inbox.delivered",
++    "session.inbox.enqueued",
++    "session.inbox.cancelled",
++    "session.inbox.delivery.changed",
++    "session.execution.started",
++    "session.execution.succeeded",
++    "session.execution.failed",
++    "session.execution.interrupted",
++    "session.instructions.updated",
++    "session.synthetic",
++    "session.skill.activated",
++    "session.shell.started",
++    "session.shell.ended",
++    "session.step.started",
++    "session.step.streamed",
++    "session.step.ended",
++    "session.step.failed",
++    "session.text.started",
++    "session.text.delta",
++    "session.text.ended",
++    "session.reasoning.started",
++    "session.reasoning.delta",
++    "session.reasoning.ended",
++    "session.tool.input.started",
++    "session.tool.input.delta",
++    "session.tool.input.ended",
++    "session.tool.called",
++    "session.tool.progress",
++    "session.tool.success",
++    "session.tool.failed",
++    "session.retry.scheduled",
++    "session.compaction.started",
++    "session.compaction.delta",
++    "session.compaction.ended",
++    "session.compaction.failed",
++    "session.revert.staged",
++    "session.revert.cleared",
++    "session.revert.committed",
++];
++#[derive(Debug,PartialEq)]
++pub enum WebEventDecision { Forward,Foreign,InvalidateBinding }
++#[derive(Debug,PartialEq)]
++enum Claims {
++    Nonprivate,
++    Session{session:String,parent:Option<String>,directory:Option<String>,project:Option<String>},
++    Pty{pty:String,directory:Option<String>},
++    UnqualifiedGlobal,
++}
++fn refused()->String{"Original Web event needs its actual scoped owner/projection".into()}
++fn opaque(value:&str,prefix:&str)->bool{value.starts_with(prefix)&&value.len()>prefix.len()&&value.len()<=256&&value.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-')}
++fn string(value:&Value,pointer:&str)->Result<String,String>{value.pointer(pointer).and_then(Value::as_str).map(str::to_owned).ok_or_else(refused)}
++fn claims(frame:&[u8])->Result<Claims,String>{
++    if frame==b": heartbeat\n\n"||frame==b": heartbeat\r\n\r\n"{return Ok(Claims::Nonprivate)}
++    let text=std::str::from_utf8(frame).map_err(|_|refused())?;
++    if !text.ends_with("\n\n")&&!text.ends_with("\r\n\r\n"){return Err(refused())}
++    let mut data=String::new();let mut count=0;
++    for line in text.lines(){
++        if line.is_empty(){continue;}
++        let Some(value)=line.strip_prefix("data:")else{return Err(refused())};
++        if count>0{data.push('\n');}data.push_str(value.strip_prefix(' ').unwrap_or(value));count+=1;
++    }
++    if count==0{return Err(refused())}
++    let event:Value=serde_json::from_str(&data).map_err(|_|refused())?;
++    let kind=string(&event,"/type")?;
++    if !event.get("id").and_then(Value::as_str).is_some_and(|id|opaque(id,"evt_")){return Err(refused())}
++    if kind=="server.connected"{
++        if event.as_object().is_some_and(|o|o.len()==3&&o.keys().all(|k|["id","type","data"].contains(&k.as_str())))
++            &&event.get("data").and_then(Value::as_object).is_some_and(|o|o.is_empty()) {return Ok(Claims::Nonprivate)}
++        return Err(refused());
++    }
++    let directory=event.pointer("/location/directory").map(|v|v.as_str().map(str::to_owned).ok_or_else(refused)).transpose()?;
++    if SESSION_EVENTS.contains(&kind.as_str())||["permission.asked","permission.replied","form.created","form.replied","form.cancelled"].contains(&kind.as_str()){
++        let session=string(&event,if kind=="form.created"{"/data/form/sessionID"}else{"/data/sessionID"})?;
++        if !opaque(&session,"ses_"){return Err(refused())}
++        let parent=if ["session.created","session.forked"].contains(&kind.as_str()){
++            event.pointer("/data/parentID").map(|v|v.as_str().filter(|s|opaque(s,"ses_")).map(str::to_owned).ok_or_else(refused)).transpose()?
++        }else{None};
++        let inner=event.pointer("/data/location/directory").map(|v|v.as_str().map(str::to_owned).ok_or_else(refused)).transpose()?;
++        if let (Some(outer),Some(inner))=(&directory,&inner){if outer!=inner&&kind!="session.moved"{return Err(refused())}}
++        let project=event.pointer("/data/projectID").map(|v|v.as_str().map(str::to_owned).ok_or_else(refused)).transpose()?;
++        return Ok(Claims::Session{session,parent,directory:inner.or(directory),project});
++    }
++    if ["pty.created","pty.updated","pty.exited","pty.deleted"].contains(&kind.as_str()){
++        let pty=string(&event,if ["pty.created","pty.updated"].contains(&kind.as_str()){"/data/info/id"}else{"/data/id"})?;
++        if !opaque(&pty,"pty_"){return Err(refused())}
++        return Ok(Claims::Pty{pty,directory});
++    }
++    // RPC/model/provider/plugin/global events need their original resource
++    // projection. A type prefix/location claim is never a permission grant.
++    Ok(Claims::UnqualifiedGlobal)
++}
++pub fn project_local_web_event(store:&ProjectStore,binding:&LocalWorkspaceBinding,lease:&LocalWebLease,frame:&[u8])->Result<WebEventDecision,String>{
++    if lease.revoked()||binding.owner()!=lease.owner()||binding.directory()!=lease.directory(){return Err(refused())}
++    binding.verify_current(store,&binding.owner().service_instance_id)?;
++    store.require_local_session(&binding.owner().workspace_id,lease.session_id()).map_err(|_|refused())?;
++    match claims(frame)?{
++        Claims::Nonprivate=>Ok(WebEventDecision::Forward),
++        Claims::UnqualifiedGlobal=>Err(refused()),
++        Claims::Session{session,parent,directory,project}=>{
++            let foreign=directory.as_deref().is_some_and(|d|d!=binding.directory())||project.as_deref().is_some_and(|p|p!=lease.engine_project_id());
++            if foreign{
++                if session==lease.session_id(){lease.revoke();return Ok(WebEventDecision::InvalidateBinding)}
++                return Ok(WebEventDecision::Foreign);
++            }
++            for id in std::iter::once(session).chain(parent){
++                match store.require_local_session(&binding.owner().workspace_id,&id){
++                    Ok(())=>{},Err(StoreError::NotFound)=>return Ok(WebEventDecision::Foreign),Err(_)=>return Err(refused())
++                }
++            }
++            Ok(WebEventDecision::Forward)
++        },
++        Claims::Pty{pty,directory}=>{
++            if directory.as_deref()!=Some(binding.directory()){return Ok(WebEventDecision::Foreign)}
++            match store.saved_native_web_pty(binding,lease,&pty,&binding.owner().service_instance_id){
++                Ok(_)=>Ok(WebEventDecision::Forward),Err(StoreError::NotFound)=>Ok(WebEventDecision::Foreign),Err(_)=>Err(refused())
++            }
++        }
++    }
++}
++/// Bounded frame assembly only. Actual projection above is still mandatory
++/// before forwarding. No resume cursor is invented on stream loss/overflow.
++#[derive(Default)]
++pub struct NativeSseFrames {pending:Vec<u8>}
++impl NativeSseFrames{
++    pub fn push(&mut self,bytes:&[u8])->Result<Vec<Vec<u8>>,String>{
++        if self.pending.len().checked_add(bytes.len()).is_none_or(|n|n>32*1024*1024){return Err("Original Web SSE frame exceeds its retained bound".into())}
++        self.pending.extend_from_slice(bytes);let mut output=Vec::new();
++        loop{
++            let lf=self.pending.windows(2).position(|v|v==b"\n\n").map(|p|p+2);
++            let crlf=self.pending.windows(4).position(|v|v==b"\r\n\r\n").map(|p|p+4);
++            let end=match(lf,crlf){(Some(a),Some(b))=>a.min(b),(Some(a),None)=>a,(None,Some(b))=>b,(None,None)=>break};
++            let tail=self.pending.split_off(end);output.push(std::mem::replace(&mut self.pending,tail));
++        }Ok(output)
++    }
++    pub fn finish(&self)->Result<(),String>{if !self.pending.is_empty(){return Err("Original Web SSE ended mid-frame; reconnect requires actual reads".into())}Ok(())}
++}
++#[cfg(test)]mod tests{
++    use super::*;
++    #[test]fn actual_heartbeat_and_connected_are_closed_nonprivate_cases(){
++        assert_eq!(claims(b": heartbeat\n\n").unwrap(),Claims::Nonprivate);
++        assert_eq!(claims(b"data: {\"id\":\"evt_actual\",\"type\":\"server.connected\",\"data\":{}}\n\n").unwrap(),Claims::Nonprivate);
++        assert!(claims(b"data: {\"id\":\"evt_actual\",\"type\":\"server.connected\",\"data\":{\"secret\":1}}\n\n").is_err());
++        assert!(matches!(claims(b"data: {\"id\":\"evt_actual\",\"type\":\"rpc.private\",\"location\":{\"directory\":\"/private\"},\"data\":{}}\n\n").unwrap(),Claims::UnqualifiedGlobal));
++    }
++    #[test]fn actual_session_form_and_pty_paths_remain_distinct_owner_claims(){
++        assert!(matches!(claims(b"data: {\"id\":\"evt_a\",\"type\":\"session.text.delta\",\"data\":{\"sessionID\":\"ses_actual\",\"delta\":\"literal\\ntext\"}}\n\n").unwrap(),Claims::Session{session,..} if session=="ses_actual"));
++        assert!(matches!(claims(b"data: {\"id\":\"evt_a\",\"type\":\"form.created\",\"data\":{\"form\":{\"sessionID\":\"ses_actual\"}}}\n\n").unwrap(),Claims::Session{..}));
++        assert!(matches!(claims(b"data: {\"id\":\"evt_a\",\"type\":\"pty.created\",\"location\":{\"directory\":\"/private\"},\"data\":{\"info\":{\"id\":\"pty_actual\"}}}\n\n").unwrap(),Claims::Pty{..}));
++    }
++    #[test]fn chunk_boundaries_crlf_and_frame_bytes_are_preserved(){
++        let first=b": heartbeat\n\n";let second=b"data: {\"id\":\"evt_a\",\"type\":\"server.connected\",\"data\":{}}\r\n\r\n";
++        let mut all=first.to_vec();all.extend_from_slice(second);let mut frames=NativeSseFrames::default();let mut received=Vec::new();
++        for chunk in all.chunks(3){received.extend(frames.push(chunk).unwrap());}
++        assert_eq!(received,vec![first.to_vec(),second.to_vec()]);assert!(frames.finish().is_ok());
++        let mut incomplete=NativeSseFrames::default();incomplete.push(b"data: {").unwrap();assert!(incomplete.finish().is_err());
++    }
++}
+--- /dev/null
++++ b/crates/adapters/src/opencode/local_web_transport.rs
+@@ -0,0 +1,75 @@
++//! One original prompt HTTP send to the existing retained client endpoint.
++//! This is not a generic method/path forwarding port or a second engine.
++use super::*;
++pub(crate) struct WebPromptResponse { pub status:u16,pub content_type:Option<String>,pub body:Vec<u8> }
++impl OpenCodeClient {
++    pub(crate) fn send_original_web_prompt_once(&self,session:&str,raw_target:&str,
++        content_headers:&[(String,String)],effective_body:&[u8])->Result<WebPromptResponse,EngineError>{
++        validate_session(session)?;
++        let target=self.base.join(raw_target).map_err(|_|EngineError::InvalidEndpoint)?;
++        let rendered=format!("{}{}",target.path(),target.query().map(|q|format!("?{q}")).unwrap_or_default());
++        if target.origin()!=self.base.origin()||rendered!=raw_target
++            ||target.path()!=format!("/api/session/{session}/prompt")||target.fragment().is_some()
++            ||!target.username().is_empty()||target.password().is_some()||effective_body.len()>16*1024*1024
++        {return Err(EngineError::Malformed);}
++        // Actual cached reqwest0.12.28 declares retry::never and blocking
++        // ClientBuilder::retry. No library retry, proxy discovery or redirects.
++        let http=Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
++            .retry(reqwest::retry::never()).connect_timeout(Duration::from_secs(5))
++            .timeout(Duration::from_secs(30)).build().map_err(|_|EngineError::Transport)?;
++        let mut request=http.request(Method::POST,target);
++        if let Some(auth)=&self.auth{request=request.basic_auth(&auth.username,Some(&auth.password));}
++        let mut seen=std::collections::BTreeSet::new();
++        for (name,value) in content_headers{
++            if !["content-type","accept","content-encoding"].contains(&name.as_str())||!seen.insert(name)
++                ||(name=="content-encoding"&&value!="identity")
++                ||value.chars().any(char::is_control){return Err(EngineError::Malformed);}
++            request=request.header(name.as_str(),value.as_str());
++        }
++        let response=request.body(effective_body.to_vec()).send().map_err(|_|EngineError::Transport)?;
++        let status=response.status().as_u16();
++        // No browser/upstream redirect response crosses this native boundary.
++        if (300..400).contains(&status){return Err(EngineError::Transport);}
++        let content_type=response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|h|h.to_str().ok()).map(str::to_owned);
++        let mut body=Vec::new();response.take(16*1024*1024+1).read_to_end(&mut body).map_err(|_|EngineError::Transport)?;
++        if body.len()>16*1024*1024{return Err(EngineError::Malformed);}
++        Ok(WebPromptResponse{status,content_type,body})
++    }
++}
++
++#[cfg(test)]mod tests{
++    use super::*;
++    use std::{io::{BufRead,BufReader,Write},net::TcpListener,thread};
++    fn fixture(status:&str)->(OpenCodeClient,thread::JoinHandle<(String,String,Vec<u8>)>){
++        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
++        let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),Some(EngineAuth::new("fixture".into(),"secret".into())),Duration::from_secs(2)).unwrap();
++        let status=status.to_owned();let worker=thread::spawn(move||{
++            let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
++            let mut reader=BufReader::new(stream.try_clone().unwrap());let mut first=String::new();reader.read_line(&mut first).unwrap();
++            let mut headers=String::new();let mut length=0;
++            loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}
++                if let Some(value)=line.to_ascii_lowercase().strip_prefix("content-length:"){length=value.trim().parse().unwrap();}headers.push_str(&line);}
++            let mut body=vec![0;length];reader.read_exact(&mut body).unwrap();
++            let reply="{}";write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nLocation: /api/session/ses_fixture/prompt?redirected=yes\r\nConnection: close\r\n\r\n{reply}",reply.len()).unwrap();
++            stream.flush().unwrap();drop(stream);listener.set_nonblocking(true).unwrap();
++            thread::sleep(Duration::from_millis(80));assert!(listener.accept().is_err(),"original request was repeated or redirected");
++            (first,headers,body)
++        });(client,worker)
++    }
++    #[test]fn full_effective_bytes_and_exact_target_are_sent_once_with_private_auth(){
++        let (client,worker)=fixture("200 OK");let target="/api/session/ses_fixture/prompt?opaque=a%20b";
++        let body=br#"{ "id":"msg_fixture", "files":[{"uri":"data:text/plain;base64,eA=="}],"metadata":{"future":true},"delivery":"queue","resume":false }"#;
++        client.send_original_web_prompt_once("ses_fixture",target,&[("content-type".into(),"application/json".into())],body).unwrap();
++        let (request,headers,received)=worker.join().unwrap();assert_eq!(request,format!("POST {target} HTTP/1.1\r\n"));assert_eq!(received,body);
++        assert!(headers.to_ascii_lowercase().contains("authorization: basic zml4dhvyztpzzwnyzxq="));
++        assert!(!request.contains("secret")&&!request.contains("fixture:"));
++    }
++    #[test]fn redirect_and_failure_responses_are_never_retried(){
++        for status in ["302 Found","503 Service Unavailable"]{
++            let (client,worker)=fixture(status);
++            let result=client.send_original_web_prompt_once("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}");
++            if status.starts_with("302"){assert!(result.is_err());}else{assert_eq!(result.unwrap().status,503);}
++            worker.join().unwrap();
++        }
++    }
++}

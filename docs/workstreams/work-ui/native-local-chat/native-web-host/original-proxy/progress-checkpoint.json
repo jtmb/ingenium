@@ -1,0 +1,81 @@
+{
+  "schema": 1,
+  "scope": "source progress checkpoint; not phase completion or handoff",
+  "source_parent": "8bae140606bd3cf19c5975a797c94d7d03336cec",
+  "native_delta_files": 15,
+  "patch_sha256": "94e664c8e9aabbb517e1244fdf4514a04acf4ceae955acedff5515c603f77fc7",
+  "patch_bytes": 110107,
+  "native_preimages": "exact immutable staged blobs in native15-inputs.json; working-tree equality independently checked",
+  "native_working_preimage_drift": [],
+  "resolver_dependencies": [
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "sha256": "e69d49b35f15ba8be1ccb2370d28ee1c5faaf58ae56b9a17ff6ba40b6447e494",
+      "bytes": 6406,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/wsl-helper.py",
+      "sha256": "85552c8df4c4765b931266158f07295102c4e857f55e439039af86ffb171b2cd",
+      "bytes": 7317,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/wsl_workspace.rs",
+      "sha256": "34ff8fc88a9fbabf2969d5e0136c28649c8909577161400d83e49e771954b9d5",
+      "bytes": 53717,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments.rs",
+      "sha256": "8e7893ecf573e6ac4f6a6c8bb2c541ac0981ea33d689c93c8ba20d30644ccfd8",
+      "bytes": 7168,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/web-files.py",
+      "sha256": "b28c2683b032c0b6e1ccd8e814c4d17b067a098e4687c59726f259cdc3f6a3b6",
+      "bytes": 2928,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/local_execution/web_files.rs",
+      "sha256": "a4a535b0ebf5063cac2ba3b5b320c8d299c66b446df685a870f40c21c81f4369",
+      "bytes": 5837,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_files.rs",
+      "sha256": "f86651cb8145b7ecf50e57181e61f0acf300436bf1d5f231c2a0aef68794c303",
+      "bytes": 12837,
+      "scope": "actual applied working-tree resolver dependency; not modified by Work UI"
+    }
+  ],
+  "sqlite_behavior_tests": {
+    "passed": 8,
+    "failed": 0,
+    "engine": "Python stdlib sqlite3 in-memory; actual allocation6 input + proposed allocation7"
+  },
+  "rust_tests_run": false,
+  "compiler_run": false,
+  "runtime_run": false,
+  "desktop_or_CU_run": false,
+  "shared_source_written": false,
+  "original_send_activation_qualified": false,
+  "remaining": [
+    "actual image/skill/prepared expansion or no-transform authority and proven acknowledgement upper bounds",
+    "retained Windows73fc7184 and genuine WSL original-URI/filesystem parity",
+    "coherent ordinary20MiB intake/materialization/source/ack representation and bounds",
+    "genuine private listener/origin/profile/auth factory and remaining route effects",
+    "actual Web session/fork mapping and native selection/adoption",
+    "real HTTP/SSE/PTY ticket+WebSocket bridge, scoped global events and platform policies",
+    "six native commands, actual WebView2 resource/auth coverage, joined retirement and runtime/visual gates"
+  ],
+  "cleanup": {
+    "removed_paths": [],
+    "removed_bytes": 0,
+    "bulk_generated": [],
+    "retained": "minimal canonical source/recipes/preimages/manifests/tests and small tracked review deltas for Root integration; no Windows or Linux recovery claimed"
+  },
+  "native_read_only_patch_check": "git apply --check --cached PASS; exact Native working preimages equal pinned blobs"
+}
