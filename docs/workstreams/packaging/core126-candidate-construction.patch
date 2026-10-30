@@ -1,0 +1,431 @@
+diff --git a/packages/veyra-operations/core126-image-owner.mjs b/packages/veyra-operations/core126-image-owner.mjs
+--- a/packages/veyra-operations/core126-image-owner.mjs
++++ b/packages/veyra-operations/core126-image-owner.mjs
+@@ -1,5 +1,8 @@
++import {readInstalledCandidateSource,assertCandidateMeasuredClosure} from './core126-candidate-observation.mjs';
++import {assertCandidateInertIntentLive,MAX_CANDIDATE_LEASE_MS} from '../../tools/veyra-release/core126-candidate-intent.mjs';
+ import {AsyncLocalStorage} from 'node:async_hooks';
+ import {CORE126_PROTOCOL,UUID,hash,originalJsonHash,freeze,hex,imageId,text,integer,validateManifest,unavailable} from './core126-image-contract.mjs';
++const candidateImageOwners=new WeakMap();
+ const clients=new WeakMap(),observations=new WeakMap(),registries=new WeakMap(),definitions=new WeakMap();
+ const limitsOf=r=>Object.fromEntries(['cpuMillis','memoryBytes','pidsLimit','diskBytes','processLimit'].map(k=>[k,r[k]]));
+ function scopeOf(f){
+@@ -15,7 +18,14 @@
+ /** requestOriginalManager must be the original private authenticated client; no caller header/token owner. */
+ export function createCore126ObservationClient({requestOriginalManager,now=Date.now}){
+  if(typeof requestOriginalManager!=='function')unavailable('original authenticated manager client export');
+- const owner={async acquire(runtimeId){
++ const owner={async acquireCandidate(runtimeId){
++  if(!UUID.test(runtimeId??''))unavailable('candidate runtime selection');
++  const raw=await requestOriginalManager('/v1/runtimes/'+encodeURIComponent(runtimeId)+'/candidate-closure');
++  if(!raw||Object.keys(raw).sort().join('|')!=='completedAt|exec|kind|measurement|proof|schemaVersion|selectionSha256'||raw.schemaVersion!==1||raw.kind!=='original-manager-unapproved-candidate-closure-v1'||!hex(raw.selectionSha256)||!raw.exec||Object.keys(raw.exec).sort().join('|')!=='exitCode|id|inspectSha256|stdoutSha256'||!hex(raw.exec.id)||raw.exec.exitCode!==0||!hex(raw.exec.stdoutSha256)||!hex(raw.exec.inspectSha256)||!integer(raw.completedAt))unavailable('actual original candidate measurement');
++  const value=freeze(structuredClone(raw));validateProof(value.proof,now());if(value.proof.parent.runtimeId!==runtimeId||value.completedAt<value.proof.observedAt||value.completedAt>=value.proof.expiresAt)unavailable('candidate observation deadline');
++  const token=Object.freeze({});observations.set(token,{client:owner,value:value.proof,candidate:value});return token;
++ },
++ async acquire(runtimeId){
+   if(!UUID.test(runtimeId??''))unavailable('runtime selection');
+   const raw=await requestOriginalManager('/v1/runtimes/'+encodeURIComponent(runtimeId)+'/job-role-proof');
+   const value=freeze(structuredClone(validateProof(raw,now())));if(value.parent.runtimeId!==runtimeId)unavailable('manager runtime response');
+@@ -51,9 +61,33 @@
+ export function createCore126ImageOwner({client,registry,originalProvisionProfile,inTransaction,now=Date.now}){
+  if(!clients.has(client)||!registries.has(registry)||typeof originalProvisionProfile!=='function'||typeof inTransaction!=='function')unavailable('original owner exports missing');
+  const local=new AsyncLocalStorage();
++ const candidateLocal=new AsyncLocalStorage();
++ const candidateCurrent=f=>{
++  const lease=candidateLocal.getStore();if(!lease?.active)unavailable('original candidate request observation missing');
++  const proof=proofFrom(lease.observation,client,now()),raw=observations.get(lease.observation)?.candidate,selected=readInstalledCandidateSource(now()),d=selected.definition;
++  if(!raw||selected.selectionSha256!==lease.selectionSha256||raw.selectionSha256!==selected.selectionSha256)unavailable('original candidate source changed');
++  assertCandidateMeasuredClosure(raw.measurement,d);
++  const scope=bindOriginal(f,proof,originalProvisionProfile(f),d,now()),c=d.canary;
++  if(scope.runId!==d.selection.runId||f.job.id!==c.jobId||f.run.effective_service_principal_id!==c.principalId||scope.organizationId!==c.organizationId||scope.projectId!==c.projectId||scope.ownerUserId!==c.ownerUserId||scope.workspaceId!==c.workspaceId||scope.agentHash!==c.agentHash||f.job.agent!=='qualification'||f.job.prompt_template!=='qualification-canary'||hash(f.job.prompt_template)!==c.promptHash||!integer(f.principalEpoch))unavailable('actual original public canary scope changed');
++  if(lease.scopeHash&&lease.scopeHash!==hash(scope))unavailable('original candidate request scope changed');return{lease,scope,proof,d};
++ };
++ const candidateState={async observe(f,work){
++  if(inTransaction()||typeof work!=='function')unavailable('candidate observation outside original transaction required');
++  const selected=readInstalledCandidateSource(now()),observation=await client.acquireCandidate(f.runtime.id),lease={observation,selectionSha256:selected.selectionSha256,scopeHash:null,active:true,spent:false};
++  try{return await candidateLocal.run(lease,async()=>{const current=candidateCurrent(f);lease.scopeHash=hash(current.scope);return await work();});}finally{lease.active=false;}
++ },spend(f,attemptId,runIdentityHash){
++  const {lease,scope,proof,d}=candidateCurrent(f);if(lease.spent||!inTransaction()||!UUID.test(attemptId??'')||!hex(runIdentityHash))unavailable('one-use original candidate observation unavailable');lease.spent=true;
++  const issuedAt=now(),expiresAt=Math.min(issuedAt+MAX_CANDIDATE_LEASE_MS,d.validUntil,Date.parse(f.runtime.absoluteExpiresAt),Date.parse(f.runtime.idleExpiresAt),issuedAt+f.job.timeout_minutes*60000);
++  const intent={schemaVersion:1,purpose:'candidate-inert-v1',caseId:d.selection.caseId,nonce:d.selection.nonce,source:{revision:d.source.revision,sha256:d.source.sha256,filesSha256:hash(d.source.files)},imageId:d.imageId,artifactClosureSha256:hash(d.files),rawSchemaSha256:d.rawSchemaSha256,probeSha256:d.probeSha256,
++   parent:{runtimeId:scope.runtimeId,containerId:scope.parentContainerId,daemonId:proof.daemonId,hostId:proof.hostId,startIdentity:proof.parent.startIdentity,publicProfileSha256:proof.parent.publicProfileSha256,provisioningRevision:proof.parent.provisioningRevision},
++   scope:{organizationId:scope.organizationId,projectId:scope.projectId,ownerUserId:scope.ownerUserId,workspaceId:scope.workspaceId,bindingHash:scope.bindingHash,bindingEpoch:scope.bindingEpoch,principalId:f.run.effective_service_principal_id,principalSecurityEpoch:f.principalEpoch,grantRevision:f.run.authorization_revision},
++   run:{runId:scope.runId,jobId:scope.jobId,attemptId,runIdentityHash,jobRevision:f.run.job_revision,scheduleRevision:f.run.schedule_revision,promptHash:hash(f.job.prompt_template),agentHash:scope.agentHash},resource:{admissionId:scope.runId,runtimeRevision:scope.runtimeRevision,limits:scope.limits},canary:{agent:'qualification',model:'opencode/qualification-canary',tool:'ingenium_project_detail',projectName:d.canary.projectName,trapOrigin:'http://127.0.0.1:39261',catalogSha256:d.catalogSha256},issuedAt:new Date(issuedAt).toISOString(),expiresAt:new Date(expiresAt).toISOString()};
++  assertCandidateInertIntentLive(intent,issuedAt);return freeze({intent,selectionSha256:lease.selectionSha256});
++ }};
++
+  function current(f){const lease=local.getStore();if(!lease?.active)unavailable('fresh request-scoped observation missing');const proof=proofFrom(lease.observation,client,now()),d=definition(lease.definition,registry,now());
+   const scope=bindOriginal(f,proof,originalProvisionProfile(f),d.manifest,now());if(hash(scope)!==lease.scopeHash)unavailable('request scope changed');return{scope,proof,d};}
+- return Object.freeze({
++ const owner=Object.freeze({
+   async withFreshOriginalJobRole(f,work){
+    if(inTransaction())unavailable('manager observation must precede Core transaction');if(typeof work!=='function')unavailable('request continuation');
+    const observation=await client.acquire(f.runtime.id),proof=proofFrom(observation,client,now()),def=await registry.load(proof.parent.imageId),d=definition(def,registry,now());
+@@ -76,6 +110,7 @@
+    if(admission.profileId!=='core126-image:'+d.approval.manifestSha256||admission.profileHash!==imageIdentity(scope,proof,d.approval.manifestSha256,admission.model,admission.modelBindingHash)||admission.imageId!==proof.parent.imageId||admission.parentContainerId!==proof.parent.id||admission.daemonId!==proof.daemonId||admission.provisioningRevision!==proof.parent.provisioningRevision)unavailable('original qualified admission changed');return true;
+   },
+  });
++ candidateImageOwners.set(owner,candidateState);return owner;
+ }
+ /** Manager calls after its own fresh raw Docker probe before EACH create/start.
+  * The admitted Core profile hash was previously bound to the original projection. */
+@@ -84,3 +119,8 @@
+  const scope={runId:admission.runId,jobId:admission.jobId,projectId:admission.projectId,organizationId:admission.organizationId,ownerUserId:admission.ownerUserId,runtimeId:admission.runtimeId,runtimeRevision:admission.runtimeRevision,parentContainerId:admission.parentContainerId,workspaceId:admission.workspaceId,bindingHash:admission.bindingHash,bindingEpoch:admission.bindingEpoch,limits:admission.limits,agentHash:admission.agentHash};
+  if(!Number.isFinite(Date.parse(admission.deadlineAt))||Date.parse(admission.deadlineAt)<=now||hash(admission.approvedScopes)!==hash(d.manifest.approvedScopes)||admission.organizationId!==p.organizationId||admission.projectId!==p.projectId||admission.ownerUserId!==p.ownerUserId||admission.workspaceId!==p.workspaceId||p.name!=='/ingenium-runtime-'+admission.runtimeId.replaceAll('-','')||p.memoryBytes!==admission.limits.memoryBytes||p.nanoCpus!==admission.limits.cpuMillis*1000000||p.effectivePids!==Math.min(admission.limits.pidsLimit,admission.limits.processLimit)||hash(proof.image.config)!==hash(d.manifest.config)||admission.profileId!=='core126-image:'+d.approval.manifestSha256||admission.imageId!==p.imageId||d.manifest.imageId!==p.imageId||admission.parentContainerId!==p.id||admission.runtimeId!==p.runtimeId||admission.bindingHash!==p.bindingHash||admission.bindingEpoch!==p.bindingEpoch||admission.daemonId!==proof.daemonId||admission.provisioningRevision!==p.provisioningRevision||admission.profileHash!==imageIdentity(scope,proof,d.approval.manifestSha256,admission.model,admission.modelBindingHash))unavailable('fresh manager effect image/profile proof changed');return true;
+ }
++
++/** Observation/data construction only; Core must authorize and commit the original
++ * candidate claim before minting its own lexical execution lease. */
++export function withOriginalCandidateSourceObservation(owner,facts,work){const state=candidateImageOwners.get(owner);if(!state)unavailable('same original image owner required');return state.observe(facts,work);}
++export function spendOriginalCandidateSourceObservation(owner,facts,attemptId,runIdentityHash){const state=candidateImageOwners.get(owner);if(!state)unavailable('same original image owner required');return state.spend(facts,attemptId,runIdentityHash);}
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.mjs b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -1,3 +1,5 @@
++import {withOriginalCandidateSourceObservation,spendOriginalCandidateSourceObservation} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
++import {candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
+ import {describeStoredManagedPurpose,requireProductionManagedPurpose} from './core126-purpose.mjs';
+ import {projectCore126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
+ import {createHash,randomUUID} from "node:crypto";
+@@ -10,6 +12,7 @@
+ export function createCore126Owner(ports){
+  const {getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials,profiles,requireManager,verifierFactory}=ports;
+  const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb(),fenceIssuer=randomUUID();
++ const candidateLeases=new WeakMap();
+  const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
+  const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
+  const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
+@@ -64,10 +67,22 @@
+   admissionPurpose(runId){const r=row(runId);if(!r)fail('MANAGED_JOB_NOT_FOUND');return describeStoredManagedPurpose(r);},
+   async prepareCandidateInert(selection,ctx){
+    if(Object.keys(selection).sort().join('|')!=='projectId|runId|runtimeId|workspaceId')fail('MANAGED_JOB_INVALID_SELECTION');
+-   base(selection,ctx); // Reuse original permission, source, run, epochs and quota checks; no second claim.
+-   // Root's real observation/source/canary constructor is not installed. A DTO or injected port cannot supply it.
+-   fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
++   if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
++   const before=base(selection,ctx);if(row(selection.runId)||before.run.status!=='running')fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
++   return withOriginalCandidateSourceObservation(ports.imageOwner,before,()=>write(()=>{
++    if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');const facts=base(selection,ctx);
++    if(row(selection.runId)||originalJobRunIdentity(facts.run)!==originalJobRunIdentity(before.run)||facts.runtime.revision!==before.runtime.revision||facts.principalEpoch!==before.principalEpoch)fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
++    const {intent,selectionSha256}=spendOriginalCandidateSourceObservation(ports.imageOwner,facts,id(),originalJobRunIdentity(facts.run)),candidateIntentHash=candidateInertIntentHash(intent);
++    const project=db.prepare('SELECT name FROM projects WHERE id=? AND archived_at IS NULL').get(facts.job.project_id);if(project?.name!==intent.canary.projectName)fail('MANAGED_JOB_PUBLIC_CANARY_UNAVAILABLE');
++    const a={purpose:'candidate-inert-v1',candidateIntentHash,selectionSha256,runId:intent.run.runId,jobId:intent.run.jobId,projectId:intent.scope.projectId,organizationId:intent.scope.organizationId,ownerUserId:intent.scope.ownerUserId,attemptId:intent.run.attemptId,runtimeId:intent.parent.runtimeId,runtimeRevision:intent.resource.runtimeRevision,provisioningRevision:intent.parent.provisioningRevision,parentContainerId:intent.parent.containerId,workspaceId:intent.scope.workspaceId,bindingHash:intent.scope.bindingHash,bindingEpoch:intent.scope.bindingEpoch,jobRevision:intent.run.jobRevision,scheduleRevision:intent.run.scheduleRevision,effectFenceIssuer:fenceIssuer,grantRevision:intent.scope.grantRevision,principalSecurityEpoch:intent.scope.principalSecurityEpoch,promptHash:intent.run.promptHash,daemonId:intent.parent.daemonId,imageId:intent.imageId,resourceAdmissionId:intent.resource.admissionId,agentHash:intent.run.agentHash,model:intent.canary.model,limits:intent.resource.limits,projectName:intent.canary.projectName,deadlineAt:intent.expiresAt};a.specHash=sha(a);
++    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
++    db.prepare('INSERT INTO job_run_managed_execution ('+Object.keys(columns).join(',')+') VALUES ('+Object.keys(columns).map(()=>'?').join(',')+')').run(...Object.values(columns));
++    const lease=Object.freeze({});candidateLeases.set(lease,{db,admission:Object.freeze(structuredClone(a)),intent,selectionSha256});return lease;
++   }));
+   },
++  /** Metadata receipt, NOT child material. Opaque key is private to this Core instance. */
++  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
++  candidateLaunchMaterial(){fail('MANAGED_JOB_ORIGINAL_CANDIDATE_READINESS_UNAVAILABLE');},
+   factsForImagePreparation(selection,ctx){
+    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
+    return base(selection,ctx);
+diff --git a/services/ingenium-api/lib/runtime-manager-client.ts b/services/ingenium-api/lib/runtime-manager-client.ts
+--- a/services/ingenium-api/lib/runtime-manager-client.ts
++++ b/services/ingenium-api/lib/runtime-manager-client.ts
+@@ -183,3 +183,11 @@
+  if(!('parent' in proof)||!proof.parent||typeof proof.parent!=='object'||!('runtimeId' in proof.parent)||proof.parent.runtimeId!==runtimeId||!('id' in proof.parent)||proof.parent.id!==result.backendId||!('name' in proof.parent)||proof.parent.name!==result.backendName)throw Error("Original manager job-role identity changed");
+  return proof;
+ }
++
++/** Same original private manager/token; no caller-selected closure paths. */
++export async function inspectManagedRuntimeCandidateClosure(runtimeId:string):Promise<unknown>{
++ if(!UUID.test(runtimeId))throw Error('Original candidate runtime identity');const result=await requestManager('/v1/runtimes/'+runtimeId+'/candidate-closure');
++ if(!('candidateClosure' in result)||!result.candidateClosure||typeof result.candidateClosure!=='object')throw Error('Original candidate closure unavailable');
++ const value=result.candidateClosure as {proof?:{parent?:{runtimeId?:string;id?:string;name?:string}}};
++ if(value.proof?.parent?.runtimeId!==runtimeId||value.proof.parent.id!==result.backendId||value.proof.parent.name!==result.backendName)throw Error('Original candidate parent changed');return value;
++}
+diff --git a/services/ingenium-api/scripts/runtime-manager.ts b/services/ingenium-api/scripts/runtime-manager.ts
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -1,3 +1,4 @@
++import {createOriginalCandidateClosureProducer} from '../../../packages/veyra-operations/core126-candidate-observation.mjs';
+ import {createCore126ManagerProofProducer} from "../../../packages/veyra-operations/core126-manager-proof.mjs";
+ import {publicContainer as publicJobParent,hash as jobParentHash} from "../../../packages/veyra-operations/core126-image-contract.mjs";
+ import { createServer, request as httpRequest } from "node:http";
+@@ -395,6 +396,7 @@
+ export function startRuntimeManager(): import("node:http").Server {
+   const token = loadManagerToken();
+   const originalJobRoleProof=createCore126ManagerProofProducer({docker:dockerRequest});
++  const originalCandidateClosure=createOriginalCandidateClosureProducer({docker:dockerRequest,makeOriginalRequest:(options,callback)=>httpRequest({...options,socketPath:DOCKER_SOCKET,path:'/v1.45'+options.path},callback)});
+   const mappings = readWorkspaceMappings(environment("INGENIUM_RUNTIME_WORKSPACE_MAP_FILE"));
+   const jobCore=createManagedJobCoreClient({apiUrl:environment("INGENIUM_RUNTIME_API_URL"),managerToken:token});
+   const jobOwner=createManagedJobContainerOwner({core:jobCore,docker:dockerRequest,
+@@ -453,6 +455,12 @@
+         response.writeHead(200).end(JSON.stringify({data:{...publicInspect(runtime),placement:observation}}));
+         return;
+       }
++      const candidateRole=/^\/v1\/runtimes\/([a-f0-9-]+)\/candidate-closure$/.exec(url.pathname);
++      if(request.method==='GET'&&candidateRole&&UUID.test(candidateRole[1]!)&&url.search===''&&request.headers.cookie===undefined&&request.headers.origin===undefined){
++        const closure=await originalCandidateClosure.observe(candidateRole[1]!),current=await inspectRuntime(candidateRole[1]!);
++        if(!current||jobParentHash(publicJobParent(current))!==jobParentHash(closure.proof.parent)||Date.now()>=closure.proof.expiresAt)throw Error('Original candidate parent changed before publication');
++        response.writeHead(200).end(JSON.stringify({data:{...publicInspect(current),candidateClosure:closure}}));return;
++      }
+       const jobRole=/^\/v1\/runtimes\/([a-f0-9-]+)\/job-role-proof$/.exec(url.pathname);
+       if(request.method==="GET"&&jobRole&&UUID.test(jobRole[1]!)&&url.search===""&&request.headers.cookie===undefined&&request.headers.origin===undefined){
+         const runtimeId=jobRole[1]!;
+diff --git a/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts b/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts
+--- a/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts
+@@ -1,7 +1,8 @@
++import {readInstalledCandidateSource} from '../../../../packages/veyra-operations/core126-candidate-observation.mjs';
+ import {constants,openSync,closeSync,fstatSync,lstatSync,realpathSync,readFileSync} from "node:fs";
+ import {dirname} from "node:path";
+ import {createHash} from "node:crypto";
+ import {getDb,runtimes} from "ingenium-core";
+ import {createCore126ObservationClient,createCore126ImageRegistry,createCore126ImageOwner,type Core126ImageOwner,type Core126ImageApproval} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
+-import {inspectManagedRuntimeJobRole} from "../runtime-manager-client.js";
++import {inspectManagedRuntimeCandidateClosure,inspectManagedRuntimeJobRole} from "../runtime-manager-client.js";
+ import {parseStrictJobJson} from "./job-bootstrap-frame.mjs";
+@@ -48,4 +49,15 @@
+  return createCore126ImageOwner({client,registry,inTransaction:()=>getDb().inTransaction,originalProvisionProfile:facts=>{
+   assertPolicyCurrent();return runtimes.getRuntimeOriginalProvision(facts.runtime.id);
+  }});
+-}
+\ No newline at end of file
++}
++/** Explicit PRIVATE coordinator construction only. Never a missing-approval fallback. */
++export function loadInstalledCore126UnapprovedCandidateImageOwner():Core126ImageOwner {
++ readInstalledCandidateSource();
++ const client=createCore126ObservationClient({requestOriginalManager:async path=>{
++  readInstalledCandidateSource();
++  const match=/^\/v1\/runtimes\/([a-f0-9-]+)\/(job-role-proof|candidate-closure)$/.exec(path);
++  if(!match?.[1])return deny();return match[2]==='candidate-closure'?inspectManagedRuntimeCandidateClosure(match[1]):inspectManagedRuntimeJobRole(match[1]);
++ }});
++ const registry=createCore126ImageRegistry({loadManifestBytes:async()=>deny()},[]);
++ return createCore126ImageOwner({client,registry,inTransaction:()=>getDb().inTransaction,originalProvisionProfile:facts=>runtimes.getRuntimeOriginalProvision(facts.runtime.id)});
++}
+diff --git a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+--- a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -1,6 +1,6 @@
+ import {agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault} from "ingenium-core";
+ import {createHash} from "node:crypto";
+-import {originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
++import {requireOriginalCandidateCoordinatorContext,originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
+ import {createOriginalManagedProviderResolution} from "./core126-provider-resolution.js";
+ import type {Core126ImageOwner} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
+ import type {Core126Facts,Core126Handlers} from "./managed-job-contracts.mjs";
+@@ -55,7 +55,7 @@
+    try{if(binding(provider)!==admission.modelBindingHash)throw Error("Managed JobRun provider changed");}finally{provider.release();}
+   },
+  };
+- const owner=createCore126Owner({approvedDot:originalDotContextAuthority,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
++ const owner=createCore126Owner({imageOwner,originalCandidate:{require:requireOriginalCandidateCoordinatorContext},approvedDot:originalDotContextAuthority,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
+  const authorizeTool=createCore126ToolAuthorizer({credentials:mcpCredentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog});
+  const broker=createActualCore126Broker(owner,authorizeTool);
+  dispatchExistingTool=broker.dispatch;
+diff --git a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+--- a/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
++++ b/services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts
+@@ -1,3 +1,4 @@
++import type {Core126ImageOwner} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
+ import type {Core126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
+ import type {ChildProcess} from "node:child_process";
+ import type {IncomingHttpHeaders} from "node:http";
+@@ -96,6 +97,8 @@
+ export type ManagedJobCredential=mcpCredentials.ManagedJobCredential;
+ export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential"|"withdrawManagedJobDispatch">;
+ export interface Core126OwnerPorts {
++ imageOwner?:Core126ImageOwner;
++ originalCandidate?:{require(context:CoreActorContext,selection:Core126Selection):void};
+  approvedDot?:{authorize(context:unknown,selection:Core126Selection,action:"execute"|"read"|"cancel"):boolean;describe(context:unknown,selection:Core126Selection):import("./dot-original-context.js").OriginalDotDeclaration|undefined;assertCurrent(admission:ManagedJobAdmission,selection:Core126Selection):void};
+  getDb:typeof getDb;execTransaction:typeof execTransaction;checkpointAfterWrite:typeof checkpointAfterWrite;
+  jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent"|"finishJobRun"|"cancelJobRun">;
+@@ -111,7 +114,9 @@
+ export interface Core126Owner {
+  admissionPurpose(runId:string):ManagedAdmissionPurpose;
+  /** Closed until the original image/physical-parent/source/canary constructor is installed. No lease parameter. */
+- prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<never>;
++ prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<OriginalCandidateLease>;
++ describeCandidateLease(lease:OriginalCandidateLease):Readonly<{purpose:"candidate-inert-v1";candidateIntentHash:string;runId:string;attemptId:string;stage:"prepared-no-child-material"}>;
++ candidateLaunchMaterial():never;
+  /** Private Root composition only; these are never HTTP operations or permission grants. */
+  factsForImagePreparation(selection:Core126Selection,context:CoreActorContext):Core126Facts;
+  factsForOriginalImageCheck(runId:string):Core126Facts;
+diff --git a/packages/veyra-operations/core126-image-owner.d.mts b/packages/veyra-operations/core126-image-owner.d.mts
+--- a/packages/veyra-operations/core126-image-owner.d.mts
++++ b/packages/veyra-operations/core126-image-owner.d.mts
+@@ -19,7 +19,7 @@
+ declare const observationBrand:unique symbol,clientBrand:unique symbol,definitionBrand:unique symbol,registryBrand:unique symbol;
+ export interface Core126Observation {readonly [observationBrand]:true}
+ export interface Core126ImageDefinition {readonly [definitionBrand]:true}
+-export interface Core126ObservationClient {readonly [clientBrand]:true;acquire(runtimeId:string):Promise<Core126Observation>}
++export interface Core126ObservationClient {readonly [clientBrand]:true;acquire(runtimeId:string):Promise<Core126Observation>;acquireCandidate(runtimeId:string):Promise<Core126Observation>}
+ export interface Core126ImageRegistry {readonly [registryBrand]:true;load(imageId:string):Promise<Core126ImageDefinition>}
+ export interface Core126QualifiedImage {
+  readonly qualified:true;readonly id:string;readonly hash:string;readonly imageId:string;readonly parentImageId:string;readonly daemonId:string;readonly provisioningRevision:number;readonly approvedScopes:readonly string[];readonly expiresAt:number;readonly agentHash:string;readonly model:string;readonly modelBindingHash:string;readonly jobRunAudience:'job-run';readonly transport:'scoped-core126-mcp-v1';
+@@ -42,4 +42,6 @@
+ export function createCore126ImageRegistry(ports:{loadManifestBytes:(imageId:string)=>Promise<Buffer>;now?:()=>number},approvedImages:readonly Core126ImageApproval[]):Core126ImageRegistry;
+ export function createCore126ImageOwner(ports:{client:Core126ObservationClient;registry:Core126ImageRegistry;originalProvisionProfile:(facts:Core126Facts)=>Core126OriginalProvisionProfile|null|undefined;inTransaction:()=>boolean;now?:()=>number}):Core126ImageOwner;
+ /** Original manager calls with its own fresh probe before EACH create and start. */
+-export function assertAdmissionOriginalImage(admission:Core126ImageAdmission,proof:Core126ManagerProof,definition:Core126ImageDefinition,registry:Core126ImageRegistry,now?:number):true;
+\ No newline at end of file
++export function assertAdmissionOriginalImage(admission:Core126ImageAdmission,proof:Core126ManagerProof,definition:Core126ImageDefinition,registry:Core126ImageRegistry,now?:number):true;
++export function withOriginalCandidateSourceObservation<T>(owner:Core126ImageOwner,facts:Core126Facts,work:()=>T|Promise<T>):Promise<T>;
++export function spendOriginalCandidateSourceObservation(owner:Core126ImageOwner,facts:Core126Facts,attemptId:string,runIdentityHash:string):Readonly<{intent:import('../../tools/veyra-release/core126-candidate-intent.mjs').CandidateInertIntent;selectionSha256:string}>;
+diff --git a/tools/veyra-release/core126-docker-binary.mjs b/tools/veyra-release/core126-docker-binary.mjs
+--- a/tools/veyra-release/core126-docker-binary.mjs
++++ b/tools/veyra-release/core126-docker-binary.mjs
+@@ -58,14 +58,16 @@
+ function json(response,status){if(response.status!==status)throw failure('CORE126_DOCKER_STATUS');try{return JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(response.bytes));}catch{throw failure('CORE126_DOCKER_JSON');}}
+ /** Actual exec/read/inspect producer. No caller command, detached mode or TTY.
+  * probeSource is the reviewed frozen harness source, not task/user prompt text. */
+-export function createCore126DockerProbeOwner({io,probeSource,probeSha256}){
++export function createCore126DockerProbeOwner({io,probeSource,probeSha256,retainOriginalExec}){
+  if(!io||typeof io.request!=='function'||typeof io.hijack!=='function'||!Buffer.isBuffer(probeSource)||probeSource.length<1||probeSource.length>96*1024||digest(probeSource)!==probeSha256)throw failure('CORE126_PROBE_SOURCE');
++ if(retainOriginalExec!==undefined&&typeof retainOriginalExec!=='function')throw failure('CORE126_ORIGINAL_EXEC_RETENTION');
+  const text=new TextDecoder('utf-8',{fatal:true}).decode(probeSource),retired=new WeakMap();
+  return Object.freeze({
+   async exec(containerId,input,options){
+    if(!id(containerId))throw failure('CORE126_CONTAINER_ID');const payload=Buffer.from(JSON.stringify(input));if(payload.length>INPUT)throw failure('CORE126_PROBE_INPUT_LIMIT');
+    const create=await io.request('POST','/containers/'+containerId+'/exec',{AttachStdin:true,AttachStdout:true,AttachStderr:true,Tty:false,Privileged:false,User:'1000:1000',WorkingDir:'/workspace',Cmd:['/usr/local/bin/node','--input-type=module','-e',text,'--','--core126-probe']},options);
+    const exec=json(create,201);if(!id(exec.Id))throw failure('CORE126_EXEC_ID');
++   retainOriginalExec?.(Object.freeze({containerId,execId:exec.Id,probeSha256}));
+    const stream=await io.hijack('/exec/'+exec.Id+'/start',{Detach:false,Tty:false},payload,options),decoded=decodeDockerMultiplex(stream.bytes,options?.maxBytes??1024*1024);
+    const inspectRaw=await io.request('GET','/exec/'+exec.Id+'/json',undefined,options),inspect=json(inspectRaw,200);
+    if(inspect.ID!==exec.Id&&inspect.Id!==exec.Id||inspect.ContainerID!==containerId||inspect.Running!==false||!Number.isInteger(inspect.ExitCode))throw failure('CORE126_EXEC_RETIREMENT_UNCONFIRMED');
+diff --git a/tools/veyra-release/core126-docker-binary.d.mts b/tools/veyra-release/core126-docker-binary.d.mts
+--- a/tools/veyra-release/core126-docker-binary.d.mts
++++ b/tools/veyra-release/core126-docker-binary.d.mts
+@@ -10,4 +10,4 @@
+ declare const receipt:unique symbol;
+ export type OriginalRetirementReceipt=Readonly<{[receipt]:true}>;
+ export function originalContainerProfileSha256(container:any):string;
+-export function createCore126DockerProbeOwner(input:{io:OriginalBinaryIo;probeSource:Buffer;probeSha256:string}):Readonly<{exec(containerId:string,input:unknown,options?:ExchangeOptions):Promise<ProbeExecution>;waitOriginalContainer(binding:OriginalContainerBinding,options?:ExchangeOptions):Promise<OriginalRetirementReceipt>;retirementFacts(receipt:OriginalRetirementReceipt):Readonly<OriginalRetirementFacts>;removeRetired(receipt:OriginalRetirementReceipt,options?:ExchangeOptions):Promise<{containerId:string;removed:true}>}>;
++export function createCore126DockerProbeOwner(input:{io:OriginalBinaryIo;probeSource:Buffer;probeSha256:string;retainOriginalExec?:(actual:Readonly<{containerId:string;execId:string;probeSha256:string}>)=>void}):Readonly<{exec(containerId:string,input:unknown,options?:ExchangeOptions):Promise<ProbeExecution>;waitOriginalContainer(binding:OriginalContainerBinding,options?:ExchangeOptions):Promise<OriginalRetirementReceipt>;retirementFacts(receipt:OriginalRetirementReceipt):Readonly<OriginalRetirementFacts>;removeRetired(receipt:OriginalRetirementReceipt,options?:ExchangeOptions):Promise<{containerId:string;removed:true}>}>;
+diff --git a/services/ingenium-api/scripts/copy-domain-runtime.mjs b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+--- a/services/ingenium-api/scripts/copy-domain-runtime.mjs
++++ b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+@@ -9,6 +9,6 @@
+ const domains = ['projects-v2', 'memory-v2', 'customize-v2', 'dot-v2', 'voice-v2'];
+ const shared = ['veyra-projects', 'veyra-memory', 'veyra-automation', 'veyra-voice', 'veyra-operations'];
+ // Reviewed singleton only: never discover or copy the release-tools directory.
+-const singletonTools = [{ source: 'tools/veyra-release/core126-candidate-intent.mjs', target: 'veyra-tools/veyra-release/core126-candidate-intent.mjs' }];
++const singletonTools = [{ source: 'tools/veyra-release/core126-candidate-intent.mjs', target: 'veyra-tools/veyra-release/core126-candidate-intent.mjs' }, { source: 'tools/veyra-release/core126-docker-binary.mjs', target: 'veyra-tools/veyra-release/core126-docker-binary.mjs' }];
+ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+ const within = (root, candidate) => candidate === root || candidate.startsWith(root + path.sep);
+diff --git a/packages/veyra-operations/core126-image-contract.mjs b/packages/veyra-operations/core126-image-contract.mjs
+--- a/packages/veyra-operations/core126-image-contract.mjs
++++ b/packages/veyra-operations/core126-image-contract.mjs
+@@ -1,7 +1,7 @@
+ import {createHash} from 'node:crypto';
+ export const CORE126_PROTOCOL='scoped-core126-mcp-v1';
+-export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts','services/ingenium-api/lib/dot-v2/job-original-authority.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/job-private-control.mjs','services/ingenium-api/lib/dot-v2/job-private-files.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs','services/ingenium-api/lib/dot-v2/job-private-plugin.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs','services/ingenium-api/lib/dot-v2/core126-owner.mjs','packages/ingenium-core/lib/tools/mcp-credentials.ts','packages/ingenium-extension/scripts/job-run-mcp-transport.ts','packages/ingenium-extension/scripts/job-run-mcp-client.ts','services/ingenium-api/lib/dot-v2/core126-purpose.mjs','tools/veyra-release/core126-candidate-intent.mjs']);
+-export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js','/app/services/ingenium-api/dist/lib/dot-v2/job-original-authority.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-control.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-files.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-runtime.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-facade.mjs','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-client.js','/app/services/ingenium-api/dist/lib/dot-v2/core126-purpose.mjs','/app/services/ingenium-api/dist/veyra-tools/veyra-release/core126-candidate-intent.mjs']);
++export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts','services/ingenium-api/lib/dot-v2/job-original-authority.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/job-private-control.mjs','services/ingenium-api/lib/dot-v2/job-private-files.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs','services/ingenium-api/lib/dot-v2/job-private-plugin.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs','services/ingenium-api/lib/dot-v2/core126-owner.mjs','packages/ingenium-core/lib/tools/mcp-credentials.ts','packages/ingenium-extension/scripts/job-run-mcp-transport.ts','packages/ingenium-extension/scripts/job-run-mcp-client.ts','services/ingenium-api/lib/dot-v2/core126-purpose.mjs','tools/veyra-release/core126-candidate-intent.mjs',"packages/veyra-operations/core126-candidate-observation.mjs","packages/veyra-operations/core126-image-owner.mjs","tools/veyra-release/core126-docker-binary.mjs","config/opencode-managed/candidate-inert-catalog.json","services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts"]);
++export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js','/app/services/ingenium-api/dist/lib/dot-v2/job-original-authority.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-control.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-files.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-runtime.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-facade.mjs','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-client.js','/app/services/ingenium-api/dist/lib/dot-v2/core126-purpose.mjs','/app/services/ingenium-api/dist/veyra-tools/veyra-release/core126-candidate-intent.mjs',"/usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json","/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-candidate-observation.mjs","/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-image-owner.mjs","/app/services/ingenium-api/dist/veyra-tools/veyra-release/core126-docker-binary.mjs"]);
+ export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+ export const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+ export const imageId=v=>typeof v==='string'&&/^sha256:[a-f0-9]{64}$/.test(v);
+diff --git a/Dockerfile b/Dockerfile
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -283,6 +283,7 @@
+     install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent /etc/opencode && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/job-opencode.json /usr/local/share/ingenium/opencode-managed/job-opencode.json && \
++    install -o root -g root -m 0444 /app/config/opencode-managed/candidate-inert-catalog.json /usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-job-agent/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs && \
+     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs && \
+     install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md && \
+diff --git a/packages/veyra-operations/core126-candidate-observation.mjs b/packages/veyra-operations/core126-candidate-observation.mjs
+new file mode 100644
+--- /dev/null
++++ b/packages/veyra-operations/core126-candidate-observation.mjs
+@@ -0,0 +1,75 @@
++// Proposed canonical target: packages/veyra-operations/core126-candidate-observation.mjs.
++// Metadata observation only. No production qualification or child launch authority.
++import fs from 'node:fs';
++import {createHash} from 'node:crypto';
++import {SOURCE_INPUTS,IMAGE_INPUTS,PROTOCOL_CASES,UUID,hex,imageId,hash,freeze} from './core126-image-contract.mjs';
++import {createCore126ManagerProofProducer} from './core126-manager-proof.mjs';
++import {parseStrictJobJson} from '../../services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs';
++import {createOriginalDockerBinaryIo,createCore126DockerProbeOwner} from '../../tools/veyra-release/core126-docker-binary.mjs';
++export const CANDIDATE_SELECTION_FILE='/run/ingenium-core126/candidate-source.json';
++export const CANDIDATE_CATALOG='/usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json';
++const digest=b=>createHash('sha256').update(b).digest('hex');
++const deny=()=>{throw Object.assign(Error('Original unapproved candidate observation unavailable'),{code:'CORE126_CANDIDATE_OBSERVATION_UNAVAILABLE',status:503});};
++const must=v=>{if(!v)deny();};
++const keys=(v,names)=>must(v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join('|')===[...names].sort().join('|'));
++const uuid=v=>typeof v==='string'&&UUID.test(v),integer=v=>Number.isSafeInteger(v)&&v>=0;
++const text=v=>typeof v==='string'&&v.length>0&&v.length<=256&&v===v.trim()&&!/[\u0000-\u001f\u007f]/u.test(v);
++export function assertCandidateSourceDefinition(v,now=Date.now()){
++ keys(v,['schemaVersion','kind','imageId','config','source','files','rawSchemaSha256','probeSha256','catalogSha256','validUntil','selection','canary']);
++ must(v.schemaVersion===1&&v.kind==='unapproved-candidate-source-v1'&&imageId(v.imageId)&&integer(v.validUntil)&&v.validUntil>now&&['rawSchemaSha256','probeSha256','catalogSha256'].every(k=>hex(v[k])));
++ keys(v.source,['revision','sha256','files']);must(typeof v.source.revision==='string'&&/^[a-f0-9]{40}$/.test(v.source.revision)&&hex(v.source.sha256));
++ for(const[rows,names]of[[v.source.files,SOURCE_INPUTS],[v.files,IMAGE_INPUTS]]){must(Array.isArray(rows)&&rows.length===names.length&&rows.every(r=>r&&typeof r==='object'&&!Array.isArray(r))&&new Set(rows.map(r=>r.path)).size===names.length);for(const name of names){const r=rows.find(r=>r.path===name);must(r&&hex(r.sha256)&&Number.isSafeInteger(r.bytes)&&r.bytes>0);}}
++ for(const r of v.files){keys(r,['path','sha256','bytes','uid','gid','mode','kind']);must(r.uid===0&&r.gid===0&&r.kind==='file'&&integer(r.mode)&&!(r.mode&0o022));}
++ for(const r of v.source.files)keys(r,['path','sha256','bytes']);
++ keys(v.config,['User','WorkingDir','Entrypoint','Cmd']);must(v.config.User==='appuser'&&v.config.WorkingDir==='/app'&&JSON.stringify(v.config.Entrypoint)===JSON.stringify(['/app/scripts/runtime-entrypoint.sh'])&&(v.config.Cmd===null||Array.isArray(v.config.Cmd)&&v.config.Cmd.length===0));
++ keys(v.selection,['runId','caseId','nonce']);must(uuid(v.selection.runId)&&uuid(v.selection.nonce)&&Object.hasOwn(PROTOCOL_CASES,v.selection.caseId));
++ keys(v.canary,['organizationId','projectId','ownerUserId','workspaceId','principalId','jobId','agentHash','promptHash','projectName']);must(['organizationId','projectId','ownerUserId','principalId','jobId'].every(k=>uuid(v.canary[k]))&&text(v.canary.workspaceId)&&text(v.canary.projectName)&&hex(v.canary.agentHash)&&hex(v.canary.promptHash));
++ must(v.files.some(r=>r.path===CANDIDATE_CATALOG&&r.sha256===v.catalogSha256));return v;
++}
++/** Fixed private Root-owned source selection; never a caller path/approval/result. */
++function readCandidateSourceFile(now){
++ must(process.platform==='linux');for(const p of ['/run','/run/ingenium-core126']){const s=fs.lstatSync(p);must(s.isDirectory()&&!s.isSymbolicLink()&&s.uid===0&&!(s.mode&0o022)&&fs.realpathSync(p)===p);}
++ let fd;try{const named=fs.lstatSync(CANDIDATE_SELECTION_FILE);must(named.isFile()&&!named.isSymbolicLink()&&fs.realpathSync(CANDIDATE_SELECTION_FILE)===CANDIDATE_SELECTION_FILE);fd=fs.openSync(CANDIDATE_SELECTION_FILE,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);const first=fs.fstatSync(fd);must(first.isFile()&&first.uid===0&&first.nlink===1&&!(first.mode&0o022)&&first.size>1&&first.size<=65536&&named.dev===first.dev&&named.ino===first.ino);const bytes=fs.readFileSync(fd),last=fs.fstatSync(fd),current=fs.lstatSync(CANDIDATE_SELECTION_FILE);must(bytes.length===first.size&&!current.isSymbolicLink()&&fs.realpathSync(CANDIDATE_SELECTION_FILE)===CANDIDATE_SELECTION_FILE&&[last,current].every(s=>['dev','ino','size','mtimeMs','ctimeMs','uid','gid','mode','nlink'].every(k=>s[k]===first[k])));const definition=freeze(assertCandidateSourceDefinition(parseStrictJobJson(bytes,65536),now));return Object.freeze({definition,selectionSha256:digest(bytes)});}finally{if(fd!==undefined)fs.closeSync(fd);}
++}
++export function readInstalledCandidateSource(now=Date.now()){
++ try{return readCandidateSourceFile(now);}catch(error){if(error?.code==='CORE126_CANDIDATE_OBSERVATION_UNAVAILABLE')throw error;throw Object.assign(new Error('Original unapproved candidate source unavailable',{cause:error}),{code:'CORE126_CANDIDATE_OBSERVATION_UNAVAILABLE',status:503});}
++}
++/** Function text is the exact fixed original-manager exec payload; no caller paths,
++ * commands, URLs, expected hashes, model/task calls or new native server. */
++async function readonlyProbe(paths,catalog){
++ const fs=await import('node:fs'),{createHash}=await import('node:crypto'),sha=b=>createHash('sha256').update(b).digest('hex');
++ const must=v=>{if(!v)throw Error('candidate-readonly-observation');};must(process.platform==='linux'&&process.getuid()===1000&&process.getgid()===1000);
++ async function file(path){let fd;try{fd=fs.openSync(path,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);const a=fs.fstatSync(fd);must(a.isFile()&&a.nlink===1&&a.uid===0&&a.gid===0&&!(a.mode&0o022)&&a.size>0&&a.size<=256*1024*1024);const h=createHash('sha256'),buf=Buffer.alloc(65536);let n,count=0;while((n=fs.readSync(fd,buf,0,buf.length,null))){must(Date.now()<deadline);h.update(buf.subarray(0,n));count+=n;}const b=fs.fstatSync(fd),c=fs.lstatSync(path);must(!c.isSymbolicLink()&&fs.realpathSync(path)===path&&count===a.size&&[b,c].every(s=>['dev','ino','size','mtimeMs','ctimeMs','uid','gid','mode','nlink'].every(k=>s[k]===a[k])));return{path,sha256:h.digest('hex'),bytes:count,uid:a.uid,gid:a.gid,mode:a.mode&0o777,kind:'file'};}finally{if(fd!==undefined)fs.closeSync(fd);}}
++ const deadline=Date.now()+3000;const files=[];for(const p of paths)files.push(await file(p));const catalogFile=files.find(r=>r.path===catalog);must(catalogFile);
++ const secretPath='/run/ingenium-runtime/opencode-server-password';let fd,password;
++ try{must(fs.realpathSync(secretPath)===secretPath);fd=fs.openSync(secretPath,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);const s=fs.fstatSync(fd);must(s.isFile()&&s.uid===1000&&s.nlink===1&&(s.mode&0o777)===0o600&&s.size>=16&&s.size<=256);password=fs.readFileSync(fd,'utf8').trim();must(password.length>=16&&!/[\r\n\u0000]/.test(password));}finally{if(fd!==undefined)fs.closeSync(fd);}
++ const response=await fetch('http://127.0.0.1:4098/openapi.json',{redirect:'error',headers:{Authorization:'Basic '+Buffer.from('opencode:'+password).toString('base64'),Accept:'application/json'},signal:AbortSignal.timeout(Math.max(1,Math.min(1500,deadline-Date.now())))});must(response.status===200&&response.body);must(Date.now()<deadline);let size=0;const h=createHash('sha256');for await(const chunk of response.body){size+=chunk.length;must(Date.now()<deadline&&size<=512*1024);h.update(chunk);}must(size>0);
++ const result={schemaVersion:1,kind:'actual-retained-parent-readonly-files-and-schema',files,rawSchemaSha256:h.digest('hex'),rawSchemaBytes:size,catalogSha256:catalogFile.sha256,probeSha256:sha(Buffer.from(process._eval))};process.stdout.write(JSON.stringify(result)+'\n');
++}
++export function originalCandidateReadonlyProbeSource(){return'await ('+readonlyProbe.toString()+')('+JSON.stringify(IMAGE_INPUTS)+','+JSON.stringify(CANDIDATE_CATALOG)+');';}
++/** Call only INSIDE existing manager using its original request/socket/version.
++ * originalProof is its existing real daemon/parent before/after producer, not DTO. */
++export function createOriginalCandidateClosureProducer({docker,makeOriginalRequest,now=Date.now}){
++ must(typeof docker==='function'&&typeof makeOriginalRequest==='function');
++ const originalProof=createCore126ManagerProofProducer({docker,now}),source=Buffer.from(originalCandidateReadonlyProbeSource()),io=createOriginalDockerBinaryIo({makeOriginalRequest}),pending=new Map(),byContainer=new Map();
++ const probe=createCore126DockerProbeOwner({io,probeSource:source,probeSha256:digest(source),retainOriginalExec:actual=>{const state=byContainer.get(actual.containerId);must(state&&state.execId===null&&actual.probeSha256===digest(source));state.execId=actual.execId;state.stage='original-exec-created';}});
++ return Object.freeze({
++  pendingObservations(){return freeze([...pending.entries()].map(([runtimeId,s])=>({runtimeId,...s})));},
++  /** Read-only recovery proves STOPPED only; never manufactures missing output,
++   * clears an unknown claim, reruns it or returns candidate observation authority. */
++  async reconcileUnknown(runtimeId){const s=pending.get(runtimeId);must(s&&hex(s.execId));const p=await originalProof.observe(runtimeId);must(p.daemonId===s.daemonId&&p.parent.id===s.containerId&&p.parent.imageId===s.imageId&&p.parent.startIdentity===s.startIdentity);const r=await io.request('GET','/exec/'+s.execId+'/json');must(r.status===200);const value=parseStrictJobJson(r.bytes,65536);must((value.ID===s.execId||value.Id===s.execId)&&value.ContainerID===s.containerId&&value.Running===false&&Number.isInteger(value.ExitCode));s.stage='exec-stopped-observation-incomplete';s.inspectSha256=digest(r.bytes);return freeze({runtimeId,...s,exitCode:value.ExitCode});},
++  async observe(runtimeId){
++   must(uuid(runtimeId)&&!pending.has(runtimeId));const selected=readInstalledCandidateSource(now()),d=selected.definition;must(d.probeSha256===digest(source));const first=await originalProof.observe(runtimeId),deadline=first.observedAt+5000;must(first.parent.imageId===d.imageId&&first.parent.projectId===d.canary.projectId&&first.parent.organizationId===d.canary.organizationId&&first.parent.ownerUserId===d.canary.ownerUserId&&first.parent.workspaceId===d.canary.workspaceId);
++   const remaining=deadline-now()-250;must(remaining>=1);const state={containerId:first.parent.id,imageId:first.parent.imageId,startIdentity:first.parent.startIdentity,daemonId:first.daemonId,execId:null,stage:'original-exec-create-intent',selectionSha256:selected.selectionSha256};pending.set(runtimeId,state);byContainer.set(first.parent.id,state);
++   let execution;try{execution=await probe.exec(first.parent.id,{}, {timeoutMs:Math.min(3500,remaining),maxBytes:128*1024});}catch(error){state.stage='original-exec-outcome-unconfirmed';state.failureCode=error?.code??'CORE126_CANDIDATE_EXEC_UNKNOWN';throw error;}
++   // Only the shared helper's actual EOF+stopped-exec inspect permits release.
++   pending.delete(runtimeId);byContainer.delete(first.parent.id);
++   must(execution.exitCode===0&&execution.stderr.length===0);const measured=parseStrictJobJson(execution.stdout,128*1024);assertCandidateMeasuredClosure(measured,d);
++   const last=await originalProof.observe(runtimeId),current=readInstalledCandidateSource(now());must(now()<deadline&&current.selectionSha256===selected.selectionSha256&&hash(last.parent)===hash(first.parent)&&last.daemonId===first.daemonId&&hash(last.image)===hash(first.image));
++   return freeze({schemaVersion:1,kind:'original-manager-unapproved-candidate-closure-v1',selectionSha256:selected.selectionSha256,proof:first,measurement:measured,exec:{id:execution.execId,exitCode:execution.exitCode,stdoutSha256:execution.stdoutSha256,inspectSha256:execution.rawInspectSha256},completedAt:now()});
++  }
++ });
++}
++export function assertCandidateMeasuredClosure(m,d){
++ keys(m,['schemaVersion','kind','files','rawSchemaSha256','rawSchemaBytes','catalogSha256','probeSha256']);must(m.schemaVersion===1&&m.kind==='actual-retained-parent-readonly-files-and-schema'&&Number.isSafeInteger(m.rawSchemaBytes)&&m.rawSchemaBytes>0&&m.rawSchemaBytes<=512*1024&&m.rawSchemaSha256===d.rawSchemaSha256&&m.catalogSha256===d.catalogSha256&&m.probeSha256===d.probeSha256&&hash(m.files)===hash(d.files));return true;
++}
+diff --git a/config/opencode-managed/candidate-inert-catalog.json b/config/opencode-managed/candidate-inert-catalog.json
+new file mode 100644
+--- /dev/null
++++ b/config/opencode-managed/candidate-inert-catalog.json
+@@ -0,0 +1,1 @@
++{"opencode":{"id":"opencode","name":"Core126 inert only","env":[],"npm":"@ai-sdk/openai-compatible","api":"http://127.0.0.1:39261/v1","models":{"qualification-canary":{"id":"qualification-canary","name":"Inert canary","release_date":"2026-01-01","attachment":false,"reasoning":false,"tool_call":true,"cost":{"input":0,"output":0},"limit":{"context":8192,"input":8192,"output":128},"modalities":{"input":["text"],"output":["text"]}}}}}
+diff --git a/packages/veyra-operations/core126-candidate-observation.d.mts b/packages/veyra-operations/core126-candidate-observation.d.mts
+new file mode 100644
+--- /dev/null
++++ b/packages/veyra-operations/core126-candidate-observation.d.mts
+@@ -0,0 +1,8 @@
++import type {Core126ManagerProof} from './core126-image-owner.mjs';
++export const CANDIDATE_SELECTION_FILE:'/run/ingenium-core126/candidate-source.json';
++export const CANDIDATE_CATALOG:'/usr/local/share/ingenium/opencode-managed/candidate-inert-catalog.json';
++export function assertCandidateSourceDefinition(value:unknown,now?:number):any;
++export function readInstalledCandidateSource(now?:number):Readonly<{definition:any;selectionSha256:string}>;
++export function originalCandidateReadonlyProbeSource():string;
++export function assertCandidateMeasuredClosure(measurement:unknown,definition:any):true;
++export function createOriginalCandidateClosureProducer(ports:{docker:(method:string,path:string)=>Promise<any>;makeOriginalRequest:(options:any,callback:any)=>any;now?:()=>number}):Readonly<{pendingObservations():readonly Record<string,unknown>[];reconcileUnknown(runtimeId:string):Promise<Readonly<Record<string,unknown>>>;observe(runtimeId:string):Promise<{schemaVersion:1;kind:'original-manager-unapproved-candidate-closure-v1';selectionSha256:string;proof:Core126ManagerProof;measurement:any;exec:any;completedAt:number}>}>;

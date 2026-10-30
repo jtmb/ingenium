@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-original-candidate-construction-proposal",
+  "authorityClass": "Unapproved source observation/lexical prepare only; NO credentials/readiness/launch/approval",
+  "files": [
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "beforeSha256": "c4948687cd6903bcd37836d524c282fd29c778806131a06ebda5e8d72972838c",
+      "beforeBytes": 12173,
+      "afterSha256": "1e6beefa49622995ecdd7cb32f64c5e1715512fcb5ec3fb0b8338eaddf73f2e8",
+      "afterBytes": 18182
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "beforeSha256": "0883ab6dfe01296d1c26732dcb9a5f8c2dbd5a312205629e0e95c8d3d69483ab",
+      "beforeBytes": 26045,
+      "afterSha256": "af8e4b1712f75161dcefac5977f868d3d75d22e4b92fa705b086e013e3b944cd",
+      "afterBytes": 30794
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "beforeSha256": "e41c80f956bba3ec53dfccd6fc617d5873b3d9767f35510bb4e79558ed7aa9e5",
+      "beforeBytes": 9766,
+      "afterSha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772",
+      "afterBytes": 10565
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "beforeSha256": "0d981f8cc4709713877bbb18b7552b2e3088a1bc1207f9d691cf895a310d6e43",
+      "beforeBytes": 26528,
+      "afterSha256": "157a17371cd3e741f1fa6d252bc238b0997313011be4a1fe33b5996c21e373b1",
+      "afterBytes": 27606
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+      "beforeSha256": "158d8bedc02a52b87845f4d68dc3e334e9eec61ed85a5069f66efcf0212d6032",
+      "beforeBytes": 4652,
+      "afterSha256": "6b389fcd9e9780dc29b930969583079eea6188520a5de18e79b88e2f76203063",
+      "afterBytes": 5660
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "beforeSha256": "27bbeccd7f2363cad185ac570851990bde9f509a2de266e817d76425a8be89aa",
+      "beforeBytes": 9336,
+      "afterSha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba",
+      "afterBytes": 9461
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "beforeSha256": "da519b86f0d72d10cef277acbfd14c0eeb253fbf5cfb8f62a9a37c0bf5e70bd8",
+      "beforeBytes": 12625,
+      "afterSha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b",
+      "afterBytes": 13087
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.d.mts",
+      "beforeSha256": "8a263450672c0571b36939e73f157ccba20e232504a8aa7d0847acdc7c26e44b",
+      "beforeBytes": 5400,
+      "afterSha256": "b16847ab048991fd702f67d7d33b9d2e230150a905cd22fd8e82b96bc2ae18ce",
+      "afterBytes": 5869
+    },
+    {
+      "path": "tools/veyra-release/core126-docker-binary.mjs",
+      "beforeSha256": "fc323c8fa6bd1739ee8e69c378b5bc49a0bf47ad84e87b8ce62b6d2bfdb68658",
+      "beforeBytes": 10857,
+      "afterSha256": "b3b5456f73996ff63eaa0f433895de6fce62dc1a5cc5eedead38ddb183522d8f",
+      "afterBytes": 11083
+    },
+    {
+      "path": "tools/veyra-release/core126-docker-binary.d.mts",
+      "beforeSha256": "be66f7bbfb9ce31d19abbf8ea65f71f9a306ad41faf72c98f4a1246b8a4e1911",
+      "beforeBytes": 1970,
+      "afterSha256": "6f179910f10e60aa8faf04bf99fd504b63799a754e9251f11a0a01ad73d7a610",
+      "afterBytes": 2069
+    },
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "beforeSha256": "a8bf9fb6132ca61ba099024505b19e8154a07b04e1a133ac37c6763a95848b23",
+      "beforeBytes": 8201,
+      "afterSha256": "6d3224c3b6b1f13d8b991840cd7a2f060334d2bb6684900c3760bd5ad8ebff80",
+      "afterBytes": 8325
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "beforeSha256": "1647f7b5586d18c167029f075c325f4044c069469af1017084c3e4cf057bc253",
+      "beforeBytes": 11550,
+      "afterSha256": "f262f1a2119add00119a16e5830678848492a08edd84307da3731ba897cd8338",
+      "afterBytes": 12185
+    },
+    {
+      "path": "Dockerfile",
+      "beforeSha256": "1cbb6830060e9eeb9b6a3307b465c48fd1265fb1247ef042b2096ded10c108e7",
+      "beforeBytes": 32402,
+      "afterSha256": "c19be5d1e15ef951218ac281ee4d1792e85d3ae13dfa19676c1bd78d3ee0c862",
+      "afterBytes": 32573
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-observation.mjs",
+      "beforeSha256": null,
+      "beforeBytes": 0,
+      "afterSha256": "ff416fb5e4b8334265b325cb7e7943548003902fe4339b8296c780f1f04afa55",
+      "afterBytes": 12489
+    },
+    {
+      "path": "config/opencode-managed/candidate-inert-catalog.json",
+      "beforeSha256": null,
+      "beforeBytes": 0,
+      "afterSha256": "ce1190a5bf8e32a6eee392640350744cd30f0df6d7526c5a57349e929eb30225",
+      "afterBytes": 435
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "beforeSha256": null,
+      "beforeBytes": 0,
+      "afterSha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d",
+      "afterBytes": 1129
+    }
+  ],
+  "patch": {
+    "bytes": 61677,
+    "sha256": "0284620262ac26cd1cb888cf820975b635c8e75c5c5780b86f1df95400b77f27"
+  },
+  "closure": {
+    "sourceBefore": 31,
+    "sourceAfter": 36,
+    "imageBefore": 27,
+    "imageAfter": 31,
+    "newSingleton": "tools/veyra-release/core126-docker-binary.mjs",
+    "newSingletonOutput": "dist/veyra-tools/veyra-release/core126-docker-binary.mjs",
+    "catalog": "config/opencode-managed/candidate-inert-catalog.json",
+    "catalogSha256": "ce1190a5bf8e32a6eee392640350744cd30f0df6d7526c5a57349e929eb30225"
+  },
+  "tests": {
+    "class": "18 synthetic CPU VM/fake-FS/fake-Docker/Core source checks and parser-only syntax; NOT actual source-policy/transport/authority/runtime qualification",
+    "windows": {
+      "passed": 18,
+      "failed": 0
+    },
+    "wsl": {
+      "passed": 18,
+      "failed": 0
+    },
+    "buildRun": false,
+    "runtimeRun": false,
+    "liveManagerExec": false
+  },
+  "remaining": [
+    "Root private actual originalCandidate.require context binding and SQL130 admission adapter/recovery",
+    "Root same installed original owner + real protected coordinator source definition + same original measured manager endpoint",
+    "Root SQL131 waiting bootstrap/original child ID/trap/catalog/private-egress readiness and one-use credential/frame",
+    "Root restart-safe pending-exec recovery/retirement through original owner; no unknown replay",
+    "All18 actual cases, independent protected approval and fresh production admission"
+  ],
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "sourceSnapshotsCopied": false,
+    "sharedSourceMutated": false,
+    "retention": "Minimal readable constructor/source/proposer/tests/patch/receipt/guide for Root application and real qualification"
+  }
+}
