@@ -1,0 +1,22 @@
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -1,6 +1,8 @@
+ //! Grounded lease + lossless request producer. No listener, renderer factory,
+ //! raw forwarding or admission token is supplied by this module.
+ use super::*;
++mod windows_read;
++pub use windows_read::NativeWindowsWebRead;
+ use reqwest::{Method, Url};
+ use veyra_contracts::local_workspaces::LocalWorkspaceOwner;
+
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -30,7 +30,7 @@
+ const START_TIMEOUT: Duration = Duration::from_secs(15);
+ mod creation;
+ mod local_workspaces;
+-pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission};
++pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission,NativeWindowsWebRead};
+ pub use local_workspaces::web_materialization::{EffectiveWebBody,WebUriReplacement,WebUriTransformation,materialize_web_uri_spans,materialize_resolved_web_files};
+ pub use local_workspaces::web_completion::NativeWebCompletions;
+ pub(crate) use local_workspaces::web_completion::NativeWebCompletionIdentity;

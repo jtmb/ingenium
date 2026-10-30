@@ -1,0 +1,102 @@
+{
+  "base_completion": "492f77695e812be14889978eb80dce821d0ef815",
+  "base_projects": "abdbd8f1956e3e3f2b8964086d2ad32dc67b6149",
+  "requires": "094c then492f; canonical73fc other3structural imports +abdb4source contracts; required-web-imports.patch BEFORE windows-read-join.patch",
+  "scope": "source only; no activation/runtime acceptance",
+  "patch_sha256": "274f020ae1b1ea93d05a58c90b30b83c3c2220956d2893cc4a148b4f59f21d5c",
+  "patch_bytes": 40064,
+  "imports_patch_sha256": "45c505cb477ace440eded3288a7a7fefc7f01f4876a056b66775c69f11bcd6f9",
+  "imports_patch_bytes": 1356,
+  "imports": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_sha256": "eb040b63b4c32a1cfbf577da7b11724d2b708cebad821b3d70bfc882ca367a02",
+      "postimage_sha256": "46379e863c5f488ef8e52d117e73dd82083a14bdfc8f7a4aad6047ae6bb9c222"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "b6eb2534d08d40720e27447c544fc83685db4f4c7d6032e3acdb78ebc1082354",
+      "postimage_sha256": "39d344f729f3587f03af855ea6ad840261e5972484ecf3a3863515964692abdf"
+    }
+  ],
+  "files": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_sha256": "46379e863c5f488ef8e52d117e73dd82083a14bdfc8f7a4aad6047ae6bb9c222",
+      "postimage_sha256": "c8f65a8b315bede66baf7c865f3d4fe4bfb4ed7c8ca93582bfa7accb83c5f311",
+      "bytes": 36932
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "39d344f729f3587f03af855ea6ad840261e5972484ecf3a3863515964692abdf",
+      "postimage_sha256": "388b80ddb940f10c538e8d8d7534f7df628d2cce60ce1fdf3220dff696890d24",
+      "bytes": 144822
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "preimage_sha256": "b2ec2bc05d5471a567603379e0de8a565dd5c1edc5728240eab0effb8d4f0cc5",
+      "postimage_sha256": "03b3a237800106881dd7927dadde29e7d87ca9cad0ecbe7ebc08ab8a61b90423",
+      "bytes": 3411
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "preimage_sha256": "4bfbeb8f35468cb1c85e4511f555c98e1abd185806479c954058ef1891be71ee",
+      "postimage_sha256": "d01d2ef27c346accee3c58fd716bb8da8e9fdb51a2c32d96133f6bf0c6314df1",
+      "bytes": 9254
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "preimage_sha256": "0359dc09bd5f6dd0b19883d036b7bde57c8a0edb4cd28ae09c471c597ec733cf",
+      "postimage_sha256": "d3f0dd09464e8ed25d31ae70e35aa16f6b69f693d1102e24096f817b644a255a",
+      "bytes": 56283
+    },
+    {
+      "path": "crates/adapters/src/projects/local_web_originals.rs",
+      "preimage_sha256": "05c690cd89898a98b206c34eb608de0d62bce0bfa09eee539548692a22fed31b",
+      "postimage_sha256": "b947d9599d64c1e8e2ee2626bf00f22c78d7eb7f703149e499db243802b51ea9",
+      "bytes": 23577
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs",
+      "preimage_sha256": "f3f23901e14d07d9fe4ebefb4e12810634e6ed930cf72caf46017ddab7d47726",
+      "postimage_sha256": "46cb1c4d102aed70795acd4171f0206081fe7de2ee476a1d2582c29b20308162",
+      "bytes": 14225
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs",
+      "preimage_sha256": "8a9ac7f8057d8f189e1e76c49825cd2275690634f1f7f1c6c58bc24cc50c5b3f",
+      "postimage_sha256": "b13143b5a2d67328cdd0ac677135d73a3036191c704b61fbe7ba0b786dac9b05",
+      "bytes": 8871
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs",
+      "preimage_sha256": "0535d56c8930a3c3cd58fd200811f1278098ecb00c0ee25e78e0391e395d13c5",
+      "postimage_sha256": "a09b7a6a20351029cb0c1c7dae6fc0e6b67192c3d329ece90cf72f60748c2063",
+      "bytes": 8432
+    },
+    {
+      "path": "crates/adapters/src/local_execution/windows_web_read.rs",
+      "preimage_sha256": "e4198e30685d38fb5ba369821f7065e4e862ffc05dbad2e8a131392367df6e79",
+      "postimage_sha256": "594c550080bceb2742634a8bea5d1ce5358ff46effb9d3fbc7b7722cef36144c",
+      "bytes": 10545
+    },
+    {
+      "path": "crates/adapters/src/local_execution/windows_web_read/native.rs",
+      "preimage_sha256": "efd4ecb1e4cd7b313c249065e84009e0658abf32dafeaaa7a0dc40030a3fa637",
+      "postimage_sha256": "9640d1e6a8cf6a1bce9b34b2c6c01e5bc1e2656945c60dabadd2d55cfc272de0",
+      "bytes": 8349
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read/completion.rs",
+      "preimage_sha256": null,
+      "postimage_sha256": "af70bda11de22bcf80da5c8dd254bc2904d71c061578f3b0bc508a37b916408a",
+      "bytes": 9739
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_file_input.rs",
+      "preimage_sha256": null,
+      "postimage_sha256": "07258c8321f89ca186f3c4440ee48e570ee72582d01f1ea58e3015a0f230c41d",
+      "bytes": 2216
+    }
+  ]
+}

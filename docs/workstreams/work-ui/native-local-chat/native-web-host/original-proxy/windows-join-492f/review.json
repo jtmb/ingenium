@@ -1,0 +1,41 @@
+{
+  "scope": "CPU source-order and exact composition only; not executed Rust/Windows/runtime tests",
+  "passed": [
+    "Windows acquisition uses same engine lock",
+    "actual Windows recheck precedes prepare/send",
+    "actual optional read carrier stays in move-only dispatch/slot",
+    "Windows identity wire and WSL explicit transform are distinct",
+    "raw Windows wire is exact under actual original read",
+    "original writer evidence comes from real retained sources",
+    "actual source bytes compact into existing BLOB writer",
+    "actual request owner retained before read begin and HTTP",
+    "join minted only after actual transport and materialized-file verification",
+    "partial transport/generic status cannot mint join",
+    "HTTP rejection does not become a materialized read join",
+    "materialization binds same original input and every URI occurrence",
+    "nonimage/source data and canonical base64 verified",
+    "join binds actual held allocation and same slot/operation/input/body publication",
+    "carrier refuses foreign/copied/duplicate join and publication",
+    "close fault cannot turn into Closed or authorize retry",
+    "actual publication retained before checked close and slot removal",
+    "never-sent cleanup excludes active/sent/uncertain slots",
+    "eligible inactive original cleanup performs checked close before removal",
+    "no metadata/PID/stopped-flag engine retirement surrogate",
+    "no renderer or public positive join/read-owner constructor",
+    "both patch layers reconstruct every exact postimage",
+    "immutable492f checkpoint unchanged",
+    "immutable094c checkpoint unchanged"
+  ],
+  "count": 24,
+  "rust_materialization_tests": "supplied3;UNRUN",
+  "rust_partial_transport_test": "supplied492f;UNRUN",
+  "activation": false,
+  "remaining": [
+    "Memory3 retention/tombstone integration",
+    "Rust compilation/borrow/type checks",
+    "real source identity and checked-close qualification",
+    "real engine-tree retirement for unknown requests",
+    "20MiB/image/skill/ACK bounds",
+    "actual HTTP/SSE/PTY/native host runtime and visual acceptance"
+  ]
+}
