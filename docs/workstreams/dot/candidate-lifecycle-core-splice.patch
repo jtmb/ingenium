@@ -1,0 +1,50 @@
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -1,3 +1,4 @@
++import {createCandidateLifecycleExtension} from "./candidate-lifecycle-owner.mjs";
+ import {withOriginalCandidateSourceObservation,spendOriginalCandidateSourceObservation} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
+ import {candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
+ import {describeStoredManagedPurpose,requireProductionManagedPurpose} from './core126-purpose.mjs';
+@@ -63,10 +64,12 @@
+   return p;
+  };
+  const manager=ctx=>{requireManager(ctx);same();};
++ const candidateLifecycle=createCandidateLifecycleExtension({db,getDb,write,clock,readManagedRow:row,baseCurrent:base,originalRunIdentity:originalJobRunIdentity,jobs,candidateLeases});
+  return Object.freeze({
+   /** Private original-owner lookup only: data discrimination is never a grant. */
+   admissionPurpose(runId){const r=row(runId);if(!r)fail('MANAGED_JOB_NOT_FOUND');return describeStoredManagedPurpose(r);},
+   async prepareCandidateInert(selection,ctx){
++   candidateLifecycle.requireSchema();
+    if(Object.keys(selection).sort().join('|')!=='projectId|runId|runtimeId|workspaceId')fail('MANAGED_JOB_INVALID_SELECTION');
+    if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+    const before=base(selection,ctx,"candidate-inert-v1");if(row(selection.runId)||before.run.status!=='running')fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
+@@ -76,14 +79,27 @@
+     const {intent,selectionSha256}=spendOriginalCandidateSourceObservation(ports.imageOwner,facts,id(),originalJobRunIdentity(facts.run)),candidateIntentHash=candidateInertIntentHash(intent);
+     const project=db.prepare('SELECT name FROM projects WHERE id=? AND archived_at IS NULL').get(facts.job.project_id);if(project?.name!==intent.canary.projectName)fail('MANAGED_JOB_PUBLIC_CANARY_UNAVAILABLE');
+     const a={purpose:'candidate-inert-v1',candidateIntentHash,selectionSha256,runId:intent.run.runId,jobId:intent.run.jobId,projectId:intent.scope.projectId,organizationId:intent.scope.organizationId,ownerUserId:intent.scope.ownerUserId,attemptId:intent.run.attemptId,runtimeId:intent.parent.runtimeId,runtimeRevision:intent.resource.runtimeRevision,provisioningRevision:intent.parent.provisioningRevision,parentContainerId:intent.parent.containerId,workspaceId:intent.scope.workspaceId,bindingHash:intent.scope.bindingHash,bindingEpoch:intent.scope.bindingEpoch,jobRevision:intent.run.jobRevision,scheduleRevision:intent.run.scheduleRevision,effectFenceIssuer:fenceIssuer,grantRevision:intent.scope.grantRevision,principalSecurityEpoch:intent.scope.principalSecurityEpoch,promptHash:intent.run.promptHash,daemonId:intent.parent.daemonId,imageId:intent.imageId,resourceAdmissionId:intent.resource.admissionId,agentHash:intent.run.agentHash,model:intent.canary.model,limits:intent.resource.limits,projectName:intent.canary.projectName,deadlineAt:intent.expiresAt};a.specHash=sha(a);
+-    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
++    const columns={candidate_waiting_protocol:'original-candidate-waiting-v1',run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
+     db.prepare('INSERT INTO job_run_managed_execution ('+Object.keys(columns).join(',')+') VALUES ('+Object.keys(columns).map(()=>'?').join(',')+')').run(...Object.values(columns));
+     const lease=Object.freeze({});candidateLeases.set(lease,{db,admission:Object.freeze(structuredClone(a)),intent,selectionSha256});return lease;
+    }));
+   },
+   /** Metadata receipt, NOT child material. Opaque key is private to this Core instance. */
+-  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
++  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');candidateLifecycle.requirePrepared(r.run_id);return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
+   candidateLaunchMaterial(){fail('MANAGED_JOB_ORIGINAL_CANDIDATE_READINESS_UNAVAILABLE');},
++  // Private same-writer lifecycle; actual original constructors stay unavailable.
++  candidateCreateIntent:(lease,context,handle)=>candidateLifecycle.createIntent(lease,context,handle),
++  candidateBindOriginalChild:(runId,context,handle)=>candidateLifecycle.bindChild(runId,context,handle),
++  candidateStartIntent:(runId,context,handle)=>candidateLifecycle.startIntent(runId,context,handle),
++  candidateObserveWaiting:(runId,context,handle)=>candidateLifecycle.observeWaiting(runId,context,handle),
++  candidateObserveReady:(runId,context,handle)=>candidateLifecycle.observeReady(runId,context,handle),
++  candidateCommitOriginalMaterial:(runId,context,handle)=>candidateLifecycle.commitOriginalMaterial(runId,context,handle),
++  candidateObserveRunning:(runId,context,handle)=>candidateLifecycle.observeRunning(runId,context,handle),
++  candidateRecordOriginalResult:(runId,context,handle)=>candidateLifecycle.recordResult(runId,context,handle),
++  candidateRequestCancellation:(runId,context)=>candidateLifecycle.cancel(runId,context),
++  candidateRetainUnknown:(runId,context,handle)=>candidateLifecycle.unknown(runId,context,handle),
++  candidateRecordOriginalRetirement:(runId,context,handle)=>candidateLifecycle.retire(runId,context,handle),
++  candidateLifecycleReceipt:(runId,context)=>candidateLifecycle.inspect(runId,context),
+   factsForImagePreparation(selection,ctx){
+    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
+    return base(selection,ctx);

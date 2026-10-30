@@ -1,0 +1,122 @@
+{
+  "kind": "SQL131 immutable original candidate waiting lifecycle SOURCE proposal",
+  "patchSha256": "1366c0feb19a7fcf04b5bf1466f2fc32a5e45e09125ecd2009d134dbc9c9c24b",
+  "patchBytes": 74198,
+  "emittedArtifactCheck": {
+    "artifacts": 7,
+    "js": 3,
+    "types": 3,
+    "sql": 1,
+    "failures": 0
+  },
+  "targets": [
+    {
+      "target": "packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql",
+      "source": "131_candidate_waiting_lifecycle.proposal.sql",
+      "preimageSha256": null,
+      "postimageSha256": "549c984312ce115309a252d908153a49702de5e53e33f6fafb14435bd357b05f",
+      "bytes": 43322
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+      "source": "candidate-lifecycle-owner.proposal.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "2d153d5b873f44e643cb8272a11448c04f52f738939f9e16124c5f385446c604",
+      "bytes": 12153
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts",
+      "source": "candidate-lifecycle-owner.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "d95a93862daf9557254f5d5abcd0d9ce2d5396719bca5a39996dcd186e295522",
+      "bytes": 2497
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+      "source": "candidate-lifecycle-original-gates.proposal.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "422623cf72e9242d58fc17760c70800f721f4a4df387da97819f7091e3ad56d2",
+      "bytes": 1583
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts",
+      "source": "candidate-lifecycle-original-gates.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "713cac95c6c1a4ca78141100b2839f93f032015970c06f14b6b94ef496df189c",
+      "bytes": 3209
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "source": "core126-lifecycle-owner.proposal.mjs",
+      "preimageSha256": "d532e2b5abc43455d38d973fe3b6573ea33bcf33aecf30f0b356a80aef005602",
+      "postimageSha256": "17d8b464c6fd14f54ab559773a2b1352967354c87dedb96445594478ffa68534",
+      "bytes": 32822
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+      "source": "core126-lifecycle-owner.d.mts",
+      "preimageSha256": "6c6c4e00e6435d17f2a381ea38f2f2275736f429008977aec273d41e09f58064",
+      "postimageSha256": "46cb91b37771bdaf2dff6214b4fc19d06ec14ce0a1b30f7666ce4b618ba04089",
+      "bytes": 374
+    }
+  ],
+  "migrationRegistration": {
+    "file": "131_candidate_waiting_lifecycle.sql",
+    "tables": [
+      "managed_candidate_lifecycle_schema",
+      "job_run_candidate_lifecycle"
+    ],
+    "addedBaseColumn": "candidate_waiting_protocol",
+    "triggers": [
+      "candidate131_schema_no_update",
+      "candidate131_schema_no_delete",
+      "candidate131_schema_no_replace",
+      "candidate131_new_marker",
+      "candidate131_base_no_update",
+      "candidate131_base_no_delete",
+      "candidate131_base_no_replace",
+      "candidate131_extension_initial",
+      "candidate131_extension_no_replace",
+      "candidate131_extension_no_delete",
+      "candidate131_seed",
+      "candidate131_transition",
+      "candidate131_child_no_adoption",
+      "candidate131_run_no_delete",
+      "candidate131_run_no_replace",
+      "candidate131_run_terminal_guard",
+      "candidate131_run_identity",
+      "candidate131_exact_evidence"
+    ],
+    "foreignKey": "job_run_candidate_lifecycle.run_id -> job_run_managed_execution.run_id ON DELETE RESTRICT, not parent.id"
+  },
+  "closedActualConstructors": [
+    "current persisted candidate context/source/placement",
+    "original retained control after withdrawal/restart",
+    "original create/child/attach/start/readiness",
+    "candidate-only credential/frame material issuance",
+    "actual candidate result/native verification",
+    "original unknown/cancel/physical/no-create retirement"
+  ],
+  "sourceOnly": true,
+  "runtimeCasesRun": 0,
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retained": "Minimal durable SQL/helper/gates/types/patch/source fixtures and Root audit for integration; existing one C-backed WSL root"
+  },
+  "validation": {
+    "sourceFixturePass": 42,
+    "sourceFixtureFail": 0,
+    "stdoutSha256": "882cc5fabb169a9e388b3a6a64a7de4525f9e65e1ac8ae679b804fb71c97660d",
+    "testSourceSha256": "6ade8e4d1e5d2fdc1d9bc6abc7fdb4fac81ea1c1afa41a3f8c32535fc4345418",
+    "command": "node --experimental-strip-types --test docs/workstreams/dot/candidate-lifecycle.test.mjs",
+    "limits": "In-memory actual126/129/130 plus proposed131 and closed-constructor source fixtures. No live manager/auth/material/readiness or 18 runtime cases."
+  },
+  "actualRootApplyCheck": {
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "readerAudit": "candidate-lifecycle-reader-audit.json",
+  "protectedEvidence": "Earlier committed r1/r2/r3 patch failure and correction witnesses remain unchanged; original canonical source untouched."
+}

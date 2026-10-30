@@ -1,0 +1,376 @@
+diff --git a/packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql b/packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql
+new file mode 100644
+--- /dev/null
++++ b/packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql
+@@ -0,0 +1,185 @@
++-- SQL131 SOURCE PROPOSAL. Root is sole canonical writer/registrar.
++-- Candidate-only one-to-one extension of original execution, never another Run,
++-- queue, scheduler, credential issuer, image approval or readiness authority.
++-- No legacy row is adopted/backfilled; production data/credential guards untouched.
++ALTER TABLE job_run_managed_execution ADD COLUMN candidate_waiting_protocol TEXT
++ CHECK(candidate_waiting_protocol IS NULL OR (purpose='candidate-inert-v1' AND candidate_waiting_protocol='original-candidate-waiting-v1'));
++CREATE TABLE managed_candidate_lifecycle_schema(singleton INTEGER PRIMARY KEY CHECK(singleton=1),schema_version INTEGER NOT NULL CHECK(schema_version=1));
++INSERT INTO managed_candidate_lifecycle_schema VALUES(1,1);
++CREATE TRIGGER candidate131_schema_no_update BEFORE UPDATE ON managed_candidate_lifecycle_schema BEGIN SELECT RAISE(ABORT,'Candidate lifecycle schema is immutable'); END;
++CREATE TRIGGER candidate131_schema_no_delete BEFORE DELETE ON managed_candidate_lifecycle_schema BEGIN SELECT RAISE(ABORT,'Candidate lifecycle schema is retained'); END;
++CREATE TRIGGER candidate131_schema_no_replace BEFORE INSERT ON managed_candidate_lifecycle_schema WHEN EXISTS(SELECT 1 FROM managed_candidate_lifecycle_schema WHERE singleton=NEW.singleton) BEGIN SELECT RAISE(ABORT,'Candidate lifecycle schema cannot be replaced'); END;
++CREATE TABLE job_run_candidate_lifecycle (
++ run_id TEXT PRIMARY KEY REFERENCES job_run_managed_execution(run_id) ON DELETE RESTRICT,
++ attempt_id TEXT NOT NULL UNIQUE,
++ candidate_intent_hash TEXT NOT NULL UNIQUE,
++ spec_hash TEXT NOT NULL,
++ run_identity_hash TEXT NOT NULL,
++ selection_sha256 TEXT NOT NULL,
++ organization_id TEXT NOT NULL,
++ owner_user_id TEXT NOT NULL,
++ project_id TEXT NOT NULL,
++ job_id TEXT NOT NULL,
++ runtime_id TEXT NOT NULL,
++ parent_container_id TEXT NOT NULL,
++ workspace_id TEXT NOT NULL,
++ binding_hash TEXT NOT NULL,
++ binding_epoch INTEGER NOT NULL,
++ daemon_id TEXT NOT NULL,
++ image_id TEXT NOT NULL,
++ artifact_closure_sha256 TEXT NOT NULL,
++ catalog_sha256 TEXT NOT NULL,
++ deadline_at TEXT NOT NULL,
++ deadline_ms INTEGER NOT NULL,
++ created_at TEXT NOT NULL,
++ phase TEXT NOT NULL CHECK(phase IN ('prepared','create_intent','created','start_intent','waiting','ready','material_spent','running','result','unknown','retired')),
++ revision INTEGER NOT NULL CHECK(revision>=0),
++ updated_ms INTEGER NOT NULL CHECK(updated_ms>=0),
++ create_effect_hash TEXT,
++ child_id TEXT UNIQUE,
++ child_birth_hash TEXT UNIQUE,
++ child_created_ms INTEGER,
++ start_effect_hash TEXT,
++ attach_identity_hash TEXT,
++ child_start_hash TEXT,
++ child_started_ms INTEGER,
++ readiness_json TEXT,
++ ready_observed_ms INTEGER,
++ ready_expires_ms INTEGER,
++ material_release_id TEXT UNIQUE,
++ material_spent_ms INTEGER,
++ material_readiness_json TEXT,
++ material_ready_observed_ms INTEGER,
++ material_ready_expires_ms INTEGER,
++ result_json TEXT,
++ unknown_code TEXT,
++ unknown_ms INTEGER,
++ cancel_requested_ms INTEGER,
++ retirement_json TEXT,
++ retired_ms INTEGER,
++ CHECK(length(candidate_intent_hash)=64 AND candidate_intent_hash NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(spec_hash)=64 AND spec_hash NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(run_identity_hash)=64 AND run_identity_hash NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(selection_sha256)=64 AND selection_sha256 NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(parent_container_id)=64 AND parent_container_id NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(binding_hash)=64 AND binding_hash NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(artifact_closure_sha256)=64 AND artifact_closure_sha256 NOT GLOB '*[^0-9a-f]*'),
++ CHECK(length(catalog_sha256)=64 AND catalog_sha256 NOT GLOB '*[^0-9a-f]*'),
++ CHECK(create_effect_hash IS NULL OR (length(create_effect_hash)=64 AND create_effect_hash NOT GLOB '*[^0-9a-f]*')),
++ CHECK(child_id IS NULL OR (length(child_id)=64 AND child_id NOT GLOB '*[^0-9a-f]*')),
++ CHECK(child_birth_hash IS NULL OR (length(child_birth_hash)=64 AND child_birth_hash NOT GLOB '*[^0-9a-f]*')),
++ CHECK(start_effect_hash IS NULL OR (length(start_effect_hash)=64 AND start_effect_hash NOT GLOB '*[^0-9a-f]*')),
++ CHECK(attach_identity_hash IS NULL OR (length(attach_identity_hash)=64 AND attach_identity_hash NOT GLOB '*[^0-9a-f]*')),
++ CHECK(child_start_hash IS NULL OR (length(child_start_hash)=64 AND child_start_hash NOT GLOB '*[^0-9a-f]*')),
++ CHECK(binding_epoch>=0),
++ CHECK(deadline_ms>0),
++ CHECK(length(deadline_at)=24 AND deadline_at GLOB '????-??-??T??:??:??.???Z'),
++ CHECK(deadline_ms=CAST(strftime('%s',deadline_at) AS INTEGER)*1000+CAST(substr(deadline_at,21,3) AS INTEGER)),
++ CHECK(child_created_ms IS NULL OR child_created_ms>=0),
++ CHECK(child_started_ms IS NULL OR child_started_ms>=0),
++ CHECK(ready_observed_ms IS NULL OR ready_observed_ms>=0),
++ CHECK(ready_expires_ms IS NULL OR ready_expires_ms>=0),
++ CHECK(material_spent_ms IS NULL OR material_spent_ms>=0),
++ CHECK(unknown_ms IS NULL OR unknown_ms>=0),
++ CHECK(cancel_requested_ms IS NULL OR cancel_requested_ms>=0),
++ CHECK(retired_ms IS NULL OR retired_ms>=0),
++ CHECK((child_id IS NULL)=(child_birth_hash IS NULL) AND (child_id IS NULL)=(child_created_ms IS NULL)),
++ CHECK((start_effect_hash IS NULL)=(attach_identity_hash IS NULL)),
++ CHECK((child_start_hash IS NULL)=(child_started_ms IS NULL)),
++ CHECK((readiness_json IS NULL)=(ready_observed_ms IS NULL) AND (readiness_json IS NULL)=(ready_expires_ms IS NULL)),
++ CHECK((material_release_id IS NULL)=(material_spent_ms IS NULL) AND (material_release_id IS NULL)=(material_readiness_json IS NULL) AND (material_release_id IS NULL)=(material_ready_observed_ms IS NULL) AND (material_release_id IS NULL)=(material_ready_expires_ms IS NULL)),
++ CHECK((unknown_code IS NULL)=(unknown_ms IS NULL)),
++ CHECK((retirement_json IS NULL)=(retired_ms IS NULL)),
++ CHECK(unknown_code IS NULL OR unknown_code IN ('create_ack_unknown','start_ack_unknown','attach_eof','material_ack_unknown','runtime_owner_unknown','candidate_result_unknown')),
++ CHECK(child_id IS NULL OR create_effect_hash IS NOT NULL),
++ CHECK(start_effect_hash IS NULL OR child_id IS NOT NULL),
++ CHECK(child_start_hash IS NULL OR start_effect_hash IS NOT NULL),
++ CHECK(readiness_json IS NULL OR child_start_hash IS NOT NULL),
++ CHECK(material_release_id IS NULL OR readiness_json IS NOT NULL),
++ CHECK(result_json IS NULL OR material_release_id IS NOT NULL),
++ CHECK(unknown_ms IS NULL OR phase IN ('unknown','retired')),
++ CHECK((phase='retired')=(retirement_json IS NOT NULL)),
++ CHECK(phase!='prepared' OR (create_effect_hash IS NULL AND child_id IS NULL)),
++ CHECK(phase!='create_intent' OR (create_effect_hash IS NOT NULL AND child_id IS NULL)),
++ CHECK(phase!='created' OR (child_id IS NOT NULL AND start_effect_hash IS NULL)),
++ CHECK(phase!='start_intent' OR (start_effect_hash IS NOT NULL AND child_start_hash IS NULL)),
++ CHECK(phase!='waiting' OR (child_start_hash IS NOT NULL AND readiness_json IS NULL)),
++ CHECK(phase!='ready' OR (readiness_json IS NOT NULL AND material_release_id IS NULL)),
++ CHECK(phase NOT IN ('material_spent','running') OR (material_release_id IS NOT NULL AND result_json IS NULL)),
++ CHECK(phase!='result' OR result_json IS NOT NULL),
++ CHECK(phase!='unknown' OR unknown_ms IS NOT NULL),
++ CHECK(material_release_id IS NULL OR length(material_release_id) BETWEEN 1 AND 128),
++ CHECK(readiness_json IS NULL OR (length(CAST(readiness_json AS BLOB))<=16384 AND json_valid(readiness_json))),
++ CHECK(result_json IS NULL OR (length(CAST(result_json AS BLOB))<=4096 AND json_valid(result_json))),
++ CHECK(retirement_json IS NULL OR (length(CAST(retirement_json AS BLOB))<=8192 AND json_valid(retirement_json))),
++ CHECK(ready_observed_ms IS NULL OR (ready_expires_ms>ready_observed_ms AND ready_expires_ms-ready_observed_ms<=5000 AND ready_expires_ms<=deadline_ms)),
++ CHECK(material_spent_ms IS NULL OR material_spent_ms<=material_ready_expires_ms),
++ CHECK(readiness_json IS NULL OR COALESCE((json_type(readiness_json,'$.schemaVersion')='integer' AND json_extract(readiness_json,'$.schemaVersion') IS 1 AND json_extract(readiness_json,'$.kind') IS 'original-candidate-ready-v1' AND json_extract(readiness_json,'$.runId') IS run_id AND json_extract(readiness_json,'$.attemptId') IS attempt_id AND json_extract(readiness_json,'$.candidateIntentHash') IS candidate_intent_hash AND json_extract(readiness_json,'$.specHash') IS spec_hash AND json_extract(readiness_json,'$.containerId') IS child_id AND json_extract(readiness_json,'$.childBirthHash') IS child_birth_hash AND json_extract(readiness_json,'$.childStartHash') IS child_start_hash AND json_extract(readiness_json,'$.daemonId') IS daemon_id AND json_extract(readiness_json,'$.imageId') IS image_id AND json_extract(readiness_json,'$.catalogSha256') IS catalog_sha256 AND json_extract(readiness_json,'$.artifactClosureSha256') IS artifact_closure_sha256 AND json_extract(readiness_json,'$.selectionSha256') IS selection_sha256 AND json_extract(readiness_json,'$.attachIdentityHash') IS attach_identity_hash AND json_extract(readiness_json,'$.trapAddress') IS '127.0.0.1:39261' AND json_extract(readiness_json,'$.proxyAddress') IS '127.0.0.1:39262' AND json_extract(readiness_json,'$.observedAt') IS ready_observed_ms AND json_extract(readiness_json,'$.expiresAt') IS ready_expires_ms AND json_extract(readiness_json,'$.networkMode')='none' AND json_type(readiness_json,'$.tty')='false' AND json_type(readiness_json,'$.pid')='integer' AND json_extract(readiness_json,'$.pid')>0),0)),
++ CHECK(material_readiness_json IS NULL OR COALESCE((json_type(material_readiness_json,'$.schemaVersion')='integer' AND json_extract(material_readiness_json,'$.schemaVersion') IS 1 AND json_extract(material_readiness_json,'$.kind') IS 'original-candidate-ready-v1' AND json_extract(material_readiness_json,'$.runId') IS run_id AND json_extract(material_readiness_json,'$.attemptId') IS attempt_id AND json_extract(material_readiness_json,'$.candidateIntentHash') IS candidate_intent_hash AND json_extract(material_readiness_json,'$.specHash') IS spec_hash AND json_extract(material_readiness_json,'$.containerId') IS child_id AND json_extract(material_readiness_json,'$.childBirthHash') IS child_birth_hash AND json_extract(material_readiness_json,'$.childStartHash') IS child_start_hash AND json_extract(material_readiness_json,'$.daemonId') IS daemon_id AND json_extract(material_readiness_json,'$.imageId') IS image_id AND json_extract(material_readiness_json,'$.catalogSha256') IS catalog_sha256 AND json_extract(material_readiness_json,'$.artifactClosureSha256') IS artifact_closure_sha256 AND json_extract(material_readiness_json,'$.selectionSha256') IS selection_sha256 AND json_extract(material_readiness_json,'$.attachIdentityHash') IS attach_identity_hash AND json_extract(material_readiness_json,'$.trapAddress') IS '127.0.0.1:39261' AND json_extract(material_readiness_json,'$.proxyAddress') IS '127.0.0.1:39262' AND json_extract(material_readiness_json,'$.observedAt') IS material_ready_observed_ms AND json_extract(material_readiness_json,'$.expiresAt') IS material_ready_expires_ms AND json_extract(material_readiness_json,'$.networkMode')='none' AND json_type(material_readiness_json,'$.tty')='false' AND json_type(material_readiness_json,'$.pid')='integer' AND json_extract(material_readiness_json,'$.pid')>0),0)),
++ CHECK(material_readiness_json IS NULL OR (json_valid(material_readiness_json) AND length(CAST(material_readiness_json AS BLOB))<=16384 AND material_ready_observed_ms>=ready_observed_ms AND material_ready_expires_ms>material_ready_observed_ms AND material_ready_expires_ms-material_ready_observed_ms<=5000 AND material_ready_expires_ms<=deadline_ms)),
++ CHECK(result_json IS NULL OR COALESCE((json_type(result_json,'$.schemaVersion')='integer' AND json_extract(result_json,'$.schemaVersion') IS 1 AND json_extract(result_json,'$.kind') IS 'original-candidate-result-v1' AND json_extract(result_json,'$.runId') IS run_id AND json_extract(result_json,'$.attemptId') IS attempt_id AND json_extract(result_json,'$.candidateIntentHash') IS candidate_intent_hash AND json_extract(result_json,'$.specHash') IS spec_hash AND json_extract(result_json,'$.containerId') IS child_id AND json_extract(result_json,'$.childBirthHash') IS child_birth_hash AND json_extract(result_json,'$.childStartHash') IS child_start_hash AND json_extract(result_json,'$.materialReleaseId') IS material_release_id AND json_type(result_json,'$.exitCode')='integer' AND json_extract(result_json,'$.verification') IN ('response-verified','unverified','error') AND length(json_extract(result_json,'$.reportSha256'))=64 AND json_extract(result_json,'$.reportSha256') NOT GLOB '*[^0-9a-f]*'),0))
++) STRICT;
++CREATE TRIGGER candidate131_new_marker BEFORE INSERT ON job_run_managed_execution
++WHEN NEW.purpose='candidate-inert-v1' AND (NEW.candidate_waiting_protocol IS NOT 'original-candidate-waiting-v1' OR NEW.phase!='prepared' OR NEW.effect_fence!='open-v1' OR NEW.original_container_id IS NOT NULL OR NEW.material_consumed_at IS NOT NULL OR NEW.credential_id IS NOT NULL OR NEW.result_json IS NOT NULL OR NEW.retirement_proof IS NOT NULL)
++BEGIN SELECT RAISE(ABORT,'New candidate requires original waiting protocol'); END;
++CREATE TRIGGER candidate131_base_no_update BEFORE UPDATE ON job_run_managed_execution
++WHEN NEW.candidate_waiting_protocol IS NOT OLD.candidate_waiting_protocol OR OLD.candidate_waiting_protocol='original-candidate-waiting-v1'
++BEGIN SELECT RAISE(ABORT,'Original candidate base admission is immutable'); END;
++CREATE TRIGGER candidate131_base_no_delete BEFORE DELETE ON job_run_managed_execution WHEN OLD.purpose='candidate-inert-v1'
++BEGIN SELECT RAISE(ABORT,'Original candidate admission is retained'); END;
++CREATE TRIGGER candidate131_base_no_replace BEFORE INSERT ON job_run_managed_execution
++WHEN EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE (e.purpose='candidate-inert-v1' OR NEW.purpose='candidate-inert-v1') AND (e.run_id=NEW.run_id OR e.attempt_id=NEW.attempt_id))
++ OR (NEW.original_container_id IS NOT NULL AND EXISTS(SELECT 1 FROM job_run_candidate_lifecycle c WHERE c.child_id=NEW.original_container_id))
++BEGIN SELECT RAISE(ABORT,'Original candidate admission cannot be replaced'); END;
++CREATE TRIGGER candidate131_extension_initial BEFORE INSERT ON job_run_candidate_lifecycle
++WHEN NEW.phase!='prepared' OR NEW.revision!=0 OR NEW.create_effect_hash IS NOT NULL OR NEW.child_id IS NOT NULL OR NEW.child_birth_hash IS NOT NULL OR NEW.child_created_ms IS NOT NULL OR NEW.start_effect_hash IS NOT NULL OR NEW.attach_identity_hash IS NOT NULL OR NEW.child_start_hash IS NOT NULL OR NEW.child_started_ms IS NOT NULL OR NEW.readiness_json IS NOT NULL OR NEW.ready_observed_ms IS NOT NULL OR NEW.ready_expires_ms IS NOT NULL OR NEW.material_release_id IS NOT NULL OR NEW.material_spent_ms IS NOT NULL OR NEW.result_json IS NOT NULL OR NEW.unknown_code IS NOT NULL OR NEW.unknown_ms IS NOT NULL OR NEW.cancel_requested_ms IS NOT NULL OR NEW.retirement_json IS NOT NULL OR NEW.retired_ms IS NOT NULL OR NEW.material_readiness_json IS NOT NULL OR NEW.material_ready_observed_ms IS NOT NULL OR NEW.material_ready_expires_ms IS NOT NULL OR NOT EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=NEW.run_id AND e.purpose='candidate-inert-v1' AND e.candidate_waiting_protocol='original-candidate-waiting-v1' AND e.phase='prepared' AND e.effect_fence='open-v1' AND NEW.run_id IS e.run_id AND NEW.attempt_id IS e.attempt_id AND NEW.candidate_intent_hash IS e.candidate_intent_hash AND NEW.spec_hash IS e.spec_hash AND NEW.run_identity_hash IS e.run_identity_hash AND NEW.organization_id IS e.organization_id AND NEW.owner_user_id IS e.owner_user_id AND NEW.project_id IS e.project_id AND NEW.job_id IS e.job_id AND NEW.runtime_id IS e.runtime_id AND NEW.parent_container_id IS e.parent_container_id AND NEW.workspace_id IS e.workspace_id AND NEW.binding_hash IS e.binding_hash AND NEW.binding_epoch IS e.binding_epoch AND NEW.daemon_id IS e.daemon_id AND NEW.image_id IS e.image_id AND NEW.deadline_at IS e.deadline_at AND NEW.created_at IS e.created_at AND NEW.selection_sha256 IS json_extract(e.admission_json,'$.selectionSha256') AND NEW.artifact_closure_sha256 IS json_extract(e.candidate_intent_json,'$.artifactClosureSha256') AND NEW.catalog_sha256 IS json_extract(e.candidate_intent_json,'$.canary.catalogSha256') AND NEW.deadline_ms IS CAST(strftime('%s',e.deadline_at) AS INTEGER)*1000+CAST(substr(e.deadline_at,21,3) AS INTEGER))
++BEGIN SELECT RAISE(ABORT,'Original candidate atomic seed required'); END;
++CREATE TRIGGER candidate131_extension_no_replace BEFORE INSERT ON job_run_candidate_lifecycle
++WHEN EXISTS(SELECT 1 FROM job_run_candidate_lifecycle c WHERE c.run_id=NEW.run_id OR c.attempt_id=NEW.attempt_id OR c.candidate_intent_hash=NEW.candidate_intent_hash OR (NEW.child_id IS NOT NULL AND c.child_id=NEW.child_id) OR (NEW.child_birth_hash IS NOT NULL AND c.child_birth_hash=NEW.child_birth_hash))
++BEGIN SELECT RAISE(ABORT,'Original candidate lifecycle cannot be replaced'); END;
++CREATE TRIGGER candidate131_extension_no_delete BEFORE DELETE ON job_run_candidate_lifecycle BEGIN SELECT RAISE(ABORT,'Original candidate lifecycle is retained'); END;
++CREATE TRIGGER candidate131_seed AFTER INSERT ON job_run_managed_execution WHEN NEW.candidate_waiting_protocol='original-candidate-waiting-v1'
++BEGIN
++ INSERT INTO job_run_candidate_lifecycle(run_id,attempt_id,candidate_intent_hash,spec_hash,run_identity_hash,selection_sha256,organization_id,owner_user_id,project_id,job_id,runtime_id,parent_container_id,workspace_id,binding_hash,binding_epoch,daemon_id,image_id,artifact_closure_sha256,catalog_sha256,deadline_at,deadline_ms,created_at,phase,revision,updated_ms) VALUES(NEW.run_id,NEW.attempt_id,NEW.candidate_intent_hash,NEW.spec_hash,NEW.run_identity_hash,json_extract(NEW.admission_json,'$.selectionSha256'),NEW.organization_id,NEW.owner_user_id,NEW.project_id,NEW.job_id,NEW.runtime_id,NEW.parent_container_id,NEW.workspace_id,NEW.binding_hash,NEW.binding_epoch,NEW.daemon_id,NEW.image_id,json_extract(NEW.candidate_intent_json,'$.artifactClosureSha256'),json_extract(NEW.candidate_intent_json,'$.canary.catalogSha256'),NEW.deadline_at,CAST(strftime('%s',NEW.deadline_at) AS INTEGER)*1000+CAST(substr(NEW.deadline_at,21,3) AS INTEGER),NEW.created_at,'prepared',0,CAST(strftime('%s',NEW.created_at) AS INTEGER)*1000+CAST(substr(NEW.created_at,21,3) AS INTEGER));
++END;
++CREATE TRIGGER candidate131_transition BEFORE UPDATE ON job_run_candidate_lifecycle
++WHEN OLD.phase='retired' OR NEW.revision!=OLD.revision+1 OR NEW.updated_ms<OLD.updated_ms
++ OR NEW.run_id IS NOT OLD.run_id OR NEW.attempt_id IS NOT OLD.attempt_id OR NEW.candidate_intent_hash IS NOT OLD.candidate_intent_hash OR NEW.spec_hash IS NOT OLD.spec_hash OR NEW.run_identity_hash IS NOT OLD.run_identity_hash OR NEW.selection_sha256 IS NOT OLD.selection_sha256 OR NEW.organization_id IS NOT OLD.organization_id OR NEW.owner_user_id IS NOT OLD.owner_user_id OR NEW.project_id IS NOT OLD.project_id OR NEW.job_id IS NOT OLD.job_id OR NEW.runtime_id IS NOT OLD.runtime_id OR NEW.parent_container_id IS NOT OLD.parent_container_id OR NEW.workspace_id IS NOT OLD.workspace_id OR NEW.binding_hash IS NOT OLD.binding_hash OR NEW.binding_epoch IS NOT OLD.binding_epoch OR NEW.daemon_id IS NOT OLD.daemon_id OR NEW.image_id IS NOT OLD.image_id OR NEW.artifact_closure_sha256 IS NOT OLD.artifact_closure_sha256 OR NEW.catalog_sha256 IS NOT OLD.catalog_sha256 OR NEW.deadline_at IS NOT OLD.deadline_at OR NEW.deadline_ms IS NOT OLD.deadline_ms OR NEW.created_at IS NOT OLD.created_at
++ OR (OLD.create_effect_hash IS NOT NULL AND NEW.create_effect_hash IS NOT OLD.create_effect_hash) OR (OLD.child_id IS NOT NULL AND NEW.child_id IS NOT OLD.child_id) OR (OLD.child_birth_hash IS NOT NULL AND NEW.child_birth_hash IS NOT OLD.child_birth_hash) OR (OLD.child_created_ms IS NOT NULL AND NEW.child_created_ms IS NOT OLD.child_created_ms) OR (OLD.start_effect_hash IS NOT NULL AND NEW.start_effect_hash IS NOT OLD.start_effect_hash) OR (OLD.attach_identity_hash IS NOT NULL AND NEW.attach_identity_hash IS NOT OLD.attach_identity_hash) OR (OLD.child_start_hash IS NOT NULL AND NEW.child_start_hash IS NOT OLD.child_start_hash) OR (OLD.child_started_ms IS NOT NULL AND NEW.child_started_ms IS NOT OLD.child_started_ms) OR (OLD.readiness_json IS NOT NULL AND NEW.readiness_json IS NOT OLD.readiness_json) OR (OLD.ready_observed_ms IS NOT NULL AND NEW.ready_observed_ms IS NOT OLD.ready_observed_ms) OR (OLD.ready_expires_ms IS NOT NULL AND NEW.ready_expires_ms IS NOT OLD.ready_expires_ms) OR (OLD.material_release_id IS NOT NULL AND NEW.material_release_id IS NOT OLD.material_release_id) OR (OLD.material_spent_ms IS NOT NULL AND NEW.material_spent_ms IS NOT OLD.material_spent_ms) OR (OLD.result_json IS NOT NULL AND NEW.result_json IS NOT OLD.result_json) OR (OLD.unknown_code IS NOT NULL AND NEW.unknown_code IS NOT OLD.unknown_code) OR (OLD.unknown_ms IS NOT NULL AND NEW.unknown_ms IS NOT OLD.unknown_ms) OR (OLD.cancel_requested_ms IS NOT NULL AND NEW.cancel_requested_ms IS NOT OLD.cancel_requested_ms) OR (OLD.retirement_json IS NOT NULL AND NEW.retirement_json IS NOT OLD.retirement_json) OR (OLD.retired_ms IS NOT NULL AND NEW.retired_ms IS NOT OLD.retired_ms) OR (OLD.material_readiness_json IS NOT NULL AND NEW.material_readiness_json IS NOT OLD.material_readiness_json) OR (OLD.material_ready_observed_ms IS NOT NULL AND NEW.material_ready_observed_ms IS NOT OLD.material_ready_observed_ms) OR (OLD.material_ready_expires_ms IS NOT NULL AND NEW.material_ready_expires_ms IS NOT OLD.material_ready_expires_ms)
++ OR COALESCE(((OLD.phase='prepared' AND NEW.phase='create_intent' AND OLD.cancel_requested_ms IS NULL AND NEW.updated_ms<=OLD.deadline_ms AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='create_intent' AND NEW.phase='created' AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='created' AND NEW.phase='start_intent' AND OLD.cancel_requested_ms IS NULL AND NEW.updated_ms<=OLD.deadline_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='start_intent' AND NEW.phase='waiting' AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='waiting' AND NEW.phase='ready' AND OLD.cancel_requested_ms IS NULL AND NEW.updated_ms<=OLD.deadline_ms AND NEW.ready_observed_ms<=NEW.updated_ms AND NEW.ready_expires_ms>NEW.updated_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='ready' AND NEW.phase='material_spent' AND OLD.cancel_requested_ms IS NULL AND NEW.updated_ms<=OLD.deadline_ms AND NEW.updated_ms<NEW.material_ready_expires_ms AND NEW.material_ready_observed_ms<=NEW.updated_ms AND NEW.material_spent_ms<=NEW.updated_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms)
++ OR (OLD.phase='material_spent' AND NEW.phase='running' AND OLD.cancel_requested_ms IS NULL AND NEW.updated_ms<=OLD.deadline_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='running' AND NEW.phase='result' AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase!='retired' AND NEW.phase=OLD.phase AND OLD.cancel_requested_ms IS NULL AND NEW.cancel_requested_ms<=NEW.updated_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase NOT IN ('retired','unknown') AND NEW.phase='unknown' AND OLD.unknown_ms IS NULL AND NEW.unknown_ms<=NEW.updated_ms AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)
++ OR (OLD.phase='unknown' AND NEW.phase='unknown' AND OLD.child_id IS NULL AND OLD.create_effect_hash IS NOT NULL AND NEW.child_id IS NOT NULL AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms)
++ OR (OLD.phase='unknown' AND NEW.phase='unknown' AND OLD.child_start_hash IS NULL AND OLD.start_effect_hash IS NOT NULL AND NEW.child_start_hash IS NOT NULL AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.retirement_json IS OLD.retirement_json AND NEW.retired_ms IS OLD.retired_ms)
++ OR (OLD.phase!='retired' AND NEW.phase='retired' AND NEW.retired_ms<=NEW.updated_ms AND COALESCE((json_type(NEW.retirement_json,'$.schemaVersion')='integer' AND json_extract(NEW.retirement_json,'$.schemaVersion')=1 AND json_extract(NEW.retirement_json,'$.runId')=OLD.run_id AND json_extract(NEW.retirement_json,'$.attemptId')=OLD.attempt_id AND json_extract(NEW.retirement_json,'$.candidateIntentHash')=OLD.candidate_intent_hash AND json_extract(NEW.retirement_json,'$.specHash')=OLD.spec_hash AND json_extract(NEW.retirement_json,'$.retiredAtMs')=NEW.retired_ms AND ((OLD.child_id IS NOT NULL AND json_extract(NEW.retirement_json,'$.kind')='original-candidate-scope-retired-v1' AND json_extract(NEW.retirement_json,'$.containerId')=OLD.child_id AND json_extract(NEW.retirement_json,'$.childBirthHash')=OLD.child_birth_hash AND json_extract(NEW.retirement_json,'$.childStartHash') IS OLD.child_start_hash AND json_extract(NEW.retirement_json,'$.daemonId')=OLD.daemon_id AND json_type(NEW.retirement_json,'$.exitCode')='integer' AND json_extract(NEW.retirement_json,'$.exitCode') BETWEEN 0 AND 255 AND length(json_extract(NEW.retirement_json,'$.waitJoinSha256'))=64 AND json_extract(NEW.retirement_json,'$.waitJoinSha256') NOT GLOB '*[^0-9a-f]*' AND length(json_extract(NEW.retirement_json,'$.eofSha256'))=64 AND json_extract(NEW.retirement_json,'$.eofSha256') NOT GLOB '*[^0-9a-f]*') OR (OLD.phase IN ('prepared','create_intent') AND OLD.child_id IS NULL AND OLD.material_release_id IS NULL AND OLD.unknown_ms IS NULL AND json_extract(NEW.retirement_json,'$.kind')='original-candidate-no-create-v1' AND json_extract(NEW.retirement_json,'$.createEffectHash') IS OLD.create_effect_hash AND length(json_extract(NEW.retirement_json,'$.originalNotSentSha256'))=64 AND json_extract(NEW.retirement_json,'$.originalNotSentSha256') NOT GLOB '*[^0-9a-f]*'))),0) AND NEW.create_effect_hash IS OLD.create_effect_hash AND NEW.child_id IS OLD.child_id AND NEW.child_birth_hash IS OLD.child_birth_hash AND NEW.child_created_ms IS OLD.child_created_ms AND NEW.start_effect_hash IS OLD.start_effect_hash AND NEW.attach_identity_hash IS OLD.attach_identity_hash AND NEW.child_start_hash IS OLD.child_start_hash AND NEW.child_started_ms IS OLD.child_started_ms AND NEW.readiness_json IS OLD.readiness_json AND NEW.ready_observed_ms IS OLD.ready_observed_ms AND NEW.ready_expires_ms IS OLD.ready_expires_ms AND NEW.material_release_id IS OLD.material_release_id AND NEW.material_spent_ms IS OLD.material_spent_ms AND NEW.result_json IS OLD.result_json AND NEW.unknown_code IS OLD.unknown_code AND NEW.unknown_ms IS OLD.unknown_ms AND NEW.cancel_requested_ms IS OLD.cancel_requested_ms AND NEW.material_readiness_json IS OLD.material_readiness_json AND NEW.material_ready_observed_ms IS OLD.material_ready_observed_ms AND NEW.material_ready_expires_ms IS OLD.material_ready_expires_ms)),0)=0
++BEGIN SELECT RAISE(ABORT,'Original candidate transition is immutable and monotonic'); END;
++CREATE TRIGGER candidate131_child_no_adoption BEFORE UPDATE ON job_run_candidate_lifecycle
++WHEN OLD.child_id IS NULL AND NEW.child_id IS NOT NULL AND EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.original_container_id=NEW.child_id)
++BEGIN SELECT RAISE(ABORT,'Original candidate cannot adopt another execution child'); END;
++CREATE TRIGGER candidate131_run_no_delete BEFORE DELETE ON job_runs WHEN EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=OLD.id AND e.purpose='candidate-inert-v1') BEGIN SELECT RAISE(ABORT,'Original candidate Run is retained'); END;
++CREATE TRIGGER candidate131_run_no_replace BEFORE INSERT ON job_runs WHEN EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=NEW.id AND e.purpose='candidate-inert-v1') BEGIN SELECT RAISE(ABORT,'Original candidate Run cannot be replaced'); END;
++CREATE TRIGGER candidate131_run_terminal_guard BEFORE UPDATE ON job_runs
++WHEN EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=OLD.id AND e.candidate_waiting_protocol='original-candidate-waiting-v1') AND
++ ((OLD.status IN ('success','failed','timeout','cancelled') AND (NEW.status IS NOT OLD.status OR NEW.finished_at IS NOT OLD.finished_at))
++ OR (NEW.status IN ('success','failed','timeout','cancelled') AND NEW.status IS NOT OLD.status AND NOT EXISTS(SELECT 1 FROM job_run_candidate_lifecycle c WHERE c.run_id=OLD.id AND c.phase='retired' AND c.retirement_json IS NOT NULL AND (NEW.status!='success' OR (json_extract(c.result_json,'$.verification')='response-verified' AND json_extract(c.result_json,'$.exitCode')=0 AND json_extract(c.retirement_json,'$.exitCode')=0)))))
++BEGIN SELECT RAISE(ABORT,'Candidate requires original physical retirement before terminal outcome'); END;
++-- Existing production credential/material guards intentionally remain unchanged.
++-- Actual candidate credential/frame constructors and HTTP authorization are closed Root gates.
++
++CREATE TRIGGER candidate131_run_identity BEFORE UPDATE ON job_runs
++WHEN EXISTS(SELECT 1 FROM job_run_managed_execution e WHERE e.run_id=OLD.id AND e.purpose='candidate-inert-v1') AND (NEW.id IS NOT OLD.id OR NEW.job_id IS NOT OLD.job_id OR NEW.project_id IS NOT OLD.project_id OR NEW.organization_id IS NOT OLD.organization_id OR NEW.effective_service_principal_id IS NOT OLD.effective_service_principal_id OR NEW.job_revision IS NOT OLD.job_revision OR NEW.schedule_revision IS NOT OLD.schedule_revision OR NEW.authorization_revision IS NOT OLD.authorization_revision OR NEW.trigger IS NOT OLD.trigger OR NEW.scheduled_for IS NOT OLD.scheduled_for OR NEW.created_at IS NOT OLD.created_at)
++BEGIN SELECT RAISE(ABORT,'Original candidate Run identity is immutable'); END;
++
++CREATE TRIGGER candidate131_exact_evidence BEFORE UPDATE ON job_run_candidate_lifecycle
++WHEN (NEW.readiness_json IS NOT NULL AND ((SELECT count(*) FROM json_each(NEW.readiness_json))!=22 OR (SELECT count(DISTINCT key) FROM json_each(NEW.readiness_json))!=22 OR EXISTS(SELECT 1 FROM json_each(NEW.readiness_json) WHERE key NOT IN ('schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','daemonId','imageId','catalogSha256','artifactClosureSha256','selectionSha256','attachIdentityHash','trapAddress','proxyAddress','pid','networkMode','tty','observedAt','expiresAt'))))
++ OR (NEW.material_readiness_json IS NOT NULL AND ((SELECT count(*) FROM json_each(NEW.material_readiness_json))!=22 OR (SELECT count(DISTINCT key) FROM json_each(NEW.material_readiness_json))!=22 OR EXISTS(SELECT 1 FROM json_each(NEW.material_readiness_json) WHERE key NOT IN ('schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','daemonId','imageId','catalogSha256','artifactClosureSha256','selectionSha256','attachIdentityHash','trapAddress','proxyAddress','pid','networkMode','tty','observedAt','expiresAt'))))
++ OR (NEW.result_json IS NOT NULL AND ((SELECT count(*) FROM json_each(NEW.result_json))!=13 OR (SELECT count(DISTINCT key) FROM json_each(NEW.result_json))!=13 OR EXISTS(SELECT 1 FROM json_each(NEW.result_json) WHERE key NOT IN ('schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','materialReleaseId','exitCode','verification','reportSha256'))))
++ OR (NEW.retirement_json IS NOT NULL AND ((json_extract(NEW.retirement_json,'$.kind')='original-candidate-no-create-v1' AND ((SELECT count(*) FROM json_each(NEW.retirement_json))!=9 OR (SELECT count(DISTINCT key) FROM json_each(NEW.retirement_json))!=9 OR EXISTS(SELECT 1 FROM json_each(NEW.retirement_json) WHERE key NOT IN ('schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','createEffectHash','originalNotSentSha256','retiredAtMs')))) OR (json_extract(NEW.retirement_json,'$.kind')!='original-candidate-no-create-v1' AND ((SELECT count(*) FROM json_each(NEW.retirement_json))!=14 OR (SELECT count(DISTINCT key) FROM json_each(NEW.retirement_json))!=14 OR EXISTS(SELECT 1 FROM json_each(NEW.retirement_json) WHERE key NOT IN ('schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','daemonId','exitCode','waitJoinSha256','eofSha256','retiredAtMs'))))))
++BEGIN SELECT RAISE(ABORT,'Original candidate evidence has an exact bounded shape'); END;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs
+@@ -0,0 +1,63 @@
++import {createHash} from "node:crypto";
++import {parseStrictJobJson} from "./job-bootstrap-frame.mjs";
++import {describeStoredManagedPurpose} from "./core126-purpose.mjs";
++import {candidateInertIntentHash} from "../../../../tools/veyra-release/core126-candidate-intent.mjs";
++import * as original from "./candidate-lifecycle-original-gates.mjs";
++const deny=code=>{throw Object.assign(Error(code),{code,status:503});},hex=/^[a-f0-9]{64}$/,uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
++const exact=(value,names)=>{if(!value||typeof value!=="object"||Array.isArray(value)||Object.keys(value).sort().join("|")!==[...names].sort().join("|"))deny("CORE131_ORIGINAL_FACTS_UNAVAILABLE");};
++const readyKeys=["schemaVersion", "kind", "runId", "attemptId", "candidateIntentHash", "specHash", "containerId", "childBirthHash", "childStartHash", "daemonId", "imageId", "catalogSha256", "artifactClosureSha256", "selectionSha256", "attachIdentityHash", "trapAddress", "proxyAddress", "pid", "networkMode", "tty", "observedAt", "expiresAt"];
++const resultKeys=["schemaVersion", "kind", "runId", "attemptId", "candidateIntentHash", "specHash", "containerId", "childBirthHash", "childStartHash", "materialReleaseId", "exitCode", "verification", "reportSha256"];
++const physicalKeys=["schemaVersion", "kind", "runId", "attemptId", "candidateIntentHash", "specHash", "containerId", "childBirthHash", "childStartHash", "daemonId", "exitCode", "waitJoinSha256", "eofSha256", "retiredAtMs"];
++const noCreateKeys=["schemaVersion", "kind", "runId", "attemptId", "candidateIntentHash", "specHash", "createEffectHash", "originalNotSentSha256", "retiredAtMs"];
++const readyJson=facts=>{exact(facts,readyKeys);return boundedJson(facts,16384);};
++const boundedJson=(value,limit)=>{const bytes=Buffer.from(JSON.stringify(value));if(bytes.length>limit)deny("CORE131_ORIGINAL_FACTS_UNAVAILABLE");parseStrictJobJson(bytes,limit);return bytes.toString("utf8");};
++const originalHash=value=>createHash("sha256").update(typeof value==="string"?value:JSON.stringify(value)).digest("hex");
++const hash=value=>{if(typeof value!=="string"||!hex.test(value))deny("CORE131_ORIGINAL_FACTS_UNAVAILABLE");return value;};
++/** Extension methods run ONLY through the existing Core126 row/write/base/lease
++ * closures. No database opener, credentials, scheduler, HTTP auth or fake owner. */
++export function createCandidateLifecycleExtension({db,getDb,write,clock,readManagedRow,baseCurrent,originalRunIdentity,jobs,candidateLeases}){
++ const same=()=>{if(getDb()!==db)deny("CORE131_DATABASE_REPLACED");};
++ const now=()=>{const value=clock().getTime();if(!Number.isSafeInteger(value)||value<0)deny("CORE131_CLOCK_UNAVAILABLE");return value;};
++ function requireSchema(){same();if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='managed_candidate_lifecycle_schema'").get()||db.prepare("SELECT schema_version FROM managed_candidate_lifecycle_schema WHERE singleton=1").get()?.schema_version!==1)deny("CORE131_SCHEMA_UNAVAILABLE");}
++ function bound(runId){
++  requireSchema();if(!uuid.test(runId??""))deny("CORE131_ORIGINAL_UNAVAILABLE");const r=readManagedRow(runId),purpose=r&&describeStoredManagedPurpose(r),c=db.prepare("SELECT * FROM job_run_candidate_lifecycle WHERE run_id=?").get(runId);
++  if(!r||purpose.purpose!=="candidate-inert-v1"||r.candidate_waiting_protocol!=="original-candidate-waiting-v1"||!c||c.run_id!==r.run_id||c.attempt_id!==r.attempt_id||c.candidate_intent_hash!==purpose.candidateIntentHash||c.spec_hash!==r.spec_hash||c.run_identity_hash!==r.run_identity_hash||c.deadline_at!==r.deadline_at||c.deadline_ms!==Date.parse(r.deadline_at))deny("CORE131_ORIGINAL_UNAVAILABLE");
++  const a=parseStrictJobJson(Buffer.from(r.admission_json),65536),intent=parseStrictJobJson(Buffer.from(r.candidate_intent_json),65536),run=jobs.getJobRun(r.project_id,r.run_id);
++  if(!run||originalRunIdentity(run)!==c.run_identity_hash||candidateInertIntentHash(intent)!==c.candidate_intent_hash||a.selectionSha256!==c.selection_sha256||a.specHash!==c.spec_hash||a.attemptId!==c.attempt_id||a.deadlineAt!==c.deadline_at)deny("CORE131_ORIGINAL_UNAVAILABLE");
++  return {r,c,a,intent,selection:{runId:r.run_id,projectId:r.project_id,runtimeId:r.runtime_id,workspaceId:r.workspace_id},binding:Object.freeze({runId:r.run_id,attemptId:r.attempt_id,candidateIntentHash:c.candidate_intent_hash,specHash:c.spec_hash,selectionSha256:c.selection_sha256,deadlineAt:c.deadline_at,deadlineMs:c.deadline_ms,runIdentityHash:c.run_identity_hash,organizationId:c.organization_id,ownerUserId:c.owner_user_id,projectId:c.project_id,jobId:c.job_id,runtimeId:c.runtime_id,parentContainerId:c.parent_container_id,workspaceId:c.workspace_id,bindingHash:c.binding_hash,bindingEpoch:c.binding_epoch,daemonId:c.daemon_id,imageId:c.image_id,artifactClosureSha256:c.artifact_closure_sha256,catalogSha256:c.catalog_sha256,containerId:c.child_id,childBirthHash:c.child_birth_hash,childStartHash:c.child_start_hash,createEffectHash:c.create_effect_hash,attachIdentityHash:c.attach_identity_hash})};
++ }
++ function current(value,context){
++  // Fixed missing constructor refuses. Root must compare refreshed actual source
++  // selection/intent to these ORIGINAL persisted hashes, never remint prepare.
++  if(original.requireOriginalCandidateLifecycleCurrent(context,value.binding)!==undefined)deny("CORE131_CURRENT_CONTEXT_UNAVAILABLE");
++  const facts=baseCurrent(value.selection,context,"candidate-inert-v1");
++  if(now()>=value.c.deadline_ms||originalHash(facts.agentConfig)!==value.a.agentHash||originalHash(facts.job.prompt_template)!==value.a.promptHash||originalRunIdentity(facts.run)!==value.c.run_identity_hash||facts.runtime.revision!==value.a.runtimeRevision||facts.runtime.backendContainerId!==value.a.parentContainerId||facts.workspace.storageMappingHash!==value.a.bindingHash||facts.workspace.securityEpoch!==value.a.bindingEpoch||facts.principalEpoch!==value.a.principalSecurityEpoch)deny("CORE131_CURRENT_BINDING_UNAVAILABLE");
++ }
++ const control=(value,context)=>{if(original.requireOriginalCandidateLifecycleControl(context,value.binding)!==undefined)deny("CORE131_CONTROL_CONTEXT_UNAVAILABLE");};
++ function prepared(runId){const value=bound(runId);if(value.c.phase!=="prepared"||value.c.cancel_requested_ms!==null||value.c.unknown_ms!==null||now()>=value.c.deadline_ms)deny("CORE131_PREPARED_UNAVAILABLE");return value;}
++ function lease(key){const saved=key&&candidateLeases.get(key);if(!saved||saved.db!==db)deny("CORE131_ORIGINAL_LEASE_UNAVAILABLE");const value=prepared(saved.intent.run.runId);if(value.r.admission_json!==JSON.stringify(saved.admission)||value.c.selection_sha256!==saved.selectionSha256||candidateInertIntentHash(saved.intent)!==value.c.candidate_intent_hash)deny("CORE131_ORIGINAL_LEASE_UNAVAILABLE");return value;}
++ const metadata=value=>Object.freeze({purpose:"candidate-inert-v1",runId:value.c.run_id,attemptId:value.c.attempt_id,candidateIntentHash:value.c.candidate_intent_hash,specHash:value.c.spec_hash,phase:value.c.phase,revision:value.c.revision,containerId:value.c.child_id,childBirthHash:value.c.child_birth_hash,deadlineAt:value.c.deadline_at,unknown:value.c.unknown_ms!==null,retirementRecorded:value.c.phase==="retired"});
++ function cas(value,phase,fields){
++  const names=Object.keys(fields);if(names.some(k=>!["create_effect_hash","child_id","child_birth_hash","child_created_ms","start_effect_hash","attach_identity_hash","child_start_hash","child_started_ms","readiness_json","ready_observed_ms","ready_expires_ms","material_release_id","material_spent_ms","material_readiness_json","material_ready_observed_ms","material_ready_expires_ms","result_json","unknown_code","unknown_ms","cancel_requested_ms","retirement_json","retired_ms"].includes(k)))deny("CORE131_INVALID_WRITE");
++  const timestamp=now(),changed=db.prepare("UPDATE job_run_candidate_lifecycle SET phase=?,"+names.map(k=>k+"=?").join(",")+(names.length?",":"")+"revision=revision+1,updated_ms=? WHERE run_id=? AND attempt_id=? AND candidate_intent_hash=? AND spec_hash=? AND revision=? AND phase=?").run(phase,...names.map(k=>fields[k]),timestamp,value.c.run_id,value.c.attempt_id,value.c.candidate_intent_hash,value.c.spec_hash,value.c.revision,value.c.phase);
++  if(Number(changed.changes)!==1)deny("CORE131_REVISION_CONFLICT");return metadata(bound(value.c.run_id));
++ }
++ function transition(runId,context,handle,mode,method,next,fields){
++  const before=bound(runId);mode==="current"?current(before,context):control(before,context);
++  return write(()=>{const value=bound(runId);mode==="current"?current(value,context):control(value,context);const facts=original[method](handle,value.binding);return cas(value,typeof next==="function"?next(value):next,fields(facts,value));});
++ }
++ return Object.freeze({requireSchema,requirePrepared(runId){return metadata(prepared(runId));},
++  inspect(runId,context){const value=bound(runId);control(value,context);return metadata(value);},
++  createIntent(key,context,handle){const value=lease(key);return transition(value.c.run_id,context,handle,"current","requireOriginalCandidateCreateIntent","create_intent",facts=>{exact(facts,["createEffectHash"]);return{create_effect_hash:hash(facts.createEffectHash)};});},
++  bindChild:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateChild",value=>value.c.phase==="unknown"?"unknown":"created",facts=>{exact(facts,["containerId","childBirthHash","createdAtMs"]);return{child_id:hash(facts.containerId),child_birth_hash:hash(facts.childBirthHash),child_created_ms:facts.createdAtMs};}),
++  startIntent:(runId,context,handle)=>transition(runId,context,handle,"current","requireOriginalCandidateAttachIntent","start_intent",facts=>{exact(facts,["startEffectHash","attachIdentityHash"]);return{start_effect_hash:hash(facts.startEffectHash),attach_identity_hash:hash(facts.attachIdentityHash)};}),
++  observeWaiting:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateWaiting",value=>value.c.phase==="unknown"?"unknown":"waiting",facts=>{exact(facts,["childStartHash","startedAtMs"]);return{child_start_hash:hash(facts.childStartHash),child_started_ms:facts.startedAtMs};}),
++  observeReady:(runId,context,handle)=>transition(runId,context,handle,"current","requireOriginalCandidateReady","ready",facts=>({readiness_json:readyJson(facts),ready_observed_ms:facts.observedAt,ready_expires_ms:facts.expiresAt})),
++  commitOriginalMaterial:(runId,context,handle)=>transition(runId,context,handle,"current","spendOriginalCandidateMaterial","material_spent",facts=>{exact(facts,["releaseId","spentAtMs","readiness"]);if(typeof facts.releaseId!=="string"||!uuid.test(facts.releaseId))deny("CORE131_ORIGINAL_FACTS_UNAVAILABLE");return{material_release_id:facts.releaseId,material_spent_ms:facts.spentAtMs,material_readiness_json:readyJson(facts.readiness),material_ready_observed_ms:facts.readiness.observedAt,material_ready_expires_ms:facts.readiness.expiresAt};}),
++  observeRunning:(runId,context,handle)=>transition(runId,context,handle,"current","requireOriginalCandidateRunning","running",facts=>{exact(facts,[]);return{};}),
++  recordResult:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateResult","result",facts=>{exact(facts,resultKeys);return{result_json:boundedJson(facts,4096)};}),
++  cancel(runId,context){const before=bound(runId);control(before,context);return write(()=>{const value=bound(runId);control(value,context);if(value.c.cancel_requested_ms!==null)return metadata(value);return cas(value,value.c.phase,{cancel_requested_ms:now()});});},
++  unknown:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateUnknown","unknown",facts=>{exact(facts,["code","observedAtMs"]);return{unknown_code:facts.code,unknown_ms:facts.observedAtMs};}),
++  retire:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateRetirement","retired",facts=>{exact(facts,facts?.kind==="original-candidate-no-create-v1"?noCreateKeys:physicalKeys);return{retirement_json:boundedJson(facts,8192),retired_ms:facts.retiredAtMs};}),
++ });
++}
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts
+@@ -0,0 +1,7 @@
++import type {Core126OwnerPorts,Core126Facts,Core126Selection,OriginalCandidateLease} from "./managed-job-contracts.mjs";
++import type {OriginalCandidateLifecycleHandle} from "./candidate-lifecycle-original-gates.mjs";
++export type CandidateLifecyclePhase="prepared"|"create_intent"|"created"|"start_intent"|"waiting"|"ready"|"material_spent"|"running"|"result"|"unknown"|"retired";
++export interface CandidateLifecycleMetadata {readonly purpose:"candidate-inert-v1";readonly runId:string;readonly attemptId:string;readonly candidateIntentHash:string;readonly specHash:string;readonly phase:CandidateLifecyclePhase;readonly revision:number;readonly containerId:string|null;readonly childBirthHash:string|null;readonly deadlineAt:string;readonly unknown:boolean;readonly retirementRecorded:boolean;}
++type Step=(runId:string,context:unknown,handle:OriginalCandidateLifecycleHandle)=>CandidateLifecycleMetadata;
++export interface CandidateLifecycleOwnerMethods {candidateCreateIntent(lease:OriginalCandidateLease,context:unknown,handle:OriginalCandidateLifecycleHandle):CandidateLifecycleMetadata;candidateBindOriginalChild:Step;candidateStartIntent:Step;candidateObserveWaiting:Step;candidateObserveReady:Step;candidateCommitOriginalMaterial:Step;candidateObserveRunning:Step;candidateRecordOriginalResult:Step;candidateRequestCancellation(runId:string,context:unknown):CandidateLifecycleMetadata;candidateRetainUnknown:Step;candidateRecordOriginalRetirement:Step;candidateLifecycleReceipt(runId:string,context:unknown):CandidateLifecycleMetadata;}
++export function createCandidateLifecycleExtension(options:{db:ReturnType<Core126OwnerPorts["getDb"]>;getDb:Core126OwnerPorts["getDb"];write<T>(work:()=>T):T;clock():Date;readManagedRow(runId:string):unknown;baseCurrent(selection:Core126Selection,context:unknown,purpose:"candidate-inert-v1"):Core126Facts;originalRunIdentity(run:Core126Facts["run"]):string;jobs:Pick<Core126OwnerPorts["jobs"],"getJobRun">;candidateLeases:WeakMap<object,unknown>}):Readonly<{requireSchema():void;requirePrepared(runId:string):CandidateLifecycleMetadata;inspect(runId:string,context:unknown):CandidateLifecycleMetadata;createIntent(lease:OriginalCandidateLease,context:unknown,handle:OriginalCandidateLifecycleHandle):CandidateLifecycleMetadata;bindChild:Step;startIntent:Step;observeWaiting:Step;observeReady:Step;commitOriginalMaterial:Step;observeRunning:Step;recordResult:Step;cancel(runId:string,context:unknown):CandidateLifecycleMetadata;unknown:Step;retire:Step}>;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs
+@@ -0,0 +1,19 @@
++/** CLOSED constructor gates. These are not injectable authorization callbacks.
++ * Root must implement fixed exports using its genuine original Core/API/manager
++ * private brands and retained original Docker create/attach/start/wait owners.
++ * Until that actual composition exists, no object/JSON/status/Promise/boolean
++ * can authorize a lifecycle transition, credential, frame or physical proof.
++ */
++const closed=kind=>{throw Object.assign(Error("CORE131_ORIGINAL_"+kind+"_UNAVAILABLE"),{code:"CORE131_ORIGINAL_"+kind+"_UNAVAILABLE",status:503});};
++export function requireOriginalCandidateLifecycleCurrent(){return closed("CURRENT_CONTEXT");}
++export function requireOriginalCandidateLifecycleControl(){return closed("CONTROL_CONTEXT");}
++export function requireOriginalCandidateCreateIntent(){return closed("CREATE_OWNER");}
++export function requireOriginalCandidateChild(){return closed("CHILD_OWNER");}
++export function requireOriginalCandidateAttachIntent(){return closed("ATTACH_OWNER");}
++export function requireOriginalCandidateWaiting(){return closed("WAITING_OWNER");}
++export function requireOriginalCandidateReady(){return closed("READINESS_OWNER");}
++export function spendOriginalCandidateMaterial(){return closed("MATERIAL_CONSTRUCTOR");}
++export function requireOriginalCandidateRunning(){return closed("RUNNING_OWNER");}
++export function requireOriginalCandidateResult(){return closed("RESULT_OWNER");}
++export function requireOriginalCandidateUnknown(){return closed("UNKNOWN_OWNER");}
++export function requireOriginalCandidateRetirement(){return closed("RETIREMENT_OWNER");}
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts
+@@ -0,0 +1,17 @@
++/** Constructor interfaces only. All implementation exports are fixed UNAVAILABLE. */
++export interface CandidateLifecycleBinding {readonly runId:string;readonly attemptId:string;readonly candidateIntentHash:string;readonly specHash:string;readonly selectionSha256:string;readonly deadlineAt:string;readonly deadlineMs:number;readonly runIdentityHash:string;readonly organizationId:string;readonly ownerUserId:string;readonly projectId:string;readonly jobId:string;readonly runtimeId:string;readonly parentContainerId:string;readonly workspaceId:string;readonly bindingHash:string;readonly bindingEpoch:number;readonly daemonId:string;readonly imageId:string;readonly artifactClosureSha256:string;readonly catalogSha256:string;readonly containerId:string|null;readonly childBirthHash:string|null;readonly childStartHash:string|null;readonly createEffectHash:string|null;readonly attachIdentityHash:string|null;}
++declare const originalLifecycleHandle:unique symbol;
++export interface OriginalCandidateLifecycleHandle {readonly [originalLifecycleHandle]:never;}
++export function requireOriginalCandidateLifecycleCurrent(context:unknown,binding:CandidateLifecycleBinding):void;
++export function requireOriginalCandidateLifecycleControl(context:unknown,binding:CandidateLifecycleBinding):void;
++export function requireOriginalCandidateCreateIntent(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{createEffectHash:string}>;
++export function requireOriginalCandidateChild(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{containerId:string;childBirthHash:string;createdAtMs:number}>;
++export function requireOriginalCandidateAttachIntent(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{startEffectHash:string;attachIdentityHash:string}>;
++export function requireOriginalCandidateWaiting(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{childStartHash:string;startedAtMs:number}>;
++export function requireOriginalCandidateReady(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<Record<string,unknown>&{observedAt:number;expiresAt:number}>;
++/** Real Root credential/frame owner must spend synchronously in the SAME final transaction. */
++export function spendOriginalCandidateMaterial(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{releaseId:string;spentAtMs:number;readiness:Readonly<Record<string,unknown>&{observedAt:number;expiresAt:number}>}>;
++export function requireOriginalCandidateRunning(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<Record<string,never>>;
++export function requireOriginalCandidateResult(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<Record<string,unknown>>;
++export function requireOriginalCandidateUnknown(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<{code:string;observedAtMs:number}>;
++export function requireOriginalCandidateRetirement(handle:OriginalCandidateLifecycleHandle,binding:CandidateLifecycleBinding):Readonly<Record<string,unknown>&{retiredAtMs:number}>;
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.mjs b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -1,3 +1,4 @@
++import {createCandidateLifecycleExtension} from "./candidate-lifecycle-owner.mjs";
+ import {withOriginalCandidateSourceObservation,spendOriginalCandidateSourceObservation} from '../../../../packages/veyra-operations/core126-image-owner.mjs';
+ import {candidateInertIntentHash} from '../../../../tools/veyra-release/core126-candidate-intent.mjs';
+ import {describeStoredManagedPurpose,requireProductionManagedPurpose} from './core126-purpose.mjs';
+@@ -63,10 +64,12 @@
+   return p;
+  };
+  const manager=ctx=>{requireManager(ctx);same();};
++ const candidateLifecycle=createCandidateLifecycleExtension({db,getDb,write,clock,readManagedRow:row,baseCurrent:base,originalRunIdentity:originalJobRunIdentity,jobs,candidateLeases});
+  return Object.freeze({
+   /** Private original-owner lookup only: data discrimination is never a grant. */
+   admissionPurpose(runId){const r=row(runId);if(!r)fail('MANAGED_JOB_NOT_FOUND');return describeStoredManagedPurpose(r);},
+   async prepareCandidateInert(selection,ctx){
++   candidateLifecycle.requireSchema();
+    if(Object.keys(selection).sort().join('|')!=='projectId|runId|runtimeId|workspaceId')fail('MANAGED_JOB_INVALID_SELECTION');
+    if(typeof ports.originalCandidate?.require!=='function')fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');if(ports.originalCandidate.require(ctx,selection)!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+    const before=base(selection,ctx,"candidate-inert-v1");if(row(selection.runId)||before.run.status!=='running')fail('MANAGED_JOB_CANDIDATE_ALREADY_SEEN');
+@@ -76,14 +79,27 @@
+     const {intent,selectionSha256}=spendOriginalCandidateSourceObservation(ports.imageOwner,facts,id(),originalJobRunIdentity(facts.run)),candidateIntentHash=candidateInertIntentHash(intent);
+     const project=db.prepare('SELECT name FROM projects WHERE id=? AND archived_at IS NULL').get(facts.job.project_id);if(project?.name!==intent.canary.projectName)fail('MANAGED_JOB_PUBLIC_CANARY_UNAVAILABLE');
+     const a={purpose:'candidate-inert-v1',candidateIntentHash,selectionSha256,runId:intent.run.runId,jobId:intent.run.jobId,projectId:intent.scope.projectId,organizationId:intent.scope.organizationId,ownerUserId:intent.scope.ownerUserId,attemptId:intent.run.attemptId,runtimeId:intent.parent.runtimeId,runtimeRevision:intent.resource.runtimeRevision,provisioningRevision:intent.parent.provisioningRevision,parentContainerId:intent.parent.containerId,workspaceId:intent.scope.workspaceId,bindingHash:intent.scope.bindingHash,bindingEpoch:intent.scope.bindingEpoch,jobRevision:intent.run.jobRevision,scheduleRevision:intent.run.scheduleRevision,effectFenceIssuer:fenceIssuer,grantRevision:intent.scope.grantRevision,principalSecurityEpoch:intent.scope.principalSecurityEpoch,promptHash:intent.run.promptHash,daemonId:intent.parent.daemonId,imageId:intent.imageId,resourceAdmissionId:intent.resource.admissionId,agentHash:intent.run.agentHash,model:intent.canary.model,limits:intent.resource.limits,projectName:intent.canary.projectName,deadlineAt:intent.expiresAt};a.specHash=sha(a);
+-    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
++    const columns={candidate_waiting_protocol:'original-candidate-waiting-v1',run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:null,profile_hash:null,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:'prepared',effect_fence:'open-v1',resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:intent.run.runIdentityHash,deadline_at:a.deadlineAt,purpose:'candidate-inert-v1',candidate_intent_json:JSON.stringify(intent),candidate_intent_hash:candidateIntentHash,created_at:clock().toISOString(),updated_at:clock().toISOString()};
+     db.prepare('INSERT INTO job_run_managed_execution ('+Object.keys(columns).join(',')+') VALUES ('+Object.keys(columns).map(()=>'?').join(',')+')').run(...Object.values(columns));
+     const lease=Object.freeze({});candidateLeases.set(lease,{db,admission:Object.freeze(structuredClone(a)),intent,selectionSha256});return lease;
+    }));
+   },
+   /** Metadata receipt, NOT child material. Opaque key is private to this Core instance. */
+-  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
++  describeCandidateLease(lease){same();const value=candidateLeases.get(lease);if(!value||value.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');const r=row(value.intent.run.runId),p=describeStoredManagedPurpose(r);if(p.purpose!=='candidate-inert-v1'||p.candidateIntentHash!==candidateInertIntentHash(value.intent)||r.spec_hash!==value.admission.specHash||r.admission_json!==JSON.stringify(value.admission)||r.phase!=='prepared'||r.material_consumed_at||r.credential_id||r.original_container_id||Date.parse(r.deadline_at)<=clock().getTime())fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');candidateLifecycle.requirePrepared(r.run_id);return Object.freeze({purpose:'candidate-inert-v1',candidateIntentHash:p.candidateIntentHash,runId:r.run_id,attemptId:r.attempt_id,stage:'prepared-no-child-material'});},
+   candidateLaunchMaterial(){fail('MANAGED_JOB_ORIGINAL_CANDIDATE_READINESS_UNAVAILABLE');},
++  // Private same-writer lifecycle; actual original constructors stay unavailable.
++  candidateCreateIntent:(lease,context,handle)=>candidateLifecycle.createIntent(lease,context,handle),
++  candidateBindOriginalChild:(runId,context,handle)=>candidateLifecycle.bindChild(runId,context,handle),
++  candidateStartIntent:(runId,context,handle)=>candidateLifecycle.startIntent(runId,context,handle),
++  candidateObserveWaiting:(runId,context,handle)=>candidateLifecycle.observeWaiting(runId,context,handle),
++  candidateObserveReady:(runId,context,handle)=>candidateLifecycle.observeReady(runId,context,handle),
++  candidateCommitOriginalMaterial:(runId,context,handle)=>candidateLifecycle.commitOriginalMaterial(runId,context,handle),
++  candidateObserveRunning:(runId,context,handle)=>candidateLifecycle.observeRunning(runId,context,handle),
++  candidateRecordOriginalResult:(runId,context,handle)=>candidateLifecycle.recordResult(runId,context,handle),
++  candidateRequestCancellation:(runId,context)=>candidateLifecycle.cancel(runId,context),
++  candidateRetainUnknown:(runId,context,handle)=>candidateLifecycle.unknown(runId,context,handle),
++  candidateRecordOriginalRetirement:(runId,context,handle)=>candidateLifecycle.retire(runId,context,handle),
++  candidateLifecycleReceipt:(runId,context)=>candidateLifecycle.inspect(runId,context),
+   factsForImagePreparation(selection,ctx){
+    if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
+    return base(selection,ctx);
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+@@ -1,3 +1,4 @@
++import type {CandidateLifecycleOwnerMethods} from "./candidate-lifecycle-owner.mjs";
+ import type {Core126OwnerPorts,Core126Owner,Core126Facts} from "./managed-job-contracts.mjs";
+ export declare function originalJobRunIdentity(run:Core126Facts["run"]):string;
+-export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner;
++export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner & CandidateLifecycleOwnerMethods;

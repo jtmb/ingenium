@@ -1,0 +1,79 @@
+{
+  "scope": "Root-only integration audit; no canonical files edited",
+  "sourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "readers": [
+    {
+      "path": "packages/ingenium-core/lib/tools/jobs.ts",
+      "reviewLocations": "764-786,820-824,842-847",
+      "sourceSha256": "3eb50d727132dcdc77a6d505ef48ec0ed2bbbc8af70bf2747414eb83b889b3bd",
+      "rootAction": "Discriminate purpose and protocol; join extension for candidate finish/result/retirement and cancellation. Preserve managed recovery exclusion and production predicate. Base prepared must never imply live or retired."
+    },
+    {
+      "path": "services/ingenium-api/lib/job-runner.ts",
+      "reviewLocations": "1595",
+      "sourceSha256": "cb7c6e8ccfee17d22661523b6a21d8febb569d47671c9172a2621884321e241c",
+      "rootAction": "Preserve managed-run local-runner refusal; no fallback, replay or new attempt."
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+      "reviewLocations": "545-570,622-634",
+      "sourceSha256": "541c86dd2488e9917068372ed9a1653f0e4f5e7540a38d24889a5e6173a07ed0",
+      "rootAction": "Keep original production material binding/withdrawal unchanged. Candidate issuer and self-withdraw need genuine separate owner and extension; no candidate credentials are enabled by this proposal."
+    },
+    {
+      "path": "services/ingenium-api/lib/restore-runtime-guard.ts",
+      "reviewLocations": "15-28",
+      "sourceSha256": "7a515b12a84875f09e7def114f9c6e4a964d4877b4f9edd8d90a858ed7395695",
+      "rootAction": "Recognize exact protocol/schema and extension original physical retirement plus terminal Run; base remains prepared. No absence or parent-health inference; no retrofitting old candidate rows."
+    },
+    {
+      "path": "packages/ingenium-core/lib/db.ts",
+      "reviewLocations": "5513-5525,5539,5588",
+      "sourceSha256": "ddf3605b572695899c5f92745c59974f31bf6f684b6656e2d14b6f65c178c9c4",
+      "rootAction": "Register131 between130/132 atomically; validate exact column, marker, tables and all triggers. Compose cumulative126+129+131 schema comparator; dedicated FK validation targets run_id rather than generic parent id. Include signed restore checks."
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+      "reviewLocations": "42-45,101",
+      "sourceSha256": "d915d34a49a49c1f242138eb87772e599e0f2676e23955d6d17aa8c289cf02d5",
+      "rootAction": "Keep production cancellation and existing-ledger absent-close refusal. Candidate safety reduction requires genuine separate original control context after withdrawal/restart."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "reviewLocations": "101-120",
+      "sourceSha256": "c6fd4d762622dda2bd9f8b81d6e93ce989d20c7ae4e0a02e92b84aa1aa3c250f",
+      "rootAction": "Reacquire fresh private context and placement against original persisted selection SHA/intent/deadline. No new prepare, selection or deadline."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "reviewLocations": "68-70",
+      "sourceSha256": "38af882cd69c2bdd90e149eb24ec97c404d57290018270019cda8a9d5187cea3",
+      "rootAction": "Keep production cancellation ports and ordinary scheduler closed to candidate. Candidate recovery remains same original manager and extension."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "reviewLocations": "production branches and candidate splice",
+      "sourceSha256": "d532e2b5abc43455d38d973fe3b6573ea33bcf33aecf30f0b356a80aef005602",
+      "rootAction": "Preserve production CAS/material/retirement. Apply exact proposed source splice only after review. Marked base row remains immutable; extension is sole mutable candidate lifecycle authority."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+      "reviewLocations": "31,47,74",
+      "sourceSha256": "dbaccea339d8c9f6cbee96acfa10b489e5b26e4e7f13a4608d0d5453063b591e",
+      "rootAction": "Keep production HTTP/tool principal gates closed to candidate; separate actual private candidate auth/routes are Root work. JSON purpose is not authority."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "reviewLocations": "67,86",
+      "sourceSha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba",
+      "rootAction": "Bind actual private candidate owner without broadening production endpoints or accepting fake principals."
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "reviewLocations": "58-84,87,90,102",
+      "sourceSha256": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923",
+      "rootAction": "Preserve production material-before-create path. Candidate requires dedicated genuine create/retained duplex attach/start/readiness/material on same original child and manager; no sibling serve, listing adoption or second client."
+    }
+  ],
+  "closure": "Add new helper/gates, SQL and owner bytes to exact source/copier/image compiler closure. Reapproval required for changed source. Root strict Core/API, same-child native/18 protocol, Windows and cluster gates remain open."
+}

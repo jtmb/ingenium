@@ -66,3 +66,5 @@ Core126 owner, explicit credential audience and endpoint implementation: [core12
 Original verifier contract follow-on: [candidate-bootstrap-verifier-r3.md](candidate-bootstrap-verifier-r3.md) explicitly replaces only the r2 candidate bootstrap declaration with the existing ResponseVerifier type. Earlier frozen artifacts remain preserved.
 
 Finite positive candidate provider follow-on: [candidate-finite-program.md](candidate-finite-program.md) adds a case-bound one/two-request inert SSE program and exact candidate-only agent projection. It preserves default503, actual Core/CLI verification authority and all live/18-case/retirement gates.
+
+SQL131 source proposal: [lifecycle and closed gates](candidate-lifecycle-sql131.md), [exact Root reader audit](candidate-lifecycle-reader-audit.md), [seven-target patch](candidate-lifecycle-sql131.patch), [receipt](candidate-lifecycle-sql131.json). 42/42 source fixtures; actual runtime/phase gates remain open.
