@@ -1,6 +1,5 @@
--- Root-reserved Node 127 proposal only. Register/apply through original Core.
+-- Root-reserved Node 127 proposal only. Existing Core migration transaction owns BEGIN/COMMIT.
 -- No original is inferred from legacy rows, labels, events or a current probe.
-BEGIN IMMEDIATE;
 CREATE TABLE runtime_original_provisions (
  runtime_id TEXT PRIMARY KEY REFERENCES runtime_instances(id) ON DELETE RESTRICT,
  parent_container_id TEXT NOT NULL UNIQUE CHECK(length(parent_container_id)=64 AND parent_container_id NOT GLOB '*[^0-9a-f]*'),
@@ -42,4 +41,3 @@ CREATE TRIGGER runtime_original_provisions_no_update BEFORE UPDATE ON runtime_or
 BEGIN SELECT RAISE(ABORT,'initial runtime provision is immutable'); END;
 CREATE TRIGGER runtime_original_provisions_no_delete BEFORE DELETE ON runtime_original_provisions
 BEGIN SELECT RAISE(ABORT,'initial runtime provision must survive'); END;
-COMMIT;

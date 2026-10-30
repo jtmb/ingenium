@@ -35,7 +35,7 @@
 @@ -1,5 +1,6 @@
  import { createServer, request as httpRequest } from "node:http";
  import { timingSafeEqual } from "node:crypto";
-+import {runtimes} from "ingenium-core";
++import * as runtimeProvision from 'ingenium-core/lib/tools/runtime-original-provision';
  import { pathToFileURL } from "node:url";
  import {
    buildRuntimeContainerSpec,
@@ -53,7 +53,7 @@
  
 +// Only the original private POST new-create flow populates this map. Inspect,
 +// labels or a replayed/current container cannot construct an original receipt.
-+const originalProvisionResponses=new WeakMap<DockerInspect,{disposition:"new_created"|"existing_reused"|"legacy_unqualified";original:runtimes.RuntimeOriginalProvision|null}>();
++const originalProvisionResponses=new WeakMap<DockerInspect,{disposition:"new_created"|"existing_reused"|"legacy_unqualified";original:runtimeProvision.RuntimeOriginalProvision|null}>();
  async function provisionRuntime(input: RuntimeProvisionRequest, mappings: ReturnType<typeof readWorkspaceMappings>): Promise<DockerInspect> {
    const mapping = mappings.get(input.workspaceId);
    if (!mapping) throw new Error("Workspace mapping is unavailable");
@@ -82,7 +82,7 @@
 +  let originalCandidate:{daemon:{ID?:string};imageId:string}|null=null;
 +  if(input.originalRequestId){
 +    try{
-+      runtimes.publicProvisionRequest({...input,originalRequestId:input.originalRequestId});
++      runtimeProvision.publicProvisionRequest({...input,originalRequestId:input.originalRequestId});
 +      const daemon=await dockerRequest<{ID?:string}>("GET","/info");
 +      const image=await dockerRequest<{Id?:string}>("GET",`/images/${encodeURIComponent(config.image)}/json`);
 +      if(daemon.status!==200||!daemon.data?.ID||image.status!==200||!/^sha256:[a-f0-9]{64}$/.test(image.data?.Id??""))throw Error("Original provision prerequisites unavailable");
@@ -101,7 +101,7 @@
 +      try{
 +        const daemonAfter=await dockerRequest<{ID?:string}>("GET","/info");
 +        if(daemonAfter.status!==200||!daemonAfter.data)throw Error("Original daemon unavailable");
-+        const original=runtimes.originalProvisionFromNewFlow({request:{...input,originalRequestId:input.originalRequestId!},spec,
++        const original=runtimeProvision.originalProvisionFromNewFlow({request:{...input,originalRequestId:input.originalRequestId!},spec,
 +          daemonBefore:originalCandidate.daemon,daemonAfter:daemonAfter.data,imageId:originalCandidate.imageId,createdId:created.data?.Id,
 +          createStatus:created.status,startStatus:started.status,attachJoined:true,container:ready});
 +        originalProvisionResponses.set(ready,{disposition:"new_created",original});
@@ -133,22 +133,22 @@
    organizationId: string;
 --- a/services/ingenium-api/lib/runtime-manager-client.ts
 +++ b/services/ingenium-api/lib/runtime-manager-client.ts
-@@ -1,5 +1,6 @@
+@@ -1,5 +1,7 @@
  import { lstatSync, readFileSync, realpathSync } from "node:fs";
--import type { runtimes } from "ingenium-core";
-+import {runtimes} from "ingenium-core";
+ import type { runtimes } from "ingenium-core";
++import * as runtimeProvision from 'ingenium-core/lib/tools/runtime-original-provision';
 +import {randomUUID} from "node:crypto";
  import { isManagedRuntimeObservation, type ManagedRuntimeObservation } from "./runtime-placement-contract.js";
  
  export interface RuntimeManagerInspect {
-@@ -77,9 +78,14 @@
+@@ -77,9 +79,14 @@
    return result.data;
  }
  
 -export function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promise<RuntimeManagerInspect> {
-+const originalProvisionReceipts=new WeakMap<RuntimeManagerInspect,runtimes.RuntimeOriginalProvision>();
++const originalProvisionReceipts=new WeakMap<RuntimeManagerInspect,runtimeProvision.RuntimeOriginalProvision>();
 +/** No DTO constructor: only the same object returned by private authenticated POST. */
-+export function authenticatedOriginalProvision(result:RuntimeManagerInspect):runtimes.RuntimeOriginalProvision|undefined{return originalProvisionReceipts.get(result);}
++export function authenticatedOriginalProvision(result:RuntimeManagerInspect):runtimeProvision.RuntimeOriginalProvision|undefined{return originalProvisionReceipts.get(result);}
 +export async function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promise<RuntimeManagerInspect> {
    const { runtime } = payload;
 -  return requestManager("/v1/runtimes", "POST", {
@@ -158,7 +158,7 @@
      runtimeId: runtime.id,
      backendName: runtime.backendName,
      organizationId: runtime.organizationId,
-@@ -100,7 +106,17 @@
+@@ -100,7 +107,17 @@
        diskBytes: runtime.diskBytes,
        processLimit: runtime.processLimit,
      },
@@ -169,7 +169,7 @@
 +  // Only this immediate authenticated response plus this exact local request
 +  // can create an entry. A copied DTO/current probe has no WeakMap identity.
 +  if(fields.provisionDisposition==="new_created"){
-+    try{originalProvisionReceipts.set(result,runtimes.validateProvisionResponse(fields.originalProvision,managerRequest,result.backendId));}
++    try{originalProvisionReceipts.set(result,runtimeProvision.validateProvisionResponse(fields.originalProvision,managerRequest,result.backendId));}
 +    catch{/* Preserve ordinary runtime lifecycle; no original role authority. */}
 +  }
 +  delete fields.originalProvision;delete fields.provisionDisposition;

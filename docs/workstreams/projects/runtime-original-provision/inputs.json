@@ -26,18 +26,22 @@
   "consumer": [
     {
       "path": "packages/veyra-operations/core126-image-contract.mjs",
-      "sha256": "db23b41232c82301299503fd87aa158deeb09629858bf83d9745ae3c39e3cb78"
+      "sha256": "1147543c03a5292991db846aaca6f5fdad59ea1d421b59882da497bc579be191",
+      "previousSha256": "db23b41232c82301299503fd87aa158deeb09629858bf83d9745ae3c39e3cb78"
     },
     {
       "path": "packages/veyra-operations/core126-image-owner.mjs",
-      "sha256": "e1b447963e8f9848b34eddf8ced79b40186bda8c3be42c8f43548286d220acc9"
+      "sha256": "040e5e5b4d8118a1eb6cf5663181ed076a6f2ed9a264eee29245999f4901910b",
+      "previousSha256": "e1b447963e8f9848b34eddf8ced79b40186bda8c3be42c8f43548286d220acc9"
     },
     {
       "path": "packages/veyra-operations/core126-image-owner.d.mts",
-      "sha256": "e6f308d4121936dcef60b2f06e7c8a962d28a853c45dc037ea3b138ad0c5d882"
+      "sha256": "261bfc82990e495d2a258204197ff643f8caf48486a80febd0cc2642cd1fcc69",
+      "previousSha256": "e6f308d4121936dcef60b2f06e7c8a962d28a853c45dc037ea3b138ad0c5d882"
     }
   ],
   "sharedWritten": false,
   "ddlAllocation": 127,
-  "ddlOwner": "Root applies/registers/publishes; worker proposal only"
+  "ddlOwner": "Root applies/registers/publishes; worker proposal only",
+  "consumerRefresh": "Root review127: read-only reviewed exact source diff; publicContainer unchanged, source inventories/protocol cases extended, bindOriginal now requires imageId/startIdentity. First focused rerun refused old consumer SHA before refresh; no test cases ran."
 }

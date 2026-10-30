@@ -2,13 +2,13 @@
 Root alone registers/applies SQL127 and the reviewed source proposal.
 """
 from pathlib import Path
-import argparse,json,hashlib,difflib
-parser=argparse.ArgumentParser();parser.add_argument('--core-source-root',required=True);args=parser.parse_args()
+import argparse,json,hashlib,difflib,subprocess
+parser=argparse.ArgumentParser();parser.add_argument('--core-source-root',required=True);parser.add_argument('--recorded-git-preimage',action='store_true',help='Explicit historical proposal regeneration; never an apply check against current shared files');args=parser.parse_args()
 root=Path(args.core_source_root);owned=Path(__file__).resolve().parent;inputs=json.loads((owned/'inputs.json').read_text())
 assert root.is_absolute() and root.resolve()==root
 original={}
 for item in inputs['inputs']:
- raw=(root/item['path']).read_bytes()
+ raw=subprocess.run(['git','show',inputs['head']+':'+item['path']],cwd=root,check=True,capture_output=True).stdout if args.recorded_git_preimage else (root/item['path']).read_bytes()
  if hashlib.sha256(raw).hexdigest()!=item['sha256']:raise RuntimeError('shared source drift; no fallback: '+item['path'])
  original[item['path']]=raw.decode()
 changed=dict(original)
@@ -29,12 +29,12 @@ replace(rel,'    const revoked = input.toState === "REVOKED";', '    insertRunti
 rel='services/ingenium-api/lib/runtime-manager-contract.ts'
 replace(rel,'export interface RuntimeProvisionRequest {','export interface RuntimeProvisionRequest {\n  originalRequestId?: string; // new private flow only; no legacy adoption')
 rel='services/ingenium-api/scripts/runtime-manager.ts'
-replace(rel,'import { timingSafeEqual } from "node:crypto";', 'import { timingSafeEqual } from "node:crypto";\nimport {runtimes} from "ingenium-core";')
+replace(rel,'import { timingSafeEqual } from "node:crypto";', '''import { timingSafeEqual } from "node:crypto";\nimport * as runtimeProvision from 'ingenium-core/lib/tools/runtime-original-provision';''')
 replace(rel,'  Name?: string;','  Name?: string;\n  Image?: string;')
 needle='async function provisionRuntime(input: RuntimeProvisionRequest, mappings: ReturnType<typeof readWorkspaceMappings>): Promise<DockerInspect> {'
 replace(rel,needle,"""// Only the original private POST new-create flow populates this map. Inspect,
 // labels or a replayed/current container cannot construct an original receipt.
-const originalProvisionResponses=new WeakMap<DockerInspect,{disposition:"new_created"|"existing_reused"|"legacy_unqualified";original:runtimes.RuntimeOriginalProvision|null}>();
+const originalProvisionResponses=new WeakMap<DockerInspect,{disposition:"new_created"|"existing_reused"|"legacy_unqualified";original:runtimeProvision.RuntimeOriginalProvision|null}>();
 """+needle)
 replace(rel,'  const spec = buildRuntimeContainerSpec(input, mapping, config);','  let spec = buildRuntimeContainerSpec(input, mapping, config);')
 replace(rel,'    if (exact && prior.State?.Status === "running") return prior;', '    if (exact && prior.State?.Status === "running") {originalProvisionResponses.set(prior,{disposition:"existing_reused",original:null});return prior;}')
@@ -45,7 +45,7 @@ needle="""  try {
 replace(rel,needle,"""  let originalCandidate:{daemon:{ID?:string};imageId:string}|null=null;
   if(input.originalRequestId){
     try{
-      runtimes.publicProvisionRequest({...input,originalRequestId:input.originalRequestId});
+      runtimeProvision.publicProvisionRequest({...input,originalRequestId:input.originalRequestId});
       const daemon=await dockerRequest<{ID?:string}>("GET","/info");
       const image=await dockerRequest<{Id?:string}>("GET",`/images/${encodeURIComponent(config.image)}/json`);
       if(daemon.status!==200||!daemon.data?.ID||image.status!==200||!/^sha256:[a-f0-9]{64}$/.test(image.data?.Id??""))throw Error("Original provision prerequisites unavailable");
@@ -62,7 +62,7 @@ replace(rel,"""    if (!ready) throw new Error("Runtime disappeared after start"
       try{
         const daemonAfter=await dockerRequest<{ID?:string}>("GET","/info");
         if(daemonAfter.status!==200||!daemonAfter.data)throw Error("Original daemon unavailable");
-        const original=runtimes.originalProvisionFromNewFlow({request:{...input,originalRequestId:input.originalRequestId!},spec,
+        const original=runtimeProvision.originalProvisionFromNewFlow({request:{...input,originalRequestId:input.originalRequestId!},spec,
           daemonBefore:originalCandidate.daemon,daemonAfter:daemonAfter.data,imageId:originalCandidate.imageId,createdId:created.data?.Id,
           createStatus:created.status,startStatus:started.status,attachJoined:true,container:ready});
         originalProvisionResponses.set(ready,{disposition:"new_created",original});
@@ -73,7 +73,7 @@ replace(rel,'response.writeHead(202).end(JSON.stringify({ data: publicInspect(in
         response.writeHead(202).end(JSON.stringify({data:{...publicInspect(inspect),
           provisionDisposition:original?.disposition??"legacy_unqualified",originalProvision:original?.original??null}}));""")
 rel='services/ingenium-api/lib/runtime-manager-client.ts'
-replace(rel,'import type { runtimes } from "ingenium-core";','import {runtimes} from "ingenium-core";\nimport {randomUUID} from "node:crypto";')
+replace(rel,'import type { runtimes } from "ingenium-core";',"import type { runtimes } from \"ingenium-core\";\nimport * as runtimeProvision from 'ingenium-core/lib/tools/runtime-original-provision';\nimport {randomUUID} from \"node:crypto\";")
 a=changed[rel].index('export function provisionManagedRuntime(');z=changed[rel].index('\nexport function inspectManagedRuntime(',a)
 block=changed[rel][a:z]
 block=block.replace('export function provisionManagedRuntime(', 'export async function provisionManagedRuntime(')
@@ -85,16 +85,16 @@ block=block[:-len('  });\n}\n')]+"""  };
   // Only this immediate authenticated response plus this exact local request
   // can create an entry. A copied DTO/current probe has no WeakMap identity.
   if(fields.provisionDisposition==="new_created"){
-    try{originalProvisionReceipts.set(result,runtimes.validateProvisionResponse(fields.originalProvision,managerRequest,result.backendId));}
+    try{originalProvisionReceipts.set(result,runtimeProvision.validateProvisionResponse(fields.originalProvision,managerRequest,result.backendId));}
     catch{/* Preserve ordinary runtime lifecycle; no original role authority. */}
   }
   delete fields.originalProvision;delete fields.provisionDisposition;
   return result;
 }
 """
-prefix="""const originalProvisionReceipts=new WeakMap<RuntimeManagerInspect,runtimes.RuntimeOriginalProvision>();
+prefix="""const originalProvisionReceipts=new WeakMap<RuntimeManagerInspect,runtimeProvision.RuntimeOriginalProvision>();
 /** No DTO constructor: only the same object returned by private authenticated POST. */
-export function authenticatedOriginalProvision(result:RuntimeManagerInspect):runtimes.RuntimeOriginalProvision|undefined{return originalProvisionReceipts.get(result);}
+export function authenticatedOriginalProvision(result:RuntimeManagerInspect):runtimeProvision.RuntimeOriginalProvision|undefined{return originalProvisionReceipts.get(result);}
 """
 changed[rel]=changed[rel][:a]+prefix+block+changed[rel][z:]
 rel='services/ingenium-api/lib/runtime-provisioner.ts'

@@ -9,7 +9,7 @@
     {
       "path": "services/ingenium-api/scripts/runtime-manager.ts",
       "baseSha256": "a900896af67a97ea153183324b199542f3e84062dc340bbce8c4a5f36cac01a4",
-      "proposedSha256": "bd68e7e52b502423b8361d4d7562adbcb298732571f8f235cf3c56bb139eaa70"
+      "proposedSha256": "880341102cbe06d6c9d4679e99cd6219d6c8ea52e6e38a39244cb95996dc0a2a"
     },
     {
       "path": "services/ingenium-api/lib/runtime-manager-contract.ts",
@@ -19,7 +19,7 @@
     {
       "path": "services/ingenium-api/lib/runtime-manager-client.ts",
       "baseSha256": "0e3c8514ca4ba2df0eab9dae653019f81766701f3dbc33dd58afee4e8b1ba32a",
-      "proposedSha256": "269192d80beff8e1bc69198e15f0f2da3fe0e50d6f548156a89c8733d25c2e0a"
+      "proposedSha256": "1e7cdaa1936ea7f6ca165112d85e2f676e3708d5f06ef8edbbb14b0bc6737f01"
     },
     {
       "path": "services/ingenium-api/lib/runtime-provisioner.ts",
@@ -34,9 +34,9 @@
       "sha256": "2d231a2015739bee169f92c4bc2a3037f9eb3524772efe2903790fe184e870c7"
     }
   ],
-  "patchSha256": "a99db142749b34cc26dc4e68624c3bc0ac638ff1513b805dc0edebd0f67ce966",
+  "patchSha256": "2c3915ad5ad60265a7aacd58d4d7e289f0e547461944b9cd91ac566dcc15d955",
   "ddlAllocation": 127,
-  "ddlSha256": "1d23e11154fb08c885e738d5e8d6c1323a252a7c8164cd37b2d4dc6d0ae1ef28",
+  "ddlSha256": "34ef9f57d8ccaf4ae3c216bccd9d6a26855dfef02dc613f920dbb79bfff7d969",
   "ddlRegisteredOrApplied": false,
   "sharedWritten": false,
   "compiled": false,

@@ -8,12 +8,15 @@ import {resolve,join} from "node:path";
 import {legacyDigest} from "../lib/projects-v2/migration.mjs";
 const root=new URL("../../../docs/workstreams/projects/runtime-original-provision/",import.meta.url);
 const producer=await import(new URL("sources/packages/ingenium-core/lib/tools/runtime-original-provision.ts",root));
+const proposal=JSON.parse(readFileSync(new URL("proposal.json",root),"utf8"));
 const inputs=JSON.parse(readFileSync(new URL("inputs.json",root),"utf8"));
 const source=process.env.VEYRA_PROJECTS_PROVISION_SOURCE_ROOT;
 assert.ok(source,"explicit VEYRA_PROJECTS_PROVISION_SOURCE_ROOT is required; no current-label/source fallback");
 assert.equal(realpathSync(source),resolve(source));
 for(const rel of ["services/ingenium-api/lib/runtime-manager-contract.ts","packages/veyra-operations/core126-image-contract.mjs"]){
- const entry=[...inputs.inputs,...inputs.consumer].find(v=>v.path===rel);assert.equal(createHash("sha256").update(readFileSync(join(source,rel))).digest("hex"),entry.sha256,"source drift: "+rel);
+ const entry=[...inputs.inputs,...inputs.consumer].find(v=>v.path===rel);
+ const exactHashes=[entry.sha256,...proposal.existingInputs.filter(v=>v.path===rel).map(v=>v.proposedSha256)];
+ assert.ok(exactHashes.includes(createHash("sha256").update(readFileSync(join(source,rel))).digest("hex")),"source drift beyond recorded base/proposal: "+rel);
 }
 const {buildRuntimeContainerSpec}=await import(pathToFileURL(join(source,"services/ingenium-api/lib/runtime-manager-contract.ts")));
 const {publicContainer}=await import(pathToFileURL(join(source,"packages/veyra-operations/core126-image-contract.mjs")));
@@ -36,7 +39,7 @@ function database(){
  const migrations=readdirSync(directory).filter(v=>v.endsWith(".sql")&&Number(v.slice(0,3))<=126&&!alternates.has(v)).sort();assert.equal(migrations.length,126);
  for(const file of migrations)db.exec(readFileSync(join(directory,file),"utf8"));db.exec("PRAGMA foreign_keys=ON");
  const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(v=>v.name),before=legacyDigest(db,tables);
- db.exec(readFileSync(new URL("DDL127.sql",root),"utf8"));assert.deepEqual(legacyDigest(db,tables),before);
+ db.exec("BEGIN IMMEDIATE;\n"+readFileSync(new URL("DDL127.sql",root),"utf8")+"\nCOMMIT;");assert.deepEqual(legacyDigest(db,tables),before);
  const m=material(),q=m.request;
  db.prepare("INSERT INTO users(id,email_normalized,display_name,created_at,updated_at) VALUES(?,'original@invalid','Original',?,?)").run(ids.user,time,time);
  db.prepare("INSERT INTO organizations(id,name,slug,created_at,updated_at) VALUES(?,'Original','original',?,?)").run(ids.org,time,time);
