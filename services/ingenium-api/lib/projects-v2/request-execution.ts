@@ -1,3 +1,4 @@
+import {createCanonicalRequestChatResolver} from "./canonical-chat-binding.mjs";
 import type { Request } from "express";
 import { findRequestChatSourceIds, isRequestChatConversationActive } from "./request-chat-source.mjs";
 import { authorization, contextConversations, explicitMemory, getDb, runtimes } from "ingenium-core";
@@ -78,3 +79,9 @@ export function resolveRequestExecution(request: Request, selection: RequestExec
 export function resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string, purpose: RequestChatPurpose = "active") {
   return resolver.resolveRequestChatBinding(request, execution, chatId, purpose);
 }
+
+/** Canonical Context ID adapter; the original engine-ID resolver remains unchanged. */
+export const resolveRequestContextChatBinding=createCanonicalRequestChatResolver({
+  resolveExecution:resolveRequestExecution,resolveEngineChat:resolveRequestChatBinding,
+  getConversation:contextConversations.getContextConversation,
+});

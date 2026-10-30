@@ -110,10 +110,11 @@ export function createRequestDotBinding(request:Request,selected:DotRequestSelec
   const memory=()=>{
     const c=current();if(!selectedChat)return null;
     permission(c.principal,c.execution,"memory","read");
-    const session=ports.createRequestMemorySession(request,selection),scope=session.resolveScope("read",selectedChat);
+    const engineSessionId=chat(c.principal,c.execution,selectedChat).sessionId;
+    const session=ports.createRequestMemorySession(request,selection),scope=session.resolveScope("read",engineSessionId);
     if(scope.visibility!=="private"||JSON.stringify([scope.organizationId,scope.ownerUserId,scope.projectId,scope.workspaceId,scope.bindingHash,scope.bindingEpoch,scope.hostId,scope.environmentId])!==JSON.stringify([c.execution.organizationId,c.execution.ownerUserId,c.execution.projectId,c.execution.workspaceId,c.execution.bindingHash,c.execution.bindingEpoch,c.execution.hostId,c.execution.environmentId]))throw new DotError("DOT_REQUEST_BINDING_CHANGED");
-    const policy=session.memory.policy(scope,selectedChat);
-    return policy.policy.enabled&&policy.policy.useMemory&&policy.chat.useMemory?{c,session,scope}:null;
+    const policy=session.memory.policy(scope,engineSessionId);
+    return policy.policy.enabled&&policy.policy.useMemory&&policy.chat.useMemory?{c,session,scope,engineSessionId}:null;
   };
   const authorization:Authorization={
     require(actor,scope,action,capabilities){const c=requireScope(actor,scope);permission(c.principal,c.execution,"jobs",action==="read"||action==="notify"?"read":action==="dispatch"?"execute":"write");if(action==="approve")permission(c.principal,c.execution,"jobs","execute");ports.requireCapabilities(c.principal,c.execution,capabilities);},
@@ -140,7 +141,7 @@ export function createRequestDotBinding(request:Request,selected:DotRequestSelec
           const m=item?.memory;
           if(!item||item.instructionAuthority!==false||item.contentKind!=="untrusted_memory_data"||!m||m.id!==ref.id||m.state!=="active"||m.visibility!=="private"||m.organizationId!==c.scope.organizationId||m.ownerUserId!==c.scope.ownerUserId||m.projectId!==c.scope.projectId||m.workspaceId!==c.execution.workspaceId||m.version!==ref.version||m.contentHash!==ref.hash)throw new DotError("DOT_SOURCE_REVOKED");
         }else if(ref.memoryKind==="derived"){
-          const page=admitted.session.memory.recall(admitted.scope,selectedChat!,{maxItems:16,maxTokens:2048}),item=page.items.find(m=>m.id===ref.id);
+          const page=admitted.session.memory.recall(admitted.scope,admitted.engineSessionId,{maxItems:16,maxTokens:2048}),item=page.items.find(m=>m.id===ref.id);
           if(page.excluded||!item||item.instructionAuthority!==false||item.contentKind!=="untrusted_memory_data"||item.version!==ref.version||item.contentHash!==ref.hash||memoryKey(item.scope)!==memoryKey(admitted.scope))throw new DotError("DOT_SOURCE_REVOKED");
         }else throw new DotError("DOT_SOURCE_REVOKED");
       }else throw new DotError("DOT_SOURCE_REVOKED");

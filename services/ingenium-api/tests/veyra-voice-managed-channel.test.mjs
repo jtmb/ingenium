@@ -82,7 +82,7 @@ test('Core result comparison is semantic across canonical DB key order and exact
 test('renderer-shaped retirement booleans/owner nonce cannot instantiate an actual supervisor proof',()=>{
   const methods=['reserveControl','listControls','reserve','privateRead','retireOriginal','settle'];const ledger=Object.fromEntries(methods.map(name=>[name,()=>{throw new Error('no Core mutation');}]));
   const supervisor=new ManagedCpuSupervisor({profile:{helperSource:'fixture-only',witnessSource:'fixture-only',settings:{instance_id:'fixture'},value:{defaultVoice:'af_heart'}},ledger,
-    bindContext(){throw new Error('fixture does not authorize');},admitCpu(){throw new Error('fixture does not admit');},requireCpuAdmission(){throw new Error('fixture does not admit');},releaseCpu(){throw new Error('fixture does not release');}});
+    bindContext(){throw new Error('fixture does not authorize');},admitCpu(){throw new Error('fixture does not admit');},requireCpuAdmission(){throw new Error('fixture does not admit');},releaseCpu(){throw new Error('fixture does not release');},admitCpuWitness(){throw new Error('fixture does not admit witness');},releaseCpuWitness(){throw new Error('fixture does not release witness');}});
   assert.equal(supervisor.status().ready,false);
   assert.throws(()=>supervisor.verifyRetirement({}, {owner:{ownerId:randomUUID()},original:{operationId:randomUUID()}}, {drained:true,helperKernelExited:true,treeEmpty:true}),/CPU_RETIREMENT_PRODUCER_REQUIRED/);
 });

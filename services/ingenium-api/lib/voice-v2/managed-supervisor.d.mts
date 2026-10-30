@@ -35,6 +35,8 @@ export interface ManagedCpuDependencies<C> {
   admitCpu(input: { context: C; scope: VoiceScope; owner: voiceOperations.VoiceOwner; profileDigest: string; memoryBytes: number; cpuThreads: number; deadlineAt: number; signal?: AbortSignal }): CpuAdmission | Promise<CpuAdmission>;
   requireCpuAdmission(admission: CpuAdmission | null, scope: SupervisedCpuScope<C>): void;
   releaseCpu(admission: CpuAdmission | null, proof: object, producer: ManagedCpuSupervisor<C>): void | Promise<void>;
+  admitCpuWitness(input: {context:C;scope:SupervisedCpuScope<C>;profileDigest:string;deadlineAt:number}):CpuAdmission|Promise<CpuAdmission>;
+  releaseCpuWitness(admission:CpuAdmission,proof:object,producer:ManagedCpuSupervisor<C>):void|Promise<void>;
   fetch?: typeof globalThis.fetch;
   /** Fixture-only override. Product omits it and retains the actual spawn API. */
   spawn?: typeof import('node:child_process').spawn;
@@ -42,6 +44,7 @@ export interface ManagedCpuDependencies<C> {
 export class ManagedCpuSupervisor<C> {
   constructor(dependencies: ManagedCpuDependencies<C>);
   status(): CpuSupervisorStatus;
+  inspectResourceRetirement(proof:object):Readonly<{manager:ManagedCpuSupervisor<C>;scope:SupervisedCpuScope<C>;owner:voiceOperations.VoiceOwner;admission:CpuAdmission|null;retired:true;kind:"physical"|"sealed-before-fork"|"witness-retired"|"witness-before-fork"}>;
   isOwnedScope(value: unknown): value is SupervisedCpuScope<C>;
   requireOriginalResource: VoiceOperationAuthorities<C>['requireOriginalResource'];
   verifyRetirement: VoiceOperationAuthorities<C>['verifyRetirement'];

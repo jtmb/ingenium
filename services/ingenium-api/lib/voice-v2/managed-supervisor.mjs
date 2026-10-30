@@ -44,14 +44,24 @@ function childOriginal(child, maximum, consume) {
  */
 export class ManagedCpuSupervisor {
   #scopes = new Map(); #proofs = new WeakMap(); #prepared = new WeakMap(); #handles = new WeakMap(); #current = null; #opening = null;
-  constructor({ profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, fetch: request = globalThis.fetch, spawn: launch = spawn }) {
+  constructor({ profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, fetch: request = globalThis.fetch, spawn: launch = spawn }) {
     if (!profile?.helperSource || !profile?.witnessSource || ['reserveControl', 'listControls', 'reserve', 'privateRead', 'retireOriginal', 'settle'].some(method => typeof ledger?.[method] !== 'function')
-      || [bindContext, admitCpu, requireCpuAdmission, releaseCpu, request, launch].some(value => typeof value !== 'function')) fail('CPU_SUPERVISOR_BINDING_REQUIRED');
-    Object.assign(this, { profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, request, launch, nodeBootId: randomUUID() });
+      || [bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch].some(value => typeof value !== 'function')) fail('CPU_SUPERVISOR_BINDING_REQUIRED');
+    Object.assign(this, { profile, ledger, bindContext, admitCpu, requireCpuAdmission, releaseCpu, admitCpuWitness, releaseCpuWitness, request, launch, nodeBootId: randomUUID() });
   }
   status() { const scope = this.#current; return { ready: Boolean(scope?.ready && !scope.closing), gpuReady: false, backend: 'cpu-onnx', qualified: false,
     instanceId: this.profile.settings.instance_id, voices: scope?.health?.voices ?? [], configuredDefaultVoice: this.profile.value.defaultVoice }; }
   isOwnedScope(scope) { return Boolean(scope && this.#scopes.get(scope.owner?.ownerId) === scope); }
+  /** Read-only actual proof registry. Never accepts serialized booleans/PID/health/timeout evidence. */
+  inspectResourceRetirement(input) {
+    const proof=this.#proofs.get(input),scope=proof?.scope;
+    if(!proof||!scope)fail('CPU_RESOURCE_RETIREMENT_PRODUCER_REQUIRED');
+    if(proof.kind==='physical'&&scope.physicalRetired) return Object.freeze({manager:this,scope,owner:scope.owner,admission:scope.admission,
+      retired:true,kind:!scope.recovered&&!scope.started&&scope.child===null?'sealed-before-fork':'physical'});
+    if(proof.kind==='witness-retired'||proof.kind==='witness-before-fork') return Object.freeze({manager:this,scope,owner:scope.owner,
+      admission:proof.admission,retired:true,kind:proof.kind});
+    fail('CPU_RESOURCE_RETIREMENT_PRODUCER_REQUIRED');
+  }
   #scope(context, input, deadlineAt, ownerGeneration = 1) {
     const scope = { context, scope: validateScope(input), deadlineAt, controlOperationId: randomUUID(), owner: Object.freeze({ instanceId: this.profile.settings.instance_id,
       bootId: this.nodeBootId, ownerId: randomUUID(), ownerGeneration, leaseId: randomUUID() }), contextFor: original => this.bindContext(original, scope, this),
@@ -69,7 +79,7 @@ export class ManagedCpuSupervisor {
   /** Exact callback passed to the real Core factory. The opaque resource object
    * must be this manager's actual prepared/live/recovered original, never JSON. */
   requireOriginalResource(_context, operation, action, request) {
-    const scope = this.#scopes.get(request.owner?.ownerId);
+    const scope = action === 'retireOriginal' ? this.#proofs.get(request.physicalProof)?.scope : this.#scopes.get(request.owner?.ownerId);
     if (!scope || !equal(scope.owner, request.owner)) fail('CPU_ORIGINAL_RESOURCE_REQUIRED');
     if (operation && (!equal(operation.owner, scope.owner) || operation.original.operationId !== request.operationId)) fail('CPU_ORIGINAL_RESOURCE_CONFLICT');
     const isControl = request.operationId === scope.controlOperationId || operation?.original?.kind === 'voice-cpu-supervisor';
@@ -211,6 +221,7 @@ export class ManagedCpuSupervisor {
     const requestedScope = validateScope(requested); signal?.throwIfAborted();
     if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128 || !Number.isSafeInteger(deadlineAt) || deadlineAt <= Date.now()) fail('CPU_SCOPE_DEADLINE_REQUIRED');
     if (this.#current?.ready && !this.#current.closing && sameScope(this.#current.scope, requestedScope)) {
+      this.requireCpuAdmission(this.#current.admission,this.#current);
       if (this.#current.sessions.size >= 16 && !this.#current.sessions.has(sessionId)) fail('CPU_SCOPE_CAPACITY');
       this.#current.sessions.add(sessionId); return this.status();
     }
@@ -315,6 +326,12 @@ export class ManagedCpuSupervisor {
     finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); }
   }
   async #witness(scope, deadlineAt, requireParentExit) {
+    const admission=await this.admitCpuWitness({context:scope.context,scope,profileDigest:this.profile.profileDigest,deadlineAt});
+    scope.witnessAdmission=admission;let launchCalled=false;
+    try {
+    this.requireCpuAdmission(admission,scope);
+    if(!Number.isSafeInteger(admission.deadlineAt)||admission.deadlineAt<=Date.now())fail('CPU_RESOURCE_DEADLINE_REQUIRED');
+    deadlineAt=Math.min(deadlineAt,admission.deadlineAt);launchCalled=true;
     const child = this.launch(this.profile.value.python, ['-I', '-S', '-B', '-c', this.profile.witnessSource], { env: this.#environment(), cwd: this.profile.value.workerRoot, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     scope.witnessChild = child;
     scope.witness = childOriginal(child, 8192);
@@ -322,13 +339,23 @@ export class ManagedCpuSupervisor {
       recoveryEndpointIdentity: scope.control.recoveryEndpointIdentity, retirementSecretSha256: scope.control.retirementSecretSha256,
       requireParentExit, deadlineMs: Math.max(1, Math.min(60000, deadlineAt - Date.now())) };
     scope.witnessInput = new Promise((resolve, reject) => child.stdin.end(JSON.stringify(request) + '\n', error => error ? reject(error) : resolve()));
-    const result = await this.#deadline(Promise.all([scope.witness.exited, scope.witness.closed, scope.witness.stdout, scope.witness.stderr, scope.witnessInput]), deadlineAt);
+    scope.witnessReleaseOriginal=Promise.all([scope.witness.exited,scope.witness.closed,scope.witness.stdout,scope.witness.stderr,scope.witnessInput]).then(async result=>{
+      const proof={};this.#proofs.set(proof,{kind:'witness-retired',scope,admission});
+      await this.releaseCpuWitness(admission,proof,this);return result;
+    });
+    scope.witnessReleaseOriginal.catch(error=>{scope.witnessReleaseFailure??=error;});
+    const result=await this.#deadline(scope.witnessReleaseOriginal,deadlineAt);
     if (result[0].code !== 0 || result[0].signal || result[3].length) fail('CPU_RECOVERY_WITNESS_UNCONFIRMED');
     const proof = privateJson(result[2]);
     if (proof.controlOperationId !== scope.controlOperationId || !equal(proof.owner, scope.owner) || proof.recoveryEndpointIdentity !== scope.control.recoveryEndpointIdentity
       || proof.retirementSecretSha256 !== scope.control.retirementSecretSha256 || proof.helperKernelExited !== true || proof.helperPipeEOF !== true
       || proof.treeEmpty !== true || proof.pipeEof !== true || requireParentExit && proof.parentExited !== true && proof.noStartSealed !== true) fail('CPU_RECOVERY_WITNESS_CONFLICT');
     return proof;
+    } catch(error) {
+      if(!launchCalled){const proof={};this.#proofs.set(proof,{kind:'witness-before-fork',scope,admission});
+        try{await this.releaseCpuWitness(admission,proof,this);}catch(releaseError){scope.witnessReleaseFailure??=releaseError;}}
+      throw error;
+    }
   }
   async #recoverControl(context, operation, deadlineAt) {
     const scope = this.#scope(context, operation.original.scope, deadlineAt, operation.owner.ownerGeneration);
@@ -337,6 +364,7 @@ export class ManagedCpuSupervisor {
     await this.#witness(scope, deadlineAt, true); scope.physicalRetired = true;
     const proof = {}; this.#proofs.set(proof, { kind: 'physical', scope, retentionSeed: randomBytes(32).toString('hex') });
     this.ledger.retireOriginal(scope.contextFor(context), { operationId: scope.controlOperationId, owner: scope.owner, physicalProof: proof });
+    await this.releaseCpu(scope.admission,proof,this);
   }
   stopScope(scope = this.#current, deadlineAt = Date.now() + 20000) {
     if (!scope) return Promise.resolve(); if (scope.stopOriginal) return scope.stopOriginal;

@@ -2,7 +2,7 @@ import type { Request } from "express";
 import { authorization, contextConversations, explicitMemory, getDb, execTransaction, checkpointAfterWrite, jobs, jobEventDeliveries, trustedJobEvents } from "ingenium-core";
 import { toAuthorizationPrincipal } from "../authorization-policy.js";
 import { revalidateRequestIdentity } from "../request-identity.js";
-import { resolveRequestExecution, resolveRequestChatBinding } from "../projects-v2/request-execution.js";
+import { resolveRequestExecution, resolveRequestContextChatBinding } from "../projects-v2/request-execution.js";
 import { createRequestMemorySession } from "../memory-v2/request-session.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 import { createCoreDotRuntime, type CoreDotOptions } from "./core-binding.js";
@@ -15,7 +15,7 @@ export type DotQualifiedRunnerOwner=Omit<QualifiedDotRequestRunner,"executeJobRu
 /** Root supplies qualified placement/capability/settlement facts; all other adapters use existing owners. */
 export function createCoreRequestDotBinding(request:Request,selected:DotRequestSelection,runner:DotQualifiedRunnerOwner) {
   return createRequestDotBinding(request,selected,{
-    revalidateRequestIdentity,resolveRequestExecution,resolveRequestChatBinding,toAuthorizationPrincipal,
+    revalidateRequestIdentity,resolveRequestExecution,resolveRequestChatBinding:resolveRequestContextChatBinding,toAuthorizationPrincipal,
     requireProjectPermission:authorization.requireProjectPermission,
     requireCapabilities:(principal,execution,capabilities)=>runner.requireCapabilities(principal,execution,capabilities),
     getContextConversation:contextConversations.getContextConversation,
