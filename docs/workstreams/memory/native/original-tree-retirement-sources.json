@@ -1,0 +1,90 @@
+{
+  "kind": "source-only-original-retirement-audit",
+  "ownerThread": "01a18935-0219-7cc0-88be-368fa7fa330c",
+  "capturedUtc": "2026-10-30T18:33:54.9670544Z",
+  "nativeRoot": "\\\\wsl.localhost\\Ubuntu\\home\\brajam\\.local\\state\\ingenium-release\\skill-zen-fix-1792810845\\real-gmail-ui\\veyra-phase-1\\windows-source",
+  "actualNative": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "sha256": "17e9a2a734070a2f4853e4220fdd6d232c06236e43ce92f8867d82e217771817",
+      "bytes": 143884
+    },
+    {
+      "path": "crates/adapters/src/owned_process_job.rs",
+      "sha256": "98ef1b2d7a338b80368d38af1213b695669cbd0e90e1323194deee46b5d06153",
+      "bytes": 16803
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/isolated_wsl.rs",
+      "sha256": "ea1d735dc429a69dd03af19491dbb10b3d4aebad1995b0d5fec997d40c18e779",
+      "bytes": 26204
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/isolated_windows.rs",
+      "sha256": "f320756bfddb73096749f04da0e48527ba4a10e33daa04c7f2b26730a4d23bae",
+      "bytes": 28947
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2",
+      "bytes": 19202
+    },
+    {
+      "path": "crates/adapters/src/opencode/mod.rs",
+      "sha256": "ea74d8ce2f22459a816c3c34f4e48c873cc6914013509bdfad1492598786aa40",
+      "bytes": 31285
+    },
+    {
+      "path": "apps/service/src/routes/idle_engine.rs",
+      "sha256": "eb8e50b946da42b6cb1d693a071ebf9fea991334be57296af8921703c0662927",
+      "bytes": 10020
+    },
+    {
+      "path": "apps/service/src/routes/task_activity/engine_retirement.rs",
+      "sha256": "c56a603a88402aabcfc502528a89f6c11ddb6fb6e1e65887355fb2733649e0ea",
+      "bytes": 10156
+    }
+  ],
+  "immutableWork1Commit": "fbf7b19218337d4b2a08a233ca752d4326db6e8b",
+  "immutableWork1Blobs": [
+    {
+      "path": "docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/followon-094c/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs",
+      "gitBlob": "b5646d6a6779ba77403f2e8f7b7e37958e8b3688"
+    },
+    {
+      "path": "docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/followon-094c/sources/crates/adapters/src/opencode/local_web_transport.rs",
+      "gitBlob": "dd93dbbd684b6e952f5dcaf0fe948e2b95168284"
+    },
+    {
+      "path": "docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/windows-join-492f/windows-read-join.patch",
+      "gitBlob": "59469039b55af2e320c15478cc32b1d156b50a48"
+    },
+    {
+      "path": "docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/windows-join-492f/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read/completion.rs",
+      "gitBlob": "b74935dc1d474c3a6163f8b86f2c6e93069c2cad"
+    },
+    {
+      "path": "docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/windows-join-492f/README.md",
+      "gitBlob": "b8cb5ca627c381f239e5d073fe972d1d36cd6cee"
+    }
+  ],
+  "nativeWrites": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "newRustTests": 0,
+  "existingAppliedRustCasesUncompiled": 31,
+  "goalComplete": false,
+  "cleanup": {
+    "newDisposablePaths": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": [
+      "original-tree-retirement-contract.md",
+      "original-tree-retirement-sources.json"
+    ],
+    "consumer": "Root reconcile Work1 witness proposal with actual Native and physical closure",
+    "endCondition": "Root integrates or explicitly supersedes this contract",
+    "protected": "Original source and lockfiles; actual Native; immutable Work1; prior cleanup-rejected fixtures and unique evidence",
+    "windowsRecoveryClaim": false
+  }
+}
