@@ -280,8 +280,10 @@ RUN find /app/node_modules /app/packages /app/services /app/scripts /app/docs /a
     find /app/node_modules /app/packages /app/services /app/scripts /app/docs /app/.opencode /app/nginx \
       ! -type l -perm /022 -exec chmod go-w {} + && \
     chmod 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md && \
-    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /etc/opencode && \
+    install -d -o root -g root -m 0555 /usr/local/share/ingenium/opencode-managed /usr/local/share/ingenium/opencode-managed/agents /usr/local/share/ingenium/opencode-managed/plugins /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent /etc/opencode && \
     install -o root -g root -m 0444 /app/config/opencode-managed/opencode.json /usr/local/share/ingenium/opencode-managed/opencode.json && \
+    install -o root -g root -m 0444 /app/config/opencode-managed/job-opencode.json /usr/local/share/ingenium/opencode-managed/job-opencode.json && \
+    install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-job-agent/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs && \
     install -o root -g root -m 0444 /app/config/opencode-managed/plugins/enforce-reserved-broker/index.mjs /usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs && \
     install -o root -g root -m 0444 /app/.opencode/agents/execution/ingenium-llm-broker.md /usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md && \
     ln -s /usr/local/share/ingenium/opencode-managed/opencode.json /etc/opencode/opencode.json && \

@@ -1,0 +1,20 @@
+{
+  "plugins": [
+    "-*",
+    "opencode.models.dev",
+    "opencode.provider.opencode",
+    "opencode.config.policy",
+    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker",
+    "/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent"
+  ],
+  "permissions": [
+    {
+      "action": "*",
+      "resource": "*",
+      "effect": "deny"
+    }
+  ],
+  "mcp": {
+    "servers": {}
+  }
+}

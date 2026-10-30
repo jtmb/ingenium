@@ -1,3 +1,4 @@
+import type {Core126AgentMaterial} from "../../../../packages/veyra-operations/core126-agent-material.mjs";
 import type {ChildProcess} from "node:child_process";
 import type {IncomingHttpHeaders} from "node:http";
 import type {agents,authorization,getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,mcpCredentials,mcpAuthorizationPolicy} from "ingenium-core";
@@ -27,9 +28,9 @@ export interface ManagedJobAdmission {
 }
 export interface ManagedLaunchMaterial {
  admission:ManagedJobAdmission;runId:string;attemptId:string;credentialRunId:string;
- profileQualified:true;capability:string;provision:RuntimeProvisionRequest;
+ profileQualified:true;agentMaterial:Core126AgentMaterial;capability:string;provision:RuntimeProvisionRequest;
 }
-export interface ManagedSpecMaterial {admission:ManagedJobAdmission;capability:string;spec:DockerContainerSpec}
+export interface ManagedSpecMaterial {admission:ManagedJobAdmission;capability:string;agentMaterial:Core126AgentMaterial;spec:DockerContainerSpec}
 export interface JournalKey {attemptId:string;revision:number;specHash:string}
 export type JournalAction="launch"|"inspect"|"cancel"|"cleanup";
 export type EffectDecision={accepted:false}|{accepted:true;admission:ManagedJobAdmission};
@@ -49,7 +50,7 @@ export type DockerOwnerRequest=(method:"GET"|"POST"|"DELETE",path:string,body?:o
 export interface ManagedJobContainerPorts {
  core:ManagedJobCoreClient;docker:DockerOwnerRequest;
  buildRuntimeSpec(admission:ManagedJobAdmission):Promise<ManagedSpecMaterial>;
- handoff(containerId:string,admission:ManagedJobAdmission,capability:string):Promise<void>;
+ handoff(containerId:string,admission:ManagedJobAdmission,capability:string,agentMaterial:Core126AgentMaterial):Promise<void>;
 }
 export type ManagedObservation={state:"active"|"unknown";code:string}|{state:"settled";code:string;proof:ManagedRetirementProof};
 export type ManagedCleanupObservation=ManagedObservation|{state:"removed";code:string};
@@ -71,7 +72,7 @@ export interface ManagedChildPorts {
  fetchAssignment(identity:ManagedJobIdentity):Promise<unknown>;
  reportResult(identity:ManagedJobIdentity,result:ManagedChildResult):Promise<unknown>;
  spawn(command:"opencode",args:string[],options:{cwd:"/workspace";env:NodeJS.ProcessEnv;stdio:["ignore","pipe","pipe"];shell:false;detached:false}):ChildProcess;
- verifierFactory():ResponseVerifier;environment:NodeJS.ProcessEnv;
+ verifierFactory():ResponseVerifier;environment:NodeJS.ProcessEnv;beforeSpawn?():void;retainChild?(child:ChildProcess):void;
 }
 export interface ManagerContext {request:{headers:IncomingHttpHeaders}}
 export interface CoreActorContext {revalidate():authorization.AuthorizationPrincipal|null|undefined}
@@ -87,11 +88,12 @@ export interface QualifiedManagedProfile {
  modelBindingHash:string;model:string;projectName:string;limits:runtimes.RuntimeLimits;
 }
 export interface Core126Profiles {
+ describeOriginalJobBootstrap(admission:ManagedJobAdmission,facts:Core126Facts):unknown;
  qualify(facts:Core126Facts):Promise<QualifiedManagedProfile>;
  assertCurrent(admission:ManagedJobAdmission,facts:Core126Facts):void;
 }
 export type ManagedJobCredential=mcpCredentials.ManagedJobCredential;
-export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential">;
+export type ManagedCredentialPorts=Pick<typeof mcpCredentials,"issueManagedJobCredential"|"inspectManagedJobCredential"|"revokeManagedJobCredential"|"withdrawManagedJobDispatch">;
 export interface Core126OwnerPorts {
  getDb:typeof getDb;execTransaction:typeof execTransaction;checkpointAfterWrite:typeof checkpointAfterWrite;
  jobs:Pick<typeof jobs,"getJob"|"getJobRun"|"isJobRunAuthorizationCurrent"|"finishJobRun"|"cancelJobRun">;
@@ -118,6 +120,7 @@ export interface Core126Owner {
  requestCancel(runId:string,context:CoreActorContext):ManagedJobAdmission;
  readOriginalRun(runId:string,scope:DotScope,context:CoreActorContext):NonNullable<ReturnType<typeof jobs.getJobRun>>;
  requireCancellationIntent(runId:string):void;requireOriginalRetirementProof(runId:string,proof:unknown):void;
+ bootstrapAssignment(runId:string,credential:ManagedJobCredential):unknown;
  assignment(runId:string,credential:ManagedJobCredential):ManagedJobAssignment;
  result(runId:string,input:unknown,credential:ManagedJobCredential):{recorded:true};
 }

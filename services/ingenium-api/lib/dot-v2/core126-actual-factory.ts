@@ -3,7 +3,7 @@ import {createHash} from "node:crypto";
 import type {Core126ImageOwner} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
 import type {Core126Facts,Core126Handlers} from "./managed-job-contracts.mjs";
 import {createCore126Owner} from "./core126-owner.mjs";
-import {createCore126ManagerGuard,createCore126ToolAuthorizer,createCore126Handlers} from "./core126-http.mjs";
+import {createCore126ManagerGuard,createCore126ToolAuthorizer,createCore126Handlers,createCore126WithdrawalHandler} from "./core126-http.mjs";
 import {loadManagerToken} from "../runtime-manager-auth.js";
 import {JobResponseVerification} from "../job-response-verification.js";
 import {resolveJobProviderModel} from "../job-native-provider.js";
@@ -51,6 +51,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    return {...image,approvedScopes:[...image.approvedScopes],model,modelBindingHash:before,resourceAdmissionId:facts.run.id,
     projectName,limits:{cpuMillis:facts.runtime.cpuMillis,memoryBytes:facts.runtime.memoryBytes,pidsLimit:facts.runtime.pidsLimit,diskBytes:facts.runtime.diskBytes,processLimit:facts.runtime.processLimit}};
   },
+  describeOriginalJobBootstrap(admission:any,facts:any){if(!imageOwner)throw Object.assign(Error("Qualified original image owner unavailable"),{status:503});return imageOwner.describeOriginalJobBootstrap(admission,facts);},
   assertCurrent(admission:any,facts:any){
    agents.validateProtectedOpenCodeDeployment();
    requireCurrentParentScopes(facts.runtime.id,admission.approvedScopes);
@@ -68,6 +69,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
   return imageOwner.withFreshOriginalJobRole(facts,work);
  };
  const rawHandlers=createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list});
+ const withdrawOriginal=createCore126WithdrawalHandler({credentials:mcpCredentials});
  const handlers:Core126Handlers={
   async internal(request){
    const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/([^/]+)$/.exec(request.path),runId=match?.[1],operation=match?.[2];
@@ -77,6 +79,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    return needsImage?withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.internal(request)):rawHandlers.internal(request);
   },
   async runtime(request){
+   const narrowed=await withdrawOriginal(request);if(narrowed)return narrowed;
    const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\//.exec(request.path),runId=match?.[1];
    if(!runId)return rawHandlers.runtime(request);
    const header=request.headers.authorization,credential=mcpCredentials.inspectManagedJobCredential(typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"","job-run");

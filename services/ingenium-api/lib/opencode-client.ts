@@ -1322,6 +1322,7 @@ async function streamRequest(
   path: string,
   query?: Record<string, string | number | undefined>,
   extraHeaders?: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> {
   const target = currentOpenCodeRuntimeTarget();
   const auth = target ? (target.authHeader ?? (target.password ? `Basic ${Buffer.from(`opencode:${target.password}`).toString("base64")}` : null)) : buildAuthHeader();
@@ -1345,14 +1346,17 @@ async function streamRequest(
   }
 
   try {
+    signal?.throwIfAborted();
     const headers: Record<string, string> = { Accept: "text/event-stream", ...extraHeaders };
     if (auth) headers.Authorization = auth;
     const response = await fetch(url, {
       method: "GET",
       headers,
+      signal,
     });
 
     if (!response.ok || !response.body) {
+      await response.body?.cancel().catch(() => undefined);
       return {
         error: {
           message: `SSE stream failed: HTTP ${response.status}`,
@@ -2331,11 +2335,13 @@ export const opencodeClient = {
     _sessionId?: string,
     _directory?: string,
     lastEventId?: string,
+    signal?: AbortSignal,
   ): Promise<ReadableStream<Uint8Array> | OpenCodeErrorShape> =>
     streamRequest(
       "/api/event",
       undefined,
       lastEventId ? { "Last-Event-ID": lastEventId } : undefined,
+      signal,
     ),
 };
 

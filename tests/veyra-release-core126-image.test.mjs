@@ -41,7 +41,7 @@ async function fixture(){
 const qualify=f=>f.owner.withFreshOriginalJobRole(f.facts,()=>f.owner.qualifyOriginalJobRole(f.facts));
 test('deterministic producer pins source, image config, artifacts and eighteen protocol traces',async()=>{
  const f=await fixture(),r=await produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']});
- assert.deepEqual(r.bytes,f.result.bytes);assert.equal(r.approvalGranted,false);assert.equal(r.manifest.protocolEvidence.length,18);assert.equal(r.manifest.files.length,16);assert.equal(r.manifest.source.files.length,18);
+ assert.deepEqual(r.bytes,f.result.bytes);assert.equal(r.approvalGranted,false);assert.equal(r.manifest.protocolEvidence.length,18);assert.equal(r.manifest.files.length,25);assert.equal(r.manifest.source.files.length,29);
 });
 test('source bytes must match frozen Source, not merely image labels',async()=>{const f=await fixture();f.sources.set(SOURCE_INPUTS[0],Buffer.from('drift'));await assert.rejects(produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']}),fail);});
 test('missing closed broker artifact refuses qualification',async()=>{const f=await fixture();f.artifacts.delete('/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js');await assert.rejects(produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']}),fail);});

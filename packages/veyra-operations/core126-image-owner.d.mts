@@ -29,6 +29,7 @@ export interface Core126ImageAdmission {
  runId:string;jobId:string;projectId:string;organizationId:string;ownerUserId:string;runtimeId:string;runtimeRevision:number;parentContainerId:string;workspaceId:string;bindingHash:string;bindingEpoch:number;limits:Core126Limits;agentHash:string;profileId:string;profileHash:string;imageId:string;daemonId:string;provisioningRevision:number;model:string;modelBindingHash:string;approvedScopes:readonly string[];deadlineAt:string;
 }
 export interface Core126ImageOwner {
+ describeOriginalJobBootstrap(admission:Core126ImageAdmission,facts:Core126Facts):Readonly<{imageId:string;files:readonly {path:string;sha256:string;bytes:number;uid:number;gid:number;mode:number;kind:string}[]}>;
  /** Invoke outside DB transaction; original Core must reread facts inside its write. */
  withFreshOriginalJobRole<T>(facts:Core126Facts,work:()=>T|Promise<T>):Promise<T>;
  qualifyOriginalJobRole(facts:Core126Facts & {model:string;modelBindingHash:string}):Promise<Core126QualifiedImage>;

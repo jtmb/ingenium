@@ -1,3 +1,5 @@
+import {createCore126ManagerProofProducer} from "../../../packages/veyra-operations/core126-manager-proof.mjs";
+import {publicContainer as publicJobParent,hash as jobParentHash} from "../../../packages/veyra-operations/core126-image-contract.mjs";
 import { createServer, request as httpRequest } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import * as runtimeProvision from "ingenium-core/lib/tools/runtime-original-provision";
@@ -127,6 +129,12 @@ function dockerHijack(path: string, body: object | undefined, input: Buffer): Pr
     request.on("error", reject);
     request.end(payload);
   });
+}
+
+async function handoffOriginalJobFrame(container:string,capability:string,agentMaterial:unknown):Promise<void>{
+ const payload=Buffer.from(JSON.stringify({capability,agentMaterial})+"\n","utf8");
+ if(payload.length>384*1024+256)throw Error("Original JobRun frame exceeds its bound");
+ await dockerHijack(`/containers/${encodeURIComponent(container)}/attach?stream=1&stdin=1&stdout=0&stderr=0`,undefined,payload);
 }
 
 async function handoffRuntimeCapability(container: string, capability: string): Promise<void> {
@@ -386,6 +394,7 @@ async function readJsonBody(request: import("node:http").IncomingMessage): Promi
 
 export function startRuntimeManager(): import("node:http").Server {
   const token = loadManagerToken();
+  const originalJobRoleProof=createCore126ManagerProofProducer({docker:dockerRequest});
   const mappings = readWorkspaceMappings(environment("INGENIUM_RUNTIME_WORKSPACE_MAP_FILE"));
   const jobCore=createManagedJobCoreClient({apiUrl:environment("INGENIUM_RUNTIME_API_URL"),managerToken:token});
   const jobOwner=createManagedJobContainerOwner({core:jobCore,docker:dockerRequest,
@@ -394,9 +403,10 @@ export function startRuntimeManager(): import("node:http").Server {
       if(material.runId!==admission.runId||material.attemptId!==admission.attemptId||material.credentialRunId!==admission.runId||material.profileQualified!==true||input.capability!==material.capability
         ||input.runtimeId!==admission.runtimeId||input.organizationId!==admission.organizationId||input.projectId!==admission.projectId||input.ownerUserId!==admission.ownerUserId||input.workspaceId!==admission.workspaceId||input.storageMappingHash!==admission.bindingHash||input.securityEpoch!==admission.bindingEpoch||input.revision!==admission.provisioningRevision)throw Error("Managed JobRun material binding changed");
       const mapping=mappings.get(input.workspaceId);if(!mapping)throw Error("Managed JobRun workspace mapping unavailable");
-      return {admission:material.admission,capability:material.capability,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
+      if(!material.agentMaterial)throw Error("Original JobRun agent material unavailable");
+      return {admission:material.admission,capability:material.capability,agentMaterial:material.agentMaterial,spec:buildRuntimeContainerSpec(input,mapping,{image:admission.imageId,network:runtimeNetworkName(admission.runtimeId),apiUrl:environment("INGENIUM_RUNTIME_API_URL")})};
     },
-    handoff:(containerId,_admission,capability)=>handoffRuntimeCapability(containerId,capability),
+    handoff:(containerId,_admission,capability,agentMaterial)=>handoffOriginalJobFrame(containerId,capability,agentMaterial),
   });
   const port = Number(environment("INGENIUM_RUNTIME_MANAGER_PORT"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("Runtime manager port is invalid");
@@ -442,6 +452,14 @@ export function startRuntimeManager(): import("node:http").Server {
         const observation=observeManagedRuntime(runtime,daemon.data.ID,Date.now());
         response.writeHead(200).end(JSON.stringify({data:{...publicInspect(runtime),placement:observation}}));
         return;
+      }
+      const jobRole=/^\/v1\/runtimes\/([a-f0-9-]+)\/job-role-proof$/.exec(url.pathname);
+      if(request.method==="GET"&&jobRole&&UUID.test(jobRole[1]!)&&url.search===""&&request.headers.cookie===undefined&&request.headers.origin===undefined){
+        const runtimeId=jobRole[1]!;
+        const proof=await originalJobRoleProof.observe(runtimeId);
+        const current=await inspectRuntime(runtimeId);
+        if(!current||jobParentHash(publicJobParent(current))!==jobParentHash(proof.parent))throw Error("Original job parent changed before publication");
+        response.writeHead(200).end(JSON.stringify({data:{...publicInspect(current),jobRoleProof:proof}}));return;
       }
       const match = /^\/v1\/runtimes\/([0-9a-f-]+)(\/stop)?$/.exec(url.pathname);
       if (match && UUID.test(match[1]!)) {

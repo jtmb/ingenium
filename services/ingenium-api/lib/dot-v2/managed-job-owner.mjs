@@ -81,7 +81,7 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
     const started=await docker("POST",`/containers/${path(id)}/start`);
     if(started.status!==204){await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
     // Existing attach-only credential handoff; credential is scoped to this original run by Core.
-    a=await fresh(a,"launch");await handoff(id,a,material.capability);a=await fresh(a,"launch");await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
+    a=await fresh(a,"launch");await handoff(id,a,material.capability,material.agentMaterial);a=await fresh(a,"launch");await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
    }catch{await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
   },
   async inspect(runId){if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");try{return await settle(await admission(runId,"inspect"));}catch(e){return unknown(e.code??"MANAGED_JOB_INSPECTION_UNAVAILABLE");}},

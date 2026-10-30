@@ -173,3 +173,13 @@ export const inspectManagedJobRun=(runId:string)=>requestManagedJob(runId,"inspe
 export const cancelManagedJobRun=(runId:string)=>requestManagedJob(runId,"cancel");
 
 export const cleanupManagedJobRun=(runId:string)=>requestManagedJob(runId,"cleanup");
+
+/** Read-only actual same-manager/full-parent proof. Only the sealed image consumer grants a role. */
+export async function inspectManagedRuntimeJobRole(runtimeId:string):Promise<unknown>{
+ if(!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(runtimeId))throw Error("Original runtime identity is invalid");
+ const result=await requestManager('/v1/runtimes/'+runtimeId+'/job-role-proof');
+ if(!('jobRoleProof' in result)||!result.jobRoleProof||typeof result.jobRoleProof!=='object')throw Error("Original manager job-role proof unavailable");
+ const proof=result.jobRoleProof;
+ if(!('parent' in proof)||!proof.parent||typeof proof.parent!=='object'||!('runtimeId' in proof.parent)||proof.parent.runtimeId!==runtimeId||!('id' in proof.parent)||proof.parent.id!==result.backendId||!('name' in proof.parent)||proof.parent.name!==result.backendName)throw Error("Original manager job-role identity changed");
+ return proof;
+}

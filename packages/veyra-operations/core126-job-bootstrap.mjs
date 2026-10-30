@@ -6,7 +6,7 @@ import {freeze,unavailable} from './core126-image-contract.mjs';
 export async function bootstrapCore126Job(ports){
  for(const name of ['readOriginalJobFrame','validateOriginalProtectedDeployment','writeOriginalPrivateCapability','fetchOriginalAssignment','writeOriginalPrivateJson','assertOriginalImageIsolation','runOriginalChild'])if(typeof ports?.[name]!=='function')unavailable('original job bootstrap producer missing');
  await ports.validateOriginalProtectedDeployment();
- const frame=await ports.readOriginalJobFrame({maxBytes:384*1024+62});
+ const frame=await ports.readOriginalJobFrame({maxBytes:384*1024+256});
  if(!frame||typeof frame.capability!=='string'||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(frame.capability))unavailable('original job attach frame');
  await ports.writeOriginalPrivateCapability('/run/ingenium-runtime/capability',frame.capability);
  const expected=await ports.fetchOriginalAssignment();

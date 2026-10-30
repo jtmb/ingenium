@@ -20,6 +20,18 @@ if [ "$HOME" != "/home/appuser" ] || [ "$XDG_CONFIG_HOME" != "/home/appuser/.con
   exit 1
 fi
 
+case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
+  job)
+    export OPENCODE_CONFIG_PROJECT_DISABLE="1"
+    export OPENCODE_CONFIG_DIR="/run/ingenium-runtime/job/config"
+    export OPENCODE_CONFIG="/usr/local/share/ingenium/opencode-managed/job-opencode.json"
+    unset OPENCODE_CONFIG_CONTENT
+    exec node /app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js
+    ;;
+  runtime) ;;
+  *) echo "ERROR: runtime role unavailable"; exit 1 ;;
+esac
+
 NODE_ENV=production node --input-type=module -e '
   let core;
   try {
@@ -105,10 +117,6 @@ EOF
 chmod 0600 "$config_file"
 
 case "${INGENIUM_RUNTIME_ROLE:-runtime}" in
-  job)
-    if [ -z "${INGENIUM_JOB_RUN_ID:-}" ] || [ -z "${INGENIUM_JOB_ATTEMPT_ID:-}" ]; then echo "ERROR: original JobRun identity missing"; exit 1; fi
-    exec node /app/services/ingenium-api/dist/scripts/runtime-job-child.js
-    ;;
   runtime)
     export INGENIUM_RUNTIME_BIND_HOST="0.0.0.0"
     exec supervisord -c /app/runtime-supervisord.conf

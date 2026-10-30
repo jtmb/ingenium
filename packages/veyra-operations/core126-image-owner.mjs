@@ -66,6 +66,9 @@ export function createCore126ImageOwner({client,registry,originalProvisionProfil
    return freeze({qualified:true,id:'core126-image:'+d.approval.manifestSha256,hash:profileHash,imageId:d.manifest.imageId,parentImageId:proof.parent.imageId,daemonId:proof.daemonId,provisioningRevision:proof.parent.provisioningRevision,
     approvedScopes:[...d.manifest.approvedScopes],expiresAt:Math.min(d.approval.validUntil,Date.parse(f.runtime.absoluteExpiresAt)),agentHash:scope.agentHash,model:f.model,modelBindingHash:f.modelBindingHash,jobRunAudience:'job-run',transport:CORE126_PROTOCOL});
   },
+  describeOriginalJobBootstrap(admission,f){
+   this.assertCurrentOriginalJobRole(admission,f);const {d}=current(f);return freeze({imageId:d.manifest.imageId,files:structuredClone(d.manifest.files)});
+  },
   assertCurrentOriginalJobRole(admission,f){
    const {scope,proof,d}=current(f);
    const admittedScope=Object.fromEntries(Object.keys(scope).map(key=>[key,admission[key]]));

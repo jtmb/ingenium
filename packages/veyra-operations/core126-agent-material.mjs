@@ -9,7 +9,7 @@ const sameKeys=(o,keys)=>o&&typeof o==='object'&&!Array.isArray(o)&&Object.keys(
 const safeName=n=>typeof n==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(n)&&n!=='ingenium-llm-broker'&&!['__proto__','constructor','prototype'].includes(n);
 const bindingKeys=['runId','attemptId','runtimeId','projectId','organizationId','ownerUserId','workspaceId','bindingHash','bindingEpoch','profileHash','imageId','agentHash','deadlineAt'];
 function binding(a){
- if(!a||!['runId','attemptId','runtimeId','projectId','organizationId','ownerUserId','workspaceId'].every(k=>UUID.test(a[k]??''))||!['bindingHash','profileHash','agentHash'].every(k=>hex(a[k]))||!imageId(a.imageId)||!Number.isSafeInteger(a.bindingEpoch)||a.bindingEpoch<0||!Number.isFinite(Date.parse(a.deadlineAt)))unavailable('original agent-material admission binding');
+ if(!a||!['runId','attemptId','runtimeId','projectId','organizationId','ownerUserId'].every(k=>UUID.test(a[k]??''))||typeof a.workspaceId!=='string'||!a.workspaceId||a.workspaceId.length>256||a.workspaceId!==a.workspaceId.trim()||/[\u0000-\u001f\u007f]/u.test(a.workspaceId)||!['bindingHash','profileHash','agentHash'].every(k=>hex(a[k]))||!imageId(a.imageId)||!Number.isSafeInteger(a.bindingEpoch)||a.bindingEpoch<0||!Number.isFinite(Date.parse(a.deadlineAt)))unavailable('original agent-material admission binding');
  return Object.fromEntries(bindingKeys.map(k=>[k,a[k]]));
 }
 function configuration(c){

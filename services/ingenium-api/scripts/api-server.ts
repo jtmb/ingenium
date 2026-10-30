@@ -1,6 +1,7 @@
 import express from "express";
 import {createCore126Ingress} from "../lib/dot-v2/core126-ingress.js";
-import {actualManagedJobHandlers} from "../lib/dot-v2/core126-runtime.js";
+import {actualManagedJobHandlers,installActualManagedJobOwner} from "../lib/dot-v2/core126-runtime.js";
+import {loadInstalledCore126ImageOwner} from "../lib/dot-v2/core126-installed-image-owner.js";
 import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
@@ -408,6 +409,10 @@ export function startApiServer(): ApiServerHandle | null {
     return null;
   }
 
+  if(isControlPlaneMode()){
+    try{installActualManagedJobOwner(loadInstalledCore126ImageOwner());}
+    catch{logger.warn("runtime","Managed JobRun image approval is unavailable; execution remains closed");}
+  }
   const server = app.listen(config.port, isControlPlaneMode() ? "0.0.0.0" : "127.0.0.1");
   const lifecycle = createApiLifecycle(server);
   const disposeSignals = installShutdownSignalHandlers(lifecycle);
