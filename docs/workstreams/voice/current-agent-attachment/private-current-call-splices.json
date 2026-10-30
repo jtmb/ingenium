@@ -1,0 +1,164 @@
+{
+  "kind": "private-current-call-plan-owner-exact-splices-v1",
+  "applied": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "files": [
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "preimageSha256": "2cedc1b257fa92f84f6f1ae7b8bdf7c26766e97fb8a469d6be83d749442b1f68",
+      "postimageSha256": "4e4edf50f80cad413a486d9e96af650860b8dfa9111127eddd2f04977a41245f",
+      "edits": [
+        {
+          "name": "protected-original-profile-import",
+          "offset": 0,
+          "before": "import { spawn } from 'node:child_process';",
+          "after": "import { spawn } from 'node:child_process';\nimport { ManagedCpuProfile } from './managed-profile.mjs';"
+        },
+        {
+          "name": "private-original-call-leases",
+          "offset": 2968,
+          "before": "  #scopes = new Map();",
+          "after": "  #attachmentLeases = new WeakMap(); #originalProfile;\n  #scopes = new Map();"
+        },
+        {
+          "name": "capture-original-constructor-profile",
+          "offset": 3699,
+          "before": "    Object.assign(this, { profile, ledger, bindContext,",
+          "after": "    this.#originalProfile = profile;\n    Object.assign(this, { profile, ledger, bindContext,"
+        },
+        {
+          "name": "inside-class-actual-call-resource-operations",
+          "offset": 34896,
+          "before": "",
+          "afterFile": "managed-call-resource.additions.mjs",
+          "afterFileSha256": "1df217dcd0051ea63ac6bbf8f2a7bb38319640eb68e66590301ea56d82ee4a9f",
+          "prefix": "\n"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "preimageSha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1",
+      "postimageSha256": "bcdc8841ed9d09b6fac4a1e898743a613c9d5c0c1a9529235b12075bc8093174",
+      "edits": [
+        {
+          "name": "typed-private-call-resource-methods",
+          "offset": 2427,
+          "before": "  status(): CpuSupervisorStatus;",
+          "after": "  status(): CpuSupervisorStatus;\n  bindAttachmentContext(context:C):C;\n  captureAttachmentLease(context:C,scope:SupervisedCpuScope<C>,callId:string,deadlineAt:number):AttachmentCpuLease;\n  inspectAttachmentLease(lease:AttachmentCpuLease):AttachmentCpuFacts;\n  releaseAttachmentLease(lease:AttachmentCpuLease):Promise<void>;"
+        },
+        {
+          "name": "typed-call-lease-facts",
+          "offset": 3811,
+          "before": "",
+          "afterFile": "managed-call-resource.additions.d.mts",
+          "afterFileSha256": "201eb2bce3e90e79118fb878c43f358c9ec51c6327cdbbfb31894bb53561a0a9",
+          "prefix": "\n"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "preimageSha256": "6bf381d5cefa22e6c1267f913ce3904a1627b8b5a074eaf2ea248d42ccb91658",
+      "postimageSha256": "c337a60d03e4ade219c046c6ed02308b46028a572e30d50103664cc61fdb47c4",
+      "edits": [
+        {
+          "name": "actual-session-and-live-feed-original-readers",
+          "offset": 101842,
+          "before": "",
+          "afterFiles": [
+            "call-session-reader.additions.ts",
+            "call-event-reader.additions.ts"
+          ],
+          "afterFileSha256s": [
+            "6dcae7fe6205a24103bc528b59d68c4dad060f4cd31d6a9ce52b3d9ede23462f",
+            "0e1d509e843c2b75eec57c02f9bb2a6655515707762b55f7c25268b93932a9dd"
+          ]
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "preimageSha256": "53bd5b736b8e58856f3bc6a8621b9d59743136c97c73ea581596f68ecb47bf3b",
+      "postimageSha256": "d88a16e1470c344aed4bdc2c759733fe6ddb72b15a905cd79b6c2b4f135a5116",
+      "edits": [
+        {
+          "name": "actual-private-call-reader-policy-imports",
+          "offset": 0,
+          "before": "import {createHash} from 'node:crypto';",
+          "after": "import {createHash} from 'node:crypto';\nimport {randomUUID} from 'node:crypto';\nimport {readOriginalCallSessionSelection,readOriginalRawAssistantMessage,takeOriginalRawAssistantRead,discardOriginalRawAssistantRead,openOriginalCallEventBody,type OriginalRawAssistantRead,type OriginalRawAssistantReadData} from '../opencode-client.js';\nimport {rawAssistantRange,type RawSessionSelection} from './raw-assistant-wire.mjs';\nimport {deriveAttachedVerbatimPlan} from './attached-verbatim-policy.mjs';\nimport {parseSelectedCallEvent,type SelectedCallEvent} from './attached-call-protocol.mjs';\nimport {inspectOriginalCallRuntimeJobRole} from '../runtime-manager-client.js';"
+        },
+        {
+          "name": "private-call-and-plan-owner",
+          "offset": 15176,
+          "before": "",
+          "afterFile": "private-current-call.additions.ts",
+          "afterFileSha256": "480e8fa3bc71b7d507cc3fac7eb64936665f03eceec1557ea378c62c4fc470fe",
+          "prefix": "\n"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/hosted-attachment-owner.mjs",
+      "preimageSha256": "f36737054caa4d748dfae1d4d67da5675db7c924ff960a5b018ee4380434d394",
+      "postimageSha256": "c8f643ef01e21c5792d56e8e0aec016736902e10ca9f16edf949440eb9ed1b36",
+      "edits": [
+        {
+          "name": "pinned-inbox-ACK-validator",
+          "offset": 0,
+          "before": "import { createHash } from 'node:crypto';",
+          "after": "import { createHash } from 'node:crypto';\nimport { assertAttachedPromptInboxAck } from './attached-call-protocol.mjs';"
+        },
+        {
+          "name": "durable-ACK-never-agent-result",
+          "offset": 3182,
+          "before": "        if(result?.error||ack?.id!==message.nativeMessageId||ack.sessionID!==binding.sessionId||ack.delivery!==message.delivery)fail('CALL_MESSAGE_DELIVERY_UNKNOWN');",
+          "after": "        assertAttachedPromptInboxAck(result,{sessionId:binding.sessionId,messageId:message.nativeMessageId,text:message.text,delivery:message.delivery});"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/tests/voice-call-hosted-owner.test.mjs",
+      "preimageSha256": "9c2b0626ad1e8aedac43dc3dd2cf5d73bbf8a5a0e99e9e9831f41cd1b19665b7",
+      "postimageSha256": "bcddd5db3c3b91c5a0270f0d702bbea70570219c4545db2f531cc356bd7532c4",
+      "edits": [
+        {
+          "name": "pinned-real-protocol-shape-fixture-not-runtime-acceptance",
+          "offset": 1453,
+          "before": "return {data:{id:options.body.id,sessionID:badAck?'ses_other':scope.conversationId,delivery:options.body.delivery}};",
+          "after": "return {data:{id:options.body.id,sessionID:badAck?'ses_other':scope.conversationId,delivery:options.body.delivery,type:'user',time:{created:1},payload:{text:options.body.text}}};"
+        }
+      ]
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "preimageSha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772",
+      "postimageSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+      "edits": [
+        {
+          "name": "strict-call-role-body-owner-import",
+          "offset": 0,
+          "before": "",
+          "after": "import {consumeBoundedRawJson,RAW_ASSISTANT_LIMITS} from './voice-v2/raw-assistant-wire.mjs';\n"
+        },
+        {
+          "name": "actual-bounded-original-manager-call-reader",
+          "offset": 10565,
+          "before": "",
+          "afterFile": "call-manager-reader.additions.ts",
+          "afterFileSha256": "5f5892f62125900976085f951529afa41cbdbfe65157cb35ba8da09df441ff7f",
+          "prefix": "\n"
+        }
+      ]
+    }
+  ],
+  "newModules": [
+    "attached-verbatim-policy.mjs",
+    "attached-verbatim-policy.d.mts",
+    "attached-call-protocol.mjs",
+    "attached-call-protocol.d.mts"
+  ],
+  "appendConvention": "afterFile uses prefix+exact file; afterFiles concatenates each LF+exact file in order, verify corresponding SHA256s",
+  "productionBoundary": "Already-running genuine CPU scope plus actual captured context; Core134 dispatch/API composition not installed; legacy unavailable observation and VoiceService unchanged"
+}

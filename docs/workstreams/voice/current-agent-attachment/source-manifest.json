@@ -29,6 +29,26 @@
       "sha256": "9e12e88acdd4464382d647d69ec5617b1bda7e69e74578d14d4190d13c2656e1"
     },
     {
+      "path": "attached-call-protocol.d.mts",
+      "bytes": 442,
+      "sha256": "be273803adabc3f1781404efd5ef13604f6d351271dd73fdaab581e323955411"
+    },
+    {
+      "path": "attached-call-protocol.mjs",
+      "bytes": 3064,
+      "sha256": "2016f36944291aa916bddb2b105d965129534eab3aa5941e4105d2a11c084aa7"
+    },
+    {
+      "path": "attached-verbatim-policy.d.mts",
+      "bytes": 730,
+      "sha256": "f5f4d78dfc253cad570301127d9017b0aaea33800482cb3cd594b459ed72e166"
+    },
+    {
+      "path": "attached-verbatim-policy.mjs",
+      "bytes": 1977,
+      "sha256": "e1ce337a0f296893b1e6a36afba1f2cb2d56fc454b96289f90a109526dbd51cd"
+    },
+    {
       "path": "attachment.mjs",
       "bytes": 17211,
       "sha256": "c033338361bc1630d5d8c5e74de21a7206a4e32a7320cf5ef880918c87a83dbb"
@@ -37,6 +57,21 @@
       "path": "attachment.test.mjs",
       "bytes": 7592,
       "sha256": "9799ed259401f1df728e3f6020e82b13fdb74dbd8a0336bb37208efe25f96622"
+    },
+    {
+      "path": "call-event-reader.additions.ts",
+      "bytes": 2246,
+      "sha256": "0e1d509e843c2b75eec57c02f9bb2a6655515707762b55f7c25268b93932a9dd"
+    },
+    {
+      "path": "call-manager-reader.additions.ts",
+      "bytes": 2235,
+      "sha256": "5f5892f62125900976085f951529afa41cbdbfe65157cb35ba8da09df441ff7f"
+    },
+    {
+      "path": "call-session-reader.additions.ts",
+      "bytes": 3174,
+      "sha256": "6dcae7fe6205a24103bc528b59d68c4dad060f4cd31d6a9ce52b3d9ede23462f"
     },
     {
       "path": "constructor-audit.json",
@@ -67,6 +102,16 @@
       "path": "hosted-owner.test.mjs",
       "bytes": 3717,
       "sha256": "b8de66975f5673bbd2a6ff590a5ce69a4906493f5d5b2b5b2826587d51d542b8"
+    },
+    {
+      "path": "managed-call-resource.additions.d.mts",
+      "bytes": 698,
+      "sha256": "201eb2bce3e90e79118fb878c43f358c9ec51c6327cdbbfb31894bb53561a0a9"
+    },
+    {
+      "path": "managed-call-resource.additions.mjs",
+      "bytes": 3580,
+      "sha256": "1df217dcd0051ea63ac6bbf8f2a7bb38319640eb68e66590301ea56d82ee4a9f"
     },
     {
       "path": "native-voice-transport-receipt.json",
@@ -100,8 +145,38 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1426,
-      "sha256": "543ef79855c229cb3580bc05c4c3b50c3d9551bc3b517f65ebc592259acd159e"
+      "bytes": 1467,
+      "sha256": "8fd18041a8a5051b940677218c7eb4414e157e3e34daa01d2ce76777389db66d"
+    },
+    {
+      "path": "private-current-call-negative.test.ts",
+      "bytes": 1827,
+      "sha256": "a0a7ecbfa7e01b9642f81e460fd5bd226136b5578b14cec1f97fc68a7f6a4fe3"
+    },
+    {
+      "path": "private-current-call-receipt.json",
+      "bytes": 10228,
+      "sha256": "2d1b8f0c33d1ada1e3a671a33db6ab0cf75b38edded3683c3c0b5a06953987e0"
+    },
+    {
+      "path": "private-current-call-review.md",
+      "bytes": 10716,
+      "sha256": "d59e066d31730ffb358ba6148b6fcadbe5a7b0979ef7958ce17b8182c0a2af84"
+    },
+    {
+      "path": "private-current-call-splices.json",
+      "bytes": 8130,
+      "sha256": "8edad15e04a3669e0b77f0f28251e7c00a61a79775360e0785b3cbe5cd0de859"
+    },
+    {
+      "path": "private-current-call.additions.ts",
+      "bytes": 21700,
+      "sha256": "480e8fa3bc71b7d507cc3fac7eb64936665f03eceec1557ea378c62c4fc470fe"
+    },
+    {
+      "path": "private-current-call.test.mjs",
+      "bytes": 4936,
+      "sha256": "d58f3fb083a26b50d16d0a8852818c33c574c9bbfcb91420e9df03fd844da564"
     },
     {
       "path": "raw-assistant-client-negative.test.ts",
@@ -234,5 +309,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 242338
+  "totalContentBytes": 318062
 }

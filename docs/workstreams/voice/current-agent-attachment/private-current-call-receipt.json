@@ -1,0 +1,236 @@
+{
+  "kind": "genuine-private-current-call-plan-source-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "c1175ecb79e101ac4086e0a8db10bf6cdc86569c",
+  "applied": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "testsAuthored": {
+    "dataPolicyProtocol": 7,
+    "actualAuthorityNegatives": 3
+  },
+  "testsExecuted": 0,
+  "policyDecision": "Root explicitly authorized fixed verbatim-assistant-text-v1; preserves assistant text, no credential-redaction claim, no caller callback/policy",
+  "sourceInputs": [
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "sha256": "53bd5b736b8e58856f3bc6a8621b9d59743136c97c73ea581596f68ecb47bf3b"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "sha256": "2cedc1b257fa92f84f6f1ae7b8bdf7c26766e97fb8a469d6be83d749442b1f68"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "sha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-profile.mjs",
+      "sha256": "17ba2346a41b63e4e21955af2cccad24148dca627f7bf89d8115bb551814746e"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.mjs",
+      "sha256": "8b2ff9128ba83a83d7cc1c79372922dd2e49dd7baa26080946ba46068f6d094d"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/managed-cpu-speech.mjs",
+      "sha256": "726745274af68847b723f665ce4599a1f6317c65457c265b4e59b6fa4271dfe9"
+    },
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "sha256": "6bf381d5cefa22e6c1267f913ce3904a1627b8b5a074eaf2ea248d42ccb91658"
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "sha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/hosted-attachment-owner.mjs",
+      "sha256": "f36737054caa4d748dfae1d4d67da5675db7c924ff960a5b018ee4380434d394"
+    },
+    {
+      "path": "services/ingenium-api/tests/voice-call-hosted-owner.test.mjs",
+      "sha256": "9c2b0626ad1e8aedac43dc3dd2cf5d73bbf8a5a0e99e9e9831f41cd1b19665b7"
+    },
+    {
+      "path": "packages/veyra-voice/segments.mjs",
+      "sha256": "d0ae5a426309b624c5998fb6a98471097b26b5d4166483c958699a40ee47881a"
+    }
+  ],
+  "primaryTextSources": [
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-inbox.ts",
+      "utf8Bytes": 3423,
+      "sha256": "61f9b9fd57409e4c8982da998142563a5d9fbd2148c47c383ad48f3897b73d51"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-event.ts",
+      "utf8Bytes": 19223,
+      "sha256": "c7c97520446915e0aa3aaf3abfde0ba0801ab4058a840f6fafd9f0219754eaa1"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/session.ts",
+      "utf8Bytes": 36107,
+      "sha256": "9f78f4c34732adcd7fe87c3968ee28de9078b82494114b6a73053bd80c0ab5c1"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/event.ts",
+      "utf8Bytes": 2839,
+      "sha256": "de5857bb0a9baf94e165f95978c0ae1affe70abce5182ffb01225afae507fbd0"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/handlers/session.ts",
+      "utf8Bytes": 26743,
+      "sha256": "89baae70d0c411a2f61a7ca5d4b586180e52889227437828a7016700cece692e"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/handlers/event.ts",
+      "utf8Bytes": 1381,
+      "sha256": "539b073446be0c6bda3b6f4311cc65e54a1e30ac733cb5428c341adaff3b92f5"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/server/src/event-feed.ts",
+      "utf8Bytes": 3184,
+      "sha256": "8867fb8ca3b1d7d667038ac1210a69a33b2cc264be0782d3e735e9bbf6eba568"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/prompt.ts",
+      "utf8Bytes": 2961,
+      "sha256": "41b3000a4fe8ce1f48ad90bb0bd996ad52ca1dbe530b63cdc7f5af2b11b92d01"
+    }
+  ],
+  "outputs": [
+    {
+      "path": "managed-call-resource.additions.mjs",
+      "bytes": 3580,
+      "sha256": "1df217dcd0051ea63ac6bbf8f2a7bb38319640eb68e66590301ea56d82ee4a9f"
+    },
+    {
+      "path": "managed-call-resource.additions.d.mts",
+      "bytes": 698,
+      "sha256": "201eb2bce3e90e79118fb878c43f358c9ec51c6327cdbbfb31894bb53561a0a9"
+    },
+    {
+      "path": "attached-verbatim-policy.mjs",
+      "bytes": 1977,
+      "sha256": "e1ce337a0f296893b1e6a36afba1f2cb2d56fc454b96289f90a109526dbd51cd"
+    },
+    {
+      "path": "attached-verbatim-policy.d.mts",
+      "bytes": 730,
+      "sha256": "f5f4d78dfc253cad570301127d9017b0aaea33800482cb3cd594b459ed72e166"
+    },
+    {
+      "path": "attached-call-protocol.mjs",
+      "bytes": 3064,
+      "sha256": "2016f36944291aa916bddb2b105d965129534eab3aa5941e4105d2a11c084aa7"
+    },
+    {
+      "path": "attached-call-protocol.d.mts",
+      "bytes": 442,
+      "sha256": "be273803adabc3f1781404efd5ef13604f6d351271dd73fdaab581e323955411"
+    },
+    {
+      "path": "call-session-reader.additions.ts",
+      "bytes": 3174,
+      "sha256": "6dcae7fe6205a24103bc528b59d68c4dad060f4cd31d6a9ce52b3d9ede23462f"
+    },
+    {
+      "path": "call-event-reader.additions.ts",
+      "bytes": 2246,
+      "sha256": "0e1d509e843c2b75eec57c02f9bb2a6655515707762b55f7c25268b93932a9dd"
+    },
+    {
+      "path": "call-manager-reader.additions.ts",
+      "bytes": 2235,
+      "sha256": "5f5892f62125900976085f951529afa41cbdbfe65157cb35ba8da09df441ff7f"
+    },
+    {
+      "path": "private-current-call.additions.ts",
+      "bytes": 21700,
+      "sha256": "480e8fa3bc71b7d507cc3fac7eb64936665f03eceec1557ea378c62c4fc470fe"
+    },
+    {
+      "path": "private-current-call.test.mjs",
+      "bytes": 4936,
+      "sha256": "d58f3fb083a26b50d16d0a8852818c33c574c9bbfcb91420e9df03fd844da564"
+    },
+    {
+      "path": "private-current-call-negative.test.ts",
+      "bytes": 1827,
+      "sha256": "a0a7ecbfa7e01b9642f81e460fd5bd226136b5578b14cec1f97fc68a7f6a4fe3"
+    },
+    {
+      "path": "private-current-call-splices.json",
+      "bytes": 8130,
+      "sha256": "8edad15e04a3669e0b77f0f28251e7c00a61a79775360e0785b3cbe5cd0de859"
+    },
+    {
+      "path": "private-current-call-review.md",
+      "bytes": 10716,
+      "sha256": "d59e066d31730ffb358ba6148b6fcadbe5a7b0979ef7958ce17b8182c0a2af84"
+    }
+  ],
+  "sourceSplices": [
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "preimageSha256": "2cedc1b257fa92f84f6f1ae7b8bdf7c26766e97fb8a469d6be83d749442b1f68",
+      "postimageSha256": "4e4edf50f80cad413a486d9e96af650860b8dfa9111127eddd2f04977a41245f"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "preimageSha256": "50fd4180d1dfaf163aa43f501e21e2640b07366402c33c4bd247f19b49f167e1",
+      "postimageSha256": "bcdc8841ed9d09b6fac4a1e898743a613c9d5c0c1a9529235b12075bc8093174"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "preimageSha256": "6bf381d5cefa22e6c1267f913ce3904a1627b8b5a074eaf2ea248d42ccb91658",
+      "postimageSha256": "c337a60d03e4ade219c046c6ed02308b46028a572e30d50103664cc61fdb47c4"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "preimageSha256": "53bd5b736b8e58856f3bc6a8621b9d59743136c97c73ea581596f68ecb47bf3b",
+      "postimageSha256": "d88a16e1470c344aed4bdc2c759733fe6ddb72b15a905cd79b6c2b4f135a5116"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/hosted-attachment-owner.mjs",
+      "preimageSha256": "f36737054caa4d748dfae1d4d67da5675db7c924ff960a5b018ee4380434d394",
+      "postimageSha256": "c8f643ef01e21c5792d56e8e0aec016736902e10ca9f16edf949440eb9ed1b36"
+    },
+    {
+      "source": "services/ingenium-api/tests/voice-call-hosted-owner.test.mjs",
+      "preimageSha256": "9c2b0626ad1e8aedac43dc3dd2cf5d73bbf8a5a0e99e9e9831f41cd1b19665b7",
+      "postimageSha256": "bcddd5db3c3b91c5a0270f0d702bbea70570219c4545db2f531cc356bd7532c4"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "preimageSha256": "fdad7203679b12240b5394f031aec6c147421808c752784a6115e12b05668772",
+      "postimageSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83"
+    }
+  ],
+  "validation": [
+    "Seven exact current source preimages and composed postimages",
+    "Unexecuted toolV8 MJSbody syntax parsing only; no TS compile",
+    "JSON/manifest/sourcehash/gitdiffchecks"
+  ],
+  "positiveSourceOwners": [
+    "Actual private captured+bound request context, current manager source/start identity",
+    "Actual running ManagedCpuSupervisor private control/scope/admission/protected profile/default voice",
+    "Private server-generated call incarnation/deadline/speech generation and lease",
+    "Actual raw reader EOF provenance consumed internally and immutable verbatim-policy plan",
+    "Actual HTTP feed acquisition/reader/cancel/join and pinned inboxACK selector"
+  ],
+  "boundaries": [
+    "No actual CPU source TTS/Core134 claim/dispatch; explicit refusal",
+    "No production API mount or generic hosted-owner composition activation",
+    "No original call/plan recreated from serialized metadata",
+    "No agent/goal/queue execution ownership, completion or retirement",
+    "Restore invalidation/tombstones and actual positivecall/audio/Windows/Linux tests remainRoot"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "generatedRuntimeArtifacts": [],
+    "retained": "Minimal source/tests/exactrecipes/unique protocol evidence for Root actualintegration/qualification; protected13Native drafts andc117evidence preserved"
+  }
+}
