@@ -1,0 +1,22 @@
+{
+  "sourceOnly": true,
+  "workerSyntaxChecksPassed": 7,
+  "sourceTestsScheduledGroups": 6,
+  "sourceTestsExecuted": false,
+  "exactOriginalPublicInputsVerified": {
+    "jsFiles": 5,
+    "jsBytes": 331669,
+    "sqlFiles": 125,
+    "sqlBytes": 483414,
+    "sourceImported": false
+  },
+  "coreOrNativeImported": false,
+  "databaseOpened": false,
+  "buildModelServiceDeploymentOrCleanupRun": false,
+  "canonicalWrites": false,
+  "requiredGoldenModified": false,
+  "sourceProposalReadyForIntegrationReview": true,
+  "productionReady": false,
+  "fullReleaseComplete": false,
+  "newDisposablePaths": []
+}

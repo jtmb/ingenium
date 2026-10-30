@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "blockedForRuntime": true,
+  "sources": [
+    {
+      "sourceFile": "contract.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/contract.mjs",
+      "sha256": "20b84b4510433a75b3fa16e72b5feace8606d64ae012520cf8bb98af1442b27f"
+    },
+    {
+      "sourceFile": "original-static-pins.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/original-static-pins.mjs",
+      "sha256": "76a951417a941dfe1a0c112c2fcbb4be6b22d17f485b8f65a259399321db0aea"
+    },
+    {
+      "sourceFile": "io.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/io.mjs",
+      "sha256": "2e39e56a85f85a4a9d5ea084c3280d29d898c61e0c9a57d12b607974899fbc41"
+    },
+    {
+      "sourceFile": "capture-original.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/capture-original.mjs",
+      "sha256": "22245dc916430c5d81d0143a072037b197c552800e7ce6ac820c84903ec18495"
+    },
+    {
+      "sourceFile": "startup.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/startup.mjs",
+      "sha256": "8a7f401f00cc30ec0d54135bdd11ff3d5a0d489d31b7239c228d4b77efd4b873"
+    },
+    {
+      "sourceFile": "api-after-capture.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/api-after-capture.mjs",
+      "sha256": "e9e4dc7573c586089194e98608aa7360a982d99db337552d3ae5b0f3e97d12ba"
+    },
+    {
+      "sourceFile": "../capture-legacy-plugin-owner.mjs",
+      "targetPath": "scripts/legacy-startup-capsule/capture-legacy-plugin-owner.mjs",
+      "sha256": "4ac3a6121c8fff3a51029e7e0ff37d37cfc4610e269397ac2a9a5eca6773a90e"
+    }
+  ],
+  "sourceInputs": {
+    "actualJsReceiptSha256": "9c05fd0324bcbe3d53d142ebed2ff37bbdfe7d13a553d3154b8651d0b1bd8fb9",
+    "actualSqlReceiptSha256": "f38050fcce3b93cbe5ce390f792159d5ae2cbe5555cd4ce6b05b84877c807ec1",
+    "prospective132RecipeSha256": "01a715509159ebe6d3c02a08d77463b2f81931f1ca3dfab2cc11a41fab9a8171",
+    "actualSourceQualification": "Root coordination/compat132-qualification/receipt.json, synthetic only; no production native equivalence"
+  },
+  "sourceTestGroupsScheduled": 6,
+  "sourceTestsExecutedByWorker": false,
+  "missingInputs": [
+    "full transitive package/native asset equivalence and exact production runtime qualification",
+    "actual API gid/supplementary groups",
+    "Root actual exclusive custody, durable root-owned journal and current code module pins",
+    "standalone/fresh-install/future-ack hook contract and zero-active selection owner"
+  ],
+  "newDisposableOutputs": [],
+  "noRuntimeOrDbOrBuildOrCleanupRun": true,
+  "syntaxCheckFiles": 7,
+  "syntaxOnly": true,
+  "actualSourcePinsVerified": {
+    "js": 5,
+    "sql": 125,
+    "coreOrNativeImported": false,
+    "databaseOpened": false
+  }
+}

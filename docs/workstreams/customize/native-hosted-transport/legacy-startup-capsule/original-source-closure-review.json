@@ -1,0 +1,137 @@
+{
+  "sourceOnly": true,
+  "sourceReceiptSha256": "9c05fd0324bcbe3d53d142ebed2ff37bbdfe7d13a553d3154b8651d0b1bd8fb9",
+  "expectedSourceReceiptSha256": "9c05fd0324bcbe3d53d142ebed2ff37bbdfe7d13a553d3154b8651d0b1bd8fb9",
+  "files": [
+    {
+      "path": "/app/packages/ingenium-core/dist/lib/db.js",
+      "bytes": 293488,
+      "sha256": "a19aaaec4326e8fa93fe98ac95f2b31f50b261a2394bbd6ef75be36ca553df35"
+    },
+    {
+      "path": "/app/packages/ingenium-core/dist/lib/tools/paths.js",
+      "bytes": 3671,
+      "sha256": "1fa55b2a224e6bd6959ed291a76fe3547511a299c017c9b52947c272b5ac97ae"
+    },
+    {
+      "path": "/app/packages/ingenium-core/dist/lib/logger.js",
+      "bytes": 3348,
+      "sha256": "56f1a2926d99e10d7932c24035fa5f54c8eebd78caf1515312191f4aa2ceee7a"
+    },
+    {
+      "path": "/app/packages/ingenium-core/dist/lib/restore-fixture-path.js",
+      "bytes": 3523,
+      "sha256": "1ac9d3fca61ca5427bb0714ffad832a479066f8323d760bba2d3b2b3e77e932b"
+    },
+    {
+      "path": "/app/packages/ingenium-core/dist/lib/schema.js",
+      "bytes": 27639,
+      "sha256": "da1744d81a843324a26fd8ae77861dfaa9f23f19d5f96daa0fc2ab2103e59620"
+    }
+  ],
+  "actualAstImports": [
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "better-sqlite3"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "node:crypto"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "node:fs"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "node:path"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "./logger.js"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "./restore-fixture-path.js"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/db.js",
+      "module": "./schema.js"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/tools/paths.js",
+      "module": "../db.js"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/tools/paths.js",
+      "module": "node:path"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/restore-fixture-path.js",
+      "module": "node:fs"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/restore-fixture-path.js",
+      "module": "node:path"
+    },
+    {
+      "file": "/app/packages/ingenium-core/dist/lib/schema.js",
+      "module": "zod"
+    }
+  ],
+  "noOriginalCoreImported": true,
+  "noDatabaseOpened": true,
+  "notQualifiedClosure": true,
+  "missing": [
+    "full transitive package/native asset equivalence and qualification",
+    "actual API gid/supplementary groups",
+    "qualified prospective132 stage and originalRoot custody/durable journal/current-code pins"
+  ],
+  "discardedEvidence": "r1 registeredSourceMigrations empty array had a regex typo; it is not migration evidence",
+  "exactSqlSource": {
+    "serializedSha256": "f38050fcce3b93cbe5ce390f792159d5ae2cbe5555cd4ce6b05b84877c807ec1",
+    "files": 125,
+    "bytes": 483414,
+    "allIndividualBytesAndHashesVerified": true
+  },
+  "originalRuntimeMetadata": {
+    "node": "v22.23.4",
+    "modulesAbi": "127",
+    "platform": "linux",
+    "arch": "x64",
+    "packages": [
+      {
+        "name": "better-sqlite3",
+        "path": "/app/node_modules/better-sqlite3/package.json",
+        "version": "11.10.0",
+        "sha256": "58e81504576abccfacbfd08dc9432dc3a00d0fc0454685cb7a76aaf976cf25a9",
+        "dependencies": {
+          "bindings": "^1.5.0",
+          "prebuild-install": "^7.1.1"
+        },
+        "optionalDependencies": {},
+        "engines": {}
+      },
+      {
+        "name": "zod",
+        "path": "/app/node_modules/zod/package.json",
+        "version": "4.6.7",
+        "sha256": "c2d190d9ee4e0bdb60332aaa2130a6a98d65ddb903fe1d29248b15de57832c45",
+        "dependencies": {},
+        "optionalDependencies": {},
+        "engines": {}
+      }
+    ],
+    "binding": {
+      "path": "/app/node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "bytes": 2072760,
+      "sha256": "d7d9272b12d11c1dc2bb787741b1b7c4037d336155f316ace3420410c28fda37"
+    }
+  },
+  "astSqlLiteralInventorySummary": {
+    "count": 125,
+    "latest": "121_repository_sync_worktree_state.sql",
+    "namesSha256": "7423538eda2745a8dcccb7e1cdcb9858b5eb71c115875fe32d14526f1d0acbce",
+    "actualPins": "original-static-pins.mjs"
+  }
+}

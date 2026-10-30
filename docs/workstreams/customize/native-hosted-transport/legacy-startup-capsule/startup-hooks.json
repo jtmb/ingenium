@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "scope": "reviewable hooks for this existing-installation upgrade; blocked until Root contracts complete; not generic fresh-install enablement",
+  "rootMustAlsoOwn": [
+    "qualified actual old SQL/package/native runtime closure",
+    "sealed fixed manifest and root-only journal provisioning",
+    "trusted entrypoint-chain validation allowlist updates",
+    "separate original fresh-install path / future post-ack release path",
+    "real exclusive deployment writer/consumer custody"
+  ],
+  "sources": [
+    {
+      "path": "scripts/docker-entrypoint.sh",
+      "replacements": [
+        {
+          "before": "if ! runuser -u ingenium-api -- env -i \\\n  PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\" \\\n  HOME=\"/home/ingenium-api\" \\\n  INGENIUM_CORE_DB_PATH=\"$CORE_DB_PATH\" \\\n  node --input-type=module -e 'import { getDb } from \"ingenium-core\"; getDb();'; then",
+          "after": "# Scoped existing-installation upgrade capsule: requires Root's pinned manifest/closure/custody.\n# Run BEFORE any current-Core import, with existing path/uid checks retained above.\nif ! node /app/scripts/legacy-startup-capsule/startup.mjs; then"
+        }
+      ],
+      "preimageSha256": "5370a807e56ff50273859867e0059e5ca6f218ea725e061342e173e956928be2",
+      "postimageSha256": "56e7f77060aa5a40aafc67f30534c206b40fb5e33592f96c644a078a336d9b6c"
+    },
+    {
+      "path": "scripts/run-api.sh",
+      "replacements": [
+        {
+          "before": "  node dist/scripts/api-server.js",
+          "after": "  node /app/scripts/legacy-startup-capsule/api-after-capture.mjs"
+        }
+      ],
+      "preimageSha256": "a85eef161f9165981f56b0439bafc04d4886d1eef24a43fcb00206597f15be7c",
+      "postimageSha256": "86914984bd79cc1a1b60b1af83aad53177c895173ba6755241f6398ba4c5514b"
+    },
+    {
+      "path": "Dockerfile",
+      "replacements": [
+        {
+          "before": "COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf",
+          "after": "COPY --chown=root:root --chmod=0444 supervisord.conf ./supervisord.conf\n# Root packaging supplies the qualified exact original runtime closure and sealed deployment manifest.\nCOPY --chown=root:root --chmod=0444 scripts/legacy-startup-capsule/contract.mjs scripts/legacy-startup-capsule/original-static-pins.mjs scripts/legacy-startup-capsule/io.mjs scripts/legacy-startup-capsule/capture-original.mjs scripts/legacy-startup-capsule/startup.mjs scripts/legacy-startup-capsule/api-after-capture.mjs scripts/legacy-startup-capsule/capture-legacy-plugin-owner.mjs ./scripts/legacy-startup-capsule/"
+        }
+      ],
+      "preimageSha256": "f2066463924b032301cc6fc90159b2df376f4fd416780681187210d196f8ec99",
+      "postimageSha256": "8217220ca0e518e02d61285d5bce6c3fb51a1924032fb817c3a688480660afbe"
+    }
+  ]
+}

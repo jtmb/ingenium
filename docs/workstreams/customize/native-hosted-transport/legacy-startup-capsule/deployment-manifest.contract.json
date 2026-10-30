@@ -1,0 +1,93 @@
+{
+  "protocol": "original-pre133-startup-capsule-v1",
+  "NOT_AN_EXECUTABLE_OR_APPROVED_MANIFEST": true,
+  "priorImage": "docker.io/jtmb92/ingenium@sha256:792f18c3bece144028df8b79772b4928e73c4ff2e1ef625f20ce85ca796d9e8b",
+  "launch": {
+    "cwd": "/app/services/ingenium-api",
+    "uid": 1101,
+    "gid": null,
+    "groups": null,
+    "environment": {
+      "HOME": "/home/ingenium-api",
+      "NODE_ENV": "production",
+      "INGENIUM_DEPLOYMENT_MODE": "compatibility",
+      "INGENIUM_HOME": "/app/.ingenium",
+      "INGENIUM_CORE_DB_PATH": "/app/.ingenium/data",
+      "INGENIUM_GLOBAL_CONFIG_PATH": "/home/ingenium-opencode/.config/opencode",
+      "INGENIUM_BACKUPS_DIR": "/app/.ingenium/backups",
+      "OPENCODE_DB_PATH": "/home/ingenium-opencode/.local/share/opencode/opencode.db"
+    }
+  },
+  "database": {
+    "path": "/app/.ingenium/data",
+    "device": "64769",
+    "inode": "524504"
+  },
+  "journalRoot": null,
+  "custodyEvidence": {
+    "reference": null,
+    "sha256": null
+  },
+  "old": {
+    "root": null,
+    "dbModule": null,
+    "dbSha256": "a19aaaec4326e8fa93fe98ac95f2b31f50b261a2394bbd6ef75be36ca553df35",
+    "pathsModule": null,
+    "pathsSha256": "1fa55b2a224e6bd6959ed291a76fe3547511a299c017c9b52947c272b5ac97ae",
+    "files": [],
+    "availableExactJsReceiptSha256": "9c05fd0324bcbe3d53d142ebed2ff37bbdfe7d13a553d3154b8651d0b1bd8fb9",
+    "runtime": {
+      "nodeVersion": "v22.23.4",
+      "modulesAbi": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "availableExactSqlReceiptSha256": "f38050fcce3b93cbe5ce390f792159d5ae2cbe5555cd4ce6b05b84877c807ec1"
+  },
+  "current": {
+    "root": null,
+    "dbModule": null,
+    "dbSha256": null,
+    "apiModule": null,
+    "apiSha256": null,
+    "files": []
+  },
+  "readiness": "JS125SQL available; old runtime package/native equivalence, explicit132 qualification, zero-active/archived transition and Root deployment contracts remain open",
+  "compatibility": {
+    "role": "prospective-compatibility132",
+    "root": null,
+    "dbModule": null,
+    "dbSha256": "6445fafce515995828ed69006efc55f54f1e5ff5f108b1d4e8b00a52596aa876",
+    "pathsModule": null,
+    "pathsSha256": "1fa55b2a224e6bd6959ed291a76fe3547511a299c017c9b52947c272b5ac97ae",
+    "runtime": {
+      "nodeVersion": "v22.23.4",
+      "modulesAbi": "127",
+      "platform": "linux",
+      "arch": "x64"
+    },
+    "qualification": {
+      "reference": null,
+      "sha256": null,
+      "availableActualSourceReceipt": {
+        "reference": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/compat132-qualification/receipt.json",
+        "sha256": "0d1d979949a42ff14c672288892e9c65ba852f38870428e203b6a3c30197ca5c",
+        "syntheticOnly": true,
+        "node": "v22.23.1",
+        "notExactLiveNativeBinaryQualification": true
+      }
+    },
+    "files": [],
+    "meaning": "independent prospective normal122-132 migration/capture owner; no133; not prior deployed121 equivalence and not promotion of local golden",
+    "losslessSourceRecipe": "Root coordination/customize-legacy-original-code/compat132-delta-r1.json (unexecuted/unqualified; not promoted by worker)",
+    "runtimeQualification": {
+      "reference": null,
+      "sha256": null,
+      "remaining": "actual source qualification passed; exact production package/native/Node equivalence still Root-owned"
+    }
+  },
+  "captureHelper": {
+    "modulePath": null,
+    "sha256": "4ac3a6121c8fff3a51029e7e0ff37d37cfc4610e269397ac2a9a5eca6773a90e"
+  }
+}
