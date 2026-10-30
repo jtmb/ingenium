@@ -1,0 +1,40 @@
+{
+  "scope": "pinned source + Root prior cache observations; NOT final target closure or Rust execution",
+  "version": "1.0.151",
+  "archive_sha256": "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14",
+  "files_exact_archive_sha256": {
+    "Cargo.toml": "00b920255c320a278bf25b962b491263a19d8c90e12e4a91c1d823db71eabb2f",
+    "src/map.rs": "b5a2fd1ee865e6cfd83ef2da0a2e1057f892465ac7ede8a78a11354a60526f33",
+    "src/number.rs": "70b83c36286f6c58123f544f27db2b54a1135f928fe33b08b521b2997773f862",
+    "src/de.rs": "4998d7e252eb513be85b298e287048b4fb283882e9ba7df905f572f07200f3f3",
+    "src/ser.rs": "f2b8cc0b97e30c49dbc58698fa22c14a7d56ea616cdb57b067835a59af49a75f",
+    "src/value/de.rs": "ceda1bf415aafde89caa83bf275811b70d393717d4e1038e0c61822d2da02993",
+    "src/value/ser.rs": "11f2b7daa1eba826d4086d5497f73729478dd7647bff77deccde5e47b0f126f2"
+  },
+  "root_feature_receipt": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/integration/serde-json-existing-fingerprints-r1.json",
+  "root_feature_receipt_sha256": "de35910f7367998a59a479889e7939c69ca12a5dc6b1f23de2ec19d7b17a1662",
+  "cached_observation_count": 5,
+  "cached_feature_sets": [
+    "alloc,default,raw_value,std",
+    "alloc,default,std,unbounded_depth",
+    "default,raw_value,std",
+    "default,std"
+  ],
+  "checks": {
+    "archive_exact_actual_lock": true,
+    "seven_cached_files_exact_archive": true,
+    "default_features_std_only": true,
+    "map_btree_vs_index_feature_selected": true,
+    "actual_collect_str_streams_fragments": true,
+    "actual_map_key_collect_str_delegates": true,
+    "number_serialize_feature_selected": true,
+    "actual_float_format_zmij": true,
+    "float_roundtrip_long_scratch_real": true,
+    "raw_value_first_key_changes_value_semantics": true,
+    "arbitrary_precision_first_key_changes_value_semantics": true,
+    "cached_observations_omit_three_special_features": true
+  },
+  "passed": 12,
+  "current_exact_target_feature_closure_verified": false,
+  "compiler_or_runtime_run": false
+}

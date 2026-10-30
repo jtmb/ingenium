@@ -1,0 +1,340 @@
+--- a/crates/adapters/src/native_web_json.rs
++++ b/crates/adapters/src/native_web_json.rs
+@@ -0,0 +1 @@
++mod canonical;
+@@ -8,0 +10,3 @@
++ pub(crate) fn canonical_sha256(&self)->Result<[u8;32],Invalid>{canonical::hash(self)}
++ pub(crate) fn canonical_is_object(&self)->Result<bool,Invalid>{canonical::is_object(self)}
++ pub(crate) fn range_in(&self,parent:&Payload)->Option<Range<usize>>{self.body.range_in(parent)}
+@@ -15 +19 @@
+- pub(crate) fn is_number(&self)->bool{self.raw().iter().find(|b|!b.is_ascii_whitespace()).is_some_and(|b|*b==b'-'||b.is_ascii_digit())&&std::str::from_utf8(self.raw()).ok().and_then(|n|n.parse::<f64>().ok()).is_some_and(f64::is_finite)}
++ pub(crate) fn is_number(&self)->bool{serde_json::from_slice::<serde_json::Number>(self.raw()).is_ok()}
+@@ -60 +64 @@
+-   b'"'=>{self.string()?;},b'-'|b'0'..=b'9'=>self.number()?,
++   b'"'=>{self.string()?;},b'-'|b'0'..=b'9'=>{let begin=self.at;self.number()?;if check{serde_json::from_slice::<serde_json::Number>(&self.input[begin..self.at]).map_err(|_|Invalid)?;}},
+--- a/crates/adapters/src/native_web_payload.rs
++++ b/crates/adapters/src/native_web_payload.rs
+@@ -71,0 +72,4 @@
++ pub(crate) fn range_in(&self,parent:&Self)->Option<Range<usize>>{
++  if !Arc::ptr_eq(&self.allocation,&parent.allocation)||self.range.start<parent.range.start||self.range.end>parent.range.end{return None}
++  Some(self.range.start-parent.range.start..self.range.end-parent.range.start)
++ }
+--- /dev/null
++++ b/crates/adapters/src/native_web_json/canonical.rs
+@@ -0,0 +1,160 @@
++//! Child of native_web_json. Exact library serialization over charged indexes.
++use super::*;
++use serde::{Serialize,Serializer,ser::{SerializeMap,SerializeSeq,Error as _}};
++use std::{cmp::Ordering,fmt,io::{self,Write},sync::OnceLock};
++struct Node<'a>{input:&'a[u8],pool:&'a std::sync::Arc<crate::native_web_payload::Pool>,legacy_embedded:bool}
++struct Text<'a>(&'a[u8]);
++impl fmt::Display for Text<'_>{fn fmt(&self,f:&mut fmt::Formatter<'_>)->fmt::Result{
++ for c in Decoded::new(self.0).map_err(|_|fmt::Error)?{let mut encoded=[0;4];f.write_str(c.map_err(|_|fmt::Error)?.encode_utf8(&mut encoded))?}Ok(())
++}}
++impl Serialize for Text<'_>{fn serialize<S:Serializer>(&self,s:S)->Result<S::Ok,S::Error>{s.collect_str(self)}}
++fn preserve_order()->bool{
++ static ORDER:OnceLock<bool>=OnceLock::new();
++ *ORDER.get_or_init(||{let mut m=serde_json::Map::new();m.insert("z".into(),serde_json::Value::Null);m.insert("a".into(),serde_json::Value::Null);m.keys().next().is_some_and(|key|key=="z")})
++}
++fn raw_value_feature()->bool{static FLAG:OnceLock<bool>=OnceLock::new();*FLAG.get_or_init(||serde_json::from_str::<serde_json::Value>(r#"{"$serde_json::private::RawValue":"null"}"#).is_ok_and(|v|v.is_null()))}
++fn arbitrary_precision_feature()->bool{static FLAG:OnceLock<bool>=OnceLock::new();*FLAG.get_or_init(||serde_json::from_str::<serde_json::Value>(r#"{"$serde_json::private::Number":"1"}"#).is_ok_and(|v|v.is_number()))}
++fn decode(pool:&std::sync::Arc<crate::native_web_payload::Pool>,literal:&[u8])->Result<Payload,Invalid>{
++ let length=Decoded::new(literal)?.try_fold(0usize,|n,c|n.checked_add(c?.len_utf8()).ok_or(Invalid))?;
++ let mut actual=pool.allocate(length.max(1)).map_err(|_|Invalid)?;for c in Decoded::new(literal)?{let mut bytes=[0;4];actual.append(c?.encode_utf8(&mut bytes).as_bytes()).map_err(|_|Invalid)?}Ok(actual.freeze())
++}
++// RawValue's embedded JSON is a separate legacy deserialization. Its duplicate
++// keys use last-value semantics, and it has the library's127-container limit.
++// Original literal objects were already checked by strict Json::parse.
++fn legacy_value(scan:&mut Scan<'_>,containers:usize)->Result<(),Invalid>{
++ scan.ws();match scan.byte()?{
++  b'"'=>{scan.string()?;},b'-'|b'0'..=b'9'=>scan.number()?,b'n'=>scan.literal(b"null")?,b't'=>scan.literal(b"true")?,b'f'=>scan.literal(b"false")?,
++  kind @ (b'['|b'{')=>{
++   if containers>=127{return Err(Invalid)}scan.at+=1;scan.ws();let end=if kind==b'['{b']'}else{b'}'};if scan.peek()==Some(end){scan.at+=1;return Ok(())}
++   loop{if kind==b'{'{scan.string()?;scan.expect(b':')?;}legacy_value(scan,containers+1)?;scan.ws();match scan.byte()?{b if b==end=>{scan.at+=1;break},b','=>scan.at+=1,_=>return Err(Invalid)}}
++  },_=>return Err(Invalid)
++ }Ok(())
++}
++fn skip(scan:&mut Scan<'_>,legacy:bool)->Result<(),Invalid>{if legacy{legacy_value(scan,0)}else{scan.value(1,false)}}
++fn member_count(scan:&Scan<'_>,legacy:bool)->Result<usize,Invalid>{
++ if !legacy{return scan.count_members(0)}let mut cursor=Scan{input:scan.input,at:scan.at,nodes:0,pool:scan.pool};let mut count=0usize;
++ loop{count=count.checked_add(1).ok_or(Invalid)?;cursor.string()?;cursor.expect(b':')?;legacy_value(&mut cursor,0)?;cursor.ws();match cursor.byte()?{b'}'=>break,b','=>cursor.at+=1,_=>return Err(Invalid)}}Ok(count)
++}
++pub(super) fn is_object(json:&Json)->Result<bool,Invalid>{semantic_object(json.raw(),json.body.pool(),false)}
++fn semantic_object(input:&[u8],pool:&std::sync::Arc<crate::native_web_payload::Pool>,legacy:bool)->Result<bool,Invalid>{
++ let mut scan=Scan{input,at:0,nodes:0,pool};scan.ws();if scan.byte()?!=b'{'{return Ok(false)}scan.at+=1;scan.ws();if scan.peek()==Some(b'}'){return Ok(true)}
++ let count=member_count(&scan,legacy)?;let first=scan.string()?;
++ let raw=raw_value_feature()&&equals(&input[first.clone()],"$serde_json::private::RawValue")?;
++ let number=arbitrary_precision_feature()&&equals(&input[first],"$serde_json::private::Number")?;
++ if !raw&&!number{return Ok(true)}if count!=1{return Err(Invalid)}scan.expect(b':')?;scan.ws();let begin=scan.at;skip(&mut scan,legacy)?;
++ let decoded=decode(pool,&input[begin..scan.at])?;
++ if number{let text=std::str::from_utf8(decoded.as_ref()).map_err(|_|Invalid)?;let _:serde_json::Number=text.parse().map_err(|_|Invalid)?;return Ok(false)}
++ let mut checked=Scan{input:decoded.as_ref(),at:0,nodes:0,pool};legacy_value(&mut checked,0)?;checked.ws();if checked.at!=decoded.len(){return Err(Invalid)}semantic_object(decoded.as_ref(),pool,true)
++}
++fn field(entry:&[u8],index:usize)->Result<usize,Invalid>{let raw:[u8;8]=entry.get(index*8..index*8+8).ok_or(Invalid)?.try_into().map_err(|_|Invalid)?;usize::try_from(u64::from_le_bytes(raw)).map_err(|_|Invalid)}
++fn span(entry:&[u8],index:usize)->Result<Range<usize>,Invalid>{Ok(field(entry,index)?..field(entry,index+1)?)}
++fn compare_keys(a:&[u8],b:&[u8])->Result<Ordering,Invalid>{
++ let mut a=Decoded::new(a)?;let mut b=Decoded::new(b)?;
++ loop{match(a.next(),b.next()){
++  (Some(a),Some(b))=>{let order=a?.cmp(&b?);if order!=Ordering::Equal{return Ok(order)}},
++  (None,None)=>return Ok(Ordering::Equal),(None,Some(_))=>return Ok(Ordering::Less),(Some(_),None)=>return Ok(Ordering::Greater),
++ }}
++}
++impl Serialize for Node<'_>{
++ fn serialize<S:Serializer>(&self,serializer:S)->Result<S::Ok,S::Error>{
++  let invalid=||S::Error::custom("Original canonical JSON unavailable");
++  let mut scan=Scan{input:self.input,at:0,nodes:0,pool:self.pool};scan.ws();
++  match scan.byte().map_err(|_|invalid())?{
++   b'"'=>{let literal=scan.string().map_err(|_|invalid())?;Text(&self.input[literal]).serialize(serializer)},
++   b'n'=>serializer.serialize_unit(),b't'=>serializer.serialize_bool(true),b'f'=>serializer.serialize_bool(false),
++   b'-'|b'0'..=b'9'=>{
++    // SAME serde_json Number parser/serializer as Value, including -0, u64/i64,
++    // overflow-to-float, feature-selected precision and zmij finite formatting.
++    // Resource bound requires actual target feature proof; see PLAN.md.
++    let number:serde_json::Number=serde_json::from_slice(self.input).map_err(|_|invalid())?;
++    number.serialize(serializer)
++   },
++   b'['=>{
++    let mut seq=serializer.serialize_seq(None)?;scan.at+=1;scan.ws();
++    if scan.peek()==Some(b']'){return seq.end()}
++    loop{scan.ws();let start=scan.at;skip(&mut scan,self.legacy_embedded).map_err(|_|invalid())?;
++     seq.serialize_element(&Node{input:&self.input[start..scan.at],pool:self.pool,legacy_embedded:self.legacy_embedded})?;
++     scan.ws();match scan.byte().map_err(|_|invalid())?{b']'=>break,b','=>scan.at+=1,_=>return Err(invalid())}
++    }seq.end()
++   },
++   b'{'=>{
++    scan.at+=1;scan.ws();if scan.peek()==Some(b'}'){return serializer.serialize_map(Some(0))?.end()}
++    let count=member_count(&scan,self.legacy_embedded).map_err(|_|invalid())?;
++    let mut probe=Scan{input:self.input,at:scan.at,nodes:0,pool:self.pool};let first=probe.string().map_err(|_|invalid())?;
++    let raw=raw_value_feature()&&equals(&self.input[first.clone()],"$serde_json::private::RawValue").map_err(|_|invalid())?;
++    let number=arbitrary_precision_feature()&&equals(&self.input[first],"$serde_json::private::Number").map_err(|_|invalid())?;
++    if raw||number{
++     if count!=1{return Err(invalid())}probe.expect(b':').map_err(|_|invalid())?;probe.ws();let start=probe.at;skip(&mut probe,self.legacy_embedded).map_err(|_|invalid())?;
++     let decoded=decode(self.pool,&self.input[start..probe.at]).map_err(|_|invalid())?;
++     if number{let text=std::str::from_utf8(decoded.as_ref()).map_err(|_|invalid())?;let number:serde_json::Number=text.parse().map_err(|_|invalid())?;return number.serialize(serializer)}
++     let mut validation=Scan{input:decoded.as_ref(),at:0,nodes:0,pool:self.pool};legacy_value(&mut validation,0).map_err(|_|invalid())?;validation.ws();if validation.at!=decoded.len(){return Err(invalid())}
++     return Node{input:decoded.as_ref(),pool:self.pool,legacy_embedded:true}.serialize(serializer)
++    }
++    let capacity=count.checked_mul(32).ok_or_else(invalid)?;
++    let mut entries=self.pool.allocate(capacity.max(1)).map_err(|_|invalid())?;
++    let mut emitted=count;
++    entries.refill_dynamic(|data|->Result<usize,Invalid>{
++     for index in 0..count{
++      let key=scan.string()?;scan.expect(b':')?;scan.ws();let start=scan.at;skip(&mut scan,self.legacy_embedded)?;
++      for (part,value) in [key.start,key.end,start,scan.at].into_iter().enumerate(){let raw=u64::try_from(value).map_err(|_|Invalid)?.to_le_bytes();data[index*32+part*8..index*32+part*8+8].copy_from_slice(&raw)}
++      scan.ws();match scan.byte()?{b'}' if index+1==count=>{},b',' if index+1<count=>scan.at+=1,_=>return Err(Invalid)}
++     }
++     if self.legacy_embedded{
++      let mut distinct=0usize;
++      for index in 0..count{let mut record=[0;32];record.copy_from_slice(&data[index*32..(index+1)*32]);let key=span(&record,0)?;let mut found=None;
++       for prior in 0..distinct{let previous=span(&data[prior*32..(prior+1)*32],0)?;if compare_keys(&self.input[previous],&self.input[key.clone()])?==Ordering::Equal{found=Some(prior);break}}
++       if let Some(prior)=found{data[prior*32+16..prior*32+32].copy_from_slice(&record[16..32]);}else{data[distinct*32..(distinct+1)*32].copy_from_slice(&record);distinct+=1;}
++      }emitted=distinct;
++     }
++     if !preserve_order(){
++      // Bounded in-place index sort; strings stay in the original allocation.
++      // UTF8 byte lexicographic order equals decoded scalar order for valid str.
++      for index in 1..emitted{let mut current=index;while current>0{
++       let a=span(&data[(current-1)*32..current*32],0)?;let b=span(&data[current*32..(current+1)*32],0)?;
++       if compare_keys(&self.input[a],&self.input[b])?!=Ordering::Greater{break}
++       for byte in 0..32{data.swap((current-1)*32+byte,current*32+byte)}current-=1;
++      }}
++     }Ok(emitted*32)
++    }).map_err(|_|invalid())?;
++    let mut map=serializer.serialize_map(Some(emitted))?;
++    for entry in entries.as_ref().chunks_exact(32){let key=span(entry,0).map_err(|_|invalid())?;let value=span(entry,2).map_err(|_|invalid())?;map.serialize_entry(&Text(&self.input[key]),&Node{input:&self.input[value],pool:self.pool,legacy_embedded:self.legacy_embedded})?}map.end()
++   },_=>Err(invalid())
++  }
++ }
++}
++pub(super) fn hash(json:&Json)->Result<[u8;32],Invalid>{
++ struct HashWriter(Sha256);impl Write for HashWriter{fn write(&mut self,bytes:&[u8])->io::Result<usize>{self.0.update(bytes);Ok(bytes.len())}fn flush(&mut self)->io::Result<()>{Ok(())}}
++ let mut writer=HashWriter(Sha256::new());serde_json::to_writer(&mut writer,&Node{input:json.raw(),pool:json.body.pool(),legacy_embedded:false}).map_err(|_|Invalid)?;Ok(writer.0.finalize().into())
++}
++
++#[cfg(test)]mod tests{
++ use super::*;
++ fn charged(raw:&[u8])->Payload{let pool=crate::native_web_payload::Pool::for_registry();let mut b=pool.allocate(raw.len().max(1)).unwrap();b.append(raw).unwrap();b.freeze()}
++ fn equivalent(raw:&[u8]){
++  let legacy=serde_json::from_slice::<serde_json::Value>(raw);
++  if legacy.is_err(){assert!(Json::parse(charged(raw)).and_then(|parsed|hash(&parsed)).is_err());return}
++  let legacy=legacy.unwrap();let legacy_bytes=serde_json::to_vec(&legacy).unwrap();
++  let parsed=Json::parse(charged(raw)).unwrap();assert_eq!(is_object(&parsed).unwrap(),legacy.is_object());let actual=serde_json::to_vec(&Node{input:parsed.raw(),pool:parsed.body.pool(),legacy_embedded:false}).unwrap();
++  assert_eq!(actual,legacy_bytes);assert_eq!(hash(&parsed).unwrap().as_slice(),Sha256::digest(&legacy_bytes).as_slice());
++ }
++ #[test]fn exact_object_order_nested_unknowns_and_unicode_keys(){for raw in [br#"{"z":0,"a":{"d":4,"b":2},"future":[{"q":false,"a":null}]}"#.as_slice(),"{\"é\":1,\"a\":2,\"😀\":3,\"\\u0062\":4}".as_bytes()]{equivalent(raw)}}
++ #[test]fn exact_string_escaping_surrogates_slashes_controls(){equivalent(br#"{"s":"\uD83D\uDE00\n\r\t\b\f\u0000\u001f\/\\\"\u00E9"}"#)}
++ #[test]fn exact_integer_limits_negative_zero_exponent_and_float_rounding(){for raw in [b"-0".as_slice(),b"-0.0",b"18446744073709551615",b"18446744073709551616",b"-9223372036854775808",b"-9223372036854775809",b"1.00",b"1e+02",b"1e-308",b"5e-324",b"1.7976931348623157e308",b"0.123456789012345678901234567890123456789"]{equivalent(raw)}}
++ #[test]fn exact_large_unknown_text_keeps_hash_and_releases_index_allocations(){let mut raw=b"{\"z\":\"".to_vec();raw.extend(std::iter::repeat_n(b'x',1024*1024));raw.extend_from_slice(b"\",\"a\":1}");let parsed=Json::parse(charged(&raw)).unwrap();let pool=parsed.body.pool().clone();let used=pool.used();let actual=hash(&parsed).unwrap();let legacy=serde_json::to_vec(&serde_json::from_slice::<serde_json::Value>(&raw).unwrap()).unwrap();assert_eq!(actual.as_slice(),Sha256::digest(&legacy).as_slice());assert_eq!(pool.used(),used);}
++ #[test]fn duplicates_stay_refused_before_canonical_hash(){assert!(Json::parse(charged(br#"{"x":1,"\u0078":2}"#)).is_err())}
++ #[test]fn exact_feature_selected_reserved_first_keys_and_failures(){for raw in [
++  br#"{"$serde_json::private::RawValue":"null"}"#.as_slice(),
++  br#"{"$serde_json::private::RawValue":"{\"z\":1,\"a\":2}"}"#,
++  br#"{"\u0024serde_json::private::RawValue":"true"}"#,
++  br#"{"z":0,"$serde_json::private::RawValue":"null"}"#,
++  br#"{"$serde_json::private::RawValue":"null","z":0}"#,
++  br#"{"$serde_json::private::RawValue":"{"}"#,
++  br#"{"$serde_json::private::Number":"1e+02"}"#,
++  br#"{"$serde_json::private::Number":1}"#,
++  br#"{"z":0,"$serde_json::private::Number":"1e+02"}"#,
++ ]{equivalent(raw)}}
++ #[test]fn exact_embedded_raw_duplicate_and_depth_semantics(){
++  equivalent(br#"{"$serde_json::private::RawValue":"{\"z\":0,\"a\":1,\"a\":2}"}"#);
++  for depth in [126,127,128]{let inner=format!("{}0{}","[".repeat(depth),"]".repeat(depth));let literal=serde_json::to_string(&inner).unwrap();let raw=format!("{{\"$serde_json::private::RawValue\":{literal}}}");equivalent(raw.as_bytes())}
++ }
++}
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
+@@ -8 +8 @@
+-use std::{collections::{BTreeMap,BTreeSet},ops::Range,sync::Arc};
++use std::{collections::BTreeSet,ops::Range};
+@@ -50,3 +50,6 @@
+-    let view:Value=serde_json::from_slice(original).map_err(|_|invalid())?;
+-    let projection=resolved.journal_original();
+-    if projection.get("prompt_view_sha256").and_then(Value::as_str)!=Some(hash(&serde_json::to_vec(&view).map_err(|_|invalid())?).as_str()){return Err(invalid())}
++    let view=crate::native_web_json::Json::parse(original.clone()).map_err(|_|invalid())?;
++    let projection=resolved.journal_original(); // remaining provenance AST gate
++    let canonical=view.canonical_sha256().map_err(|_|invalid())?;
++    let alphabet=b"0123456789abcdef";let mut hex=[0;64];for(i,b)in canonical.iter().enumerate(){hex[2*i]=alphabet[(b>>4)as usize];hex[2*i+1]=alphabet[(b&15)as usize];}
++    if projection.get("prompt_view_sha256").and_then(Value::as_str)!=Some(std::str::from_utf8(&hex).map_err(|_|invalid())?){return Err(invalid())}
++    let files=view.member("files").map_err(|_|invalid())?;
+@@ -57 +60,3 @@
+-        if pointer!=format!("/files/{index}/uri")||view.pointer(pointer).and_then(Value::as_str)!=Some(file.original_uri()){return Err(invalid())}
++        let selected=files.as_ref().ok_or_else(invalid)?.item(index).map_err(|_|invalid())?.ok_or_else(invalid)?;
++        let uri=selected.member("uri").map_err(|_|invalid())?.ok_or_else(invalid)?;
++        if pointer!=format!("/files/{index}/uri")||!uri.string_eq(file.original_uri()).map_err(|_|invalid())?{return Err(invalid())}
+@@ -59,2 +64,3 @@
+-        let bytes=STANDARD.decode(data).map_err(|_|invalid())?;
+-        replacements.push(WebUriReplacement{file_index:index,original_uri_sha256:hash(file.original_uri().as_bytes()),captured_bytes_sha256:hash(&bytes),effective_uri:file.effective_uri().into(),default_name:file.fallback_name().map(str::to_owned)});
++        let mut decoded=original.pool().allocate(base64::decoded_len_estimate(data.len()).max(1)).map_err(|_|invalid())?;
++        decoded.refill_dynamic(|out|STANDARD.decode_slice(data.as_bytes(),out)).map_err(|_|invalid())?;
++        replacements.push(WebUriReplacement{file_index:index,original_uri_sha256:hash(file.original_uri().as_bytes()),captured_bytes_sha256:hash(decoded.as_ref()),effective_uri:file.effective_uri().into(),default_name:file.fallback_name().map(str::to_owned)});
+@@ -65,56 +70,0 @@
+-#[derive(Clone,Copy)]
+-enum At { Root, Files, File(usize), Other }
+-struct Scanner<'a>{input:&'a[u8],offset:usize,nodes:usize,uris:BTreeMap<usize,Range<usize>>,file_ends:BTreeMap<usize,(usize,bool)>}
+-impl Scanner<'_>{
+-    fn ws(&mut self){while self.input.get(self.offset).is_some_and(|b|matches!(b,b' '|b'\n'|b'\r'|b'\t')){self.offset+=1;}}
+-    fn expect(&mut self,byte:u8)->Result<(),String>{self.ws();if self.input.get(self.offset)!=Some(&byte){return Err(invalid())}self.offset+=1;Ok(())}
+-    fn string(&mut self)->Result<Range<usize>,String>{
+-        self.ws();let start=self.offset;
+-        if self.input.get(start)!=Some(&b'"'){return Err(invalid())}self.offset+=1;
+-        loop{match self.input.get(self.offset){
+-            Some(b'"')=>{self.offset+=1;break},
+-            Some(b'\\')=>{self.offset+=2;if self.offset>self.input.len(){return Err(invalid())}},
+-            Some(_)=>self.offset+=1,None=>return Err(invalid())
+-        }}
+-        // serde validates UTF8, escape sequences, surrogate pairs and controls.
+-        serde_json::from_slice::<String>(&self.input[start..self.offset]).map_err(|_|invalid())?;
+-        Ok(start..self.offset)
+-    }
+-    fn value(&mut self,at:At,depth:usize)->Result<(),String>{
+-        self.nodes+=1;if depth>64||self.nodes>200_000{return Err(invalid())}self.ws();
+-        match self.input.get(self.offset){
+-            Some(b'{')=>{
+-                self.offset+=1;self.ws();if self.input.get(self.offset)==Some(&b'}'){
+-                    if let At::File(index)=at{self.file_ends.insert(index,(self.offset,false));}
+-                    self.offset+=1;return Ok(())}
+-                let mut keys=BTreeSet::new();
+-                loop{
+-                    let keyspan=self.string()?;let key:String=serde_json::from_slice(&self.input[keyspan]).map_err(|_|invalid())?;
+-                    if keys.len()>=4096||!keys.insert(key.clone()){return Err(invalid())}
+-                    self.expect(b':')?;self.ws();
+-                    if let At::File(index)=at {if key=="uri"{
+-                        let span=self.string()?;
+-                        if self.uris.insert(index,span).is_some(){return Err(invalid())}
+-                    }else{self.value(At::Other,depth+1)?;}}
+-                    else{self.value(if matches!(at,At::Root)&&key=="files"{At::Files}else{At::Other},depth+1)?;}
+-                    self.ws();match self.input.get(self.offset){Some(b',')=>self.offset+=1,Some(b'}')=>{
+-                        if let At::File(index)=at{self.file_ends.insert(index,(self.offset,true));}
+-                        self.offset+=1;break},_=>return Err(invalid())}
+-                }
+-            },
+-            Some(b'[')=>{
+-                self.offset+=1;self.ws();if self.input.get(self.offset)==Some(&b']'){self.offset+=1;return Ok(())}
+-                let mut index=0;
+-                loop{self.value(if matches!(at,At::Files){At::File(index)}else{At::Other},depth+1)?;index+=1;self.ws();
+-                    match self.input.get(self.offset){Some(b',')=>self.offset+=1,Some(b']')=>{self.offset+=1;break},_=>return Err(invalid())}}
+-            },
+-            Some(b'"')=>{self.string()?;},
+-            Some(_)=>{
+-                let start=self.offset;
+-                while self.input.get(self.offset).is_some_and(|b|!matches!(b,b','|b']'|b'}'|b' '|b'\n'|b'\r'|b'\t')){self.offset+=1;}
+-                if start==self.offset{return Err(invalid())}
+-            },None=>return Err(invalid())
+-        }Ok(())
+-    }
+-}
+-
+@@ -121,0 +72 @@
++    use crate::native_web_json::Json;
+@@ -123,5 +74,5 @@
+-    let before:Value=serde_json::from_slice(original).map_err(|_|invalid())?;
+-    if !before.is_object(){return Err(invalid())}
+-    let mut scanner=Scanner{input:original,offset:0,nodes:0,uris:BTreeMap::new(),file_ends:BTreeMap::new()};
+-    scanner.value(At::Root,0)?;scanner.ws();if scanner.offset!=original.len(){return Err(invalid())}
+-    let mut expected=before.clone();let mut seen=BTreeSet::new();let mut edits=Vec::new();let mut transformations=Vec::new();
++    let before=Json::parse(original.clone()).map_err(|_|invalid())?;
++    if !before.canonical_is_object().map_err(|_|invalid())?{return Err(invalid())}
++    before.canonical_sha256().map_err(|_|invalid())?; // same legacy full-Value validity
++    let files=before.member("files").map_err(|_|invalid())?;
++    let mut seen=BTreeSet::new();let mut edits:Vec<(Range<usize>,Payload)>=Vec::new();let mut transformations=Vec::new();
+@@ -129 +80 @@
+-    for replacement in replacements {
++    for replacement in replacements{
+@@ -131,2 +82,2 @@
+-            || !replacement.captured_bytes_sha256.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())
+-            || !replacement.effective_uri.starts_with("data:") {return Err(invalid())}
++            ||!replacement.captured_bytes_sha256.bytes().all(|b|b.is_ascii_hexdigit()&&!b.is_ascii_uppercase())
++            ||!replacement.effective_uri.starts_with("data:"){return Err(invalid())}
+@@ -136 +87,2 @@
+-        let captured=STANDARD.decode(data).map_err(|_|invalid())?;
++        let mut captured=original.pool().allocate(base64::decoded_len_estimate(data.len()).max(1)).map_err(|_|invalid())?;
++        captured.refill_dynamic(|out|STANDARD.decode_slice(data.as_bytes(),out)).map_err(|_|invalid())?;
+@@ -138,2 +90,4 @@
+-        if STANDARD.encode(&captured)!=data||hash(&captured)!=replacement.captured_bytes_sha256||decoded_total>8*1024*1024{return Err(invalid())}
+-        let (observed_mime,_)=crate::attachments::sniff_for_prompt(&captured).map_err(|_|invalid())?;
++        let mut encoded=original.pool().allocate(base64::encoded_len(captured.len(),true).ok_or_else(invalid)?.max(1)).map_err(|_|invalid())?;
++        encoded.refill_dynamic(|out|STANDARD.encode_slice(captured.as_ref(),out)).map_err(|_|invalid())?;
++        if encoded.as_ref()!=data.as_bytes()||hash(captured.as_ref())!=replacement.captured_bytes_sha256||decoded_total>8*1024*1024{return Err(invalid())}
++        let (observed_mime,_)=crate::attachments::sniff_for_prompt(captured.as_ref()).map_err(|_|invalid())?;
+@@ -141,15 +95,10 @@
+-        let span=scanner.uris.get(&replacement.file_index).ok_or_else(invalid)?.clone();
+-        let previous:String=serde_json::from_slice(&original[span.clone()]).map_err(|_|invalid())?;
+-        if hash(previous.as_bytes())!=replacement.original_uri_sha256{return Err(invalid())}
+-        let uri=expected.get_mut("files").and_then(Value::as_array_mut).and_then(|files|files.get_mut(replacement.file_index))
+-            .and_then(Value::as_object_mut).and_then(|file|file.get_mut("uri")).ok_or_else(invalid)?;
+-        if uri.as_str()!=Some(previous.as_str()){return Err(invalid())}
+-        *uri=Value::String(replacement.effective_uri.clone());
+-        if let Some(name)=&replacement.default_name {
+-            if !previous.starts_with("file://")||name.is_empty()||name.len()>4096||name.chars().any(char::is_control){return Err(invalid())}
+-            let file=expected.get_mut("files").and_then(Value::as_array_mut).and_then(|files|files.get_mut(replacement.file_index))
+-                .and_then(Value::as_object_mut).ok_or_else(invalid)?;
+-            if file.contains_key("name"){return Err(invalid())}
+-            file.insert("name".into(),Value::String(name.clone()));
+-            let (end,comma)=scanner.file_ends.get(&replacement.file_index).ok_or_else(invalid)?;
+-            let prefix=if *comma{b",\"name\":".as_slice()}else{b"\"name\":".as_slice()};
++        let file=files.as_ref().ok_or_else(invalid)?.item(replacement.file_index).map_err(|_|invalid())?.ok_or_else(invalid)?;
++        let uri=file.member("uri").map_err(|_|invalid())?.ok_or_else(invalid)?;
++        let span=uri.range_in(original).ok_or_else(invalid)?;
++        let previous=uri.decoded_string_bounded(original.len()).map_err(|_|invalid())?;
++        if hash(previous.as_ref())!=replacement.original_uri_sha256{return Err(invalid())}
++        if let Some(name)=&replacement.default_name{
++            if !previous.as_ref().starts_with(b"file://")||name.is_empty()||name.len()>4096||name.chars().any(char::is_control)
++                ||file.member("name").map_err(|_|invalid())?.is_some(){return Err(invalid())}
++            let file_range=file.range_in(original).ok_or_else(invalid)?;
++            let end=file_range.end.checked_sub(1).filter(|n|original.get(*n)==Some(&b'}')).ok_or_else(invalid)?;
+@@ -156,0 +106 @@
++            let prefix=b",\"name\":"; // file has its original URI, so is nonempty
+@@ -159 +109 @@
+-            edits.push((*end..*end,insertion.freeze()));
++            edits.push((end..end,insertion.freeze()));
+@@ -165 +115 @@
+-        if previous!=replacement.effective_uri{edits.push((span,literal));}
++        if previous.as_ref()!=replacement.effective_uri.as_bytes(){edits.push((span,literal))}
+@@ -170 +120 @@
+-    for (span,literal) in edits {
++    for(span,literal)in edits{
+@@ -176 +126,2 @@
+-    if effective.len()>16*1024*1024||serde_json::from_slice::<Value>(&effective).map_err(|_|invalid())?!=expected{return Err(invalid())}
++    if effective.len()>16*1024*1024{return Err(invalid())}
++    Json::parse(effective.share()).map_err(|_|invalid())?;

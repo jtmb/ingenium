@@ -1,0 +1,41 @@
+{
+  "scope": "unapplied finite source composition only; equivalence fixtures UNRUN",
+  "checks": {
+    "four_exact_paths_after5de7": true,
+    "canonical_object_indexes_charged": true,
+    "canonical_index_reserved_before_fill": true,
+    "canonical_keys_remain_source_spans": true,
+    "actual_dependency_map_order_probe": true,
+    "actual_library_string_escaping": true,
+    "actual_library_number_parser_and_serializer": true,
+    "std_f64_substitution_removed": true,
+    "hash_output_streamed_not_full_vec": true,
+    "legacy_full_body_view_ast_removed": true,
+    "legacy_untracked_scanner_removed": true,
+    "canonical_prompt_view_hash_preserved": true,
+    "base64_destinations_before_decode": true,
+    "base64_roundtrip_charged": true,
+    "output_original_json_unknown_bytes_preserved": true,
+    "no_new_protocol_or_ddl": true,
+    "seven_meaningful_library_equivalence_fixtures_supplied": true,
+    "raw_and_number_private_keys_feature_selected": true,
+    "legacy_embedded_raw_duplicate_semantics_preserved": true,
+    "legacy_raw_container_limit_matches_pinned_default": true,
+    "legacy_semantic_root_object_shape_preserved": true
+  },
+  "passed": 21,
+  "rust_fixtures_supplied": 7,
+  "rust_fixtures_run": false,
+  "compiler_or_runtime_run": false,
+  "ddl_or_dependency_change": false,
+  "full_memory_or20MiB_qualified": false,
+  "patch_bytes": 27257,
+  "patch_sha256": "b17f401132fdcac0a392d3f9c072308dab12bcf50b7a208471313061fc83a7af",
+  "features": "Root prior cache receipt omits preserve_order/arbitrary_precision/float_roundtrip; raw_value mixed; final exact target closure remains Root qualification",
+  "remaining": [
+    "actual final target feature/Number scratch proof",
+    "Root exact compiler/library-equivalence and fuzz tests",
+    "full source provenance/path/WSL/HTTP/SQLite/bookkeeping bounds",
+    "actual full20MiB/64MiB qualification"
+  ]
+}
