@@ -1,0 +1,210 @@
+{
+  "status": "source-confirmed finite UI inventory, NOT a permission allowlist or full served-route closure",
+  "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "version": "2.0.11",
+  "source_pins": [
+    {
+      "path": "packages/app/src/composer/submit.ts",
+      "git_blob": "762fc07978a89c3c6d9ce981a19fe91427acfdab",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/app/src/composer/submit.ts"
+    },
+    {
+      "path": "packages/app/src/new-session/composer-adapter.ts",
+      "git_blob": "0961cbcae77dbfd1852c46c044da2482487975ad",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/app/src/new-session/composer-adapter.ts"
+    },
+    {
+      "path": "packages/client/src/solid/data.ts",
+      "git_blob": "4716d2599ffeecf7fd1b0026592dcb1e65ed1d04",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/client/src/solid/data.ts"
+    },
+    {
+      "path": "packages/app/src/session/requests/model.ts",
+      "git_blob": "db640fe80f8d558f10db854db7108b71a9b6a5ab",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/app/src/session/requests/model.ts"
+    },
+    {
+      "path": "packages/app/src/session/requests/session-question-dock.tsx",
+      "git_blob": "5b97d8f5f54332e098ff3ecf2fc5b8c71bc5404e",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/app/src/session/requests/session-question-dock.tsx"
+    },
+    {
+      "path": "packages/app/src/session/terminal/context.tsx",
+      "git_blob": "5938438fd663c1c7ca53b3442b757697ea336e5e",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/app/src/session/terminal/context.tsx"
+    },
+    {
+      "path": "packages/client/src/promise/generated/client.ts",
+      "git_blob": "f2c271e286c67fd7867e27bfcff6b8ec74b28392",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+      "url": "https://github.com/anomalyco/opencode/blob/9eb6902aaf3c35ce985b67c605a775992249066b/packages/client/src/promise/generated/client.ts"
+    },
+    {
+      "path": "packages/app/src/session/commands/fork-dialog.tsx",
+      "git_blob": "a531854b6ee01211278edce1704128d4436507e1",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b"
+    },
+    {
+      "path": "packages/schema/src/session-id.ts",
+      "git_blob": "ba0b48ce7ef577f5f46b8908f90f56d525b5145d",
+      "commit": "9eb6902aaf3c35ce985b67c605a775992249066b"
+    }
+  ],
+  "mutations": [
+    {
+      "operation": "session.create",
+      "method": "POST",
+      "path": "/api/session",
+      "identity": "client Session.ID.create; supplied by new-session and solid data",
+      "payload": "id,agent,model,location,title,metadata,permissions",
+      "required_original": "create original preserving actual upstream session ID; local UUID-derived session constructor is not an ID rewrite adapter",
+      "qualified": false
+    },
+    {
+      "operation": "session.prompt",
+      "method": "POST",
+      "path": "/api/session/:sessionID/prompt",
+      "identity": "value.id reused for identical normal retry; same admission object auto-retried once",
+      "payload": "id,text,files(uri/name/mention),agents,skills,metadata(displayText/comments/attachments/agent/model),delivery",
+      "required_original": "full lossless prompt original, exact stable ID/hash, original inbox/message proof; no text-only AgentTurn",
+      "qualified": false
+    },
+    {
+      "operation": "session.command",
+      "method": "POST",
+      "path": "/api/session/:sessionID/command",
+      "identity": "NO value.id in actual sendCommand or generated HTTP request",
+      "payload": "name,text,files,agents,skills,delivery",
+      "required_original": "new original ingress/ambiguity recovery constructor required; no text-hash dedup",
+      "qualified": false
+    },
+    {
+      "operation": "session.shell",
+      "method": "POST",
+      "path": "/api/session/:sessionID/shell",
+      "identity": "id=value.id supplied; shell restoration does not use normal-mode retry ID restore",
+      "payload": "id,command",
+      "required_original": "exact shell original and terminal/output receipt; gate new effects while old shell unknown",
+      "qualified": false
+    },
+    {
+      "operation": "session.switchAgent",
+      "method": "POST",
+      "path": "/api/session/:sessionID/agent",
+      "identity": "no unique operation ID; explicit current-selection action",
+      "payload": "agent",
+      "required_original": "retained selection original with exact before/after ownership and observation",
+      "qualified": false
+    },
+    {
+      "operation": "session.switchModel",
+      "method": "POST",
+      "path": "/api/session/:sessionID/model",
+      "identity": "no unique operation ID; selection applied before steer",
+      "payload": "model(id/providerID/variant)",
+      "required_original": "real original model owner; preserve payload, do not autoload/substitute",
+      "qualified": false
+    },
+    {
+      "operation": "session.fork",
+      "method": "POST",
+      "path": "/api/session/:sessionID/fork",
+      "identity": "source session+before only; NO new request ID in fork-dialog",
+      "payload": "before",
+      "required_original": "genuine original fork ingress/receipt; preserve parent/source boundary and actual returned session",
+      "qualified": false
+    },
+    {
+      "operation": "session.compact",
+      "method": "POST",
+      "path": "/api/session/:sessionID/compact",
+      "identity": "solid Data path mints ID/coalesces; direct session command call omits ID",
+      "payload": "id when Data path; otherwise absent",
+      "required_original": "distinct actual compaction original and canonical coalesced ID; direct no-ID route remains a gap",
+      "qualified": false
+    },
+    {
+      "operation": "session.permission.reply",
+      "method": "POST",
+      "path": "/api/session/:sessionID/permission/:requestID/reply",
+      "identity": "actual pending permission requestID; not a unique decision ID",
+      "payload": "decision,message",
+      "required_original": "exact permission-decision original; bind full request/decision/actor; 404 does not prove which decision ran",
+      "qualified": false
+    },
+    {
+      "operation": "session.form.reply",
+      "method": "POST",
+      "path": "/api/session/:sessionID/form/:formID/reply",
+      "identity": "actual pending formID; no new operation ID",
+      "payload": "answer",
+      "required_original": "exact typed answer original; matching already-settled object alone does not prove original answer",
+      "qualified": false
+    },
+    {
+      "operation": "session.form.cancel",
+      "method": "DELETE",
+      "path": "/api/session/:sessionID/form/:formID",
+      "identity": "actual pending formID",
+      "payload": "none",
+      "required_original": "original cancel transition; GET actual form and original receipt, not absence inference",
+      "qualified": false
+    },
+    {
+      "operation": "session.background",
+      "method": "POST",
+      "path": "/api/session/:sessionID/background",
+      "identity": "no new ID in request model move call",
+      "payload": "none",
+      "required_original": "actual background owner/original; do not impersonate a managed/native task",
+      "qualified": false
+    },
+    {
+      "operation": "pty.create",
+      "method": "POST",
+      "path": "/api/pty",
+      "identity": "actual terminal/context create does not supply a client creation ID",
+      "payload": "location,title",
+      "required_original": "actual private terminal creation original and native custody; no arbitrary PTY/raw engine URL",
+      "qualified": false
+    },
+    {
+      "operation": "pty.update",
+      "method": "PUT",
+      "path": "/api/pty/:ptyID",
+      "identity": "actual existing PTY ID",
+      "payload": "query location; body title,size{rows,cols} from actual terminal/context.tsx update",
+      "required_original": "original exact terminal resize/state transition",
+      "qualified": false
+    },
+    {
+      "operation": "pty.remove",
+      "method": "DELETE",
+      "path": "/api/pty/:ptyID",
+      "identity": "actual existing PTY ID",
+      "payload": "location",
+      "required_original": "actual owner close/retirement proof; do not infer OS retirement from HTTP acknowledgement",
+      "qualified": false
+    }
+  ],
+  "observed_read_families": [
+    "actual solid Data session list/get/active/messages/message/inbox/form/permission",
+    "actual composer agent/model/command catalogs",
+    "actual location/project/bootstrap and scoped event stream",
+    "actual terminal/context existing PTY state"
+  ],
+  "remaining_closure": [
+    "pin exact bootstrap/event/files/PTY-connect-token/WebSocket/provider/settings/worktree APIs from served UI traces before qualification",
+    "scope every returned session/form/permission/file/worktree reference to original workspace; normal new/fork selections need authoritative native return mapping",
+    "preserve attachment bytes/URIs/mentions/skills/comments/display metadata; no field stripping",
+    "generated client prepare has no automatic idempotency/request-ID header; method-specific identity above is real evidence",
+    "unknown no-ID mutation and intentionally repeated equal action cannot be distinguished by payload hash; Root must supply actual intent/recovery authority without editing upstream or silently weakening once-only policy"
+  ],
+  "no_upstream_source_saved": true
+}

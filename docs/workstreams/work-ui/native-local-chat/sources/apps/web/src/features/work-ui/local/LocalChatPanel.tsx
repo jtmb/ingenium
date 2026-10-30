@@ -6,6 +6,8 @@ import type { LocalChatController } from "./local-chat-controller.mjs";
 import { LocalConversation } from "./LocalConversation";
 import { LocalRuntimeControls, type RuntimeCatalog } from "./LocalRuntimeControls";
 import "./local-chat.css";
+import { LocalWebPresentation } from "./LocalWebPresentation";
+import type { LocalWebController } from "./local-web-controller.mjs";
 
 /** Projection of the actual new closed context port; Root adapts the frozen
  * generated DTO. Unavailable is the default, never a fixture/readiness fallback. */
@@ -19,17 +21,17 @@ function sameContext(view: LocalAdmissionView, controller: LocalChatController) 
 function boundContent(value: BoundLocalContent | null | undefined, actual: LocalWorkspaceOwner | undefined, sessionID: string | undefined) {
   try { return value && actual && sessionID === value.session_id && same(owner(value.owner), owner(actual)) ? value.content : null; } catch { return null; }
 }
-export function LocalChatPanel({ controller, admission, conversation, controls, settings }: {
+export function LocalChatPanel({ controller, admission, conversation, controls, settings, web }: {
   controller: LocalChatController | null; admission: LocalAdmissionView;
-  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
+  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode; web?: LocalWebController | null;
 }) {
   if (!controller) return <NativeWorkPresentation scope="local-unavailable" projectName="No project" hasWorkspace={false}>
     <p role="status">Chats without a project are not available yet. Your existing originals are kept.</p>
   </NativeWorkPresentation>;
-  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} settings={settings} />;
+  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} settings={settings} web={web} />;
 }
-function LocalChatForm({ controller, admission, conversation, controls, settings }: {
-  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
+function LocalChatForm({ controller, admission, conversation, controls, settings, web }: {
+  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode; web?: LocalWebController | null;
 }) {
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const [form, setForm] = useState({ text: "", agent: "" }), latest = useRef(form);
@@ -83,7 +85,7 @@ function LocalChatForm({ controller, admission, conversation, controls, settings
       await controller.prepareWorkspace();
     }).catch(cause => { if (live.current) setError(cause instanceof Error ? cause.message : "This chat could not be started. Your draft is kept."); }).finally(() => { if (live.current) setWorking(false); });
   };
-  return <NativeWorkPresentation scope={JSON.stringify([controller.key, actualOwner, sessionID])} projectName="No project" hasWorkspace={false}>
+  return <LocalWebPresentation controller={web ?? null} scope={JSON.stringify([controller.key, actualOwner, sessionID])} projectName="No project">
     <section className="native-local-chat" aria-label="Chat without a project">
       {!custodyEligible && <p role="status">{admission.message}</p>}
       {(error || snapshot.error) && <p role="alert">{error ?? snapshot.error}</p>}
@@ -129,5 +131,5 @@ function LocalChatForm({ controller, admission, conversation, controls, settings
         </NativeWorkComposerOptions>
       </div>
     </section>
-  </NativeWorkPresentation>;
+  </LocalWebPresentation>;
 }

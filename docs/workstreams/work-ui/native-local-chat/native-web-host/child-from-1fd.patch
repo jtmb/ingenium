@@ -1,0 +1,468 @@
+--- a/apps/web/src/features/work-ui/local/LocalChatPanel.tsx
++++ b/apps/web/src/features/work-ui/local/LocalChatPanel.tsx
+@@ -8,0 +9,2 @@
++import { LocalWebPresentation } from "./LocalWebPresentation";
++import type { LocalWebController } from "./local-web-controller.mjs";
+@@ -22 +24 @@
+-export function LocalChatPanel({ controller, admission, conversation, controls, settings }: {
++export function LocalChatPanel({ controller, admission, conversation, controls, settings, web }: {
+@@ -24 +26 @@
+-  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
++  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode; web?: LocalWebController | null;
+@@ -29 +31 @@
+-  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} settings={settings} />;
++  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} settings={settings} web={web} />;
+@@ -31,2 +33,2 @@
+-function LocalChatForm({ controller, admission, conversation, controls, settings }: {
+-  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
++function LocalChatForm({ controller, admission, conversation, controls, settings, web }: {
++  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode; web?: LocalWebController | null;
+@@ -86 +88 @@
+-  return <NativeWorkPresentation scope={JSON.stringify([controller.key, actualOwner, sessionID])} projectName="No project" hasWorkspace={false}>
++  return <LocalWebPresentation controller={web ?? null} scope={JSON.stringify([controller.key, actualOwner, sessionID])} projectName="No project">
+@@ -132 +134 @@
+-  </NativeWorkPresentation>;
++  </LocalWebPresentation>;
+--- /dev/null
++++ b/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx
+@@ -0,0 +1,62 @@
++import { useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
++import { NativeWorkPresentation } from "../NativeWorkPresentation";
++import type { LocalWebController, WebBounds } from "./local-web-controller.mjs";
++
++export function LocalWebPresentation({ controller, scope, projectName, children }: {
++  controller: LocalWebController | null; scope: string; projectName: string; children: ReactNode;
++}) {
++  return controller ? <BoundWebPresentation key={scope} controller={controller} projectName={projectName}>{children}</BoundWebPresentation>
++    : <NativeWorkPresentation scope={scope} projectName={projectName} hasWorkspace={false}>{children}</NativeWorkPresentation>;
++}
++function BoundWebPresentation({ controller, projectName, children }: {
++  controller: LocalWebController; projectName: string; children: ReactNode;
++}) {
++  const id = useId(), anchor = useRef<HTMLDivElement>(null);
++  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
++  const pendingEnter = useRef(false), live = useRef(true), lifetime = useRef(0);
++  const bounds = (): WebBounds => {
++    if (!anchor.current) throw Error("The Web viewport is unavailable.");
++    const value = anchor.current.getBoundingClientRect();
++    return { x: value.x, y: value.y, width: value.width, height: value.height, viewport_width: window.innerWidth, viewport_height: window.innerHeight };
++  };
++  useLayoutEffect(() => {
++    live.current = true;
++    lifetime.current++;
++    return () => {
++      live.current = false; const closed = ++lifetime.current;
++      queueMicrotask(() => { if (lifetime.current === closed) void controller.dispose().catch(() => { /* mandatory cleanupFailure callback owns the retained native handle */ }); });
++    };
++  }, [controller]);
++  useLayoutEffect(() => {
++    if (snapshot.view !== "web" || !anchor.current) return;
++    const resize = () => { if (!live.current) return; void controller.resize(bounds()).catch(() => { /* controller retains truthful error/pending state */ }); };
++    const observer = new ResizeObserver(resize); observer.observe(anchor.current);
++    window.addEventListener("resize", resize); window.addEventListener("scroll", resize, true);
++    return () => { observer.disconnect(); window.removeEventListener("resize", resize); window.removeEventListener("scroll", resize, true); };
++  }, [controller, snapshot.view]);
++  const web = async () => {
++    if (pendingEnter.current || snapshot.busy || snapshot.pending) return;
++    pendingEnter.current = true;
++    // DOM host slot is already mounted; only the original native authority can show a child.
++    try { await controller.enter(bounds()); } catch { /* controller publishes the actual failure */ }
++    finally { pendingEnter.current = false; }
++  };
++  return <section className="native-work-presentation" aria-label="Work conversation">
++    <header className="native-work-heading">
++      <span className="native-work-project">{projectName}</span>
++      <div role="group" aria-label="Conversation presentation" className="native-work-switch">
++        <button type="button" aria-pressed={snapshot.view === "work"} aria-controls={`${id}-work`} disabled={snapshot.busy || Boolean(snapshot.pending)} onClick={() => { void controller.work().catch(() => {}); }}>Work</button>
++        <button type="button" aria-pressed={snapshot.view === "web"} aria-controls={`${id}-web`} disabled={snapshot.busy || Boolean(snapshot.pending)} onClick={() => { void web(); }}>Web</button>
++      </div>
++    </header>
++    {snapshot.error && <p role="alert">{snapshot.error}</p>}
++    {snapshot.pending && !snapshot.busy && <button type="button" onClick={() => { void controller.check().catch(() => {}); }}>Check Web view status</button>}
++    <div className="native-work-viewport">
++      <div id={`${id}-work`} className="native-work-surface" role="region" aria-label="Native Work presentation" aria-hidden={snapshot.view !== "work"} inert={snapshot.view !== "work"} data-active={snapshot.view === "work"}>{children}</div>
++      <div id={`${id}-web`} ref={anchor} className="native-work-surface" role="region" aria-label="Upstream Web presentation" aria-hidden={snapshot.view !== "web"} inert={snapshot.view !== "web"} data-active={snapshot.view === "web"}>
++        {snapshot.busy && <p role="status">Opening Web conversation…</p>}
++        {snapshot.error && !snapshot.pending && <button type="button" onClick={() => { void controller.work().catch(() => {}); }}>Return to Work</button>}
++      </div>
++    </div>
++  </section>;
++}
+--- /dev/null
++++ b/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx
+@@ -0,0 +1,52 @@
++import { useEffect } from "react";
++import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { LocalWebController, type LocalWebPort, type WebState } from "./local-web-controller.mjs";
++import { LocalWebPresentation } from "./LocalWebPresentation";
++beforeEach(() => {
++  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
++  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(100,100,600,400));
++});
++afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
++function fixture() {
++  const actualOwner={installation_id:"actual-library",custodian_key:"actual-custodian",workspace_id:"11111111-1111-4111-8111-111111111111",revision:1,service_instance_id:"actual-instance",environment:{kind:"windows" as const}};
++  const session_id="ses_"+"a".repeat(32), binding={kind:"qualified" as const,owner:actualOwner,session_id,binding_id:"native-binding",invalidation_epoch:"native-epoch"};
++  const state=(visibility:WebState["visibility"]):WebState=>({binding_id:binding.binding_id,invalidation_epoch:binding.invalidation_epoch,visibility});
++  const port:LocalWebPort={readBinding:vi.fn(async()=>binding),show:vi.fn(async()=>state("visible")),hide:vi.fn(async()=>state("hidden")),bounds:vi.fn(async()=>state("visible")),readState:vi.fn(async()=>state("hidden")),release:vi.fn(async()=>state("closed"))};
++  const cleanupFailure=vi.fn(), refreshWork=vi.fn(async()=>{});
++  const controller=new LocalWebController({actualOwner,sessionID:session_id,port,current:()=>true,refreshWork,cleanupFailure});
++  return{port,controller,cleanupFailure,refreshWork};
++}
++describe("native child Web presentation adapter proposal",()=>{
++  it("keeps the Work draft owner mounted while native show/hide retain one binding",async()=>{
++    const f=fixture(),mounted=vi.fn(),disposed=vi.fn();
++    function WorkOwner(){useEffect(()=>{mounted();return disposed;},[]);return <input aria-label="Retained Work draft" defaultValue="original"/>;}
++    const view=render(<LocalWebPresentation controller={f.controller} scope="actual-owner/session" projectName="No project"><WorkOwner/></LocalWebPresentation>);
++    const input=screen.getByLabelText("Retained Work draft");fireEvent.change(input,{target:{value:"Preserve exact draft"}});
++    fireEvent.click(screen.getByRole("button",{name:"Web",exact:true}));
++    await waitFor(()=>expect(f.port.show).toHaveBeenCalledTimes(1));
++    await waitFor(()=>expect(screen.getByRole("button",{name:"Work",exact:true}).hasAttribute("disabled")).toBe(false));
++    fireEvent.click(screen.getByRole("button",{name:"Work",exact:true}));
++    await waitFor(()=>expect(f.refreshWork).toHaveBeenCalledTimes(1));
++    expect(screen.getByLabelText("Retained Work draft")).toBe(input);expect((input as HTMLInputElement).value).toBe("Preserve exact draft");
++    expect(mounted).toHaveBeenCalledTimes(1);expect(disposed).not.toHaveBeenCalled();
++    expect(f.port.readBinding).toHaveBeenCalledTimes(1);expect(f.port.hide).toHaveBeenCalledTimes(1);expect(document.querySelector("iframe")).toBeNull();
++    view.unmount();await waitFor(()=>expect(f.port.release).toHaveBeenCalledTimes(1));
++  });
++  it("shows a truthful unavailable host and never fabricates Web content",async()=>{
++    const f=fixture();vi.mocked(f.port.readBinding).mockResolvedValue({kind:"unavailable",reason:"Original native host not qualified"});
++    render(<LocalWebPresentation controller={f.controller} scope="actual-owner/session" projectName="No project"><input aria-label="Original draft" defaultValue="kept"/></LocalWebPresentation>);
++    fireEvent.click(screen.getByRole("button",{name:"Web",exact:true}));await screen.findByText("Original native host not qualified");
++    expect(f.port.show).not.toHaveBeenCalled();expect(document.querySelector("iframe")).toBeNull();
++    fireEvent.click(screen.getByRole("button",{name:"Return to Work"}));
++    await waitFor(()=>expect((screen.getByLabelText("Original draft") as HTMLInputElement).value).toBe("kept"));
++  });
++  it("reports the retained native handle when unmount cleanup is not confirmed",async()=>{
++    const f=fixture();vi.mocked(f.port.release).mockRejectedValue(Error("native close not confirmed"));
++    const view=render(<LocalWebPresentation controller={f.controller} scope="actual-owner/session" projectName="No project"><p>Work owner</p></LocalWebPresentation>);
++    fireEvent.click(screen.getByRole("button",{name:"Web",exact:true}));
++    await waitFor(()=>expect(f.port.show).toHaveBeenCalledTimes(1));
++    await waitFor(()=>expect(f.controller.getSnapshot().busy).toBe(false));view.unmount();
++    await waitFor(()=>expect(f.cleanupFailure).toHaveBeenCalledWith("native-binding",expect.any(Error)));
++  });
++});
+--- /dev/null
++++ b/apps/web/src/features/work-ui/local/local-web-controller.mjs
+@@ -0,0 +1,111 @@
++import { clone, owner, same, requireValue } from "./local-protocol.mjs";
++const opaque = value => typeof value === "string" && /^[A-Za-z0-9_-]{1,160}$/.test(value);
++export function webBounds(value) {
++  const keys = ["x", "y", "width", "height", "viewport_width", "viewport_height"];
++  requireValue(value && Object.keys(value).sort().join() === keys.sort().join() && keys.every(key => Number.isFinite(value[key])) &&
++    value.x >= 0 && value.y >= 0 && value.width > 0 && value.height > 0 &&
++    value.viewport_width > 0 && value.viewport_height > 0 && value.viewport_width <= 32768 && value.viewport_height <= 32768 &&
++    value.x + value.width <= value.viewport_width + 0.5 && value.y + value.height <= value.viewport_height + 0.5,
++    "The Web viewport is not available.");
++  return clone(value);
++}
++/** Root-only port injection. No URL, token, generic invoke or fake host fallback. */
++export class LocalWebController {
++  constructor({ actualOwner, sessionID, port, current, refreshWork, cleanupFailure }) {
++    this.owner = owner(actualOwner); this.sessionID = sessionID; this.port = port; this.current = current;
++    requireValue(/^ses_[A-Za-z0-9_-]{1,128}$/.test(sessionID), "The Web conversation is not confirmed.");
++    requireValue(typeof refreshWork === "function" && typeof cleanupFailure === "function", "Original refresh and cleanup reporting are required.");
++    this.refreshWork = refreshWork; this.cleanupFailure = cleanupFailure;
++    this.binding = null; this.pending = null; this.busy = false; this.disposed = false; this.listeners = new Set();
++    this.snapshot = { view: "work", busy: false, pending: null, error: null };
++  }
++  getSnapshot = () => this.snapshot;
++  subscribe = fn => { this.listeners.add(fn); return () => this.listeners.delete(fn); };
++  publish(view = this.snapshot.view, error = null) {
++    this.snapshot = Object.freeze({ view, busy: this.busy, pending: this.pending, error });
++    for (const listener of this.listeners) listener();
++  }
++  checkCurrent() { requireValue(!this.disposed && this.current(), "The conversation changed; the Web binding was not redirected."); }
++  verifiedState(reply) {
++    requireValue(this.binding && reply?.binding_id === this.binding.binding_id && reply.invalidation_epoch === this.binding.invalidation_epoch &&
++      ["hidden", "visible", "closed"].includes(reply.visibility), "The actual Web host state was not confirmed.");
++    return reply.visibility;
++  }
++  async enter(bounds) {
++    requireValue(!this.busy && !this.pending, "Check the Web view outcome before another action.");
++    this.busy = true; this.publish("web");
++    try {
++      this.checkCurrent(); const rect = webBounds(bounds);
++      if (!this.binding) {
++        const reply = await this.port.readBinding({ owner: this.owner, session_id: this.sessionID }, this.current);
++        requireValue(reply?.kind === "qualified", reply?.reason ?? "Web is unavailable for this conversation.");
++        requireValue(opaque(reply.binding_id) && opaque(reply.invalidation_epoch) && same(owner(reply.owner), this.owner) && reply.session_id === this.sessionID &&
++          Object.keys(reply).every(key => ["kind", "binding_id", "invalidation_epoch", "owner", "session_id"].includes(key)), "The original Web binding is invalid.");
++        this.binding = clone(reply);
++        if (this.disposed || !this.current()) { await this.dispose(); throw new Error("The conversation changed; the retained Web binding was released."); }
++      }
++      this.checkCurrent(); this.pending = "show"; this.publish("web");
++      requireValue(this.verifiedState(await this.port.show(this.binding, rect, this.current)) === "visible", "The Web view was not shown.");
++      this.checkCurrent(); this.pending = null;
++    } catch (error) { this.publish("web", error instanceof Error ? error.message : "The Web view outcome is unknown."); throw error; }
++    finally { this.busy = false; this.publish(this.snapshot.view, this.snapshot.error); }
++  }
++  async work() {
++    requireValue(!this.busy && !this.pending, "Check the Web view outcome before returning.");
++    this.busy = true; this.publish();
++    try {
++      if (this.binding) {
++        this.pending = "hide"; this.publish();
++        requireValue(this.verifiedState(await this.port.hide(this.binding)) === "hidden", "The Web view hide was not confirmed.");
++        this.pending = null;
++      }
++      this.publish("work");
++      this.checkCurrent(); await this.refreshWork(); // actual original owner reads only
++    } catch (error) { this.publish(this.snapshot.view, error instanceof Error ? error.message : "The Web view outcome is unknown."); throw error; }
++    finally { this.busy = false; this.publish(this.snapshot.view, this.snapshot.error); }
++  }
++  async check() {
++    requireValue(this.binding && !this.busy, "No retained Web binding is available to check.");
++    const visibility = this.verifiedState(await this.port.readState(this.binding));
++    this.pending = null;
++    if (visibility === "closed") this.binding = null;
++    this.publish(visibility === "visible" ? "web" : "work");
++  }
++  async resize(bounds) {
++    if (!this.binding || this.snapshot.view !== "web" || this.busy) return;
++    try {
++      this.checkCurrent();
++      // Bounds never creates or shows a child; it remains safe during outcome recovery.
++      this.verifiedState(await this.port.bounds(this.binding, webBounds(bounds), this.current));
++    } catch (error) { this.publish(this.snapshot.view, this.snapshot.error ?? "The Web viewport resize was not confirmed."); throw error; }
++  }
++  async dispose() {
++    this.disposed = true;
++    if (!this.binding) return;
++    const retained = this.binding;
++    this.pending = "release"; this.publish();
++    try {
++      requireValue(this.verifiedState(await this.port.release(retained)) === "closed", "Web child removal is not confirmed.");
++      this.binding = null; this.pending = null; this.publish("work");
++    } catch (error) {
++      this.publish(this.snapshot.view, "Web child cleanup requires reconciliation.");
++      this.cleanupFailure(retained.binding_id, error); throw error;
++    }
++  }
++}
++/** These proposed commands must be guarded by the actual requesting Webview. */
++export function createLocalWebPort(invoke) {
++  requireValue(typeof invoke === "function", "The original native Web host is unavailable.");
++  const key = binding => { requireValue(opaque(binding?.binding_id) && opaque(binding?.invalidation_epoch), "Invalid Web binding."); return { binding_id: binding.binding_id, invalidation_epoch: binding.invalidation_epoch }; };
++  return {
++    readBinding: (request, current) => {
++      requireValue(current() && request && Object.keys(request).sort().join() === "owner,session_id" && /^ses_[A-Za-z0-9_-]{1,128}$/.test(request.session_id), "The conversation changed or its owner is invalid.");
++      return invoke("read_local_web_binding", { request: { owner: owner(request.owner), session_id: request.session_id } });
++    },
++    show: (binding, bounds, current) => { requireValue(current(), "The conversation changed."); return invoke("show_local_web_child", { ...key(binding), bounds: webBounds(bounds) }); },
++    bounds: (binding, bounds, current) => { requireValue(current(), "The conversation changed."); return invoke("bound_local_web_child", { ...key(binding), bounds: webBounds(bounds) }); },
++    hide: binding => invoke("hide_local_web_child", key(binding)),
++    readState: binding => invoke("read_local_web_child", key(binding)),
++    release: binding => invoke("release_local_web_child", key(binding)),
++  };
++}
+--- /dev/null
++++ b/apps/web/src/features/work-ui/local/local-web-controller.d.mts
+@@ -0,0 +1,21 @@
++import type { LocalWorkspaceOwner } from "@veyra/contracts";
++export type WebBounds = { x: number; y: number; width: number; height: number; viewport_width: number; viewport_height: number };
++export type LocalWebBinding = { kind: "qualified"; owner: LocalWorkspaceOwner; session_id: string; binding_id: string; invalidation_epoch: string };
++export type WebState = { binding_id: string; invalidation_epoch: string; visibility: "hidden" | "visible" | "closed" };
++export interface LocalWebPort {
++  readBinding(request: { owner: LocalWorkspaceOwner; session_id: string }, current: () => boolean): Promise<LocalWebBinding | { kind: "unavailable"; reason: string }>;
++  show(binding: LocalWebBinding, bounds: WebBounds, current: () => boolean): Promise<WebState>;
++  bounds(binding: LocalWebBinding, bounds: WebBounds, current: () => boolean): Promise<WebState>;
++  hide(binding: LocalWebBinding): Promise<WebState>;
++  readState(binding: LocalWebBinding): Promise<WebState>;
++  release(binding: LocalWebBinding): Promise<WebState>;
++}
++export class LocalWebController {
++  constructor(options: { actualOwner: LocalWorkspaceOwner; sessionID: string; port: LocalWebPort; current: () => boolean;
++    refreshWork: () => Promise<void>; cleanupFailure: (bindingID: string, error: unknown) => void });
++  getSnapshot(): Readonly<{ view: "work" | "web"; busy: boolean; pending: "show" | "hide" | "release" | null; error: string | null }>;
++  subscribe(listener: () => void): () => void;
++  enter(bounds: WebBounds): Promise<void>; work(): Promise<void>; check(): Promise<void>; resize(bounds: WebBounds): Promise<void>; dispose(): Promise<void>;
++}
++export function webBounds(value: unknown): WebBounds;
++export function createLocalWebPort(invoke: (command: string, args: Record<string, unknown>) => Promise<unknown>): LocalWebPort;
+--- /dev/null
++++ b/apps/desktop/src-tauri/src/local_web_child.rs
+@@ -0,0 +1,182 @@
++//! Proposal only: Root enables tauri/unstable and supplies original authority.
++//! Invoke from async commands/off-event-thread; no synchronous Windows creation.
++use std::{collections::HashMap, path::Path, sync::{Arc, atomic::{AtomicBool, Ordering}}};
++use tauri::{webview::{DownloadEvent, NewWindowFeatures, NewWindowResponse, PermissionKind, PermissionResponse, WebviewBuilder},
++    LogicalPosition, LogicalSize, Manager, Rect, Url, Webview, WebviewUrl, Window};
++
++#[derive(serde::Deserialize)]
++#[serde(deny_unknown_fields)]
++pub(crate) struct CssBounds { x:f64, y:f64, width:f64, height:f64, viewport_width:f64, viewport_height:f64 }
++pub(crate) fn viewport_bounds(parent:&Window, value:CssBounds)->Result<Rect,String> {
++    if ![value.x,value.y,value.width,value.height,value.viewport_width,value.viewport_height].iter().all(|x|x.is_finite())
++        || value.x<0.0 || value.y<0.0 || value.width<=0.0 || value.height<=0.0
++        || value.viewport_width<=0.0 || value.viewport_height<=0.0 || value.viewport_width>32768.0 || value.viewport_height>32768.0
++        || value.x+value.width>value.viewport_width+0.5 || value.y+value.height>value.viewport_height+0.5
++    {return Err("Invalid Work viewport bounds".into());}
++    let scale=parent.scale_factor().map_err(|_|"Parent scale unavailable")?;
++    if !scale.is_finite() || scale<=0.0 {return Err("Parent scale unavailable".into());}
++    let size=parent.inner_size().map_err(|_|"Parent size unavailable")?.to_logical::<f64>(scale);
++    if !size.width.is_finite() || !size.height.is_finite() || size.width<=0.0 || size.height<=0.0 {return Err("Parent viewport unavailable".into());}
++    let sx=size.width/value.viewport_width;let sy=size.height/value.viewport_height;
++    Ok(Rect{position:LogicalPosition::new(value.x*sx,value.y*sy).into(),size:LogicalSize::new(value.width*sx,value.height*sy).into()})
++}
++
++/// Root's read_local_web_child uses a cloned retained child, outside its map lock.
++/// Native observation resolves a lost hide/show acknowledgement without replay.
++#[cfg(windows)]
++pub(crate) async fn observed_visibility(child:Webview)->Result<bool,String> {
++    let(tx,rx)=tokio::sync::oneshot::channel();
++    child.with_webview(move|native|{
++        let mut visible=windows::Win32::Foundation::BOOL::default();
++        let result=unsafe{native.controller().IsVisible(&mut visible)}
++            .map(|_|visible.as_bool()).map_err(|_|"Native child visibility unavailable".to_string());
++        let _=tx.send(result);
++    }).map_err(|_|"Native child observation unavailable")?;
++    tokio::time::timeout(std::time::Duration::from_secs(5),rx).await
++        .map_err(|_|"Native child visibility timed out")?.map_err(|_|"Native child observation ended")?
++}
++
++/// No Deserialize/renderer factory. Root implements this using its original
++/// private proxy/engine lease, full LocalWorkspaceOwner+session+engine epoch,
++/// actual assets/route-closure qualification and native auth bootstrap.
++pub(crate) trait OriginalWebAuthority: Send + Sync + 'static {
++    fn binding_id(&self) -> &str;
++    fn entry_url(&self) -> &Url; // dedicated PUBLIC proxy origin, native-only
++    fn profile(&self) -> &Path; // existing owner profile, never scratch or deleted
++    fn check_current(&self) -> Result<(), String>;
++    fn revoked(&self) -> bool; // cheap atomic callback, never blocking network
++    fn authorize_child(&self, child: &Webview) -> Result<(), String>; // exact-origin native bootstrap; no eval/script/token URL or port-ambient cookie
++    fn download(&self, child: Webview, event: DownloadEvent<'_>) -> bool;
++    fn permission(&self, child: Webview, kind: PermissionKind) -> PermissionResponse;
++    fn new_window(&self, url:Url, features:NewWindowFeatures) -> NewWindowResponse<tauri::Wry>;
++    fn release_proxy(&self) -> Result<(), String>; // after positive child close only
++}
++
++struct Entry { child: Webview, parent_label:String, authority: Arc<dyn OriginalWebAuthority>, cleanup_required: bool, close_attempted: bool, closed: bool }
++struct UnconfirmedCreation { label:String, parent_label:String, _authority:Arc<dyn OriginalWebAuthority> }
++pub(crate) struct LocalWebChildren { entries: HashMap<String, Entry>, unconfirmed:HashMap<String,UnconfirmedCreation> }
++impl Default for LocalWebChildren { fn default() -> Self { Self { entries: HashMap::new(), unconfirmed:HashMap::new() } } }
++
++impl LocalWebChildren {
++    /// Root command checks the requesting Webview label AND trusted app origin;
++    /// a child shares its parent's Window and must never pass that guard.
++    pub(crate) fn create(&mut self, parent: &Window, authority: Arc<dyn OriginalWebAuthority>, bounds: Rect) -> Result<(), String> {
++        authority.check_current()?;
++        let id = authority.binding_id().to_owned();
++        if self.entries.contains_key(&id) { return Err("This Web binding already has a retained child; read it first.".into()); }
++        if self.entries.values().any(|entry|entry.parent_label==parent.label()) {return Err("The retained Work Web child must be closed before replacing its binding.".into());}
++        if self.unconfirmed.values().any(|entry|entry.parent_label==parent.label()) {return Err("An original child creation still requires native reconciliation.".into());}
++        let target = authority.entry_url().clone();
++        let loopback = target.host_str().is_some_and(|host| host == "localhost" || host.parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
++        if !loopback || target.scheme() != "http" || !target.username().is_empty() || target.password().is_some()
++            || target.query().is_some() || target.fragment().is_some() || !target.path().starts_with("/server/")
++        { return Err("Original dedicated proxy navigation is unavailable.".into()); }
++        let origin = target.origin();
++        let starting = Arc::new(AtomicBool::new(true));
++        let initial = starting.clone();
++        let navigation_authority = authority.clone();
++        let downloads = authority.clone();
++        let permissions = authority.clone();
++        let new_windows = authority.clone();
++        let label = format!("opencode-child-{}", uuid::Uuid::new_v4());
++        let builder = WebviewBuilder::new(&label, WebviewUrl::External(Url::parse("about:blank").map_err(|_| "Invalid bootstrap URL")?))
++            .data_directory(authority.profile().to_path_buf()).focused(false).devtools(false)
++            .browser_extensions_enabled(false).general_autofill_enabled(false).disable_drag_drop_handler()
++            .on_navigation(move |url| !navigation_authority.revoked() &&
++                ((initial.load(Ordering::Acquire) && url.as_str() == "about:blank") || url.origin() == origin))
++            .on_new_window(move |url, features| if new_windows.revoked() {NewWindowResponse::Deny} else {new_windows.new_window(url,features)})
++            .on_download(move |child, event| !downloads.revoked() && downloads.download(child, event))
++            .on_permission_request(move |child, kind| if permissions.revoked() { PermissionResponse::Deny } else { permissions.permission(child, kind) });
++        // Zero bounds prevents initial content flashing over the trusted UI.
++        let child = match parent.add_child(builder, LogicalPosition::new(0.0, 0.0), LogicalSize::new(0.0, 0.0)) {
++            Ok(child)=>child,
++            Err(_)=>{
++                if let Some(child)=parent.app_handle().get_webview(&label) {
++                    self.entries.insert(id.clone(),Entry{child,parent_label:parent.label().into(),authority,cleanup_required:true,close_attempted:false,closed:false});
++                    return match self.release(&id) {Ok(())=>Err("Child creation failed and its retained handle was closed.".into()),Err(error)=>Err(format!("Child creation failed; cleanup pending for {id}: {error}"))};
++                }
++                // Absence from the map alone does not prove a partially-created
++                // native object retired. Root's original creator must reconcile.
++                self.unconfirmed.insert(id.clone(),UnconfirmedCreation{label:label.clone(),parent_label:parent.label().into(),_authority:authority});
++                return Err(format!("Child creation unconfirmed; retain original binding {id} and label {label} for native reconciliation."));
++            }
++        };
++        // Enroll before the first fallible post-create step; never lose a handle.
++        self.entries.insert(id.clone(), Entry { child, parent_label:parent.label().into(), authority, cleanup_required: false, close_attempted: false, closed: false });
++        let entry = self.entries.get(&id).ok_or("Web child enrollment failed")?;
++        let initialized = (|| {
++            entry.child.hide().map_err(|_| "Could not hide bootstrap child")?;
++            entry.authority.authorize_child(&entry.child)?;
++            entry.authority.check_current()?;
++            starting.store(false, Ordering::Release);
++            entry.child.navigate(target).map_err(|_| "Could not navigate the original Web child")?;
++            entry.child.set_bounds(bounds).map_err(|_| "Could not position the Web child")?;
++            entry.authority.check_current()
++        })();
++        if let Err(error) = initialized {
++            if let Some(entry) = self.entries.get_mut(&id) { entry.cleanup_required = true; }
++            return match self.release(&id) {
++                Ok(()) => Err(error),
++                Err(cleanup) => Err(format!("{error}; cleanup pending for {id}: {cleanup}")),
++            };
++        }
++        Ok(())
++    }
++    pub(crate) fn show(&mut self, id: &str, bounds: Rect) -> Result<(), String> {
++        let entry = self.entries.get_mut(id).ok_or("Web child is unavailable")?;
++        if entry.cleanup_required { return Err("Web child cleanup still needs reconciliation".into()); }
++        entry.authority.check_current()?;
++        entry.child.set_bounds(bounds).map_err(|_| "Web child bounds were not confirmed")?;
++        entry.child.show().map_err(|_| "Web child visibility was not confirmed")?;
++        if let Err(error) = entry.authority.check_current() {
++            entry.cleanup_required = true;
++            return match entry.child.hide() {
++                Ok(()) => Err(error),
++                Err(_) => Err(format!("{error}; revoked child hide failed; cleanup required for {id}")),
++            };
++        }
++        Ok(())
++    }
++    pub(crate) fn hide(&self, id: &str) -> Result<(), String> {
++        // Hiding/closing remains allowed after revocation; showing does not.
++        self.entries.get(id).ok_or("Web child is unavailable")?.child.hide().map_err(|_| "Web child hide was not confirmed".into())
++    }
++    pub(crate) fn bounds(&self, id: &str, bounds: Rect) -> Result<(), String> {
++        let entry = self.entries.get(id).ok_or("Web child is unavailable")?;
++        entry.authority.check_current()?;
++        entry.child.set_bounds(bounds).map_err(|_| "Web child bounds were not confirmed")?;
++        entry.authority.check_current()
++    }
++    pub(crate) fn release(&mut self, id: &str) -> Result<(), String> {
++        let entry = self.entries.get_mut(id).ok_or("Web child is unavailable")?;
++        entry.cleanup_required = true;
++        if !entry.closed {
++            if entry.child.app_handle().get_webview(entry.child.label()).is_none() { entry.closed=true; }
++            else if !entry.close_attempted {
++                entry.close_attempted = true;
++                entry.child.close().map_err(|_| "Web child close failed; retained for reconciliation")?;
++            }
++            if entry.child.app_handle().get_webview(entry.child.label()).is_some() {
++                return Err("Web child removal is not yet observed; retained for reconciliation without repeating close".into());
++            }
++            entry.closed = true;
++        }
++        entry.authority.release_proxy()?;
++        self.entries.remove(id);
++        Ok(()) // profile/drafts are original user state and are never deleted here
++    }
++    pub(crate) fn cleanup_pending(&self) -> Vec<String> {
++        self.entries.iter().filter(|(_, entry)| entry.cleanup_required).map(|(id, _)| id.clone())
++            .chain(self.unconfirmed.iter().map(|(id,entry)|format!("{id}:{}",entry.label))).collect()
++    }
++    pub(crate) fn hide_revoked(&mut self) -> Vec<String> {
++        let mut failed=Vec::new();
++        for (id,entry) in &mut self.entries {
++            if entry.authority.revoked() {
++                entry.cleanup_required=true;
++                if entry.child.hide().is_err() {failed.push(id.clone());}
++            }
++        }
++        failed // Root must report and reconcile these exact retained handles
++    }
++}

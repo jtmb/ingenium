@@ -1,0 +1,20 @@
+{
+  "status": "source-proposed; Root applies and qualifies only",
+  "tauri": "2.12.2 actual Window.add_child/WebviewBuilder/set_bounds/hide/show/close; desktop+unstable required",
+  "cargo_proposal": {"file":"apps/desktop/src-tauri/Cargo.toml","before":"tauri = { version = \"2\", features = [\"tray-icon\"] }","after":"tauri = { version = \"2\", features = [\"tray-icon\", \"unstable\"] }","lock":"Root resolves/checks existing lock and cache under ordinary resource guard; worker changes neither"},
+  "capability_proposal": {"file":"apps/desktop/src-tauri/capabilities/default.json","replace_windows_with_webviews":["main","workspace-*"],"remote_urls":[],"child_label_prefix":"opencode-child-","rule":"child must match no local or remote capability; no wildcard origin or new command grant to child"},
+  "command_guard": "All six proposed commands receive actual tauri::Webview and check exact trusted parent Webview label AND bundled app origin, not parent Window label alone. Existing application IPC must also reject the child regardless of its parent window. Root verifies actual resolved ACL.",
+  "commands": [
+    {"name":"read_local_web_binding","input":"strict {request:{owner:LocalWorkspaceOwner,session_id}}","source":"original protected service lease, registry/retained engine/proxy qualification; no engine/session/model creation"},
+    {"name":"show_local_web_child","input":"strict {binding_id,invalidation_epoch,bounds:CssBounds}","source":"Root private lease only; create one child per parent slot or show retained identical binding; no renderer URL"},
+    {"name":"bound_local_web_child","input":"strict {binding_id,invalidation_epoch,bounds:CssBounds}","source":"viewport_bounds from actual parent scale/client size; set_bounds only, never create/show"},
+    {"name":"hide_local_web_child","input":"strict {binding_id,invalidation_epoch}","source":"hide exact retained Webview without disposing its profile"},
+    {"name":"read_local_web_child","input":"strict {binding_id,invalidation_epoch}","source":"actual native visibility/closed observation; no show/hide replay; closed requires both child removal and proxy release"},
+    {"name":"release_local_web_child","input":"strict {binding_id,invalidation_epoch}","source":"one close attempt, observe actual child removal, release original proxy; retain/report exact handle on failure; preserve profile/drafts"}
+  ],
+  "frontend": "LocalChatPanel.web receives actual LocalWebController only from Root-qualified port. No port leaves truthful existing unavailable fallback. LocalWebPresentation retains mounted Work subtree and native anchor. Observer bounds are CSS client rect plus viewport size; native validates and maps to parent logical units.",
+  "normal_workflows": "OriginalWebAuthority supplies real scoped download/permission/new-window owners; no blanket success or generic browser fallback. Full unchanged UI route/payload closure and selected-session navigation consistency must qualify before its factory returns a lease.",
+  "missing_original_constructors": ["Root original protected service-issued qualified proxy/engine lease implementing OriginalWebAuthority", "exact-origin native auth bootstrap without renderer credentials or cross-port cookie leakage", "actual download/permission/new-window authority adapters", "Root native visibility/closed observation command envelope", "lossless once/recovery ingress for command/fork and other no-ID mutations"],
+  "cleanup": "Root authoritative registry survives frontend unmount. Invoke hide_revoked on original service/engine/owner revocation and release on real parent close. No profile deletion or engine kill. Failed checks retain exact native handle and report; do not lose map entries through Drop.",
+  "acceptance": "No worker native build/runtime/host launch. Source fixtures are not qualified Web/IPC/custody/render evidence. Root compiler/actual device/privacy/normal workflow/restart/recovery/visual gates remain open. Linux Docker/Kubernetes scope unchanged."
+}

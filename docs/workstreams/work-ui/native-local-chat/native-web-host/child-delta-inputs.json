@@ -1,0 +1,50 @@
+{
+  "base": "1fd9f0b4ac84312ac03315a0f5b7f29d04558c87",
+  "files": [
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
+      "preimage_lf_sha256": "1376b7db8a5ef4ab53e48c686a7c439991714438ddf23d7de169d9d483f0b4a0",
+      "requires_absent": false,
+      "source": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
+      "after_lf_sha256": "b8ebc65f1fd97a6edc7fbe74ceb0a6082f16f2f7e41978e3a5a2c9044647f480"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalWebPresentation.tsx",
+      "preimage_lf_sha256": null,
+      "requires_absent": true,
+      "source": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx",
+      "after_lf_sha256": "fa17ce387a693b633eb5a880d75c74bf9e7d443927a327e64ac1254a0ac0e859"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
+      "preimage_lf_sha256": null,
+      "requires_absent": true,
+      "source": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
+      "after_lf_sha256": "88f7a4323d98e55231be2da0fec59ef02e93265ef028cb25f43b593b802e2985"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/local-web-controller.mjs",
+      "preimage_lf_sha256": null,
+      "requires_absent": true,
+      "source": "sources/apps/web/src/features/work-ui/local/local-web-controller.mjs",
+      "after_lf_sha256": "79a3d28660dbbcbb828cecc7f275c69126ccd5493e83e509590bdea0793ebc44"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/local-web-controller.d.mts",
+      "preimage_lf_sha256": null,
+      "requires_absent": true,
+      "source": "sources/apps/web/src/features/work-ui/local/local-web-controller.d.mts",
+      "after_lf_sha256": "bbe21527b44ab6964dbe32585d6e1ebad1b113980038d0d15a9064a5649c6233"
+    },
+    {
+      "path": "apps/desktop/src-tauri/src/local_web_child.rs",
+      "preimage_lf_sha256": null,
+      "requires_absent": true,
+      "source": "native-web-host/sources/apps/desktop/src-tauri/src/local_web_child.rs",
+      "after_lf_sha256": "f6d4dec5a19c827c24679517d49b22c0f0a9327915740082bf0059ec8985c0b3"
+    }
+  ],
+  "bytes": 34151,
+  "sha256": "f3b812b3f6cb5db817535ce4e7a6742bf15293d1cbb23bcbf1bdb2034abceb52",
+  "application": "exact existing preimages/new paths absent; --unidiff-zero; Root reconciles actual current tree. Does not edit Cargo/lock/ACL/commands or implement the missing authority factory."
+}

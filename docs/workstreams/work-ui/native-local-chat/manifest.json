@@ -36,19 +36,54 @@
       "sha256": "bd883d9f4a8a1e71978b798d0a7c11997ad857c5203ec22a208f71dcf93ac9ad"
     },
     {
+      "path": "native-web-host/CHILD-HOST.md",
+      "bytes": 9938,
+      "sha256": "71207409b89a101f3eb4080ecd6e7b34d836dd644222e51150fe283fc7af517e"
+    },
+    {
       "path": "native-web-host/README.md",
       "bytes": 6919,
       "sha256": "c0ee61babe09e269634842a7ca112cdb0aa1b194fadbec3290767ac4bccf1d8f"
     },
     {
+      "path": "native-web-host/child-delta-inputs.json",
+      "bytes": 2437,
+      "sha256": "c0bc5716154d97fa226e987a33be4a5ec77d72a435363b953ff689c4d5bc6d03"
+    },
+    {
+      "path": "native-web-host/child-from-1fd.patch",
+      "bytes": 34151,
+      "sha256": "f3b812b3f6cb5db817535ce4e7a6742bf15293d1cbb23bcbf1bdb2034abceb52"
+    },
+    {
+      "path": "native-web-host/child-integration.json",
+      "bytes": 4006,
+      "sha256": "68bafd77c2c8002c4a0e2352af2e43fcd0afac508ca0ba7cb184f07ca763251b"
+    },
+    {
       "path": "native-web-host/contract.json",
-      "bytes": 3686,
-      "sha256": "ea58156d52c0180defe26e6973f84c725a45011d376eb740eb18766924df2cc2"
+      "bytes": 3918,
+      "sha256": "f1ef1f4a8cebe66ed7289926e5705d053a0dc7b58e326b91f941ee36215283c0"
+    },
+    {
+      "path": "native-web-host/sources/apps/desktop/src-tauri/src/local_web_child.rs",
+      "bytes": 12555,
+      "sha256": "f6d4dec5a19c827c24679517d49b22c0f0a9327915740082bf0059ec8985c0b3"
     },
     {
       "path": "native-web-host/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_binding.rs",
       "bytes": 2476,
       "sha256": "8a174addc8b9c4416c67579639d966df868980a778eb51ad73f0c39615577916"
+    },
+    {
+      "path": "native-web-host/ui-ingress-manifest.json",
+      "bytes": 9983,
+      "sha256": "4d4d3cc9b74b6b4fb7b6d35dbfe7dcdd729a6ba4de463c6cc605c15cc2387d29"
+    },
+    {
+      "path": "native-web-host/ui-read-routes.json",
+      "bytes": 14601,
+      "sha256": "e9f8bee770455bbc84d243166344d3a55076b362b7123fe3617b46da4b1de06d"
     },
     {
       "path": "prepare-composition.py",
@@ -59,6 +94,11 @@
       "path": "prepare-ux-delta.py",
       "bytes": 1850,
       "sha256": "101c08580c510c9db5369495f2ae4438f96e585707ce81757e5a30885a9e1a6a"
+    },
+    {
+      "path": "prepare-web-delta.py",
+      "bytes": 2207,
+      "sha256": "c11778fbbaf26c1b06f828f9ae207fdea4b36b9e14ee3c65f24211268f1d81bb"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalChatEntry.test.tsx",
@@ -77,8 +117,8 @@
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
-      "bytes": 9668,
-      "sha256": "1376b7db8a5ef4ab53e48c686a7c439991714438ddf23d7de169d9d483f0b4a0"
+      "bytes": 9887,
+      "sha256": "b8ebc65f1fd97a6edc7fbe74ceb0a6082f16f2f7e41978e3a5a2c9044647f480"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalConversation.tsx",
@@ -89,6 +129,16 @@
       "path": "sources/apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx",
       "bytes": 4205,
       "sha256": "0903032fc837ee27d1f5413ead5df3d57d89fd2d5b02c87794e2ee7158c83c0a"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
+      "bytes": 4807,
+      "sha256": "88f7a4323d98e55231be2da0fec59ef02e93265ef028cb25f43b593b802e2985"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx",
+      "bytes": 4538,
+      "sha256": "fa17ce387a693b633eb5a880d75c74bf9e7d443927a327e64ac1254a0ac0e859"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/NativeLocalActions.test.tsx",
@@ -151,9 +201,24 @@
       "sha256": "31747a1467c7b2908527ab09f73a5b7a58e6a28d1f54dc7b19972374c87c689e"
     },
     {
+      "path": "sources/apps/web/src/features/work-ui/local/local-web-controller.d.mts",
+      "bytes": 1805,
+      "sha256": "bbe21527b44ab6964dbe32585d6e1ebad1b113980038d0d15a9064a5649c6233"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/local-web-controller.mjs",
+      "bytes": 7501,
+      "sha256": "79a3d28660dbbcbb828cecc7f275c69126ccd5493e83e509590bdea0793ebc44"
+    },
+    {
       "path": "tests/local-chat.test.mjs",
       "bytes": 20119,
       "sha256": "f6fe94cff3b9e1026b391053a60d6252144d91b822d4c63d8bec3f694ff16060"
+    },
+    {
+      "path": "tests/local-web.test.mjs",
+      "bytes": 4899,
+      "sha256": "a4f2fd1afbc9f98d4cf6d2270bd2fc67cb987d1946cd1f5611c58e1b17681b3a"
     }
   ],
   "removed_paths": [],
