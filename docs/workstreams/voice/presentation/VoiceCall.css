@@ -1,0 +1,35 @@
+.wb-voice-workspace{min-width:0}
+.wb-voice-workspace>.wb-call-launch{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 12px;border:1px solid #487ef2;border-radius:999px;background:#2e65cd;color:#fff;cursor:pointer}
+.wb-voice-workspace>.wb-call-launch[aria-expanded=true]{background:var(--control,#252525);border-color:var(--border,#444)}
+.wb-call{display:flex;flex-direction:column;gap:14px;min-width:0;margin:12px 0 4px;padding:20px clamp(12px,3vw,32px);border:1px solid var(--border,#333);border-radius:20px;background:var(--canvas,#101010);color:var(--text,#eee)}
+.wb-call-header{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted,#aaa)}
+.wb-call-header strong{font-weight:500;color:var(--text,#eee)}
+.wb-call-stage{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:16px;min-height:clamp(200px,30vh,360px);padding:24px 0 8px;text-align:center}
+.wb-call-orb{width:88px;height:88px;flex:none;border-radius:50%;background:radial-gradient(ellipse at 70% 100%,#f6faff 0%,#d8e7ff 20%,transparent 48%),radial-gradient(ellipse at 20% 85%,#a5c8ff 0%,transparent 43%),linear-gradient(165deg,#3159eb 0%,#2b6af2 48%,#81b6ff 82%,#f4f8ff 100%);box-shadow:inset 0 0 0 1px #ffffff12}
+.wb-call[data-phase=speaking] .wb-call-orb{box-shadow:0 0 0 6px #4079ed1a,inset 0 0 0 1px #ffffff12}
+.wb-call[data-phase=attention] .wb-call-orb,.wb-call[data-phase=offline] .wb-call-orb{opacity:.6}
+.wb-call-status{display:flex;flex-direction:column;gap:6px;min-height:44px}
+.wb-call-status strong{font-size:16px;font-weight:500}
+.wb-call-status span{font-size:12px;color:var(--muted,#aaa)}
+.wb-call .wb-voice-actions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;max-width:760px;width:100%;margin:0 auto;padding:8px;border:1px solid var(--border,#333);border-radius:28px;background:var(--control,#222)}
+.wb-call button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:8px 12px;border:1px solid var(--border,#444);border-radius:999px;background:var(--canvas,#171717);color:var(--text,#eee);cursor:pointer;font:inherit;font-size:12px}
+.wb-call .wb-call-mic{background:#2e65cd;border-color:#487ef2;color:#fff}
+.wb-call .wb-call-end{background:#2e65cd;border-color:#487ef2;color:#fff}
+.wb-call button:disabled{opacity:.45;cursor:default}
+.wb-call-preferences{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted,#aaa)}
+.wb-call-preferences label{display:flex;align-items:center;gap:7px;min-width:0}
+.wb-call-preferences select,.wb-call-preferences input:not([type=checkbox]){min-height:34px;max-width:min(260px,100%);border:1px solid var(--border,#444);border-radius:8px;padding:5px 8px;background:var(--control,#222);color:var(--text,#eee)}
+.wb-call-consent{margin:0;text-align:center;font-size:12px;color:var(--muted,#aaa)}
+.wb-call-blockers{display:flex;flex-direction:column;gap:8px;font-size:12px;overflow-wrap:anywhere}
+.wb-call-blockers:empty{display:none}
+.wb-call-blockers p{margin:0;line-height:1.5}
+.wb-call [role=alert]{color:var(--danger,#fda4a4)}
+.wb-call-recovery{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border:1px solid var(--border,#444);border-radius:12px;font-size:12px;overflow-wrap:anywhere}
+.wb-call-recovery>p{flex-basis:100%;margin:0;line-height:1.5}
+.wb-call-details,.wb-call-transcript{padding-top:10px;border-top:1px solid var(--border,#333);font-size:12px;color:var(--muted,#aaa)}
+.wb-call-details>summary,.wb-call-transcript>summary{cursor:pointer;width:fit-content;min-height:32px;padding:6px 0;color:var(--text,#ddd)}
+.wb-call-details p{line-height:1.5;overflow-wrap:anywhere}
+.wb-call-transcript .wb-voice-turns{margin-top:10px;max-height:260px;color:var(--text,#ddd)}
+.wb-call :focus-visible,.wb-call-launch:focus-visible{outline:2px solid var(--accent,#7db1ff);outline-offset:3px}
+.wb-call-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+@media(max-width:540px){.wb-call{border-radius:16px;padding:14px 10px}.wb-call-stage{min-height:190px}.wb-call .wb-voice-actions{border-radius:20px}.wb-call .wb-voice-actions button{min-height:40px}.wb-call-header{align-items:flex-start}.wb-call-preferences{justify-content:flex-start}.wb-call-preferences label{flex-wrap:wrap}}

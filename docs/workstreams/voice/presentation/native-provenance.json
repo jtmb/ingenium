@@ -1,0 +1,41 @@
+{
+  "baseTree": "4e8e29436cfe42c81cc6401599cf8d224357a928",
+  "files": [
+    {
+      "path": "apps/web/src/features/workbench/VoiceChat.tsx",
+      "beforeSha256": "57eb9dfdabe80302eb097efe54c6b0328a1999e5d0cdd4b5cc340699b7d5c9a6",
+      "afterSha256": "8917e7ed36c1486b2a0a8b0fcb71184c5ec1568bfb5d7f021fca4f8f980cd9e5"
+    },
+    {
+      "path": "apps/web/src/features/workbench/VoiceWorkspace.tsx",
+      "beforeSha256": "bfc2be0cf849849f0c47221b82173af007c6dc9a2188c90219c42dd1d02d039c",
+      "afterSha256": "8136fa240e76b1ad3df65b8d358ebe6a13727934b8c7611a60a8af12910af59c"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/call-presentation.mjs",
+      "beforeSha256": null,
+      "afterSha256": "c21fd46cf9f801c148f1cfcefccf02e10b16adab74901581d7ec913b6d7b071d"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/call-presentation.d.mts",
+      "beforeSha256": null,
+      "afterSha256": "cb628c6c7846c3e87a600108b997f39e8a3a7157f9c0e8d155411c4cfb7002ba"
+    },
+    {
+      "path": "apps/web/src/features/workbench/VoiceCall.css",
+      "beforeSha256": null,
+      "afterSha256": "7072bc33f8cb17cf5cc4579561a1aeb7cead3e4034d02efa76b0db330256960b"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx",
+      "beforeSha256": "391a90056d45c9e8aa16ad622a3515efca1eb2c0085a6d1e9731d2ca79855ae8",
+      "afterSha256": "fb78f728a65164988691e3ac7409b003e0350299dd2c5de4d8edb07338d8bd79"
+    },
+    {
+      "path": "apps/web/src/features/voice-ui/VoiceCall.test.tsx",
+      "beforeSha256": null,
+      "afterSha256": "ea91e2c52aa510de0008a7b870a908c75890e6214e2ee9c8a16cfa4003f816bb"
+    }
+  ],
+  "patchSha256": "4b29dacb1a5edcde8b3a4175d0983f54b5c5a477e02ad2329344e35e3777475f"
+}

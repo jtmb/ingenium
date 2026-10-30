@@ -1,0 +1,289 @@
+--- a/apps/web/src/features/workbench/VoiceChat.tsx
++++ b/apps/web/src/features/workbench/VoiceChat.tsx
+@@ -1,5 +1,7 @@
++import { callPresentation } from "../voice-ui/call-presentation.mjs";
++import "./VoiceCall.css";
+ import { useEffect, useLayoutEffect, useRef, useState } from "react";
+-import { Mic, Square, Volume2 } from "lucide-react";
++import { Mic, Square, Volume2, X } from "lucide-react";
+ import { AttentionDetails } from "../voice-ui/AttentionDetails";
+ import { recordingFrames, selectedVoice, speechCapabilities, type SpeechCapabilities } from "../voice-ui/capabilities";
+ 
+@@ -414,10 +416,33 @@
+   const retainedVoiceIssue = capabilities.backend === "owned-http-cpu" && retained && session?.read_replies === true
+     && (!text(session.voice) || !capabilities.voices.includes(text(session.voice)))
+     ? "The original session's speech voice is missing or unsupported by this CPU catalog. Check and stop the original before explicitly starting a compatible session. No default is inferred for it." : "";
+-  return <AttentionDetails className="wb-voice-chat" needed={presentationNeeded} summary={<><Mic size={13}/>Continuous voice chat{monitoring && <span role="status"> · Microphone on{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span>}{playing && <span role="status"> · Reply playing</span>}</>}><div className="wb-voice-panel">
+-    <p>Spoken turns are sent automatically to this existing chat through configured speech tools. The microphone uses a 150 ms speech onset and 700 ms silence boundary, with at most {maxSeconds} seconds per turn. Local speech detection has not been qualified.</p>
++  const activeUtterance = rows(session?.utterances).find(item => item.id === session?.active_utterance_id);
++  const callState = callPresentation({ connected, disabled, busy, monitoring, recording, playing, paused,
++    retainedCapture: !!retainedCapture, sessionState: text(session?.state), utteranceState: text(activeUtterance?.state) });
++  const noticeNeedsAttention = !monitoring || paused || disabled || !connected;
++  return <section className="wb-voice-chat wb-call" aria-label="Call current working agent" data-phase={callState.phase}>
++    <header className="wb-call-header"><strong>Current agent</strong><span>Live conversation · this chat</span></header>
++    <div className="wb-call-stage">
++      <div className="wb-call-orb" aria-hidden="true"/>
++      <div className="wb-call-status" role="status" aria-live="polite"><strong>{callState.label}</strong><span>{callState.detail}{recording ? ` · ${seconds}/${maxSeconds}s` : ""}</span></div>
++    </div>
++    <p className="wb-call-consent">Spoken turns are sent automatically to this chat after you start voice.</p>
++    <div className="wb-voice-actions"><button type="button" className="wb-call-mic" aria-label={monitoring ? "Microphone on" : retained ? "Resume microphone" : "Start voice chat and send spoken turns"} disabled={!connected || disabled || busy || monitoring || !!retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={16}/>{monitoring ? "Mic on" : retained ? "Resume mic" : "Start voice"}</button><button type="button" className="wb-call-end" aria-label="Stop voice chat" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><X size={16}/>End</button><button type="button" aria-label="Interrupt voice turn for spoken steering" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}><Square size={14}/>Interrupt</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" aria-label="Check original voice session and controls" disabled={!connected} onClick={() => void checkRef.current()}>Check original</button>}</div>
++    <div className="wb-call-preferences">
++    <label className="wb-voice-check"><input type="checkbox" checked={wantsReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label>
++    {capabilities.backend === "owned-http-cpu" ? <label>Configured speech voice<select value={displayVoice} disabled={busy || retained} onChange={event => setVoice(event.target.value)}>
++      <option value="">{retainedCpu ? "Original voice unavailable" : `Configured default${capabilities.defaultVoice ? ` (${capabilities.defaultVoice})` : " unavailable"}`}</option>
++      {displayVoice && !capabilities.voices.includes(displayVoice) && <option value={displayVoice}>{displayVoice} (unavailable)</option>}
++      {capabilities.voices.map(id => <option key={id} value={id}>{id}</option>)}
++    </select></label> : <label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>}
++    </div>
++    <div className="wb-call-blockers">
+     {!sessionId && <p>Create or select a chat first.</p>}
+-    {retainedCapture && <div role="alert"><p>The complete unsubmitted capture is retained in this view. Export or discard it before resuming. Closing this view loses this unsubmitted copy.</p>
++    {(!capabilities.transcription || (wantsReplies && !capabilities.synthesis)) && <p>Configure transcription{wantsReplies ? " and speech output" : ""} before starting.</p>}
++    {capabilities.reason && <p role="status">{capabilities.reason}</p>}{!plannedVoice.ok && <p>{plannedVoice.message}</p>}{retainedVoiceIssue && <p role="alert">{retainedVoiceIssue}</p>}
++    {notice && noticeNeedsAttention && <p role="status">{notice}</p>}{tracking?.issue && <p role="alert">{tracking.issue}</p>}{error && <p role="alert">{error}</p>}{text(session?.message) && <p>{text(session?.message)}</p>}
++    </div>
++    {retainedCapture && <div role="alert" className="wb-call-recovery"><p>The complete unsubmitted capture is retained in this view. Export or discard it before resuming. Closing this view loses this unsubmitted copy.</p>
+       <button type="button" onClick={() => {
+         const source = retainedCapture;
+         const header = JSON.stringify({ format: "veyra-float32-frames-v1", sampleRate: source.rate, frameLengths: source.frames.map(frame => frame.length) }) + "\n";
+@@ -425,19 +450,13 @@
+         const link = document.createElement("a"); link.href = url; link.download = "veyra-unsubmitted-capture.f32"; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+       }}>Export complete unsubmitted capture</button>
+       <button type="button" onClick={() => { setRetainedCapture(null); setError(""); }}>Discard unsubmitted capture</button></div>}
+-    <label className="wb-voice-check"><input type="checkbox" checked={wantsReplies} disabled={busy || retained} onChange={event => setReadReplies(event.target.checked)}/>Read replies aloud</label>
+-    {capabilities.backend === "owned-http-cpu" ? <label>Configured speech voice<select value={displayVoice} disabled={busy || retained} onChange={event => setVoice(event.target.value)}>
+-      <option value="">{retainedCpu ? "Original voice unavailable" : `Configured default${capabilities.defaultVoice ? ` (${capabilities.defaultVoice})` : " unavailable"}`}</option>
+-      {displayVoice && !capabilities.voices.includes(displayVoice) && <option value={displayVoice}>{displayVoice} (unavailable)</option>}
+-      {capabilities.voices.map(id => <option key={id} value={id}>{id}</option>)}
+-    </select></label> : <label>Configured speech voice (optional)<input value={voice} maxLength={64} disabled={busy || retained} onChange={event => setVoice(event.target.value)}/></label>}
+-    <div className="wb-voice-actions"><button type="button" disabled={!connected || disabled || busy || monitoring || !!retainedCapture || !sessionId || !capabilities.transcription || (wantsReplies && !capabilities.synthesis) || !plannedVoice.ok || !!retainedVoiceIssue || (retained && (paused || !session || session.state !== "listening" || !!tracking?.utteranceId || !!tracking?.bargeId || !!tracking?.stopId))} onClick={() => void start()}><Mic size={13}/>{retained ? "Resume microphone" : "Start voice chat and send spoken turns"}</button><button type="button" disabled={!monitoring && !retained && !busy && !playing} onClick={stop}><Square size={13}/>Stop voice chat</button><button type="button" disabled={!connected || !monitoring || !!tracking?.bargeId || !!tracking?.stopId} onClick={() => { stopPlayback(); capture.current = null; queued.current = null; rows(observed.current?.utterances).forEach(item => suppressed.current.add(text(item.id))); void control("barge"); }}>Interrupt voice turn for spoken steering</button>{playing && <button type="button" onClick={stopPlayback}>Stop local playback</button>}{tracking && <button type="button" disabled={!connected} onClick={() => void checkRef.current()}>Check original voice session and controls</button>}</div>
+-    {(!capabilities.transcription || (wantsReplies && !capabilities.synthesis)) && <p>Configure transcription{wantsReplies ? " and speech output" : ""} before starting.</p>}
+-    {capabilities.reason && <p role="status">{capabilities.reason}</p>}{!plannedVoice.ok && <p>{plannedVoice.message}</p>}{retainedVoiceIssue && <p role="alert">{retainedVoiceIssue}</p>}
+-    <p role="status">{monitoring ? disabled || !connected ? "New voice admission paused · incoming audio is discarded" : recording ? `Recording spoken turn · ${seconds}/${maxSeconds} seconds` : playing ? "Listening during reply playback; speaking interrupts this voice turn" : "Microphone listening" : "Microphone off"}{session ? ` · Service: ${text(session.state)}` : ""}{paused ? " · Automatic checks paused for original-request recovery" : ""}</p>
++    {utterances.length > 0 && <AttentionDetails className="wb-call-transcript" needed={false} summary="Transcript"><ol className="wb-voice-turns">{utterances.map(item => <li key={text(item.id)}><strong>{text(item.state)}</strong>{text(item.transcript) && <p>You: {text(item.transcript)}</p>}{text(item.reply_text) && <p>Reply: {text(item.reply_text)}</p>}{text(item.message) && <p>{text(item.message)}</p>}{!rows(item.children).length && replyAudio?.id === item.id ? <button type="button" onClick={() => { if (replyAudio && replyAudio.id === item.id) void playOriginalReply({ ...item, wav_base64: replyAudio.data }); }}><Volume2 size={13}/>Play reply</button> : !rows(item.children).length && item.state === "completed" && text(item.speech_operation_id) && <button type="button" disabled={!connected} onClick={() => void loadReply(text(item.id))}>Load original reply audio</button>}</li>)}</ol></AttentionDetails>}
++    <AttentionDetails className="wb-call-details" needed={paused || !!tracking?.issue || session?.state === "uncertain"} summary="Voice settings and original session">
+     {tracking && <p className="wb-voice-note">Original voice session: {tracking.sessionId}{tracking.utteranceId ? " · Original utterance retained" : ""}{tracking.bargeId ? " · Original interruption retained" : ""}{tracking.stopId ? " · Original stop retained" : ""}. Audio is never automatically submitted again.</p>}
+-    {notice && <p role="status">{notice}</p>}{tracking?.issue && <p role="alert">{tracking.issue}</p>}{error && <p role="alert">{error}</p>}{text(session?.message) && <p>{text(session?.message)}</p>}
+-    {utterances.length > 0 && <ol className="wb-voice-turns">{utterances.map(item => <li key={text(item.id)}><strong>{text(item.state)}</strong>{text(item.transcript) && <p>You: {text(item.transcript)}</p>}{text(item.reply_text) && <p>Reply: {text(item.reply_text)}</p>}{text(item.message) && <p>{text(item.message)}</p>}{!rows(item.children).length && replyAudio?.id === item.id ? <button type="button" onClick={() => { if (replyAudio && replyAudio.id === item.id) void playOriginalReply({ ...item, wav_base64: replyAudio.data }); }}><Volume2 size={13}/>Play reply</button> : !rows(item.children).length && item.state === "completed" && text(item.speech_operation_id) && <button type="button" disabled={!connected} onClick={() => void loadReply(text(item.id))}>Load original reply audio</button>}</li>)}</ol>}
++    <p>Service: {text(session?.state) || "No voice session"}. Microphone {monitoring ? "on" : "off"}. {paused ? "Automatic checks paused for original-request recovery." : ""}</p>
++    {notice && !noticeNeedsAttention && <p>{notice}</p>}
++    <p>Speech detection uses a 150 ms onset and 700 ms silence boundary, with at most {maxSeconds} seconds per turn. Local speech detection has not been qualified.</p>
+     <p className="wb-voice-note">Speaking during this view’s reply playback stops that playback immediately and requests interruption of the exact voice-owned turn. Steering audio waits for the original safe-interruption receipt. Switching away releases local devices; use Stop voice chat to stop service-owned work.</p>
+-  </div></AttentionDetails>;
++    </AttentionDetails>
++  </section>;
+ }
+--- a/apps/web/src/features/workbench/VoiceWorkspace.tsx
++++ b/apps/web/src/features/workbench/VoiceWorkspace.tsx
+@@ -1,3 +1,4 @@
++import { AudioLines } from "lucide-react";
+ import { useEffect, useId, useMemo, useRef, useState } from "react";
+ import type { VoiceSessionOwner } from "@veyra/contracts";
+ import { SpeechControls } from "./SpeechControls";
+@@ -32,9 +33,9 @@
+   }), [isCurrent]);
+   const guarded = useMemo<SpeechRequest>(() => (method, path, body, current) =>
+     request(method, path, body, () => live.current && isCurrent() && current?.() !== false), [request, isCurrent]);
+-  return <section aria-label="Voice controls" data-audio-active={occupied || undefined}>
+-    {compact && <button type="button" aria-controls={optionsId} aria-expanded={expanded} aria-disabled={needed || undefined}
+-      onClick={() => { if (!needed) setOptionsOpen(value => !value); }}>Voice options{needed ? " · Activity or recovery needs attention" : ""}</button>}
++  return <section className="wb-voice-workspace" aria-label="Voice controls" data-audio-active={occupied || undefined}>
++    {compact && <button type="button" className="wb-call-launch" title="Voice options" aria-controls={optionsId} aria-expanded={expanded} aria-disabled={needed || undefined}
++      onClick={() => { if (!needed) setOptionsOpen(value => !value); }}><AudioLines size={16}/><span className="wb-call-sr">Voice options{needed ? " · Activity or recovery needs attention" : ""}</span></button>}
+     <div id={optionsId} hidden={!expanded}>
+     <SpeechControls request={guarded} scope={scope} connected={connected} disabled={disabled} reply={reply} onInsert={onInsert} lease={lease} isCurrent={isCurrent} onPresentationNeeded={setSpeechNeeded}/>
+     {continuousDisabledReason && <p className="wb-voice-note">{continuousDisabledReason}</p>}
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/call-presentation.mjs
+@@ -0,0 +1,24 @@
++/** Read-only labels from existing Voice/device observations; owns no readiness,
++ * request, playback, device, transcript, tool or session state. */
++export function callPresentation({ connected, disabled, busy, monitoring, recording, playing, paused,
++  retainedCapture, sessionState, utteranceState }) {
++  if (!connected) return { phase: 'offline', label: 'Service disconnected', detail: monitoring ? 'Microphone release pending' : 'Microphone off' };
++  if (paused || sessionState === 'uncertain' || utteranceState === 'uncertain')
++    return { phase: 'attention', label: 'Check the original voice session', detail: 'Automatic voice activity paused' };
++  if (retainedCapture) return { phase: 'attention', label: 'Recording retained', detail: 'Export or discard before resuming' };
++  if (sessionState === 'stopping' || sessionState === 'interruption_pending')
++    return { phase: 'stopping', label: 'Stopping voice activity', detail: 'Waiting for the original control' };
++  if (disabled) return { phase: 'paused', label: 'Voice admission paused', detail: monitoring ? 'Microphone release pending' : 'Microphone off' };
++  if (busy) return { phase: 'starting', label: 'Starting voice', detail: 'Checking the existing voice owner' };
++  if (recording && monitoring) return { phase: 'listening', label: 'Listening to you', detail: 'Microphone on' };
++  if (playing) return { phase: 'speaking', label: 'Speaking', detail: monitoring ? 'Microphone on · speak to interrupt' : 'Microphone off' };
++  if (utteranceState === 'transcribing') return { phase: 'transcribing', label: 'Transcribing', detail: monitoring ? 'Microphone on' : 'Microphone off' };
++  if (utteranceState === 'admitting' || utteranceState === 'awaiting_reply' || sessionState === 'awaiting_reply')
++    return { phase: 'thinking', label: 'Thinking', detail: monitoring ? 'Microphone on · speak to interrupt' : 'Microphone off' };
++  if (utteranceState === 'synthesizing') return { phase: 'preparing', label: 'Preparing voice reply', detail: monitoring ? 'Microphone on' : 'Microphone off' };
++  if (utteranceState === 'awaiting_playback') return { phase: 'playback-pending', label: 'Playback waiting', detail: 'The original audio has not started playing' };
++  if (sessionState === 'processing') return { phase: 'processing', label: 'Processing voice turn', detail: monitoring ? 'Microphone on' : 'Microphone off' };
++  if (monitoring) return { phase: 'listening', label: 'Listening', detail: 'Microphone on' };
++  if (sessionState === 'stopped') return { phase: 'ended', label: 'Voice ended', detail: 'Microphone off' };
++  return { phase: 'idle', label: 'Microphone off', detail: 'Start voice to send spoken turns to this chat' };
++}
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/call-presentation.d.mts
+@@ -0,0 +1,6 @@
++export interface CallObservations {
++  connected: boolean; disabled: boolean; busy: boolean; monitoring: boolean;
++  recording: boolean; playing: boolean; paused: boolean; retainedCapture: boolean;
++  sessionState: string; utteranceState: string;
++}
++export function callPresentation(observations: CallObservations): { phase: string; label: string; detail: string };
+--- /dev/null
++++ b/apps/web/src/features/workbench/VoiceCall.css
+@@ -0,0 +1,35 @@
++.wb-voice-workspace{min-width:0}
++.wb-voice-workspace>.wb-call-launch{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 12px;border:1px solid #487ef2;border-radius:999px;background:#2e65cd;color:#fff;cursor:pointer}
++.wb-voice-workspace>.wb-call-launch[aria-expanded=true]{background:var(--control,#252525);border-color:var(--border,#444)}
++.wb-call{display:flex;flex-direction:column;gap:14px;min-width:0;margin:12px 0 4px;padding:20px clamp(12px,3vw,32px);border:1px solid var(--border,#333);border-radius:20px;background:var(--canvas,#101010);color:var(--text,#eee)}
++.wb-call-header{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted,#aaa)}
++.wb-call-header strong{font-weight:500;color:var(--text,#eee)}
++.wb-call-stage{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:16px;min-height:clamp(200px,30vh,360px);padding:24px 0 8px;text-align:center}
++.wb-call-orb{width:88px;height:88px;flex:none;border-radius:50%;background:radial-gradient(ellipse at 70% 100%,#f6faff 0%,#d8e7ff 20%,transparent 48%),radial-gradient(ellipse at 20% 85%,#a5c8ff 0%,transparent 43%),linear-gradient(165deg,#3159eb 0%,#2b6af2 48%,#81b6ff 82%,#f4f8ff 100%);box-shadow:inset 0 0 0 1px #ffffff12}
++.wb-call[data-phase=speaking] .wb-call-orb{box-shadow:0 0 0 6px #4079ed1a,inset 0 0 0 1px #ffffff12}
++.wb-call[data-phase=attention] .wb-call-orb,.wb-call[data-phase=offline] .wb-call-orb{opacity:.6}
++.wb-call-status{display:flex;flex-direction:column;gap:6px;min-height:44px}
++.wb-call-status strong{font-size:16px;font-weight:500}
++.wb-call-status span{font-size:12px;color:var(--muted,#aaa)}
++.wb-call .wb-voice-actions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;max-width:760px;width:100%;margin:0 auto;padding:8px;border:1px solid var(--border,#333);border-radius:28px;background:var(--control,#222)}
++.wb-call button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:8px 12px;border:1px solid var(--border,#444);border-radius:999px;background:var(--canvas,#171717);color:var(--text,#eee);cursor:pointer;font:inherit;font-size:12px}
++.wb-call .wb-call-mic{background:#2e65cd;border-color:#487ef2;color:#fff}
++.wb-call .wb-call-end{background:#2e65cd;border-color:#487ef2;color:#fff}
++.wb-call button:disabled{opacity:.45;cursor:default}
++.wb-call-preferences{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted,#aaa)}
++.wb-call-preferences label{display:flex;align-items:center;gap:7px;min-width:0}
++.wb-call-preferences select,.wb-call-preferences input:not([type=checkbox]){min-height:34px;max-width:min(260px,100%);border:1px solid var(--border,#444);border-radius:8px;padding:5px 8px;background:var(--control,#222);color:var(--text,#eee)}
++.wb-call-consent{margin:0;text-align:center;font-size:12px;color:var(--muted,#aaa)}
++.wb-call-blockers{display:flex;flex-direction:column;gap:8px;font-size:12px;overflow-wrap:anywhere}
++.wb-call-blockers:empty{display:none}
++.wb-call-blockers p{margin:0;line-height:1.5}
++.wb-call [role=alert]{color:var(--danger,#fda4a4)}
++.wb-call-recovery{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border:1px solid var(--border,#444);border-radius:12px;font-size:12px;overflow-wrap:anywhere}
++.wb-call-recovery>p{flex-basis:100%;margin:0;line-height:1.5}
++.wb-call-details,.wb-call-transcript{padding-top:10px;border-top:1px solid var(--border,#333);font-size:12px;color:var(--muted,#aaa)}
++.wb-call-details>summary,.wb-call-transcript>summary{cursor:pointer;width:fit-content;min-height:32px;padding:6px 0;color:var(--text,#ddd)}
++.wb-call-details p{line-height:1.5;overflow-wrap:anywhere}
++.wb-call-transcript .wb-voice-turns{margin-top:10px;max-height:260px;color:var(--text,#ddd)}
++.wb-call :focus-visible,.wb-call-launch:focus-visible{outline:2px solid var(--accent,#7db1ff);outline-offset:3px}
++.wb-call-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
++@media(max-width:540px){.wb-call{border-radius:16px;padding:14px 10px}.wb-call-stage{min-height:190px}.wb-call .wb-voice-actions{border-radius:20px}.wb-call .wb-voice-actions button{min-height:40px}.wb-call-header{align-items:flex-start}.wb-call-preferences{justify-content:flex-start}.wb-call-preferences label{flex-wrap:wrap}}
+--- a/apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx
++++ b/apps/web/src/features/voice-ui/VoiceWorkspace.test.tsx
+@@ -16,6 +16,8 @@
+ function gateway(sessionVoice?: string | null) {
+   return vi.fn<SpeechRequest>(async (method, path) => {
+     if (method === "GET" && path === "/v1/speech/status") return cpu;
++    if (method === "GET" && path === "/v1/voice/status") return { speech: cpu, segmented_capture: true,
++      max_utterance_seconds: 60, playback_protocol: "voice-child-claim-v1" };
+     if (method === "GET" && path === `/v1/speech/operations/${original}`)
+       return { id: original, kind: "transcribe", state: "uncertain", message: "Original outcome unconfirmed" };
+     if (method === "GET" && path === `/v1/voice/sessions/${original}`)
+@@ -31,14 +33,14 @@
+   it("defaults to legacy presentation without an outer options collapse", async () => {
+     const request = gateway();
+     const view = render(<VoiceWorkspace {...common} request={request}/>);
+-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+     expect(screen.queryByRole("button", { name: /Voice options/ })).toBeNull();
+     expect(view.container.querySelector("[hidden]")).toBeNull();
+   });
+   it("collapses idle options explicitly while keeping the two real children mounted", async () => {
+     const request = gateway(), user = userEvent.setup();
+     const view = render(<VoiceWorkspace {...common} request={request} compact/>);
+-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+     const button = screen.getByRole("button", { name: /Voice options/ });
+     const details = [...view.container.querySelectorAll("details")];
+     expect(button.getAttribute("aria-expanded")).toBe("false");
+@@ -46,7 +48,7 @@
+     await user.click(button); expect(button.getAttribute("aria-expanded")).toBe("true");
+     await user.click(button); expect(button.getAttribute("aria-expanded")).toBe("false");
+     expect([...view.container.querySelectorAll("details")]).toEqual(details);
+-    expect(request).toHaveBeenCalledTimes(2);
++    expect(request).toHaveBeenCalledTimes(3);
+   });
+   it("exposes the actual uncertain speech original and cannot hide its recovery controls", async () => {
+     localStorage.setItem("veyra.speech-operation.v1:fixture", original);
+@@ -67,7 +69,7 @@
+   it("refuses an oversized CPU spoken reply before storage or any POST", async () => {
+     const request = gateway(), user = userEvent.setup();
+     render(<VoiceWorkspace {...common} request={request} reply={"x".repeat(601)} compact/>);
+-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+     await user.click(screen.getByRole("button", { name: /Voice options/ }));
+     await user.click(screen.getByText("Voice and dictation"));
+     const prepare = screen.getByRole<HTMLButtonElement>("button", { name: "Prepare spoken reply" });
+--- /dev/null
++++ b/apps/web/src/features/voice-ui/VoiceCall.test.tsx
+@@ -0,0 +1,71 @@
++// @vitest-environment jsdom
++import { cleanup, render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { VoiceChat } from "../workbench/VoiceChat";
++import type { SpeechRequest } from "../workbench/VoiceWorkspace";
++
++const sessionId = "21af783b-b665-43b4-8482-c68606c1c166";
++const utteranceId = "65f38cd4-647a-4dfc-8366-cd3370e38813";
++const cpu = { backend: "owned-http-cpu", available: true, transcription_configured: true, synthesis_configured: true,
++  limits: { min_recording_ms: 250, max_recording_ms: 15000, max_text_chars: 600, max_text_utf8_bytes: 2400, max_output_ms: 15000 },
++  voices: ["af_sky"], configured_default_voice: "af_sky", qualified: false };
++const lease = { claim: vi.fn(() => true), release: vi.fn() };
++const common = { projectId: "project", sessionId: "working-chat", connected: true, disabled: false,
++  lease, isCurrent: () => true, ownerMatches: () => true };
++function gateway(state = "listening", turnState = "") {
++  return vi.fn<SpeechRequest>(async (method, path) => {
++    if (method === "GET" && path === "/v1/speech/status") return cpu;
++    if (method === "GET" && path === "/v1/voice/status") return { segmented_capture: true,
++      max_utterance_seconds: 60, playback_protocol: "voice-child-claim-v1" };
++    const utterance = { id: utteranceId, state: turnState, transcript: "Explain the actual failing test.",
++      reply_text: null, wav_base64: null, children: [] };
++    if (method === "GET" && path === `/v1/voice/sessions/${sessionId}/utterances/${utteranceId}`) return utterance;
++    if (method === "GET" && path === `/v1/voice/sessions/${sessionId}`) return { id: sessionId,
++      project_id: common.projectId, session_id: common.sessionId, state, voice: "af_sky", read_replies: true,
++      utterances: turnState ? [utterance] : [], active_utterance_id: turnState ? utteranceId : null };
++    throw new Error(`Forbidden presentation test effect ${method} ${path}`);
++  });
++}
++beforeEach(() => { localStorage.clear(); vi.clearAllMocks(); });
++afterEach(() => { cleanup(); localStorage.clear(); });
++describe("canonical current-agent call presentation", () => {
++  it("shows microphone off, consent and actual configured voice without starting a call", async () => {
++    const request = gateway(); const view = render(<VoiceChat {...common} request={request}/>);
++    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
++    expect(screen.getByText("Microphone off")).toBeTruthy();
++    expect(screen.getByText(/Spoken turns are sent automatically/)).toBeTruthy();
++    expect(screen.getByRole("checkbox", { name: "Read replies aloud" })).toBeTruthy();
++    expect(screen.getByRole("combobox", { name: "Configured speech voice" })).toBeTruthy();
++    expect(view.container.querySelector('.wb-call-orb[aria-hidden="true"]')).toBeTruthy();
++    expect(screen.queryByText("Listening")).toBeNull();
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++    expect(lease.claim).not.toHaveBeenCalled();
++  });
++  it("never presents a disconnected service as listening or permits start", () => {
++    const request = gateway(); render(<VoiceChat {...common} request={request} connected={false}/>);
++    expect(screen.getByText("Service disconnected")).toBeTruthy();
++    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Start voice chat and send spoken turns" }).disabled).toBe(true);
++    expect(screen.queryByText("Listening")).toBeNull();
++    expect(request).not.toHaveBeenCalled();
++  });
++  it("shows Thinking only from the retained active original and retains its transcript", async () => {
++    localStorage.setItem("veyra.voice-chat.v1:project:working-chat", JSON.stringify({ sessionId, utteranceId }));
++    const request = gateway("awaiting_reply", "awaiting_reply"); render(<VoiceChat {...common} request={request}/>);
++    expect(await screen.findByText("Thinking")).toBeTruthy();
++    expect(screen.getByText("Transcript")).toBeTruthy();
++    expect(screen.getByText(/Explain the actual failing test/)).toBeTruthy();
++    expect(screen.queryByText("Speaking")).toBeNull();
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++  it("keeps original recovery/end controls outside the technical disclosure", async () => {
++    localStorage.setItem("veyra.voice-chat.v1:project:working-chat", JSON.stringify({ sessionId }));
++    const request = gateway("uncertain"); render(<VoiceChat {...common} request={request}/>);
++    await screen.findByText("Check the original voice session");
++    const stop = screen.getByRole<HTMLButtonElement>("button", { name: "Stop voice chat" });
++    const check = screen.getByRole("button", { name: "Check original voice session and controls" });
++    expect(stop.disabled).toBe(false); expect(stop.closest("details")).toBeNull(); expect(check.closest("details")).toBeNull();
++    expect(screen.getByText("Voice settings and original session").closest("details")!.open).toBe(true);
++    expect(JSON.parse(localStorage.getItem("veyra.voice-chat.v1:project:working-chat")!).sessionId).toBe(sessionId);
++    expect(request.mock.calls.some(([method]) => method === "POST")).toBe(false);
++  });
++});
