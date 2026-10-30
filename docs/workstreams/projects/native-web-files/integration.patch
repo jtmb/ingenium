@@ -1,0 +1,42 @@
+--- a/crates/adapters/src/local_execution.rs
++++ b/crates/adapters/src/local_execution.rs
+@@ -2,6 +2,7 @@
+ #[cfg(windows)]
+ #[path="local_wsl_git.rs"]
+ pub mod wsl_git;
++mod web_files;
+ use crate::{local_custody::LocalCustody,projects::ProjectStore};
+ use std::sync::Arc;
+ use serde_json::{Value,json};
+--- a/crates/adapters/src/local_custody/wsl-helper.py
++++ b/crates/adapters/src/local_custody/wsl-helper.py
+@@ -88,6 +88,7 @@
+         root=os.path.join(home,'.local','state','veyra-private-workspaces',installation,workspace)
+         if action=='namespace_snapshot': return local_namespace_facts([root])
+         if action in ('create','verify'): return {'root':root,'identity':identity}
++        if action=='web_file_read': return local_web_file_read(current,root,a)
+         if action=='terminal':
+             shells={'bash':('/bin/bash',['-li']),'sh':('/bin/sh',['-i']),
+                     'zsh':('/usr/bin/zsh',['-li']),'fish':('/usr/bin/fish',['-li'])}
+--- a/crates/adapters/src/wsl_workspace.rs
++++ b/crates/adapters/src/wsl_workspace.rs
+@@ -21,7 +21,7 @@
+ use veyra_contracts::{ExecutionEnvironment, Project};
+ 
+ const LIMIT: usize = 24 * 1024 * 1024;
+-const SCRIPT: &str = concat!(include_str!("local_custody/wsl-helper.py"), r#"
++const SCRIPT: &str = concat!(include_str!("local_custody/wsl-helper.py"), include_str!("local_custody/web-files.py"), r#"
+ import base64, ctypes, errno, fcntl, json, os, pathlib, pwd, secrets, stat, sys, tempfile
+ 
+ def fail(code, recovery_path=None):
+--- a/crates/adapters/src/opencode/attachments.rs
++++ b/crates/adapters/src/opencode/attachments.rs
+@@ -4,6 +4,8 @@
+ //! SessionPrompt boundary materializes data URLs into persisted `{data,mime}`
+ //! message parts. This module only emits service-resolved inline data; callers
+ //! cannot use it to make OpenCode read arbitrary host paths.
++pub mod web_files;
++pub use web_files::{resolve_local_web_files,NativeWebFilesOriginal,NativeWebFileReplacement};
+ use super::{Admission, OpenCodeClient, validate_session};
+ use base64::{Engine as _, engine::general_purpose::STANDARD};
+ use reqwest::{Method, StatusCode};

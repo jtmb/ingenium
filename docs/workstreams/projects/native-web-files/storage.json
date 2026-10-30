@@ -1,0 +1,14 @@
+{
+  "owner": "Projects and execution existing chat 01a18934-fe43-76a0-940e-6766d96f5770",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "existing authorized C-backed Ubuntu VHDX",
+  "generatedPaths": [
+    "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/native-web-files",
+    "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/projects/native-web-files-fixture"
+  ],
+  "estimatedPeakBytes": 2097152,
+  "buildDependenciesOrRuntime": "none; source proposals and inert CPU fixtures only",
+  "regeneration": "python3 docs/workstreams/projects/native-web-files/prepare-proposal.py --native-source-root <exact shared Native>; python3 .../test-files.py --fixture-root <existing-coordination>/native-web-files-fixture",
+  "protected": "All shared source/runtime/data/evidence and original locks; no shared writes",
+  "cleanup": "Remove fixture files after identity/reference/source checks; retain source/patch/tests/minimal in-place receipts for Root application"
+}

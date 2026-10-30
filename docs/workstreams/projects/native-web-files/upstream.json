@@ -1,0 +1,24 @@
+{
+  "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "files": [
+    {
+      "path": "packages/schema/src/prompt-input.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/prompt-input.ts",
+      "bytes": 1266,
+      "sha256": "7da46cec88bf36b9e4d7be1e78506e6fdf8c5629ca2fb3397e8504cb08bbbfe7"
+    },
+    {
+      "path": "packages/schema/src/prompt.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/prompt.ts",
+      "bytes": 2961,
+      "sha256": "41b3000a4fe8ce1f48ad90bb0bd996ad52ca1dbe530b63cdc7f5af2b11b92d01"
+    },
+    {
+      "path": "packages/core/src/session/prompt.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/session/prompt.ts",
+      "bytes": 8910,
+      "sha256": "4a453f9e57d3cc48fc7d6ea23504d1437c751620d7b97bff795c090f2941fc99"
+    }
+  ],
+  "observedSemantics": "SessionPrompt materializes URI sources by pathname; text/plain ranges split newline / slice(start-1,end) / join newline; data inputs have no implicit basename or range; source bytes MIME-detected; directory produces application/x-directory sorted entries; upstream per-attachment max20MiB. No upstream bytes persisted here."
+}

@@ -1,0 +1,54 @@
+{
+  "existingDeltas": [
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "baseSha256": "80d98be55f40580cc9c156b2f39a1aed567911c5d746e771e93058298d6ee64d",
+      "proposedSha256": "e69d49b35f15ba8be1ccb2370d28ee1c5faaf58ae56b9a17ff6ba40b6447e494"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/wsl-helper.py",
+      "baseSha256": "cd438974249c78fc8ed3006d9055597baf2095a66083437f466f916e9307b952",
+      "proposedSha256": "85552c8df4c4765b931266158f07295102c4e857f55e439039af86ffb171b2cd"
+    },
+    {
+      "path": "crates/adapters/src/wsl_workspace.rs",
+      "baseSha256": "1b92a8af9d16d4fb52ae343b27a664c2971e63a6d4cdb58a5671fad31b4e00ed",
+      "proposedSha256": "34ff8fc88a9fbabf2969d5e0136c28649c8909577161400d83e49e771954b9d5"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments.rs",
+      "baseSha256": "cc6e4b62c5f5c1253683886d70c768c3b28f666b5866dfc9d041aa5d266a24bf",
+      "proposedSha256": "8e7893ecf573e6ac4f6a6c8bb2c541ac0981ea33d689c93c8ba20d30644ccfd8"
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "crates/adapters/src/local_custody/web-files.py",
+      "bytes": 2928,
+      "sha256": "b28c2683b032c0b6e1ccd8e814c4d17b067a098e4687c59726f259cdc3f6a3b6"
+    },
+    {
+      "path": "crates/adapters/src/local_execution/web_files.rs",
+      "bytes": 5837,
+      "sha256": "a4a535b0ebf5063cac2ba3b5b320c8d299c66b446df685a870f40c21c81f4369"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_files.rs",
+      "bytes": 12837,
+      "sha256": "f86651cb8145b7ecf50e57181e61f0acf300436bf1d5f231c2a0aef68794c303"
+    }
+  ],
+  "patchSha256": "3df6810768053c94ac6c58c33e65bf9268257b19fc61ecc44399f05207d0d770",
+  "sharedWritten": false,
+  "compiled": false,
+  "runtimeQualified": false,
+  "journalAllocation": "Root allocation7 existing writer only; no worker schema",
+  "unsupportedCompatibility": [
+    "20MiB upstream parity",
+    "application/x-directory directory listing",
+    "other binary formats",
+    "UNC/network native custody"
+  ],
+  "resolver": "opencode::attachments::resolve_local_web_files",
+  "rawOriginalPreserved": "Work1 owns exact raw original and URI-only span patch + approved missing basename insertion; no request reserialization"
+}

@@ -1,0 +1,27 @@
+{
+  "sourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source",
+  "inputs": [
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "sha256": "80d98be55f40580cc9c156b2f39a1aed567911c5d746e771e93058298d6ee64d"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/wsl-helper.py",
+      "sha256": "cd438974249c78fc8ed3006d9055597baf2095a66083437f466f916e9307b952"
+    },
+    {
+      "path": "crates/adapters/src/wsl_workspace.rs",
+      "sha256": "1b92a8af9d16d4fb52ae343b27a664c2971e63a6d4cdb58a5671fad31b4e00ed"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments.rs",
+      "sha256": "cc6e4b62c5f5c1253683886d70c768c3b28f666b5866dfc9d041aa5d266a24bf"
+    }
+  ],
+  "contextInputs": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2"
+    }
+  ]
+}
