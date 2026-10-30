@@ -336,6 +336,8 @@ ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' '            <Memory
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'mod slot_yield;' ('mod slot_yield;'+[char]10+'pub(in crate::routes::provider) mod memory;')
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '    Native(NativeOriginals),' ('    Native(NativeOriginals),'+[char]10+'    Memory(Box<memory::MemoryOriginals>),')
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '            Self::Native(original) => Ok(original),' ('            Self::Native(original) => Ok(original),'+[char]10+'            Self::Memory(_) => Err(GatewayError::InvalidCorrelation),')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/native_snapshot.rs' '            Originals::Native(original) => inspect(original),' ('            Originals::Native(original) => inspect(original),'+[char]10+'            Originals::Memory(_) => Err(GatewayError::InvalidCorrelation),')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition/tests.rs' '        Originals::Native(_) => panic!("source fixture only"),' '        Originals::Native(_) | Originals::Memory(_) => panic!("source fixture only"),'
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'pub(super) struct ProviderAcquisition {' 'pub(crate) struct ProviderAcquisition {'
 ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod acquisition;' ('mod acquisition;'+[char]10+'pub(crate) use acquisition::ProviderAcquisition;')
 ReplaceOnce 'apps/service/src/routes.rs' 'mod provider;' ('mod provider;'+[char]10+'pub(crate) use provider::ProviderAcquisition;')
