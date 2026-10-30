@@ -1,3 +1,4 @@
+/** scope-policy reads host/workspace policy without a chat; policy retains its required chatId. */
 export interface MemoryRequest {
   action: string; method: string; chatId?: string; operationId?: string; body?: Record<string, unknown>; query?: Record<string, number>;
 }

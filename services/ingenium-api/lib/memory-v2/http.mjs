@@ -1,5 +1,6 @@
 import { MemoryError } from './lifecycle.mjs';
 const definitions = {
+  'scope-policy': { method: 'GET', permission: 'read', keys: [], invoke: (memory, scope) => memory.scopePolicy(scope) },
   policy: { method: 'GET', permission: 'read', keys: [], invoke: (memory, scope, request) => memory.policy(scope, request.chatId) },
   'set-policy': { method: 'PUT', permission: 'write-policy', keys: ['operationId', 'expectedRevision', 'enabled', 'generate', 'useMemory', 'externalContext'], invoke: (memory, scope, request) => memory.setPolicy(scope, request.body) },
   'set-chat-policy': { method: 'PUT', permission: 'write-policy', keys: ['operationId', 'expectedRevision', 'useMemory', 'contribute'], invoke: (memory, scope, request) => memory.setChatPolicy(scope, request.chatId, request.body) },

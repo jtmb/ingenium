@@ -4,6 +4,7 @@ export interface MemoryScope {
 }
 export type MemoryPermission = "read" | "write-policy" | "generate" | "read-source" | "forget" | "backup" | "restore";
 export interface HostPolicy { revision: number; enabled: boolean; generate: boolean; useMemory: boolean; externalContext: boolean }
+export interface ScopePolicy { schemaVersion: 1; scopeHash: string; bindingHash: string; bindingEpoch: number; policy: HostPolicy; available: true }
 export interface ChatPolicy { revision: number; useMemory: boolean; contribute: boolean }
 export interface SourceRef { id: string; contentHash: string; eligibilityVersion?: string }
 export interface SourceState { contentHash: string; active: boolean; excluded: boolean; uncertain: boolean; idleEligible: boolean; kind: "transcript" | "tool" | "external"; eligibilityVersion?: string }
@@ -37,6 +38,7 @@ export interface SuppressionBundle { schemaVersion: 1; scopeHash: string; entrie
 export class MemoryLifecycle {
   constructor(adapter: { db: SqlConnection; authorize: (scope: MemoryScope, permission: MemoryPermission, chatId: string | null) => boolean;
     sources: (scope: MemoryScope, chatId: string, id: string) => SourceState | null; checkpoint: () => void; runTransaction?: <T>(work: () => T) => T; clock?: () => string });
+  scopePolicy(scope: MemoryScope): ScopePolicy;
   policy(scope: MemoryScope, chatId: string): { schemaVersion: 1; scopeHash: string; chatId: string; bindingHash: string; bindingEpoch: number; policy: HostPolicy; chat: ChatPolicy; available: true };
   operation(scope: MemoryScope, operationId: string): MemoryReceipt | null;
   setPolicy(scope: MemoryScope, input: Omit<HostPolicy,"revision"> & { operationId: string; expectedRevision: number }): MutationResult;

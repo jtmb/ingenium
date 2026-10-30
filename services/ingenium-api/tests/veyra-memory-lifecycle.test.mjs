@@ -251,3 +251,37 @@ test('stale binding epochs fail authorization while a current reconnect retains 
     assert.equal(current.recall({ ...scope, bindingEpoch: 2 }, 'fresh').items.length, 1);
   } finally { db.close(); }
 });
+
+test('scope policy reads before any chat without writes and reauthorizes each exact scope', () => {
+  const { db, memory, adapter, state } = fixture();
+  const calls = [];
+  adapter.authorize = (target, permission, chatId) => { calls.push({ target, permission, chatId }); return !state.denied; };
+  const checked = new MemoryLifecycle(adapter);
+  try {
+    const tables = ['veyra_memory_policy', 'veyra_memory_chat_policy', 'veyra_memory_receipt'];
+    const counts = () => tables.map((table) => db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n);
+    const before = counts();
+    const initial = checked.scopePolicy(scope);
+    assert.deepEqual(Object.keys(initial).sort(), ['schemaVersion', 'scopeHash', 'bindingHash', 'bindingEpoch', 'policy', 'available'].sort());
+    assert.equal(initial.available, true); assert.equal(initial.schemaVersion, 1);
+    assert.equal(initial.bindingHash, scope.bindingHash); assert.equal(initial.bindingEpoch, scope.bindingEpoch);
+    assert.deepEqual(initial.policy, { revision: 0, enabled: true, generate: false, useMemory: true, externalContext: false });
+    assert.deepEqual(calls, [{ target: scope, permission: 'read', chatId: null }]);
+    assert.deepEqual(counts(), before); assert.equal(state.checkpoints, 0);
+    memory.setPolicy(scope, { operationId: 'scope-only-policy', expectedRevision: 0, enabled: false, generate: false, useMemory: false, externalContext: false });
+    const stored = checked.scopePolicy(scope);
+    assert.equal(stored.policy.revision, 1); assert.equal(stored.policy.enabled, false);
+    for (const field of ['organizationId', 'ownerUserId', 'hostId', 'environmentId', 'projectId', 'workspaceId']) {
+      const other = checked.scopePolicy({ ...scope, [field]: 'other' });
+      assert.equal(other.policy.revision, 0, field); assert.notEqual(other.scopeHash, stored.scopeHash, field);
+    }
+    assert.equal(checked.scopePolicy({ ...scope, projectId: null }).policy.revision, 0);
+    assert.deepEqual(memory.policy(scope, 'unchanged-chat').policy, stored.policy);
+    assert.equal(memory.policy(scope, 'unchanged-chat').chatId, 'unchanged-chat');
+    assert.deepEqual(memory.policy(scope, 'unchanged-chat').chat, { revision: 0, useMemory: true, contribute: false });
+    state.denied = true;
+    const denied = new MemoryLifecycle({ ...adapter, db: { prepare() { assert.fail('denied read reached database'); } } });
+    assert.throws(() => denied.scopePolicy(scope), code('FORBIDDEN'));
+    assert.throws(() => checked.scopePolicy({ ...scope, visibility: 'public' }), code('INVALID_SCOPE'));
+  } finally { db.close(); }
+});

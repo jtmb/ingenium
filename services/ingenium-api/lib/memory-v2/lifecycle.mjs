@@ -62,6 +62,10 @@ export class MemoryLifecycle {
     const row = this.db.prepare('SELECT * FROM veyra_memory_chat_policy WHERE scope_key=? AND chat_id=?').get(key, chatId);
     return row ? { revision: row.revision, useMemory: !!row.use_memory, contribute: !!row.contribute } : { ...DEFAULT_CHAT_MEMORY_POLICY };
   }
+  scopePolicy(scope) {
+    const key = this.access(scope, 'read');
+    return { schemaVersion: 1, scopeHash: digest(key), bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, policy: this.policyAt(key), available: true };
+  }
   policy(scope, chatId) {
     const key = this.access(scope, 'read', chatId);
     return { schemaVersion: 1, scopeHash: digest(key), chatId, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, policy: this.policyAt(key), chat: this.chatAt(key, chatId), available: true };

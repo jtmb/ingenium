@@ -35,3 +35,29 @@ test('API facade commits CAS changes and reports conflicts with sanitized errors
     assert.equal(failed.status, 500); assert.equal(JSON.stringify(failed).includes('private database path'), false);
   } finally { db.close(); }
 });
+
+test('scope-policy GET needs no chat and keeps scope authorization, method and input guards', () => {
+  const { db, memory } = fixture();
+  try {
+    const calls = [];
+    const resolve = (request, permission) => { calls.push(permission); return scope; };
+    const request = { action: 'scope-policy', method: 'GET' };
+    const response = memoryResponse(memory, resolve, request);
+    assert.equal(response.status, 200); assert.equal(response.headers['Cache-Control'], 'no-store');
+    assert.deepEqual(response.body.data, memory.scopePolicy(scope));
+    assert.deepEqual(calls, ['read']);
+    assert.equal(Object.hasOwn(response.body.data, 'chatId'), false);
+    assert.equal(Object.hasOwn(response.body.data, 'chat'), false);
+    assert.equal(memoryResponse(memory, () => null, request).status, 403);
+    const denied = new MemoryLifecycle({ db, authorize: () => false, sources: () => null, checkpoint: () => {} });
+    assert.equal(memoryResponse(denied, resolve, request).status, 403);
+    const wrongMethod = memoryResponse(memory, resolve, { ...request, method: 'PUT' });
+    assert.equal(wrongMethod.status, 405); assert.equal(wrongMethod.headers.Allow, 'GET');
+    assert.equal(memoryResponse(memory, resolve, { ...request, body: { ownerUserId: 'other' } }).status, 422);
+    assert.equal(memoryResponse(memory, resolve, { ...request, query: { chatId: 'invented' } }).status, 422);
+    assert.equal(memoryResponse(memory, resolve, { action: 'policy', method: 'GET' }).status, 422);
+    const withChat = memoryResponse(memory, resolve, { action: 'policy', method: 'GET', chatId: 'real-chat' });
+    assert.equal(withChat.status, 200); assert.equal(withChat.body.data.chatId, 'real-chat');
+    assert.deepEqual(withChat.body.data.policy, response.body.data.policy);
+  } finally { db.close(); }
+});
