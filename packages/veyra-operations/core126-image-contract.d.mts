@@ -9,6 +9,7 @@ export function originalJsonHash(value:unknown):string;
 export function freeze<T>(value:T):Readonly<T>;
 export function unavailable(reason:string):never;
 export function scopes(value:unknown):string[];
+export const AGENT_CANARY:Readonly<Record<string,unknown>>;
 export const PROTOCOL_CASES:Readonly<Record<string,unknown>>;
 export interface Core126Manifest {
  schemaVersion:1;format:'core126-immutable-image-qualification';target:'user-runtime';transport:'scoped-core126-mcp-v1';jobRunAudience:'job-run';imageId:string;configSha256:string;config:Core126ImageConfig;

@@ -15,7 +15,7 @@ async function fixture(){
  const config={os:'linux',architecture:'amd64',config:{User:'appuser',WorkingDir:'/app',Entrypoint:['/app/scripts/runtime-entrypoint.sh'],Cmd:[],Labels:{'org.opencontainers.image.revision':source.revision,'org.ingenium.source.sha256':source.sha256}}};
  const rawConfig=Buffer.from(JSON.stringify(config)),imageId='sha256:'+hash(rawConfig);
  const artifacts=new Map(IMAGE_INPUTS.map(path=>[path,{bytes:Buffer.from('synthetic emitted '+path),uid:0,gid:0,kind:'file',mode:0o555}]));
- const closure={files:['managed-job-child.mjs','core126-http.mjs'].map(name=>{const source='services/ingenium-api/lib/dot-v2/'+name;return {source,path:source.slice('services/ingenium-api/'.length),sourceSha256:hash(sources.get(source)),emittedSha256:hash(artifacts.get('/app/services/ingenium-api/dist/lib/dot-v2/'+name).bytes)};})};
+ const closure={files:['services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','packages/veyra-operations/core126-agent-material.mjs'].map(source=>{const path=source.startsWith('packages/')?'veyra-packages/'+source.slice('packages/'.length):source.slice('services/ingenium-api/'.length);return {source,path,sourceSha256:hash(sources.get(source)),emittedSha256:hash(artifacts.get('/app/services/ingenium-api/dist/'+path).bytes)};})};
  artifacts.get('/app/services/ingenium-api/dist/veyra-runtime-closure.json').bytes=Buffer.from(JSON.stringify(closure));
  const ports={frozenSource:async()=>structuredClone(source),sourceFile:async path=>sources.get(path),imageConfig:async()=>rawConfig,imageFile:async(_,path)=>artifacts.get(path),harnessIdentity:async()=>hash('synthetic CPU harness'),inertProtocolCase:async ({caseId,...binding})=>({...binding,caseId,trace:structuredClone(PROTOCOL_CASES[caseId]),exitCode:0,evidenceClass:'actual-image-inert-protocol-harness'})};
  const result=await produceCore126ImageManifest(ports,{imageId,approvedScopes:['tools:read']});
@@ -39,9 +39,9 @@ async function fixture(){
  return{facts,parent,config,imageId,rawConfig,sources,source,artifacts,ports,result,approvals,producer,client,registry,owner,admission,original,docker,dockerCalls,now,advance:n=>{time+=n;},transaction:v=>{transaction=v;},counts:()=>({calls,loads})};
 }
 const qualify=f=>f.owner.withFreshOriginalJobRole(f.facts,()=>f.owner.qualifyOriginalJobRole(f.facts));
-test('deterministic producer pins source, image config, artifacts and eight protocol traces',async()=>{
+test('deterministic producer pins source, image config, artifacts and thirteen protocol traces',async()=>{
  const f=await fixture(),r=await produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']});
- assert.deepEqual(r.bytes,f.result.bytes);assert.equal(r.approvalGranted,false);assert.equal(r.manifest.protocolEvidence.length,8);assert.equal(r.manifest.files.length,8);assert.equal(r.manifest.source.files.length,10);
+ assert.deepEqual(r.bytes,f.result.bytes);assert.equal(r.approvalGranted,false);assert.equal(r.manifest.protocolEvidence.length,13);assert.equal(r.manifest.files.length,13);assert.equal(r.manifest.source.files.length,15);
 });
 test('source bytes must match frozen Source, not merely image labels',async()=>{const f=await fixture();f.sources.set(SOURCE_INPUTS[0],Buffer.from('drift'));await assert.rejects(produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']}),fail);});
 test('missing closed broker artifact refuses qualification',async()=>{const f=await fixture();f.artifacts.delete('/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js');await assert.rejects(produceCore126ImageManifest(f.ports,{imageId:f.imageId,approvedScopes:['tools:read']}),fail);});
