@@ -3,23 +3,10 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
-    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
-    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
-    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
-    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "owner": "Root/Projects",
     "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "status": "bound-in-source-awaiting-Native-integration-review",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
     "memory_purpose": {
-      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
-      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
       "audit": "closed-synthesis-purpose.md",
+      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
       "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
       "open_validation": [
         "combined actual Native compile and Task regressions",
@@ -27,9 +14,22 @@
         "Memory phase-owner inclusion in actual global shutdown capture",
         "actual productivity and Project/private generation acceptance"
       ],
-      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN"
+      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs"
     },
-    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority"
+    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "status": "bound-in-source-awaiting-Native-integration-review",
+    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
+    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
+    "owner": "Root/Projects",
+    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
+    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs"
   },
   "operations": [
     {
@@ -841,6 +841,66 @@
       "preimage_sha256": "a331a516c1a43fd10ce8c55cbfc0412a1ac7685232405f66fe43953f2076ec12",
       "find": "    if prepared.is_err()\n        || enrollment.is_err()",
       "replacement": "    if memory.is_err()\n        || prepared.is_err()\n        || enrollment.is_err()"
+    },
+    {
+      "path": "apps/service/src/routes/idle_engine.rs",
+      "preimage_sha256": "733fdcbe0d63acb28d51f4a24b24f9ab9375af29a8e6018cc432bdd10c19fee2",
+      "find": "pub(in crate::routes) struct IdleEngineRetirement {",
+      "replacement": "mod startup_queue;\npub(in crate::routes) struct IdleEngineRetirement {"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/retained.rs",
+      "preimage_sha256": "379ea2709f7daaf4e4d1809eeebe5623af5bc1484fd884ff119d9de0c4d7100c",
+      "find": "mod idle_retirement;",
+      "replacement": "mod idle_retirement;\n#[cfg(windows)]\nmod startup_queue;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "    pub(in crate::routes) fn preflight_retained_startup(\n        &self,\n        originals: &super::tasks::retained::OriginalTaskSlots,\n        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,\n        deadline: Instant,\n    ) -> Result<(), GatewayError> {\n        if self.current.is_some() || self.registry.active_request()?.is_some()\n            || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }\n        let retired = originals.retired_bindings_before_startup(startup, deadline).map_err(unavailable)?;\n        self.registry.check_engine_census(&retired.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        self.journal.can_admit()\n    }",
+      "replacement": "    pub(in crate::routes) fn preflight_retained_startup(\n        &self,\n        state: &ServiceState,\n        originals: &super::tasks::retained::OriginalTaskSlots,\n        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,\n        deadline: Instant,\n    ) -> Result<(), GatewayError> {\n        budget(deadline)?;\n        if self.current.is_some() || self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        // Borrowed original ledger + actual service/store/activity owner. This\n        // cannot be replaced by supplied terminal rows, status or a DTO flag.\n        let history=originals.startup_queue_history(state,self,startup,deadline).map_err(unavailable)?;\n        self.registry.check_engine_census(&history.bindings().iter().map(|ready|ready.epoch.clone()).collect::<Vec<_>>())?;\n        self.check_queue_cleanup(state,history.rows(),deadline)?;\n        history.check_current(self).map_err(unavailable)?;\n        self.journal.can_admit()?;budget(deadline)\n    }"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "    pub(super) fn publish_initial(\n        &mut self,",
+      "replacement": "    pub(super) fn publish_initial(\n        &mut self,\n        state: &ServiceState,"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "        self.preflight_retained_startup(originals, Some(original), observed.deadline())?;",
+      "replacement": "        self.preflight_retained_startup(state, originals, Some(original), observed.deadline())?;"
+    },
+    {
+      "path": "apps/service/src/routes/task_submission/root_engine.rs",
+      "preimage_sha256": "3a881cb1094be43ef96a0fca04e637912f4e7056703d10ca25b783fa83474bd9",
+      "find": "        if !tasks.is_empty() {\n            return Err(GatewayError::InvalidCorrelation);\n        }\n        provider.preflight_retained_startup(",
+      "replacement": "        if !tasks.is_empty() {\n            return Err(GatewayError::InvalidCorrelation);\n        }\n        provider.preflight_retained_startup(\n            state,"
+    },
+    {
+      "path": "apps/service/src/routes/task_submission/root_engine.rs",
+      "preimage_sha256": "3a881cb1094be43ef96a0fca04e637912f4e7056703d10ca25b783fa83474bd9",
+      "find": "    if active.is_none() {\n        provider.preflight_retained_startup(",
+      "replacement": "    if active.is_none() {\n        provider.preflight_retained_startup(\n            state,"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "    current.preflight_retained_startup(\n        &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,",
+      "replacement": "    current.preflight_retained_startup(\n        state, &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "            provider.preflight_retained_startup(&originals, None, deadline)?;",
+      "replacement": "            provider.preflight_retained_startup(&authority, &originals, None, deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "            let result = provider.publish_initial(&originals, &candidate, observed);",
+      "replacement": "            let result = provider.publish_initial(&authority, &originals, &candidate, observed);"
     }
   ]
 }

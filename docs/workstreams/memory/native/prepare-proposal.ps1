@@ -578,6 +578,74 @@ ReplaceOnce 'apps/service/src/routes/model_operations.rs' $preparation @'
     let memory:Result<(),String>=Ok(());
 '@
 ReplaceOnce 'apps/service/src/routes/model_operations.rs' ('    if prepared.is_err()'+[char]10+'        || enrollment.is_err()') ('    if memory.is_err()'+[char]10+'        || prepared.is_err()'+[char]10+'        || enrollment.is_err()')
+ReplaceOnce 'apps/service/src/routes/idle_engine.rs' 'pub(in crate::routes) struct IdleEngineRetirement {' ('mod startup_queue;'+[char]10+'pub(in crate::routes) struct IdleEngineRetirement {')
+ReplaceOnce 'apps/service/src/routes/tasks/retained.rs' 'mod idle_retirement;' ('mod idle_retirement;'+[char]10+'#[cfg(windows)]'+[char]10+'mod startup_queue;')
+$startupOld=@'
+    pub(in crate::routes) fn preflight_retained_startup(
+        &self,
+        originals: &super::tasks::retained::OriginalTaskSlots,
+        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,
+        deadline: Instant,
+    ) -> Result<(), GatewayError> {
+        if self.current.is_some() || self.registry.active_request()?.is_some()
+            || self.registry.provider_queue().has_retained()? {
+            return Err(GatewayError::RequestBusy);
+        }
+        let retired = originals.retired_bindings_before_startup(startup, deadline).map_err(unavailable)?;
+        self.registry.check_engine_census(&retired.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;
+        self.journal.can_admit()
+    }
+'@
+$startupNew=@'
+    pub(in crate::routes) fn preflight_retained_startup(
+        &self,
+        state: &ServiceState,
+        originals: &super::tasks::retained::OriginalTaskSlots,
+        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,
+        deadline: Instant,
+    ) -> Result<(), GatewayError> {
+        budget(deadline)?;
+        if self.current.is_some() || self.registry.active_purpose_request()?.is_some() {
+            return Err(GatewayError::RequestBusy);
+        }
+        // Borrowed original ledger + actual service/store/activity owner. This
+        // cannot be replaced by supplied terminal rows, status or a DTO flag.
+        let history=originals.startup_queue_history(state,self,startup,deadline).map_err(unavailable)?;
+        self.registry.check_engine_census(&history.bindings().iter().map(|ready|ready.epoch.clone()).collect::<Vec<_>>())?;
+        self.check_queue_cleanup(state,history.rows(),deadline)?;
+        history.check_current(self).map_err(unavailable)?;
+        self.journal.can_admit()?;budget(deadline)
+    }
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' $startupOld $startupNew
+$publish=@'
+    pub(super) fn publish_initial(
+        &mut self,
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' $publish ($publish+[char]10+'        state: &ServiceState,')
+ReplaceOnce 'apps/service/src/routes/provider.rs' '        self.preflight_retained_startup(originals, Some(original), observed.deadline())?;' '        self.preflight_retained_startup(state, originals, Some(original), observed.deadline())?;'
+$emptyStartup=@'
+        if !tasks.is_empty() {
+            return Err(GatewayError::InvalidCorrelation);
+        }
+        provider.preflight_retained_startup(
+'@
+ReplaceOnce 'apps/service/src/routes/task_submission/root_engine.rs' $emptyStartup ($emptyStartup+[char]10+'            state,')
+$retiredStartup=@'
+    if active.is_none() {
+        provider.preflight_retained_startup(
+'@
+ReplaceOnce 'apps/service/src/routes/task_submission/root_engine.rs' $retiredStartup ($retiredStartup+[char]10+'            state,')
+$initialStartup=@'
+    current.preflight_retained_startup(
+        &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,
+'@
+ReplaceOnce 'apps/service/src/routes/tasks/initial.rs' $initialStartup @'
+    current.preflight_retained_startup(
+        state, &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,
+'@
+ReplaceOnce 'apps/service/src/routes/tasks/initial.rs' '            provider.preflight_retained_startup(&originals, None, deadline)?;' '            provider.preflight_retained_startup(&authority, &originals, None, deadline)?;'
+ReplaceOnce 'apps/service/src/routes/tasks/initial.rs' '            let result = provider.publish_initial(&originals, &candidate, observed);' '            let result = provider.publish_initial(&authority, &originals, &candidate, observed);'
 $manifest=[ordered]@{native_revision=$revision;projects_proposal='8b18318e248c7e1cba953c1e68b47529aac1a276';status='unapplied-uncompiled-source-proposal';required_reconciliation=@{
  owner='Root/Projects';status='bound-in-source-awaiting-Native-integration-review';actual_export='OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage';
  provider_source='docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs';

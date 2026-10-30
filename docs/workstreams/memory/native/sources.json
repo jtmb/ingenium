@@ -104,6 +104,22 @@
     "transform": null
   },
   {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/idle_engine/startup_queue.rs",
+    "target": "apps/service/src/routes/idle_engine/startup_queue.rs",
+    "required_preimage": "absent",
+    "sha256": "e6e86c25026e68ea6a9e6c970d79bcd1567edae992c5219888ae340e5bd1b35d",
+    "bytes": 1021,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/tasks/retained/startup_queue.rs",
+    "target": "apps/service/src/routes/tasks/retained/startup_queue.rs",
+    "required_preimage": "absent",
+    "sha256": "a82b2b1851ea44f489eb2e8d18c56b65485210062a090f10562fc5b7f592a3b6",
+    "bytes": 5721,
+    "transform": null
+  },
+  {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/live_agent/memory_learning.rs",
     "target": "apps/service/src/routes/live_agent/memory_learning.rs",
     "required_preimage": "absent",

@@ -1,0 +1,87 @@
+{
+  "status": "unapplied-uncompiled-startup-source-follow-on",
+  "depends_on": "d1bcb3c7f7333e4932a955b7fcde1628fe52a868",
+  "new_authored_cases": 6,
+  "worker_executed_rust": 0,
+  "operations": [
+    {
+      "path": "apps/service/src/routes/idle_engine.rs",
+      "preimage_sha256": "733fdcbe0d63acb28d51f4a24b24f9ab9375af29a8e6018cc432bdd10c19fee2",
+      "find": "pub(in crate::routes) struct IdleEngineRetirement {",
+      "replacement": "mod startup_queue;\npub(in crate::routes) struct IdleEngineRetirement {"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/retained.rs",
+      "preimage_sha256": "379ea2709f7daaf4e4d1809eeebe5623af5bc1484fd884ff119d9de0c4d7100c",
+      "find": "mod idle_retirement;",
+      "replacement": "mod idle_retirement;\n#[cfg(windows)]\nmod startup_queue;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "    pub(in crate::routes) fn preflight_retained_startup(\n        &self,\n        originals: &super::tasks::retained::OriginalTaskSlots,\n        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,\n        deadline: Instant,\n    ) -> Result<(), GatewayError> {\n        if self.current.is_some() || self.registry.active_request()?.is_some()\n            || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }\n        let retired = originals.retired_bindings_before_startup(startup, deadline).map_err(unavailable)?;\n        self.registry.check_engine_census(&retired.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        self.journal.can_admit()\n    }",
+      "replacement": "    pub(in crate::routes) fn preflight_retained_startup(\n        &self,\n        state: &ServiceState,\n        originals: &super::tasks::retained::OriginalTaskSlots,\n        startup: Option<&Arc<super::tasks::retained::StartingEngineRecord>>,\n        deadline: Instant,\n    ) -> Result<(), GatewayError> {\n        budget(deadline)?;\n        if self.current.is_some() || self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        // Borrowed original ledger + actual service/store/activity owner. This\n        // cannot be replaced by supplied terminal rows, status or a DTO flag.\n        let history=originals.startup_queue_history(state,self,startup,deadline).map_err(unavailable)?;\n        self.registry.check_engine_census(&history.bindings().iter().map(|ready|ready.epoch.clone()).collect::<Vec<_>>())?;\n        self.check_queue_cleanup(state,history.rows(),deadline)?;\n        history.check_current(self).map_err(unavailable)?;\n        self.journal.can_admit()?;budget(deadline)\n    }"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "    pub(super) fn publish_initial(\n        &mut self,",
+      "replacement": "    pub(super) fn publish_initial(\n        &mut self,\n        state: &ServiceState,"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "        self.preflight_retained_startup(originals, Some(original), observed.deadline())?;",
+      "replacement": "        self.preflight_retained_startup(state, originals, Some(original), observed.deadline())?;"
+    },
+    {
+      "path": "apps/service/src/routes/task_submission/root_engine.rs",
+      "preimage_sha256": "3a881cb1094be43ef96a0fca04e637912f4e7056703d10ca25b783fa83474bd9",
+      "find": "        if !tasks.is_empty() {\n            return Err(GatewayError::InvalidCorrelation);\n        }\n        provider.preflight_retained_startup(",
+      "replacement": "        if !tasks.is_empty() {\n            return Err(GatewayError::InvalidCorrelation);\n        }\n        provider.preflight_retained_startup(\n            state,"
+    },
+    {
+      "path": "apps/service/src/routes/task_submission/root_engine.rs",
+      "preimage_sha256": "3a881cb1094be43ef96a0fca04e637912f4e7056703d10ca25b783fa83474bd9",
+      "find": "    if active.is_none() {\n        provider.preflight_retained_startup(",
+      "replacement": "    if active.is_none() {\n        provider.preflight_retained_startup(\n            state,"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "    current.preflight_retained_startup(\n        &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,",
+      "replacement": "    current.preflight_retained_startup(\n        state, &*state.task_originals.try_lock().map_err(unavailable)?, startup, deadline,"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "            provider.preflight_retained_startup(&originals, None, deadline)?;",
+      "replacement": "            provider.preflight_retained_startup(&authority, &originals, None, deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/tasks/initial.rs",
+      "preimage_sha256": "953fec723714d8733ad1370d352779fe079bd19c942af7f5a32d1c819d777ac0",
+      "find": "            let result = provider.publish_initial(&originals, &candidate, observed);",
+      "replacement": "            let result = provider.publish_initial(&authority, &originals, &candidate, observed);"
+    }
+  ],
+  "sources": [
+    {
+      "source": "sources/apps/service/src/routes/idle_engine/startup_queue.rs",
+      "target": "apps/service/src/routes/idle_engine/startup_queue.rs",
+      "required_preimage": "absent",
+      "bytes": 1021,
+      "sha256": "e6e86c25026e68ea6a9e6c970d79bcd1567edae992c5219888ae340e5bd1b35d"
+    },
+    {
+      "source": "sources/apps/service/src/routes/tasks/retained/startup_queue.rs",
+      "target": "apps/service/src/routes/tasks/retained/startup_queue.rs",
+      "required_preimage": "absent",
+      "bytes": 5721,
+      "sha256": "a82b2b1851ea44f489eb2e8d18c56b65485210062a090f10562fc5b7f592a3b6"
+    }
+  ],
+  "proof": "real service reference + borrowed original slots + sealed completed idle-engine/activity/task-store reads; same queue/acquisition/native/journal eligibility",
+  "preservation": "no public ctor/Clone/Deserialize/DTO/boolean proof; no ownership deletion; legacy pristine compatibility unchanged",
+  "plan": "native-startup-qualification-plan.md"
+}
