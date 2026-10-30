@@ -65,7 +65,7 @@ export class CpuOwnershipClient {
       headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': contentType, ...(identity ? { 'X-Veyra-Identity': JSON.stringify(identity) } : {}) },
       body, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(7000)]) : AbortSignal.timeout(7000) });
     const bytes = await bounded(response, limit);
-    return { bytes, status: response.status, ok: response.ok };
+    return { bytes, status: response.status, ok: response.ok, contentType: response.headers.get('content-type')?.split(';')[0] ?? '' };
   }
   async #observe(identity, action) {
     const result = await this.#call('/v2/operations/' + action, JSON.stringify(identity));
@@ -110,6 +110,7 @@ export class CpuOwnershipClient {
       if (result.ok !== (proof.outcome === 'completed')) fail('CPU_RESPONSE_PROOF_CONFLICT');
       const accepted = await this.#accept(identity, proof);
       if (!accepted.retired) fail('CPU_ORIGINAL_UNSETTLED');
+      if (typeof this.owner.validateResult === 'function') await this.owner.validateResult(identity, { status: result.status, contentType: result.contentType, bytes: result.bytes });
       return { ...accepted, resultAvailable: result.ok, bytes: result.ok ? result.bytes : undefined, status: result.status };
     } catch { return this.#unknown(identity); }
   }
