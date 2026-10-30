@@ -1,0 +1,9 @@
+{
+  "packages/ingenium-core/lib/tools/hosted-governance.ts": [
+    ["const c=value.command,fields=commandFields[c.op]; shape(c,fields.required,fields.optional);", "const c=value.command,fields=commandFields[c.op]; if (!fields) return fail(\"UNSUPPORTED_COMMAND\",422); shape(c,fields.required,fields.optional);"]
+  ],
+  "services/ingenium-api/lib/routes/native-customize-read.ts": [
+    ["[[\"always_apply\",\"alwaysApply\"],[\"file_tree\",\"fileTree\"],[\"file_tree_patch\",\"fileTreePatch\"]])", "[[\"always_apply\",\"alwaysApply\"],[\"file_tree\",\"fileTree\"],[\"file_tree_patch\",\"fileTreePatch\"]] as const)"],
+    ["  if(!command||!Object.hasOwn(fields,command.op)||Object.keys(command).some(k=>!fields[command.op].includes(k)))reject(\"UNSUPPORTED_READ\");", "  if(!command||!Object.hasOwn(fields,command.op))reject(\"UNSUPPORTED_READ\");\n  const allowed=fields[command.op];\n  if(!allowed||Object.keys(command).some(k=>!allowed.includes(k)))reject(\"UNSUPPORTED_READ\");"]
+  ]
+}

@@ -1,6 +1,14 @@
 {
   "base": "fbafc1cd0de7e8809218d9e19cca1552ae459e64",
   "priorProposalCommit": "34351ff2d3c7795709925b48fec81246432908ea",
+  "preservedRootStrictRepairs": "root-strict-repairs.json",
+  "preservedPreimages": [
+    {
+      "path": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "preimageSha256": "50c980fcd06f72cffc4e5a2bc7bfa6ba663e83aaa338c6442740ab3a8cc36305",
+      "strictRepairsPreserved": 2
+    }
+  ],
   "patchSha256": "c1613a1d8d83dc9534956cf4d3a156d03b721ee5c783f8ced2a05de244b3f0e7",
   "changes": [
     {
@@ -12,8 +20,8 @@
     {
       "path": "packages/ingenium-core/lib/tools/hosted-governance.ts",
       "expectedAbsent": false,
-      "preimageSha256": "783738c32984d1b6021acbec2ef57de8e7b70a3f5c80708b7eaeab8cbbf0634c",
-      "proposedSha256": "6e4131e3f58d7544115a1eb566b74e929d7bd55c6b673114289730250bca4e16"
+      "preimageSha256": "de64b21bb05cb419e84ed819f83177f54744d2bc1fb343b172c90bc1cd44640b",
+      "proposedSha256": "6ed09f8cf5e3cf99f57108206a5ba0e141f42d84fe941f01b52f5a461bc77b9f"
     },
     {
       "path": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",

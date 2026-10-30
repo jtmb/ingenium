@@ -6,6 +6,14 @@ const prior='34351ff2d3c7795709925b48fec81246432908ea';
 const sha=value=>createHash('sha256').update(value).digest('hex');
 export function buildProjectionProposal(integration,worker) {
  const read=(root,ref,path)=>execFileSync('git',['-C',root,'show',ref+':'+path],{encoding:'utf8',maxBuffer:4*1024*1024});
+ const strictRepairs=JSON.parse(readFileSync(new URL('root-strict-repairs.json',import.meta.url),'utf8'));
+ const repair=(path,text)=>{
+   for(const [from,to] of strictRepairs[path]??[]) {
+     if(text.split(from).length!==2)throw new Error('Exact strict repair anchor mismatch: '+path);
+     text=text.replace(from,to);
+   }
+   return text;
+ };
  const priorGenerator=read(worker,prior,'docs/workstreams/rust-api/hosted-governance/prepare-proposal.mjs');
  const appendMatch=priorGenerator.match(/"packages\/ingenium-core\/lib\/tools\/skills\.ts": ("(?:[^"\\]|\\.)*")/);
  if(!appendMatch)throw new Error('Prior absent-only helper recipe unavailable');
@@ -33,7 +41,8 @@ export function buildProjectionProposal(integration,worker) {
  replace('try { if (existsSync(filePath)) unlinkSync(filePath); } catch {}','try { projectionIo(witnessSkill,"remove","SKILL.md",()=>{\n    if(strictProjectionObserver) {\n      try { lstatSync(filePath); } catch(error) {\n        if(error && typeof error === "object" && "code" in error && error.code === "ENOENT") return;\n        throw error;\n      }\n      unlinkSync(filePath);\n    } else if(existsSync(filePath))unlinkSync(filePath);\n  }); } catch(error) { if(strictProjectionObserver) throw error; }');
  const changes=[{path,before,after}];
  const enginePath='packages/ingenium-core/lib/tools/hosted-governance.ts';
- const engine=read(worker,prior,'docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts');
+ const engineBefore=read(worker,prior,'docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance.ts');
+ const engine=repair(enginePath,engineBefore);
  let engineAfter=engine
   .replace('execute(command: Row, binding: Row, actor: Actor):','projectionPlan?(original: Row): Row;\n  execute(command: Row, binding: Row, actor: Actor, operationId: string, projection: {plan:Row|null;events:Row[]}):')
   .replace('const now=new Date().toISOString();\n        const proposalSource=', 'const now=new Date().toISOString();\n        const projectionPlan=ports.projectionPlan?.(original)??null;\n        const proposalSource=')
@@ -43,7 +52,7 @@ export function buildProjectionProposal(integration,worker) {
   .replace('ports.execute(original.command,original.binding,actor!)','ports.execute(original.command,original.binding,actor!,original.id,{plan:admitted.projection_plan_json?JSON.parse(admitted.projection_plan_json):null,events:projectionEvents})')
   .replace("first_failure_code=COALESCE(first_failure_code,'CORE_EFFECT_INTERRUPTED') WHERE operation_id=?\").run(original.id)","first_failure_code=COALESCE(first_failure_code,'CORE_EFFECT_INTERRUPTED'),projection_witness_json=COALESCE(projection_witness_json,?) WHERE operation_id=?\").run(JSON.stringify(projectionEvents),original.id)");
  if(engineAfter===engine)throw new Error('Missing original engine execute anchor');
- changes.push({path:enginePath,before:engine,after:engineAfter});
+ changes.push({path:enginePath,before:engine,after:engineAfter,priorBefore:engineBefore});
  const ownerPath='packages/ingenium-core/lib/tools/hosted-governance-owner.ts';
  const owner=read(worker,prior,'docs/workstreams/rust-api/hosted-governance/proposed/hosted-governance-owner.ts');
  let ownerAfter=owner
@@ -60,9 +69,13 @@ export function buildProjectionProposal(integration,worker) {
  changes.push({path:'packages/ingenium-core/lib/tools/hosted-projection-plan.ts',before:'',after:readFileSync(new URL('hosted-projection-plan.ts',import.meta.url),'utf8'),newFile:true});
  const priorManifest=JSON.parse(read(worker,prior,'docs/workstreams/rust-api/hosted-governance/preimages.json'));
  for(const change of changes.filter(c=>!c.newFile)) {
-   if(priorManifest.changes.find(c=>c.path===change.path)?.proposedSha256!==sha(change.before))throw new Error('Prior proposal preimage drift: '+change.path);
+   if(priorManifest.changes.find(c=>c.path===change.path)?.proposedSha256!==sha(change.priorBefore??change.before))throw new Error('Prior proposal preimage drift: '+change.path);
  }
- return {base,prior,changes};
+ const readPath='services/ingenium-api/lib/routes/native-customize-read.ts';
+ const readBefore=read(worker,prior,'docs/workstreams/rust-api/hosted-governance/proposed/native-customize-read.ts');
+ const readAfter=repair(readPath,readBefore);
+ const preservedPreimages=[{path:readPath,preimageSha256:sha(readAfter),strictRepairsPreserved:2}];
+ return {base,prior,changes,preservedPreimages};
 }
 export function writeProjectionProposal(integration,worker) {
  const proposal=buildProjectionProposal(integration,worker);
@@ -70,7 +83,7 @@ export function writeProjectionProposal(integration,worker) {
  const result=spawnSync('python3',['-c',py],{input:JSON.stringify(proposal.changes),encoding:'utf8',maxBuffer:4*1024*1024});
  if(result.status!==0)throw new Error('Projection patch render failed');
  writeFileSync(new URL('projection-owner.patch',import.meta.url),result.stdout);
- const manifest={base:proposal.base,priorProposalCommit:proposal.prior,patchSha256:sha(result.stdout),changes:proposal.changes.map(c=>({path:c.path,expectedAbsent:!!c.newFile,preimageSha256:c.newFile?null:sha(c.before),proposedSha256:sha(c.after)}))};
+ const manifest={base:proposal.base,priorProposalCommit:proposal.prior,preservedRootStrictRepairs:'root-strict-repairs.json',preservedPreimages:proposal.preservedPreimages,patchSha256:sha(result.stdout),changes:proposal.changes.map(c=>({path:c.path,expectedAbsent:!!c.newFile,preimageSha256:c.newFile?null:sha(c.before),proposedSha256:sha(c.after)}))};
  writeFileSync(new URL('preimages.json',import.meta.url),JSON.stringify(manifest,null,2)+'\n');
  console.log(JSON.stringify(manifest));
 }
