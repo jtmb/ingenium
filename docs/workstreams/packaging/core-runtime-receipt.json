@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-same-core-explicit-restore-runtime-copier",
+  "productBotName": "veyra-bot",
+  "rootHead": "46641d92859dcb8c8cfdba998cf288fce167bffe",
+  "patch": {
+    "bytes": 35867,
+    "sha256": "59f0231c7a38c9b7679706b34ab4c71df78515dcd29dd32fdb2669e248d1c21f"
+  },
+  "canonicalEdits": [
+    {
+      "path": "packages/ingenium-core/scripts/copy-core-runtime.mjs",
+      "beforeBytes": 0,
+      "beforeSha256": null,
+      "afterBytes": 6266,
+      "afterSha256": "606ac8edf410a3beae4a6d664b540f219c765c8f727af3d2eeb3013bca624cfb"
+    },
+    {
+      "path": "packages/ingenium-core/package.json",
+      "beforeBytes": 795,
+      "beforeSha256": "54218c32ae7c321bd70e4fe03530c70c48e7a78f0183602d257f6db6bf61c97e",
+      "afterBytes": 833,
+      "afterSha256": "318ae35b9483b94b396287b493a8084fd9d2d3ed847e594b0ebf72c831199eec"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "beforeBytes": 19101,
+      "beforeSha256": "0ef220c2eb05a244704874719cf9829af3809047fed34afa13a77ab5fc5d2b67",
+      "afterBytes": 20041,
+      "afterSha256": "c97c4a8819324219b49930dd8b7290e49658e1bc43703df41a4d8f88a86b8912"
+    },
+    {
+      "path": "Dockerfile",
+      "beforeBytes": 30772,
+      "beforeSha256": "43bfb364d079831b44a28d497ec21ae87916446624e55c269bda997f5456d6bc",
+      "afterBytes": 31667,
+      "afterSha256": "f2066463924b032301cc6fc90159b2df376f4fd416780681187210d196f8ec99"
+    }
+  ],
+  "actualInputs": [
+    {
+      "path": "packages/ingenium-core/package.json",
+      "bytes": 795,
+      "sha256": "54218c32ae7c321bd70e4fe03530c70c48e7a78f0183602d257f6db6bf61c97e"
+    },
+    {
+      "path": "packages/ingenium-core/tsconfig.json",
+      "bytes": 190,
+      "sha256": "6b29c8dbf24a6837ef61466fe869cb461b9110446effbd8ee33ff80d3560ca17"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/backups.ts",
+      "bytes": 149929,
+      "sha256": "a2626fea9bf4aefda42eca88368a6f3717ef98b27fef8ec28ec8e3a01026537b"
+    },
+    {
+      "path": "packages/ingenium-core/lib/db.ts",
+      "bytes": 308683,
+      "sha256": "a7ca13c2e10c669ad1871d71bbd33c44ef3c0063195fb1d3eb1d8593d0eb475c"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/learned-memory-restore.mjs",
+      "bytes": 6022,
+      "sha256": "c18df8abfd95cd9a01ff452a1ae7a0c004caec0387fa1095d6432f004bde908c"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/learned-memory-restore.d.mts",
+      "bytes": 549,
+      "sha256": "a50a848cb6176a034bb0d6186ab201beac94d2f05fb90acd1813ffa567b66909"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-attachment-restore.mjs",
+      "bytes": 9834,
+      "sha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-attachment-restore.d.mts",
+      "bytes": 941,
+      "sha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/132_voice_attachment_deliveries.sql",
+      "bytes": 2588,
+      "sha256": "ae6daaf3b9f1b98265b138be6ed3a4d5c9e052df56b0ba2f06b0bfc674788a0d"
+    },
+    {
+      "path": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "bytes": 54631,
+      "sha256": "d844f25c617d1e3300dc566cc2bccbe9efeed060e8e849887590d2ed47ece6aa"
+    }
+  ],
+  "originalOutputWitness": {
+    "exists": true,
+    "path": "packages/ingenium-core/dist/lib/tools/backups.js",
+    "bytes": 136285,
+    "sha256": "28712a2b301576911ac17707911b6bcd10f383643e725280762b4d480894c753",
+    "observedRestoreImports": [],
+    "requiredSourceResolutions": [
+      {
+        "specifier": "./learned-memory-restore.mjs",
+        "code": "MODULE_NOT_FOUND"
+      },
+      {
+        "specifier": "./voice-attachment-restore.mjs",
+        "code": "MODULE_NOT_FOUND"
+      }
+    ],
+    "note": "Read-only existing output; not current or rebuilt. Source-required specifiers resolved from this original output location without module execution."
+  },
+  "plannedCoreClosure": {
+    "schemaVersion": 1,
+    "kind": "original-core-explicit-runtime-closure",
+    "files": [
+      {
+        "source": "lib/tools/learned-memory-restore.mjs",
+        "path": "lib/tools/learned-memory-restore.mjs",
+        "bytes": 6022,
+        "sourceSha256": "c18df8abfd95cd9a01ff452a1ae7a0c004caec0387fa1095d6432f004bde908c",
+        "artifactSha256": "c18df8abfd95cd9a01ff452a1ae7a0c004caec0387fa1095d6432f004bde908c"
+      },
+      {
+        "source": "lib/tools/learned-memory-restore.d.mts",
+        "path": "lib/tools/learned-memory-restore.d.mts",
+        "bytes": 549,
+        "sourceSha256": "a50a848cb6176a034bb0d6186ab201beac94d2f05fb90acd1813ffa567b66909",
+        "artifactSha256": "a50a848cb6176a034bb0d6186ab201beac94d2f05fb90acd1813ffa567b66909"
+      },
+      {
+        "source": "lib/tools/voice-attachment-restore.mjs",
+        "path": "lib/tools/voice-attachment-restore.mjs",
+        "bytes": 9834,
+        "sourceSha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3",
+        "artifactSha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3"
+      },
+      {
+        "source": "lib/tools/voice-attachment-restore.d.mts",
+        "path": "lib/tools/voice-attachment-restore.d.mts",
+        "bytes": 941,
+        "sourceSha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9",
+        "artifactSha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9"
+      }
+    ]
+  },
+  "copierSource": {
+    "path": "packages/ingenium-core/scripts/copy-core-runtime.mjs",
+    "bytes": 6266,
+    "sha256": "606ac8edf410a3beae4a6d664b540f219c765c8f727af3d2eeb3013bca624cfb"
+  },
+  "candidateRefresh": {
+    "sourceBefore": 103,
+    "sourceAfter": 110,
+    "imageBefore": 79,
+    "imageAfter": 86,
+    "sourceAdditions": [
+      "packages/ingenium-core/scripts/copy-core-runtime.mjs",
+      "packages/ingenium-core/lib/tools/backups.ts",
+      "packages/ingenium-core/lib/tools/learned-memory-restore.mjs",
+      "packages/ingenium-core/lib/tools/learned-memory-restore.d.mts",
+      "packages/ingenium-core/lib/tools/voice-attachment-restore.mjs",
+      "packages/ingenium-core/lib/tools/voice-attachment-restore.d.mts",
+      "packages/ingenium-core/data/migrations/132_voice_attachment_deliveries.sql"
+    ],
+    "imageAdditions": [
+      "/app/packages/ingenium-core/dist/lib/tools/backups.js",
+      "/app/packages/ingenium-core/dist/lib/tools/learned-memory-restore.mjs",
+      "/app/packages/ingenium-core/dist/lib/tools/learned-memory-restore.d.mts",
+      "/app/packages/ingenium-core/dist/lib/tools/voice-attachment-restore.mjs",
+      "/app/packages/ingenium-core/dist/lib/tools/voice-attachment-restore.d.mts",
+      "/app/packages/ingenium-core/dist/veyra-core-runtime-closure.json",
+      "/app/packages/ingenium-core/dist/data/migrations/132_voice_attachment_deliveries.sql"
+    ],
+    "sourceHashReuseAllowed": false,
+    "approvalOrObservationGenerated": false,
+    "requirement": "Regenerate FINAL actual source revision/full-source SHA, every listed source hash/byte count, actual emitted image file hashes/ownership and original image/config/source before all18cases and independent protected approval. The prior103row snapshot is not current approval. SQL131/further owned changes must be explicitly enrolled when real source lands."
+  },
+  "tests": {
+    "windows": {
+      "node": "24.18.0",
+      "passed": 11,
+      "failed": 0
+    },
+    "wsl": {
+      "node": "22.23.1",
+      "passed": 11,
+      "failed": 0
+    },
+    "class": "Actual source/read-only Node resolver witness; AST/VM/sh-n; same materializer against in-memory distribution only",
+    "actualBuild": false,
+    "actualMaterialization": false,
+    "actualCoreOrHelperImport": false,
+    "actualDatabaseExecution": false
+  },
+  "remaining": [
+    "Root apply reviewed exact current-preimage Core build script/copier/contract/Docker proposal",
+    "Root run original Core build within existing approved resource/output boundaries; compare exact4helper/declaration bytes and manifest; actual compiled backups.js import resolution and helper exports",
+    "Root genuine Core132/signed restore/maintenance regression and complete actual strict API/Core checks; worker did not duplicate these",
+    "Root final candidate source/image metadata refresh, realSQL131/coordinator/waiting-child/readiness/egress/retirement/18cases and independent approval remain open"
+  ],
+  "cleanup": {
+    "owner": "packaging worker01a18935-1a8b-7eb3-a709-d874f70095e8",
+    "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "Existing C-backed WSL Ubuntu ext4 VHDX; root unchanged",
+    "generatedPaths": [
+      "docs/workstreams/packaging/core-runtime-copier-source.mjs",
+      "docs/workstreams/packaging/core-runtime-proposal.mjs",
+      "docs/workstreams/packaging/core-runtime.test.mjs",
+      "docs/workstreams/packaging/core-runtime-freeze.mjs",
+      "docs/workstreams/packaging/core-runtime.patch",
+      "docs/workstreams/packaging/core-runtime-receipt.json",
+      "docs/workstreams/packaging/core-runtime.md"
+    ],
+    "newDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "sourceOrDependencyTreeCopied": false,
+    "actualDistributionWritten": false,
+    "retention": "Seven minimal durable source/proposal/regression/patch/receipt/guide files for Root integration and actual artifact acceptance",
+    "regeneration": "Existing TEMP/TMP/TMPDIR=coordination/packaging; NODE_COMPILE_CACHE empty; VEYRA_CORE_AUDIT_ROOT and Windows VEYRA_CORE_LINUX_ROOT point at actual Root source; Node --experimental-vm-modules core-runtime-freeze.mjs; Node --experimental-vm-modules --test ./core-runtime.test.mjs",
+    "protected": "All user/runtime/editor/workspace/backup data, original Core outputs, Native targets/Cargo homes/caches/failure evidence and prior frozen proposals",
+    "windowsRecoveryClaimed": false,
+    "linuxRecoveryClaimed": false
+  }
+}
