@@ -1,0 +1,10 @@
+{
+  "firstRun": {
+    "tests": 13,
+    "pass": 2,
+    "fail": 11
+  },
+  "failure": "EXECUTION_RUNTIME_UNAVAILABLE: fixture used epoch1000000 while actual unchanged request-execution.ts supplies Date.now, making its runtime deadlines expired.",
+  "correction": "Fixture now uses actual Date.now with bounded future deadlines; no production owner/check was changed. Final14/14 pass.",
+  "evidenceClass": "fixture clock setup error, no runtime or authorization acceptance"
+}

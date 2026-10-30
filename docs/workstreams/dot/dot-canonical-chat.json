@@ -1,0 +1,36 @@
+{
+  "state": "unapplied three-file Dot-only source proposal; shared canonical owner remains Root-owned",
+  "patchSha256": "394b7e7174c2ea1516ef3012495ba00f44f170dd3fdbe5f98145fe656c7499b6",
+  "preimages": {
+    "services/ingenium-api/lib/dot-v2/request-session.ts": "bb5902f2716383eb08e126c2ea632e93266211dba54c0d2ee51fc57e905e02d8",
+    "services/ingenium-api/lib/dot-v2/request-binding.ts": "93f88eafce8a9c83586b6f2d6d474b8fbd797c47906079f0cee25557c4a6de11",
+    "services/ingenium-api/tests/veyra-dot-canonical-chat.test.mjs": null
+  },
+  "postimages": {
+    "services/ingenium-api/lib/dot-v2/request-session.ts": "110e08754f50d1ddeec5d87f0e3a95b3f5736c5b46852891e75850b83978f4b0",
+    "services/ingenium-api/lib/dot-v2/request-binding.ts": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a",
+    "services/ingenium-api/tests/veyra-dot-canonical-chat.test.mjs": "95a7704585532da40fe16f4d7413a9b3f59f22f290e234a309377d12216565aa"
+  },
+  "actualSharedDependencies": {
+    "services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs": "b547648303df0ddda50d739b4db20b0d975a70edcc2a2b96f7978b87d5fde628",
+    "services/ingenium-api/lib/projects-v2/request-execution.ts": "7910a9895750227a93e7e87862c359cef574aa2c261b3bd2079c48c856eb501d",
+    "services/ingenium-api/lib/projects-v2/request-execution-owner.mjs": "3de41437fde44a458525a23d31184be5584dff51f48ce92b6875ad2bfc288541",
+    "services/ingenium-api/lib/projects-v2/request-chat-source.mjs": "0f5b3fa9056ed38c218a83bc300c82495dfe7459b480377b240303c4cdd14624",
+    "services/ingenium-api/lib/memory-v2/request-session.ts": "a031ea288172b2cc9f8265ab8cd36d1bf56ee75569d5aa9ed2a15fa0e2ed70e4"
+  },
+  "tests": {
+    "pass": 14,
+    "fail": 0,
+    "outputSha256": "90f4bdb442157c576b728c9127e73aa351f755b8c55134fe844c0b6db40d805d",
+    "actualAfterApplyCommand": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes VEYRA_DOT_CANONICAL_ACTUAL=1 /home/brajam/.local/bin/node --experimental-strip-types --test services/ingenium-api/tests/veyra-dot-canonical-chat.test.mjs",
+    "scope": "Actual shared canonical/engine resolvers and source/archive SQL; actual Dot binding/session and unchanged Memory request composition evaluated with explicit original-identity/DAO/lifecycle fixture ports and :memory: Context/audit/message data. No full Memory lifecycle/runtime/auth deployment acceptance."
+  },
+  "behavior": "Canonical Context IDs remain Dot scope/source identities; actual metadata engineSessionId is re-resolved by shared owner and supplied to unchanged Memory resolveScope/policy/recall, including derived source recall. No stored record rewritten.",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "runtimeObjects": false,
+    "sharedWrites": false
+  }
+}
