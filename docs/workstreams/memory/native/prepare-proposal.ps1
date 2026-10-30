@@ -25,6 +25,7 @@ foreach($p in @('crates/adapters/Cargo.toml','apps/service/Cargo.toml')){
  ReplaceOnce $p 'veyra-contracts.workspace = true' ('veyra-contracts.workspace = true'+[char]10+'veyra-memory.workspace = true')
 }
 ReplaceOnce 'crates/adapters/src/lib.rs' 'pub mod goal_store;' ('pub mod goal_store;'+[char]10+'pub mod native_memory_owner;')
+ReplaceOnce 'crates/adapters/src/lib.rs' 'pub mod goal_store;' ('pub mod goal_store;'+[char]10+'#[cfg(test)]'+[char]10+'mod memory_test_fixture;')
 ReplaceOnce 'crates/adapters/src/goal_store.rs' 'mod retained_workspaces;' ('mod retained_workspaces;'+[char]10+'mod learned;')
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '    uncertain: bool,' ('    learned: veyra_memory::LearnedState,'+[char]10+'    uncertain: bool,')
 ReplaceOnce 'crates/adapters/src/goal_store.rs' '        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, uncertain: false })' ('        let learned = learned::load(directory)?;'+[char]10+'        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, learned, uncertain: false })')
@@ -193,6 +194,7 @@ ReplaceOnce $history '    pub(crate) fn check_retained_census(' '    pub(crate) 
 ReplaceOnce $history '        identities: &[super::super::RequestIdentity],' '        identities: &[I],'
 ReplaceOnce $history '            if entry.identity != *identity' '            if entry.identity != identity.common()'
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' 'use super::{' ('mod memory;'+[char]10+'pub(crate) use memory::QueuedMemory;'+[char]10+'use super::{')
+ReplaceOnce 'apps/service/src/inference/provider_queue.rs' 'use super::{' ('mod cleanup;'+[char]10+'use super::{')
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,') ('struct Book {'+[char]10+'    entries: Vec<Arc<QueuedProvider>>,'+[char]10+'    memory: memory::MemoryBook,')
 ReplaceOnce 'apps/service/src/inference/provider_queue.rs' '        if book.entries.len() >= 128 {' '        if book.entries.len() + book.memory.entries.len() >= 128 {'
 $memoryReplay=@'
@@ -336,6 +338,48 @@ ReplaceOnce 'apps/web/src/features/workbench/promptOriginal.ts' 'export function
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' 'import { MemoryPanel } from "./MemoryPanel";' ('import { MemoryPanel } from "./MemoryPanel";'+[char]10+'import { LearnedMemoryControls } from "./native-memory/LearnedMemoryControls";')
 ReplaceOnce 'apps/web/src/features/workbench/Workbench.tsx' '            <MemoryPanel ' ('            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>' +[char]10+'            <MemoryPanel ')
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'mod slot_yield;' ('mod slot_yield;'+[char]10+'pub(in crate::routes::provider) mod memory;')
+ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' 'mod slot_yield;' ('mod slot_yield;'+[char]10+'#[cfg(windows)]'+[char]10+'pub(super) mod queue_cleanup;')
+ReplaceOnce 'apps/service/src/routes/provider.rs' 'mod queue;' ('mod queue;'+[char]10+'#[cfg(windows)]'+[char]10+'mod queue_cleanup;')
+$oldCleanupQueue=@'
+        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;
+        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {
+            return Err(GatewayError::RequestBusy);
+        }
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' $oldCleanupQueue @'
+        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;
+        if self.registry.active_purpose_request()?.is_some() {
+            return Err(GatewayError::RequestBusy);
+        }
+        self.check_queue_cleanup(state,rows,deadline)?;
+'@
+$detach=@'
+    pub(in crate::routes) fn detach_retired_engine(
+        &mut self,
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' $detach ($detach+[char]10+'        state: &ServiceState,'+[char]10+'        rows: &[veyra_adapters::task_store::StoredTask],')
+$detachQueue=@'
+        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;
+        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {
+            return Err(GatewayError::RequestBusy);
+        }
+'@
+ReplaceOnce 'apps/service/src/routes/provider.rs' $detachQueue @'
+        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;
+        if self.registry.active_purpose_request()?.is_some() {
+            return Err(GatewayError::RequestBusy);
+        }
+        self.check_queue_cleanup(state,rows,deadline)?;
+'@
+ReplaceOnce 'apps/service/src/routes/idle_engine.rs' '            .detach_retired_engine(&self.ready, &self.cleanup, deadline)' '            .detach_retired_engine(state, &self.activity.rows(), &self.ready, &self.cleanup, deadline)'
+ReplaceOnce 'apps/service/src/routes/provider.rs' '        if engines.is_empty() && self.shutdown_blocked()? { return Err(GatewayError::RequestBusy); }' @'
+        // Queue/acquisition/native/journal ownership was matched above. Memory
+        // history can remain without a saved-task engine; unmatched task-only
+        // cancellation/tree owners still prohibit this empty-engine cleanup.
+        if engines.is_empty() && (self.cancellation_owners.has_retained() || !self.model_trees.is_empty()) {
+            return Err(GatewayError::RequestBusy);
+        }
+'@
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '    Native(NativeOriginals),' ('    Native(NativeOriginals),'+[char]10+'    Memory(Box<memory::MemoryOriginals>),')
 ReplaceOnce 'apps/service/src/routes/provider/acquisition.rs' '            Self::Native(original) => Ok(original),' ('            Self::Native(original) => Ok(original),'+[char]10+'            Self::Memory(_) => Err(GatewayError::InvalidCorrelation),')
 ReplaceOnce 'apps/service/src/routes/provider/acquisition/native_snapshot.rs' '            Originals::Native(original) => inspect(original),' ('            Originals::Native(original) => inspect(original),'+[char]10+'            Originals::Memory(_) => Err(GatewayError::InvalidCorrelation),')

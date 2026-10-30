@@ -1,5 +1,7 @@
 use super::*;
 use veyra_memory::{LearnedState,MemoryError};
+#[cfg(test)]
+mod tests;
 pub(super) fn load(directory:&Path)->Result<LearnedState,String>{
  let path=directory.join("learned-memory-v1.json");
  let metadata=match fs::symlink_metadata(&path){

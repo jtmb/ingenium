@@ -2,6 +2,8 @@
 //! No new connection, writer, credential, request slot or release authority.
 use super::*;
 use serde::{Deserialize,Serialize};
+#[cfg(test)]
+mod persistence_tests;
 #[derive(Clone,PartialEq,Eq,Serialize,Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MemoryAttemptMetadata{

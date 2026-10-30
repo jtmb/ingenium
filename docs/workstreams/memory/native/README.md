@@ -5,12 +5,18 @@ Native owners, not Native runtime acceptance or completion of learned memory.
 Native reference: 4e8e29436cfe42c81cc6401599cf8d224357a928.
 Required Projects proposal: 8b18318e248c7e1cba953c1e68b47529aac1a276.
 
-proposal.json contains 126 narrow edits with pinned-blob SHA-256 preconditions
+proposal.json contains 135 narrow edits with pinned-blob SHA-256 preconditions
 and unique exact preimages. sources.json maps modular files to proposed Native
 destinations with hashes. The generic controller is reused as source with one
 declared import transformation. Preparation never changes a Native checkout.
 
 ## Original owners and preservation
+
+The store/queue qualification follow-up supplies 25 additional unexecuted Rust
+cases, an explicit-root synthetic fixture with mandatory reconciliation, and a
+current-Root delta in store-tests-delta.json. See native-store-qualification-plan.md
+for actual owners, exact selectors, output bounds and remaining positive
+lifecycle/startup gates. This worker does not compile or run the Rust cases.
 
 The service visibility follow-up also supplies visibility-facade-delta.json:
 11 exact preimages against current Root Native source plus one absent facade.

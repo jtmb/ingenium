@@ -64,11 +64,27 @@
     "transform": null
   },
   {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/cleanup.rs",
+    "target": "apps/service/src/inference/provider_queue/cleanup.rs",
+    "required_preimage": "absent",
+    "sha256": "85839e9d18b56040637e8cc984cd899d21350081d271fccf9287b6e9846a22cf",
+    "bytes": 6796,
+    "transform": null
+  },
+  {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/memory.rs",
     "target": "apps/service/src/inference/provider_queue/memory.rs",
     "required_preimage": "absent",
-    "sha256": "9a5350d27ed2ad225c29274b13771f2d44c060dfef9bf55fc22bc5574a6efe94",
-    "bytes": 7186,
+    "sha256": "3bef192593c520ecc0989bd6a4234696ad23bfed9c7e2ea173d74f9ea709d4bb",
+    "bytes": 8523,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/inference/provider_queue/memory/refusal_tests.rs",
+    "target": "apps/service/src/inference/provider_queue/memory/refusal_tests.rs",
+    "required_preimage": "absent",
+    "sha256": "b3755750ad856d15f18d938ce98c0577e7722d78eac51809d4358252859c8dd8",
+    "bytes": 1813,
     "transform": null
   },
   {
@@ -115,8 +131,8 @@
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_admission.rs",
     "target": "apps/service/src/routes/provider/memory_admission.rs",
     "required_preimage": "absent",
-    "sha256": "08e7a6846e99dffb27eaac82c5b17eec8cedb992b9b7624a37f5069025a2682f",
-    "bytes": 6179,
+    "sha256": "13431225fd081af51738ad767c9bae774171b3dfb76beaedeffd673f9f715ff9",
+    "bytes": 6211,
     "transform": null
   },
   {
@@ -128,11 +144,35 @@
     "transform": null
   },
   {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/queue_cleanup.rs",
+    "target": "apps/service/src/routes/provider/queue_cleanup.rs",
+    "required_preimage": "absent",
+    "sha256": "36270164b506d2cb3f5898c3b2deb680ad44c866f1bf374dd7993aace193064e",
+    "bytes": 3678,
+    "transform": null
+  },
+  {
     "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/acquisition/memory.rs",
     "target": "apps/service/src/routes/provider/acquisition/memory.rs",
     "required_preimage": "absent",
-    "sha256": "3da3ee4d2b2cf7cc2339591cf83bed115b91ef6601ff5ab9603adc45e1554b10",
-    "bytes": 32631,
+    "sha256": "ae2944858197b4807da4a61006e73290b6f08ac31596c33ec73b4f76789998f3",
+    "bytes": 33768,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/acquisition/queue_cleanup.rs",
+    "target": "apps/service/src/routes/provider/acquisition/queue_cleanup.rs",
+    "required_preimage": "absent",
+    "sha256": "e6394da34479c60a92bda43aaf827b24da130789fdbcc3410a130886492b5662",
+    "bytes": 2313,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/provider/memory_admission/refusal_tests.rs",
+    "target": "apps/service/src/routes/provider/memory_admission/refusal_tests.rs",
+    "required_preimage": "absent",
+    "sha256": "4d7a5175f2e2d62c57563cf5d75b6e5dd5abbd28031751ea2d7debd7aa1bd743",
+    "bytes": 2402,
     "transform": null
   },
   {
@@ -141,6 +181,14 @@
     "required_preimage": "absent",
     "sha256": "0573f127655c3cb7cfc7b3ca912a208118d713cefa9230ce4569b658eaacadb7",
     "bytes": 1521,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/memory_test_fixture.rs",
+    "target": "crates/adapters/src/memory_test_fixture.rs",
+    "required_preimage": "absent",
+    "sha256": "d5bfafbb9462adcb53a1b7a82352fb858251c04125076998c9ce4df36306e39d",
+    "bytes": 4440,
     "transform": null
   },
   {
@@ -155,8 +203,16 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/goal_store/learned.rs",
     "target": "crates/adapters/src/goal_store/learned.rs",
     "required_preimage": "absent",
-    "sha256": "fcd839e9c04c98815a49f612b4eb670776d7fd78628b146db74554140b94c1a1",
-    "bytes": 2653,
+    "sha256": "6a6cd306f5956b77d73a4a90f62f72bbe8221bbf084fc97aca1e867ca48bf712",
+    "bytes": 2678,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/goal_store/learned/tests.rs",
+    "target": "crates/adapters/src/goal_store/learned/tests.rs",
+    "required_preimage": "absent",
+    "sha256": "03f93e138719f5e88f392a59afbaed062059cdddff42f6589b2dfe0c5f22905d",
+    "bytes": 7583,
     "transform": null
   },
   {
@@ -195,8 +251,16 @@
     "source": "docs/workstreams/memory/native/sources/crates/adapters/src/provider_attempts/memory.rs",
     "target": "crates/adapters/src/provider_attempts/memory.rs",
     "required_preimage": "absent",
-    "sha256": "5f381280f026f8ba6e770a779accfa66a0261d96cdaab97d7898c5464604c10b",
-    "bytes": 8862,
+    "sha256": "83e6aedc1978909c1050ba935c525f0f8e57d0f0c6a7ed8516739eb7726ebc1b",
+    "bytes": 8898,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/provider_attempts/memory/persistence_tests.rs",
+    "target": "crates/adapters/src/provider_attempts/memory/persistence_tests.rs",
+    "required_preimage": "absent",
+    "sha256": "2c2ef714255a9aaaf0604418cedeec9c3e2d40d8e7d05266f0d77b008c8be4d8",
+    "bytes": 10560,
     "transform": null
   },
   {

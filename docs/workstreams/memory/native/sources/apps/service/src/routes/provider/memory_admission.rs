@@ -1,5 +1,7 @@
 //! Internal producer. No HTTP route, external credential or caller-built grant.
 use super::*;
+#[cfg(test)]
+mod refusal_tests;
 use veyra_adapters::{native_memory_owner::NativeMemoryOwner,local_execution::LocalWorkspaceBinding};
 use veyra_contracts::{Project,ModelBinding,local_workspaces::LocalWorkspaceOwner};
 use veyra_memory::{ClosedSynthesisPayload,MemorySynthesisOriginal,SynthesisBudget,ValidatedSynthesisOutput,LearnedEntry,content_hash};

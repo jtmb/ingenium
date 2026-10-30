@@ -120,10 +120,12 @@ impl ProviderAcquisition{
  }
  fn memory_capture_convert(&self,state:&ServiceState,runtime:&tokio::runtime::Handle)->Result<(),GatewayError>{
   self.memory_step(Phase::Enrolled,Phase::Converted,|o|{
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    o.admission.check_current(state)?;
    o.budget.begin_setup()?;
    // Enrolled cell exists before the original ModelWorkOwner's first effect.
    o.socket=Some(state.model_work.connect_owned_request(o.admission.binding(),self.deadline).map_err(unavailable)?);
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    self.live()?;
    let socket=o.socket.as_mut().ok_or(GatewayError::RuntimeUnavailable)?;
    o.tree=Some(socket.take_tree_exit_observer().map_err(unavailable)?);
@@ -137,6 +139,7 @@ impl ProviderAcquisition{
  }
  fn memory_candidate(&self,state:&ServiceState,provider:&ProviderState)->Result<(),GatewayError>{
   self.memory_step(Phase::Converted,Phase::Candidate,|o|{
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    provider.journal.can_admit()?;
    let residency=state.residency.try_lock().map_err(unavailable)?;
    let runtime=o.asynchronous.as_ref().ok_or(GatewayError::RuntimeUnavailable)?.identity();
@@ -146,6 +149,7 @@ impl ProviderAcquisition{
  }
  fn memory_prepare_verify(&self,state:&ServiceState,runtime:&tokio::runtime::Handle)->Result<(),GatewayError>{
   self.memory_step(Phase::Candidate,Phase::Verified,|o|{
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    let socket=o.asynchronous.take().ok_or(GatewayError::RuntimeUnavailable)?;
    let candidate=o.candidate.take().ok_or(GatewayError::InvalidCorrelation)?;
    // Private effect cell, not Serial/store/Core locks, across handshake await.
@@ -155,6 +159,7 @@ impl ProviderAcquisition{
    })?);
    o.candidate=Some(o.prepared.as_mut().ok_or(GatewayError::RuntimeUnavailable)?.take_candidate()?);
    let observer=o.observer.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    observer.verify().map_err(unavailable)?;
    observer.check_live().map_err(unavailable)?;
    state.model_work.try_compare_socket(observer).map_err(unavailable)?;
@@ -163,6 +168,7 @@ impl ProviderAcquisition{
  }
  fn memory_claim(&self,state:&ServiceState,provider:&mut ProviderState)->Result<(),GatewayError>{
   self.memory_step(Phase::Verified,Phase::Claimed,|o|{
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    provider.journal.can_admit()?;
    let residency=state.residency.try_lock().map_err(unavailable)?;
    let observer=o.observer.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
@@ -177,6 +183,7 @@ impl ProviderAcquisition{
     policy_revision:original.snapshot.policy_revision,chat_revision:original.snapshot.chat_revision,
     binding:o.admission.binding().clone(),runtime:RuntimeMetadata::from(observer.identity())});
    provider.journal.commit_memory_once(o.attempt.as_ref().ok_or(GatewayError::RuntimeUnavailable)?)?;
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    // After persistence, repeat exact source/policy/lease/runtime/slot checks.
    provider.registry.check_memory_candidate(candidate,state,observer.identity(),&residency)?;
    observer.check_live().map_err(unavailable)?;state.model_work.try_compare_socket(observer).map_err(unavailable)?;self.live()?;
@@ -186,6 +193,7 @@ impl ProviderAcquisition{
  }
  fn memory_start(&self,state:&ServiceState)->Result<Operation,GatewayError>{
   self.memory_step(Phase::Claimed,Phase::Published,|o|{
+   o.entry.upgrade().ok_or(GatewayError::RuntimeUnavailable)?.check_queue_known()?;
    o.admission.check_current(state)?;
    let observer=o.observer.as_ref().ok_or(GatewayError::RuntimeUnavailable)?;
    observer.check_live().map_err(unavailable)?;state.model_work.try_compare_socket(observer).map_err(unavailable)?;
@@ -312,6 +320,12 @@ pub(super) fn previous(record:&ProviderAcquisition)->Result<Option<Arc<ProviderA
 }
 pub(super) fn request_identity(record:&ProviderAcquisition)->Result<MemoryTransportIdentity,GatewayError>{
  Ok(record.originals.try_lock().map_err(metadata_contention)?.memory_mut()?.request.clone().ok_or(GatewayError::InvalidCorrelation)?)
+}
+pub(in crate::routes::provider) fn check_queue_entry(record:&ProviderAcquisition,entry:&Arc<QueuedMemory>)->Result<(),GatewayError>{
+ let mut held=record.originals.try_lock().map_err(metadata_contention)?;let o=held.memory_mut()?;
+ if !o.entry.upgrade().is_some_and(|actual|Arc::ptr_eq(&actual,entry))||!Arc::ptr_eq(&o.admission,&entry.admission)||
+    !record.cancellation.same_original(&entry.cancellation){return Err(GatewayError::InvalidCorrelation)}
+ Ok(())
 }
 /// Called only by the original shutdown ProviderHistory capture after the
 /// queue/slot/worker census proves every Memory request has actually retired.

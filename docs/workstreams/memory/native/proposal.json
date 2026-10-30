@@ -3,31 +3,31 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
-    "status": "bound-in-source-awaiting-Native-integration-review",
-    "owner": "Root/Projects",
-    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
-    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
     "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
     "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
-    "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
     "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
+    "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
+    "owner": "Root/Projects",
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
+    "status": "bound-in-source-awaiting-Native-integration-review",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
     "memory_purpose": {
+      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
+      "audit": "closed-synthesis-purpose.md",
+      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
       "open_validation": [
         "combined actual Native compile and Task regressions",
         "actual same-slot/authentication/retirement/lease negative controls",
         "Memory phase-owner inclusion in actual global shutdown capture",
         "actual productivity and Project/private generation acceptance"
       ],
-      "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
-      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
-      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN",
-      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
-      "audit": "closed-synthesis-purpose.md"
+      "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN"
     },
     "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority"
   },
@@ -61,6 +61,12 @@
       "preimage_sha256": "25101891a0a5896f07f3c468d59a32803b9727a0fab0d424faa3656246bfbead",
       "find": "pub mod goal_store;",
       "replacement": "pub mod goal_store;\npub mod native_memory_owner;"
+    },
+    {
+      "path": "crates/adapters/src/lib.rs",
+      "preimage_sha256": "25101891a0a5896f07f3c468d59a32803b9727a0fab0d424faa3656246bfbead",
+      "find": "pub mod goal_store;",
+      "replacement": "pub mod goal_store;\n#[cfg(test)]\nmod memory_test_fixture;"
     },
     {
       "path": "crates/adapters/src/goal_store.rs",
@@ -425,6 +431,12 @@
     {
       "path": "apps/service/src/inference/provider_queue.rs",
       "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
+      "find": "use super::{",
+      "replacement": "mod cleanup;\nuse super::{"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "f875dea77afe59a071e64cea3d7c4ce406176dec48bfbb0577bbe391ee3700dc",
       "find": "struct Book {\n    entries: Vec<Arc<QueuedProvider>>,",
       "replacement": "struct Book {\n    entries: Vec<Arc<QueuedProvider>>,\n    memory: memory::MemoryBook,"
     },
@@ -613,6 +625,48 @@
       "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
       "find": "mod slot_yield;",
       "replacement": "mod slot_yield;\npub(in crate::routes::provider) mod memory;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "28020675ed95b3763d360905484cac4483a10cf9c47b504ae189a7ea17cdad26",
+      "find": "mod slot_yield;",
+      "replacement": "mod slot_yield;\n#[cfg(windows)]\npub(super) mod queue_cleanup;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "mod queue;",
+      "replacement": "mod queue;\n#[cfg(windows)]\nmod queue_cleanup;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }",
+      "replacement": "        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        if self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        self.check_queue_cleanup(state,rows,deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "    pub(in crate::routes) fn detach_retired_engine(\n        &mut self,",
+      "replacement": "    pub(in crate::routes) fn detach_retired_engine(\n        &mut self,\n        state: &ServiceState,\n        rows: &[veyra_adapters::task_store::StoredTask],"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;\n        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }",
+      "replacement": "        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;\n        if self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        self.check_queue_cleanup(state,rows,deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/idle_engine.rs",
+      "preimage_sha256": "733fdcbe0d63acb28d51f4a24b24f9ab9375af29a8e6018cc432bdd10c19fee2",
+      "find": "            .detach_retired_engine(&self.ready, &self.cleanup, deadline)",
+      "replacement": "            .detach_retired_engine(state, &self.activity.rows(), &self.ready, &self.cleanup, deadline)"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "c18f69568818c19b42792a7be5fc20fdaf2a09702eebbc6c54445997549193f9",
+      "find": "        if engines.is_empty() && self.shutdown_blocked()? { return Err(GatewayError::RequestBusy); }",
+      "replacement": "        // Queue/acquisition/native/journal ownership was matched above. Memory\n        // history can remain without a saved-task engine; unmatched task-only\n        // cancellation/tree owners still prohibit this empty-engine cleanup.\n        if engines.is_empty() && (self.cancellation_owners.has_retained() || !self.model_trees.is_empty()) {\n            return Err(GatewayError::RequestBusy);\n        }"
     },
     {
       "path": "apps/service/src/routes/provider/acquisition.rs",

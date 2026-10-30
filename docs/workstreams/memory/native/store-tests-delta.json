@@ -1,0 +1,156 @@
+{
+  "status": "unapplied-uncompiled-store-and-queue-source",
+  "owner": "01a18935-0219-7cc0-88be-368fa7fa330c",
+  "authored_cases": 25,
+  "production_behavior_changes": "separate exact cleanup eligibility; Task Unknown fences Memory admission/native phases through weak same-queue owner; has_retained ownership census unchanged",
+  "fixture_plan": "native-store-qualification-plan.md",
+  "operations": [
+    {
+      "path": "crates/adapters/src/lib.rs",
+      "preimage_sha256": "df54d609596165203415f7fac99db186fae92b92cff171ecc4634cc84af09051",
+      "find": "pub mod goal_store;",
+      "replacement": "pub mod goal_store;\n#[cfg(test)]\nmod memory_test_fixture;"
+    },
+    {
+      "path": "crates/adapters/src/goal_store/learned.rs",
+      "preimage_sha256": "fcd839e9c04c98815a49f612b4eb670776d7fd78628b146db74554140b94c1a1",
+      "find": "use veyra_memory::{LearnedState,MemoryError};",
+      "replacement": "use veyra_memory::{LearnedState,MemoryError};\n#[cfg(test)]\nmod tests;"
+    },
+    {
+      "path": "crates/adapters/src/provider_attempts/memory.rs",
+      "preimage_sha256": "5f381280f026f8ba6e770a779accfa66a0261d96cdaab97d7898c5464604c10b",
+      "find": "use serde::{Deserialize,Serialize};",
+      "replacement": "use serde::{Deserialize,Serialize};\n#[cfg(test)]\nmod persistence_tests;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/memory_admission.rs",
+      "preimage_sha256": "08e7a6846e99dffb27eaac82c5b17eec8cedb992b9b7624a37f5069025a2682f",
+      "find": "use super::*;\nuse veyra_adapters::",
+      "replacement": "use super::*;\n#[cfg(test)]\nmod refusal_tests;\nuse veyra_adapters::"
+    },
+    {
+      "path": "apps/service/src/inference/provider_queue.rs",
+      "preimage_sha256": "385adb47b4279216d822f14c418216f3915b4ee495cc255162ea7be80a69231f",
+      "find": "mod memory;",
+      "replacement": "mod memory;\nmod cleanup;"
+    },
+    {
+      "path": "apps/service/src/routes/provider/acquisition.rs",
+      "preimage_sha256": "0908c3568ffb18e9776f551c0487aec200fd29b054fde0840b1a6e9f41638034",
+      "find": "pub(in crate::routes::provider) mod memory;",
+      "replacement": "pub(in crate::routes::provider) mod memory;\n#[cfg(windows)]\npub(super) mod queue_cleanup;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "mod queue;",
+      "replacement": "mod queue;\n#[cfg(windows)]\nmod queue_cleanup;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }",
+      "replacement": "        self.registry.check_engine_census(&engines.iter().map(|ready| ready.epoch.clone()).collect::<Vec<_>>())?;\n        if self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        self.check_queue_cleanup(state,rows,deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "    pub(in crate::routes) fn detach_retired_engine(\n        &mut self,",
+      "replacement": "    pub(in crate::routes) fn detach_retired_engine(\n        &mut self,\n        state: &ServiceState,\n        rows: &[veyra_adapters::task_store::StoredTask],"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;\n        if self.registry.active_request()?.is_some() || self.registry.provider_queue().has_retained()? {\n            return Err(GatewayError::RequestBusy);\n        }",
+      "replacement": "        cleanup.check_retained_completion(ready, deadline).map_err(unavailable)?;\n        if self.registry.active_purpose_request()?.is_some() {\n            return Err(GatewayError::RequestBusy);\n        }\n        self.check_queue_cleanup(state,rows,deadline)?;"
+    },
+    {
+      "path": "apps/service/src/routes/idle_engine.rs",
+      "preimage_sha256": "733fdcbe0d63acb28d51f4a24b24f9ab9375af29a8e6018cc432bdd10c19fee2",
+      "find": "            .detach_retired_engine(&self.ready, &self.cleanup, deadline)",
+      "replacement": "            .detach_retired_engine(state, &self.activity.rows(), &self.ready, &self.cleanup, deadline)"
+    },
+    {
+      "path": "apps/service/src/routes/provider.rs",
+      "preimage_sha256": "28817e9022b2661428f06b668d32e2d19651c89cf78a90460e33bc8eb072e58b",
+      "find": "        if engines.is_empty() && self.shutdown_blocked()? { return Err(GatewayError::RequestBusy); }",
+      "replacement": "        // Queue/acquisition/native/journal ownership was matched above. Memory\n        // history can remain without a saved-task engine; unmatched task-only\n        // cancellation/tree owners still prohibit this empty-engine cleanup.\n        if engines.is_empty() && (self.cancellation_owners.has_retained() || !self.model_trees.is_empty()) {\n            return Err(GatewayError::RequestBusy);\n        }"
+    }
+  ],
+  "sources": [
+    {
+      "source": "sources/crates/adapters/src/memory_test_fixture.rs",
+      "target": "crates/adapters/src/memory_test_fixture.rs",
+      "required_preimage": "absent",
+      "bytes": 4440,
+      "sha256": "d5bfafbb9462adcb53a1b7a82352fb858251c04125076998c9ce4df36306e39d"
+    },
+    {
+      "source": "sources/crates/adapters/src/goal_store/learned/tests.rs",
+      "target": "crates/adapters/src/goal_store/learned/tests.rs",
+      "required_preimage": "absent",
+      "bytes": 7583,
+      "sha256": "03f93e138719f5e88f392a59afbaed062059cdddff42f6589b2dfe0c5f22905d"
+    },
+    {
+      "source": "sources/crates/adapters/src/provider_attempts/memory/persistence_tests.rs",
+      "target": "crates/adapters/src/provider_attempts/memory/persistence_tests.rs",
+      "required_preimage": "absent",
+      "bytes": 10560,
+      "sha256": "2c2ef714255a9aaaf0604418cedeec9c3e2d40d8e7d05266f0d77b008c8be4d8"
+    },
+    {
+      "source": "sources/apps/service/src/inference/provider_queue/memory/refusal_tests.rs",
+      "target": "apps/service/src/inference/provider_queue/memory/refusal_tests.rs",
+      "required_preimage": "absent",
+      "bytes": 1813,
+      "sha256": "b3755750ad856d15f18d938ce98c0577e7722d78eac51809d4358252859c8dd8"
+    },
+    {
+      "source": "sources/apps/service/src/routes/provider/memory_admission/refusal_tests.rs",
+      "target": "apps/service/src/routes/provider/memory_admission/refusal_tests.rs",
+      "required_preimage": "absent",
+      "bytes": 2402,
+      "sha256": "4d7a5175f2e2d62c57563cf5d75b6e5dd5abbd28031751ea2d7debd7aa1bd743"
+    },
+    {
+      "source": "sources/apps/service/src/inference/provider_queue/cleanup.rs",
+      "target": "apps/service/src/inference/provider_queue/cleanup.rs",
+      "required_preimage": "absent",
+      "bytes": 6796,
+      "sha256": "85839e9d18b56040637e8cc984cd899d21350081d271fccf9287b6e9846a22cf"
+    },
+    {
+      "source": "sources/apps/service/src/routes/provider/acquisition/queue_cleanup.rs",
+      "target": "apps/service/src/routes/provider/acquisition/queue_cleanup.rs",
+      "required_preimage": "absent",
+      "bytes": 2313,
+      "sha256": "e6394da34479c60a92bda43aaf827b24da130789fdbcc3410a130886492b5662"
+    },
+    {
+      "source": "sources/apps/service/src/routes/provider/queue_cleanup.rs",
+      "target": "apps/service/src/routes/provider/queue_cleanup.rs",
+      "required_preimage": "absent",
+      "bytes": 3678,
+      "sha256": "36270164b506d2cb3f5898c3b2deb680ad44c866f1bf374dd7993aace193064e"
+    }
+  ],
+  "owned_replacements": [
+    {
+      "source": "sources/apps/service/src/inference/provider_queue/memory.rs",
+      "target": "apps/service/src/inference/provider_queue/memory.rs",
+      "required_preimage_sha256": "9a5350d27ed2ad225c29274b13771f2d44c060dfef9bf55fc22bc5574a6efe94",
+      "bytes": 8523,
+      "sha256": "3bef192593c520ecc0989bd6a4234696ad23bfed9c7e2ea173d74f9ea709d4bb"
+    },
+    {
+      "source": "sources/apps/service/src/routes/provider/acquisition/memory.rs",
+      "target": "apps/service/src/routes/provider/acquisition/memory.rs",
+      "required_preimage_sha256": "3da3ee4d2b2cf7cc2339591cf83bed115b91ef6601ff5ab9603adc45e1554b10",
+      "bytes": 33768,
+      "sha256": "ae2944858197b4807da4a61006e73290b6f08ac31596c33ec73b4f76789998f3"
+    }
+  ],
+  "acceptance": "Root runs actual stores/refusals; positive Memory lifecycle/queue/retirement/shutdown remains OPEN"
+}
