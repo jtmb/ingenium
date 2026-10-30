@@ -8,6 +8,8 @@ Required authorities have no defaults: actual request-selected scope/auth/CSRF/a
 
 The source tests use real SQLite and this exact proposed implementation. The finite cases include two actual connections, busy admission, stale revision, one-shot and lost dispatch permit, lost/historical CPU ACK, reserved-repeat and uncertain ACKs, current API scope/SQL revocation before FFI, body fingerprint order and immutability, terminal/public-unknown separation, private positive retirement after UI shift, one hot scope/control replacement and monotonic owner generation. Validators are compared with the actual portable session/CPUv2 source. This remains inert source qualification, not a running supervisor, physical retirement, actual Express auth or production migration test.
 
+The file-backed case closes every SQLite connection and opens a fresh Core ledger over the same database. A reservation committed before its checkpoint response was lost remains spent, and a lost CPU transaction ACK returns the identical retained UUID/revision after cold reopen. The fixture's authority callbacks remain explicit stand-ins; this proves persisted ledger semantics without claiming a real process crash or physical-owner recovery.
+
 Strict/noUncheckedIndexedAccess checks use the existing installed TypeScript library entirely in memory, with declared original Core DB signatures. No compiler outputs, cache or dependencies are generated. Root must still typecheck and test the installed full Core/API and original Node supervisor composition.
 
 Regenerate from the owned checkout with the SAME declared C-backed WSL coordination output root:

@@ -77,7 +77,8 @@ function fixture({databasePath=':memory:'}={}) {
    const value=original({operationId,kind:'voice-speech-stt',inputSha256:identity.digest,cpuIdentity:identity,controlOperationId:control.operation.original.operationId});
    return {operation:reserve(value).operation,identity,control};
  };
- return {db,state,ports,ledger,context:privateContext,nodeContext,scope,owner,original,reserve,change,proof,createControl,cpuOperation,privateOwners,close:()=>db.close()};
+ let closed=false;
+ return {db,state,ports,ledger,context:privateContext,nodeContext,scope,owner,original,reserve,change,proof,createControl,cpuOperation,privateOwners,close:()=>{if(!closed){db.close();closed=true;}}};
 }
 const run=async action=>{const f=fixture();try{return await action(f);}finally{f.close();}};
 
@@ -316,10 +317,11 @@ test('two SQLite connections serialize duplicate reservations, stale CAS and bus
  let f,other;const removed=[];
  try {
    f=fixture({databasePath:path});other=new DatabaseSync(path);other.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0;');
-   const second=createCoreVoiceOperationLedger({...f.ports,db:()=>other,transaction:(work,mode)=>{
-     other.exec(mode==='immediate'?'BEGIN IMMEDIATE':'BEGIN');
-     try{const result=work();other.exec('COMMIT');return result;}catch(error){other.exec('ROLLBACK');throw error;}
+   const connectionLedger=connection=>createCoreVoiceOperationLedger({...f.ports,db:()=>connection,transaction:(work,mode)=>{
+     connection.exec(mode==='immediate'?'BEGIN IMMEDIATE':'BEGIN');
+     try{const result=work();connection.exec('COMMIT');return result;}catch(error){connection.exec('ROLLBACK');throw error;}
    }});
+   const second=connectionLedger(other);
    const original=f.original(),op=f.reserve(original).operation;
    assert.equal(second.reserve(f.context,original,f.owner).accepted,false);
    assert.throws(()=>second.reserve(f.context,{...original,operationId:randomUUID()},f.owner),/REQUEST_ALREADY_RETAINED/);
@@ -327,6 +329,21 @@ test('two SQLite connections serialize duplicate reservations, stale CAS and bus
    const absent=f.original();f.db.exec('BEGIN IMMEDIATE');
    try{assert.throws(()=>second.reserve(f.context,absent,f.owner),/busy|locked/i);}finally{f.db.exec('ROLLBACK');}
    assert.equal(second.read(f.context,absent.operationId),null);
+   // Commit succeeded but neither reservation nor CPU ACK reached its caller.
+   const lostReservation=f.original();f.state.failCheckpoint=true;
+   assert.throws(()=>f.reserve(lostReservation),/checkpoint unavailable/);
+   const {operation:cpuOperation,identity}=f.cpuOperation();
+   f.ledger.claimCpuDispatch(f.nodeContext,cpuRequest(f,cpuOperation,identity));
+   const lostCpuAck=cpuRequest(f,cpuOperation,identity,{transactionId:randomUUID(),phase:'reserved',outcome:null,drained:false});
+   f.state.failCheckpoint=true;assert.throws(()=>f.ledger.retainCpu(f.nodeContext,lostCpuAck),/checkpoint unavailable/);
+   const retained=JSON.parse(f.db.prepare('SELECT cpu_json FROM veyra_voice_operations WHERE operation_id=?').get(identity.operationId).cpu_json).transactions[lostCpuAck.transactionId].ack;
+   other.close();other=null;f.close(); // No SQLite connection remains before cold recovery.
+   other=new DatabaseSync(path);other.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0;');
+   const cold=connectionLedger(other);
+   assert.equal(cold.read(f.context,original.operationId).state,'running');
+   assert.equal(cold.reserve(f.context,lostReservation,f.owner).accepted,false);
+   assert.deepEqual(cold.retainCpu(f.nodeContext,lostCpuAck),retained);
+   assert.equal(cold.privateRead(f.nodeContext,{operationId:identity.operationId,owner:f.owner}).cpu.revision,1);
  } finally {
    other?.close();f?.close();
    for(const suffix of ['','-wal','-shm','-journal']){
