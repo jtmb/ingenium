@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "preimageSha256": "e5addff789c056feafd4c188a641f2d8987e586be15cdc0e07672869150a18f6",
+  "afterSha256": "c2404104d92c3e1f803bb5d7f3272674ec2dc6f8a9d1cd0c59f52822227aacbd",
+  "helperSha256": "8d4765e8da40984c810b140de9da31c722075e126e2f5a8c1174e6f64bf34547",
+  "canonicalDestination": "tools/reviewed-cargo-check.mjs",
+  "patchSha256": "4698d1b97e8bdd159ed1e13e7f9a01342529e20531d493bccdf8a02e70a5fbc9",
+  "patchBytes": 2274,
+  "descriptorChecksPreserved": true,
+  "cacheHashingPreserved": true,
+  "width": 8,
+  "failedReadsDrained": true,
+  "resultOrder": "Unchanged original sorted Source order",
+  "syntax": "Node --check stdin PASS; no evaluation",
+  "currentNativeTouched": false,
+  "actualCaptureOrCompilerInvoked": false
+}

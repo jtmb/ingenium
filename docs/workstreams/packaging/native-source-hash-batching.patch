@@ -1,0 +1,44 @@
+diff --git a/tools/reviewed-cargo-check.mjs b/tools/reviewed-cargo-check.mjs
+--- a/tools/reviewed-cargo-check.mjs
++++ b/tools/reviewed-cargo-check.mjs
+@@ -88,12 +88,38 @@
+   if (!value || value.includes('\\') || value.includes('\0') || value.includes(':') || path.isAbsolute(value) || value.split('/').some(part => !part || part === '.' || part === '..')) fail('unsafe source relative path');
+   return value;
+ }
++/** Hash only Source inputs in eight bounded async lanes. Each reader owns its
++ * descriptor checks/finally-close; settle every started read before returning. */
++export async function hashSourceFileBatch(names, readFile) {
++  const ordered = [...names], files = new Array(ordered.length);
++  let next = 0, stopped = false, failedAt = Infinity, failure;
++  const worker = async () => {
++    while (!stopped) {
++      const index = next++;
++      if (index >= ordered.length) return;
++      try { files[index] = [ordered[index], await readFile(ordered[index])]; }
++      catch (error) {
++        stopped = true;
++        // Preserve sequential sorted-order failure selection when concurrent
++        // reads fail in a different completion order. Earlier reads are already
++        // started; drain them (and their finally-close blocks) before throwing.
++        if (index < failedAt) { failedAt = index; failure = error; }
++      }
++    }
++  };
++  await Promise.all(Array.from({ length: Math.min(8, ordered.length) }, () => worker()));
++  if (failedAt !== Infinity) throw failure;
++  return files;
++}
++
+ async function sourceState(root, env) {
+   if (await git(root, env, ['diff', '--name-only']) || await git(root, env, ['ls-files', '--others', '--exclude-standard'])) fail('working tree differs from staged source');
+   const tree = await git(root, env, ['write-tree']);
+   const names = (await git(root, env, ['ls-files', '-z'])).split('\0').filter(Boolean).sort();
+-  const files = [];
+-  for (const name of names) { safeRelative(name); files.push([name, await hashFile(root, path.join(root, name), 67108864)]); }
++  const files = await hashSourceFileBatch(names, name => {
++    safeRelative(name);
++    return hashFile(root, path.join(root, name), 67108864);
++  });
+   return { tree, files, sha256: digest(files) };
+ }
+ function buildEnvironment(env) {
