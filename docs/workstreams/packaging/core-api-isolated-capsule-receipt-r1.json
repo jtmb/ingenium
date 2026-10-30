@@ -1,0 +1,2032 @@
+{
+  "schemaVersion": 1,
+  "owner": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "at": "2026-10-30T22:47:57.433Z",
+  "scope": "Source-only isolated current Core/API compiler/copier preparation; no actual compile/copy/runtime/cleanup",
+  "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "capsule": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1",
+  "coreDestination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/dist",
+  "apiDestination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist",
+  "edits": [
+    {
+      "path": "packages/ingenium-core/scripts/copy-core-runtime.mjs",
+      "preimageBytes": 6266,
+      "postimageBytes": 7818,
+      "preimageSha256": "606ac8edf410a3beae4a6d664b540f219c765c8f727af3d2eeb3013bca624cfb",
+      "postimageSha256": "879e2b288460a4bd91c2650e3c31220e9e48d9288837da4065ef5395f479d8cd"
+    },
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "preimageBytes": 45537,
+      "postimageBytes": 54518,
+      "preimageSha256": "b360aa94aeea2ad0b743ba1d7bee7b7369ab4867131a881c0f2781d33836c3e5",
+      "postimageSha256": "47cc63df0d161f8f19186547d341bcf60edc093de37750e8e07c3f40dd76af7d"
+    }
+  ],
+  "patch": {
+    "bytes": 19200,
+    "sha256": "8c4dc5d741ed1b5cd82145a61bac3f60b94e44d1caaab6212e3ed14856c20fee"
+  },
+  "contract": {
+    "path": "packages/veyra-operations/core126-image-contract.mjs",
+    "sha256": "22b233b9beff317e5845a3c8c7f9934d0b8f107f0aabe620869b27c430b04adb",
+    "sourceCount": 161,
+    "imageCount": 138,
+    "sourcePins": [
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+        "bytes": 12857,
+        "sha256": "952471e0dc02cb1462deb545253d53e405893451339d106ddf7fbd2c7dc64ae3"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+        "bytes": 1583,
+        "sha256": "422623cf72e9242d58fc17760c70800f721f4a4df387da97819f7091e3ad56d2"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts",
+        "bytes": 2617,
+        "sha256": "19a3fcb5f3fc77f9fbb110fcc834b09a884080a9254c798273a24070cb8e855a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts",
+        "bytes": 3209,
+        "sha256": "713cac95c6c1a4ca78141100b2839f93f032015970c06f14b6b94ef496df189c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql",
+        "bytes": 44139,
+        "sha256": "8ae12c3081e8ae6701619b7eea0d2bdddf093c4c30533a578dec03d5244aae2c"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.mjs",
+        "bytes": 9475,
+        "sha256": "b125c50a2130f4de37feca93e05b05f36404dfbf3571fd5ee1d476e2e5ec14aa"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.d.mts",
+        "bytes": 1650,
+        "sha256": "87a649b35e8f693e704a4a02c834af8d471016c0e8bb35f9e97419961e848891"
+      },
+      {
+        "source": "Dockerfile",
+        "bytes": 31667,
+        "sha256": "f2066463924b032301cc6fc90159b2df376f4fd416780681187210d196f8ec99"
+      },
+      {
+        "source": "package-lock.json",
+        "bytes": 653874,
+        "sha256": "07e954e2af4bad758da89ffe94d08cc1309568a9d990c321aba7cdf2dd87e179"
+      },
+      {
+        "source": "scripts/runtime-entrypoint.sh",
+        "bytes": 5138,
+        "sha256": "0402d4d20d842a545fb394f6d7c9369968d3c627ce6ac0d6c3604166742ebf02"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-job-child.ts",
+        "bytes": 786,
+        "sha256": "dff0164eabb77d776736ac36db20211fdb327061c22807cdd68af35a0d581502"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+        "bytes": 2732,
+        "sha256": "df4d6f2da61ae7d9a4a836e2d95948ec8ef478032caf2076adc2a52b2bdd2e1e"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+        "bytes": 8702,
+        "sha256": "dbaccea339d8c9f6cbee96acfa10b489e5b26e4e7f13a4608d0d5453063b591e"
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-contract.ts",
+        "bytes": 11277,
+        "sha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-manager.ts",
+        "bytes": 29102,
+        "sha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec"
+      },
+      {
+        "source": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+        "bytes": 45537,
+        "sha256": "b360aa94aeea2ad0b743ba1d7bee7b7369ab4867131a881c0f2781d33836c3e5"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+        "bytes": 659,
+        "sha256": "6d22a7a97a5602fc66629a2bde3ff8513ea58cdfdd41ef400db8c18ccff04dcd"
+      },
+      {
+        "source": "packages/veyra-operations/core126-agent-material.mjs",
+        "bytes": 7493,
+        "sha256": "6d6e0354becc927326e5d90b5477adaa8968ee4ae5e4e48d433fc069c19a20a6"
+      },
+      {
+        "source": "config/opencode-managed/job-opencode.json",
+        "bytes": 418,
+        "sha256": "55a6797f6e2ce9d22278608bfe8757a7f2e1b439de8d324afa6410f9503f7b69"
+      },
+      {
+        "source": "config/opencode-managed/plugins/enforce-job-agent/index.mjs",
+        "bytes": 665,
+        "sha256": "f0abe3f7e53d91d56b9ed45d2f958d9e4edaa5d5faae930636e80fe8cfcae35c"
+      },
+      {
+        "source": "config/opencode-managed/plugins/enforce-reserved-broker/index.mjs",
+        "bytes": 4763,
+        "sha256": "d26faf67b82152bbbf9ba6d0a2591b8ecc8fee18ec1af357ed00302c2a91ac95"
+      },
+      {
+        "source": ".opencode/agents/execution/ingenium-llm-broker.md",
+        "bytes": 527,
+        "sha256": "ce5e3609aa4d05e018d739873cb6ca72cd148a79cb4674d1051c8a68325eb805"
+      },
+      {
+        "source": "packages/veyra-operations/core126-job-plugin.mjs",
+        "bytes": 8490,
+        "sha256": "f6e09ad01f3de57d948b2b159d10b20a931664cca5bc3e6a4b6bd4500ee99dfc"
+      },
+      {
+        "source": "packages/veyra-operations/core126-job-bootstrap.mjs",
+        "bytes": 2286,
+        "sha256": "d685142d5c2c3ba5ced0c64d9fa2b100ed1979e662462bd493d9bd414cce3343"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-job-bootstrap.ts",
+        "bytes": 515,
+        "sha256": "126f89bb908b7240b91841b9bc7b7e7dabb8f02a3c48097267535736e794e862"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+        "bytes": 2471,
+        "sha256": "d18d5d892477eb5d5a9c501ee3194edf8314cf896997bdd0559aeabcc271400e"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+        "bytes": 2337,
+        "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+        "bytes": 5152,
+        "sha256": "3b9334dc6e32b27b1de2ad50443c63a05a7a48a3d1d78f6454b0baf6d8507b6a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+        "bytes": 3139,
+        "sha256": "e45245d6923f37f17a2f5a8503be0a67852c50eeada2ba3d1fcd202b222e6631"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+        "bytes": 5845,
+        "sha256": "15fca1e2f55a70ea6e259949a44c2b948abf3870d3a4be2133d58ea5143bbd42"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-private-plugin.mjs",
+        "bytes": 2753,
+        "sha256": "6a4fd7a98856465273934fd1ce1f1a8c8f35e12b2b20c958ffc43dd58a456e88"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+        "bytes": 524,
+        "sha256": "c98582e75fed3791aed7b8c5679ba30d67be6cc2034884fb488eef1f19e07226"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+        "bytes": 35028,
+        "sha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/mcp-credentials.ts",
+        "bytes": 39263,
+        "sha256": "541c86dd2488e9917068372ed9a1653f0e4f5e7540a38d24889a5e6173a07ed0"
+      },
+      {
+        "source": "packages/ingenium-extension/scripts/job-run-mcp-transport.ts",
+        "bytes": 1310,
+        "sha256": "aa67ad16b4ab24352bd11d01d08619d52d1da76a45bb1eeb500124ae91b8f2d8"
+      },
+      {
+        "source": "packages/ingenium-extension/scripts/job-run-mcp-client.ts",
+        "bytes": 3556,
+        "sha256": "145fd796bce00a0b680aba0b80b293a9bca1058f5476a2d6cb6321020646552a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+        "bytes": 2675,
+        "sha256": "d865891ca7678458ec9872e5d108cdef31e7a913bf217e806d091b7420fc9bda"
+      },
+      {
+        "source": "tools/veyra-release/core126-candidate-intent.mjs",
+        "bytes": 4893,
+        "sha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1"
+      },
+      {
+        "source": "packages/veyra-operations/core126-candidate-observation.mjs",
+        "bytes": 12489,
+        "sha256": "ff416fb5e4b8334265b325cb7e7943548003902fe4339b8296c780f1f04afa55"
+      },
+      {
+        "source": "packages/veyra-operations/core126-image-owner.mjs",
+        "bytes": 18182,
+        "sha256": "1e6beefa49622995ecdd7cb32f64c5e1715512fcb5ec3fb0b8338eaddf73f2e8"
+      },
+      {
+        "source": "tools/veyra-release/core126-docker-binary.mjs",
+        "bytes": 11083,
+        "sha256": "b3b5456f73996ff63eaa0f433895de6fce62dc1a5cc5eedead38ddb183522d8f"
+      },
+      {
+        "source": "config/opencode-managed/candidate-inert-catalog.json",
+        "bytes": 435,
+        "sha256": "ce1190a5bf8e32a6eee392640350744cd30f0df6d7526c5a57349e929eb30225"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+        "bytes": 5660,
+        "sha256": "6b389fcd9e9780dc29b930969583079eea6188520a5de18e79b88e2f76203063"
+      },
+      {
+        "source": "packages/veyra-operations/core126-candidate-material.mjs",
+        "bytes": 2571,
+        "sha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+        "bytes": 10266,
+        "sha256": "a2b38ee4a33f6cecf98b6861368a6aa21b36e501b25bf1166ee94c1d2f1509cd"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+        "bytes": 12399,
+        "sha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+        "bytes": 2018,
+        "sha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+        "bytes": 8247,
+        "sha256": "3c5028809396e146bd547cdc3c5d06ed32f596e73eadf050a13d912210a38046"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+        "bytes": 1329,
+        "sha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+        "bytes": 3524,
+        "sha256": "41f696f1568d09321e61cbd4099335850485ff25feaf448a916beafb229aafc1"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+        "bytes": 918,
+        "sha256": "d807173cbb481fe7f096f55bdca59cc5f770ccbc04f2522c8744044819c714e3"
+      },
+      {
+        "source": "packages/veyra-operations/core126-image-contract.mjs",
+        "bytes": 26770,
+        "sha256": "22b233b9beff317e5845a3c8c7f9934d0b8f107f0aabe620869b27c430b04adb"
+      },
+      {
+        "source": "packages/veyra-operations/core126-manager-proof.mjs",
+        "bytes": 1585,
+        "sha256": "36faf7dc7064fd4183759c2799d31ade57d9eccbb02eb727bb1998b91cd332a2"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+        "bytes": 9699,
+        "sha256": "2bab431a0d4cd3ab48c3c8ff575d2737f09b5b9b62b8d8125e0bab293ea0f86d"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+        "bytes": 15524,
+        "sha256": "42b8b8e8f7e294d0fd1dbfbb98553d9bca67f7980483eddcc28e8a2707cd721d"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+        "bytes": 2340,
+        "sha256": "fc6ef51d4e71ca58b50cd66ee3b5caebca183bb2d39f3f096dd63d03c65f6365"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+        "bytes": 12223,
+        "sha256": "9baccc0a8ec748ad0679070826162155dd3c92b2d223938fead79ba83463322a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+        "bytes": 4201,
+        "sha256": "0ab7360153ad50f87df5759275593ed4da48f99f1dc5bcacad6885e39b936136"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/repository.ts",
+        "bytes": 3832,
+        "sha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+        "bytes": 23480,
+        "sha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/service.ts",
+        "bytes": 20194,
+        "sha256": "1d8af5c2fb93c30b1d214acb0cc37a30f556ad69aa4712b944e283ce8cbdffbd"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/schedule.ts",
+        "bytes": 4452,
+        "sha256": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+        "bytes": 1729,
+        "sha256": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762"
+      },
+      {
+        "source": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+        "bytes": 1372,
+        "sha256": "0f5b3fa9056ed38c218a83bc300c82495dfe7459b480377b240303c4cdd14624"
+      },
+      {
+        "source": "services/ingenium-api/lib/job-response-verification.ts",
+        "bytes": 2681,
+        "sha256": "d5a023e1e6e91bf24ef7d8ac7734f3df330e307ab1f083b6bca1399ccadc0c46"
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+        "bytes": 12895,
+        "sha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83"
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-auth.ts",
+        "bytes": 850,
+        "sha256": "ef443c5b122dec81c184291c0b86320f70735446b0aa9f94293ce419c2bf8b97"
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-placement-contract.ts",
+        "bytes": 5619,
+        "sha256": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+        "bytes": 1463,
+        "sha256": "09458d257660fa9bd393eff4cde4e6c296195a742cf0e5173c9df022c52b0692"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+        "bytes": 2774,
+        "sha256": "d1878007ef1ae8fbcd7b1ca459a0fc01291946ef379ecfde0c5a425781013bf8"
+      },
+      {
+        "source": "services/ingenium-api/lib/job-native-provider.ts",
+        "bytes": 1526,
+        "sha256": "be7caf71d1f9adf874c0def9cb4292be4b8962986f574bcaf9c5b465803cb4fb"
+      },
+      {
+        "source": "services/ingenium-api/lib/opencode-client.ts",
+        "bytes": 107528,
+        "sha256": "c337a60d03e4ade219c046c6ed02308b46028a572e30d50103664cc61fdb47c4"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+        "bytes": 12169,
+        "sha256": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+        "bytes": 2136,
+        "sha256": "c451bb63f00fdaa36b4fb12afd3db5ea5adebb34cf241b407b463b5f19169000"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+        "bytes": 600,
+        "sha256": "a95183d3535b6da6ba62c1af3358bc724195d9c1dbdbc3174948e0c3177ecdb4"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+        "bytes": 2158,
+        "sha256": "9459006f6964abbadba314e17a700e89896a6ccc7b25aff291de9899884088c1"
+      },
+      {
+        "source": "packages/ingenium-core/lib/index.ts",
+        "bytes": 5546,
+        "sha256": "de7fc69cfe83f7c1680f64a950919d790203f762428a59d86f30a99433925496"
+      },
+      {
+        "source": "packages/ingenium-core/lib/db.ts",
+        "bytes": 315716,
+        "sha256": "935061fb2e140e0f72da6854d4ae813c957e2aabe61e3c5377ab13f01ade9e31"
+      },
+      {
+        "source": "packages/ingenium-core/lib/schema.ts",
+        "bytes": 53644,
+        "sha256": "0131ca7ce9db0f7841239e09eb07d8fcacc1c340858f887b755ebe3805eafe1b"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+        "bytes": 15656,
+        "sha256": "d915d34a49a49c1f242138eb87772e599e0f2676e23955d6d17aa8c289cf02d5"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/jobs.ts",
+        "bytes": 58339,
+        "sha256": "131af2a8174214d18f7b0cdcf59f5ee9fb2c0b9cd6ecb9c9b10e4f86c8b9ac3e"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/runtimes.ts",
+        "bytes": 58127,
+        "sha256": "47118264a1ec11e03a094212487bb9c9f7745de5aea66b3b83a3514398fd7c38"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/context-conversations.ts",
+        "bytes": 64500,
+        "sha256": "9d04b98823b766bd15a2a44a9c344248dce7f2dba08d598767a6fcbc40ac6700"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/trusted-job-events.ts",
+        "bytes": 15315,
+        "sha256": "30554e3b4b0e0d6d6e6ab36bed3d2415d3fa91cbab001671cb041f6595728c42"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/agents.ts",
+        "bytes": 58204,
+        "sha256": "21810c92e30b556a0d32dd572a60d66181f43cce5d99990ce5f6d4a7d554ad11"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/authorization.ts",
+        "bytes": 19024,
+        "sha256": "9248705e19c7d49e1be57a182ca5e62181b5d9fd6fecd659df6d76f167a8cae7"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/mcp-authorization-policy.ts",
+        "bytes": 11872,
+        "sha256": "aa2a41a4bcf2196f7ba6e594337e44a10b737a1e009231eb821b884897979215"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/job-providers.ts",
+        "bytes": 11242,
+        "sha256": "7f3d56a90bb6a6e585d95502a2e45279fbe352539bcf3869ac6e49605008680e"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/vault.ts",
+        "bytes": 37021,
+        "sha256": "85d6a1b33a923cad267137372a5c2fe1f4aba9d2d4b3ae35e46baf6526e9163f"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/runtime-original-provision.ts",
+        "bytes": 17982,
+        "sha256": "2d231a2015739bee169f92c4bc2a3037f9eb3524772efe2903790fe184e870c7"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/authentication.ts",
+        "bytes": 30350,
+        "sha256": "6614b9124326ea5dac21fb0f9da9f1f07378126c61e8a4e670978b5cfc25306f"
+      },
+      {
+        "source": "packages/veyra-operations/core126-candidate-material.d.mts",
+        "bytes": 375,
+        "sha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+        "bytes": 667,
+        "sha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+        "bytes": 2843,
+        "sha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+        "bytes": 290,
+        "sha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+        "bytes": 1485,
+        "sha256": "2f9a03f015a40194aac56a7b9722b5421c7bc32bcff99a88e2106e8dbc8921dd"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+        "bytes": 434,
+        "sha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts",
+        "bytes": 189,
+        "sha256": "5e083615accd16b2f9cf49ba4b452bf6ee71f174993c48c97119fffb0e6b326d"
+      },
+      {
+        "source": "packages/veyra-operations/core126-candidate-observation.d.mts",
+        "bytes": 1129,
+        "sha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d"
+      },
+      {
+        "source": "packages/veyra-operations/core126-image-owner.d.mts",
+        "bytes": 5869,
+        "sha256": "b16847ab048991fd702f67d7d33b9d2e230150a905cd22fd8e82b96bc2ae18ce"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+        "bytes": 13087,
+        "sha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b"
+      },
+      {
+        "source": "scripts/validate-deployment-config.sh",
+        "bytes": 40576,
+        "sha256": "57b194a5c7ed52fe4e2bae8cb87eaa96fd03fb6b995e20251a79a9685043fe69"
+      },
+      {
+        "source": "services/ingenium-api/tsconfig.json",
+        "bytes": 245,
+        "sha256": "c6d353d9521f1a1bc028e887c2bb9db6cdd6310548314de03f42030f4b4b2361"
+      },
+      {
+        "source": "packages/ingenium-core/tsconfig.json",
+        "bytes": 190,
+        "sha256": "6b29c8dbf24a6837ef61466fe869cb461b9110446effbd8ee33ff80d3560ca17"
+      },
+      {
+        "source": "tsconfig.base.json",
+        "bytes": 532,
+        "sha256": "d3a56e5bd556499e9d83efd8838233514341395972098aa24d5981253eabfbcc"
+      },
+      {
+        "source": "services/ingenium-api/package.json",
+        "bytes": 1086,
+        "sha256": "9cd0daf7ba6bed7d5d2f049b67b2158f786df338115a428b912b4d031b77e0aa"
+      },
+      {
+        "source": "packages/ingenium-core/package.json",
+        "bytes": 833,
+        "sha256": "318ae35b9483b94b396287b493a8084fd9d2d3ed847e594b0ebf72c831199eec"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/126_managed_job_execution.sql",
+        "bytes": 8644,
+        "sha256": "44532aace969cf4b76465d72fb14cb68341c269ac08433d77febc89a44adbc4a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql",
+        "bytes": 23513,
+        "sha256": "62c72c6e6c2dee158e7730ae4a9dba2d7a29a8726384b046909ad153ff9ab11b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/130_dot_original_dispatch_fence.sql",
+        "bytes": 14308,
+        "sha256": "3d81d09fce002348304943d18f762740c3fd42cf74cc599048411ccd0237e653"
+      },
+      {
+        "source": "packages/ingenium-core/scripts/copy-core-runtime.mjs",
+        "bytes": 6266,
+        "sha256": "606ac8edf410a3beae4a6d664b540f219c765c8f727af3d2eeb3013bca624cfb"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/backups.ts",
+        "bytes": 149929,
+        "sha256": "a2626fea9bf4aefda42eca88368a6f3717ef98b27fef8ec28ec8e3a01026537b"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/learned-memory-restore.mjs",
+        "bytes": 6022,
+        "sha256": "c18df8abfd95cd9a01ff452a1ae7a0c004caec0387fa1095d6432f004bde908c"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/learned-memory-restore.d.mts",
+        "bytes": 549,
+        "sha256": "a50a848cb6176a034bb0d6186ab201beac94d2f05fb90acd1813ffa567b66909"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/voice-attachment-restore.mjs",
+        "bytes": 9834,
+        "sha256": "7a4452808bde5b20e3261a9d47e59b2c3d520eae1f6d11e0efd49df48c8352d3"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/voice-attachment-restore.d.mts",
+        "bytes": 941,
+        "sha256": "71ca2427e21c75384cc31fb500a83cc7987184baec3a50e9e0e3da9ffc26d6e9"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/132_voice_attachment_deliveries.sql",
+        "bytes": 2588,
+        "sha256": "ae6daaf3b9f1b98265b138be6ed3a4d5c9e052df56b0ba2f06b0bfc674788a0d"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
+        "bytes": 29921,
+        "sha256": "f495504a64bd0b8256b246bc095345d5037773d2a3495648196e86b396fd68ab"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/customize-scoped-v1-contracts.ts",
+        "bytes": 4816,
+        "sha256": "d139f7f68aaefdd7de8e2b6688e0027d5c62c19a6d342bb7b321ae176fa47901"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugins.ts",
+        "bytes": 13370,
+        "sha256": "21cf90ab1a6500fc044148a9eef8cec125a04bcb6b23d766c3e46309048449e4"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+        "bytes": 4889,
+        "sha256": "1cc6e745b428e0ccbfeed0bfbc9698be6ab7baa17a603828d2d4144fdbbf49c5"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugin-config-text.ts",
+        "bytes": 6167,
+        "sha256": "28ecf126e36f84556c1d210ffb0852796f44522a0a20b4a9b769968eb271c0d5"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugin-projection-reconciliation.ts",
+        "bytes": 6786,
+        "sha256": "56e842b1d195dcc86144f5df90dcde753641085582b911f719c6127534925ad0"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/skills.ts",
+        "bytes": 41926,
+        "sha256": "0e537ac05a17b91b27244c6a507f9cd56398537953a717771c1df40c8a85a4c7"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/skill-governance.ts",
+        "bytes": 79668,
+        "sha256": "823770332beb2592f69db2fa7d3c3c2dd321193b9dfa5c3d8ea33ec2af0095a9"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/hosted-governance.ts",
+        "bytes": 24189,
+        "sha256": "6ed09f8cf5e3cf99f57108206a5ba0e141f42d84fe941f01b52f5a461bc77b9f"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+        "bytes": 3045,
+        "sha256": "2ff04444e890d2ff1f893054c3a3e55d56c45f046518fc5b61079177c55af8cb"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/hosted-projection-plan.ts",
+        "bytes": 5548,
+        "sha256": "7405321fb3361e2e6dcf7cb81fb4d17665e8ff9471942140fa6d11804f16babd"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+        "bytes": 3215,
+        "sha256": "db1083e08a49a6c99f89a68ec89f08e109f104a7da1dba4bc689fd874dba7a4d"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/paths.ts",
+        "bytes": 5141,
+        "sha256": "23a788496af98a92f0a48d735c62ac2ea89415111fbc50e9fd2ddc5ebe21b823"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/maintenance-locks.ts",
+        "bytes": 11211,
+        "sha256": "c79d6a35aeaad78dfd11d2e168000325fc49ef71ae572ce4771c82f82c941cb9"
+      },
+      {
+        "source": "services/ingenium-api/scripts/api-server.ts",
+        "bytes": 21727,
+        "sha256": "221405c956487df1178ce25fe9af11e5cd561c50ec2cecb63fdc72c32e5dd148"
+      },
+      {
+        "source": "services/ingenium-api/scripts/runtime-gateway.ts",
+        "bytes": 27056,
+        "sha256": "4e32392548a026b8d1efeb48e02f2cf4237a21369019da2555f41ce6b1b50494"
+      },
+      {
+        "source": "services/ingenium-api/scripts/restore-maintenance.ts",
+        "bytes": 54631,
+        "sha256": "d844f25c617d1e3300dc566cc2bccbe9efeed060e8e849887590d2ed47ece6aa"
+      },
+      {
+        "source": "services/ingenium-api/lib/routes/customize-scoped.ts",
+        "bytes": 3258,
+        "sha256": "0204d7975e9ea06419fc5db82bb559212a09987642f14ed33ec2187f9792b572"
+      },
+      {
+        "source": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+        "bytes": 22319,
+        "sha256": "88ed24ffc3b3350f6e5bd1231428d84816e91e090e5b35ad4164ff0b7cb944fe"
+      },
+      {
+        "source": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+        "bytes": 2143,
+        "sha256": "2fd945e90299950e000cac11b37545f99191a0672f87768dba757a0cef8e986b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+        "bytes": 12554,
+        "sha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09"
+      },
+      {
+        "source": "services/ingenium-api/lib/restore-runtime-guard.ts",
+        "bytes": 5898,
+        "sha256": "1c2bab0dbf8a4ece1606d10e213a5b8826a965f1d86710cad3799e4d0f9b508a"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugin-projection-transition.ts",
+        "bytes": 42687,
+        "sha256": "89506d17ec74df3086d07d485f463075af2b70dd0425448759f71f7273098e19"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/plugin-projection-materialize.ts",
+        "bytes": 9671,
+        "sha256": "be92a2228b7f29861e15b23b0a3d2432430e60a6879b57aa97bfb020f5a69429"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/configs.ts",
+        "bytes": 4732,
+        "sha256": "2abd543f73c2f0a76d07c8aa75c62f4cf93a1e74d4c8c98ee01a73733dd8cc27"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/projects.ts",
+        "bytes": 28615,
+        "sha256": "28133d3e9bcca1e3c4806cb15fddcbce40367aee7931585a646597bf4675b40d"
+      },
+      {
+        "source": "services/ingenium-api/lib/routes/projects.ts",
+        "bytes": 10535,
+        "sha256": "7a530c8de1447f68c2028e51bc6c83e66c05c97d3be69fcfd33219691790f88a"
+      },
+      {
+        "source": "services/ingenium-api/lib/authorization-policy.ts",
+        "bytes": 30499,
+        "sha256": "5855e736a994a20571b01011e912bbc80cb953ab2141d38f9b69aa3895fbfd27"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.mjs",
+        "bytes": 1977,
+        "sha256": "e1ce337a0f296893b1e6a36afba1f2cb2d56fc454b96289f90a109526dbd51cd"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.d.mts",
+        "bytes": 730,
+        "sha256": "f5f4d78dfc253cad570301127d9017b0aaea33800482cb3cd594b459ed72e166"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/attached-call-protocol.mjs",
+        "bytes": 3064,
+        "sha256": "2016f36944291aa916bddb2b105d965129534eab3aa5941e4105d2a11c084aa7"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/attached-call-protocol.d.mts",
+        "bytes": 442,
+        "sha256": "be273803adabc3f1781404efd5ef13604f6d351271dd73fdaab581e323955411"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+        "bytes": 48218,
+        "sha256": "25002842f96917fbb7ed215abb80292043fc6be6435a9d06de859b7fea5e32bb"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+        "bytes": 5995,
+        "sha256": "6d74dc2dbea2f34650ca04d01f62105d82b5591d68d001225db23c44dbbecece"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+        "bytes": 47135,
+        "sha256": "f91dd10e64bf13a36145fd015237b80ee22aedbd8dab920c52dc517ea51b6f9e"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+        "bytes": 26193,
+        "sha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+        "bytes": 11948,
+        "sha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+        "bytes": 1329,
+        "sha256": "572ce33cf8a9ffe8494a00f7ada8e3dc4ff1956858091e11bf1b13ff8a2e12b3"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+        "bytes": 1278,
+        "sha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs",
+        "bytes": 9920,
+        "sha256": "ec6d19bd21690882e735495d5ab2d0fd469316c7d242f5831c3152f2aeb32118"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts",
+        "bytes": 1090,
+        "sha256": "cf1d63fff74994dab09ff0f7e81b66d530457904c47a391fd09f788b10fffe9f"
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/core126-ingress.ts",
+        "bytes": 3111,
+        "sha256": "8fef3d813529d8d9834e8dee838ccc2adada0aaa958cb5ede0da6ac5598a6ecc"
+      },
+      {
+        "source": "packages/ingenium-core/lib/tools/voice-assistant-source.ts",
+        "bytes": 15490,
+        "sha256": "1bf6730300938ad3bae9bb16b9d87b3c661e457a60f280b07b9d288ed88e5fc6"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/134_voice_assistant_sources.sql",
+        "bytes": 8571,
+        "sha256": "e007bf725dc4dd6dc444c61bd3937094e12554ef8e1b07e85277363b51951efa"
+      }
+    ],
+    "sourcePinsSha256": "378d9777d296db77a3ec1fcee61b53bff1bcbe20d6aaafae4031c35ffd3ffed1"
+  },
+  "coreCompiler": {
+    "inputs": 94,
+    "bytes": 2496391,
+    "sourceMerkleSha256": "8fda1f8f58b2718d39900aeabcd4780561eca5d334cf34e9b9fa23c4eb055430",
+    "algorithm": "Original tsconfig parseJsonConfigFileContent fileNames, sorted relative path/raw byte count/SHA256 JSON, no compiler program or emit",
+    "configSha256": "6b29c8dbf24a6837ef61466fe869cb461b9110446effbd8ee33ff80d3560ca17",
+    "data": [
+      {
+        "source": "packages/ingenium-core/data/migrations/001_init.sql",
+        "bytes": 4815,
+        "sha256": "3dd3007fe9e6e3a0088eebec15e46a01e1853027772e928965383f5adbbaeefd"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/002_archive.sql",
+        "bytes": 346,
+        "sha256": "70591fedb852c35ec31229aea524bfce5991b4a52e3e945659d3cdcaca23ba23"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/003_agents.sql",
+        "bytes": 530,
+        "sha256": "b778bedc1b7817db57ffcae5afcdd3cac49d50e765401addd2d82f5fbf43549a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/004_learnings_status.sql",
+        "bytes": 143,
+        "sha256": "89db3ea336f6955ecf31522576bdc8be8808a7b00eb417668db3d1d50e54855c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/005_skills_metadata.sql",
+        "bytes": 103,
+        "sha256": "8c769479616689912b90b1af82aa82447ada3fa2ffc24b643a903a5e6778d78f"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/006_skill_file_tree.sql",
+        "bytes": 46,
+        "sha256": "0a82c8b18071fbdc73f60e4fe020c57645e7a9d80e3d419863972e91a8d8feec"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/007_observations.sql",
+        "bytes": 3362,
+        "sha256": "dca46741dffaad0a00b226bd7d6ec09ba1f28231bebe77769e448635a74ac68a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/008_personality_traits.sql",
+        "bytes": 2369,
+        "sha256": "79d3c22a6868ffeefff09401d2c82700e11e09be238520a2bfe4be1ea64496ff"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/009_pipeline_events.sql",
+        "bytes": 2427,
+        "sha256": "4d500c273f5041ef53bfd418b3c1b5b5b5ce8f7f1743964298a83b4822bf9808"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/010_commands.sql",
+        "bytes": 463,
+        "sha256": "5e9a59a1848415baf515062ea658328debb8fe917cadd6753907d4a5c301c77e"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/011_server_source.sql",
+        "bytes": 128,
+        "sha256": "a0d38a2fef531a61f374e0d8e04c747164033a2c9c559170cd7c092e9d3e829b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/012_project_is_global.sql",
+        "bytes": 130,
+        "sha256": "d94b7eff36500695ea4a17700db65bfc972b62515afdf7859f859c6c90e13a24"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/013_fix_plugins_unique.sql",
+        "bytes": 669,
+        "sha256": "03ca90e615cf4be4be66e29c38d4fc642146edb05c1efd8208b6f086d9730e20"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/014_configs.sql",
+        "bytes": 416,
+        "sha256": "58da0d5d693e61bf7e6f43f0283d22a021f5c877d75685f4ee172ccd4d7d0986"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/015_auto_observer_source.sql",
+        "bytes": 3922,
+        "sha256": "8ea277740b78a6385f7f0a938241e5b1ac7de1bb4cd1f74265753a7f502725ff"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/016_mcp_tool_states.sql",
+        "bytes": 396,
+        "sha256": "191ae5c0f4fff427a9f682c7c21edf5c86f7d209851c966d43011c83f647b479"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/017_fix_trait_fk.sql",
+        "bytes": 2883,
+        "sha256": "3a825e982267f75c4d7f71d3cb8b11c9e9e8ca284a473ea90555c8182440e648"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/018_extraction_pipeline_events.sql",
+        "bytes": 3248,
+        "sha256": "b4c7e44517bb10bf4e64a902f0a491008fdb1839825c333b093868f20443d571"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/019_trait_exemplar_fk_setnull.sql",
+        "bytes": 2895,
+        "sha256": "264bb37825585031ce6cf5a0156e0f80fd7b7d3d04f060341bddcb097cf7da0d"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/020_kanban_board.sql",
+        "bytes": 5097,
+        "sha256": "fd0832d22d381b840187fab661c52990aa4a64493e2d5d739e7b6b16822624c4"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/021_jobs.sql",
+        "bytes": 2129,
+        "sha256": "396ec3b0b88fb7c595ff6ca08cbea1ec11e20bcdb52c09f2a34cf8ce8da4b5ad"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/022_email_cache.sql",
+        "bytes": 2003,
+        "sha256": "c9fef98d1fcceaef784e645a0f7efe4b3d8f33f5f207345b4ed120b60603cd97"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/023_fix_servers_unique.sql",
+        "bytes": 717,
+        "sha256": "2977b950be0fbc937ef1c015c957c9ddde532b05c0ee54e052757eb06a1752bb"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/024_skills_unique_per_project.sql",
+        "bytes": 2890,
+        "sha256": "1a66a94f9df1db5bde12ab47cc78cfe3f493742062dfc16044617890305b5b5a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/025_email_string_ids.sql",
+        "bytes": 3911,
+        "sha256": "0837b4f70cb05c722d9c5d97a5a1bea3e7607ae78a91c5d158c3bb59c1f8feea"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/026_email_suggestions.sql",
+        "bytes": 570,
+        "sha256": "66d9b1c1a2771b2c0379a19432a1151533bce83f2643b7c9c632d99fba6d0a20"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/027_email_summaries.sql",
+        "bytes": 609,
+        "sha256": "a00b475fefd604ea49292fe353954269f3123ede659bc525430a718fc63383e5"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/028_email_suggestion_queue.sql",
+        "bytes": 468,
+        "sha256": "b1487d7a4b0872041283e6dc51824ca5ebc3ed2ea8266b52083cd12c3afca929"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/029_docs_spaces.sql",
+        "bytes": 646,
+        "sha256": "56874313fe2ae6baa0409c23f46707f2045a6d18ff37a3885cb8b825bbaae981"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/030_docs_pages.sql",
+        "bytes": 1101,
+        "sha256": "2a35cf78138af78d4153bfdecd2967f932c748168dfddbe51453081ddfc1b305"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/031_docs_pages_fts.sql",
+        "bytes": 946,
+        "sha256": "0c725b0be1729430195bb6e98fd630389a258af5499e803f6c326b75670e3779"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/032_docs_drafts.sql",
+        "bytes": 398,
+        "sha256": "facfa5268b8b01b855952c28d0a53ff774d68badcb96f630fa45cbc868dd80e8"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/033_docs_versions.sql",
+        "bytes": 464,
+        "sha256": "54c7256c665f7c63250d11359fcaa911d00c78b30d9c41e2e21409ad6d3f67a0"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/034_docs_tags.sql",
+        "bytes": 455,
+        "sha256": "87b411ed4b717a50235338f542cee30f3b0b8ab89cbe2bf8f87f2c093c7ef757"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/035_docs_links.sql",
+        "bytes": 524,
+        "sha256": "6cd7fc9c081ac3cee321e1a0b0e70f0b13f7809bb88abc6f3389d76ab9cb285b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/036_docs_comments.sql",
+        "bytes": 709,
+        "sha256": "4c3a5f16c9206faa6ebac65e5920ff38d13e84abf4bd5f5c024fa4810b1858e3"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/037_docs_project_links.sql",
+        "bytes": 427,
+        "sha256": "9ca24d7e5c73e266419bb285e7cc296e81b5c205c5d3257afffcd0ade4269023"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/038_docs_attachments.sql",
+        "bytes": 692,
+        "sha256": "1499cd4a3d389f78eef72d519ca1faefae110afb362acc7376d82da73bf20a4a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/039_docs_templates.sql",
+        "bytes": 377,
+        "sha256": "002993fb99cecefee2f7a3a1c0b14ba529b0e4a08bb41d9bdb18b3ddf1dc3d29"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/040_docs_integrity.sql",
+        "bytes": 2079,
+        "sha256": "08263bba0a367df81364420f5a1e553d53322ad51bed2ed562cca4257972ce2c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/041_skill_maintenance_locks.sql",
+        "bytes": 2164,
+        "sha256": "50ece0f8ace73671c1e55d2abbd895886e61030b4bc369142857d3997693bafa"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/042_skill_versions.sql",
+        "bytes": 3845,
+        "sha256": "70c44abd4597909b02dbf3914e0c31d12feab024dff860c9aeb5315dfc80bede"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/043_skill_lineage.sql",
+        "bytes": 2468,
+        "sha256": "cfec2476e3e0aca1716cb4fddf1a300d2fb317b9c7469cdbecd8c4119c4c88c9"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/044_skill_proposals.sql",
+        "bytes": 4043,
+        "sha256": "d087a7383a568f963a5f40129996e7067df0ed62d22b4a8eda8faba43166a16e"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/045_pipeline_event_types.sql",
+        "bytes": 4011,
+        "sha256": "694dd057293d67657a6c380381c036e0a443b5549dea8130d8b5f4965aa0a55a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/046_vault.sql",
+        "bytes": 2572,
+        "sha256": "c98fd1a93ff54be1e1f8efcef2d06c4c450c416b915fdadb83e146553412e6d6"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/047_backups.sql",
+        "bytes": 1132,
+        "sha256": "337b4135a4a265983cabe52bac638a1232f9ad34113a0f2650398e1a05f99b84"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/048_docs_rag.sql",
+        "bytes": 3473,
+        "sha256": "e46c188ca29846913f0ee7460938ee2d6e6f15fd961e61277c655ed8a9e5edb3"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/049_workspace_project_migration.sql",
+        "bytes": 513,
+        "sha256": "ecef272c7caeff7bd9303108be5b96d382793b36ed7437e46bbd3f5abe6746ee"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/050_context_rag_phase3.sql",
+        "bytes": 965,
+        "sha256": "85ab948210ce8b7257c78aa84f30370e6ecf1353c7d728700866e9befa8c9745"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/051_thread_retirement.sql",
+        "bytes": 1433,
+        "sha256": "e352d86d9c827b949771a696b35e289717747dd101972241b353e28fef05fe1b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/052_agent_category_integrity.sql",
+        "bytes": 1143,
+        "sha256": "d20b5d827d537a163931a7307037da94d53436eea1fc6a9612bc58dc9a77696f"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/053_global_project_integrity_and_protected_settings.sql",
+        "bytes": 692,
+        "sha256": "e862b65738c2e01763983e1a1eb7f382af30e8598f97699dca032343b96ac8a5"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/054_agent_frontmatter_metadata.sql",
+        "bytes": 1289,
+        "sha256": "0a36675aae84ebfbbefd306e16b962afbbf82e6bb79844a0f1a710ea5233b2ad"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/055_reserved_broker_delete_protection.sql",
+        "bytes": 630,
+        "sha256": "bece29f091a35799895df20f0edba04d0f856b589a4419cba75f5bd373b60717"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/056_reserved_broker_rename_protection.sql",
+        "bytes": 533,
+        "sha256": "6060991f6a1728d13ede59cfeb9e772d8f8d266ae1dcf860882ece365dff4fbd"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/057_reserved_broker_immutable.sql",
+        "bytes": 3159,
+        "sha256": "ffed0046fc90175b1da76ed13724665738916129a9e985407ed8764e3ea3de12"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/058_reserved_broker_connection_independent.sql",
+        "bytes": 5755,
+        "sha256": "202c0ac637d978209250c35934cbc7f93da2453dead92481dedbe89d5b8780f8"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/059_repository_docs_onboarding.sql",
+        "bytes": 1031,
+        "sha256": "cbc82caf923d3db26248da94e79e85220abecb3b4ab65bfac1c8b818c5e71483"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/060_repository_resource_sync.sql",
+        "bytes": 1150,
+        "sha256": "c7cc81e36b57793248814dac166fbbd33123d50d8428594bf1e587151c128fc6"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/061_global_backup_ownership.sql",
+        "bytes": 955,
+        "sha256": "c58917d9e059a2ebcb15dc3aa32f79edb0f3dd89b6fad67b2e3c45dd89375f44"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/062_child_mcp_definitions.sql",
+        "bytes": 3521,
+        "sha256": "442695c98851ad88f4fc33e3e1654f6ca1c69acdb7a1eb4eb67e847a2121028f"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/063_immutable_context_conversations.sql",
+        "bytes": 7867,
+        "sha256": "1229565e10dbd2c39f35a51e9d9a8bac3d5b7a512c8dccaca76f7380a69227b2"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/064_child_mcp_tool_categories.sql",
+        "bytes": 1844,
+        "sha256": "33409e240bccc03fe1fda157f5cf9d859b9089af529e3d8dc90fcfc4bb84c0c3"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/065_context_rag_ingestion.sql",
+        "bytes": 8667,
+        "sha256": "6f6c7e2ebdd6e2965f2e269e096b926d4ded2a7cde23d8687ce395440f84c8cd"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/066_context_checkpoint_governance.sql",
+        "bytes": 4353,
+        "sha256": "849772f80009b8fd1e21c0fcb972cd18dff04911be480a194bcb8fdd3173dfad"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/067_context_migration_repair.sql",
+        "bytes": 808,
+        "sha256": "e2b4e0cbf18debee6e029bb79b57e1d552c728ac28c3b854d0665490e3f26797"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/068_usage_telemetry.sql",
+        "bytes": 3907,
+        "sha256": "4d809219a8a1d68140d1eac7924b8010a928a0e3fda4b2d10a884ef31015cf28"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/069_context_conversation_snapshot_imports.sql",
+        "bytes": 3185,
+        "sha256": "1aebc753c063dc81410f76e79f2dfbf80464bece75cc058d1acb42abeb0d4444"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/070_drop_legacy_rag_embeddings.sql",
+        "bytes": 185,
+        "sha256": "e78f53b2a4bc61c25c400e27adcff42322580f87ef8166273de57851b9963884"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/071_context_rag_session_source_reference.sql",
+        "bytes": 2012,
+        "sha256": "f6077625c404ec2d9b70e9fe41c9ec2e7c7558e4dba2dff7b68ee757b2ac68e2"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/072_task_source_references.sql",
+        "bytes": 1399,
+        "sha256": "2ccf6077e45cf7de65273cd9940ffe2b3389124a48a45700f743de537cf5058b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/073_task_coordination.sql",
+        "bytes": 2787,
+        "sha256": "cc9450fa9c85c7ccf09af0fb923a84ae9a792194c6958fb1ce29c9fb5b38ce15"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/074_task_reservation_tokens.sql",
+        "bytes": 2251,
+        "sha256": "8c0e1a53814fc5c43a130d0997decaa409d79bb36b7ed09620e25d5a844d1cd1"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/075_coordination_registry.sql",
+        "bytes": 5807,
+        "sha256": "55ca7ec37646f07cce8147ff512c55ab5b9f1da2f34306917f0c964a605a3b96"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/076_trusted_job_events.sql",
+        "bytes": 7773,
+        "sha256": "c429bd16b13e2407dddf834c49fc61aea29efbe35b9ef7bc1623e63b07b3c1c0"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/077_job_event_deliveries.sql",
+        "bytes": 7367,
+        "sha256": "952a3c28c452d689e6799d59e10f133da91092eb06bbc2ce760a54ee5dd87fde"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/078_usage_advisory_thresholds.sql",
+        "bytes": 1669,
+        "sha256": "96acf90934f225c6dd6f51c011945461c507ee0c033fd4c6a04b9b851381e5ab"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/079_usage_attention_items.sql",
+        "bytes": 14804,
+        "sha256": "cac140a5557c5f2423ee337fc7a130dbe87faa21bb4789849a983492832f2f72"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/080_job_vault_references.sql",
+        "bytes": 4460,
+        "sha256": "7e039dc42adafab7faebb1c0835edcf74b16514f2fd7f4f12f902ed03b9d62f5"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/081_vault_job_runs.sql",
+        "bytes": 4576,
+        "sha256": "73624c7c3528aade01d81525ec8930c634d0666aa33b44c59542836831d2f758"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/082_job_vault_revision_audit.sql",
+        "bytes": 2524,
+        "sha256": "329fc2bd7b4db8109673dc6d750dc388e8f062647538095f4a375becca6e1b24"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/083_restore_plans.sql",
+        "bytes": 17380,
+        "sha256": "423bf62424fa959580bbf9c1e41d616a157112f1e1acbca891528cbf0d87d21f"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/084_restore_executor.sql",
+        "bytes": 27629,
+        "sha256": "dadecc8f7c0f25e283563c47e5ac382e0c3ccb00276522995737941d480c8f81"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/085_restore_executor_phase_events.sql",
+        "bytes": 2624,
+        "sha256": "118207580952263306c1350de812401351d85a2edb834898acfef50b9c4e7eb3"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/086_server_global_project_provenance.sql",
+        "bytes": 1235,
+        "sha256": "4b2a947baa7aaaf5dfb34bf3a74bd8c9336155222db2a568f54e791c1b378751"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/087_job_timeout_guard.sql",
+        "bytes": 934,
+        "sha256": "3163d768fb551bc3c51cbfe700634d8eb96987aa279272bfcbf5758803ea229d"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/088_email_suggestion_queue_leases.sql",
+        "bytes": 579,
+        "sha256": "7d62ea64360a64bc64710efd7e0d73d525f1f726b3a74bd87f0ef65f263b7f0c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/089_synthesis_batch_phases.sql",
+        "bytes": 4736,
+        "sha256": "d35f54bc9f76b26031bedb06daf64d8467adfd7e6d0ba46f92f7bad4143396de"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/090_backup_deletion_reservations.sql",
+        "bytes": 1612,
+        "sha256": "ca514bb4b1525437ef2567d66f6329a4d1a49960dbe2f1fb48912f5e5d7337b1"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/091_skill_proposal_retention_pagination.sql",
+        "bytes": 495,
+        "sha256": "d380e7b15302c9c9824f62658bbdabd2f929f4f9c140be1c3e056deb710cbc26"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/092_email_watcher_markers.sql",
+        "bytes": 977,
+        "sha256": "3e820b23f36f938412d790b737f52903a2696f0e645141434aadee680f2c4707"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/093_identity_tenancy.sql",
+        "bytes": 8341,
+        "sha256": "b7e0328910a746516fde839b26cbeee1bcd6a02de76248f8b664fec0f6f5bc16"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/094_authentication.sql",
+        "bytes": 6885,
+        "sha256": "a1da9d79f7b2d4e20444d52ebcf61291925fc732f8d2563512a7725c08ae9980"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/094_authentication_auth101_upgrade.sql",
+        "bytes": 6728,
+        "sha256": "ac021ff629e95bb4ca293a600fb6a96d33a306ec2fad9926668dfc0da41b6b67"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/095_authorization_audit.sql",
+        "bytes": 6499,
+        "sha256": "e80a17bacb3b35bd2b8331eca19c00dc2ff1574f11af56667d2e08ac649f649a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/095_authorization_auth101_upgrade.sql",
+        "bytes": 4170,
+        "sha256": "f4113437d96e32d885d94535dbc7ff98ebfed7ca5bb16428a67a5e9cb243c257"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/095_authorization_auth103_upgrade.sql",
+        "bytes": 740,
+        "sha256": "b31cdf2eba248dc558c10b05d7173f4b343c33c6502b145726a16a4c997a57ee"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/096_resource_ownership.sql",
+        "bytes": 20074,
+        "sha256": "c498798aacc5b1cc0772d6601ca2e9cd363bcd7508a090e0e0f6b849714a6c59"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/097_mail_tenancy.sql",
+        "bytes": 19589,
+        "sha256": "75038b89f90edf92de8e7e1d5400ad871c018373f5269c2baf3ab63d0bf6b848"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/098_content_tenancy.sql",
+        "bytes": 34150,
+        "sha256": "c920785a4f7ac432665110a2dedd32af9c14e7f88516ae0a1dc5c3f49e7722bd"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/099_automation_tenancy.sql",
+        "bytes": 42743,
+        "sha256": "142a456ff02535d76a6c85b6d076825540876c5bb17079147570584254dfa27a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/100_mcp_credentials.sql",
+        "bytes": 4054,
+        "sha256": "8dd566751629210d7ba72e6d125ff8f8962a787b16d8bb277266d5f763615c0b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/101_runtime_isolation.sql",
+        "bytes": 14779,
+        "sha256": "eda6b8980215e9e118ca969011e7c4018d2c2a087c910b4122fa1ed6af4159bf"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/102_runtime_browser_sessions.sql",
+        "bytes": 6866,
+        "sha256": "a73d9c89d805a32a148fa7122eb4dc7c6658dc04627cd3a2ea14d931d962e413"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/103_runtime_browser_launcher_origin.sql",
+        "bytes": 1699,
+        "sha256": "bd27132116b42e0a127fb9a8a700b181eded00a3dab5d17d52d3da4e822a6af6"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/104_security_audit_project_history.sql",
+        "bytes": 2549,
+        "sha256": "0bce35c60d953c1717e1aa2aee94fdbe18c56ac5b8d0fb293fe1f779747633d6"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/104_security_audit_project_history_collision_upgrade.sql",
+        "bytes": 348,
+        "sha256": "748c387589f9894dc9864fe26a9bf163319bb97fb4ac8f909f5d257e41ef1384"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/105_runtime_localhost_browser_origins.sql",
+        "bytes": 8718,
+        "sha256": "a10d0de81a68bb5f021ae4bb37f09e2021f3012cdda26f6f4e48ca897c4de007"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/106_session_csrf_grants.sql",
+        "bytes": 2784,
+        "sha256": "576cb7217b343d42135257e49e41f667577490af38a84bab2f17538082973345"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/107_coordination_handoffs.sql",
+        "bytes": 3046,
+        "sha256": "cbe55303ed36e5dfed747470d93fb1313cca124965929dc85c56a7db7622232f"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/108_coordination_client_claim_keys.sql",
+        "bytes": 1345,
+        "sha256": "b0c544e405f77130ff956747bbd1b28e14f9187dba268c381f56eb735a94dd7c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/109_runtime_workspace_supersession.sql",
+        "bytes": 4729,
+        "sha256": "2e635bb10b4754842901c0968f245c6435e0697c69e509b973f4a51d1326d81d"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/110_coordination_memory_cursors.sql",
+        "bytes": 1602,
+        "sha256": "f4254eaac3f171a96cbf4754dba35ca5ea7f9214a4ce699bc70659ad4cab6286"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/111_managed_mutation_repository_serialization.sql",
+        "bytes": 3538,
+        "sha256": "3a921b3984c0c023d57b7806cc5d0610b70a647f00ee5e0a4da907e48a2f6b9e"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/112_atomic_epoch_recovery.sql",
+        "bytes": 4278,
+        "sha256": "928dc8b7d7dfeb1e726954a736560674551d9e5977d5f79d2124d01a3d056c61"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/113_linked_session_transcripts.sql",
+        "bytes": 5106,
+        "sha256": "a04a651e875a92992273c5d1bb5c31550b1640077f967ebce7e6f49de77e5607"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/114_explicit_saved_memory.sql",
+        "bytes": 13554,
+        "sha256": "f8f7fef4a8eac25bd34ac7790e4cdcbaddbee7bdfd1484814753f63bb362d912"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/115_explicit_memory_fts_update_order.sql",
+        "bytes": 711,
+        "sha256": "31790d45c8e86467dea01845aabe52d7f7f192ff8b1b3765ff12658cff4ff694"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/116_child_mcp_description.sql",
+        "bytes": 158,
+        "sha256": "78092726c2d3956736223f837e103d888cd3bb16c9ab3424f10e052e6bdbe334"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/117_mcp_credential_receipts.sql",
+        "bytes": 327,
+        "sha256": "c020d25cae564c3033b2b12d2c0b3655a35c9476f8f88181bdc8b3fe13c6ba5d"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/118_repository_command_resources.sql",
+        "bytes": 1210,
+        "sha256": "2f9168b849c0e49c5dd1d9443d5875d1be89ec434e67638b5280eaeebc970f52"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/119_plugin_description.sql",
+        "bytes": 617,
+        "sha256": "9658a2a19a692a489540c6aa21f500cc5b332220cda52c740d878559fb5b57ed"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/120_lifecycle_plugin_description.sql",
+        "bytes": 321,
+        "sha256": "6cd315b2c8b5b0723491b746511af6d5554f182aad01cb00483b1600f03f36da"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/121_repository_sync_worktree_state.sql",
+        "bytes": 1730,
+        "sha256": "a9a3961676068996811120e685e80f3f2379920b053ae7897b01311260df563c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/122_veyra_workspace_projects.sql",
+        "bytes": 3174,
+        "sha256": "f6ac42adcd1b8c2f02a0da08d4970dc0059a1a305a92f1dcef15dfce3f32c361"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/123_veyra_memory_lifecycle.sql",
+        "bytes": 5030,
+        "sha256": "8536c1f43f335a7d41b96f4f00940ab601a5b300ce08306324dbe1ec70cbe763"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/124_veyra_dot_automation.sql",
+        "bytes": 903,
+        "sha256": "d333419a94d73e3e359bf4588da6f1f337e3f517b93c00bf3805ba6118a6e5c9"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/125_native_hosted_governance.sql",
+        "bytes": 3595,
+        "sha256": "7ce5ba1676b0f00864c77b2b6821569d521563127db94a0bed505ddac2c7c6b8"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/126_managed_job_execution.sql",
+        "bytes": 8644,
+        "sha256": "44532aace969cf4b76465d72fb14cb68341c269ac08433d77febc89a44adbc4a"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/127_runtime_original_provisions.sql",
+        "bytes": 3635,
+        "sha256": "b8303c3d11dfcbbe1056a0143d7f5bf7f62c2f687ec12cd9d9415a80e86b7acb"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/128_voice_operations.sql",
+        "bytes": 9339,
+        "sha256": "e9056961e84020a797165babb189e8ba1469a1f630561ae793b2884c395be55e"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql",
+        "bytes": 23513,
+        "sha256": "62c72c6e6c2dee158e7730ae4a9dba2d7a29a8726384b046909ad153ff9ab11b"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/130_dot_original_dispatch_fence.sql",
+        "bytes": 14308,
+        "sha256": "3d81d09fce002348304943d18f762740c3fd42cf74cc599048411ccd0237e653"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/131_candidate_waiting_lifecycle.sql",
+        "bytes": 44139,
+        "sha256": "8ae12c3081e8ae6701619b7eea0d2bdddf093c4c30533a578dec03d5244aae2c"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/132_voice_attachment_deliveries.sql",
+        "bytes": 2588,
+        "sha256": "ae6daaf3b9f1b98265b138be6ed3a4d5c9e052df56b0ba2f06b0bfc674788a0d"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+        "bytes": 12554,
+        "sha256": "01e5543d7b05e2134009923e7b97576781d20eee7e6549931b490c510e9d7b09"
+      },
+      {
+        "source": "packages/ingenium-core/data/migrations/134_voice_assistant_sources.sql",
+        "bytes": 8571,
+        "sha256": "e007bf725dc4dd6dc444c61bd3937094e12554ef8e1b07e85277363b51951efa"
+      }
+    ]
+  },
+  "apiFirstpartyView": {
+    "files": 269,
+    "bytes": 2376391,
+    "compilerInputs": 150,
+    "inventorySha256": "bf2e63ef144ac8e79739c732d8240aa894c37347042bfc00f712d15e1d58514a",
+    "limitBytes": 16777216,
+    "dynamicRuntimeImports": [
+      {
+        "source": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+        "line": 5,
+        "reason": "Computed runtime import is not a compiler-input file-copy request; actual runtime closure remains gated"
+      }
+    ],
+    "materialized": false,
+    "refreshedDuringRootIntegration": {
+      "reason": "Root continuing authorized voice integration; same269inputs, no scope or copier preimage change",
+      "priorInventorySha256": "7cbe62e9c9bcf2b2444bb82d8d6c93d81293e45767afe18e26e1923b6af9451e",
+      "changes": [
+        {
+          "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+          "before": "69dc5556d07305c16f835ff1c800023b658625cd02229c0775d2092facbc6732",
+          "after": "6d74dc2dbea2f34650ca04d01f62105d82b5591d68d001225db23c44dbbecece",
+          "bytes": 5995
+        },
+        {
+          "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+          "before": "266bcede5fce10416ee3aab2f7bfd4afe396eac905f6c4905dbf5749a611ad9e",
+          "after": "25002842f96917fbb7ed215abb80292043fc6be6435a9d06de859b7fea5e32bb",
+          "bytes": 48218
+        },
+        {
+          "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+          "before": "7749d9b11e080b7403b7a3a538762404e9398dbb666f06cfcb193bf297bc0188",
+          "after": "f91dd10e64bf13a36145fd015237b80ee22aedbd8dab920c52dc517ea51b6f9e",
+          "bytes": 47135
+        }
+      ]
+    }
+  },
+  "apiPlanner": {
+    "rawOriginalFailure": "Runtime import is outside reviewed closure: ../runtime-manager-auth.js; candidate-manager-http.mjs:3 and candidate-original-manager.mjs:5",
+    "postimageSourcePlanPassed": true,
+    "entries": 169,
+    "compiledRelocations": 6,
+    "fixedDirectSources": [
+      "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "services/ingenium-api/lib/dot-v2/dot-original-context.ts"
+    ],
+    "fixedCompilerGraph": [
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-auth.ts",
+        "sourceSha256": "ef443c5b122dec81c184291c0b86320f70735446b0aa9f94293ce419c2bf8b97",
+        "target": "lib/runtime-manager-auth.js",
+        "declarationTarget": "lib/runtime-manager-auth.d.ts",
+        "closure": [
+          {
+            "specifier": "node:fs",
+            "kind": "original-platform-package"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-contract.ts",
+        "sourceSha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a",
+        "target": "lib/runtime-manager-contract.js",
+        "declarationTarget": "lib/runtime-manager-contract.d.ts",
+        "closure": [
+          {
+            "specifier": "node:crypto",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "node:fs",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "node:path",
+            "kind": "original-platform-package"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+        "sourceSha256": "42b8b8e8f7e294d0fd1dbfbb98553d9bca67f7980483eddcc28e8a2707cd721d",
+        "target": "lib/dot-v2/dot-original-context.js",
+        "declarationTarget": "lib/dot-v2/dot-original-context.d.ts",
+        "closure": [
+          {
+            "specifier": "node:async_hooks",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "../../../../packages/veyra-operations/core126-candidate-observation.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/veyra-operations/core126-candidate-observation.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-candidate-observation.mjs"
+          },
+          {
+            "specifier": "../../../../tools/veyra-release/core126-candidate-intent.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tools/veyra-release/core126-candidate-intent.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/veyra-tools/veyra-release/core126-candidate-intent.mjs"
+          },
+          {
+            "specifier": "./job-bootstrap-frame.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs"
+          },
+          {
+            "specifier": "ingenium-core",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "./installed-dot-approved-scope.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/installed-dot-approved-scope.js"
+          },
+          {
+            "specifier": "./repository.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/repository.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/repository.js"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+        "sourceSha256": "fc6ef51d4e71ca58b50cd66ee3b5caebca183bb2d39f3f096dd63d03c65f6365",
+        "target": "lib/dot-v2/installed-dot-approved-scope.js",
+        "declarationTarget": "lib/dot-v2/installed-dot-approved-scope.d.ts",
+        "closure": [
+          {
+            "specifier": "ingenium-core",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "../runtime-manager-client.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/runtime-manager-client.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/runtime-manager-client.js"
+          },
+          {
+            "specifier": "../runtime-placement-contract.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/runtime-placement-contract.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/runtime-placement-contract.js"
+          },
+          {
+            "specifier": "../projects-v2/request-chat-source.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/projects-v2/request-chat-source.mjs"
+          },
+          {
+            "specifier": "./request-binding.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/request-binding.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/request-binding.js"
+          },
+          {
+            "specifier": "./core126-owner.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/core126-owner.mjs"
+          },
+          {
+            "specifier": "./repository.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/repository.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/repository.js"
+          },
+          {
+            "specifier": "./dot-job-policy.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/dot-job-policy.mjs"
+          },
+          {
+            "specifier": "./dot-approved-scope.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/dot-approved-scope.mjs"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+        "sourceSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+        "target": "lib/runtime-manager-client.js",
+        "declarationTarget": "lib/runtime-manager-client.d.ts",
+        "closure": [
+          {
+            "specifier": "./voice-v2/raw-assistant-wire.mjs",
+            "kind": "original-mjs",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/voice-v2/raw-assistant-wire.mjs",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/voice-v2/raw-assistant-wire.mjs"
+          },
+          {
+            "specifier": "node:fs",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "ingenium-core/lib/tools/runtime-original-provision",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "node:crypto",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "./runtime-placement-contract.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/runtime-placement-contract.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/runtime-placement-contract.js"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/runtime-placement-contract.ts",
+        "sourceSha256": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd",
+        "target": "lib/runtime-placement-contract.js",
+        "declarationTarget": "lib/runtime-placement-contract.d.ts",
+        "closure": [
+          {
+            "specifier": "node:crypto",
+            "kind": "original-platform-package"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+        "sourceSha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a",
+        "target": "lib/dot-v2/request-binding.js",
+        "declarationTarget": "lib/dot-v2/request-binding.d.ts",
+        "closure": [
+          {
+            "specifier": "node:crypto",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "./service.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/service.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/service.js"
+          },
+          {
+            "specifier": "./existing-jobs.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/existing-jobs.js"
+          },
+          {
+            "specifier": "./repository.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/repository.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/repository.js"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/service.ts",
+        "sourceSha256": "1d8af5c2fb93c30b1d214acb0cc37a30f556ad69aa4712b944e283ce8cbdffbd",
+        "target": "lib/dot-v2/service.js",
+        "declarationTarget": "lib/dot-v2/service.d.ts",
+        "closure": [
+          {
+            "specifier": "node:crypto",
+            "kind": "original-platform-package"
+          },
+          {
+            "specifier": "./repository.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/repository.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/repository.js"
+          },
+          {
+            "specifier": "./schedule.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/schedule.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/schedule.js"
+          }
+        ]
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/repository.ts",
+        "sourceSha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863",
+        "target": "lib/dot-v2/repository.js",
+        "declarationTarget": "lib/dot-v2/repository.d.ts",
+        "closure": []
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/schedule.ts",
+        "sourceSha256": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
+        "target": "lib/dot-v2/schedule.js",
+        "declarationTarget": "lib/dot-v2/schedule.d.ts",
+        "closure": []
+      },
+      {
+        "source": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+        "sourceSha256": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
+        "target": "lib/dot-v2/existing-jobs.js",
+        "declarationTarget": "lib/dot-v2/existing-jobs.d.ts",
+        "closure": [
+          {
+            "specifier": "./service.js",
+            "kind": "original-ts-output",
+            "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/lib/dot-v2/service.ts",
+            "target": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist/lib/dot-v2/service.js"
+          }
+        ]
+      }
+    ],
+    "sourceEnrollmentMissing": [],
+    "imageEnrollmentMissing": [
+      "/app/services/ingenium-api/dist/lib/runtime-manager-auth.d.ts",
+      "/app/services/ingenium-api/dist/lib/runtime-manager-contract.js",
+      "/app/services/ingenium-api/dist/lib/runtime-manager-contract.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/dot-original-context.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/installed-dot-approved-scope.d.ts",
+      "/app/services/ingenium-api/dist/lib/runtime-manager-client.d.ts",
+      "/app/services/ingenium-api/dist/lib/runtime-placement-contract.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/request-binding.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/service.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/repository.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/schedule.d.ts",
+      "/app/services/ingenium-api/dist/lib/dot-v2/existing-jobs.d.ts"
+    ],
+    "compilerOutputsExist": false,
+    "actualPreparationMustRefuseWithoutCompilerOutputs": true
+  },
+  "commands": {
+    "kind": "descriptor-only-not-stage-approval",
+    "sourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+    "destination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1",
+    "coreDestination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/dist",
+    "apiDestination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist",
+    "environment": "Existing scoped wrapper; no npm, NODE_PATH, loader hooks, import maps, dependency copies or symlink creation.",
+    "prerequisites": [
+      "Root records source/preimage ownership, processes/mounts, shared build lease and fresh Windows C/reserve + unchanged paired20GiB admission for the whole estimated Node capsule peak. Do not reuse the Core132 fixture128MiB guard as compiler proof. Rust2.25GiB reserve remains unchanged.",
+      "Root reviews/integrates both exact Core/API copier postimages and reruns helper tests.",
+      "Current API planner must pass after legitimate original compiled dependencies are reviewed. Current recorded failure is runtime-manager-auth.js.",
+      "Root creates format=veyra-current-core-api-capsule, destination=this literal, firstpartyLimitBytes=16777216 ownership receipt under this one absent child under existing tests/artifacts and minimal ownership receipt, with no active consumer and no protected target reuse. This does not create another task root."
+    ],
+    "commands": [
+      {
+        "id": "original-firstparty-input-view",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "--input-type=module",
+          "--eval",
+          "import {materializeFirstPartyInputs} from \"file:///home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/packaging/docs/workstreams/packaging/current-api-firstparty-input-view.mjs\";materializeFirstPartyInputs(\"bf2e63ef144ac8e79739c732d8240aa894c37347042bfc00f712d15e1d58514a\");"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+        "meaning": "Exact bounded<=16MiB firstparty inputs only; Root ownership+shared lease, pinned inventory, exclusive writes, no dependencies/runtime/source tree snapshot."
+      },
+      {
+        "id": "core-original-tsc",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "--",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/typescript/bin/tsc",
+          "--project",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core/tsconfig.json",
+          "--outDir",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/dist",
+          "--noEmitOnError"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core",
+        "meaning": "Original compiler/config with explicit output; golden Core dist untouched."
+      },
+      {
+        "id": "core-original-byte-copier",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core/scripts/copy-core-runtime.mjs",
+          "--destination",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/dist"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core",
+        "meaning": "Patched actual copier, same four exact helpers and declarations; default unchanged."
+      },
+      {
+        "id": "core-original-data-copy",
+        "executable": "cp",
+        "arguments": [
+          "-r",
+          "--",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core/data",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/dist/data"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core",
+        "meaning": "Same original build-owned SQL/data tree only, never source/node_modules. Root first verifies plain stable source data inventory and absent destination under exact capsule."
+      },
+      {
+        "id": "original-package-manifests",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "--input-type=module",
+          "--eval",
+          "import fs from 'node:fs';import path from 'node:path';for(const [source,target]of [[\"/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core/package.json\",\"/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/node_modules/ingenium-core/package.json\"]]){const stat=fs.lstatSync(source);if(!stat.isFile()||stat.isSymbolicLink()||stat.nlink!==1||fs.realpathSync(source)!==source)throw Error('Unsafe original package manifest');fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,fs.readFileSync(source),{flag:'wx'});}"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+        "meaning": "Exact original Core package.json bytes; API manifest is already in input view. No exports edits/dependency copies."
+      },
+      {
+        "id": "api-original-tsc",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "--",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/node_modules/typescript/bin/tsc",
+          "--project",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/tsconfig.json",
+          "--outDir",
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist",
+          "--noEmitOnError"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api",
+        "meaning": "Original compiler/config/options against exact firstparty input view resolves current real capsule Core via normal exports; original include set and source byte pins preserved."
+      },
+      {
+        "id": "api-original-runtime-copier",
+        "executable": "bash",
+        "arguments": [
+          "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/run-chat-plus-scoped.sh",
+          "/home/brajam/.local/bin/node",
+          "--input-type=module",
+          "--eval",
+          "import{planDomainRuntime,materializeDomainRuntime}from \"file:///home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/services/ingenium-api/scripts/copy-domain-runtime.mjs\";materializeDomainRuntime(planDomainRuntime({sourceRoot:\"/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes\",destination:\"/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1/services/ingenium-api/dist\"}));"
+        ],
+        "cwd": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+        "meaning": "Existing original API destination API; all normal reviewed MJS/declarations and compiler relocations. No custom loader or extra import rewrite."
+      }
+    ],
+    "qualificationNotYetRun": [
+      "Check copied package manifests byte-identical and all current selected IMAGE Core/API mappings incl helpers/declarations/SQL present and exact; current SOURCE pins must match Root reviewed originals. Keep unsupported IMAGE rows as full-image gates.",
+      "Use ordinary Node ESM package resolution from actual capsule importers. ingenium-core and ingenium-core/lib/* MUST resolve this real capsule package via unchanged exports, never golden dist. Existing APP dependency tree is inherited normally; no symlink/payload fallback.",
+      "Validate every emitted Core/API static JS/MJS import/re-export and declaration dependency under normal NodeNext/exports; keep unresolved/dynamic imports explicit. Actual API copier compiled postimages and declaration closure must pass.",
+      "Run original TypeScript noEmit declaration-consumer program located inside capsule importing all actual Core public exports plus actual API entry declarations, without paths/baseUrl overrides. This checks current declaration closure, not original API source against current Core.",
+      "Root actual current compiled startup, Core133 SQL/customization and signed-capsule regressions use controlled fresh fixture/runtime data under the capsule, original package exports and real dependencies. No source alias or custom loader can replace imports.",
+      "Actual original npm/package/pack/image and genuine golden132 deployment-capture consumers remain separate required gates."
+    ],
+    "blockers": [
+      "Current actual API MJS planner fails on compiled runtime-manager-auth.js dependency; no closed capsule yet.",
+      "Root must create/pin the authorized bounded firstparty input view and verify normal current capsule Core export resolution before API emit; no maps/symlink/full source/dependency copies. Shared lease must have purpose=Current Core/API compiler capsule and capsule=this exact literal.",
+      "Root budget/lease/source-input freeze, actual emit/copy, full artifact+declaration closure and native/runtime acceptance remain pending."
+    ],
+    "preserved": [
+      "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/packages/ingenium-core/dist",
+      "all previously refused paths and children",
+      "existing dependencies",
+      "original failure evidence",
+      "all runtime/models/credentials"
+    ]
+  },
+  "tests": {
+    "command": "Scoped Node22 --experimental-vm-modules --test --test-reporter=spec core-explicit-destination.test.mjs api-fixed-compiled-runtime.test.mjs",
+    "passed": 17,
+    "failed": 0,
+    "evidence": "2026-10-30 current worker observed17/17 pure source/AST and memory-filesystem tests; no real output writes",
+    "actualCompilerOrRuntimeAcceptance": false
+  },
+  "retention": {
+    "goldenCoreDist": "Protected for genuine golden132 deployment-capture and remaining actual consumers; no remove/rename/overwrite/alias/lookup substitution",
+    "sourceInputView": "Disposable<=16MiB bounded firstparty input files; Root retires after actual compiler/package consumer and all safety checks, keeps minimal pins/logs; no dependency copies",
+    "capsuleDerivatives": "Root assigns concrete current compiler/package/artifact/runtime consumer; reconcile exact paths after last consumer; no successful unchanged replay",
+    "scratchCreated": false,
+    "removedBytes": 0,
+    "protectedRefusalsPreserved": true
+  },
+  "remaining": [
+    "Root source review/import and original SOURCE/IMAGE enrollment for compiled graph rows listed as missing; do not waive existing161/138 full contract.",
+    "Root fresh full Node capsule peak admission under paired20GiB +15GiB C/destination reserves; no Rust2.25GiB estimate or ceiling change.",
+    "Root shared scoped lease + Root-owned exact absent capsule; actual bounded input copy, original Core emit/data/helper and API view emit/copier.",
+    "Normal package-export current-Core API resolution, current compiled/MJS/declaration transitive closure, computed runtime import, controlled actual startup/Core133+134 SQL/signed capsule tests.",
+    "Full original npm/package/pack/image and independent golden132 genuine deployment-capture acceptance; cleanup only by Root after exact source/protection/ownership/reference checks."
+  ]
+}

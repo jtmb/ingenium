@@ -1,0 +1,2480 @@
+{
+  "kind": "bounded-original-firstparty-compiler-input-view",
+  "owner": "01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",
+  "sourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "destination": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes/tests/artifacts/current-core-api-capsule-r1",
+  "limitBytes": 16777216,
+  "bytes": 2376391,
+  "compilerInputCount": 150,
+  "files": [
+    {
+      "source": "packages/veyra-automation/contracts.d.ts",
+      "target": "packages/veyra-automation/contracts.d.ts",
+      "bytes": 2617,
+      "sourceSha256": "864f1ccff6bc79086741ec6040706119db3168fca466ae94179f573d9239742b",
+      "inode": 3157674,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/commands.ts -> ../../../../packages/veyra-automation/contracts.js"
+    },
+    {
+      "source": "packages/veyra-operations/core126-agent-material.d.mts",
+      "target": "packages/veyra-operations/core126-agent-material.d.mts",
+      "bytes": 2621,
+      "sourceSha256": "e7b39ab7c65eb4de09d9c751f5a69a4df91f142e072c56d3d78ef7ce5ac84922",
+      "inode": 2428660,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts -> ../../../../packages/veyra-operations/core126-agent-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-agent-material.mjs",
+      "target": "packages/veyra-operations/core126-agent-material.mjs",
+      "bytes": 7493,
+      "sourceSha256": "6d6e0354becc927326e5d90b5477adaa8968ee4ae5e4e48d433fc069c19a20a6",
+      "inode": 3116652,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts -> ../../../../packages/veyra-operations/core126-agent-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-material.d.mts",
+      "target": "packages/veyra-operations/core126-candidate-material.d.mts",
+      "bytes": 375,
+      "sourceSha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420",
+      "inode": 3116647,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ../../../../packages/veyra-operations/core126-candidate-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-material.mjs",
+      "target": "packages/veyra-operations/core126-candidate-material.mjs",
+      "bytes": 2571,
+      "sourceSha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94",
+      "inode": 3116645,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ../../../../packages/veyra-operations/core126-candidate-material.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "target": "packages/veyra-operations/core126-candidate-observation.d.mts",
+      "bytes": 1129,
+      "sourceSha256": "d2e2f37a318b9d0379080fae65eef1cafec61730fa334586a449f367ca5c1d1d",
+      "inode": 3116635,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-candidate-observation.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-candidate-observation.mjs",
+      "target": "packages/veyra-operations/core126-candidate-observation.mjs",
+      "bytes": 12489,
+      "sourceSha256": "ff416fb5e4b8334265b325cb7e7943548003902fe4339b8296c780f1f04afa55",
+      "inode": 3116616,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-candidate-observation.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-contract.d.mts",
+      "target": "packages/veyra-operations/core126-image-contract.d.mts",
+      "bytes": 1698,
+      "sourceSha256": "a0c6de96e2b2b6c911cd58fee2a7a94103137e7c9dbbda5488bf8afabd717358",
+      "inode": 2427483,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-image-contract.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-contract.mjs",
+      "target": "packages/veyra-operations/core126-image-contract.mjs",
+      "bytes": 26770,
+      "sourceSha256": "22b233b9beff317e5845a3c8c7f9934d0b8f107f0aabe620869b27c430b04adb",
+      "inode": 3117496,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-image-contract.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-owner.d.mts",
+      "target": "packages/veyra-operations/core126-image-owner.d.mts",
+      "bytes": 5869,
+      "sourceSha256": "b16847ab048991fd702f67d7d33b9d2e230150a905cd22fd8e82b96bc2ae18ce",
+      "inode": 2443283,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ../../../../packages/veyra-operations/core126-image-owner.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-image-owner.mjs",
+      "target": "packages/veyra-operations/core126-image-owner.mjs",
+      "bytes": 18182,
+      "sourceSha256": "1e6beefa49622995ecdd7cb32f64c5e1715512fcb5ec3fb0b8338eaddf73f2e8",
+      "inode": 2428097,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ../../../../packages/veyra-operations/core126-image-owner.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-bootstrap.d.mts",
+      "target": "packages/veyra-operations/core126-job-bootstrap.d.mts",
+      "bytes": 895,
+      "sourceSha256": "c937944285fd85002d53fae5ed5d786bfab471b1cb60f5cc748f75699e1f1862",
+      "inode": 2436969,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs -> ../../../../packages/veyra-operations/core126-job-bootstrap.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-bootstrap.mjs",
+      "target": "packages/veyra-operations/core126-job-bootstrap.mjs",
+      "bytes": 2286,
+      "sourceSha256": "d685142d5c2c3ba5ced0c64d9fa2b100ed1979e662462bd493d9bd414cce3343",
+      "inode": 2443318,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs -> ../../../../packages/veyra-operations/core126-job-bootstrap.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-plugin.d.mts",
+      "target": "packages/veyra-operations/core126-job-plugin.d.mts",
+      "bytes": 1572,
+      "sourceSha256": "d7fb9ef671c2f61e47dd0a191d9c494a6c999239b60b1a633898279602602789",
+      "inode": 2436990,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs -> ../../../../packages/veyra-operations/core126-job-plugin.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-job-plugin.mjs",
+      "target": "packages/veyra-operations/core126-job-plugin.mjs",
+      "bytes": 8490,
+      "sourceSha256": "f6e09ad01f3de57d948b2b159d10b20a931664cca5bc3e6a4b6bd4500ee99dfc",
+      "inode": 3116653,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs -> ../../../../packages/veyra-operations/core126-job-plugin.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-manager-proof.d.mts",
+      "target": "packages/veyra-operations/core126-manager-proof.d.mts",
+      "bytes": 377,
+      "sourceSha256": "c02fa810b882b4edb350f4ceb3344b57e234c5ebe0b574977b91ab76a9c323a1",
+      "inode": 2427491,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-manager-proof.mjs"
+    },
+    {
+      "source": "packages/veyra-operations/core126-manager-proof.mjs",
+      "target": "packages/veyra-operations/core126-manager-proof.mjs",
+      "bytes": 1585,
+      "sourceSha256": "36faf7dc7064fd4183759c2799d31ade57d9eccbb02eb727bb1998b91cd332a2",
+      "inode": 2427492,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../../../packages/veyra-operations/core126-manager-proof.mjs"
+    },
+    {
+      "source": "packages/veyra-voice/segments.mjs",
+      "target": "packages/veyra-voice/segments.mjs",
+      "bytes": 4535,
+      "sourceSha256": "d0ae5a426309b624c5998fb6a98471097b26b5d4166483c958699a40ee47881a",
+      "inode": 2421206,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.mjs -> ../../../../packages/veyra-voice/segments.mjs"
+    },
+    {
+      "source": "packages/veyra-voice/session.d.mts",
+      "target": "packages/veyra-voice/session.d.mts",
+      "bytes": 3925,
+      "sourceSha256": "2798ce5b88eef987ae552cd6313fff00db6fc72f63622b69f66589cbb95c3579",
+      "inode": 2421211,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ../../../../packages/veyra-voice/session.mjs"
+    },
+    {
+      "source": "packages/veyra-voice/session.mjs",
+      "target": "packages/veyra-voice/session.mjs",
+      "bytes": 13600,
+      "sourceSha256": "ef82844a682cd13231221749c8e69b8227d6560d7174bcc7a4ac8adae40f27d2",
+      "inode": 2421213,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ../../../../packages/veyra-voice/session.mjs"
+    },
+    {
+      "source": "services/ingenium-api/config/dashboard-safe-reads.json",
+      "target": "services/ingenium-api/config/dashboard-safe-reads.json",
+      "bytes": 12194,
+      "sourceSha256": "83648c66fe542b188881e2d6ec414fd92c8fd1dd46b0aa78af9e17612ae99bf5",
+      "inode": 3719177,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dashboard-safe-read-policy.ts -> ../config/dashboard-safe-reads.json"
+    },
+    {
+      "source": "services/ingenium-api/config/index.ts",
+      "target": "services/ingenium-api/config/index.ts",
+      "bytes": 2091,
+      "sourceSha256": "3905806bc2428e747085f16038f6bbca56e761fb4a29e28bcbfce73d7f54abff",
+      "inode": 3719178,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/application-health.ts",
+      "target": "services/ingenium-api/lib/application-health.ts",
+      "bytes": 5990,
+      "sourceSha256": "51f90632da220c60610b475fa7ebe76fbb41b56a53511953c6c924923f1df2b4",
+      "inode": 3719183,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/authorization-policy.ts",
+      "target": "services/ingenium-api/lib/authorization-policy.ts",
+      "bytes": 30499,
+      "sourceSha256": "5855e736a994a20571b01011e912bbc80cb953ab2141d38f9b69aa3895fbfd27",
+      "inode": 3110242,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/backup-scheduler.ts",
+      "target": "services/ingenium-api/lib/backup-scheduler.ts",
+      "bytes": 10781,
+      "sourceSha256": "49a49b6e110d8d62fa7815f8b66cc9bf2f7820ff2755b90cd8544b76a44d64f4",
+      "inode": 3719185,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/browser-safe-scalars.ts",
+      "target": "services/ingenium-api/lib/browser-safe-scalars.ts",
+      "bytes": 1894,
+      "sourceSha256": "ca6405f376322e202b98229055c68d37811c91c68846c81a4de18c0862a7d1bd",
+      "inode": 3719186,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/chat-model-variants.ts",
+      "target": "services/ingenium-api/lib/chat-model-variants.ts",
+      "bytes": 918,
+      "sourceSha256": "9a10391ed084c21eedbfa3c1cd217b133f74357cc3fb16c47f88a2e1205d9f9e",
+      "inode": 1917758,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/chat-provider-catalog.ts",
+      "target": "services/ingenium-api/lib/chat-provider-catalog.ts",
+      "bytes": 17066,
+      "sourceSha256": "e6f350cd6b5a6994a954118bacad1168ea8d4fe6d939c440632073ed2e8ad56b",
+      "inode": 3719187,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/cloudflare-connector.ts",
+      "target": "services/ingenium-api/lib/cloudflare-connector.ts",
+      "bytes": 2319,
+      "sourceSha256": "b64566aeda86ef65487615e71b319ed73b698da3f757c1cbdc33d4dbc4cb028f",
+      "inode": 3719188,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/cloudflare-trusted-ingress.ts",
+      "target": "services/ingenium-api/lib/cloudflare-trusted-ingress.ts",
+      "bytes": 3409,
+      "sourceSha256": "ea33277f0e9c0d53eb9090be8a7ef7f1d62d2b7f79a3bab0abc9fa5b21d75ed6",
+      "inode": 3719189,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/cloudflare-tunnel-service.ts",
+      "target": "services/ingenium-api/lib/cloudflare-tunnel-service.ts",
+      "bytes": 8200,
+      "sourceSha256": "7043ffc526985c9a7f2e48e3d14a1ccb472cd5eded64aa95e1ffbcf7e413d4f5",
+      "inode": 3719190,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/compatibility-runtime-access.ts",
+      "target": "services/ingenium-api/lib/compatibility-runtime-access.ts",
+      "bytes": 5605,
+      "sourceSha256": "c12c5644e6879fb110679b38e7279ce4606eb7a589bb9ca2803c41b7cf1ac643",
+      "inode": 63298,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+      "target": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+      "bytes": 2143,
+      "sourceSha256": "2fd945e90299950e000cac11b37545f99191a0672f87768dba757a0cef8e986b",
+      "inode": 3118145,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-v2/catalog-service.ts",
+      "target": "services/ingenium-api/lib/customize-v2/catalog-service.ts",
+      "bytes": 6975,
+      "sourceSha256": "38874ab74b80d709003b9da868c2143e89bc0a4fb3bb6b1031bcddbc270cbe37",
+      "inode": 3107079,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-v2/project-authority.ts",
+      "target": "services/ingenium-api/lib/customize-v2/project-authority.ts",
+      "bytes": 1597,
+      "sourceSha256": "98dfdebfa229791fbef31010d0b34fb0d4b52c53f7e965c69f666adb6dd9a88c",
+      "inode": 3107080,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-v2/router.ts",
+      "target": "services/ingenium-api/lib/customize-v2/router.ts",
+      "bytes": 2086,
+      "sourceSha256": "f6340838c12e560d2b4ec4257ca9d42e759f554575ab9259806243c37135f4d6",
+      "inode": 3157621,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dashboard-recent-work.ts",
+      "target": "services/ingenium-api/lib/dashboard-recent-work.ts",
+      "bytes": 8467,
+      "sourceSha256": "8d60d6a9eb692884dcecb51c0384f8b0f1250d3af3205c80f3e8fe48a3e88bac",
+      "inode": 3069620,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dashboard-safe-read-policy.ts",
+      "target": "services/ingenium-api/lib/dashboard-safe-read-policy.ts",
+      "bytes": 4290,
+      "sourceSha256": "eb56fce6b6e59ae8d0753f28a34e1f19ae026df60e602f07ad6cfff664c6055b",
+      "inode": 3719191,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "bytes": 667,
+      "sourceSha256": "8dee76b14d3cbc9cb0cb294d80bb98146a3ace072560a196413d428a2a186ee7",
+      "inode": 3116639,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts -> ../lib/dot-v2/candidate-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "bytes": 10266,
+      "sourceSha256": "a2b38ee4a33f6cecf98b6861368a6aa21b36e501b25bf1166ee94c1d2f1509cd",
+      "inode": 3116638,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts -> ../lib/dot-v2/candidate-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "bytes": 2843,
+      "sourceSha256": "b56cb6dc787a92edd5e6d78bb4b98f39b3d4b37f1762f424b73634298b50b1c4",
+      "inode": 2443336,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-carrier.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "bytes": 12399,
+      "sourceSha256": "6e9baa48fa8112397b29af294d3aadb1b42cce40aae96b2be89df435dbc64dc1",
+      "inode": 2436994,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-carrier.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "bytes": 290,
+      "sourceSha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126",
+      "inode": 3116644,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs -> ./candidate-docker-stream.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "bytes": 2018,
+      "sourceSha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5",
+      "inode": 3116643,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs -> ./candidate-docker-stream.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.d.mts",
+      "bytes": 3209,
+      "sourceSha256": "713cac95c6c1a4ca78141100b2839f93f032015970c06f14b6b94ef496df189c",
+      "inode": 3118689,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts -> ./candidate-lifecycle-original-gates.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+      "bytes": 1583,
+      "sourceSha256": "422623cf72e9242d58fc17760c70800f721f4a4df387da97819f7091e3ad56d2",
+      "inode": 3118688,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts -> ./candidate-lifecycle-original-gates.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts",
+      "bytes": 2617,
+      "sourceSha256": "19a3fcb5f3fc77f9fbb110fcc834b09a884080a9254c798273a24070cb8e855a",
+      "inode": 3118687,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts -> ./candidate-lifecycle-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+      "bytes": 12857,
+      "sourceSha256": "952471e0dc02cb1462deb545253d53e405893451339d106ddf7fbd2c7dc64ae3",
+      "inode": 3118686,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts -> ./candidate-lifecycle-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "bytes": 1485,
+      "sourceSha256": "2f9a03f015a40194aac56a7b9722b5421c7bc32bcff99a88e2106e8dbc8921dd",
+      "inode": 3116637,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-loopback.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "bytes": 8247,
+      "sourceSha256": "3c5028809396e146bd547cdc3c5d06ed32f596e73eadf050a13d912210a38046",
+      "inode": 3116636,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-loopback.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts",
+      "bytes": 1090,
+      "sourceSha256": "cf1d63fff74994dab09ff0f7e81b66d530457904c47a391fd09f788b10fffe9f",
+      "inode": 3075063,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/api-server.ts -> ../lib/dot-v2/candidate-manager-http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs",
+      "bytes": 9920,
+      "sourceSha256": "ec6d19bd21690882e735495d5ab2d0fd469316c7d242f5831c3152f2aeb32118",
+      "inode": 3075044,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/api-server.ts -> ../lib/dot-v2/candidate-manager-http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "bytes": 434,
+      "sourceSha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29",
+      "inode": 2428661,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-original-invocation.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "bytes": 1329,
+      "sourceSha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe",
+      "inode": 2428123,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./candidate-original-invocation.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "bytes": 1329,
+      "sourceSha256": "572ce33cf8a9ffe8494a00f7ada8e3dc4ff1956858091e11bf1b13ff8a2e12b3",
+      "inode": 2423176,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/candidate-original-manager.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "bytes": 26193,
+      "sourceSha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83",
+      "inode": 2423178,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/candidate-original-manager.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.d.mts",
+      "bytes": 1278,
+      "sourceSha256": "8c8dc5a1c9e848eef038cd50a7fc67a4fd5bbe7157127ded449a6787d3cf2986",
+      "inode": 2423179,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts -> ./candidate-response-program.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/candidate-response-program.mjs",
+      "bytes": 11948,
+      "sourceSha256": "b8a7bffeae38cad70cd3dfa52bdda9105bd16d96eae6e1e0eb5f6745828f061a",
+      "inode": 2423182,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts -> ./candidate-response-program.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/commands.ts",
+      "target": "services/ingenium-api/lib/dot-v2/commands.ts",
+      "bytes": 2925,
+      "sourceSha256": "74d0f5d85fd936e5fa2c4f2d8de187901557569b7e39152d1bd737fce1e2dcc8",
+      "inode": 849411,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core-binding.ts",
+      "bytes": 17607,
+      "sourceSha256": "a77ae5304ab90f7f68599c90b1dfc6ad9d9cf9855c15294bcc20e5e12f69b87f",
+      "inode": 832689,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "bytes": 9699,
+      "sourceSha256": "2bab431a0d4cd3ab48c3c8ff575d2737f09b5b9b62b8d8125e0bab293ea0f86d",
+      "inode": 2443278,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-broker.d.mts",
+      "bytes": 1005,
+      "sourceSha256": "ca4b6bd0211d53cfeb75cd6fe683d998b9e26a90c41d1ffbd283c7f04a7e8cdd",
+      "inode": 2424994,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-broker.ts -> ./core126-broker.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/core126-broker.mjs",
+      "bytes": 2158,
+      "sourceSha256": "9459006f6964abbadba314e17a700e89896a6ccc7b25aff291de9899884088c1",
+      "inode": 2424983,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-broker.ts -> ./core126-broker.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "bytes": 600,
+      "sourceSha256": "a95183d3535b6da6ba62c1af3358bc724195d9c1dbdbc3174948e0c3177ecdb4",
+      "inode": 2425414,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-http.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-http.d.mts",
+      "bytes": 1189,
+      "sourceSha256": "f45caba30d49c0fa34afcee3660a54acb3f7218a917e38eb4c7879904ddb88eb",
+      "inode": 2429737,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ./core126-http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/core126-http.mjs",
+      "bytes": 8702,
+      "sourceSha256": "dbaccea339d8c9f6cbee96acfa10b489e5b26e4e7f13a4608d0d5453063b591e",
+      "inode": 2443348,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ./core126-http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-ingress.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-ingress.ts",
+      "bytes": 3111,
+      "sourceSha256": "8fef3d813529d8d9834e8dee838ccc2adada0aaa958cb5ede0da6ac5598a6ecc",
+      "inode": 2425415,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+      "bytes": 5660,
+      "sourceSha256": "6b389fcd9e9780dc29b930969583079eea6188520a5de18e79b88e2f76203063",
+      "inode": 2443276,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+      "bytes": 442,
+      "sourceSha256": "6a9cceb563fca968348b5e8f9ef0fe6487771d2ea63dc1541c4c0323d9d61e26",
+      "inode": 2425418,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ./core126-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "bytes": 35028,
+      "sourceSha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb",
+      "inode": 2437994,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ./core126-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "bytes": 2774,
+      "sourceSha256": "d1878007ef1ae8fbcd7b1ca459a0fc01291946ef379ecfde0c5a425781013bf8",
+      "inode": 3110334,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-purpose.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-purpose.d.mts",
+      "bytes": 510,
+      "sourceSha256": "65c7532ee2c786bec8c6664ad3d2f27305435221578f1df3f85bcc57b5b8bb4c",
+      "inode": 3106692,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-owner.mjs -> ./core126-purpose.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+      "bytes": 2675,
+      "sourceSha256": "d865891ca7678458ec9872e5d108cdef31e7a913bf217e806d091b7420fc9bda",
+      "inode": 3076537,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-owner.mjs -> ./core126-purpose.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "target": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "bytes": 1463,
+      "sourceSha256": "09458d257660fa9bd393eff4cde4e6c296195a742cf0e5173c9df022c52b0692",
+      "inode": 2443216,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts",
+      "bytes": 2532,
+      "sourceSha256": "9752a7b4f9fe36402e7d639fca5e78cf9508d999bbffb5542e7e4b6f5bb3fe43",
+      "inode": 3110231,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ./dot-approved-scope.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "bytes": 12223,
+      "sourceSha256": "9baccc0a8ec748ad0679070826162155dd3c92b2d223938fead79ba83463322a",
+      "inode": 2440909,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ./dot-approved-scope.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts",
+      "bytes": 466,
+      "sourceSha256": "fd8d7042ecaa02c77a746b64bda8a0b40755822b7c63b748fb1c21ea9954c27f",
+      "inode": 2428330,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ./dot-job-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/dot-job-policy.mjs",
+      "bytes": 4201,
+      "sourceSha256": "0ab7360153ad50f87df5759275593ed4da48f99f1dc5bcacad6885e39b936136",
+      "inode": 849416,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ./dot-job-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "target": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "bytes": 15524,
+      "sourceSha256": "42b8b8e8f7e294d0fd1dbfbb98553d9bca67f7980483eddcc28e8a2707cd721d",
+      "inode": 3110342,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "target": "services/ingenium-api/lib/dot-v2/existing-jobs.ts",
+      "bytes": 1729,
+      "sourceSha256": "44af08b45e58d7e3e64ae25a5fafe0f13c1006a6cd1e0b7152620a2d25c30762",
+      "inode": 3157677,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "bytes": 2340,
+      "sourceSha256": "fc6ef51d4e71ca58b50cd66ee3b5caebca183bb2d39f3f096dd63d03c65f6365",
+      "inode": 3110235,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+      "bytes": 7138,
+      "sourceSha256": "d4f80d165d7f7707f567c9d26ab8012d20b821141c4a78a93ad1430437e0d82e",
+      "inode": 3110238,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "target": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "bytes": 10683,
+      "sourceSha256": "38af882cd69c2bdd90e149eb24ec97c404d57290018270019cda8a9d5187cea3",
+      "inode": 3110240,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs",
+      "bytes": 524,
+      "sourceSha256": "c98582e75fed3791aed7b8c5679ba30d67be6cc2034884fb488eef1f19e07226",
+      "inode": 2427487,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./job-bootstrap-facade.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.d.mts",
+      "bytes": 374,
+      "sourceSha256": "e4502af1f218bdd624808fec94c57b6fd533e069f3ab0a2ae1e2ecb0e8b5c6f7",
+      "inode": 2444913,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts -> ../lib/dot-v2/job-bootstrap-frame.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "bytes": 2337,
+      "sourceSha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8",
+      "inode": 2424989,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts -> ../lib/dot-v2/job-bootstrap-frame.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.d.mts",
+      "bytes": 367,
+      "sourceSha256": "37ded5725c5869d8d5f55ae75d60958e392ce57111444dff69f02e6574cc2794",
+      "inode": 2425001,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-bootstrap.ts -> ../lib/dot-v2/job-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs",
+      "bytes": 5845,
+      "sourceSha256": "15fca1e2f55a70ea6e259949a44c2b948abf3870d3a4be2133d58ea5143bbd42",
+      "inode": 2424998,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-bootstrap.ts -> ../lib/dot-v2/job-bootstrap-runtime.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-original-authority.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/job-original-authority.d.mts",
+      "bytes": 436,
+      "sourceSha256": "626dc2bc8fa51020ef5aeb5a68c86d9db7e82e8ad57f6096307b615ad288af13",
+      "inode": 2424981,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-child.ts -> ../lib/dot-v2/job-original-authority.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-original-authority.mjs",
+      "bytes": 2471,
+      "sourceSha256": "d18d5d892477eb5d5a9c501ee3194edf8314cf896997bdd0559aeabcc271400e",
+      "inode": 2424978,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-child.ts -> ../lib/dot-v2/job-original-authority.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-private-control.mjs",
+      "bytes": 5152,
+      "sourceSha256": "3b9334dc6e32b27b1de2ad50443c63a05a7a48a3d1d78f6454b0baf6d8507b6a",
+      "inode": 2424990,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./job-private-control.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/job-private-files.mjs",
+      "bytes": 3139,
+      "sourceSha256": "e45245d6923f37f17a2f5a8503be0a67852c50eeada2ba3d1fcd202b222e6631",
+      "inode": 2424995,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs -> ./job-private-files.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-dot-execution.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/managed-dot-execution.d.mts",
+      "bytes": 317,
+      "sourceSha256": "597d80ae07d69bb72da630be7717efa11ff2adf7dcf56ac6efb55f0d80caad7e",
+      "inode": 2425416,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts -> ./managed-dot-execution.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs",
+      "bytes": 2023,
+      "sourceSha256": "3d50b6771a692289db71973bc9cafad608679787c8d8aa0e48bec9644ba334fd",
+      "inode": 2425000,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts -> ./managed-dot-execution.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-child.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-child.d.mts",
+      "bytes": 203,
+      "sourceSha256": "c864627692cc90cc921c2475f4bc2e312d13a983673ee18c036175a1c91466c8",
+      "inode": 2425413,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-child.ts -> ../lib/dot-v2/managed-job-child.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+      "bytes": 2732,
+      "sourceSha256": "df4d6f2da61ae7d9a4a836e2d95948ec8ef478032caf2076adc2a52b2bdd2e1e",
+      "inode": 3116650,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-job-child.ts -> ../lib/dot-v2/managed-job-child.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "bytes": 13087,
+      "sourceSha256": "ec547e53a21836ba29933fc8545093852f5ca65f997a9fe6cf9d8592b320f29b",
+      "inode": 2443281,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts -> ./managed-job-contracts.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-core-client.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-core-client.d.mts",
+      "bytes": 212,
+      "sourceSha256": "768675482e3acff452ff7cb415c9a4cbecb4eb83e6562e287cb5c07926c022be",
+      "inode": 2425379,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/managed-job-core-client.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs",
+      "bytes": 2136,
+      "sourceSha256": "c451bb63f00fdaa36b4fb12afd3db5ea5adebb34cf241b407b463b5f19169000",
+      "inode": 2425052,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/managed-job-core-client.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-owner.d.mts",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-owner.d.mts",
+      "bytes": 213,
+      "sourceSha256": "8ade4e93029ed370cf81df7e9f0a4c759e507c7c093ffae2e90642d3f8cee3f3",
+      "inode": 2425383,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/managed-job-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs",
+      "bytes": 12169,
+      "sourceSha256": "0e16420e4c282a2ee707b56f121e70d4f65306adcae4c204fb96108e76527923",
+      "inode": 2436987,
+      "device": 2096,
+      "consumer": "services/ingenium-api/scripts/runtime-manager.ts -> ../lib/dot-v2/managed-job-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/proactive.ts",
+      "target": "services/ingenium-api/lib/dot-v2/proactive.ts",
+      "bytes": 896,
+      "sourceSha256": "bb120999cd0d9c71758b8c2421cdc8756c89e842fc206fa4f4bfdc0b08bd741a",
+      "inode": 3157704,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "target": "services/ingenium-api/lib/dot-v2/repository.ts",
+      "bytes": 3832,
+      "sourceSha256": "c157fddba83c230182146ac66eac8e33dc50b038813fbe901848b516f9689863",
+      "inode": 3106725,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "target": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "bytes": 23480,
+      "sourceSha256": "f8b6d9f06fc9e19040ef31d303caa23a8c96cb42c32697da40bd01b96b0c783a",
+      "inode": 2425007,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-session.ts",
+      "target": "services/ingenium-api/lib/dot-v2/request-session.ts",
+      "bytes": 5220,
+      "sourceSha256": "110e08754f50d1ddeec5d87f0e3a95b3f5736c5b46852891e75850b83978f4b0",
+      "inode": 849414,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/router.ts",
+      "target": "services/ingenium-api/lib/dot-v2/router.ts",
+      "bytes": 4154,
+      "sourceSha256": "362b9f027fd866da35fbd8ae3b3efc271cbfadea31ba4f036df4baf1f3ff584e",
+      "inode": 849417,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "target": "services/ingenium-api/lib/dot-v2/schedule.ts",
+      "bytes": 4452,
+      "sourceSha256": "1670a6ec08b45de6b4b470731442f442cf0d5a075d0e552389379b1a21bd164e",
+      "inode": 3157680,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/service.ts",
+      "target": "services/ingenium-api/lib/dot-v2/service.ts",
+      "bytes": 20194,
+      "sourceSha256": "1d8af5c2fb93c30b1d214acb0cc37a30f556ad69aa4712b944e283ce8cbdffbd",
+      "inode": 832688,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/email-runtime.ts",
+      "target": "services/ingenium-api/lib/email-runtime.ts",
+      "bytes": 8991,
+      "sourceSha256": "5efaef6a82956f55bb3218f7e9ccfeb793e8bdcaeca70a46e86884fee56050b7",
+      "inode": 3719192,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/helpers.ts",
+      "target": "services/ingenium-api/lib/helpers.ts",
+      "bytes": 5372,
+      "sourceSha256": "8880412b0fc9466c44c31d344520d1fb8b5b36d9217465c8329ddc92aa10c944",
+      "inode": 3719193,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-native-provider.ts",
+      "target": "services/ingenium-api/lib/job-native-provider.ts",
+      "bytes": 1526,
+      "sourceSha256": "be7caf71d1f9adf874c0def9cb4292be4b8962986f574bcaf9c5b465803cb4fb",
+      "inode": 986126,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-response-verification.ts",
+      "target": "services/ingenium-api/lib/job-response-verification.ts",
+      "bytes": 2681,
+      "sourceSha256": "d5a023e1e6e91bf24ef7d8ac7734f3df330e307ab1f083b6bca1399ccadc0c46",
+      "inode": 986127,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-runner.ts",
+      "target": "services/ingenium-api/lib/job-runner.ts",
+      "bytes": 82061,
+      "sourceSha256": "cb7c6e8ccfee17d22661523b6a21d8febb569d47671c9172a2621884321e241c",
+      "inode": 2424986,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-runtime-artifacts.ts",
+      "target": "services/ingenium-api/lib/job-runtime-artifacts.ts",
+      "bytes": 5941,
+      "sourceSha256": "32d7cf3b2b55621ea5488a18b34804bf9d8f45c9d765183273a062396c07f5fa",
+      "inode": 986630,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/lifecycle.ts",
+      "target": "services/ingenium-api/lib/lifecycle.ts",
+      "bytes": 5849,
+      "sourceSha256": "8834912792aa0760e059abba6a84c172f4c96f51123f028ac05d4856a28f5ecd",
+      "inode": 3719195,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/mail-maintenance.ts",
+      "target": "services/ingenium-api/lib/mail-maintenance.ts",
+      "bytes": 4906,
+      "sourceSha256": "e35e12326df876da0d6ec537a83979dde93debd008e5ef08f0dd07357052dadc",
+      "inode": 3719196,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/manual-synthesis-models.ts",
+      "target": "services/ingenium-api/lib/manual-synthesis-models.ts",
+      "bytes": 2037,
+      "sourceSha256": "0a489a2fcddce6fc3074a965e99ada3b60f9be5803f650ded3a072c7c3d824c9",
+      "inode": 986636,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-launcher.ts",
+      "target": "services/ingenium-api/lib/mcp-launcher.ts",
+      "bytes": 1712,
+      "sourceSha256": "6229cfbd91a33c73e55f797a7e3d8e5204a5b92d968051e6c21165c710afca0c",
+      "inode": 3719197,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-report-auth.ts",
+      "target": "services/ingenium-api/lib/mcp-report-auth.ts",
+      "bytes": 5939,
+      "sourceSha256": "c4ec38ad710295d2645bc76c3dca32b578a9d604aba677a80d28410623fefca7",
+      "inode": 3719198,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-status.ts",
+      "target": "services/ingenium-api/lib/mcp-status.ts",
+      "bytes": 3701,
+      "sourceSha256": "4daa06593593a270d3e6decc96079d5294bc4ca55c610df1ca2091a0ed861d3c",
+      "inode": 3719199,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-usefulness-collector.ts",
+      "target": "services/ingenium-api/lib/mcp-usefulness-collector.ts",
+      "bytes": 18054,
+      "sourceSha256": "d76d93a8b1a50255565e9d2b75f89f3b1e113b68b046e065067d9203e358e975",
+      "inode": 3719200,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-engine-owner.ts",
+      "target": "services/ingenium-api/lib/memory-engine-owner.ts",
+      "bytes": 3095,
+      "sourceSha256": "d90a87248de430671e9efd4418d809d5bdcda810b60be7215624cf0cd4c4a389",
+      "inode": 851125,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-inspection.ts",
+      "target": "services/ingenium-api/lib/memory-request-inspection.ts",
+      "bytes": 3328,
+      "sourceSha256": "2b9f5dec13f494c3292f6435a7dce08b919c4416e92da4cf24f95b30e8361f1e",
+      "inode": 2421542,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-recall.ts",
+      "target": "services/ingenium-api/lib/memory-request-recall.ts",
+      "bytes": 3894,
+      "sourceSha256": "a77d1b32961aa725d626518c9386fbaa481191b2a8c3d4fd92724e2cc3acd881",
+      "inode": 849636,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/adapters.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/adapters.d.mts",
+      "bytes": 3914,
+      "sourceSha256": "d3b4067cbcfd40ddbb90904f7e1f331849c8ea1d81a0e7fc4d304ac804f501e6",
+      "inode": 849656,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/adapters.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/adapters.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/adapters.mjs",
+      "bytes": 12592,
+      "sourceSha256": "65e8e8eca92122e5313491bed8264ef25f0b78ecfcdd02912f17f79e1b1e64a8",
+      "inode": 849659,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/adapters.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/bounded-snapshot.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/bounded-snapshot.d.mts",
+      "bytes": 2087,
+      "sourceSha256": "6d6cdf347e9a48edd1ca69d8374df9d826c90147a311d3f63f6960665f10a981",
+      "inode": 850636,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./bounded-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/bounded-snapshot.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/bounded-snapshot.mjs",
+      "bytes": 6207,
+      "sourceSha256": "3f0b8fd0fe84cea85d3da507b126016a4f9cd7eafd6accbb38d9f1c713d20ef9",
+      "inode": 850637,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./bounded-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/core-session.ts",
+      "target": "services/ingenium-api/lib/memory-v2/core-session.ts",
+      "bytes": 1890,
+      "sourceSha256": "10873e2ce476058ef82c65b017b9fdcfdfed4ebdc244a0116445794a86b1e3ff",
+      "inode": 847480,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/http.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/http.d.mts",
+      "bytes": 654,
+      "sourceSha256": "2815fe842fbaace4ede9d1729bd29eea90ae70ca4d7bd7312c62caba24d75dd1",
+      "inode": 849895,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/routes/memory-lifecycle.ts -> ../memory-v2/http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/http.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/http.mjs",
+      "bytes": 4058,
+      "sourceSha256": "e783ed23048be706cb8b655dc56842b90eebc0cc64e5131b7331bf0151e3b3e0",
+      "inode": 849898,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/routes/memory-lifecycle.ts -> ../memory-v2/http.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/inspection.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/inspection.d.mts",
+      "bytes": 694,
+      "sourceSha256": "b389ab000f3c0c29b0f380ade92e9dc5cc4305674206a4e4aec40d390f80877f",
+      "inode": 2421517,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-request-inspection.ts -> ./memory-v2/inspection.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/inspection.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/inspection.mjs",
+      "bytes": 1046,
+      "sourceSha256": "1ced93fc4f49c8584f20427dc304395ed2291eb4384cc1e3860539a3c9cc6da1",
+      "inode": 2421518,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-request-inspection.ts -> ./memory-v2/inspection.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/lifecycle.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/lifecycle.d.mts",
+      "bytes": 6627,
+      "sourceSha256": "c406e62b47b31e6f2604eeaf5266bf36cd4a91ebe0f0288bc67778cf5855959a",
+      "inode": 849667,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/lifecycle.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/lifecycle.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/lifecycle.mjs",
+      "bytes": 26600,
+      "sourceSha256": "1f69423bce88c3f9c896196934a88afb425210c58b6884a8c6c306e8f48b87d9",
+      "inode": 849675,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/lifecycle.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-context-pair.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/opencode-context-pair.d.mts",
+      "bytes": 819,
+      "sourceSha256": "bcca61622bb4d8bad5f92d7a6a22e0b4127a242332d8d931399d61f191a3d5f5",
+      "inode": 861869,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/opencode-snapshot.ts -> ./opencode-context-pair.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-context-pair.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/opencode-context-pair.mjs",
+      "bytes": 4630,
+      "sourceSha256": "76a28cc3a6656b3a37344b73228f749c938ae670e260d4e0595f0888785628a4",
+      "inode": 861871,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/opencode-snapshot.ts -> ./opencode-context-pair.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-snapshot.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/opencode-snapshot.d.mts",
+      "bytes": 2434,
+      "sourceSha256": "8c67d39cced965a81d62ff179cdb9c4e4c890c2b0f6c9f43b31ba7477e52bf35",
+      "inode": 861874,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/opencode-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-snapshot.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/opencode-snapshot.mjs",
+      "bytes": 10952,
+      "sourceSha256": "c4997b88cdc1975d6c3c91238b71b701b6f19984e8c21d3b0564fc851ca9fd8f",
+      "inode": 861876,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-engine-owner.ts -> ./memory-v2/opencode-snapshot.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-snapshot.ts",
+      "target": "services/ingenium-api/lib/memory-v2/opencode-snapshot.ts",
+      "bytes": 1636,
+      "sourceSha256": "1a4fb34637ca9c2140dc9761323c4e897307cf248dcbab1b3e6287c43e5cdba2",
+      "inode": 861896,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/recall-availability.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/recall-availability.d.mts",
+      "bytes": 2256,
+      "sourceSha256": "b641734fd0d7e13f881b1c2a76e423e942c6f25e1827c29dcc93a41cf70a342d",
+      "inode": 969732,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/recall-availability.ts -> ./recall-availability.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/recall-availability.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/recall-availability.mjs",
+      "bytes": 9425,
+      "sourceSha256": "6729b07bffbdb92609bced2235e6494dd44b7de37ee0a2f3bdd39ce2a6917937",
+      "inode": 969734,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/recall-availability.ts -> ./recall-availability.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/recall-availability.ts",
+      "target": "services/ingenium-api/lib/memory-v2/recall-availability.ts",
+      "bytes": 1450,
+      "sourceSha256": "a7808537cb325723a426dd066d95ec62393b2a90a690a08d15af6d886fb8f098",
+      "inode": 970009,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-policy.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/request-policy.d.mts",
+      "bytes": 516,
+      "sourceSha256": "a395b8fe5d829e837bd810131c52021ea913771683e4e70dd6a454415cd226d4",
+      "inode": 849679,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./request-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-policy.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/request-policy.mjs",
+      "bytes": 2320,
+      "sourceSha256": "e80a87e4bbfe4f31871b27701cc4170971951c6288bc55fde88812684a90ab00",
+      "inode": 849683,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./request-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-session.ts",
+      "target": "services/ingenium-api/lib/memory-v2/request-session.ts",
+      "bytes": 4846,
+      "sourceSha256": "a031ea288172b2cc9f8265ab8cd36d1bf56ee75569d5aa9ed2a15fa0e2ed70e4",
+      "inode": 849686,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/source-state.d.mts",
+      "target": "services/ingenium-api/lib/memory-v2/source-state.d.mts",
+      "bytes": 1297,
+      "sourceSha256": "80bcf7a9772a2aa238f0ff0565b42cb42ae244e4d3d06edacfdcf1f855ee3954",
+      "inode": 849690,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./source-state.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/source-state.mjs",
+      "target": "services/ingenium-api/lib/memory-v2/source-state.mjs",
+      "bytes": 13658,
+      "sourceSha256": "27157a2894d4af5b8aab0aaf9eed2d55a78f315d1ba27031cab91e0cb7b65992",
+      "inode": 849692,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/memory-v2/request-session.ts -> ./source-state.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/api-token.ts",
+      "target": "services/ingenium-api/lib/middleware/api-token.ts",
+      "bytes": 4016,
+      "sourceSha256": "e128059a1c913a47c04a2fd936848d08cf8fa00ca276b38d2850a0539fb0a57c",
+      "inode": 3719202,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth-rate-limit.ts",
+      "target": "services/ingenium-api/lib/middleware/auth-rate-limit.ts",
+      "bytes": 3230,
+      "sourceSha256": "b4566e2591940a840fa92969729c1ae78fae88730d2455da44cd998d15f0d12d",
+      "inode": 3719203,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth.ts",
+      "target": "services/ingenium-api/lib/middleware/auth.ts",
+      "bytes": 12031,
+      "sourceSha256": "a62e7b82011525b14c15c2f54c2cab423c3145f2fc11ca328fd52ca53d6a158e",
+      "inode": 3719204,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/csrf.ts",
+      "target": "services/ingenium-api/lib/middleware/csrf.ts",
+      "bytes": 2386,
+      "sourceSha256": "3a56cce5eb0730328eec56e7b45c435530948b36ed6e7168c9356ec0f4e70840",
+      "inode": 3719205,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/errors.ts",
+      "target": "services/ingenium-api/lib/middleware/errors.ts",
+      "bytes": 5067,
+      "sourceSha256": "99ab50553767a169de7ba7b1fd68d362f7a2364d57ad61067a130fe95de9ebf9",
+      "inode": 3719206,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/pre-auth-csrf.ts",
+      "target": "services/ingenium-api/lib/middleware/pre-auth-csrf.ts",
+      "bytes": 1364,
+      "sourceSha256": "72cfe8d24ae7811a0f55dd35c675a259a5a9c86e35f358cae185abac71a7c23c",
+      "inode": 3719207,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/rate-limit.ts",
+      "target": "services/ingenium-api/lib/middleware/rate-limit.ts",
+      "bytes": 10291,
+      "sourceSha256": "8f9c48eb0e5756a144449edd3545ddc655ec5eed2468c115d1d55745587ec75b",
+      "inode": 3719208,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/repository-sync-ingress.ts",
+      "target": "services/ingenium-api/lib/middleware/repository-sync-ingress.ts",
+      "bytes": 2321,
+      "sourceSha256": "45a6a23ac1d88a1933c28127ceac72104d7612d4c20fbe015971fffa11312c1f",
+      "inode": 3719209,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/validate.ts",
+      "target": "services/ingenium-api/lib/middleware/validate.ts",
+      "bytes": 1404,
+      "sourceSha256": "57c3427c8c9c8aa79401ea19b7c179cdbe2ef2a251a2d62c105710fcdf51cd8c",
+      "inode": 3719210,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/vault-gate.ts",
+      "target": "services/ingenium-api/lib/middleware/vault-gate.ts",
+      "bytes": 663,
+      "sourceSha256": "9124785c4e6df830e376e97bc2736521d482a8cb6fb0e95e67f5eb915c9f8ab5",
+      "inode": 3719211,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "target": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "bytes": 6819,
+      "sourceSha256": "bc07dd7e67dc5bdcce61fe4c94c9e8973254f4db6fe96a3a952472cb98d779b0",
+      "inode": 2428334,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "target": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "bytes": 19639,
+      "sourceSha256": "88ac772e292760d02b94aa55039a291da269c2138c4a0db11c43a4dea2702668",
+      "inode": 2440154,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "target": "services/ingenium-api/lib/opencode-client.ts",
+      "bytes": 107528,
+      "sourceSha256": "c337a60d03e4ade219c046c6ed02308b46028a572e30d50103664cc61fdb47c4",
+      "inode": 3719212,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-messages-client.ts",
+      "target": "services/ingenium-api/lib/opencode-messages-client.ts",
+      "bytes": 2973,
+      "sourceSha256": "3e2691c039ecb5c1a1e98d3ca28d671400eb08c77c417cea193fd20db82a92d4",
+      "inode": 3719213,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/paired-native-proof.ts",
+      "target": "services/ingenium-api/lib/paired-native-proof.ts",
+      "bytes": 3341,
+      "sourceSha256": "4d6a6639c2a5fda6e99c9bb9d61f727e03ce503b9c407f9efd31ba2176fc6420",
+      "inode": 2440824,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/paired-native-reader.ts",
+      "target": "services/ingenium-api/lib/paired-native-reader.ts",
+      "bytes": 10353,
+      "sourceSha256": "7bc967099af80b05ce9bc7c0dc287831c85630a64189538dd668912585ed0fcd",
+      "inode": 2440841,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts",
+      "target": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts",
+      "bytes": 776,
+      "sourceSha256": "6e9c87011670135732bca7e2157adc633e3dd2fe5549a74f5e32a7971896d967",
+      "inode": 120940,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/projects-v2/request-execution.ts -> ./canonical-chat-binding.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs",
+      "target": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.mjs",
+      "bytes": 2917,
+      "sourceSha256": "b547648303df0ddda50d739b4db20b0d975a70edcc2a2b96f7978b87d5fde628",
+      "inode": 120929,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/projects-v2/request-execution.ts -> ./canonical-chat-binding.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-chat-source.d.mts",
+      "target": "services/ingenium-api/lib/projects-v2/request-chat-source.d.mts",
+      "bytes": 493,
+      "sourceSha256": "f241a42a917ae606d9053550370404886da8b600b1f1222bcee55cf3dc88926c",
+      "inode": 849329,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ../projects-v2/request-chat-source.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+      "target": "services/ingenium-api/lib/projects-v2/request-chat-source.mjs",
+      "bytes": 1372,
+      "sourceSha256": "0f5b3fa9056ed38c218a83bc300c82495dfe7459b480377b240303c4cdd14624",
+      "inode": 849332,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts -> ../projects-v2/request-chat-source.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts",
+      "target": "services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts",
+      "bytes": 2927,
+      "sourceSha256": "fe3a0a1031381e65aa408bf08d90d871110343017a1957a747b4698908531b54",
+      "inode": 848036,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/runtime-placement-contract.ts -> ./projects-v2/request-execution-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution-owner.mjs",
+      "target": "services/ingenium-api/lib/projects-v2/request-execution-owner.mjs",
+      "bytes": 10357,
+      "sourceSha256": "3de41437fde44a458525a23d31184be5584dff51f48ce92b6875ad2bfc288541",
+      "inode": 848037,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/runtime-placement-contract.ts -> ./projects-v2/request-execution-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution.ts",
+      "target": "services/ingenium-api/lib/projects-v2/request-execution.ts",
+      "bytes": 4789,
+      "sourceSha256": "7910a9895750227a93e7e87862c359cef574aa2c261b3bd2079c48c856eb501d",
+      "inode": 848041,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/request-identity.ts",
+      "target": "services/ingenium-api/lib/request-identity.ts",
+      "bytes": 3398,
+      "sourceSha256": "b9ca30032ff4c9f2f1c69f16a35b06c557c31dd4aac2f6821d95067811fa029b",
+      "inode": 835605,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/restore-runtime-guard.ts",
+      "target": "services/ingenium-api/lib/restore-runtime-guard.ts",
+      "bytes": 5898,
+      "sourceSha256": "1c2bab0dbf8a4ece1606d10e213a5b8826a965f1d86710cad3799e4d0f9b508a",
+      "inode": 2424979,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/restore-supervisor.ts",
+      "target": "services/ingenium-api/lib/restore-supervisor.ts",
+      "bytes": 1208,
+      "sourceSha256": "0041b8755ddbdb00511de505f926b0f7e9e4024948112174a3a4d98689108c63",
+      "inode": 3719215,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/agents.ts",
+      "target": "services/ingenium-api/lib/routes/agents.ts",
+      "bytes": 6276,
+      "sourceSha256": "3b4cbf20535b5d6caacddea4e7cd437b66b484757d1af8da6b403071bb866e8b",
+      "inode": 3719217,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "target": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "bytes": 31823,
+      "sourceSha256": "1c828afe0abb663d04998729bbadad47a6480e4a4bbf153d1293be3015884a42",
+      "inode": 3719218,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/backups.ts",
+      "target": "services/ingenium-api/lib/routes/backups.ts",
+      "bytes": 15590,
+      "sourceSha256": "35a1350198e0fd5998c5b026915509d137ac2b92b76b2567e056d8b2fed2e805",
+      "inode": 3719219,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "target": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "bytes": 1462,
+      "sourceSha256": "851570c5389c248a1d450c74e188536f44f528adf074ac4a1d361e52ac6e7210",
+      "inode": 3719220,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/cloudflare.ts",
+      "target": "services/ingenium-api/lib/routes/cloudflare.ts",
+      "bytes": 5553,
+      "sourceSha256": "6ae006bcebe6b2e5d03edb84d431e034c9b30d9f0ed437d3662fb2348ccff3df",
+      "inode": 3719221,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/commands.ts",
+      "target": "services/ingenium-api/lib/routes/commands.ts",
+      "bytes": 3067,
+      "sourceSha256": "2b3053835692718820a937033c5d84c14a115da6bb1a506e046bb9e3ae4cbc8c",
+      "inode": 3719222,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/configs.ts",
+      "target": "services/ingenium-api/lib/routes/configs.ts",
+      "bytes": 2446,
+      "sourceSha256": "4bf1e2e53d2985838b11822d6f608cc082bd6d9c8b0e03a9429e311276773374",
+      "inode": 3719223,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context-snapshot-ingest.ts",
+      "target": "services/ingenium-api/lib/routes/context-snapshot-ingest.ts",
+      "bytes": 14197,
+      "sourceSha256": "0ac82db56d7ffb8b7a36908e91c4d7892bf1e405b92a210224f6f138d3ddeac8",
+      "inode": 3719224,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context.ts",
+      "target": "services/ingenium-api/lib/routes/context.ts",
+      "bytes": 36959,
+      "sourceSha256": "766db11190936865da50a666c21d439fe77dcc9ae434eb2e0e6b26dbdeb24dca",
+      "inode": 3719225,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "target": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "bytes": 22319,
+      "sourceSha256": "88ed24ffc3b3350f6e5bd1231428d84816e91e090e5b35ad4164ff0b7cb944fe",
+      "inode": 3118154,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "target": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "bytes": 3258,
+      "sourceSha256": "0204d7975e9ea06419fc5db82bb559212a09987642f14ed33ec2187f9792b572",
+      "inode": 3118143,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize.ts",
+      "target": "services/ingenium-api/lib/routes/customize.ts",
+      "bytes": 2676,
+      "sourceSha256": "0bfea4c1d821a083f477563d99977a55130bf89077b9b016c83fdce57271e441",
+      "inode": 3106877,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/dashboard.ts",
+      "target": "services/ingenium-api/lib/routes/dashboard.ts",
+      "bytes": 30110,
+      "sourceSha256": "fc26c180a14cc525c0d0b8caa87d062f2587656283ba0ae0fbd93dc799455052",
+      "inode": 3719226,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs-ai.ts",
+      "target": "services/ingenium-api/lib/routes/docs-ai.ts",
+      "bytes": 13499,
+      "sourceSha256": "4e30f5d463b9d43a75a3cf263e155680b47a84edabd7886bfb2edee817bd5629",
+      "inode": 3719227,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs.ts",
+      "target": "services/ingenium-api/lib/routes/docs.ts",
+      "bytes": 56520,
+      "sourceSha256": "cf0e0277093e9d822cbc4448cdbf316b568fd8bdde9861c6894199aee08230a0",
+      "inode": 3719228,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/emails.ts",
+      "target": "services/ingenium-api/lib/routes/emails.ts",
+      "bytes": 71003,
+      "sourceSha256": "b67e1c9d9d371ff37c6ce4605e64eb3a2c35f1956d545bbfcdf103ddb48317ca",
+      "inode": 3719229,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/extraction.ts",
+      "target": "services/ingenium-api/lib/routes/extraction.ts",
+      "bytes": 4632,
+      "sourceSha256": "0c56c655fa352c1bf3f3a5fb1eeae5d258512bdc4176e7994ae5bc7c87a892e1",
+      "inode": 3719230,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/jobs.ts",
+      "target": "services/ingenium-api/lib/routes/jobs.ts",
+      "bytes": 26842,
+      "sourceSha256": "0916965e09a2658691c52f0474ed1182f66799ec7cfefb28d02a0b2d0f5f6f42",
+      "inode": 3719231,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/logs.ts",
+      "target": "services/ingenium-api/lib/routes/logs.ts",
+      "bytes": 935,
+      "sourceSha256": "1730edd7d619e4a5ee4db95cddf00b751ea301b52c9cea53e6694c047493ff4b",
+      "inode": 3719232,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-servers.ts",
+      "target": "services/ingenium-api/lib/routes/mcp-servers.ts",
+      "bytes": 11863,
+      "sourceSha256": "0b2bc7eddd6e97faddc27f5ab3d12c72cd83935dd18ade6c469f12f6d4e867f4",
+      "inode": 2440837,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-tools.ts",
+      "target": "services/ingenium-api/lib/routes/mcp-tools.ts",
+      "bytes": 15345,
+      "sourceSha256": "c47efdd948b3272f163015fc7cf3770febd6f1fb8e09f5d589784ed698485b00",
+      "inode": 3719234,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory-lifecycle.ts",
+      "target": "services/ingenium-api/lib/routes/memory-lifecycle.ts",
+      "bytes": 6547,
+      "sourceSha256": "c7df5179963b12f3600da8b5c2e644aba4c8ddf3e53fc60ed56f6093c39b6f8e",
+      "inode": 849766,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory.ts",
+      "target": "services/ingenium-api/lib/routes/memory.ts",
+      "bytes": 10212,
+      "sourceSha256": "0ad5cb0dcf6a07b8e690a4327aa4259a0e54b87f904158e7a3fe90dab80ac631",
+      "inode": 3719235,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-context.ts",
+      "target": "services/ingenium-api/lib/routes/native-customize-context.ts",
+      "bytes": 2982,
+      "sourceSha256": "95c86c3ad516f6015e461644583e847adabef814dd286455faccef4002b177c4",
+      "inode": 2428335,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "target": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "bytes": 1487,
+      "sourceSha256": "6dcf60b1be4c4e79a53dbaf5dad2b10e0c5eb3578072ac1150468b8141b26969",
+      "inode": 2823783,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "target": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "bytes": 7814,
+      "sourceSha256": "50c980fcd06f72cffc4e5a2bc7bfa6ba663e83aaa338c6442740ab3a8cc36305",
+      "inode": 2428337,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-wire.ts",
+      "target": "services/ingenium-api/lib/routes/native-customize-wire.ts",
+      "bytes": 2112,
+      "sourceSha256": "c25f02e1a339ed3ff68a428bb4f2f0b622ac6b76d0ba3e3247fb3a153af5e2ef",
+      "inode": 2428342,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize.ts",
+      "target": "services/ingenium-api/lib/routes/native-customize.ts",
+      "bytes": 3323,
+      "sourceSha256": "a80c160c36bc64d1f30feda6a5e2efda7517d3acd7788d2b50fe2d97d9245b53",
+      "inode": 2440904,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/observations.ts",
+      "target": "services/ingenium-api/lib/routes/observations.ts",
+      "bytes": 7507,
+      "sourceSha256": "2af53416b5ab9b97defdae02123403272b643a53fa24a867c4c4332b46e37063",
+      "inode": 3719236,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/opencode.ts",
+      "target": "services/ingenium-api/lib/routes/opencode.ts",
+      "bytes": 75161,
+      "sourceSha256": "734ef8676612cf774870c6bb69591e38c32e57a9dca89f19af73c1548ad9b337",
+      "inode": 3719237,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/organizations.ts",
+      "target": "services/ingenium-api/lib/routes/organizations.ts",
+      "bytes": 6305,
+      "sourceSha256": "42d983a5cb0c9839705ed1764ece7c06b08f84925148a7960ea2782abf36db2e",
+      "inode": 3719238,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/personality.ts",
+      "target": "services/ingenium-api/lib/routes/personality.ts",
+      "bytes": 4306,
+      "sourceSha256": "da11d6af0360fbaa4c5675d67e716f4f92e7790778bf9f2ebf7118fc1e0c28de",
+      "inode": 3719239,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/pipeline.ts",
+      "target": "services/ingenium-api/lib/routes/pipeline.ts",
+      "bytes": 2541,
+      "sourceSha256": "580a374a6d0381aa9ef1d2fbb8ac204b7c05d4b1cfec2bfe6c3372dffc31df7f",
+      "inode": 3719240,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/plugins.ts",
+      "target": "services/ingenium-api/lib/routes/plugins.ts",
+      "bytes": 7246,
+      "sourceSha256": "c957d2be7779f2383e85688e6d9e8b30cdb0ac305150cf1acb38c18a561f5b0b",
+      "inode": 3719241,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/projects.ts",
+      "target": "services/ingenium-api/lib/routes/projects.ts",
+      "bytes": 10535,
+      "sourceSha256": "7a530c8de1447f68c2028e51bc6c83e66c05c97d3be69fcfd33219691790f88a",
+      "inode": 3719242,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/rag.ts",
+      "target": "services/ingenium-api/lib/routes/rag.ts",
+      "bytes": 15847,
+      "sourceSha256": "b3b69c93d9b3924d17ea72cd5573add8e1955f8ebaf8e160a49b66fc6cff2b33",
+      "inode": 3719243,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/repository.ts",
+      "target": "services/ingenium-api/lib/routes/repository.ts",
+      "bytes": 4404,
+      "sourceSha256": "9a45c576a4cac29ece5f033d574d503196fc58367f85819de2a3fdc68ccca5fb",
+      "inode": 3719244,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/runtimes.ts",
+      "target": "services/ingenium-api/lib/routes/runtimes.ts",
+      "bytes": 23572,
+      "sourceSha256": "2e65fe69275eb6c6872dfa62fbad11aefa9ad36adbc559538e1c27758c4f737d",
+      "inode": 3719245,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/servers.ts",
+      "target": "services/ingenium-api/lib/routes/servers.ts",
+      "bytes": 2091,
+      "sourceSha256": "c6bf8540fcf292c37afe62c66b711b0056cb3270907cd0a11bbf2c98bc551c8d",
+      "inode": 3719246,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/services.ts",
+      "target": "services/ingenium-api/lib/routes/services.ts",
+      "bytes": 17792,
+      "sourceSha256": "da0f7a3dce69132abfcdcba5d0a687ebd05e22e47cd9cdb1fa842505bc32ca66",
+      "inode": 3719247,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/settings.ts",
+      "target": "services/ingenium-api/lib/routes/settings.ts",
+      "bytes": 55895,
+      "sourceSha256": "66c8def77cabcd2f0c6aa22574a0490ee6f4ac5ecb70e37fe59c3594db6dc884",
+      "inode": 3719248,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/skills.ts",
+      "target": "services/ingenium-api/lib/routes/skills.ts",
+      "bytes": 44437,
+      "sourceSha256": "424883739147c27b45060ed0e1a384dda491965e21dd91ffd4156988c75613fa",
+      "inode": 3719249,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/synthesis.ts",
+      "target": "services/ingenium-api/lib/routes/synthesis.ts",
+      "bytes": 10165,
+      "sourceSha256": "223739540ce1bd7c09f00d1ad67702b5ec63befa5978be008094e05dfb0daa5c",
+      "inode": 3719250,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/tasks.ts",
+      "target": "services/ingenium-api/lib/routes/tasks.ts",
+      "bytes": 37405,
+      "sourceSha256": "060a161bb0537c2f1ebcee62eaa645d6c6cd65de4a69c579905c279ec3dae5aa",
+      "inode": 3719251,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/usage.ts",
+      "target": "services/ingenium-api/lib/routes/usage.ts",
+      "bytes": 18086,
+      "sourceSha256": "1f15090a44cc3df4150dd1e78408b5f2f6f8774e9112741210d4d9439d8006c2",
+      "inode": 3719252,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/vault.ts",
+      "target": "services/ingenium-api/lib/routes/vault.ts",
+      "bytes": 27770,
+      "sourceSha256": "6d6906e65117d799a4899b4f2ebe1d6a11fc8cec568f843a927df06a9e32dc81",
+      "inode": 2440907,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-gateway-auth.ts",
+      "target": "services/ingenium-api/lib/runtime-gateway-auth.ts",
+      "bytes": 1762,
+      "sourceSha256": "02b41e9e8396a64ac746e28011f4055ab8ea34db877b04600d53ee9c6b676e62",
+      "inode": 3719254,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "target": "services/ingenium-api/lib/runtime-manager-auth.ts",
+      "bytes": 850,
+      "sourceSha256": "ef443c5b122dec81c184291c0b86320f70735446b0aa9f94293ce419c2bf8b97",
+      "inode": 2424985,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "target": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "bytes": 12895,
+      "sourceSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+      "inode": 2443265,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "target": "services/ingenium-api/lib/runtime-manager-contract.ts",
+      "bytes": 11277,
+      "sourceSha256": "d61c72715e793b54b6b79760b24787dd3af32c5b76953f8ad58866ff35c5194a",
+      "inode": 2437823,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-mode.ts",
+      "target": "services/ingenium-api/lib/runtime-mode.ts",
+      "bytes": 1740,
+      "sourceSha256": "f0a8d665cd80756b7c3dbbe872db558c97412efaeea8aa2231319495e7096fb6",
+      "inode": 3719257,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "target": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "bytes": 1770,
+      "sourceSha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79",
+      "inode": 3719258,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "target": "services/ingenium-api/lib/runtime-placement-contract.ts",
+      "bytes": 5619,
+      "sourceSha256": "3c9c6037b01a74724a77883d7792b16458d3d0de29a8236129028d4f34c868dd",
+      "inode": 848658,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-placement.ts",
+      "target": "services/ingenium-api/lib/runtime-placement.ts",
+      "bytes": 4517,
+      "sourceSha256": "c61ff2dc77b46755a7b3d5d2063dd362fb482777b4dfb87a7acaf5dd451cb5d1",
+      "inode": 832676,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "target": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "bytes": 14065,
+      "sourceSha256": "48394a7d3f701ed28b8c383f17d7b133550bbbab9fb3d3ee95ed39da87f5d118",
+      "inode": 2437998,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-reconciler.ts",
+      "target": "services/ingenium-api/lib/runtime-reconciler.ts",
+      "bytes": 4564,
+      "sourceSha256": "133fe5871330bf0587cceeecc3b7a30e6c66ef174fd09d8b7e49b52c8a21700a",
+      "inode": 3719260,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/scheduler.ts",
+      "target": "services/ingenium-api/lib/scheduler.ts",
+      "bytes": 26833,
+      "sourceSha256": "405df007d16a26dc9ffef110c00032884ebfd6ad8d5638725a7bbdb3c2569890",
+      "inode": 3110243,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/server-global-provider-persistence.ts",
+      "target": "services/ingenium-api/lib/server-global-provider-persistence.ts",
+      "bytes": 26518,
+      "sourceSha256": "0e5794ce55a6092b0c258795bce9fd5fcfe34bbf9ff9b710bed5429c0c045608",
+      "inode": 3719262,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/supervisor-client.ts",
+      "target": "services/ingenium-api/lib/supervisor-client.ts",
+      "bytes": 5941,
+      "sourceSha256": "da8193b7440c3087dd9fd68d0d209c151e02be49c98a479664ff22f87f8a517f",
+      "inode": 3719263,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/synthesis-cadence.ts",
+      "target": "services/ingenium-api/lib/synthesis-cadence.ts",
+      "bytes": 838,
+      "sourceSha256": "f3c37264fd39cdf65e71a53313ea80e052670481df908b2ff92d4f5a278b5dd5",
+      "inode": 3845319,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/synthesis-provider-resolution.ts",
+      "target": "services/ingenium-api/lib/synthesis-provider-resolution.ts",
+      "bytes": 3926,
+      "sourceSha256": "3085fec9acf9c5c90ccc4789c484f489204db04a002e04873752d14a66470507",
+      "inode": 3719264,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/usage-sync.ts",
+      "target": "services/ingenium-api/lib/usage-sync.ts",
+      "bytes": 15494,
+      "sourceSha256": "142a08a04a012907f7614a80746bc1498532f23a1657deeef9d8987b211e9a4c",
+      "inode": 3719265,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attached-call-protocol.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/attached-call-protocol.d.mts",
+      "bytes": 442,
+      "sourceSha256": "be273803adabc3f1781404efd5ef13604f6d351271dd73fdaab581e323955411",
+      "inode": 832728,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./attached-call-protocol.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attached-call-protocol.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/attached-call-protocol.mjs",
+      "bytes": 3064,
+      "sourceSha256": "2016f36944291aa916bddb2b105d965129534eab3aa5941e4105d2a11c084aa7",
+      "inode": 832726,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./attached-call-protocol.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.d.mts",
+      "bytes": 730,
+      "sourceSha256": "f5f4d78dfc253cad570301127d9017b0aaea33800482cb3cd594b459ed72e166",
+      "inode": 832725,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./attached-verbatim-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/attached-verbatim-policy.mjs",
+      "bytes": 1977,
+      "sourceSha256": "e1ce337a0f296893b1e6a36afba1f2cb2d56fc454b96289f90a109526dbd51cd",
+      "inode": 832724,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./attached-verbatim-policy.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-binding.ts",
+      "target": "services/ingenium-api/lib/voice-v2/attachment-delivery-binding.ts",
+      "bytes": 1183,
+      "sourceSha256": "305d3785883d6366ba955583bd718a83d44e2bcd59623381a94574aeeb8ca1cf",
+      "inode": 3116899,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts",
+      "bytes": 1236,
+      "sourceSha256": "20fced402153992b3c195a10c5027e5b329e341bb696016dfcd032e4689d132f",
+      "inode": 3116898,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/attachment-delivery-binding.ts -> ./attachment-delivery-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.mjs",
+      "bytes": 6411,
+      "sourceSha256": "adbb5d8404ed41f3a944a0105f9d7369faa075a0dfed486d4455897504205f55",
+      "inode": 3116894,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/attachment-delivery-binding.ts -> ./attachment-delivery-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/core-cpu-owner.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/core-cpu-owner.mjs",
+      "bytes": 10123,
+      "sourceSha256": "64fe39a2f0a3b8fb7cccc12b3a15552c6cc1487088ac1cef282172ffcaf84552",
+      "inode": 2444445,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs -> ./core-cpu-owner.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/cpu-ownership.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/cpu-ownership.mjs",
+      "bytes": 8780,
+      "sourceSha256": "8bc554446028d0630443f0aff6f5f28459e73242694208940f1f472049ff3f7e",
+      "inode": 864070,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs -> ./cpu-ownership.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-channel.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/managed-channel.mjs",
+      "bytes": 7947,
+      "sourceSha256": "15dd2d28b2672987f869d2944eddb5a9773fcc02c716b548ca34634b87638ddc",
+      "inode": 2444446,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs -> ./managed-channel.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-profile.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/managed-profile.d.mts",
+      "bytes": 1303,
+      "sourceSha256": "235f4421d763aaaef00658b2aaf501b32882fe35d38dcdb79517d5a83da8e604",
+      "inode": 2444447,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts -> ./managed-profile.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-profile.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/managed-profile.mjs",
+      "bytes": 7401,
+      "sourceSha256": "17ba2346a41b63e4e21955af2cccad24148dca627f7bf89d8115bb551814746e",
+      "inode": 2444452,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts -> ./managed-profile.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "bytes": 5995,
+      "sourceSha256": "6d74dc2dbea2f34650ca04d01f62105d82b5591d68d001225db23c44dbbecece",
+      "inode": 2444458,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./managed-supervisor.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+      "bytes": 48218,
+      "sourceSha256": "25002842f96917fbb7ed215abb80292043fc6be6435a9d06de859b7fea5e32bb",
+      "inode": 2444457,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/voice-v2/request-context.ts -> ./managed-supervisor.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.d.mts",
+      "target": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.d.mts",
+      "bytes": 1650,
+      "sourceSha256": "87a649b35e8f693e704a4a02c834af8d471016c0e8bb35f9e97419961e848891",
+      "inode": 3118531,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/opencode-client.ts -> ./voice-v2/raw-assistant-wire.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.mjs",
+      "target": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.mjs",
+      "bytes": 9475,
+      "sourceSha256": "b125c50a2130f4de37feca93e05b05f36404dfbf3571fd5ee1d476e2e5ec14aa",
+      "inode": 3118470,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/opencode-client.ts -> ./voice-v2/raw-assistant-wire.mjs"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "target": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "bytes": 47135,
+      "sourceSha256": "f91dd10e64bf13a36145fd015237b80ee22aedbd8dab920c52dc517ea51b6f9e",
+      "inode": 2445311,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "target": "services/ingenium-api/package.json",
+      "bytes": 1086,
+      "sourceSha256": "9cd0daf7ba6bed7d5d2f049b67b2158f786df338115a428b912b4d031b77e0aa",
+      "inode": 3719266,
+      "device": 2096,
+      "consumer": "exact original ESM package scope"
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "target": "services/ingenium-api/scripts/api-server.ts",
+      "bytes": 21727,
+      "sourceSha256": "221405c956487df1178ce25fe9af11e5cd561c50ec2cecb63fdc72c32e5dd148",
+      "inode": 3110241,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/check-database-integrity.ts",
+      "target": "services/ingenium-api/scripts/check-database-integrity.ts",
+      "bytes": 537,
+      "sourceSha256": "d43842ccc7a9f3df179f6a3803bf7b59c4abe4d49fd4ca68f699d59c88c81722",
+      "inode": 3719269,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "target": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "bytes": 54631,
+      "sourceSha256": "d844f25c617d1e3300dc566cc2bccbe9efeed060e8e849887590d2ed47ece6aa",
+      "inode": 3116712,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "target": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "bytes": 918,
+      "sourceSha256": "d807173cbb481fe7f096f55bdca59cc5f770ccbc04f2522c8744044819c714e3",
+      "inode": 3116648,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-gateway.ts",
+      "target": "services/ingenium-api/scripts/runtime-gateway.ts",
+      "bytes": 27056,
+      "sourceSha256": "4e32392548a026b8d1efeb48e02f2cf4237a21369019da2555f41ce6b1b50494",
+      "inode": 3719271,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-bootstrap.ts",
+      "target": "services/ingenium-api/scripts/runtime-job-bootstrap.ts",
+      "bytes": 515,
+      "sourceSha256": "126f89bb908b7240b91841b9bc7b7e7dabb8f02a3c48097267535736e794e862",
+      "inode": 2427488,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-child.ts",
+      "target": "services/ingenium-api/scripts/runtime-job-child.ts",
+      "bytes": 786,
+      "sourceSha256": "dff0164eabb77d776736ac36db20211fdb327061c22807cdd68af35a0d581502",
+      "inode": 2427489,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "target": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "bytes": 659,
+      "sourceSha256": "6d22a7a97a5602fc66629a2bde3ff8513ea58cdfdd41ef400db8c18ccff04dcd",
+      "inode": 2428122,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-manager.ts",
+      "target": "services/ingenium-api/scripts/runtime-manager.ts",
+      "bytes": 29102,
+      "sourceSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "inode": 2443273,
+      "device": 2096,
+      "consumer": "original API include"
+    },
+    {
+      "source": "services/ingenium-api/tsconfig.json",
+      "target": "services/ingenium-api/tsconfig.json",
+      "bytes": 245,
+      "sourceSha256": "c6d353d9521f1a1bc028e887c2bb9db6cdd6310548314de03f42030f4b4b2361",
+      "inode": 3719379,
+      "device": 2096,
+      "consumer": "exact original API config"
+    },
+    {
+      "source": "tools/veyra-release/core126-candidate-intent.d.mts",
+      "target": "tools/veyra-release/core126-candidate-intent.d.mts",
+      "bytes": 1746,
+      "sourceSha256": "eba8d947516daf06df9b7351f92114082346161fdde1c0f1843c4abdd1b09f78",
+      "inode": 2454615,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/dot-original-context.ts -> ../../../../tools/veyra-release/core126-candidate-intent.mjs"
+    },
+    {
+      "source": "tools/veyra-release/core126-candidate-intent.mjs",
+      "target": "tools/veyra-release/core126-candidate-intent.mjs",
+      "bytes": 4893,
+      "sourceSha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1",
+      "inode": 2454635,
+      "device": 2096,
+      "consumer": "services/ingenium-api/lib/dot-v2/dot-original-context.ts -> ../../../../tools/veyra-release/core126-candidate-intent.mjs"
+    },
+    {
+      "source": "tools/veyra-release/core126-docker-binary.d.mts",
+      "target": "tools/veyra-release/core126-docker-binary.d.mts",
+      "bytes": 2069,
+      "sourceSha256": "6f179910f10e60aa8faf04bf99fd504b63799a754e9251f11a0a01ad73d7a610",
+      "inode": 2444886,
+      "device": 2096,
+      "consumer": "packages/veyra-operations/core126-candidate-observation.mjs -> ../../tools/veyra-release/core126-docker-binary.mjs"
+    },
+    {
+      "source": "tools/veyra-release/core126-docker-binary.mjs",
+      "target": "tools/veyra-release/core126-docker-binary.mjs",
+      "bytes": 11083,
+      "sourceSha256": "b3b5456f73996ff63eaa0f433895de6fce62dc1a5cc5eedead38ddb183522d8f",
+      "inode": 2443339,
+      "device": 2096,
+      "consumer": "packages/veyra-operations/core126-candidate-observation.mjs -> ../../tools/veyra-release/core126-docker-binary.mjs"
+    },
+    {
+      "source": "tsconfig.base.json",
+      "target": "tsconfig.base.json",
+      "bytes": 532,
+      "sourceSha256": "d3a56e5bd556499e9d83efd8838233514341395972098aa24d5981253eabfbcc",
+      "inode": 3720218,
+      "device": 2096,
+      "consumer": "exact original extends"
+    }
+  ],
+  "sourceInventorySha256": "bf2e63ef144ac8e79739c732d8240aa894c37347042bfc00f712d15e1d58514a",
+  "blockers": [],
+  "dynamicRuntimeImports": [
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "line": 5,
+      "reason": "Computed runtime import is not a compiler-input file-copy request; actual runtime closure remains gated"
+    }
+  ],
+  "toolSingletonEnrollment": [
+    "tools/veyra-release/core126-candidate-intent.d.mts",
+    "tools/veyra-release/core126-candidate-intent.mjs",
+    "tools/veyra-release/core126-docker-binary.d.mts",
+    "tools/veyra-release/core126-docker-binary.mjs"
+  ],
+  "toolEnrollmentStatus": "Root explicitly enrolled exactly these two existing copier singletons plus literal required declarations in the same16MiB view",
+  "excluded": [
+    "thirdparty/node_modules",
+    "Core source/dist golden",
+    "runtime/user/.env/credentials/engine/models",
+    "symlinks/hardlinks",
+    "paths/baseUrl overrides/custom loaders"
+  ],
+  "materialized": false,
+  "refreshedDuringRootIntegration": {
+    "reason": "Root continuing authorized voice integration; same269inputs, no scope or copier preimage change",
+    "priorInventorySha256": "7cbe62e9c9bcf2b2444bb82d8d6c93d81293e45767afe18e26e1923b6af9451e",
+    "changes": [
+      {
+        "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+        "before": "69dc5556d07305c16f835ff1c800023b658625cd02229c0775d2092facbc6732",
+        "after": "6d74dc2dbea2f34650ca04d01f62105d82b5591d68d001225db23c44dbbecece",
+        "bytes": 5995
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.mjs",
+        "before": "266bcede5fce10416ee3aab2f7bfd4afe396eac905f6c4905dbf5749a611ad9e",
+        "after": "25002842f96917fbb7ed215abb80292043fc6be6435a9d06de859b7fea5e32bb",
+        "bytes": 48218
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+        "before": "7749d9b11e080b7403b7a3a538762404e9398dbb666f06cfcb193bf297bc0188",
+        "after": "f91dd10e64bf13a36145fd015237b80ee22aedbd8dab920c52dc517ea51b6f9e",
+        "bytes": 47135
+      }
+    ]
+  }
+}
