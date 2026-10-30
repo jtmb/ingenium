@@ -1,5 +1,7 @@
 # SQL130 original dispatch fence review
 
+Status update: Root accepted and corrected the P1 while this review was being finalized. Current SQL130 observed SHA256 `18027e08cbfd859eaaef1813785fef8b166c1632d6b76faf2f8ad2a0b19ff998` adds connection-independent operation/Run BEFORE INSERT collision guards. Root also registered them for drift checks and added both recursive-trigger settings to its refusal tests. Root owns validation of that correction. The finding and reproduction below refer to the explicitly pinned historical preimage, not the corrected source. No further concrete P1/P2 emerged in the remaining bounded review.
+
 Read-only bounded Foundation review of the original Core SQL130, registration/drift checks, unadmitted close, restart exclusion and focused fixture. No shared edits, schema application, production startup, build, process/model/runtime, Computer Use or workers were used. Exact reviewed input hashes and the output reconciliation are in the single coordination `dot-dispatch-review-receipt.json`.
 
 ## P1: INSERT OR REPLACE bypasses the persisted nonreplay fence
@@ -27,7 +29,7 @@ SQL130 is additive to the existing Dot/managed ledger. Initial and retry claims 
 
 This review does not establish actual production startup/restore acceptance, authenticated scheduler behavior, actual process placement, positive physical retirement, finite CPU/model qualification or full Veyra release acceptance. Root retains those gates. No new Run, DB writer, quota, credential authority or positive fixture constructor was introduced.
 
-Regenerate the bounded witnesses from the existing owned checkout using existing Linux Node, DOT_FENCE_REVIEW_ROOT pointing to the existing read-only `real-gmail-ui/prd-ui-fixes`, TEMP/TMP/TMPDIR in the SAME existing `veyra-phase-1/coordination/rust-api`, and NODE_DISABLE_COMPILE_CACHE=1:
+Regenerate the bounded historical witnesses from the existing owned checkout using existing Linux Node, DOT_FENCE_REVIEW_ROOT pointing to the existing read-only `real-gmail-ui/prd-ui-fixes`, TEMP/TMP/TMPDIR in the SAME existing `veyra-phase-1/coordination/rust-api`, and NODE_DISABLE_COMPILE_CACHE=1. The script accepts the exact reviewed original hash or reconstructs that same hash in memory from Root's exact appended correction hash by retiring only its known trailing collision-guard block. Unknown inputs stop. This lossless recipe avoids a cumulative full source snapshot and does not test or condemn the current corrected SQL:
 
 ```sh
 node --test docs/workstreams/rust-api/dot-dispatch-review/review-witnesses.mjs

@@ -1,9 +1,14 @@
 import fs from 'node:fs';import {pathToFileURL} from 'node:url';import {resolve} from 'node:path';import {createHash} from 'node:crypto';
 const root=process.env.DOT_FENCE_REVIEW_ROOT;if(!root?.startsWith('/'))throw Error('Explicit existing read-only integration root required');
 const sqlPath=resolve(root,'packages/ingenium-core/data/migrations/130_dot_original_dispatch_fence.sql'),sha=v=>createHash('sha256').update(v).digest('hex');
-if(sha(fs.readFileSync(sqlPath))!=='fb94676ba942e87bbe781b2a8c4e72281181b8615620aa86e1631a65b38eb573')throw Error('Reviewed SQL130 preimage changed; re-review before running');
+let baseline=fs.readFileSync(sqlPath,'utf8');
+// Retain a lossless historical recipe after Root's precise appended collision fix.
+// This NEVER writes canonical SQL and NEVER represents current fixed source as defective.
+if(sha(baseline)==='18027e08cbfd859eaaef1813785fef8b166c1632d6b76faf2f8ad2a0b19ff998')baseline=baseline.slice(0,baseline.indexOf('-- REPLACE may not invoke DELETE triggers')).trimEnd()+'\n';
+if(sha(baseline)!=='fb94676ba942e87bbe781b2a8c4e72281181b8615620aa86e1631a65b38eb573')throw Error('Reviewed SQL130 preimage changed; re-review before running');
 const fixtureURL=pathToFileURL(resolve(root,'packages/ingenium-core/tests/dot-original-dispatch-fence.test.mjs'));
 let source=fs.readFileSync(fixtureURL,'utf8');source=source.slice(0,source.indexOf('\ntest(')).replaceAll('import.meta.url',JSON.stringify(fixtureURL.href));
+source=source.replace('const sql=n=>readFileSync(',"const sql=n=>n==='130_dot_original_dispatch_fence.sql'?"+JSON.stringify(baseline)+':readFileSync(');
 source+=String.raw`
 test('review witness: REPLACE can erase a closed original operation and reopen/admit the same Run with recursive triggers off',t=>{
  const f=fixture();t.after(f.close);f.db.exec('PRAGMA recursive_triggers=OFF');assert.equal(f.db.prepare('PRAGMA recursive_triggers').get().recursive_triggers,0);
