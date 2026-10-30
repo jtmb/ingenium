@@ -1,0 +1,125 @@
+{
+  "kind": "selected-state-exact-source-edits-v1",
+  "applied": false,
+  "encoding": "UTF-8, exact preimage; descending UTF-16 offsets, verify old string before each edit; preserve untouched bytes and existing EOL",
+  "files": [
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "preimageSha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6",
+      "edits": [
+        {
+          "offset": 337,
+          "old": "import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from \"./runtime-opencode-context.js\";",
+          "new": "import { currentOpenCodeRuntimeTarget, withOpenCodeRuntimeTarget } from \"./runtime-opencode-context.js\";\nimport { withCurrentSessionAdmission, guardSelectionMutation } from \"./selected-state-binding.js\";"
+        },
+        {
+          "offset": 35954,
+          "old": "export async function request<T>(",
+          "new": "export async function request<T>(path:string,opts:NonNullable<Parameters<typeof requestUnfenced>[1]>={}):Promise<OpenCodeResult<T>> {\n  // A known local missing-credential refusal has no transport effect.\n  if(!currentOpenCodeRuntimeTarget()&&!buildAuthHeader())return requestUnfenced<T>(path,opts);\n  return guardSelectionMutation(path,opts,()=>requestUnfenced<T>(path,opts));\n}\nasync function requestUnfenced<T>("
+        },
+        {
+          "offset": 48131,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(id, async () => {"
+        },
+        {
+          "offset": 48927,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 49442,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(id, async () => {"
+        },
+        {
+          "offset": 49917,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 50086,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(id, async () => {"
+        },
+        {
+          "offset": 50355,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 53732,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(sessionId, async () => {"
+        },
+        {
+          "offset": 55550,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 58365,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(sessionId, async () => {"
+        },
+        {
+          "offset": 58985,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 59371,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(sessionId, async () => {"
+        },
+        {
+          "offset": 60258,
+          "old": "\n  },",
+          "new": "\n  }),"
+        },
+        {
+          "offset": 60453,
+          "old": "=> {",
+          "new": "=> withCurrentSessionAdmission(sessionId, async () => {"
+        },
+        {
+          "offset": 60876,
+          "old": "\n  },",
+          "new": "\n  }),"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/opencode.ts",
+      "preimageSha256": "734ef8676612cf774870c6bb69591e38c32e57a9dca89f19af73c1548ad9b337",
+      "edits": [
+        {
+          "offset": 1388,
+          "old": "import { currentOpenCodeRuntimeTarget } from \"../runtime-opencode-context.js\";",
+          "new": "import { currentOpenCodeRuntimeTarget } from \"../runtime-opencode-context.js\";\nimport { withCurrentSessionAdmission } from \"../selected-state-binding.js\";"
+        },
+        {
+          "offset": 34364,
+          "old": "  const result = await opencodeClient.sendPrompt(sessionId, req.body, directory);",
+          "new": "  const result = await withCurrentSessionAdmission(sessionId, () => opencodeClient.sendPrompt(sessionId, req.body, directory));"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "preimageSha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79",
+      "edits": [
+        {
+          "offset": 232,
+          "old": "export interface OpenCodeRuntimeTarget {",
+          "new": "export interface OpenCodeRuntimeTarget {\n  /** Server-owned logical engine identity; never accepted from a browser URL/body. */\n  selectionOwnerId?: string;"
+        },
+        {
+          "offset": 1659,
+          "old": "withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098`, directory: \"/workspace\" }, next);",
+          "new": "withOpenCodeRuntimeTarget({ baseUrl: `http://${runtime.backendName}:4098`, directory: \"/workspace\", selectionOwnerId: `runtime:${runtime.id}` }, next);"
+        }
+      ]
+    }
+  ]
+}

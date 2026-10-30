@@ -5,8 +5,8 @@
   "files": [
     {
       "path": "132_voice_attachment_deliveries.sql",
-      "bytes": 1797,
-      "sha256": "b2c7e1485660b05edea3869b7e68d760cfadf084b25019fc256045e952186eba"
+      "bytes": 2581,
+      "sha256": "d999f021b0df7f69ab289a7ab4cc9477bca2ac16498dfdfd94eeaa4b528a8877"
     },
     {
       "path": "attachment.mjs",
@@ -25,8 +25,8 @@
     },
     {
       "path": "delivery-owner.test.mjs",
-      "bytes": 4074,
-      "sha256": "c13e0fbb1f91dba079a5b55274b7230b34641c5b4c01b1f18fa9dd45d35b40ea"
+      "bytes": 6516,
+      "sha256": "e771e88fb4c19baa88d47053ce2c89fb335b45d13b07e51abe6129a2bfc4d4b5"
     },
     {
       "path": "hosted-owner.mjs",
@@ -40,24 +40,59 @@
     },
     {
       "path": "ownership.json",
-      "bytes": 1164,
-      "sha256": "7ecc406ad70bb1093e6f501f10bdb7b899a3132645486ea3f4b25b4cf7d6c6ad"
+      "bytes": 1416,
+      "sha256": "b556bea3c7b6ed6306e197143b9879a709f88261005b1bcd33f62005d987fb80"
     },
     {
       "path": "README.md",
-      "bytes": 7463,
-      "sha256": "374e8cda858ead4d3c5775033b495928cd77fa220bbe0f487abd68b747664ed2"
+      "bytes": 7003,
+      "sha256": "c268ffcfeeb568159e089d881c2f19ffb768d474a4959f7ecee1158badf623d8"
     },
     {
       "path": "receipt.json",
-      "bytes": 3568,
-      "sha256": "0d2dfb0b33d63f401eae8083683b5b4ae1644b5195fc4e8403be71087944b5cb"
+      "bytes": 3632,
+      "sha256": "b79ba26df349a24cdc852a992473eae00e92518e78de0a981a05e8f36d212e22"
     },
     {
       "path": "request-context.additions.ts",
-      "bytes": 4923,
-      "sha256": "c96a7bd9c59a71e54a3316ca30b62008e7b1da859d1b3810d34f8470b37e070b"
+      "bytes": 5243,
+      "sha256": "feb172d602b54568859bf6d53eee8727930b1a55a5ae88627cb334b208bb2293"
+    },
+    {
+      "path": "selected-state-admission.d.mts",
+      "bytes": 441,
+      "sha256": "568099b70cae35ba4cad4f1f162f0d98ae7d2628eb1de2adba7ca3385d7ac047"
+    },
+    {
+      "path": "selected-state-admission.mjs",
+      "bytes": 4516,
+      "sha256": "6966983c601a19082355eac11af10c710eca0595cb9a7f4171ab0787b19aa077"
+    },
+    {
+      "path": "selected-state-admission.test.mjs",
+      "bytes": 5163,
+      "sha256": "efa8e792d81d8729a600882bfb893367730abd19345586e77bc5542c5d877ae3"
+    },
+    {
+      "path": "selected-state-binding.ts",
+      "bytes": 989,
+      "sha256": "4a2d896445dafda365c698817a55033497c6c2cf642c8a5e4b6fb8d20b6afe26"
+    },
+    {
+      "path": "selected-state-edits.json",
+      "bytes": 4748,
+      "sha256": "aa4f993dd2006c0bc01582dca08907c5344d44ffdf04e1bf603a022f86f65725"
+    },
+    {
+      "path": "selected-state-receipt.json",
+      "bytes": 3133,
+      "sha256": "bb23194923829fc6dc96077ba74a241d71300df1e45775dca21440bb888220a7"
+    },
+    {
+      "path": "selected-state-review.md",
+      "bytes": 8423,
+      "sha256": "7af6e32542286df976a16c77b1b1c26ba3cd4211deb41e3be2e739802f311608"
     }
   ],
-  "totalContentBytes": 63154.0
+  "totalContentBytes": 93969.0
 }

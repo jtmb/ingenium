@@ -27,26 +27,19 @@ intact. The separate current-agent-original audit concerns that narrower path.
 - delivery-owner.mjs: Core factory with actual getDb and synchronous private
   assertHostedVoiceAttachment. Export through existing Core package.
 - Three test files: 8 attachment +5 SQLite owner +4 hosted adapter cases;
-  authored, not executed by this worker. Fixtures are not acceptance evidence.
+  originally authored; Root reports17/17 PASS. Follow-on cases are described in
+  selected-state-review.md; this worker executed none. Fixtures are not acceptance evidence.
 
 Root wires actual private context helpers, Core delivery owner, exported request
 and opencodeClient.streamEvents into hosted-owner; then constructs attachment
 with that private context/scope, callId, call-scoped speech owner and event sink.
 Constructor ports/browser scope are not authority; no singleton is started here.
 
-The request-context addition revalidates genuine current principal, private
-canonical Context/source, auth deadline, nine-axis scope, runtime/workspace and
-execution binding. Reads/speech require project/content READ; message/control
-requires both project/content WRITE. The async binding additionally resolves
-actual execution/chat source and selected session/agent/model, using the current
-OpenCode runtime target. Its configuration hash covers the actual selected
-session/model/permission projection, not full tool or execution ownership.
-Root retains the existing canonical selected-state admission fence through
-dispatch, shared with typed prompts/selection changes: a GET alone is not atomic
-against a concurrent source/model change. Revalidate WRITE immediately before
-claim/send. Real-context integration must cover principal revocation, project/
-content WRITE denial, inactive/private chat, source replacement, runtime/workspace
-epoch change, directory and agent/model/variant changes. None ran here.
+The private context revalidates principal, canonical source, deadline, scope and
+actual runtime/selected session. READ protects events/speech; project+content
+WRITE protects messages/control. Configuration hashing is selection metadata,
+not execution proof. See selected-state-review.md for the concrete shared fence,
+its uncovered writers, and actual auth/source/concurrency qualification gates.
 
 ## SAME queue and durable receipts
 
@@ -107,9 +100,9 @@ its genuine original owner/plugin boundary. Preserve all full-agent guards.
 Root-only command from this directory with original task-scoped TEMP/TMP/TMPDIR
 and Node caches disabled:
 
-    node --test attachment.test.mjs hosted-owner.test.mjs delivery-owner.test.mjs
+    node --test attachment.test.mjs hosted-owner.test.mjs delivery-owner.test.mjs selected-state-admission.test.mjs
 
-The17 authored tests were not run. SQLite fixture is in-memory; Root also tests
+The follow-on has29 authored tests, not run by this worker. SQLite fixture is in-memory; Root also tests
 its actual writer, auth/source/queue/selection races, stream joins, durable
 restart, CPU cleanup, UI and attended audio. Static body parse does not qualify
 module imports, TypeScript, SQL or runtime. No worker build/interpreter/model/

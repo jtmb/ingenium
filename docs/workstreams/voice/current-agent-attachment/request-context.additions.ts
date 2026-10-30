@@ -2,6 +2,7 @@
  * helpers and imports. Root-only source proposal, not a replacement file.
  * No CPU ownership binding or voice-agent-turn retirement is required here.
  */
+import {selectedStateAdmission} from '../selected-state-admission.mjs';
 export type VoiceAttachmentAction='read'|'speech'|'message'|'cancel-agent';
 export function assertHostedVoiceAttachment(context:HostedVoiceRequestContext,scope:Readonly<VoiceScope>,action:VoiceAttachmentAction):void{
  if(!['read','speech','message','cancel-agent'].includes(action))return fail('VOICE_ATTACHMENT_ACTION_INVALID',422);
@@ -16,7 +17,7 @@ export function assertHostedVoiceAttachment(context:HostedVoiceRequestContext,sc
 export async function withHostedVoiceAttachment<T>(context:HostedVoiceRequestContext,scope:Readonly<VoiceScope>,action:VoiceAttachmentAction,effect:(selection:Readonly<{scope:Readonly<VoiceScope>;sessionId:string;directory:string;agentId:string;modelId:string;providerId:string;variant:string|null;configurationRevision:string}>)=>Promise<T>|T):Promise<T>{
  assertHostedVoiceAttachment(context,scope,action);
  const record=original(context),placement={projectId:record.selection.projectId,workspaceId:record.selection.workspaceId,runtimeId:record.selection.runtimeId};
- return withManagedRequestPlacement(record.request,placement,async()=>{
+ const selectedEffect=()=>withManagedRequestPlacement(record.request,placement,async()=>{
   assertHostedVoiceAttachment(context,scope,action);
   const execution=resolveRequestExecution(record.request,placement),chat=resolveRequestContextChatBinding(record.request,execution,record.selection.contextConversationId);
   if(axes.some(k=>execution[k]!==record.execution[k])||chat.engineSessionId!==record.sessionId)return fail('VOICE_EXECUTION_CHANGED',409);
@@ -27,7 +28,7 @@ export async function withHostedVoiceAttachment<T>(context:HostedVoiceRequestCon
   const parent=manager.parent;
   if(Object.entries({id:record.backendId,startIdentity:record.startIdentity,runtimeId:record.selection.runtimeId,workspaceId:execution.workspaceId,organizationId:execution.organizationId,projectId:execution.projectId,ownerUserId:execution.ownerUserId,bindingHash:execution.bindingHash,bindingEpoch:execution.bindingEpoch}).some(([key,value])=>Reflect.get(parent,key)!==value))return fail('VOICE_EXECUTION_CHANGED',409);
   assertHostedVoiceAttachment(context,scope,action);
-  return withOpenCodeRuntimeTarget({baseUrl:`http://${facts.runtime.backendName}:4098`,directory:'/workspace'},async()=>{
+  return withOpenCodeRuntimeTarget({baseUrl:`http://${facts.runtime.backendName}:4098`,directory:'/workspace',selectionOwnerId:`runtime:${record.selection.runtimeId}`},async()=>{
    const session=await opencodeClient.getSession(record.sessionId,'/workspace');
    assertHostedVoiceAttachment(context,scope,action);
    if(isOpenCodeError(session)||session.id!==record.sessionId||session.directory!=='/workspace'||session.agent!==scope.agentId||!session.model||!text(session.model.id)||!text(session.model.providerID))return fail('VOICE_AGENT_SELECTION_CHANGED',409);
@@ -37,4 +38,6 @@ export async function withHostedVoiceAttachment<T>(context:HostedVoiceRequestCon
    return effect(Object.freeze({scope:record.scope,sessionId:session.id,directory:'/workspace',agentId:scope.agentId,modelId:session.model.id,providerId:session.model.providerID,variant:session.model.variant??null,configurationRevision}));
   });
  });
+ return action==='message'||action==='cancel-agent'
+  ?selectedStateAdmission.run(`runtime:${record.selection.runtimeId}`,record.sessionId,selectedEffect):selectedEffect();
 }

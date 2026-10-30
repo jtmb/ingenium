@@ -1,0 +1,74 @@
+{
+  "kind": "attachment-sql132-selected-state-followon-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentSourceCommit": "9739d67da8dcbea8b484d08522dc1ee24a2f384a",
+  "sharedApplied": false,
+  "runtimeQualified": false,
+  "sqlTestsExecutedByWorker": false,
+  "prior17Pass": "Reported by Root; no worker execution",
+  "authoredTestTotal": 29,
+  "newSQLiteCases": 4,
+  "newAdmissionCases": 8,
+  "requestContextAndSharedEdits": [
+    {
+      "path": "services/ingenium-api/lib/opencode-client.ts",
+      "preimageSha256": "4c21fe46ae87f0ad05931f20e1c17c7fd28872a11be9a8775db97553ace13bc6",
+      "postimageSha256": "85ccd400f9c48504d255df56c4aa39e79ac4ea185f6337ef196dde855c459528",
+      "edits": 16,
+      "applied": false
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/opencode.ts",
+      "preimageSha256": "734ef8676612cf774870c6bb69591e38c32e57a9dca89f19af73c1548ad9b337",
+      "postimageSha256": "e63818328e87f338af696ab3a0600ddc9d5e4db81d85ffaeb8ec43d76698ff73",
+      "edits": 2,
+      "applied": false
+    },
+    {
+      "path": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "preimageSha256": "ef9f24f45908e5add6fd7aa51f02fce31fb976baae9dfbe6753919da89f9ea79",
+      "postimageSha256": "e37a343a9cb707a30dc88353ecc4e6d522ec1e9c314be61059efe1969aeb3949",
+      "edits": 2,
+      "applied": false
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "preimageSha256": "cfeb6c08395d7e726ab13dfc7bc5f8fb13323e2e198144d0129c11af892fa6ed",
+      "postimageSha256": "0247c7555c9f3abccca85ae69ca32f537ec0ae025fab9ce53b0efd18fa6a6bf2",
+      "recipe": "preimage text +oneLF+exact updated request-context.additions.ts",
+      "applied": false
+    }
+  ],
+  "coverage": "Real fail-fast/reentrant exclusion among participating callbacks in one API process; no agent queue/retirement proof",
+  "openCoverage": [
+    "Separate actual Web auth proxy and Native/Rust direct engine writers",
+    "Engine internal/plugin/global registry and CLI/direct requests",
+    "Multiple API processes and restart/durable unknown admission",
+    "Map broker/scoped target identities from actual private owners; no URL fallback",
+    "Actual patched source/SQL migration/auth/transport/concurrency tests"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "newBulkCacheBuildTempRuntimeOutputs": [],
+    "retained": "Minimal owned source, exact edit recipe, hashes and receipts for Root application/qualification",
+    "removedBytes": 0,
+    "windowsRecoveryClaimed": 0,
+    "linuxFilesystemRecoveryClaimed": 0,
+    "physicalRootUnchanged": true,
+    "combined20GiBCeilingUnchanged": true
+  },
+  "uncoveredWriteBoundarySnapshots": [
+    {
+      "root": "APP",
+      "path": "scripts/opencode-auth-proxy.mjs",
+      "sha256": "9b484ac320a35c6cfb8a1f5ba6c88ce375d8b46e9f3934f46e9f72ee38a2afa1",
+      "workerWritten": false
+    },
+    {
+      "root": "NATIVE",
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2",
+      "workerWritten": false
+    }
+  ]
+}

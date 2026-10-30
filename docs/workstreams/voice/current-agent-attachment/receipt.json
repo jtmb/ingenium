@@ -7,7 +7,7 @@
   "productionApproval": false,
   "architecture": "Attachment owns speech/subscription/delivery transport only; existing canonical agent/chat/goal owner keeps execution",
   "requestContext": {
-    "proposedPostimageSha256": "5ac980bb93bef74fa6102cc3e8a4aa78dee47226d663a432977a808152d8df6e",
+    "proposedPostimageSha256": "0247c7555c9f3abccca85ae69ca32f537ec0ae025fab9ce53b0efd18fa6a6bf2",
     "target": "services/ingenium-api/lib/voice-v2/request-context.ts",
     "postimageRecipe": "UTF8(preimage text + one LF + exact additions text), no BOM/no normalization",
     "preimageSha256": "cfeb6c08395d7e726ab13dfc7bc5f8fb13323e2e198144d0129c11af892fa6ed",
@@ -18,14 +18,15 @@
   "rootReservedMigration": 132,
   "coreOwner": "Same existing Core getDb/transaction writer, metadata receipt factory only",
   "tests": {
-    "command": "node --test attachment.test.mjs hosted-owner.test.mjs delivery-owner.test.mjs",
+    "command": "node --test attachment.test.mjs hosted-owner.test.mjs delivery-owner.test.mjs selected-state-admission.test.mjs",
     "hostedOwner": 4,
-    "sqliteOwner": 5,
-    "authored": 17,
+    "sqliteOwner": 9,
+    "authored": 29,
     "executed": false,
     "attachment": 8,
     "typeScriptOrSqlValidated": false,
-    "javascriptBodyParse": "Six modules; imports removed and import.meta substituted for V8 body syntax only; no module evaluation"
+    "javascriptBodyParse": "Eight modules, imports removed/import.meta substituted for syntax bodies only; no module evaluation",
+    "selectedStateAdmission": 8
   },
   "remaining": [
     "Root application/schema registration/exports/private constructor wiring",

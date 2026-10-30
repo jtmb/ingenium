@@ -41,3 +41,31 @@ test('control ACK is pending only; migration cannot reopen unknown or treat mess
   f.owner.unknown(r.handle);assert.throws(()=>f.raw.prepare("UPDATE veyra_voice_attachment_deliveries SET state='ack',ack_kind='pending',ack_hash=?,revision=2").run('c'.repeat(64)),/replay or reopen/);
  }finally{f.raw.close();}
 });
+for(const recursive of [0,1]){
+ test(`recursive_triggers=${recursive}: INSERT OR REPLACE cannot erase intent/ack/unknown originals`,()=>{
+  for(const state of ['intent','ack','unknown']){
+   const f=fixture();try{
+    f.raw.exec(`PRAGMA recursive_triggers=${recursive}`);const r=f.owner.reserve(f.context,input);
+    if(state==='ack'){f.owner.claim(r.handle);f.owner.acknowledge(r.handle,{originalMessageId:input.originalMessageId,sessionId:scope.conversationId,state:'delivered'});}
+    if(state==='unknown')f.owner.unknown(r.handle);
+    const before=f.raw.prepare('SELECT * FROM veyra_voice_attachment_deliveries').get();
+    const sql='INSERT OR REPLACE INTO veyra_voice_attachment_deliveries(scope_hash,request_id,kind,scope_json,input_hash,original_message_id,state,revision,created_at,updated_at) VALUES(?,?,?,?,?,?,\'intent\',1,?,?)';
+    assert.throws(()=>f.raw.prepare(sql).run(before.scope_hash,before.request_id,before.kind,before.scope_json,'b'.repeat(64),'msg_replacement',1234,1234),/already exists/);
+    assert.deepEqual(f.raw.prepare('SELECT * FROM veyra_voice_attachment_deliveries').get(),before);
+    assert.throws(()=>f.raw.prepare(sql.replace('OR REPLACE','OR IGNORE')).run(before.scope_hash,before.request_id,before.kind,before.scope_json,before.input_hash,before.original_message_id,1234,1234),/already exists/);
+   }finally{f.raw.close();}
+  }
+ });
+ test(`recursive_triggers=${recursive}: DELETE and timestamp rollback preserve spent rows`,()=>{
+  const f=fixture();try{
+   f.raw.exec(`PRAGMA recursive_triggers=${recursive}`);const r=f.owner.reserve(f.context,input);f.owner.unknown(r.handle);
+   const before=f.raw.prepare('SELECT * FROM veyra_voice_attachment_deliveries').get();
+   assert.throws(()=>f.raw.exec('DELETE FROM veyra_voice_attachment_deliveries'),/cannot be deleted/);
+   assert.throws(()=>f.raw.exec('UPDATE OR REPLACE veyra_voice_attachment_deliveries SET rowid=2'),/no such column/);
+   assert.throws(()=>f.raw.exec('UPDATE veyra_voice_attachment_deliveries SET updated_at=1233'),/backwards|CHECK constraint/);
+   f.raw.exec('UPDATE veyra_voice_attachment_deliveries SET updated_at=1235');
+   assert.throws(()=>f.raw.exec('UPDATE veyra_voice_attachment_deliveries SET updated_at=1234'),/backwards/);
+   const after=f.raw.prepare('SELECT * FROM veyra_voice_attachment_deliveries').get();assert.equal(after.state,before.state);assert.equal(after.updated_at,1235);
+  }finally{f.raw.close();}
+ });
+}
