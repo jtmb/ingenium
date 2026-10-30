@@ -1,0 +1,38 @@
+{
+  "scope": "pinned primary-source API inspection only; no Rust/SQL/native execution",
+  "rusqlite_version": "0.40.2",
+  "archive_sha256": "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3",
+  "archive_bytes": 177215,
+  "cache_sources_sha256": {
+    "Cargo.toml": "e8213c0b968070c507f57ea6d87db4bd92c5453886981525c400a6eba8565dc7",
+    "src/lib.rs": "434fea1c571148b29288a50f8064e125a023ed30fdb7ae9e997b033e3ee73119",
+    "src/blob/mod.rs": "11c83bb35ec8617b405c844d6f31f0bbd43c9f2de668a7cc65179ffbc6ff27c0",
+    "src/blob/pos_io.rs": "ba6a1f3d61ecb6bd79d8bf67193a6eaf8754673d5a5a01fbee82c949fb3c6a0f"
+  },
+  "native_manifest_sha256": "eaea8832bacb74027fee855571261af75a8ac22b30a54c4e6fbdcc160d156ef8",
+  "native_lock_sha256": "a5b1f51eb57f93d553abe9d5d428db773fc4e4d43d55dd1269443a3af058fd07",
+  "native_features": [
+    "bundled",
+    "backup"
+  ],
+  "checks": {
+    "archive_matches_actual_lock_checksum": true,
+    "four_cached_sources_exact_archive": true,
+    "native_exact_version": true,
+    "native_no_blob_feature": true,
+    "default_does_not_enable_blob": true,
+    "bundled_does_not_enable_blob": true,
+    "backup_does_not_enable_blob": true,
+    "blob_module_feature_gated": true,
+    "blob_borrows_connection": true,
+    "open_takes_exact_row_and_read_only": true,
+    "positional_read_uses_caller_slice": true,
+    "underlying_read_length_bounded_by_destination": true,
+    "explicit_close_returns_result": true,
+    "drop_discards_close_result": true,
+    "close_clears_handle_before_result": true
+  },
+  "passed": 15,
+  "build_runtime_or_ddl": false,
+  "memory_bound_or_close_success_proven": false
+}
