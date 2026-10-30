@@ -76,3 +76,5 @@ Lossless composition of frozen waiting/readiness and finite response: [lineage, 
 Composed custody hardening: [signed custody contract and two application paths](candidate-composed-custody.md), [two-target delta](candidate-composed-custody-delta.patch), [hardened direct Root patch](candidate-composed-custody-root.patch), [receipt](candidate-composed-custody.json). 50source fixtures; actual verifier/lease binding remains Root-owned.
 
 Fixed internal candidate manager route proposal: [auth/MAC/DATA contract and exact missing physical owners](candidate-manager-http.md), [bounded9target patch](candidate-manager-http.patch), [anchors/receipt](candidate-manager-http.json). 42negative/source controls; positive lifecycle constructors remain unavailable.
+
+Original pending manager RPC delegation: [trust boundary, concrete handshake/phase source and missing actual owners](candidate-rpc-original.md), [8target patch](candidate-rpc-original.patch), [anchors/receipt](candidate-rpc-original.json). 16negative/source controls; actual outgoing identity/delegation/entrypoint remains unavailable.

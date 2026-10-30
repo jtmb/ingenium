@@ -1,0 +1,252 @@
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs b/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs
+@@ -0,0 +1,7 @@
++/** Fixed missing original manager source/process/backend owner. No DTO issuer,
++ * caller callback, URL-selected alternate or positive registration is exported. */
++const unavailable=()=>{throw Object.assign(Error('ORIGINAL_MANAGER_SOURCE_PROCESS_BACKEND_UNAVAILABLE'),{code:'ORIGINAL_MANAGER_SOURCE_PROCESS_BACKEND_UNAVAILABLE',status:503});};
++export function requireOriginalCandidateManagerRpcIdentity(){return unavailable();}
++export function assertOriginalCandidateManagerRpcIdentity(){return unavailable();}
++export function requireOriginalCandidateRpcFacts(){throw Object.assign(Error('ORIGINAL_CANDIDATE_RPC_FIXED_FACTS_ENTRYPOINT_UNAVAILABLE'),{code:'ORIGINAL_CANDIDATE_RPC_FIXED_FACTS_ENTRYPOINT_UNAVAILABLE',status:503});}
++export function requireOriginalCandidateRpcWithdrawalControl(){throw Object.assign(Error('ORIGINAL_CANDIDATE_RPC_NEGATIVE_CONTROL_UNAVAILABLE'),{code:'ORIGINAL_CANDIDATE_RPC_NEGATIVE_CONTROL_UNAVAILABLE',status:503});}
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts b/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts
+@@ -0,0 +1,6 @@
++declare const originalManagerIdentity:unique symbol;
++export interface OriginalCandidateManagerRpcIdentity {readonly[originalManagerIdentity]:never;}
++export function requireOriginalCandidateManagerRpcIdentity():OriginalCandidateManagerRpcIdentity;
++export function assertOriginalCandidateManagerRpcIdentity(identity:OriginalCandidateManagerRpcIdentity,channel:Readonly<{origin:string;socket:unknown;request:unknown;response:unknown;pending:Promise<unknown>}>):void;
++export function requireOriginalCandidateRpcFacts(observation:unknown,operation:string,snapshot:unknown):void;
++export function requireOriginalCandidateRpcWithdrawalControl(control:unknown,originalPreparation:unknown):void;
+diff --git a/services/ingenium-api/lib/runtime-manager-client.ts b/services/ingenium-api/lib/runtime-manager-client.ts
+--- a/services/ingenium-api/lib/runtime-manager-client.ts
++++ b/services/ingenium-api/lib/runtime-manager-client.ts
+@@ -1,3 +1,8 @@
++import {request as originalCandidateHttpRequest} from 'node:http';
++import {randomBytes,createHmac,timingSafeEqual} from 'node:crypto';
++import {hash as candidateRpcHash} from '../../../packages/veyra-operations/core126-image-contract.mjs';
++import {parseStrictJobJson as parseCandidateRpcJson} from './dot-v2/job-bootstrap-frame.mjs';
++import {requireOriginalCandidateManagerRpcIdentity,assertOriginalCandidateManagerRpcIdentity,requireOriginalCandidateRpcFacts,requireOriginalCandidateRpcWithdrawalControl} from './dot-v2/candidate-rpc-identity.mjs';
+ import {consumeBoundedRawJson,RAW_ASSISTANT_LIMITS} from './voice-v2/raw-assistant-wire.mjs';
+ import { lstatSync, readFileSync, realpathSync } from "node:fs";
+ import type {runtimes} from "ingenium-core";
+@@ -219,3 +224,89 @@
+   throw Object.assign(Error(code),{code});
+  }
+ }
++
++// Fixed candidate ORIGINAL RPC. Existing production fetch/provision paths unchanged.
++// No endpoint/token/transport/signer/Core factory/callback parameter is accepted.
++export interface ManagedCandidateRpcOriginal {readonly __managedCandidateRpcOriginal:never;}
++export interface ManagedCandidateRpcPhase {readonly __managedCandidateRpcPhase:never;}
++const candidateRpcSessions=new WeakMap<object,any>(),candidateRpcByRun=new Map<string,object>(),candidateRpcPhases=new WeakMap<object,any>();
++const rpcFailure=(code:string):never=>{throw Object.assign(Error(code),{code,status:503});};
++const rpcNeed=(value:unknown,code='MANAGED_CANDIDATE_RPC_ORIGINAL_UNAVAILABLE'):void=>{if(!value)rpcFailure(code);};
++const rpcUnknown=(s:any,reason:string)=>{if(s.status==='pending')s.status='unknown';s.failure=reason;for(const slot of s.slots.values())slot.valid=false;};
++function rpcPending(s:any):void{
++ rpcNeed(s&&s.status==='pending'&&!s.settled&&s.request&&s.socket&&s.request.socket===s.socket&&!s.request.destroyed&&!s.socket.destroyed&&!s.response?.complete&&Date.now()<s.snapshot.binding.deadlineMs,'MANAGED_CANDIDATE_RPC_NOT_PENDING');
++ rpcNeed(managerToken()===s.token,'MANAGED_CANDIDATE_RPC_TOKEN_CHANGED');
++ assertOriginalCandidateManagerRpcIdentity(s.managerIdentity,{origin:s.origin,socket:s.socket,request:s.request,response:s.response,pending:s.promise});
++}
++/** ONE actual request on existing canonical private manager URL/token channel.
++ * Missing actual manager identity refuses BEFORE enrolling or opening network. */
++export async function launchOriginalManagedCandidateRun(runId:string):Promise<unknown>{
++ if(!UUID.test(runId)||candidateRpcByRun.has(runId))return rpcFailure('MANAGED_CANDIDATE_RPC_ALREADY_SEEN');
++ const [{actualManagedJobOwner},{withPersistedOriginalCandidateOperation}]=await Promise.all([import('./dot-v2/core126-runtime.js'),import('./dot-v2/dot-original-context.js')]);
++ return withPersistedOriginalCandidateOperation(runId,async context=>{
++  const owner=actualManagedJobOwner().owner,managerIdentity=requireOriginalCandidateManagerRpcIdentity(),base=managerUrl(),token=managerToken();
++  // Original API/Core private method returns an opaque RPC preparation linked to
++  // retained ORIGINAL prepare key; it never prepares/reconstructs a Run or lease.
++  const preparation=owner.candidateOriginalRpcPreparation(runId,context),snapshot=owner.requireOriginalCandidateRpcPreparation(preparation,context);
++  const challenge=randomBytes(32),challengeHex=challenge.toString('hex'),binding=snapshot.binding;
++  const custodyId=candidateRpcHash(['managed-candidate-rpc-custody-v1',challengeHex,runId,binding.attemptId,binding.candidateIntentHash,binding.specHash,binding.selectionSha256]);
++  const handle=Object.freeze({});let resolve!:(v:unknown)=>void,reject!:(e:unknown)=>void;
++  const promise=new Promise<unknown>((yes,no)=>{resolve=yes;reject=no;});void promise.catch(()=>{});
++  const s:any={handle,owner,preparation,snapshot,managerIdentity,origin:base.origin,token,challenge,custodyId,request:null,socket:null,response:null,promise,status:'pending',settled:false,slots:new Map()};
++  // Private enrollment happens BEFORE httpRequest or request.end/network.
++  candidateRpcSessions.set(handle,s);candidateRpcByRun.set(runId,handle);
++  const payload=Buffer.from(JSON.stringify({challenge:challengeHex,runId,attemptId:binding.attemptId,intentHash:binding.candidateIntentHash,specHash:binding.specHash,selectionSha256:binding.selectionSha256,deadlineAt:binding.deadlineAt}));
++  const finish=(error?:unknown,value?:unknown)=>{if(s.settled)return;s.settled=true;clearTimeout(s.timer);rpcUnknown(s,error?'MANAGED_CANDIDATE_RPC_ACK_UNKNOWN':'MANAGED_CANDIDATE_RPC_ENDED');challenge.fill(0);error?reject(error):resolve(value);};
++  s.timer=setTimeout(()=>{finish(Error('MANAGED_CANDIDATE_RPC_DEADLINE_UNKNOWN'));s.request?.destroy();},Math.max(1,binding.deadlineMs-Date.now()));s.timer.unref?.();
++  try{
++   rpcNeed(Date.now()<binding.deadlineMs,'MANAGED_CANDIDATE_RPC_DEADLINE_UNKNOWN');
++   const url=new URL('/v1/candidate-job-runs/'+runId+'/launch',base);
++   s.request=originalCandidateHttpRequest(url,{method:'POST',agent:false,headers:{Authorization:'Bearer '+token,Accept:'application/json','Content-Type':'application/json','Content-Length':payload.length,'Accept-Encoding':'identity',Connection:'close'}},response=>{
++    s.response=response;const chunks:Buffer[]=[];let bytes=0;response.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>65536){finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_LIMIT'));response.destroy();return;}chunks.push(Buffer.from(chunk));});response.once('aborted',()=>finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_UNKNOWN')));response.once('error',()=>finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_UNKNOWN')));response.once('end',()=>{if(response.statusCode!==200||!response.complete){finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_UNKNOWN'));return;}try{const value:any=parseCandidateRpcJson(Buffer.concat(chunks),65536);rpcNeed(value?.data?.custodyId===s.custodyId&&value.data.runId===runId&&value.data.attemptId===binding.attemptId&&value.data.intentHash===binding.candidateIntentHash&&value.data.specHash===binding.specHash&&value.data.deadlineAt===binding.deadlineAt);finish(undefined,value);}catch{finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_INVALID'));}});response.once('close',()=>{if(!response.complete)finish(Error('MANAGED_CANDIDATE_RPC_RESPONSE_UNKNOWN'));});
++   });
++   s.request.once('socket',socket=>{s.socket=socket;socket.once('close',()=>{if(!s.settled)finish(Error('MANAGED_CANDIDATE_RPC_SOCKET_UNKNOWN'));});});
++   s.request.once('error',()=>finish(Error('MANAGED_CANDIDATE_RPC_ACK_UNKNOWN')));s.request.end(payload);
++  }catch(error){finish(error);}
++  return promise; // same original promise retained by the session; no retry.
++ });
++}
++/** Fixed API route calls after its strict manager auth/shape/MAC checks. Even a
++ * correctly signed copied DTO has NO authority without the enrolled pending RPC.
++ * handle represents DELEGATED manager-original authority, not API-owned Docker IO. */
++export function verifyPendingOriginalCandidatePhase(request:any,context:object):ManagedCandidateRpcPhase{
++ const match=/^\/internal\/original-candidate-job-runs\/([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/(create-intent|created|start-intent|waiting|ready)$/.exec(request.path);
++ rpcNeed(match&&request.method==='POST'&&Object.keys(request.query??{}).length===0);const runId=match![1]!,operation=match![2]!;
++ const token=managerToken(),headers=request.headers??{},header=headers.authorization;rpcNeed(typeof header==='string'&&header.startsWith('Bearer '));const supplied=Buffer.from(header.slice(7)),expected=Buffer.from(token);rpcNeed(supplied.length===expected.length&&timingSafeEqual(supplied,expected)&&headers['content-type']==='application/json'&&!['cookie','origin','x-ingenium-audience','x-ingenium-job-attempt','x-ingenium-internal-service','transfer-encoding','content-encoding'].some(k=>headers[k]!==undefined));
++ rpcNeed(Buffer.isBuffer(request.originalCandidateBody)&&request.originalCandidateBody.length<=65536);const body:any=parseCandidateRpcJson(request.originalCandidateBody,65536);
++ const session=candidateRpcByRun.get(runId),s=session&&candidateRpcSessions.get(session);rpcPending(s);
++ const snapshot=s.owner.requireOriginalCandidateRpcPreparation(s.preparation,context),b=snapshot.binding,o=body?.observation;
++ rpcNeed(body&&Object.keys(body).sort().join('|')==='custodyId|observation|signature'&&o&&body.custodyId===s.custodyId&&o.custodyId===s.custodyId,'MANAGED_CANDIDATE_RPC_CUSTODY_CHANGED');
++ const keys=['schemaVersion','domain','kind','custodyId','runId','attemptId','candidateIntentHash','specHash','selectionSha256','containerId','daemonId','childBirthHash','childStartHash','attachIdentityHash','deadlineAt','expectedRevision','observedAt','expiresAt','facts'];
++ rpcNeed(Object.keys(o).sort().join('|')===keys.sort().join('|')&&o.schemaVersion===1&&o.domain==='candidate-observation-v1'&&o.kind==='original-candidate-'+operation+'-v1');
++ rpcNeed(token===s.token&&typeof body.signature==='string'&&/^[a-f0-9]{64}$/.test(body.signature));const key=createHmac('sha256',token).update('candidate-observation-v1/key\0').digest(),mac=createHmac('sha256',key).update('candidate-observation-v1/payload\0').update(candidateRpcHash(o)).digest();rpcNeed(timingSafeEqual(mac,Buffer.from(body.signature,'hex')));
++ const phase:Record<string,string>={'create-intent':'prepared',created:'create_intent','start-intent':'created',waiting:'start_intent',ready:'waiting'};
++ rpcNeed(Object.hasOwn(phase,operation)&&snapshot.phase===phase[operation]&&!snapshot.unknown&&!snapshot.cancelRequested&&snapshot.revision===o.expectedRevision&&!s.slots.has(operation));
++ rpcNeed(['runId','attemptId','candidateIntentHash','specHash','selectionSha256','daemonId','deadlineAt'].every(k=>o[k]===b[k])&&o.runId===runId);
++ const now=Date.now();rpcNeed(Number.isSafeInteger(o.observedAt)&&Number.isSafeInteger(o.expiresAt)&&o.observedAt<=now&&now<o.expiresAt&&o.expiresAt-o.observedAt<=5000&&o.expiresAt>o.observedAt&&o.expiresAt<=b.deadlineMs);
++ for(const k of ['containerId','childBirthHash','childStartHash','attachIdentityHash']){const introduced=operation==='created'&&['containerId','childBirthHash'].includes(k)||operation==='start-intent'&&k==='attachIdentityHash'||operation==='waiting'&&k==='childStartHash';rpcNeed(introduced?b[k]===null&&typeof o[k]==='string'&&/^[a-f0-9]{64}$/.test(o[k]):o[k]===b[k]);}
++ // Fixed HTTP DATA verifier MUST additionally validate exact per-kind facts.
++ // No callback can mark arbitrary facts qualified: this fixed gate stays closed
++ // until Root assembles that verifier with its actual private API entrypoint.
++ requireOriginalCandidateRpcFacts(o,operation,snapshot);
++ const handle=Object.freeze({}),slot={handle,session:s,operation,expectedRevision:snapshot.revision,observation:structuredClone(o),valid:true,spent:false};s.slots.set(operation,slot);candidateRpcPhases.set(handle,slot);return handle as ManagedCandidateRpcPhase;
++}
++/** Called synchronously INSIDE original Core final refreshed write transaction.
++ * Failure after one-shot spend strands the slot as unknown; never retry it. */
++export function spendOriginalCandidateRpcPhase(handle:ManagedCandidateRpcPhase,operation:string,binding:any,context:object):unknown{
++ const slot=candidateRpcPhases.get(handle);rpcNeed(slot&&slot.valid&&!slot.spent&&slot.operation===operation);const s=slot.session;rpcPending(s);const current=s.owner.requireOriginalCandidateRpcFinalWrite(s.preparation,context);
++ rpcNeed(current.revision===slot.expectedRevision&&candidateRpcHash(binding)===candidateRpcHash(current.binding)&&Date.now()<slot.observation.expiresAt);
++ slot.spent=true;slot.valid=false;return Object.freeze(structuredClone(slot.observation.facts));
++}
++export function retainOriginalCandidateRpcPhaseUnknown(handle:ManagedCandidateRpcPhase):void{const slot=candidateRpcPhases.get(handle);rpcNeed(slot);rpcUnknown(slot.session,'MANAGED_CANDIDATE_RPC_FINAL_CAS_UNKNOWN');}
++
++/** Negative control ONLY: no new effect, material, replay or retirement. Fixed
++ * original withdrawal constructor is separate from current execute approval. */
++export function withdrawOriginalManagedCandidateRpc(runId:string,control:unknown):void{
++ const original=candidateRpcByRun.get(runId),s=original&&candidateRpcSessions.get(original);rpcNeed(s);
++ requireOriginalCandidateRpcWithdrawalControl(control,s.preparation);rpcUnknown(s,'MANAGED_CANDIDATE_RPC_WITHDRAWN');
++}
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.mjs b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -17,6 +17,7 @@
+  // Server-owned handoff of the ORIGINAL prepare key. HTTP metadata can never
+  // recreate this membership; after process restart create-intent stays closed.
+  const retainedCandidateLeases=new Map();
++ const candidateRpcPreparations=new WeakMap(),candidateRpcByRun=new Map();
+  const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
+  const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
+  const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
+@@ -104,6 +105,27 @@
+    if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(originalContext,{runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
+    const data=candidateLifecycle.describeOriginalManagerLease(key);if(data.binding.runId!==runId)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return data;
+   },
++  candidateOriginalRpcPreparation(runId,context){
++   same();if(candidateRpcByRun.has(runId))fail('MANAGED_CANDIDATE_RPC_ALREADY_SEEN');
++   const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
++   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
++   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
++   candidateLifecycle.requirePrepared(runId);
++   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');
++   const handle=Object.freeze({});candidateRpcPreparations.set(handle,{db,key,runId});candidateRpcByRun.set(runId,handle);return handle;
++  },
++  requireOriginalCandidateRpcPreparation(handle,context){
++   same();const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
++   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
++   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId:selected.runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
++   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');return candidateLifecycle.describeOriginalManagerLease(selected.key);
++  },
++  requireOriginalCandidateRpcFinalWrite(handle,context){
++   same();if(!db.inTransaction)fail('MANAGED_CANDIDATE_RPC_FINAL_TRANSACTION_REQUIRED');const selected=handle&&candidateRpcPreparations.get(handle),saved=selected&&candidateLeases.get(selected.key);
++   if(!selected||selected.db!==db||retainedCandidateLeases.get(selected.runId)!==selected.key||!saved||saved.db!==db)fail('MANAGED_CANDIDATE_RPC_PREPARATION_UNAVAILABLE');
++   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(context,{runId:selected.runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
++   if(typeof candidateLifecycle.describeOriginalManagerLease!=='function')fail('MANAGED_CANDIDATE_RPC_RETAINED_STATE_UNAVAILABLE');return candidateLifecycle.describeOriginalManagerLease(selected.key);
++  },
+   candidateCreateIntentForOriginalRun(runId,context,handle){
+    same();const key=retainedCandidateLeases.get(runId);
+    if(!key)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+@@ -1,4 +1,4 @@
+ import type {CandidateLifecycleOwnerMethods} from "./candidate-lifecycle-owner.mjs";
+ import type {Core126OwnerPorts,Core126Owner,Core126Facts} from "./managed-job-contracts.mjs";
+ export declare function originalJobRunIdentity(run:Core126Facts["run"]):string;
+-export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner & CandidateLifecycleOwnerMethods & import("./candidate-manager-http.mjs").CandidateManagerStateOwner;
++export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner & CandidateLifecycleOwnerMethods & import("./candidate-manager-http.mjs").CandidateManagerStateOwner & {candidateOriginalRpcPreparation(runId:string,context:unknown):object;requireOriginalCandidateRpcPreparation(handle:unknown,context:unknown):import("./candidate-manager-http.mjs").CandidateManagerState;requireOriginalCandidateRpcFinalWrite(handle:unknown,context:unknown):import("./candidate-manager-http.mjs").CandidateManagerState};
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs b/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs
+--- a/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs
++++ b/services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs
+@@ -1,3 +1,5 @@
++import {IncomingMessage,ServerResponse} from 'node:http';
++import {Socket} from 'node:net';
+ // Fixed original runtime-manager owner. Source proposal; no runtime executed.
+ import {request as httpRequest} from 'node:http';
+ import {createHash,randomBytes,createHmac} from 'node:crypto';
+@@ -28,7 +30,9 @@
+  must(base.protocol==='http:'&&!base.username&&!base.password&&base.pathname==='/api/v1'&&!base.search&&!base.hash&&/^[a-z0-9][a-z0-9.-]*$/i.test(base.hostname));
+  const active=new Map(),byRun=new Map(),launching=new Set();
+  const observationKey=createHmac('sha256',managerToken).update('candidate-observation-v1/key\0').digest();
++ function originalRpcPending(s){const rpc=s.originalRpc;must(rpc&&rpc.request instanceof IncomingMessage&&rpc.response instanceof ServerResponse&&rpc.request.socket instanceof Socket&&rpc.response.req===rpc.request&&rpc.response.socket===rpc.request.socket&&rpc.request.complete===true&&rpc.request.aborted!==true&&!rpc.request.socket.destroyed&&!rpc.response.destroyed&&!rpc.response.writableEnded,'CANDIDATE_ORIGINAL_RPC_NOT_PENDING');}
+  function authenticate(s,kind,facts,{retirement=false}={}){
++  originalRpcPending(s);
+   const observedAt=Date.now(),expiresAt=retirement?observedAt+5000:Math.min(s.deadline,observedAt+5000);must(observedAt<expiresAt);
+   const observation=freeze({schemaVersion:1,domain:'candidate-observation-v1',kind,custodyId:s.custodyId,runId:s.runId,attemptId:s.intent.run.attemptId,candidateIntentHash:s.intentHash,specHash:s.specHash,selectionSha256:s.selectionSha256,containerId:s.childId??null,daemonId:s.intent.parent.daemonId,childBirthHash:s.birthHash??null,childStartHash:s.startHash??null,attachIdentityHash:s.attachHash??null,deadlineAt:s.intent.expiresAt,expectedRevision:s.revision,observedAt,expiresAt,facts});
+   // Private fixed owner only: no exported signer or injectable positive factory.
+@@ -43,7 +47,7 @@
+   must(response.status===200,'CANDIDATE_CORE_OWNER_UNAVAILABLE');must(response.body);let size=0;const chunks=[];for await(const chunk of response.body){size+=chunk.length;must(size<=65536);chunks.push(chunk);}const value=parseStrictJobJson(Buffer.concat(chunks),65536);keys(value,['data']);return value.data;
+  }
+  function markUnknown(s,code){if(!s.unknown){s.unknown=code;s.unknownAt=Date.now();}s.ready=null;}
+- function live(s){must(!s.unknown&&Date.now()<s.deadline,'CANDIDATE_ORIGINAL_OUTCOME_UNKNOWN');}
++ function live(s){originalRpcPending(s);must(!s.unknown&&Date.now()<s.deadline,'CANDIDATE_ORIGINAL_OUTCOME_UNKNOWN');}
+  // Retain actual request AND IncomingMessage for every exchange. Never reissue.
+  async function exchange(s,slot,method,path,body,limit=1024*1024){
+   must(!s.io[slot],'CANDIDATE_ORIGINAL_REQUEST_REPLAY');const payload=body===undefined?Buffer.alloc(0):Buffer.from(JSON.stringify(body));must(payload.length<=512*1024);
+@@ -93,16 +97,22 @@
+    });retained.request.end();
+   });await s.carrier.started;
+  }
+- async function launch(runId){
++ async function launch(runId,handshake,originalRequest,originalResponse){
+   must(uuid(runId)&&!byRun.has(runId)&&!launching.has(runId),'CANDIDATE_ORIGINAL_ATTEMPT_ALREADY_OWNED');launching.add(runId);
+   let s;try{
+    const admission=await core(runId,'admission',undefined,Date.now()+10000);keys(admission,['intent','intentHash','specHash','selectionSha256','phase','revision']);assertCandidateInertIntentLive(admission.intent);must(Number.isSafeInteger(admission.revision)&&admission.revision===0&&admission.phase==='prepared'&&hex(admission.specHash)&&hex(admission.selectionSha256)&&admission.intent.run.runId===runId&&candidateInertIntentHash(admission.intent)===admission.intentHash);
+-   s={runId,revision:admission.revision,intent:structuredClone(admission.intent),intentHash:admission.intentHash,specHash:admission.specHash,selectionSha256:admission.selectionSha256,deadline:Date.parse(admission.intent.expiresAt),custodyId:nonce(),io:Object.create(null),unknown:null,ready:null};byRun.set(runId,s);active.set(s.custodyId,s);source(s);s.spec=spec(s);await originalImage(s);await parent(s,'parent-before');await current(s,'create');s.createHash=digest(JSON.stringify([s.custodyId,s.intentHash,s.specHash,digest(JSON.stringify(s.spec))]));await record(s,'create-intent',{createEffectHash:s.createHash});live(s);
++   keys(handshake,['challenge','runId','attemptId','intentHash','specHash','selectionSha256','deadlineAt']);must(hex(handshake.challenge)&&handshake.runId===runId&&handshake.attemptId===admission.intent.run.attemptId&&handshake.intentHash===admission.intentHash&&handshake.specHash===admission.specHash&&handshake.selectionSha256===admission.selectionSha256&&handshake.deadlineAt===admission.intent.expiresAt,'CANDIDATE_ORIGINAL_HANDSHAKE_CHANGED');
++   const custodyId=canonicalHash(['managed-candidate-rpc-custody-v1',handshake.challenge,runId,handshake.attemptId,handshake.intentHash,handshake.specHash,handshake.selectionSha256]);
++   s={runId,revision:admission.revision,intent:structuredClone(admission.intent),intentHash:admission.intentHash,specHash:admission.specHash,selectionSha256:admission.selectionSha256,deadline:Date.parse(admission.intent.expiresAt),custodyId,originalRpc:{request:originalRequest,response:originalResponse},io:Object.create(null),unknown:null,ready:null};originalRpcPending(s);byRun.set(runId,s);active.set(s.custodyId,s);source(s);s.spec=spec(s);await originalImage(s);await parent(s,'parent-before');await current(s,'create');s.createHash=digest(JSON.stringify([s.custodyId,s.intentHash,s.specHash,digest(JSON.stringify(s.spec))]));await record(s,'create-intent',{createEffectHash:s.createHash});live(s);
+    const created=await json(s,'create','POST','/containers/create?name='+name(s.intent),s.spec,201);must(hex(created.Id),'CANDIDATE_CREATE_ID_UNKNOWN');s.childId=created.Id;
+    const c=await json(s,'birth','GET','/containers/'+s.childId+'/json');must(c.Id===s.childId&&c.Id!==s.intent.parent.containerId&&c.Image===s.intent.imageId&&typeof c.Created==='string'&&Number.isFinite(Date.parse(c.Created))&&c.State?.Running===false);s.createdAt=c.Created;s.birthHash=digest(JSON.stringify([s.intent.parent.daemonId,c.Id,c.Created,s.intent.imageId,s.intentHash]));originalChild(s,c,false);await daemon(s,'birth-daemon');await record(s,'created',{containerId:s.childId,childBirthHash:s.birthHash,createdAtMs:Date.parse(c.Created)});
+    await current(s,'attach');await attach(s);await current(s,'start');s.startEffectHash=digest(JSON.stringify([s.createHash,s.attachHash,nonce()]));await record(s,'start-intent',{startEffectHash:s.startEffectHash,attachIdentityHash:s.attachHash});live(s);
+    await json(s,'start','POST','/containers/'+s.childId+'/start',undefined,204);const started=originalChild(s,await json(s,'started','GET','/containers/'+s.childId+'/json'),true);must(Number.isFinite(Date.parse(started.State.StartedAt))&&started.State.Pid>0);s.startedAt=started.State.StartedAt;s.startHash=digest(JSON.stringify([s.birthHash,s.startedAt,started.State.Pid]));await daemon(s,'start-daemon');await record(s,'waiting',{childStartHash:s.startHash,startedAtMs:Date.parse(s.startedAt)});
+-   await Promise.race([s.firstObservation,new Promise((_,reject)=>{const t=setTimeout(()=>reject(failure('CANDIDATE_READY_DEADLINE')),Math.max(1,s.deadline-Date.now()));t.unref?.();s.readyTimer=t;})]);clearTimeout(s.readyTimer);await observeReady(s);await record(s,'ready',s.ready);return freeze({custodyId:s.custodyId,runId,attemptId:s.intent.run.attemptId,intentHash:s.intentHash,specHash:s.specHash,childId:s.childId,childBirthHash:s.birthHash,childStartHash:s.startHash,deadlineAt:s.intent.expiresAt});
++   await Promise.race([s.firstObservation,new Promise((_,reject)=>{const t=setTimeout(()=>reject(failure('CANDIDATE_READY_DEADLINE')),Math.max(1,s.deadline-Date.now()));t.unref?.();s.readyTimer=t;})]);clearTimeout(s.readyTimer);await observeReady(s);await record(s,'ready',s.ready);
++   // READY is not the end of the original delegated request. Keep this exact
++   // response/promise pending through same-child readiness/material decisions.
++   // EOF/unknown ends delegation; it is never implicit physical retirement.
++   await s.carrier.finished;return freeze({custodyId:s.custodyId,runId,attemptId:s.intent.run.attemptId,intentHash:s.intentHash,specHash:s.specHash,childId:s.childId,childBirthHash:s.birthHash,childStartHash:s.startHash,deadlineAt:s.intent.expiresAt});
+   }catch(error){if(s){markUnknown(s,error.code??'CANDIDATE_ORIGINAL_OUTCOME_UNKNOWN');clearTimeout(s.readyTimer);}throw error;}finally{launching.delete(runId);}
+  }
+  async function observeReady(s){
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts b/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts
+--- a/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts
++++ b/services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts
+@@ -1,4 +1,6 @@
++import type {IncomingMessage,ServerResponse} from 'node:http';
++export interface OriginalCandidateRpcHandshake {readonly challenge:string;readonly runId:string;readonly attemptId:string;readonly intentHash:string;readonly specHash:string;readonly selectionSha256:string;readonly deadlineAt:string;}
+ /** Fixed original manager only; no public API, injectable transport or positive factories. */
+ export interface OriginalCandidateCustodyReceipt {readonly custodyId:string;readonly runId:string;readonly attemptId:string;readonly intentHash:string;readonly specHash:string;readonly childId:string;readonly childBirthHash:string;readonly childStartHash:string;readonly deadlineAt:string;}
+ export interface CandidateManagerEnvelope {readonly observation:Readonly<{schemaVersion:1;domain:'candidate-observation-v1';kind:string;custodyId:string;runId:string;attemptId:string;candidateIntentHash:string;specHash:string;selectionSha256:string;containerId:string|null;daemonId:string;childBirthHash:string|null;childStartHash:string|null;attachIdentityHash:string|null;deadlineAt:string;expectedRevision:number;observedAt:number;expiresAt:number;facts:Readonly<Record<string,unknown>>}>;readonly signature:string;}
+-export function createOriginalCandidateWaitingOwner():Readonly<{launch(runId:string):Promise<OriginalCandidateCustodyReceipt>;readiness(custodyId:string):Promise<CandidateManagerEnvelope>;stoppedObservation(custodyId:string):Promise<CandidateManagerEnvelope>;retainedUnknown():readonly Readonly<{runId:string;custodyId:string;childId:string|null;unknown:string|null;retainedSlots:readonly string[];deadlineAt:string}>[]}>;
++export function createOriginalCandidateWaitingOwner():Readonly<{launch(runId:string,handshake:OriginalCandidateRpcHandshake,originalRequest:IncomingMessage,originalResponse:ServerResponse):Promise<OriginalCandidateCustodyReceipt>;readiness(custodyId:string):Promise<CandidateManagerEnvelope>;stoppedObservation(custodyId:string):Promise<CandidateManagerEnvelope>;retainedUnknown():readonly Readonly<{runId:string;custodyId:string;childId:string|null;unknown:string|null;retainedSlots:readonly string[];deadlineAt:string}>[]}>;
+diff --git a/services/ingenium-api/scripts/runtime-manager.ts b/services/ingenium-api/scripts/runtime-manager.ts
+--- a/services/ingenium-api/scripts/runtime-manager.ts
++++ b/services/ingenium-api/scripts/runtime-manager.ts
+@@ -440,8 +440,8 @@
+         if(!body||typeof body!=='object'||Array.isArray(body))throw Error('Candidate manager input unavailable');
+         const fields=Object.keys(body).sort().join('|');let result;
+         if(operation==='launch'){
+-          if(fields!=='')throw Error('Candidate launch accepts only the original Run selector');
+-          result=await originalCandidateWaiting.launch(runId);
++          if(fields!=='attemptId|challenge|deadlineAt|intentHash|runId|selectionSha256|specHash')throw Error('Original candidate RPC handshake unavailable');
++          result=await originalCandidateWaiting.launch(runId,body as import('../lib/dot-v2/candidate-original-manager.mjs').OriginalCandidateRpcHandshake,request,response);
+         }else{
+           if(fields!=='custodyId'||typeof (body as {custodyId?:unknown}).custodyId!=='string')throw Error('Original candidate custody unavailable');
+           const custodyId=(body as {custodyId:string}).custodyId;

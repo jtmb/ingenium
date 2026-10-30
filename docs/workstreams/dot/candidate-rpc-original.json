@@ -1,0 +1,243 @@
+{
+  "targets": [
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs",
+      "source": "candidate-rpc-identity.proposal.mjs",
+      "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "postimageSha256": "c06aabca0996805c00ab25efec28599791b9fc73c0c31417c44c22b5c92d29d6",
+      "bytes": 949,
+      "anchors": [
+        "@@ -0,0 +1,7 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts",
+      "source": "candidate-rpc-identity.d.mts",
+      "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "postimageSha256": "c9eae282fe0e49bb6f2e70284622624302541269fc2a2a362086b175e5c2035f",
+      "bytes": 686,
+      "anchors": [
+        "@@ -0,0 +1,6 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "source": "candidate-rpc-client.proposal.ts",
+      "preimageSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+      "postimageSha256": "b4755abae1a50e35c1dedf206fa5cba096779b765b0028c1275726cf1110d3ee",
+      "bytes": 24963,
+      "anchors": [
+        "@@ -1,3 +1,8 @@",
+        "@@ -219,3 +224,89 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "source": "candidate-rpc-core.proposal.mjs",
+      "preimageSha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb",
+      "postimageSha256": "0cbcd510066728fea2545818bc19df45322997817af16ee265cb6d62b0d94935",
+      "bytes": 37830,
+      "anchors": [
+        "@@ -17,6 +17,7 @@",
+        "@@ -104,6 +105,27 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+      "source": "candidate-rpc-core.d.mts",
+      "preimageSha256": "6a9cceb563fca968348b5e8f9ef0fe6487771d2ea63dc1541c4c0323d9d61e26",
+      "postimageSha256": "b37df44236b171d1f9fbcc703f263a86d7dd64ea194c0d5cae80dc6f35311851",
+      "bytes": 778,
+      "anchors": [
+        "@@ -1,4 +1,4 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "source": "candidate-rpc-manager.proposal.mjs",
+      "preimageSha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83",
+      "postimageSha256": "98b82e02487969a27b486f8fa7f277bf681705ed84f51756f6d102131ff67f99",
+      "bytes": 27789,
+      "anchors": [
+        "@@ -1,3 +1,5 @@",
+        "@@ -28,7 +30,9 @@",
+        "@@ -43,7 +47,7 @@",
+        "@@ -93,16 +97,22 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+      "source": "candidate-rpc-manager.d.mts",
+      "preimageSha256": "572ce33cf8a9ffe8494a00f7ada8e3dc4ff1956858091e11bf1b13ff8a2e12b3",
+      "postimageSha256": "d97589e3bce014ed60db3fcac8ed3b389f8da389f67e01c7211da53be54cec54",
+      "bytes": 1731,
+      "anchors": [
+        "@@ -1,4 +1,6 @@"
+      ]
+    },
+    {
+      "target": "services/ingenium-api/scripts/runtime-manager.ts",
+      "source": "candidate-rpc-server.proposal.ts",
+      "preimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "postimageSha256": "237a138c2697a356cb62388e58ff437e84bd1393c062c0160ce994d8eed61f6a",
+      "bytes": 29273,
+      "anchors": [
+        "@@ -440,8 +440,8 @@"
+      ]
+    }
+  ],
+  "patchSha256": "39a0c332edb1b38e63599ac63641f4bd6371185a08bec078482bde5d6ec4327b",
+  "patchBytes": 33043,
+  "emitted": {
+    "js": 3,
+    "types": 5,
+    "failures": 0
+  },
+  "actualRootApplyCheck": {
+    "exitCode": 0,
+    "stderr": ""
+  },
+  "writes": 0,
+  "sourceOnly": true,
+  "runtimeCasesRun": 0,
+  "rootSourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "validation": {
+    "sourceFixturePass": 16,
+    "sourceFixtureFail": 0,
+    "stdoutSha256": "41507c9959620500546a8c0847f9e392ded1284fa86c519bcdf5c3fca6783bf3",
+    "testSourceSha256": "3983db2cadb7f17b41673fa2c0819231a126d295c9755eab2ed0a79081ec08cc",
+    "limits": "Negative isolated VM/source controls only. No actual candidate HTTP/Docker/Core DB/model/runtime. Actual outgoing identity and facts/negative-control constructors unavailable; no positive delegation or CAS qualification. Synthetic token/context only; copied Core keys fail before DB reads."
+  },
+  "dependencyAnchors": [
+    {
+      "path": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "sha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+      "anchors": [
+        {
+          "line": 31,
+          "text": "function managerUrl(): URL {"
+        },
+        {
+          "line": 40,
+          "text": "function managerToken(): string {"
+        },
+        {
+          "line": 161,
+          "text": "async function requestManagedJob(runId:string,operation:\"inspect\"|\"launch\"|\"cancel\"|\"cleanup\",runtimeId?:string):Promise<ManagedJobObservation>{"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/scripts/runtime-manager.ts",
+      "sha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+      "anchors": [
+        {
+          "line": 437,
+          "text": "      const candidateRoute=/^\\/v1\\/candidate-job-runs\\/([0-9a-f-]+)\\/(launch|readiness|stopped)$/.exec(url.pathname);"
+        },
+        {
+          "line": 444,
+          "text": "          result=await originalCandidateWaiting.launch(runId);"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+      "sha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83",
+      "anchors": []
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "sha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb",
+      "anchors": [
+        {
+          "line": 16,
+          "text": " const candidateLeases=new WeakMap();"
+        },
+        {
+          "line": 19,
+          "text": " const retainedCandidateLeases=new Map();"
+        },
+        {
+          "line": 101,
+          "text": "  candidateOriginalManagerState(runId,managerContext,originalContext){"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "sha256": "42b8b8e8f7e294d0fd1dbfbb98553d9bca67f7980483eddcc28e8a2707cd721d",
+      "anchors": [
+        {
+          "line": 130,
+          "text": "export async function withPersistedOriginalCandidateOperation<T>(runId:string,work:(context:object)=>T|Promise<T>):Promise<T>{"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-original-gates.mjs",
+      "sha256": "422623cf72e9242d58fc17760c70800f721f4a4df387da97819f7091e3ad56d2",
+      "anchors": [
+        {
+          "line": 10,
+          "text": "export function requireOriginalCandidateCreateIntent(){return closed(\"CREATE_OWNER\");}"
+        }
+      ]
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs",
+      "sha256": "ec6d19bd21690882e735495d5ab2d0fd469316c7d242f5831c3152f2aeb32118",
+      "anchors": [
+        {
+          "line": 50,
+          "text": "  const state=owner.candidateOriginalManagerState(runId,{request},context),b=state.binding,now=Date.now();need(b.runId===runId);"
+        },
+        {
+          "line": 64,
+          "text": "  const missing={'create-intent':'CREATE_INTENT','created':'CHILD_RECEIPT','start-intent':'RETAINED_DUPLEX','waiting':'ORIGINAL_START','ready':'SAME_CHILD_READINESS'}[operation];"
+        }
+      ]
+    }
+  ],
+  "missingActualOwners": [
+    "Current actual manager source/process/backend enrollment and SAME-socket identity owner; parent/image closure/health/labels do not certify manager process",
+    "ONE fixed original installed candidate coordinator call to outgoing function after existing retained prepare, never public/production fallback",
+    "Fixed exact facts verifier plus actual private API entrypoint to pending-session verifier and one-shot phase constructor; canonical gates remain closed",
+    "Final SAME-Core refreshed current-context bridge into closed lifecycle gate/spend (third context argument or fixed private ALS), original CAS/error-to-unknown integration",
+    "Separate original negative-only withdrawal/control owner; current execute approval cannot substitute after revocation",
+    "Original held-duplex candidate material/credential/frame, qualified physical retirement, descendants/fast-exit/native18cases/platform/image/Windows/cluster/full phases1-7 acceptance"
+  ],
+  "qualification": "Actual fixed outgoing candidate RPC cannot currently be established: identity constructor refuses BEFORE preparation/network. Source supplies concrete minimal link/handshake/phase owner but proves no live delegation.",
+  "cleanup": {
+    "owner": "veyra-bot existing worker slice",
+    "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "existing authorized C-backed WSL",
+    "generatedPaths": [
+      "docs/workstreams/dot/README.md",
+      "docs/workstreams/dot/candidate-rpc-client.proposal.ts",
+      "docs/workstreams/dot/candidate-rpc-core.d.mts",
+      "docs/workstreams/dot/candidate-rpc-core.proposal.mjs",
+      "docs/workstreams/dot/candidate-rpc-identity.d.mts",
+      "docs/workstreams/dot/candidate-rpc-identity.proposal.mjs",
+      "docs/workstreams/dot/candidate-rpc-manager.d.mts",
+      "docs/workstreams/dot/candidate-rpc-manager.proposal.mjs",
+      "docs/workstreams/dot/candidate-rpc-original-freeze.py",
+      "docs/workstreams/dot/candidate-rpc-original-preimages.json",
+      "docs/workstreams/dot/candidate-rpc-original-validation.json",
+      "docs/workstreams/dot/candidate-rpc-original.json",
+      "docs/workstreams/dot/candidate-rpc-original.md",
+      "docs/workstreams/dot/candidate-rpc-original.patch",
+      "docs/workstreams/dot/candidate-rpc-original.test.mjs",
+      "docs/workstreams/dot/candidate-rpc-server.proposal.ts"
+    ],
+    "regeneration": "python3 docs/workstreams/dot/candidate-rpc-original-freeze.py; --check-only writes0; no runtime/build needed",
+    "protected": "Actual Root source, original tokens/credentials/lease/custody/lockfiles, frozen ancestor evidence, unique SQL131 collision/voice/storage work unchanged",
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "retainedConsumer": "Root bounded original-link/source review and integration; minimal recipes/hash/source/patch/fixtures/receipts only"
+  },
+  "artifactWhitespace": {
+    "candidate-rpc-original.patch": []
+  }
+}

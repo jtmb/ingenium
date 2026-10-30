@@ -1,0 +1,7 @@
+{
+  "sourceFixturePass": 16,
+  "sourceFixtureFail": 0,
+  "stdoutSha256": "41507c9959620500546a8c0847f9e392ded1284fa86c519bcdf5c3fca6783bf3",
+  "testSourceSha256": "3983db2cadb7f17b41673fa2c0819231a126d295c9755eab2ed0a79081ec08cc",
+  "limits": "Negative isolated VM/source controls only. No actual candidate HTTP/Docker/Core DB/model/runtime. Actual outgoing identity and facts/negative-control constructors unavailable; no positive delegation or CAS qualification. Synthetic token/context only; copied Core keys fail before DB reads."
+}

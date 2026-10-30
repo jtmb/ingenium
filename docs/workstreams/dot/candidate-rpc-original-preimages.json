@@ -1,0 +1,58 @@
+[
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-rpc-identity.mjs",
+    "source": "candidate-rpc-identity.proposal.mjs",
+    "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "postimageSha256": "c06aabca0996805c00ab25efec28599791b9fc73c0c31417c44c22b5c92d29d6",
+    "bytes": 949
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-rpc-identity.d.mts",
+    "source": "candidate-rpc-identity.d.mts",
+    "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "postimageSha256": "c9eae282fe0e49bb6f2e70284622624302541269fc2a2a362086b175e5c2035f",
+    "bytes": 686
+  },
+  {
+    "target": "services/ingenium-api/lib/runtime-manager-client.ts",
+    "source": "candidate-rpc-client.proposal.ts",
+    "preimageSha256": "8b7f22ec4a34cf35826fc598f4aeee38cf503f8da353f41aa65fc1dc1210ca83",
+    "postimageSha256": "b4755abae1a50e35c1dedf206fa5cba096779b765b0028c1275726cf1110d3ee",
+    "bytes": 24963
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+    "source": "candidate-rpc-core.proposal.mjs",
+    "preimageSha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb",
+    "postimageSha256": "0cbcd510066728fea2545818bc19df45322997817af16ee265cb6d62b0d94935",
+    "bytes": 37830
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+    "source": "candidate-rpc-core.d.mts",
+    "preimageSha256": "6a9cceb563fca968348b5e8f9ef0fe6487771d2ea63dc1541c4c0323d9d61e26",
+    "postimageSha256": "b37df44236b171d1f9fbcc703f263a86d7dd64ea194c0d5cae80dc6f35311851",
+    "bytes": 778
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.mjs",
+    "source": "candidate-rpc-manager.proposal.mjs",
+    "preimageSha256": "609a19d72e01c47dda9b5317df7d5a13e693046d9923867934c665d9e8226e83",
+    "postimageSha256": "98b82e02487969a27b486f8fa7f277bf681705ed84f51756f6d102131ff67f99",
+    "bytes": 27789
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-original-manager.d.mts",
+    "source": "candidate-rpc-manager.d.mts",
+    "preimageSha256": "572ce33cf8a9ffe8494a00f7ada8e3dc4ff1956858091e11bf1b13ff8a2e12b3",
+    "postimageSha256": "d97589e3bce014ed60db3fcac8ed3b389f8da389f67e01c7211da53be54cec54",
+    "bytes": 1731
+  },
+  {
+    "target": "services/ingenium-api/scripts/runtime-manager.ts",
+    "source": "candidate-rpc-server.proposal.ts",
+    "preimageSha256": "d5ef7ef7d60ea4854708d6771a7461f1da6e455d46e35fbd3dc5be61790777ec",
+    "postimageSha256": "237a138c2697a356cb62388e58ff437e84bd1393c062c0160ce994d8eed61f6a",
+    "bytes": 29273
+  }
+]
