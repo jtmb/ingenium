@@ -9,6 +9,7 @@ export interface RuntimeWorkspaceMapping {
 }
 
 export interface RuntimeProvisionRequest {
+  originalRequestId?: string; // new private flow only; no legacy adoption
   runtimeId: string;
   backendName: string;
   organizationId: string;

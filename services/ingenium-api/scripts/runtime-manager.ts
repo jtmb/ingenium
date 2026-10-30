@@ -1,5 +1,6 @@
 import { createServer, request as httpRequest } from "node:http";
 import { timingSafeEqual } from "node:crypto";
+import * as runtimeProvision from "ingenium-core/lib/tools/runtime-original-provision";
 import { pathToFileURL } from "node:url";
 import {
   buildRuntimeContainerSpec,
@@ -23,6 +24,7 @@ type DockerResponse<T> = { status: number; data: T | null; raw: string };
 type DockerInspect = {
   Id?: string;
   Name?: string;
+  Image?: string;
   Config?: { Labels?: Record<string, string> };
   State?: { Status?: string; Health?: { Status?: string } };
 };
@@ -262,6 +264,9 @@ async function removeRuntimeResources(runtimeId: string): Promise<void> {
   if (removedNetwork.status !== 204 && removedNetwork.status !== 404) throw new Error("Runtime network removal failed");
 }
 
+// Only the original private POST new-create flow populates this map. Inspect,
+// labels or a replayed/current container cannot construct an original receipt.
+const originalProvisionResponses=new WeakMap<DockerInspect,{disposition:"new_created"|"existing_reused"|"legacy_unqualified";original:runtimeProvision.RuntimeOriginalProvision|null}>();
 async function provisionRuntime(input: RuntimeProvisionRequest, mappings: ReturnType<typeof readWorkspaceMappings>): Promise<DockerInspect> {
   const mapping = mappings.get(input.workspaceId);
   if (!mapping) throw new Error("Workspace mapping is unavailable");
@@ -270,7 +275,7 @@ async function provisionRuntime(input: RuntimeProvisionRequest, mappings: Return
     network: runtimeNetworkName(input.runtimeId),
     apiUrl: environment("INGENIUM_RUNTIME_API_URL"),
   };
-  const spec = buildRuntimeContainerSpec(input, mapping, config);
+  let spec = buildRuntimeContainerSpec(input, mapping, config);
   await ensureRuntimeNetwork(config.network, input.runtimeId);
   await connectControlPlane(config.network);
   await connectRuntimeGateway(config.network);
@@ -278,13 +283,24 @@ async function provisionRuntime(input: RuntimeProvisionRequest, mappings: Return
   const prior = await inspectRuntime(input.runtimeId);
   if (prior) {
     const exact = Object.entries(expectedLabels).every(([key, value]) => prior.Config?.Labels?.[key] === value);
-    if (exact && prior.State?.Status === "running") return prior;
+    if (exact && prior.State?.Status === "running") {originalProvisionResponses.set(prior,{disposition:"existing_reused",original:null});return prior;}
     if (prior.State?.Status === "running") {
       const stopped = await dockerRequest("POST", `/containers/${encodeURIComponent(input.backendName)}/stop?t=30`);
       if (stopped.status !== 204 && stopped.status !== 304) throw new Error("Stale runtime container stop failed");
     }
     const removed = await dockerRequest("DELETE", `/containers/${encodeURIComponent(input.backendName)}?v=true`);
     if (removed.status !== 204 && removed.status !== 404) throw new Error("Stale runtime container removal failed");
+  }
+  let originalCandidate:{daemon:{ID?:string};imageId:string}|null=null;
+  if(input.originalRequestId){
+    try{
+      runtimeProvision.publicProvisionRequest({...input,originalRequestId:input.originalRequestId});
+      const daemon=await dockerRequest<{ID?:string}>("GET","/info");
+      const image=await dockerRequest<{Id?:string}>("GET",`/images/${encodeURIComponent(config.image)}/json`);
+      if(daemon.status!==200||!daemon.data?.ID||image.status!==200||!/^sha256:[a-f0-9]{64}$/.test(image.data?.Id??""))throw Error("Original provision prerequisites unavailable");
+      originalCandidate={daemon:daemon.data,imageId:image.data!.Id!};
+      spec={...spec,Image:originalCandidate.imageId}; // immutable create image
+    }catch{/* Preserve legacy lifecycle, but never qualify without an original. */}
   }
   try {
     const created = await dockerRequest<{ Id?: string }>("POST", `/containers/create?name=${encodeURIComponent(input.backendName)}`, spec);
@@ -297,6 +313,17 @@ async function provisionRuntime(input: RuntimeProvisionRequest, mappings: Return
     await handoffRuntimeCapability(input.backendName, input.capability);
     const ready = await inspectRuntime(input.runtimeId);
     if (!ready) throw new Error("Runtime disappeared after start");
+    originalProvisionResponses.set(ready,{disposition:"legacy_unqualified",original:null});
+    if(originalCandidate){
+      try{
+        const daemonAfter=await dockerRequest<{ID?:string}>("GET","/info");
+        if(daemonAfter.status!==200||!daemonAfter.data)throw Error("Original daemon unavailable");
+        const original=runtimeProvision.originalProvisionFromNewFlow({request:{...input,originalRequestId:input.originalRequestId!},spec,
+          daemonBefore:originalCandidate.daemon,daemonAfter:daemonAfter.data,imageId:originalCandidate.imageId,createdId:created.data?.Id,
+          createStatus:created.status,startStatus:started.status,attachJoined:true,container:ready});
+        originalProvisionResponses.set(ready,{disposition:"new_created",original});
+      }catch{/* A missing/changed birth witness refuses Dot qualification only. */}
+    }
     return ready;
   } catch (error) {
     const logs = await dockerRequest<never>("GET", `/containers/${encodeURIComponent(input.backendName)}/logs?stdout=1&stderr=1&tail=20`).catch(() => null);
@@ -387,7 +414,9 @@ export function startRuntimeManager(): import("node:http").Server {
       }
       if (request.method === "POST" && url.pathname === "/v1/runtimes") {
         const inspect = await provisionRuntime(await readJsonBody(request) as RuntimeProvisionRequest, mappings);
-        response.writeHead(202).end(JSON.stringify({ data: publicInspect(inspect) }));
+        const original=originalProvisionResponses.get(inspect);
+        response.writeHead(202).end(JSON.stringify({data:{...publicInspect(inspect),
+          provisionDisposition:original?.disposition??"legacy_unqualified",originalProvision:original?.original??null}}));
         return;
       }
       const jobRoute=/^\/v1\/job-runs\/([0-9a-f-]+)(\/launch|\/cancel|\/cleanup)?$/.exec(url.pathname);

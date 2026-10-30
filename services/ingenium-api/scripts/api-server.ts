@@ -10,6 +10,9 @@ import { getEmailEncryptionKeyFingerprint } from "ingenium-email/lib/credential-
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import {createVerifiedNativeContextOwner} from "../lib/native-hosted-connection-owner.js";
+import {createNodeNativePairingOwner} from "../lib/node-native-pairing-custody.js";
+import {createNativePairingRouter} from "../lib/routes/native-customize-pairings.js";
 import { createNativeCustomizeRouter } from "../lib/routes/native-customize.js";
 import { createNativeCustomizeContextOwner } from "../lib/routes/native-customize-context.js";
 import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
@@ -188,7 +191,10 @@ app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
 // Root injects the actual verified Native context. Undefined means enrollment/effects fail closed.
-app.use("/api/v1/native-customize", createNativeCustomizeRouter({ context: createNativeCustomizeContextOwner() }));
+// Pairing ceremony admission is separate: it constructs the private proof custody.
+app.use("/api/v1/native-customize/pairings",createNativePairingRouter());
+const verifiedNative=createVerifiedNativeContextOwner(req=>createNodeNativePairingOwner(req).custody);
+app.use("/api/v1/native-customize",createNativeCustomizeRouter({context:createNativeCustomizeContextOwner(verifiedNative.owner),preflight:verifiedNative.preflight}));
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);

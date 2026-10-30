@@ -1,4 +1,5 @@
 import { Router } from "express";
+import {decodePreparation} from "../paired-native-reader.js";
 import type { NextFunction, Request, Response } from "express";
 import * as core from "ingenium-core";
 import { requireProject } from "../helpers.js";
@@ -107,7 +108,7 @@ function authorizeVaultResource(req: Request, row: { id: string; organization_id
 function ownedVaultItem(req: Request, projectId: string, itemId: string, permission?: core.authorization.AuthorizationPermission) {
   const row = core.getDb(dbPath()).prepare(
     `SELECT id, organization_id, owner_kind, owner_user_id FROM vault_items
-     WHERE project_id = ? AND id = ? AND access_policy <> ?`,
+     WHERE project_id = ? AND id = ? AND access_policy <> ? AND type <> 'native-pairing-credential'`,
   ).get(projectId, itemId, '{"mode":"deleted"}') as { id: string; organization_id: string; owner_kind: "user" | "organization"; owner_user_id: string | null } | undefined;
   return row && authorizeVaultResource(req, row, permission) ? row : undefined;
 }
@@ -144,7 +145,7 @@ function serializeItem(item: any): object {
     organization_id: item.organizationId ?? item.organization_id,
     owner_kind: item.ownerKind ?? item.owner_kind,
     owner_user_id: item.ownerUserId ?? item.owner_user_id ?? null,
-    effective_capabilities: ["read", "write", "reveal"],
+    effective_capabilities: item.type === "native-pairing-credential" ? [] : ["read", "write", "reveal"],
   };
 }
 
@@ -525,6 +526,17 @@ vaultRouter.post("/items", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A user owner requires a user principal" } });
     return;
   }
+  if (type === "native-pairing-credential") {
+    // Only preparation enters through this route. Paired/redeemed are private owner writes.
+    try {
+      if (req.principal?.type !== "user" || !req.principal.session || ownership.ownerKind !== "user") throw new Error();
+      const preparation = JSON.parse(value);
+      decodePreparation(preparation, preparation.enrollmentRequestId);
+    } catch {
+      res.status(422).json({error:{code:"INVALID_NATIVE_PREPARATION",message:"Invalid private Native preparation"}});
+      return;
+    }
+  }
   const id = vault!.createItem(projectId, name, type, value, folderId, tags, urls, username, ownership, vaultActor(req));
   res.status(201).json({ data: { id } });
 });
@@ -579,6 +591,7 @@ vaultRouter.patch("/items/:id", (req, res) => {
   if (!projectId) return;
 
   const { name, type, username } = req.body ?? {};
+  if (type === "native-pairing-credential") {res.status(422).json({error:{code:"RESERVED_VAULT_TYPE",message:"Reserved private credential type"}});return;}
   if (name !== undefined && (typeof name !== "string" || !name.trim())) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name must be a non-empty string" } });
     return;

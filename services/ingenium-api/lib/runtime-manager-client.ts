@@ -1,5 +1,7 @@
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import type { runtimes } from "ingenium-core";
+import type {runtimes} from "ingenium-core";
+import * as runtimeProvision from "ingenium-core/lib/tools/runtime-original-provision";
+import {randomUUID} from "node:crypto";
 import { isManagedRuntimeObservation, type ManagedRuntimeObservation } from "./runtime-placement-contract.js";
 
 export interface RuntimeManagerInspect {
@@ -77,9 +79,14 @@ async function requestManager(path: string, method = "GET", body?: unknown): Pro
   return result.data;
 }
 
-export function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promise<RuntimeManagerInspect> {
+const originalProvisionReceipts=new WeakMap<RuntimeManagerInspect,runtimes.RuntimeOriginalProvision>();
+/** No DTO constructor: only the same object returned by private authenticated POST. */
+export function authenticatedOriginalProvision(result:RuntimeManagerInspect):runtimes.RuntimeOriginalProvision|undefined{return originalProvisionReceipts.get(result);}
+export async function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promise<RuntimeManagerInspect> {
   const { runtime } = payload;
-  return requestManager("/v1/runtimes", "POST", {
+  const originalRequestId=randomUUID();
+  const managerRequest={
+    originalRequestId,
     runtimeId: runtime.id,
     backendName: runtime.backendName,
     organizationId: runtime.organizationId,
@@ -100,7 +107,17 @@ export function provisionManagedRuntime(payload: RuntimeProvisionPayload): Promi
       diskBytes: runtime.diskBytes,
       processLimit: runtime.processLimit,
     },
-  });
+  };
+  const result=await requestManager("/v1/runtimes","POST",managerRequest);
+  const fields=result as RuntimeManagerInspect&{provisionDisposition?:unknown;originalProvision?:unknown};
+  // Only this immediate authenticated response plus this exact local request
+  // can create an entry. A copied DTO/current probe has no WeakMap identity.
+  if(fields.provisionDisposition==="new_created"){
+    try{originalProvisionReceipts.set(result,runtimeProvision.validateProvisionResponse(fields.originalProvision,managerRequest,result.backendId));}
+    catch{/* Preserve ordinary runtime lifecycle; no original role authority. */}
+  }
+  delete fields.originalProvision;delete fields.provisionDisposition;
+  return result;
 }
 
 export function inspectManagedRuntime(runtimeId: string): Promise<RuntimeManagerInspect> {

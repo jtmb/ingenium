@@ -75,7 +75,12 @@ export * as rag from "./tools/rag.js";
 export { EndpointPolicyError, isIP, isPrivateAddress, safeEndpointFetch, safeLlmFetch, validateEndpointUrl } from "./tools/endpoint-policy.js";
 export type { EndpointPolicyErrorCode, EndpointPolicyOptions } from "./tools/endpoint-policy.js";
 
-export { createHostedGovernance, HostedRefusal, proposalReviewHash } from "./tools/hosted-governance.js";
-export type { Row as HostedGovernanceRow, VerifiedNative as VerifiedNativeGovernanceContext } from "./tools/hosted-governance.js";
+export { createHostedGovernance, HostedRefusal, proposalReviewHash, payloadHash as hostedGovernancePayloadHash } from "./tools/hosted-governance.js";
+export type { Row as HostedGovernanceRow, VerifiedNative as VerifiedNativeGovernanceContext, SqlDb as HostedGovernanceSqlDb } from "./tools/hosted-governance.js";
 export { createHostedGovernanceOwner } from "./tools/hosted-governance-owner.js";
 export type { HostedGovernanceAuthentication } from "./tools/hosted-governance-owner.js";
+
+export * as voiceOperations from "./tools/voice-operation-ledger.js";
+export { createVoiceOperationOwner } from "./tools/voice-operation-owner.js";
+export type { VoiceOperationAuthorities } from "./tools/voice-operation-owner.js";
+export type { CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, CpuResultFingerprint, VoiceControl } from "./tools/voice-operation-contract.js";

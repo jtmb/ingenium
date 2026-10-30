@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { getDb, mcpCredentials, projects, runtimes } from "ingenium-core";
-import { provisionManagedRuntime, removeManagedRuntime } from "./runtime-manager-client.js";
+import { authenticatedOriginalProvision, provisionManagedRuntime, removeManagedRuntime } from "./runtime-manager-client.js";
 import { deploymentMode } from "./runtime-mode.js";
 
 export const LOCAL_RUNTIME_SCOPES = [
@@ -235,6 +235,7 @@ async function provision(workspaceId: string): Promise<runtimes.RuntimeInstance>
       actorType: "manager",
       actorId: "runtime-manager",
       backendContainerId: managed.backendId ?? null,
+      originalProvision: authenticatedOriginalProvision(managed),
     });
   } catch (error) {
     if (capabilityBound) runtimes.revokeRuntimeCapability(runtime.id);

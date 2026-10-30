@@ -43,6 +43,8 @@ function trustedRuntimeDefinitions(projectId: string) {
     const environment: Record<string, string> = {};
     let resolved = true;
     for (const [key, reference] of Object.entries(definition.environment) as Array<[string, { vault_item_id: string }]>) {
+      const metadata = vault.getItemMetadata(definition.owner_project_id, reference.vault_item_id);
+      if (!metadata || !("type" in metadata) || typeof metadata.type !== "string" || metadata.type === "native-pairing-credential") {resolved = false;break;}
       const value = vault.decryptItem(definition.owner_project_id, reference.vault_item_id);
       if (value === null) {
         resolved = false;
@@ -82,7 +84,8 @@ function publicRuntimeDefinitions(projectId: string) {
     let hasUnavailableReference = false;
     const environment = Object.fromEntries(
       Object.entries(definition.environment).map(([key, reference]) => {
-        const status = vault.getItemMetadata(definition.owner_project_id, reference.vault_item_id)
+        const metadata = vault.getItemMetadata(definition.owner_project_id, reference.vault_item_id);
+        const status = metadata && "type" in metadata && typeof metadata.type === "string" && metadata.type !== "native-pairing-credential"
           ? "resolved"
           : "unavailable";
         if (status === "unavailable") hasUnavailableReference = true;

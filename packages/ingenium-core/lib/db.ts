@@ -5517,6 +5517,8 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
     { file: "124_veyra_dot_automation.sql", tables: ["veyra_dot_records"], triggers: [] },
     { file: "125_native_hosted_governance.sql", tables: ["native_hosted_governance_grants", "native_hosted_governance_effects"], triggers: ["native_hosted_effect_identity_immutable", "native_hosted_effect_terminal_immutable", "native_hosted_effect_no_delete"] },
     { file: "126_managed_job_execution.sql", tables: ["job_run_managed_execution", "job_run_mcp_credentials"], triggers: ["managed_job_execution_immutable", "job_run_mcp_credentials_immutable"] },
+    { file: "127_runtime_original_provisions.sql", tables: ["runtime_original_provisions"], triggers: ["runtime_original_provisions_initial_only", "runtime_original_provisions_no_update", "runtime_original_provisions_no_delete"] },
+    { file: "128_voice_operations.sql", tables: ["veyra_voice_operations"], triggers: ["veyra_voice_control_generation","veyra_voice_operation_identity_immutable","veyra_voice_operation_terminal_immutable","veyra_voice_operation_revision","veyra_voice_operation_no_delete","veyra_voice_private_revision","veyra_voice_control_identity_immutable","veyra_voice_cpu_identity_terminal_immutable"] },
   ];
   for (const migration of migrations) {
     const present = migration.tables.filter(name => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
@@ -5555,6 +5557,21 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       references("native_hosted_governance_effects", "actor_id", "users");
       references("native_hosted_governance_effects", "project_id", "projects");
       references("native_hosted_governance_effects", "source_project_id", "projects");
+    }
+    if (migration.file.startsWith("128_")) {
+      references("veyra_voice_operations","actor_id","users");
+      references("veyra_voice_operations","organization_id","organizations");
+      references("veyra_voice_operations","project_id","projects");
+      references("veyra_voice_operations","runtime_id","runtime_instances");
+      references("veyra_voice_operations","workspace_id","authorized_workspaces");
+      const keys=database.prepare("PRAGMA foreign_key_list(veyra_voice_operations)").all() as {from:string;to:string;table:string;on_delete:string}[];
+      for(const column of ["parent_operation_id","control_operation_id"])if(!keys.some(key=>key.from===column&&key.to==="operation_id"&&key.table==="veyra_voice_operations"&&key.on_delete==="RESTRICT"))throw Error("Missing original Voice parent/control invariant");
+    }
+    if (migration.file.startsWith("127_")) {
+      references("runtime_original_provisions", "runtime_id", "runtime_instances");
+      const keys=database.prepare("PRAGMA foreign_key_list(runtime_original_provisions)").all() as {id:number;from:string;to:string;table:string;on_delete:string}[];
+      const columns=["runtime_id","workspace_id","organization_id","project_id","owner_user_id"];
+      if(!keys.some(key=>key.table==="runtime_instances"&&key.from==="runtime_id"&&key.to==="id"&&columns.every(column=>keys.some(part=>part.id===key.id&&part.table==="runtime_instances"&&part.from===column&&part.to===(column==="runtime_id"?"id":column)&&part.on_delete==="RESTRICT"))))throw Error("Missing original runtime compound ownership invariant");
     }
     if (migration.file.startsWith("126_")) {
       references("job_run_managed_execution", "run_id", "job_runs");

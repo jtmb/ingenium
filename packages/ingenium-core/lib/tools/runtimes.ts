@@ -1,6 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { coordinationWorktreeId } from "./coordination.js";
+import {insertRuntimeOriginalProvision,readRuntimeOriginalProvision,type RuntimeOriginalProvision,type StoredRuntimeOriginalProvision} from "./runtime-original-provision.js";
+export {originalProvisionFromNewFlow,publicProvisionRequest,publicProvisionSpec,decodeRuntimeOriginalProvision,validateProvisionResponse,provisionHash} from "./runtime-original-provision.js";
+export type {RuntimeOriginalProvision,StoredRuntimeOriginalProvision,PublicProvisionRequest} from "./runtime-original-provision.js";
+/** Immutable original metadata only; fresh healthy job-role qualification is separate. */
+export function getRuntimeOriginalProvision(id:string):StoredRuntimeOriginalProvision|undefined{
+ return readRuntimeOriginalProvision(getDb(process.env.INGENIUM_CORE_DB_PATH),id);
+}
 
 export const RUNTIME_STATES = [
   "ABSENT", "PROVISIONING", "STARTING", "READY", "IDLE", "STOPPING", "STOPPED", "FAILED", "REVOKED",
@@ -96,6 +103,7 @@ type WorkspaceRow = {
 };
 type RuntimeRow = {
   id: string; workspace_id: string; organization_id: string; project_id: string; owner_user_id: string;
+  lease_owner_hash: string | null;
   state: RuntimeState; revision: number; lease_expires_at: string | null; idle_expires_at: string | null;
   absolute_expires_at: string | null; cpu_millis: number; memory_bytes: number; pids_limit: number;
   disk_bytes: number; process_limit: number; backend_name: string; backend_container_id: string | null;
@@ -494,6 +502,7 @@ function appendEvent(runtime: RuntimeRow, eventType: string, actorType: "user" |
 export function transitionRuntime(input: {
   id: string; expectedRevision: number; toState: RuntimeState; actorType: "user" | "manager" | "system"; actorId: string;
   backendContainerId?: string | null; idleExpiresAt?: Date | null; absoluteExpiresAt?: Date | null; maxActiveRuntimes?: number;
+  originalProvision?: RuntimeOriginalProvision;
 }): RuntimeInstance {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
@@ -511,6 +520,7 @@ export function transitionRuntime(input: {
     const timestamp = new Date().toISOString();
     const backend = input.backendContainerId === undefined ? current.backend_container_id : input.backendContainerId;
     if (backend !== null && !/^[0-9a-f]{64}$/.test(backend)) throw new Error("Invalid backend identity");
+    insertRuntimeOriginalProvision(db,current,input,timestamp); // same original STARTING transaction
     const revoked = input.toState === "REVOKED";
     const releaseLease = input.toState === "STOPPED" || input.toState === "FAILED" || revoked;
     const changed = db.prepare(`UPDATE runtime_instances SET state = ?, revision = revision + 1,
