@@ -5519,6 +5519,7 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
     { file: "126_managed_job_execution.sql", tables: ["job_run_managed_execution", "job_run_mcp_credentials"], triggers: ["managed_job_execution_immutable", "job_run_mcp_credentials_immutable"] },
     { file: "127_runtime_original_provisions.sql", tables: ["runtime_original_provisions"], triggers: ["runtime_original_provisions_initial_only", "runtime_original_provisions_no_update", "runtime_original_provisions_no_delete"] },
     { file: "128_voice_operations.sql", tables: ["veyra_voice_operations"], triggers: ["veyra_voice_control_generation","veyra_voice_operation_identity_immutable","veyra_voice_operation_terminal_immutable","veyra_voice_operation_revision","veyra_voice_operation_no_delete","veyra_voice_private_revision","veyra_voice_control_identity_immutable","veyra_voice_cpu_identity_terminal_immutable"] },
+    { file: "129_managed_candidate_purpose.sql", tables: ["managed_job_execution_purpose_schema"], triggers: ["managed_job_execution_immutable","managed_job_effect_fence_monotonic","managed_job_credential_requires_material","job_run_mcp_credentials_immutable","job_run_credential_purpose_immutable","managed_job_purpose_schema_no_update","managed_job_purpose_schema_no_delete"] },
   ];
   for (const migration of migrations) {
     const present = migration.tables.filter(name => database.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
@@ -5577,6 +5578,16 @@ function applyVeyraDomainMigrations(database: Database.Database, migrationsDir: 
       references("job_run_managed_execution", "run_id", "job_runs");
       references("job_run_mcp_credentials", "run_id", "job_runs");
       references("job_run_mcp_credentials", "service_principal_id", "service_principals");
+    }
+    if (migration.file.startsWith("129_")) {
+      const row=database.prepare("SELECT schema_version FROM managed_job_execution_purpose_schema WHERE singleton=1").get() as {schema_version:number}|undefined;
+      if(row?.schema_version!==1)throw Error("Missing managed execution purpose schema marker");
+      const objects=["job_run_managed_execution","job_run_mcp_credentials","managed_job_execution_purpose_schema",...migration.triggers];
+      const drift=compareMigrationDefinitions(database,["126_managed_job_execution.sql","129_managed_candidate_purpose.sql"],"CREATE TABLE job_runs(id TEXT PRIMARY KEY);CREATE TABLE service_principals(id TEXT PRIMARY KEY);",objects);
+      if(drift.length)throw Error("Managed execution purpose schema drift: "+drift.join(","));
+      references("job_run_managed_execution","run_id","job_runs");
+      references("job_run_mcp_credentials","run_id","job_runs");
+      references("job_run_mcp_credentials","service_principal_id","service_principals");
     }
     if (migration.file.startsWith("124_")) {
       references("veyra_dot_records", "organization_id", "organizations");
