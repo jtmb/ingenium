@@ -1,5 +1,7 @@
 # Request memory integration
 
+Updated2026-10-30: [completed-source snapshots](codex-completed-snapshots.md) add the preferred server-only completedSnapshot path. It requires verified bounded canonical engine evidence, without admission journal fields or a global future-ingress fence. Earlier journal-dependent descriptions below concern the retained compatibility branch only.
+
 Implements coordinator `docs/contracts/veyra-request-integration-v1.md` within the memory writer territory. `createRequestMemorySession(request,selected,internal?)` composes the real core session, shared `revalidateRequestIdentity`, Projects execution/chat resolvers, existing authorization and existing CSRF/origin middleware. It creates no credential parser, journal, database, scheduler, model selection or runtime.
 
 ## Authority and purpose

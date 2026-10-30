@@ -1,0 +1,30 @@
+{
+  "sourceOwner": "openai/codex",
+  "commit": "7689f21b79f8faf318bab98f1cd98dd5f5aa59ad",
+  "observedDate": "2026-10-30",
+  "installedQualification": "Binary location found read-only; PE version/source commit not exposed by inspected metadata. No installed binary-to-public-source equality claim.",
+  "docs": [
+    "https://learn.chatgpt.com/docs/customization/memories",
+    "https://learn.chatgpt.com/docs/config-file/config-reference"
+  ],
+  "evidence": [
+    {
+      "bytes": 28028,
+      "sha256": "4f7b9ad31b5e8dda0da75b473a1c399955ce555062f0b8ff150ced19e2032b2e",
+      "url": "https://raw.githubusercontent.com/openai/codex/7689f21b79f8faf318bab98f1cd98dd5f5aa59ad/codex-rs/memories/write/src/phase1.rs"
+    },
+    {
+      "bytes": 14864,
+      "sha256": "07fe46424338d322b77af1acc0231992e4489e5eb5fdebdadc38e16228c3861f",
+      "url": "https://raw.githubusercontent.com/openai/codex/7689f21b79f8faf318bab98f1cd98dd5f5aa59ad/codex-rs/memories/write/src/rollout_input.rs"
+    },
+    {
+      "bytes": 194926,
+      "sha256": "2e0d5a739a5db0d427744af2eb43dd2364a81b55c94d01a4dce45aaf06cca37c",
+      "url": "https://raw.githubusercontent.com/openai/codex/7689f21b79f8faf318bab98f1cd98dd5f5aa59ad/codex-rs/state/src/runtime/memories.rs"
+    }
+  ],
+  "storage": "Only metadata/hashes retained; official source read in memory, no clone/source cache/build",
+  "installedBinary": "C:/Users/james/AppData/Local/OpenAI/Codex/bin/0ab0e7a8f3779036/codex.exe",
+  "officialChange": "https://github.com/openai/codex/pull/53940"
+}

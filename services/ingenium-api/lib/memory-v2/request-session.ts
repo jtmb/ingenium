@@ -12,6 +12,7 @@ import type { AuthenticatedExecution } from "./adapters.mjs";
 import type { MemoryScope } from "./lifecycle.mjs";
 
 export interface InternalMemoryRequestOptions {
+  completedSnapshot?: import('./bounded-snapshot.mjs').CompletedMemorySnapshot;
   eligibilityPolicy?: (context: { request: Request; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string; conversationId: string; messageId: string; contentHash: string }) => ApprovedMemoryEligibilityPolicy | null;
 }
 const axes = ["organizationId", "ownerUserId", "projectId", "workspaceId", "hostId", "environmentId", "bindingHash", "bindingEpoch"] as const;
@@ -62,6 +63,7 @@ export function createRequestMemorySession(request: Request, selected: RequestEx
     },
     resolveSourceState: ({ scope, execution, chatId, messageId, conversationId, contentHash }) => contextMemorySourceState({
       db: positionalCoreConnection(getDb()), scope, execution, chatId, messageId, conversationId, contentHash,
+      completedSnapshot: internal.completedSnapshot,
       policy: internal.eligibilityPolicy?.({ request, scope, execution, chatId, conversationId, messageId, contentHash }) ?? null,
     }),
   });
