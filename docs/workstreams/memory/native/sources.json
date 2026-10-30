@@ -1,0 +1,117 @@
+[
+  {
+    "source": "crates/veyra-memory/Cargo.toml",
+    "target": "crates/veyra-memory/Cargo.toml",
+    "required_preimage": "absent",
+    "sha256": "b5e7a3824ed4a17b81d49b07c1bc916e4920116da6c52094ed200f0c2d955b01",
+    "bytes": 204,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/tests/domain.rs",
+    "target": "crates/veyra-memory/tests/domain.rs",
+    "required_preimage": "absent",
+    "sha256": "fbce777db66f7b6c9257314e9a10b908cbbb026245fa2164a395d77814e836e2",
+    "bytes": 3527,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/src/lib.rs",
+    "target": "crates/veyra-memory/src/lib.rs",
+    "required_preimage": "absent",
+    "sha256": "21c4a73c6a25f69eeed798dcb9d4726ec8a9e6c64b5a8dd6120affa69f93f1ee",
+    "bytes": 679,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/src/snapshot.rs",
+    "target": "crates/veyra-memory/src/snapshot.rs",
+    "required_preimage": "absent",
+    "sha256": "e7b992fe309576f334d30a520c469843e623d91d86d0146faae810d88770aabe",
+    "bytes": 3488,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/src/state.rs",
+    "target": "crates/veyra-memory/src/state.rs",
+    "required_preimage": "absent",
+    "sha256": "8d5bdd85e8d30b9c11b1d27bf184cb944fa18312a00d9079ebb8bad6f044cf40",
+    "bytes": 8092,
+    "transform": null
+  },
+  {
+    "source": "crates/veyra-memory/src/types.rs",
+    "target": "crates/veyra-memory/src/types.rs",
+    "required_preimage": "absent",
+    "sha256": "ed99d107169736cce0cf0bbff42bdf0a3b54cd7ca733fcc8f245b087889fd764",
+    "bytes": 4681,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/apps/service/src/routes/goal_runtime/learned.rs",
+    "target": "apps/service/src/routes/goal_runtime/learned.rs",
+    "required_preimage": "absent",
+    "sha256": "d5a5494294be8d43320661c432202c9646c1af979679fb2b1345cddb77ac5958",
+    "bytes": 11218,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/native_memory_owner.rs",
+    "target": "crates/adapters/src/native_memory_owner.rs",
+    "required_preimage": "absent",
+    "sha256": "8cd22f5afc38621e97fc01c4563db9465acb20e16e1deac567dd9e653eff7d8e",
+    "bytes": 3289,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/goal_store/learned.rs",
+    "target": "crates/adapters/src/goal_store/learned.rs",
+    "required_preimage": "absent",
+    "sha256": "fcd839e9c04c98815a49f612b4eb670776d7fd78628b146db74554140b94c1a1",
+    "bytes": 2653,
+    "transform": null
+  },
+  {
+    "source": "docs/workstreams/memory/native/sources/crates/adapters/src/opencode/desktop_runtime/memory.rs",
+    "target": "crates/adapters/src/opencode/desktop_runtime/memory.rs",
+    "required_preimage": "absent",
+    "sha256": "fe5545fabbf977a568906bb07fb2686c371b61b2fe52288c5b0abec0576975e9",
+    "bytes": 5829,
+    "transform": null
+  },
+  {
+    "source": "services/ingenium-dashboard/src/app/components/memory-v2/controller.mjs",
+    "target": "apps/web/src/features/workbench/memoryController.mjs",
+    "required_preimage": "absent",
+    "sha256": "07df864177ee2954aacb9f7e43ab8a8dff1eb70b91837e3b4ef1d49e965d87cb",
+    "bytes": 10075,
+    "transform": null
+  },
+  {
+    "source": "services/ingenium-dashboard/src/app/components/memory-v2/native/adapter.mjs",
+    "target": "apps/web/src/features/workbench/native-memory/adapter.mjs",
+    "required_preimage": "absent",
+    "sha256": "e43c847385614225977bb5c30581f0535e1ee4943ef744a666b1a4db5a5023fc",
+    "bytes": 5481,
+    "transform": {
+      "replacement": "../memoryController.mjs",
+      "find": "../controller.mjs"
+    }
+  },
+  {
+    "source": "services/ingenium-dashboard/src/app/components/memory-v2/native/adapter.d.mts",
+    "target": "apps/web/src/features/workbench/native-memory/adapter.d.mts",
+    "required_preimage": "absent",
+    "sha256": "c2057336a3aa2cee33301a302d441e4dde153ed110c5f635a41c7fe31b941351",
+    "bytes": 1261,
+    "transform": null
+  },
+  {
+    "source": "services/ingenium-dashboard/src/app/components/memory-v2/native/LearnedMemoryControls.tsx",
+    "target": "apps/web/src/features/workbench/native-memory/LearnedMemoryControls.tsx",
+    "required_preimage": "absent",
+    "sha256": "720bdcf8d72d11cc1291607e51c20141fb81b777a1afe981606d7928c4d59fec",
+    "bytes": 3733,
+    "transform": null
+  }
+]

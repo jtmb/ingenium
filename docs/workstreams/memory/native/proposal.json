@@ -1,0 +1,157 @@
+{
+  "native_revision": "4e8e29436cfe42c81cc6401599cf8d224357a928",
+  "projects_proposal": "7250f55f92e6554c47b945a529fbbbe7de114c06",
+  "status": "unapplied-uncompiled-source-proposal",
+  "operations": [
+    {
+      "path": "Cargo.toml",
+      "preimage_sha256": "fff5964b782a834da6f721eaa9ad1a5ace5bb85a95ea0bd282f92f98c5e66039",
+      "find": "\"crates/wsl-owner-helper\"]",
+      "replacement": "\"crates/wsl-owner-helper\", \"crates/veyra-memory\"]"
+    },
+    {
+      "path": "Cargo.toml",
+      "preimage_sha256": "fff5964b782a834da6f721eaa9ad1a5ace5bb85a95ea0bd282f92f98c5e66039",
+      "find": "veyra-harness = { path = \"crates/harness\" }",
+      "replacement": "veyra-harness = { path = \"crates/harness\" }\nveyra-memory = { path = \"crates/veyra-memory\" }"
+    },
+    {
+      "path": "crates/adapters/Cargo.toml",
+      "preimage_sha256": "5aabcaa2d40e26eeeaba5cfff79bed03d82c41d3f47b402a6328adee44fdfec6",
+      "find": "veyra-contracts.workspace = true",
+      "replacement": "veyra-contracts.workspace = true\nveyra-memory.workspace = true"
+    },
+    {
+      "path": "apps/service/Cargo.toml",
+      "preimage_sha256": "1b2f0c355fceebb50dc0990d36b114885540f1d581606482ac8809d7b5deaa3e",
+      "find": "veyra-contracts.workspace = true",
+      "replacement": "veyra-contracts.workspace = true\nveyra-memory.workspace = true"
+    },
+    {
+      "path": "crates/adapters/src/lib.rs",
+      "preimage_sha256": "25101891a0a5896f07f3c468d59a32803b9727a0fab0d424faa3656246bfbead",
+      "find": "pub mod goal_store;",
+      "replacement": "pub mod goal_store;\npub mod native_memory_owner;"
+    },
+    {
+      "path": "crates/adapters/src/goal_store.rs",
+      "preimage_sha256": "26e3a73265ab46a9afe72e0a8f6b90690e62b9b9ae48bd01afaa1acbb45f96a9",
+      "find": "mod retained_workspaces;",
+      "replacement": "mod retained_workspaces;\nmod learned;"
+    },
+    {
+      "path": "crates/adapters/src/goal_store.rs",
+      "preimage_sha256": "26e3a73265ab46a9afe72e0a8f6b90690e62b9b9ae48bd01afaa1acbb45f96a9",
+      "find": "    uncertain: bool,",
+      "replacement": "    learned: veyra_memory::LearnedState,\n    uncertain: bool,"
+    },
+    {
+      "path": "crates/adapters/src/goal_store.rs",
+      "preimage_sha256": "26e3a73265ab46a9afe72e0a8f6b90690e62b9b9ae48bd01afaa1acbb45f96a9",
+      "find": "        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, uncertain: false })",
+      "replacement": "        let learned = learned::load(directory)?;\n        Ok(Self { path, db, retained_tasks, retained_forks, retained_workspaces, learned, uncertain: false })"
+    },
+    {
+      "path": "crates/adapters/src/goal_store.rs",
+      "preimage_sha256": "26e3a73265ab46a9afe72e0a8f6b90690e62b9b9ae48bd01afaa1acbb45f96a9",
+      "find": "        value[\"retained_task_goals\"]",
+      "replacement": "        value[\"learned_memory_v1\"] = serde_json::to_value(&self.learned).map_err(|_|\"Learned memory export failed\")?;\n        value[\"retained_task_goals\"]"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "5b827915417ac52cd909be76f1852c0941621492db5df8f7b8dfd504f63b52da",
+      "find": "mod prompt_original;",
+      "replacement": "mod prompt_original;\nmod memory;"
+    },
+    {
+      "path": "crates/adapters/src/opencode/workflows.rs",
+      "preimage_sha256": "82fef000dbaa6146b89dd9c0d92eee180eebec601987a490c517a42e09a56f38",
+      "find": "    pub fn history_page(",
+      "replacement": "    /// One bounded latest page, canonical conversion, no cursor traversal.\n    pub fn memory_recent(&self,session:&str)->Result<Vec<super::EngineMessage>,EngineError>{\n        validate_session(session)?;\n        let page:WireMessagePage=decode(self.request_query(Method::GET,&[\"api\",\"session\",session,\"message\"],\n            &[(\"limit\",\"32\".into()),(\"order\",\"desc\".into())],None)?)?;\n        if page.data.len()>32{return Err(EngineError::Malformed)}\n        let mut messages=page.data.into_iter().map(|m|m.normalize(session)).collect::<Result<Vec<_>,_>>()?;\n        messages.reverse();Ok(messages)\n    }\n    pub fn history_page("
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "mod controls;",
+      "replacement": "mod controls;\nmod learned;"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "    entries: Vec<SavedMemory>,",
+      "replacement": "    pub(in crate::routes) entries: Vec<SavedMemory>,"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "    goal_memory_ids: Option<Vec<String>>,",
+      "replacement": "    pub(in crate::routes) goal_memory_ids: Option<Vec<String>>,\n    #[serde(default, skip_serializing_if = \"Option::is_none\")]\n    learned: Option<learned::LearnedAdmission>,"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "        Ok(MemoryAdmission { entries, goal_memory_ids: None })",
+      "replacement": "        Ok(MemoryAdmission { entries, goal_memory_ids: None, learned: None })"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "            goal_memory_ids: Some(goal.selected_memory_ids),",
+      "replacement": "            goal_memory_ids: Some(goal.selected_memory_ids),\n            learned: None,"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "            prompt.push_str(&block);\n        }\n        Ok(prompt)",
+      "replacement": "            prompt.push_str(&block);\n        }\n        if let Some(learned)=&self.learned{learned.compose(&mut prompt,&mut bytes)?;}\n        Ok(prompt)"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "        Self::validate_memory(guard.as_ref().ok_or(\"Memory store is unavailable\")?, project, session, memory)?;",
+      "replacement": "        Self::validate_memory(guard.as_ref().ok_or(\"Memory store is unavailable\")?, project, session, memory)?;\n        if memory.learned.is_some(){return Err(\"Learned originals require the Native owner boundary\".into());}"
+    },
+    {
+      "path": "apps/service/src/routes/goal_runtime.rs",
+      "preimage_sha256": "7c52cc6b3105c085f28f4f15413cac9c2e531b262764148c718b8e5008e7a2d6",
+      "find": "        .merge(controls::router())",
+      "replacement": "        .merge(controls::router())\n        .merge(learned::router())"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/main_prompt.rs",
+      "preimage_sha256": "31d9f9f4aacd9df3143b6d8671e48c4d406878110392ce8cb139364e575c6b33",
+      "find": "        let memory = if input.memory_selection.is_empty() {\n            None\n        } else {\n            Some(\n                state\n                    .goals\n                    .capture_memory(&project.id, &id, &input.memory_selection)\n                    .map_err(|_| binding())?,\n            )\n        };",
+      "replacement": "        let native_owner=veyra_adapters::native_memory_owner::NativeMemoryOwner::project(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&project,&state.instance_id).map_err(|_|binding())?;\n        let memory=Some(state.goals.capture_native_memory(\n            projects.as_ref().ok_or(RuntimeError::Storage)?,&native_owner,&state.live_agent.runtime,\n            &project.id,&id,&input.memory_selection).map_err(|_|binding())?);"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/main_prompt.rs",
+      "preimage_sha256": "31d9f9f4aacd9df3143b6d8671e48c4d406878110392ce8cb139364e575c6b33",
+      "find": "            if json!(current_memory) != original.memory {\n                return Err(binding());\n            }",
+      "replacement": "            // Learned context is validated from the retained original at final\n            // admission, never recaptured. Explicit selection remains exact.\n            let retained:Option<MemoryAdmission>=serde_json::from_value(original.memory.clone()).map_err(|_|binding())?;\n            if let Some(retained)=&retained {\n                let current_entries=current_memory.as_ref().map(|m|m.entries.as_slice()).unwrap_or(&[]);\n                if retained.goal_memory_ids.is_some() || current_entries!=retained.entries.as_slice(){return Err(binding())}\n            } else if current_memory.is_some(){return Err(binding())}"
+    },
+    {
+      "path": "apps/service/src/routes/live_agent/lifecycle.rs",
+      "preimage_sha256": "9c2e4472c3117e824d1f6d88c5405909e6a1bed4850f8daa11dc38b10b432e99",
+      "find": "            return state.goals.with_memory(&project.id, session, memory, || {",
+      "replacement": "            let native_owner=veyra_adapters::native_memory_owner::NativeMemoryOwner::project(\n                projects.as_ref().ok_or(RuntimeError::Storage)?,&current,&state.instance_id).map_err(|_|RuntimeError::Binding)?;\n            return state.goals.with_native_memory(projects.as_ref().ok_or(RuntimeError::Storage)?,\n                &native_owner,&state.live_agent.runtime,&project.id, session, memory, || {"
+    },
+    {
+      "path": "apps/web/src/features/workbench/promptOriginal.ts",
+      "preimage_sha256": "b58b3e35b28793eec80500160dbaac8c3c2526ebf9ed77e69f5e024f31d97d85",
+      "find": "export function exportPromptOriginals(",
+      "replacement": "\n// Pending policy requests extend this original custody module, under distinct\n// keys. GoalStore receipts remain authority; this is only an unsent/unknown\n// witness. Prompt originals and their raw bytes are never read or rewritten.\nexport const nativeMemoryCustody = {\n  async get(scope: string) {\n    const raw = localStorage.getItem(memoryKey(scope));\n    if (raw === null) return null;\n    if (bytes(raw) > 64 * 1024) throw new Error(\"Pending memory witness exceeds bound\");\n    const value = JSON.parse(raw);\n    if (value.identity?.scopeHash !== scope || typeof value.operationId !== \"string\" || !value.nativeCommand)\n      throw new Error(\"Pending memory witness is unreadable; preserve its raw bytes\");\n    return value;\n  },\n  async set(scope: string, record: unknown) {\n    const key = memoryKey(scope), raw = JSON.stringify(record);\n    await withPromptLock(key, async () => {\n      if (localStorage.getItem(key) !== null || bytes(raw) > 64 * 1024) throw new Error(\"A pending memory original already exists or exceeds its bound\");\n      requirePromptRoom(key, raw);\n      localStorage.setItem(key, raw);\n      if (localStorage.getItem(key) !== raw) throw new Error(\"Memory witness could not be retained\");\n    });\n  },\n  async retain(scope: string, operation: string, receipt: unknown) {\n    const key = memoryKey(scope);\n    await withPromptLock(key, async () => {\n      const raw = localStorage.getItem(key);\n      if (raw === null || row(JSON.parse(raw)).operationId !== operation) throw new Error(\"Pending memory original changed\");\n      retainPromptReceipt(key, raw, receipt);\n    });\n  },\n  async remove(scope: string, operation: string) {\n    const key = memoryKey(scope);\n    await withPromptLock(key, async () => {\n      const raw = localStorage.getItem(key);\n      if (raw === null || row(JSON.parse(raw)).operationId !== operation) throw new Error(\"Pending memory original changed\");\n      const { rows } = history(key + \":history\");\n      if (!rows.some(item => row(item).raw === raw && row(row(item).receipt).operationId === operation))\n        throw new Error(\"No retained receipt matches the pending memory original\");\n      localStorage.removeItem(key);\n      if (localStorage.getItem(key) !== null) throw new Error(\"Settled memory witness could not be released\");\n    });\n  },\n};\nfunction memoryKey(scope: string) {\n  if (!/^[a-f0-9]{64}$/.test(scope)) throw new Error(\"Native memory scope hash is invalid\");\n  return \"veyra.pending-learned-memory.v1:\" + scope;\n}\n\nexport function exportPromptOriginals("
+    },
+    {
+      "path": "apps/web/src/features/workbench/Workbench.tsx",
+      "preimage_sha256": "cd132c9e81d8b2e6f238eceeed0f3d2ff49741523390a084a9bc2ca9216e4e44",
+      "find": "import { MemoryPanel } from \"./MemoryPanel\";",
+      "replacement": "import { MemoryPanel } from \"./MemoryPanel\";\nimport { LearnedMemoryControls } from \"./native-memory/LearnedMemoryControls\";"
+    },
+    {
+      "path": "apps/web/src/features/workbench/Workbench.tsx",
+      "preimage_sha256": "cd132c9e81d8b2e6f238eceeed0f3d2ff49741523390a084a9bc2ca9216e4e44",
+      "find": "            <MemoryPanel ",
+      "replacement": "            <LearnedMemoryControls request={call} project={project} sessionId={activeSessionId} disabled={busy || !connected || !!pendingPrompt || !!pendingFork || !!pendingSession}/>\n            <MemoryPanel "
+    }
+  ]
+}
