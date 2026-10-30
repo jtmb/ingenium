@@ -104,8 +104,8 @@ export function createRequestExecutionResolvers(ports) {
       environmentId:placement.environmentId,available:true,
     });
   }
-  function resolveRequestChatBinding(request,execution,chatId) {
-    if(!text(chatId) || !execution || typeof execution!=="object")deny("INVALID_CHAT_BINDING",422);
+  function resolveRequestChatBinding(request,execution,chatId,purpose="active") {
+    if(!text(chatId) || !execution || typeof execution!=="object" || !["active","history"].includes(purpose))deny("INVALID_CHAT_BINDING",422);
     const original=snapshot(execution);
     const current=resolveRequestExecution(request,{
       projectId:original.projectId,workspaceId:original.workspaceId,runtimeId:original.runtimeId,
@@ -122,7 +122,7 @@ export function createRequestExecutionResolvers(ports) {
     let metadata;
     try{metadata=JSON.parse(chat.metadata);}catch{deny("CHAT_BINDING_UNAVAILABLE",404);}
     if(!metadata || metadata.source!=="opencode-chat" || metadata.sourceRuntimeId!==current.runtimeId ||
-      metadata.sourceSessionId!==chatId || ports.conversationIsActive(current.projectId,chat.id)!==true)
+      metadata.sourceSessionId!==chatId || (purpose==="active" && ports.conversationIsActive(current.projectId,chat.id)!==true))
       deny("CHAT_BINDING_UNAVAILABLE",404);
     // Revalidate again after Context/authorization callbacks; no serialized execution is authority.
     const final=resolveRequestExecution(request,{
@@ -132,7 +132,7 @@ export function createRequestExecutionResolvers(ports) {
       deny("EXECUTION_BINDING_CHANGED",409);
     const retained=snapshot(ports.findConversations(final,chatId)??null);
     if(!Array.isArray(retained) || retained.length!==1 || JSON.stringify(retained[0])!==JSON.stringify(chat) ||
-      ports.conversationIsActive(final.projectId,chat.id)!==true)
+      (purpose==="active" && ports.conversationIsActive(final.projectId,chat.id)!==true))
       deny("CHAT_BINDING_UNAVAILABLE",404);
     return Object.freeze({...final,chatId,contextConversationId:chat.id,visibility:"private",engineSessionId:chatId});
   }

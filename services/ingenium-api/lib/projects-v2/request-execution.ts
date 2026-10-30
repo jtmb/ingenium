@@ -6,10 +6,10 @@ import { toAuthorizationPrincipal } from "../authorization-policy.js";
 import { deploymentMode } from "../runtime-mode.js";
 import {
   createRequestExecutionResolvers, RequestExecutionError,
-  type PlacementResolver, type RequestExecutionSelection, type RequestExecutionFacts,
+  type PlacementResolver, type RequestExecutionSelection, type RequestExecutionFacts, type RequestChatPurpose,
 } from "./request-execution-owner.mjs";
 
-export type { RequestExecutionSelection, RequestExecutionFacts, RequestChatBinding,
+export type { RequestExecutionSelection, RequestExecutionFacts, RequestChatBinding, RequestChatPurpose,
   PlacementRequest, TrustedPlacement, PlacementResolver } from "./request-execution-owner.mjs";
 export { RequestExecutionError } from "./request-execution-owner.mjs";
 
@@ -75,6 +75,6 @@ const resolver = createRequestExecutionResolvers({
 export function resolveRequestExecution(request: Request, selection: RequestExecutionSelection) {
   return resolver.resolveRequestExecution(request, selection);
 }
-export function resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string) {
-  return resolver.resolveRequestChatBinding(request, execution, chatId);
+export function resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string, purpose: RequestChatPurpose = "active") {
+  return resolver.resolveRequestChatBinding(request, execution, chatId, purpose);
 }

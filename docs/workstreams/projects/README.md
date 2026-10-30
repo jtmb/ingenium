@@ -44,7 +44,7 @@ export VEYRA_PROJECTS_NATIVE_SOURCE_ROOT="$PHASE/windows-source"
 node --experimental-sqlite --test services/ingenium-api/tests/veyra-projects-*.test.mjs services/ingenium-dashboard/tests/veyra-projects-*.test.mjs
 ```
 
-Set PHASE to the existing absolute phase root. No alternate native checkout is inferred. Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 80 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
+Set PHASE to the existing absolute phase root. No alternate native checkout is inferred. Use the actual assigned coordination directory, within the existing approved root. Tests use in-memory SQLite and no npm/dependency install, service, network, model or GPU. No build cache or database file is produced. The current dependency-free suite passes 81 tests. The five-case React interaction suite is written but awaits the coordinator resource lease/tooling; it is not included in that count. TypeScript/React rendering and integrated auth/runtime tests are coordinator build requests, not claimed passes.
 
 ## Migration and rollback
 

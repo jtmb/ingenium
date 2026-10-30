@@ -294,11 +294,14 @@ test("persisted Context archive state uses the distinct canonical ID and never c
   const execution=f.owner.resolveRequestExecution({},f.selected);
   f.archiveChat(ids.chat,0,true);
   fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine),"CHAT_BINDING_UNAVAILABLE");
+  const history=f.owner.resolveRequestChatBinding({},execution,ids.engine,"history");
+  assert.equal(history.contextConversationId,ids.chat);assert.equal(history.chatId,ids.engine);
   f.archiveChat(ids.chat,1,false);
   assert.equal(f.owner.resolveRequestChatBinding({},execution,ids.engine).contextConversationId,ids.chat);
   f.insertChat({id:"ffffffff-ffff-4fff-8fff-ffffffffffff"});
   f.archiveChat(ids.chat,2,true);
   fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine),"CHAT_BINDING_UNAVAILABLE");
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"history"),"CHAT_BINDING_UNAVAILABLE");
   assert.deepEqual(f.db.prepare("PRAGMA foreign_key_check").all(),[]);
  }finally{f.close();}
 });
@@ -309,5 +312,29 @@ test("a duplicate canonical registration inserted during authorization cannot pa
    f.insertChat({id:"66666666-6666-4666-8666-666666666666"});return true;
   };
   fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine),"CHAT_BINDING_UNAVAILABLE");
+ }finally{f.close();}
+});
+
+
+test("history purpose cannot override revoked identity, wrong owner, denied content or missing canonical source",()=>{
+ const f=fixture();try{
+  const execution=f.owner.resolveRequestExecution({},f.selected);
+  f.archiveChat(ids.chat,0,true);
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"client-override"),"INVALID_CHAT_BINDING");
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,"missing-source","history"),"CHAT_BINDING_UNAVAILABLE");
+  const original=f.state.identity;
+  f.state.identity=null;
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"history"),"EXECUTION_IDENTITY_UNAVAILABLE");
+  f.state.identity={principal:{type:"user",id:"different-owner",scopes:["user:*"]}};
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"history"),"EXECUTION_SCOPE_UNAVAILABLE");
+  f.state.identity=original;f.state.chatAllowed=false;
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"history"),"CHAT_BINDING_UNAVAILABLE");
+  f.state.chatAllowed=true;
+  assert.throws(()=>f.db.prepare("DELETE FROM context_conversations WHERE id=?").run(ids.chat),/immutable/);
+  const before=digest(f.db);
+  assert.equal(f.owner.resolveRequestChatBinding({},execution,ids.engine,"history").contextConversationId,ids.chat);
+  assert.equal(digest(f.db),before,"history binding does not rewrite archive, source or recall data");
+  f.db.prepare("UPDATE authorized_workspaces SET status='revoked' WHERE id=?").run(f.selected.workspaceId);
+  fails(()=>f.owner.resolveRequestChatBinding({},execution,ids.engine,"history"),"EXECUTION_SCOPE_UNAVAILABLE");
  }finally{f.close();}
 });

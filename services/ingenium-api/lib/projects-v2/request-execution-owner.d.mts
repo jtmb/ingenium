@@ -6,6 +6,7 @@ export interface RequestExecutionFacts extends RequestExecutionSelection {
   organizationId: string; ownerUserId: string; bindingHash: string; bindingEpoch: number;
   status: "authorized"; mode: "runtime"|"native"|"compatibility"; hostId: string; environmentId: string; available: true;
 }
+export type RequestChatPurpose = "active"|"history";
 export interface RequestChatBinding extends RequestExecutionFacts {
   chatId: string; contextConversationId: string; visibility: "private"; engineSessionId: string;
 }
@@ -37,5 +38,5 @@ export interface RequestExecutionPorts {
 export class RequestExecutionError extends Error { readonly code: string; readonly status: number; constructor(code: string,status?: number) }
 export function createRequestExecutionResolvers(ports: RequestExecutionPorts): Readonly<{
   resolveRequestExecution(request: Request, selected: RequestExecutionSelection): Readonly<RequestExecutionFacts>;
-  resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string): Readonly<RequestChatBinding>;
+  resolveRequestChatBinding(request: Request, execution: RequestExecutionFacts, chatId: string, purpose?: RequestChatPurpose): Readonly<RequestChatBinding>;
 }>;

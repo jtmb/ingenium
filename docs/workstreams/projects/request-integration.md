@@ -39,7 +39,7 @@ mcp/runtime audience and current existing explicitMemory scope resolution,
 including the credential/principal epoch and expiry checks owned there.
 Request identity and persisted bindings are rechecked after callbacks.
 
-resolveRequestChatBinding(request, execution, chatId) treats chatId as the
+resolveRequestChatBinding(request, execution, chatId, purpose = "active") treats chatId as the
 existing ENGINE sourceSessionId, not a Context row ID. It re-resolves execution
 from existing owners and compares every retained binding axis. A bounded
 LIMIT 2 query reads existing Context registrations under the exact selected
@@ -51,7 +51,17 @@ Malformed metadata cannot satisfy the guarded lookup.
 The one canonical Context row is read through contextConversations and existing
 content authorization. Its organization/project/user/runtime/session metadata
 must still match. Existing append-only archive state is read by that canonical
-Context row ID. The returned binding contains chatId=engineSessionId and
+Context row ID. The trusted server composition may explicitly select purpose
+"history" for source recall; its default is "active". Active admission still
+requires an unarchived canonical row. History relaxes only that archive check:
+archive is not forget or revocation. Missing/corrupt canonical source, denied
+content permission, changed ownership, runtime or identity and ambiguity still
+deny. The purpose is not read from a request body/query/header or selection and
+unknown purpose values are rejected. Existing Memory readSource/source-state
+exclusion, deletion and source/content/message suppression checks remain owned by
+Memory and mandatory; a history binding does not bypass or reimplement them.
+Context rows remain immutable; restore/deletion that makes a source missing
+cannot obtain a binding. The returned binding contains chatId=engineSessionId and
 contextConversationId=the distinct persisted Context ID. No IDs, metadata,
 messages or archive events are rewritten. It never invents an engine session or
 makes a remote engine lookup. The persisted registration identifies the original
