@@ -1,4 +1,56 @@
-# Original Core bootstrap failure custody proposal
+# Original Core bootstrap failure custody and actual-source tests
+
+The custody patch is now installed in Root's ACTUAL db.ts. The current test
+proposal reads that current file and extracts its declarations and methods via
+the TypeScript AST. It does not import `proposal.mjs`, patch a prior preimage,
+or use the saved snippets as tested method bodies. Confirmed current SHA256:
+`45c69beab1af986b856a9050b47b0123b2e1e7dd39da8bca5d9e2c20113f7b64`.
+
+Root's canonical test copy mapping (two existing-dependency test files only):
+
+| Owned docs source | Canonical target proposal |
+| --- | --- |
+| bootstrap-failure.test.mjs | packages/ingenium-core/tests/bootstrap-failure.test.mjs |
+| actual-bootstrap-source.mjs | packages/ingenium-core/tests/actual-bootstrap-source.mjs |
+
+Both stay adjacent. The canonical test defaults APP to its repository root;
+the docs copy requires explicit `VEYRA_SOURCE_APP`. The extraction helper reads
+only current db.ts and requires exactly one actual declaration for each named
+singleton/state variable, state type and helper/function. Missing, ambiguous or
+unparseable actual source refuses execution. It reports the actual source hash
+in the TAP result without hardcoding a production-file hash into the canonical
+test, so subsequent legitimate edits are tested as current code. Constructor,
+filesystem, guard and close faults remain explicit synthetic fixtures. Only the
+pending-write counter is seeded to seven after its actual declaration is
+extracted, to verify failure cannot falsely reset it.
+
+Current results: **27/27 actual-source extracted checks PASS**; complete CURRENT
+actual db.ts strict/noUncheckedIndexedAccess/noEmit PASS. Regenerate using the
+existing task output root and existing APP dependencies:
+
+```sh
+export TEMP="$COORD" TMP="$COORD" TMPDIR="$COORD" NODE_DISABLE_COMPILE_CACHE=1
+export VEYRA_SOURCE_APP="$APP"
+SRC="$OWN/docs/workstreams/rust-api/bootstrap-failure"
+/home/brajam/.local/bin/node "$SRC/bootstrap-failure.test.mjs"
+/home/brajam/.local/bin/node "$SRC/check-actual-types.mjs"
+```
+
+No actual shared source, database file, build or physical workload was changed.
+The same coordination root retains `bootstrap-actual-current.tap` and
+`bootstrap-actual-current-types.tap` for Root's canonical test import/review.
+Their exact sizes/hashes and remaining consumer are appended under
+`canonicalCurrentExtraction` in `bootstrap-failure-receipt.json`. This follow-on
+removed zero bytes. All previous source/failure/protected evidence remains.
+The real persisted startup/guard-failure retry, native close/WAL/holder tests,
+actual root restore handoff and full integration qualifier remain OPEN.
+
+## Preserved original proposal checkpoint (08cb7644)
+
+The following records the earlier uninstalled-proposal evidence. Its
+`proposal.mjs` and `check-types.mjs` deliberately refuse the now-changed old
+preimage. Use `check-actual-types.mjs` and the current test above against the
+installed source; do not force the old preimage guard or reapply the patch.
 
 Docs-only patch for the ACTUAL existing `packages/ingenium-core/lib/db.ts`.
 No second writer, database, migration or production test factory. Root owns
@@ -48,7 +100,7 @@ faults with both reset paths, cached refusal, retry, reentry and root restore
 gate combinations are covered. Full actual db.ts with this patch also passes
 strict/noUncheckedIndexedAccess/noEmit in memory against existing dependencies.
 
-Reproduce with explicit existing APP/OWN and the SAME authorized coordination
+Original pre-import reproduction used explicit APP/OWN and the SAME authorized coordination
 root, no install/build/cache/database file:
 
 ```sh

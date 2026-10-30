@@ -1,9 +1,12 @@
-// Extracted ACTUAL db.ts methods with proposal applied IN MEMORY only.
+// Extracted CURRENT ACTUAL db.ts methods. No proposed body or old preimage.
 // Synthetic constructor/config/guard/close faults never become production ports.
 import test from 'node:test';import assert from 'node:assert/strict';
 import {createRequire,stripTypeScriptTypes} from 'node:module';import {createHash} from 'node:crypto';
-import {proposal} from './proposal.mjs';
-const app=process.env.VEYRA_SOURCE_APP,p=proposal(app),Database=createRequire(app+'/package.json')('better-sqlite3');
+import {fileURLToPath} from 'node:url';
+import {extractActualBootstrap} from './actual-bootstrap-source.mjs';
+const app=process.env.VEYRA_SOURCE_APP??fileURLToPath(new URL('../../../',import.meta.url));
+const p=extractActualBootstrap(app),Database=createRequire(app+'/package.json')('better-sqlite3');
+console.log('# CURRENT actual Core db.ts SHA256 '+p.sha256);
 function owner({fault=null,closeFault=null,real=false,env={},uid=1000,reentry=null}={}){
  const state={fault,closeFault,constructed:[],migrated:[],closed:[],config:[],reentryResults:[],mkdirs:0};let api;
  const failAt=stage=>{if(reentry===stage){try{api.getDb('/wrong-new-path');state.reentryResults.push('returned');}catch(e){state.reentryResults.push(e.message);}}if(reentry===stage+'-maintenance'){for(const action of ['closeDbForMaintenance','resetDbForTest'])try{api[action]();state.reentryResults.push('unexpected close');}catch(e){state.reentryResults.push(e.message);}}if(state.fault===stage)throw Error('fixture '+stage);};
@@ -12,7 +15,9 @@ function owner({fault=null,closeFault=null,real=false,env={},uid=1000,reentry=nu
   else{let open=true;original={get open(){if(state.closeFault==='unknown')return undefined;if(state.closeFault==='getter')throw Error('fixture close-state getter');return open;},function(){state.config.push('function');failAt('function');},pragma(v){state.config.push(v);failAt(v);},close(){state.closed.push(original);if(reentry==='close'){try{api.getDb();}catch(e){state.reentryResults.push(e.message);}try{api.closeDbForMaintenance();}catch(e){state.reentryResults.push(e.message);}}if(state.closeFault==='throw')throw Error('fixture close threw');if(state.closeFault!=='still-open'&&state.closeFault!=='unknown'&&state.closeFault!=='getter')open=false;}};}
   state.constructed.push(original);return original;
  }
- const code='let db: Database.Database | null = null;\n'+p.custody+'\nlet writeCount=7;\n'+p.getDb+'\n'+p.close+'\n'+p.reset;
+ // Seed only the synthetic pending-write count, after extracting its real
+ // declaration, to prove a failed close cannot falsely reset it.
+ const code=p.db+'\n'+p.custody+'\n'+p.writeCount+'\nwriteCount=7;\n'+p.getDb+'\n'+p.close+'\n'+p.reset;
  const js=stripTypeScriptTypes(code.replace(/^export /gm,''),{mode:'strip'})+'\nreturn {getDb,closeDbForMaintenance,resetDbForTest,inspect:()=>({db,state:dbBootstrapState,failure:dbBootstrapFailure,writeCount})};';
  api=new Function('Database','resolveCoreDbPath','dirname','mkdirSync','createHash','runMigrations','process',js)(Constructor,v=>v??'/fixture-only',()=>'/synthetic-no-directory',()=>{state.mkdirs++;},createHash,original=>{state.migrated.push(original);if(real){original.exec('PRAGMA cache_size=-8192; CREATE TABLE fixture_guard(n INTEGER); INSERT INTO fixture_guard VALUES(1)');}failAt('migration-guard');},{env,getuid:uid===null?undefined:()=>uid});
  return {api,state};
