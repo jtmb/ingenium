@@ -5,7 +5,7 @@ import { LocalChatController } from "../sources/apps/web/src/features/work-ui/lo
 import { operationWire, sha256, createLocalTransport } from "../sources/apps/web/src/features/work-ui/local/local-protocol.mjs";
 import { browserOriginalStore } from "../sources/apps/web/src/features/work-ui/local/local-original-store.mjs";
 import { environmentSelections, identityFromContext, messagePage, readConversation } from "../sources/apps/web/src/features/work-ui/local/local-observations.mjs";
-import { localFlows } from "../sources/apps/web/src/features/work-ui/local/local-flow-index.mjs";
+import { initialLocalFlows, localFlows } from "../sources/apps/web/src/features/work-ui/local/local-flow-index.mjs";
 globalThis.crypto ??= webcrypto;
 const flow = "11111111-1111-4111-8111-111111111111";
 const actual = { installation_id: "actual-library", custodian_key: "actual-os-custodian",
@@ -199,6 +199,12 @@ test("local flow selection is durable before use and survives service restart wi
   assert.deepEqual(await localFlows(f.store, actual, flow), [flow]);
   assert.deepEqual(await localFlows(f.store, { ...actual, service_instance_id: "new-instance" }), [flow]);
   await assert.rejects(localFlows(f.store, actual, flow), /distinct/);
+  assert.equal(effects(f).length, 0);
+});
+test("fresh context retains one initial draft selection and reuses it without any backend allocation", async () => {
+  const f = fixture(), makeID = () => flow;
+  assert.deepEqual(await initialLocalFlows(f.store, actual, makeID), [flow]);
+  assert.deepEqual(await initialLocalFlows(f.store, actual, () => { throw Error("must reuse original"); }), [flow]);
   assert.equal(effects(f).length, 0);
 });
 test("control serializers are closed and retain exact typed Rust declaration order", () => {

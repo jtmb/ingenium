@@ -1,0 +1,210 @@
+--- a/apps/web/src/features/work-ui/local/LocalChatEntry.tsx
++++ b/apps/web/src/features/work-ui/local/LocalChatEntry.tsx
+@@ -6 +6 @@
+-import { localFlows } from "./local-flow-index.mjs";
++import { initialLocalFlows, localFlows } from "./local-flow-index.mjs";
+@@ -26 +26 @@
+-    const actual = identityFromContext(reply, candidate.environment), saved = await localFlows(store!, actual);
++    const actual = identityFromContext(reply, candidate.environment), saved = await initialLocalFlows(store!, actual);
+@@ -59,2 +59 @@
+-  return <section aria-label="Local chats">
+-    <div role="group" aria-label="Local chat selection">
++  const selection = <div role="group" aria-label="Local chat selection">
+@@ -70 +69,3 @@
+-    </div>
++    </div>;
++  return <section className="native-local-entry" aria-label="Local chats">
++    {!context && selection}
+@@ -75,3 +76,3 @@
+-    <details><summary>Connection details</summary><p>Environment choices come from verified Windows custody or saved environments. They do not establish engine readiness.</p>
+-      <button type="button" disabled={!available || !store || busy} onClick={() => { void readContext(); }}>Check connection again</button></details>
+-    {controller && <LocalChatPanel controller={controller} admission={context ? { kind: "observed", identity: context, canRequest: available, message: "This chat is not ready to send. Your draft is kept." } : { kind: "unavailable", message: "Local chats are unavailable." }} />}
++    {!controller && <details><summary>Connection details</summary>
++      <button type="button" disabled={!available || !store || busy} onClick={() => { void readContext(); }}>Check connection again</button></details>}
++    {controller && <LocalChatPanel controller={controller} settings={selection} admission={context ? { kind: "observed", identity: context, canRequest: available, message: "This chat is not ready to send. Your draft is kept." } : { kind: "unavailable", message: "Local chats are unavailable." }} />}
+--- a/apps/web/src/features/work-ui/local/LocalChatEntry.test.tsx
++++ b/apps/web/src/features/work-ui/local/LocalChatEntry.test.tsx
+@@ -28,3 +28,3 @@
+-    await waitFor(() => expect(screen.getByRole("button", { name: "New local chat" }).hasAttribute("disabled")).toBe(false));
+-    expect(select.value).toBe(JSON.stringify(wsl.environment)); expect(effects(rpc)).toHaveLength(0);
+-    expect((screen.getByText("Connection details").parentElement as HTMLDetailsElement).open).toBe(false);
++    await screen.findByRole("heading", { name: "What should we build?" });
++    expect((screen.getByLabelText("Local chat environment") as HTMLSelectElement).value).toBe(JSON.stringify(wsl.environment)); expect(effects(rpc)).toHaveLength(0);
++    expect((screen.getByText("Composer options").parentElement as HTMLDetailsElement).open).toBe(false);
+@@ -65,2 +64,0 @@
+-    await waitFor(() => expect(screen.getByRole("button", { name: "New local chat" }).hasAttribute("disabled")).toBe(false));
+-    fireEvent.click(screen.getByRole("button", { name: "New local chat" }));
+@@ -67,0 +66 @@
++    expect(effects(rpc)).toHaveLength(0);
+@@ -69 +68 @@
+-    fireEvent.click(screen.getByRole("button", { name: "Start local chat" }));
++    fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
+@@ -75,0 +75,28 @@
++  it("opens the fresh first view with the Work hero and bottom composer without any backend effect", async () => {
++    const rpc = vi.fn(async () => context([windows], windows.environment));
++    render(<LocalChatEntry gateway={{ workbench: rpc }} available />);
++    const hero = await screen.findByRole("heading", { name: "What should we build?" });
++    expect(hero.closest(".native-local-transcript")).toBeTruthy();
++    const input = screen.getByLabelText("Local message");
++    await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
++    expect(input.closest(".native-local-composer")).toBeTruthy();
++    expect(screen.getByRole("button", { name: "Work", exact: true }).getAttribute("aria-pressed")).toBe("true");
++    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(false);
++    expect((screen.getByText("Composer options").parentElement as HTMLDetailsElement).open).toBe(false);
++    expect(effects(rpc)).toHaveLength(0); expect(rpc.mock.calls).toHaveLength(1);
++  });
++  it("retains the same fresh draft and mounted composer across Web return and restores it on remount", async () => {
++    const rpc = vi.fn(async () => context([windows], windows.environment)), gateway = { workbench: rpc };
++    const view = render(<LocalChatEntry gateway={gateway} available />);
++    await waitFor(() => expect(screen.getByLabelText("Local message").hasAttribute("disabled")).toBe(false));
++    const input = screen.getByLabelText("Local message") as HTMLTextAreaElement;
++    fireEvent.change(input, { target: { value: "Keep fresh draft 日本語" } });
++    await waitFor(() => expect(Object.values(localStorage).some(value => String(value).includes("Keep fresh draft 日本語"))).toBe(true));
++    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
++    expect(screen.getByText("Web is unavailable for this conversation")).toBeTruthy();
++    fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
++    expect(screen.getByLabelText("Local message")).toBe(input); expect(input.value).toBe("Keep fresh draft 日本語");
++    view.unmount(); render(<LocalChatEntry gateway={gateway} available />);
++    await waitFor(() => expect((screen.getByLabelText("Local message") as HTMLTextAreaElement).value).toBe("Keep fresh draft 日本語"));
++    expect(effects(rpc)).toHaveLength(0); expect(document.querySelector("iframe")).toBeNull();
++  });
+--- a/apps/web/src/features/work-ui/local/LocalChatPanel.tsx
++++ b/apps/web/src/features/work-ui/local/LocalChatPanel.tsx
+@@ -3 +3 @@
+-import { NativeWorkPresentation } from "../NativeWorkPresentation";
++import { NativeWorkComposerOptions, NativeWorkPresentation } from "../NativeWorkPresentation";
+@@ -22 +22 @@
+-export function LocalChatPanel({ controller, admission, conversation, controls }: {
++export function LocalChatPanel({ controller, admission, conversation, controls, settings }: {
+@@ -24 +24 @@
+-  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null;
++  conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
+@@ -29 +29 @@
+-  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} />;
++  return <LocalChatForm key={controller.key} controller={controller} admission={admission} conversation={conversation} controls={controls} settings={settings} />;
+@@ -31,2 +31,2 @@
+-function LocalChatForm({ controller, admission, conversation, controls }: {
+-  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null;
++function LocalChatForm({ controller, admission, conversation, controls, settings }: {
++  controller: LocalChatController; admission: LocalAdmissionView; conversation?: BoundLocalContent | null; controls?: BoundLocalContent | null; settings?: ReactNode;
+@@ -78,0 +79,7 @@
++  const start = () => {
++    if (working) return; setWorking(true); setError(null);
++    void queue.current.then(async () => {
++      await controller.setDraft(latest.current.text, latest.current.agent);
++      await controller.prepareWorkspace();
++    }).catch(cause => { if (live.current) setError(cause instanceof Error ? cause.message : "This chat could not be started. Your draft is kept."); }).finally(() => { if (live.current) setWorking(false); });
++  };
+@@ -81 +88 @@
+-      {!eligible && <p role="status">{admission.message}</p>}
++      {!custodyEligible && <p role="status">{admission.message}</p>}
+@@ -85,8 +91,0 @@
+-      {!actualOwner && <button type="button" disabled={!snapshot.loaded || working || unresolved || !custodyEligible} onClick={() => {
+-        if (working) return; setWorking(true); setError(null);
+-        void queue.current.then(async () => {
+-          await controller.setDraft(latest.current.text, latest.current.agent);
+-          await controller.prepareWorkspace();
+-        }).catch(cause => setError(cause instanceof Error ? cause.message : "Workspace outcome unknown.")).finally(() => setWorking(false));
+-      }}>Start local chat</button>}
+-      {actualOwner && <LocalRuntimeControls controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} onCatalog={setCatalog} />}
+@@ -94 +93,4 @@
+-        {renderedConversation ?? (actualOwner && sessionID ? <LocalConversation controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} refreshVersion={journal?.prompts.filter(prompt => prompt.phase === "committed").length ?? 0} /> : <p role="status">{actualOwner ? "Choose an available agent to send your first message." : "Start a local chat to check available agents. Your draft is saved as you type."}</p>)}
++        {renderedConversation ?? (actualOwner && sessionID ? <LocalConversation controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} refreshVersion={journal?.prompts.filter(prompt => prompt.phase === "committed").length ?? 0} /> : <div className="native-work-welcome native-local-hero">
++          <img src="/veyra-blue.png" alt="" width="56" height="56" />
++          <h1>What should we build?</h1>
++        </div>)}
+@@ -98,7 +99,0 @@
+-        <label>Agent <select aria-label="Agent for the new local conversation" value={form.agent} disabled={!snapshot.loaded || working || unresolved || Boolean(sessionID) || !catalog.ready}
+-          onChange={event => update({ agent: event.target.value })}>
+-          <option value="">Choose an agent</option>
+-          {catalog.agents.map(agent => <option key={agent.id} value={agent.id}>{agent.label}</option>)}
+-          {sessionID && !(catalog.agents.some(agent => agent.id === form.agent))
+-            && <option value={form.agent}>{form.agent} · existing conversation</option>}
+-        </select></label>
+@@ -112,3 +107,23 @@
+-        <button type="button" disabled={!snapshot.loaded || !eligible || working || unresolved || !form.text.trim() || (!sessionID && !form.agent)}
+-          onClick={() => { void run(false); }}>{working ? "Checking original…" : journal?.plan ? "Continue prepared original" : "Send message"}</button>
+-        <p className="native-local-help">Enter to send · Shift+Enter for a new line</p>
++        <div className="native-local-composer-actions">
++          <label>Agent <select aria-label="Agent for the new local conversation" value={form.agent} disabled={!snapshot.loaded || working || unresolved || Boolean(sessionID) || !catalog.ready}
++            onChange={event => update({ agent: event.target.value })}>
++            <option value="">Choose an agent</option>
++            {catalog.agents.map(agent => <option key={agent.id} value={agent.id}>{agent.label}</option>)}
++            {sessionID && !(catalog.agents.some(agent => agent.id === form.agent))
++              && <option value={form.agent}>{form.agent} · existing conversation</option>}
++          </select></label>
++          {!actualOwner ? <button type="button" disabled={!snapshot.loaded || working || unresolved || !custodyEligible} onClick={start}>{working ? "Starting…" : "Start chat"}</button>
++            : <button type="button" disabled={!snapshot.loaded || !eligible || working || unresolved || !form.text.trim() || (!sessionID && !form.agent)}
++              onClick={() => { void run(false); }}>{working ? "Checking…" : journal?.plan ? "Continue message" : "Send message"}</button>}
++        </div>
++        {actualOwner && !sessionID && <p className="native-local-help" role="status">{catalog.message ?? (catalog.ready ? "Choose an available agent to send your message." : "Checking chat availability…")}</p>}
++        <p className="native-local-help">{actualOwner ? "Enter to send · Shift+Enter for a new line" : "Shift+Enter for a new line"}</p>
++        <NativeWorkComposerOptions enabled attention={Boolean(error || snapshot.error || unresolved)}>
++          {settings}
++          {actualOwner && <LocalRuntimeControls controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} onCatalog={setCatalog} />}
++          <details><summary>Saved local originals</summary>
++            <p>These private records can contain your prompt and local paths.</p>
++            {journal?.error && <p>First failure: {journal.error}</p>}
++            <pre>{journal ? JSON.stringify(journal, null, 2) : "No retained original is loaded."}</pre>
++          </details>
++        </NativeWorkComposerOptions>
+@@ -116,5 +130,0 @@
+-      <details><summary>Saved local originals</summary>
+-        <p>These private records can contain your prompt and local paths. They are not an engine transcript.</p>
+-        {journal?.error && <p>First failure: {journal.error}</p>}
+-        <pre>{journal ? JSON.stringify(journal, null, 2) : "No retained original is loaded."}</pre>
+-      </details>
+--- a/apps/web/src/features/work-ui/local/LocalChatPanel.test.tsx
++++ b/apps/web/src/features/work-ui/local/LocalChatPanel.test.tsx
+@@ -33 +33 @@
+-    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
++    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
+@@ -43 +43 @@
+-    expect(screen.getByRole("button", { name: "Start local chat" }).hasAttribute("disabled")).toBe(true);
++    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(true);
+@@ -60 +60 @@
+-    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
++    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(true);
+--- a/apps/web/src/features/work-ui/local/LocalConversation.tsx
++++ b/apps/web/src/features/work-ui/local/LocalConversation.tsx
+@@ -39 +39 @@
+-        {(message.content.length > 0 || message.error) && <details><summary>Message details</summary><pre>{JSON.stringify({ content: message.content, error: message.error, reason: message.reason, outcome: message.outcome }, null, 2)}</pre></details>}
++        {(message.content.length > 0 || Boolean(message.error)) && <details><summary>Message details</summary><pre>{JSON.stringify({ content: message.content, error: message.error, reason: message.reason, outcome: message.outcome }, null, 2)}</pre></details>}
+--- a/apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx
++++ b/apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx
+@@ -6 +6 @@
+-export type RuntimeCatalog = { ready: boolean; agents: readonly { id: string; label: string }[] };
++export type RuntimeCatalog = { ready: boolean; agents: readonly { id: string; label: string }[]; message?: string };
+@@ -25 +25 @@
+-    } catch (cause) { if (captured === epoch.current) setError(cause instanceof Error ? cause.message : "Runtime observation unavailable."); }
++    } catch (cause) { if (captured === epoch.current) { setError(cause instanceof Error ? cause.message : "Runtime observation unavailable."); onCatalog({ ready: false, agents: [], message: "This chat is not ready. Your draft is kept." }); } }
+--- a/apps/web/src/features/work-ui/local/local-chat.css
++++ b/apps/web/src/features/work-ui/local/local-chat.css
+@@ -1 +1,2 @@
+-.native-local-chat { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; padding:12px 16px; gap:8px; }
++.native-local-entry { display:flex; flex-direction:column; flex:1; min-height:0; }
++.native-local-chat { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; padding:12px 16px; gap:8px; }
+@@ -3 +4,3 @@
+-.native-local-transcript { flex:1; min-height:0; overflow:auto; }
++.native-local-transcript { display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; }
++.native-local-hero.native-work-welcome { flex:1; min-height:120px; padding:24px; gap:14px; }
++.native-local-hero h1 { margin:0; }
+@@ -7,0 +11,3 @@
++.native-local-composer-actions { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
++.native-local-composer > details { margin-top:6px; max-height:36dvh; overflow:auto; }
++.native-local-composer { flex:0 0 auto; }
+--- a/apps/web/src/features/work-ui/local/local-flow-index.mjs
++++ b/apps/web/src/features/work-ui/local/local-flow-index.mjs
+@@ -4 +4 @@
+-export async function localFlows(store, actual, newFlowID = null) {
++async function retainedFlows(store, actual, newFlowID, firstID) {
+@@ -10,0 +11 @@
++    if (ids.length === 0 && firstID) newFlowID = firstID();
+@@ -17,0 +19,3 @@
++export const localFlows = (store, actual, newFlowID = null) => retainedFlows(store, actual, newFlowID, null);
++/** Fresh view creates only one client-retained draft selection under the lock. */
++export const initialLocalFlows = (store, actual, uuid = () => crypto.randomUUID()) => retainedFlows(store, actual, null, uuid);
+--- a/apps/web/src/features/work-ui/local/local-flow-index.d.mts
++++ b/apps/web/src/features/work-ui/local/local-flow-index.d.mts
+@@ -3,0 +4 @@
++export function initialLocalFlows(store: OriginalStore, actual: LocalIdentity, uuid?: () => string): Promise<string[]>;

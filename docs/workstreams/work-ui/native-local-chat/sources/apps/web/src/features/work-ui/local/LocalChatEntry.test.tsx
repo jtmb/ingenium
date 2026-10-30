@@ -25,9 +25,9 @@ describe("server-selected local chat entry", () => {
     expect(select.value).toBe(""); expect(screen.queryByRole("option", { name: /Windows/ })).toBeNull();
     expect(screen.getByRole("button", { name: "New local chat" }).hasAttribute("disabled")).toBe(true);
     fireEvent.change(select, { target: { value: JSON.stringify(wsl.environment) } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "New local chat" }).hasAttribute("disabled")).toBe(false));
-    expect(select.value).toBe(JSON.stringify(wsl.environment)); expect(effects(rpc)).toHaveLength(0);
-    expect((screen.getByText("Connection details").parentElement as HTMLDetailsElement).open).toBe(false);
+    await screen.findByRole("heading", { name: "What should we build?" });
+    expect((screen.getByLabelText("Local chat environment") as HTMLSelectElement).value).toBe(JSON.stringify(wsl.environment)); expect(effects(rpc)).toHaveLength(0);
+    expect((screen.getByText("Composer options").parentElement as HTMLDetailsElement).open).toBe(false);
   });
   it("preserves an unavailable state with no environment candidate and sends no effect", async () => {
     const rpc = vi.fn(async () => context([], null));
@@ -62,15 +62,42 @@ describe("server-selected local chat entry", () => {
       throw Error("Unexpected route in readiness test");
     });
     render(<LocalChatEntry gateway={{ workbench: rpc }} available />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "New local chat" }).hasAttribute("disabled")).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "New local chat" }));
     await waitFor(() => expect(screen.getByLabelText("Local message").hasAttribute("disabled")).toBe(false));
+    expect(effects(rpc)).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Local message"), { target: { value: "Keep draft while unavailable" } });
-    fireEvent.click(screen.getByRole("button", { name: "Start local chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start chat" }));
     await screen.findByText(/The local engine is stopped/);
     expect((screen.getByLabelText("Local message") as HTMLTextAreaElement).value).toBe("Keep draft while unavailable");
     expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
     expect(effects(rpc)).toHaveLength(1); expect(effects(rpc)[0][1]).toBe("/v1/local-workspaces/");
     expect((screen.getByText("Runtime details").parentElement as HTMLDetailsElement).open).toBe(false);
+  });
+  it("opens the fresh first view with the Work hero and bottom composer without any backend effect", async () => {
+    const rpc = vi.fn(async () => context([windows], windows.environment));
+    render(<LocalChatEntry gateway={{ workbench: rpc }} available />);
+    const hero = await screen.findByRole("heading", { name: "What should we build?" });
+    expect(hero.closest(".native-local-transcript")).toBeTruthy();
+    const input = screen.getByLabelText("Local message");
+    await waitFor(() => expect(input.hasAttribute("disabled")).toBe(false));
+    expect(input.closest(".native-local-composer")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Work", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(false);
+    expect((screen.getByText("Composer options").parentElement as HTMLDetailsElement).open).toBe(false);
+    expect(effects(rpc)).toHaveLength(0); expect(rpc.mock.calls).toHaveLength(1);
+  });
+  it("retains the same fresh draft and mounted composer across Web return and restores it on remount", async () => {
+    const rpc = vi.fn(async () => context([windows], windows.environment)), gateway = { workbench: rpc };
+    const view = render(<LocalChatEntry gateway={gateway} available />);
+    await waitFor(() => expect(screen.getByLabelText("Local message").hasAttribute("disabled")).toBe(false));
+    const input = screen.getByLabelText("Local message") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "Keep fresh draft 日本語" } });
+    await waitFor(() => expect(Object.values(localStorage).some(value => String(value).includes("Keep fresh draft 日本語"))).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    expect(screen.getByText("Web is unavailable for this conversation")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
+    expect(screen.getByLabelText("Local message")).toBe(input); expect(input.value).toBe("Keep fresh draft 日本語");
+    view.unmount(); render(<LocalChatEntry gateway={gateway} available />);
+    await waitFor(() => expect((screen.getByLabelText("Local message") as HTMLTextAreaElement).value).toBe("Keep fresh draft 日本語"));
+    expect(effects(rpc)).toHaveLength(0); expect(document.querySelector("iframe")).toBeNull();
   });
 });

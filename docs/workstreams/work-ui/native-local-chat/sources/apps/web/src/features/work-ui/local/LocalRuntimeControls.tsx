@@ -3,7 +3,7 @@ import type { LocalWorkspaceOwner } from "@veyra/contracts";
 import type { LocalChatController } from "./local-chat-controller.mjs";
 import { boundRead, type RuntimeRead } from "./local-observations.mjs";
 
-export type RuntimeCatalog = { ready: boolean; agents: readonly { id: string; label: string }[] };
+export type RuntimeCatalog = { ready: boolean; agents: readonly { id: string; label: string }[]; message?: string };
 export function LocalRuntimeControls({ controller, owner, sessionID, locked, onCatalog }: {
   controller: LocalChatController; owner: LocalWorkspaceOwner; sessionID?: string; locked: boolean;
   onCatalog: (catalog: RuntimeCatalog) => void;
@@ -22,7 +22,7 @@ export function LocalRuntimeControls({ controller, owner, sessionID, locked, onC
         : "The selected local engine is not ready. Your draft is kept.");
       const agents = value.agents.filter(agent => agent.mode === "primary" && !agent.hidden && typeof agent.id === "string" && agent.id.length > 0);
       setRuntime(value); onCatalog({ ready: true, agents: agents.map(agent => ({ id: agent.id, label: agent.name ?? agent.id })) });
-    } catch (cause) { if (captured === epoch.current) setError(cause instanceof Error ? cause.message : "Runtime observation unavailable."); }
+    } catch (cause) { if (captured === epoch.current) { setError(cause instanceof Error ? cause.message : "Runtime observation unavailable."); onCatalog({ ready: false, agents: [], message: "This chat is not ready. Your draft is kept." }); } }
     finally { if (captured === epoch.current) setBusy(false); }
   };
   const select = async (kind: "session_select_agent" | "session_select_model", value: string) => {

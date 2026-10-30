@@ -36,7 +36,7 @@ export function LocalConversation({ controller, owner, sessionID, locked, refres
       <ol aria-label="Messages in server order">{view.page.data.map(message => <li key={message.id}>
         <strong>{message.type}</strong>{message.status && <span> · {message.status}</span>}
         {message.text !== null && <p style={{ whiteSpace: "pre-wrap" }}>{message.text}</p>}
-        {(message.content.length > 0 || message.error) && <details><summary>Message details</summary><pre>{JSON.stringify({ content: message.content, error: message.error, reason: message.reason, outcome: message.outcome }, null, 2)}</pre></details>}
+        {(message.content.length > 0 || Boolean(message.error)) && <details><summary>Message details</summary><pre>{JSON.stringify({ content: message.content, error: message.error, reason: message.reason, outcome: message.outcome }, null, 2)}</pre></details>}
       </li>)}</ol>
       <p>This bounded page follows server order. A cursor does not prove older messages exist.</p>
       {view.page.cursor.next && <button type="button" disabled={busy} onClick={() => { void load(view.page.cursor.next); }}>Read next cursor page</button>}

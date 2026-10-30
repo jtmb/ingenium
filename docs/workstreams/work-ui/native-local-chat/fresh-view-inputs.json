@@ -1,0 +1,53 @@
+{
+  "base": "a6b164751e168a393103006a31e4ab2a5fe700c4",
+  "inputs": [
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalChatEntry.tsx",
+      "before_lf_sha256": "303da9b11cf76d38231284db3eb9c3b539fcd3c5b24562c23df526900729062f",
+      "after_lf_sha256": "284236b8ef197d637a7f4ba7064f1eeee48ae03d3051889be4194bad58a2bd16"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalChatEntry.test.tsx",
+      "before_lf_sha256": "007870328d4db61a0d1797bce930b363d2a3665f055eb9a00b0d15e94eb8c16f",
+      "after_lf_sha256": "5189fadb2c7193b8b06d35272fb96f5ce3923c7c0a59d13a2637fae54e6341bd"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
+      "before_lf_sha256": "ce00705470a4a9118ef40885a9db434a18406592cec51a9e9c04477c8a12a78d",
+      "after_lf_sha256": "1376b7db8a5ef4ab53e48c686a7c439991714438ddf23d7de169d9d483f0b4a0"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalChatPanel.test.tsx",
+      "before_lf_sha256": "6fc9eadd33126f7cb8be73bfa92c83554b5583c22b9af7b1d3446f6283be5c24",
+      "after_lf_sha256": "2f0854f82a2f19612596007c87dc705c66b4572a0aa8c120439ab69fea51692c"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalConversation.tsx",
+      "before_lf_sha256": "154a9747f6c6342f829033033e19f093b42d22c9b63899168f3fefa08e7d5cfd",
+      "after_lf_sha256": "712d308eee90ac3e403812da5de291565bddcfe4aa58021843320bd4f0d8704e"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx",
+      "before_lf_sha256": "067d55528bb09669775019c19a8e03296b6aadeea38500287c87bc92f8e1f686",
+      "after_lf_sha256": "0903032fc837ee27d1f5413ead5df3d57d89fd2d5b02c87794e2ee7158c83c0a"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/local-chat.css",
+      "before_lf_sha256": "bf7d12b54fa6c5a45c9b9e224d25a31cb80dd89e9aa7a9bc406b641ccfdb6362",
+      "after_lf_sha256": "6ad7a4e7957374c9105a3caf1e1460715d62168cb8eda4d4accd9d443427565c"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/local-flow-index.mjs",
+      "before_lf_sha256": "9863629d0a4e9a46dd05ce4b0df8e984a46adb225e62f6ea6aa40ba5fd4e976a",
+      "after_lf_sha256": "b78b7a6f82a23c96639f6814494c7a05b19d84dbdb3fa23bc7eeb30af5b723e7"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/local/local-flow-index.d.mts",
+      "before_lf_sha256": "4ebc9deb39bdd2d9d051d18e3c61edd05e6b06f99f577036039b86032e9544cc",
+      "after_lf_sha256": "5fc209c31b350b440ae012e5f7e4fc864a6709f8dc24712cebc3262039f7d35d"
+    }
+  ],
+  "bytes": 17411,
+  "sha256": "e0a1952a60a028f6f0da677b9813db916d87e9da967f02e7538ddf127733f8bf",
+  "application": "zero-context delta; exact preimages and --unidiff-zero required; Root reconciles Boolean(message.error) if already fixed; no App/shared gateway changes"
+}

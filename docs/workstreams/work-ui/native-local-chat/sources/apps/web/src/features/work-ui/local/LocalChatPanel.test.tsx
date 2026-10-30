@@ -30,7 +30,7 @@ describe("local Work presentation proposal", () => {
     expect(screen.getByLabelText("Local message")).toBe(input);
     expect(input.value).toBe("Retain exact private draft 日本語");
     expect(f.transport.createWorkspace).not.toHaveBeenCalled(); expect(f.transport.dispatch).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
   });
   it("keeps an unconfirmed context unavailable and refuses premature Enter sends", async () => {
@@ -40,7 +40,7 @@ describe("local Work presentation proposal", () => {
     fireEvent.change(screen.getByLabelText("Local message"), { target: { value: "Keep on unavailable" } });
     fireEvent.keyDown(screen.getByLabelText("Local message"), { key: "Enter" });
     await waitFor(() => expect(f.controller.getSnapshot().journal?.draft).toBe("Keep on unavailable"));
-    expect(screen.getByRole("button", { name: "Start local chat" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(true);
     expect(f.transport.createWorkspace).not.toHaveBeenCalled(); expect(f.transport.dispatch).not.toHaveBeenCalled();
   });
   it("keeps an unknown original locked through Web return and exposes only explicit read-only recovery", async () => {
@@ -57,7 +57,7 @@ describe("local Work presentation proposal", () => {
     fireEvent.keyDown(screen.getByLabelText("Local message"), { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
-    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Start chat" }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Check message outcome" }));
     await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
     expect(send).not.toHaveBeenCalled(); expect(f.transport.dispatch).not.toHaveBeenCalled();
