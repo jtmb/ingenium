@@ -8,15 +8,18 @@ import {resolve,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
 import {parsePluginConfiguration} from './plugin-config-text.js';
 let commandId:string|undefined;
+let relatedOriginals:readonly string[]=[];
 export const pluginProjectionStrict=()=>commandId!==undefined;
-export function withPluginCommand<T>(id:string,work:()=>T):T{
+export function withPluginCommand<T>(id:string,work:()=>T,related:readonly string[]=[]):T{
  if(commandId||work.constructor.name==='AsyncFunction')throw new Error('Exclusive original plugin command required');
- commandId=id;
+ commandId=id;relatedOriginals=related;
  try{const value=work();if(value&&typeof(value as {then?:unknown}).then==='function')throw new Error('Async plugin projection forbidden');return value;}
- finally{commandId=undefined;}
+ finally{commandId=undefined;relatedOriginals=[];}
 }
 export function assertPluginCommandClear(projectId:string):void{
- if(getDb().prepare("SELECT 1 FROM customize_commands WHERE project_id=? AND kind='plugin' AND result_json IS NULL AND id<>? LIMIT 1").get(projectId,commandId??''))throw new Error('Unresolved original plugin command');
+ const allowed=[commandId??'',...relatedOriginals];
+ const placeholders=allowed.map(()=>'?').join(',');
+ if(getDb().prepare("SELECT 1 FROM customize_commands WHERE project_id=? AND kind='plugin' AND result_json IS NULL AND id NOT IN ("+placeholders+") LIMIT 1").get(projectId,...allowed))throw new Error('Unresolved original plugin command');
 }
 export type PluginRecord=Plugin&{revision:number;archived_at:string|null};
 export function record(projectId:string,name:string):PluginRecord|undefined{return getDb().prepare('SELECT * FROM plugins WHERE project_id=? AND name=?').get(projectId,name) as PluginRecord|undefined;}

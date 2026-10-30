@@ -30,10 +30,11 @@ export function createScopedCustomizeRouter(){
  }));
  router.get('/archived-plugins',run((owner,req)=>owner.archivedPlugins(z.string().uuid().parse(req.query.projectId))));
  router.get('/installations',run((owner,req)=>owner.installations(z.string().uuid().parse(req.query.projectId))));
+ router.get('/projection-reconciliation/:operationId',run((owner,req)=>owner.reconciliationReview(String(req.params.operationId))));
  router.get('/commands/:operationId',run((owner,req)=>owner.inspect(String(req.params.operationId))));
  router.post('/commands',run((owner,req)=>{
   const command=customizeCatalog.CatalogCommandSchema.parse(req.body);
-  if(command.op==='activate-plugin'||command.op==='publish'&&command.visibility!=='personal'||command.op==='withdraw'||command.op==='restore-source'||command.op==='revise-plugin-source'){
+  if(command.op==='reconcile-local-metadata'||command.op==='reconcile-plugin-projection'||command.op==='activate-plugin'||command.op==='publish'&&command.visibility!=='personal'||command.op==='withdraw'||command.op==='restore-source'||command.op==='revise-plugin-source'){
    if(req.principal?.type!=='user'||!req.principal.session)throw new AppError('Browser session required','BROWSER_SESSION_REQUIRED',401);
    if(!authentication.hasRecentStepUp(req.principal.session))throw new AppError('Recent authentication required','STEP_UP_REQUIRED',403);
   }

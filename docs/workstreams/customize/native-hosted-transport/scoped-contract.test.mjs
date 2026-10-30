@@ -28,3 +28,12 @@ test('plugin lifecycle requires an original operation ID and current target revi
  assert.equal(schema.safeParse({...edit,description:'unsafe\0description'}).success,false);
  assert.equal(schema.safeParse({...edit,credentialItemId:id}).success,false);
 });
+test('projection reconciliation accepts a selector and actual review hash, never a claimed result',()=>{
+ const value={operationId,op:'reconcile-plugin-projection',sourceOperationId:sourceId,reviewSha256:sourceSha256};assert.deepEqual(schema.parse(value),value);
+ for(const extra of [{succeeded:true},{proof:{restored:true}},{actorId:id},{before:{revision:0}}])assert.equal(schema.safeParse({...value,...extra}).success,false);
+ assert.equal(schema.safeParse({...value,reviewSha256:''}).success,false);
+});
+test('atomic local metadata closure requires a genuine server review selector',()=>{
+ const value={operationId,op:'reconcile-local-metadata',sourceOperationId:sourceId,reviewSha256:sourceSha256};assert.deepEqual(schema.parse(value),value);
+ for(const extra of [{atomic:true},{remoteAbsent:true},{succeeded:true},{proof:{committed:false}}])assert.equal(schema.safeParse({...value,...extra}).success,false);
+});

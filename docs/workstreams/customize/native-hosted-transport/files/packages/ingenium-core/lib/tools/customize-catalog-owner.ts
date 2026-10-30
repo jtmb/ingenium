@@ -5,6 +5,7 @@ import {getDb,execTransaction,checkpointAfterWrite} from '../db.js';
 import * as auth from './authorization.js';
 import * as plugins from './plugins.js';
 import * as lifecycle from './plugin-lifecycle.js';
+import * as projection from './plugin-projection-reconciliation.js';
 import * as skills from './skills.js';
 import * as governance from './skill-governance.js';
 import {payloadHash} from './hosted-governance.js';
@@ -13,6 +14,8 @@ const id=z.string().uuid(),revision=z.number().int().nonnegative().max(Number.MA
 const name=z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),kind=z.enum(['plugin','skill']),visibility=z.enum(['personal','public','system']);
 const common={operationId:id};
 export const CatalogCommandSchema=z.discriminatedUnion('op',[
+ z.object({...common,op:z.literal('reconcile-local-metadata'),sourceOperationId:id,reviewSha256:hash}).strict(),
+ z.object({...common,op:z.literal('reconcile-plugin-projection'),sourceOperationId:id,reviewSha256:hash}).strict(),
  z.object({...common,op:z.literal('publish'),projectId:id,kind,name,expectedRevision:revision,sourceSha256:hash,visibility}).strict(),
  z.object({...common,op:z.literal('withdraw'),sourceId:id,expectedRevision:revision}).strict(),
  z.object({...common,op:z.literal('restore-source'),sourceId:id,expectedRevision:revision}).strict(),
@@ -55,8 +58,42 @@ function projectSnapshot(principal:auth.AuthorizationPrincipal,projectId:string,
 export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipal){
  active(principal);
  function current(){active(principal);return principal;}
+ function reconciliation(sourceOperationId:string,ignoreOperationId?:string):Row{
+  current();const original=db().prepare('SELECT * FROM customize_commands WHERE id=? AND actor_id=? AND installation_id=?').get(id.parse(sourceOperationId),principal.id,instance()) as Row|undefined;
+  requireValue(original&&original.project_id&&original.kind==='plugin'&&!original.result_json,'ORIGINAL_NOT_PENDING');
+  const stored=JSON.parse(original.original_json);requireValue(payloadHash(stored)===original.payload_sha256,'ORIGINAL_CORRUPT',503);
+  const command=CatalogCommandSchema.parse(stored.command);requireValue(['archive-plugin','restore-plugin','activate-plugin','deactivate-plugin'].includes(command.op),'LOCAL_PLUGIN_PROJECTION_ORIGINAL_REQUIRED');
+  project(principal,original.project_id,'plugins','admin');project(principal,original.project_id,'plugins','execute');
+  const witness=db().prepare('SELECT * FROM customize_projection_preimages WHERE command_id=?').get(original.id) as Row|undefined;
+  requireValue(witness,'ORIGINAL_PROJECTION_PREIMAGE_UNAVAILABLE',503);const before=JSON.parse(witness.snapshot_json);requireValue(payloadHash(before)===witness.snapshot_sha256,'ORIGINAL_PROJECTION_PREIMAGE_CORRUPT',503);
+  const row=lifecycle.record(original.project_id,before.resource.name);requireValue(row&&row.id===original.resource_key&&row.id===before.resource.id,'ORIGINAL_RESOURCE_CHANGED');
+  const observed=projection.reviewProjectionRollback(before,row);
+  const pending=(db().prepare("SELECT * FROM customize_commands WHERE project_id=? AND kind='plugin' AND result_json IS NULL ORDER BY id").all(original.project_id) as Row[]).filter(r=>r.id!==ignoreOperationId);
+  requireValue(pending.length<=128,'ORIGINAL_CHAIN_REVIEW_LIMIT');
+  for(const held of pending){requireValue(held.actor_id===principal.id&&held.installation_id===instance(),'OTHER_ORIGINAL_REQUIRES_ITS_OWNER');
+   if(held.id===original.id)continue;const linked=JSON.parse(held.original_json);requireValue(payloadHash(linked)===held.payload_sha256&&linked.command.op==='reconcile-plugin-projection'&&linked.command.sourceOperationId===original.id,'UNRELATED_ORIGINAL_REQUIRES_RECONCILIATION');
+  }
+  const review={protocol:'customize-projection-preimage-v1',sourceOperationId:original.id,sourcePayloadSha256:original.payload_sha256,preimageSha256:witness.snapshot_sha256,observationSha256:payloadHash(observed),pending:pending.map(r=>({operationId:r.id,payloadSha256:r.payload_sha256}))};
+  return {original,before,row,observed,pending,review,reviewSha256:payloadHash(review)};
+ }
+ const metadataOps=new Set(['publish','withdraw','restore-source','revise-plugin-source','connect','reconcile-local-metadata']);
+ function atomicReconciliation(sourceOperationId:string,ignoreOperationId?:string):Row{
+  current();const original=db().prepare('SELECT * FROM customize_commands WHERE id=? AND actor_id=? AND installation_id=?').get(id.parse(sourceOperationId),principal.id,instance()) as Row|undefined;
+  requireValue(original&&!original.result_json,'ORIGINAL_NOT_PENDING');const stored=JSON.parse(original.original_json);requireValue(payloadHash(stored)===original.payload_sha256&&metadataOps.has(stored.command.op),'LOCAL_ATOMIC_METADATA_ORIGINAL_REQUIRED');
+  const witness=db().prepare('SELECT * FROM customize_projection_preimages WHERE command_id=?').get(original.id) as Row|undefined;requireValue(witness,'ORIGINAL_SERVER_WITNESS_UNAVAILABLE',503);
+  const marker=JSON.parse(witness.snapshot_json);requireValue(payloadHash(marker)===witness.snapshot_sha256&&marker.protocol==='customize-atomic-metadata-v1'&&marker.requestSha256===original.payload_sha256,'ORIGINAL_SERVER_WITNESS_CORRUPT',503);
+  if(original.project_id)project(principal,original.project_id,original.kind==='plugin'?'plugins':'skills','admin');
+  else if(stored.command.sourceId)sourceAllowed(principal,sourceRow(principal,stored.command.sourceId),true);
+  const candidates=db().prepare('SELECT * FROM customize_commands WHERE actor_id=? AND installation_id=? AND project_id IS ? AND kind=? AND result_json IS NULL ORDER BY id').all(principal.id,instance(),original.project_id,original.kind) as Row[];
+  const pending=candidates.filter(r=>{if(r.id===ignoreOperationId)return false;if(r.id===original.id)return true;const linked=JSON.parse(r.original_json);return linked.command.op==='reconcile-local-metadata'&&linked.command.sourceOperationId===original.id;});requireValue(pending.length<=128,'ORIGINAL_CHAIN_REVIEW_LIMIT');
+  for(const row of pending)requireValue(payloadHash(JSON.parse(row.original_json))===row.payload_sha256,'ORIGINAL_CORRUPT',503);
+  const review={protocol:'customize-atomic-metadata-v1',sourceOperationId:original.id,sourcePayloadSha256:original.payload_sha256,witnessSha256:witness.snapshot_sha256,pending:pending.map(r=>({operationId:r.id,payloadSha256:r.payload_sha256})),proof:'same_SQLite_domain_and_first_receipt_commit'};
+  return {original,pending,review,reviewSha256:payloadHash(review)};
+ }
  function authorize(command:z.infer<typeof CatalogCommandSchema>):{projectId:string|null;kind:'plugin'|'skill';resourceKey:string}{
   current();
+  if(command.op==='reconcile-local-metadata'){const state=atomicReconciliation(command.sourceOperationId,command.operationId);return {projectId:state.original.project_id,kind:state.original.kind,resourceKey:state.original.resource_key};}
+  if(command.op==='reconcile-plugin-projection'){const state=reconciliation(command.sourceOperationId,command.operationId);return {projectId:state.original.project_id,kind:'plugin',resourceKey:state.original.resource_key};}
   if(command.op==='publish'){const p=project(principal,command.projectId,command.kind==='plugin'?'plugins':'skills','admin');
    if(command.visibility!=='personal')requireValue(auth.requireOrganizationPermission(principal,p.organization_id,command.kind==='plugin'?'plugins':'skills','admin').allowed,'NOT_FOUND',404);
    if(command.visibility==='system')requireValue(p.is_global===1&&auth.requireInstallationPermission(principal,'plugins','admin').allowed,'SYSTEM_SOURCE_OWNER_REQUIRED',403);
@@ -69,7 +106,9 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
  }
  // Reject stale/invalid reviews before consuming an operation. Existing terminal
  // originals are looked up first, so reading a receipt never repeats its effect.
- function review(c:z.infer<typeof CatalogCommandSchema>):void{
+ function review(c:z.infer<typeof CatalogCommandSchema>):Row|undefined{
+  if(c.op==='reconcile-local-metadata'){const state=atomicReconciliation(c.sourceOperationId,c.operationId);requireValue(state.reviewSha256===c.reviewSha256,'METADATA_REVIEW_CONFLICT');return;}
+  if(c.op==='reconcile-plugin-projection'){const state=reconciliation(c.sourceOperationId,c.operationId);requireValue(state.reviewSha256===c.reviewSha256,'PROJECTION_REVIEW_CONFLICT');return;}
   if(c.op==='publish'){const v=projectSnapshot(principal,c.projectId,c.kind,c.name);requireValue(v.row.revision===c.expectedRevision&&v.sourceSha256===c.sourceSha256,'SOURCE_REVIEW_CONFLICT');return;}
   if(c.op==='withdraw'||c.op==='restore-source'||c.op==='revise-plugin-source'){
    const row=sourceRow(principal,c.sourceId);requireValue(row.revision===c.expectedRevision,'SOURCE_REVIEW_CONFLICT');
@@ -80,10 +119,21 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
   const row=lifecycle.record(c.projectId,c.name);requireValue(row&&row.revision===c.expectedRevision,'PLUGIN_REVIEW_CONFLICT');
   requireValue(Boolean(row.archived_at)===(c.op==='restore-plugin'),'PLUGIN_REVIEW_CONFLICT');
   if(c.op==='activate-plugin')requireValue(typeof row.source_content==='string'&&row.source_content.length>0,'PLUGIN_SOURCE_UNAVAILABLE');
-  lifecycle.verifyProjection(row);
+  return projection.captureProjectionPreimage(row);
  }
  function execute(command:z.infer<typeof CatalogCommandSchema>):Row{
   authorize(command);const now=new Date().toISOString();
+  if(command.op==='reconcile-local-metadata'){
+   const state=atomicReconciliation(command.sourceOperationId,command.operationId);requireValue(state.reviewSha256===command.reviewSha256,'METADATA_REVIEW_CONFLICT');
+   for(const held of state.pending){const receipt={operationId:held.id,payloadSha256:held.payload_sha256,outcome:'refused',code:'ATOMIC_LOCAL_METADATA_DOMAIN_TRANSACTION_NOT_COMMITTED',value:{reconciledBy:command.operationId,proof:'same_SQLite_domain_and_first_receipt_commit',remoteOutcome:'not_interpreted'}};requireValue(db().prepare('UPDATE customize_commands SET result_json=? WHERE id=? AND result_json IS NULL').run(JSON.stringify(receipt),held.id).changes===1,'FIRST_RECEIPT_CONFLICT');}
+   return {sourceOperationId:state.original.id,releasedOriginals:state.pending.map((r:Row)=>r.id),proof:'same_SQLite_domain_and_first_receipt_commit',remoteOutcome:'not_interpreted'};
+  }
+  if(command.op==='reconcile-plugin-projection'){
+   const state=reconciliation(command.sourceOperationId,command.operationId);requireValue(state.reviewSha256===command.reviewSha256,'PROJECTION_REVIEW_CONFLICT');
+   const proof=projection.restoreProjectionPreimage(state.before,state.row,state.observed);
+   for(const held of state.pending){const receipt={operationId:held.id,payloadSha256:held.payload_sha256,outcome:'refused',code:'LOCAL_DOMAIN_TRANSACTION_NOT_COMMITTED_PREIMAGE_RESTORED',value:{reconciledBy:command.operationId,proof}};requireValue(db().prepare('UPDATE customize_commands SET result_json=? WHERE id=? AND result_json IS NULL').run(JSON.stringify(receipt),held.id).changes===1,'FIRST_RECEIPT_CONFLICT');}
+   return {sourceOperationId:state.original.id,releasedOriginals:state.pending.map((r:Row)=>r.id),proof};
+  }
   if(command.op==='publish'){
    const p=project(principal,command.projectId,command.kind==='plugin'?'plugins':'skills','admin'),snapshot=projectSnapshot(principal,command.projectId,command.kind,command.name);
    requireValue(snapshot.row.revision===command.expectedRevision&&snapshot.sourceSha256===command.sourceSha256,'SOURCE_REVIEW_CONFLICT');
@@ -136,16 +186,19 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
   const prior=execTransaction(()=>{
    authorize(c);const old=db().prepare('SELECT * FROM customize_commands WHERE id=?').get(c.operationId) as Row|undefined;
    if(old){requireValue(old.actor_id===principal.id&&old.installation_id===installationId&&old.payload_sha256===digest,'ORIGINAL_REUSE_CONFLICT');return old;}
-   review(c);
-   if(scope.projectId)requireValue(!db().prepare('SELECT 1 FROM customize_commands WHERE project_id=? AND kind=? AND result_json IS NULL LIMIT 1').get(scope.projectId,scope.kind),'ORIGINAL_RECONCILIATION_REQUIRED');
-   db().prepare('INSERT INTO customize_commands(id,installation_id,actor_id,project_id,kind,resource_key,original_json,payload_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(c.operationId,installationId,principal.id,scope.projectId,scope.kind,scope.resourceKey,JSON.stringify(original),digest,new Date().toISOString());return undefined;
+   const observedPreimage=review(c);
+   if(scope.projectId&&c.op!=='reconcile-plugin-projection'&&c.op!=='reconcile-local-metadata')requireValue(!db().prepare('SELECT 1 FROM customize_commands WHERE project_id=? AND kind=? AND result_json IS NULL LIMIT 1').get(scope.projectId,scope.kind),'ORIGINAL_RECONCILIATION_REQUIRED');
+   db().prepare('INSERT INTO customize_commands(id,installation_id,actor_id,project_id,kind,resource_key,original_json,payload_sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(c.operationId,installationId,principal.id,scope.projectId,scope.kind,scope.resourceKey,JSON.stringify(original),digest,new Date().toISOString());
+   const witness=observedPreimage??(metadataOps.has(c.op)?{protocol:'customize-atomic-metadata-v1',requestSha256:digest,implementation:'local_SQLite_only_v1'}:undefined);
+   if(witness)db().prepare('INSERT INTO customize_projection_preimages(command_id,snapshot_json,snapshot_sha256) VALUES(?,?,?)').run(c.operationId,JSON.stringify(witness),payloadHash(witness));return undefined;
   },1,'immediate');checkpointAfterWrite();
   if(prior)return prior.result_json?JSON.parse(prior.result_json):{operationId:c.operationId,outcome:'unknown',code:'ORIGINAL_RECONCILIATION_REQUIRED'};
   try{
+   const related=c.op==='reconcile-plugin-projection'?reconciliation(c.sourceOperationId,c.operationId).pending.map((r:Row)=>r.id):[];
    const receipt=execTransaction(()=>lifecycle.withPluginCommand(c.operationId,()=>{
     const value=execute(c),receipt={operationId:c.operationId,payloadSha256:digest,outcome:'succeeded',value};
     requireValue(db().prepare('UPDATE customize_commands SET result_json=? WHERE id=? AND result_json IS NULL').run(JSON.stringify(receipt),c.operationId).changes===1,'FIRST_RECEIPT_CONFLICT');return receipt;
-   }),1,'immediate');checkpointAfterWrite();return receipt;
+   },related),1,'immediate');checkpointAfterWrite();return receipt;
   }catch{
    // Domain SQL may have rolled back after a real projection changed. Preserve
    // consumed original and first receipt NULL; never retry executable effects.
@@ -154,6 +207,7 @@ export function createCustomizeCatalogOwner(principal:auth.AuthorizationPrincipa
  }
  return {
   command,
+  reconciliationReview(sourceOperationId:string){const witness=db().prepare('SELECT snapshot_json FROM customize_projection_preimages WHERE command_id=?').get(id.parse(sourceOperationId)) as Row|undefined;requireValue(witness,'ORIGINAL_SERVER_WITNESS_UNAVAILABLE',503);const marker=JSON.parse(witness.snapshot_json);const v=marker.protocol==='customize-atomic-metadata-v1'?atomicReconciliation(sourceOperationId):reconciliation(sourceOperationId);return {protocol:v.review.protocol,sourceOperationId:v.original.id,reviewSha256:v.reviewSha256,pluginId:v.row?.id??null,projectId:v.original.project_id,revision:v.row?.revision??null,pendingOriginals:v.pending.map((r:Row)=>r.id),purpose:marker.protocol==='customize-atomic-metadata-v1'?'atomic_local_metadata_only':'local_projection_preimage_only',remoteOutcome:'never_interpreted'};},
   projectSource(projectId:string,resourceKind:'plugin'|'skill',resourceName:string){current();const v=projectSnapshot(principal,id.parse(projectId),kind.parse(resourceKind),name.parse(resourceName));return {id:v.row.id,revision:v.row.revision,sourceSha256:v.sourceSha256,payload:v.payload};},
   discover(scope:unknown,after:unknown='',limit:unknown=50){current();const v=visibility.parse(scope),take=z.number().int().min(1).max(100).parse(limit),cursor=z.string().max(128).parse(after);
    const rows=db().prepare(`SELECT s.* FROM customize_catalog_sources s JOIN organization_memberships m ON m.organization_id=s.organization_id AND m.user_id=? AND m.status='active' WHERE s.installation_id=? AND s.visibility=? AND s.archived_at IS NULL AND (s.owner_user_id IS NULL OR s.owner_user_id=?) AND s.id>? ORDER BY s.id LIMIT ?`).all(principal.id,instance(),v,principal.id,cursor,take+1) as Row[];

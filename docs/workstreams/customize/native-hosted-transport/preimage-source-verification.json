@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "checks": [
+    {
+      "command": "node --test live-acceptance.test.mjs scoped-contract.test.mjs plugin-config-text.test.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "413f5b5ccddaf13e4947e6240d3c182190ef802d718ef3f4d572637f71a28904",
+      "summary": [
+        "# tests 23",
+        "# pass 23",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "command": "python3 check-scoped-ddl.py",
+      "exitCode": 0,
+      "stdoutSha256": "d379d87b148cd0263b856ee7cdacaeae26ad826cd05409905bb32a24b46a3e25",
+      "summary": [
+        "{\"ddlSyntax\": \"passed\", \"triggers\": 13, \"authOrSessionRowsCreated\": 0, \"liveMigrationOrOwnerAcceptance\": false}"
+      ]
+    },
+    {
+      "command": "node check-scoped-source.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "5ad0fe6f3e086a1f6adcd7c81a39bb6086dea747c3f4eb0894625eb66b04b918",
+      "summary": [
+        "{\"strictRootFiles\":11,\"actualSourceFiles\":633,\"diagnostics\":0,\"emitted\":0}"
+      ]
+    }
+  ],
+  "scope": "Actual-owner SOURCE only; no services/accounts/builds/runtime/CU",
+  "runtime": "UNRUN genuine I/O fault, first-receipt persistence, actual schema, auth/multi-actor, Native scoped consent/UI/model/restore acceptance",
+  "cleanup": {
+    "newScratch": [],
+    "removedPaths": [],
+    "latestCompactions": [
+      {
+        "path": "node-pairing-consolidated.patch",
+        "beforeBytes": 45567,
+        "afterBytes": 674,
+        "reducedBytes": 44893
+      },
+      {
+        "path": "native-lifecycle-source.patch",
+        "beforeBytes": 47558,
+        "afterBytes": 670,
+        "reducedBytes": 46888
+      }
+    ],
+    "exactOriginals": "Git9e505aa3d95a675ba7d55d231c5bccc455fdc833; per-file exact hash/recipe retained",
+    "retained": "Reviewable source/contracts/recipes/minimal receipts; Root application and acceptance is remaining consumer; no Windows recovery claim"
+  }
+}

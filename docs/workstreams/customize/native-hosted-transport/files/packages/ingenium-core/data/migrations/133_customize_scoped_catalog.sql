@@ -51,4 +51,10 @@ CREATE TABLE customize_installations(
  created_by TEXT NOT NULL REFERENCES users(id),created_at TEXT NOT NULL,
  CHECK((kind='plugin' AND resource_id IS NOT NULL AND proposal_id IS NULL) OR (kind='skill' AND resource_id IS NULL AND proposal_id IS NOT NULL)));
 CREATE TRIGGER customize_installation_no_update BEFORE UPDATE ON customize_installations BEGIN SELECT RAISE(ABORT,'Immutable installation provenance'); END;
-CREATE TRIGGER customize_installation_no_delete BEFORE DELETE ON customize_installations BEGIN SELECT RAISE(ABORT,'Retain installation provenance'); END;
+CREATE TRIGGER customize_installation_no_delete BEFORE DELETE ON customize_installations BEGIN SELECT RAISE(ABORT,'Retain installation provenance'); END;-- Server-observed private metadata witness, committed with the actual original claim.
+-- No auth/session/credential/vault rows or Native remote-result interpretation.
+CREATE TABLE customize_projection_preimages(
+ command_id TEXT PRIMARY KEY REFERENCES customize_commands(id),snapshot_json TEXT NOT NULL CHECK(json_valid(snapshot_json)),
+ snapshot_sha256 TEXT NOT NULL CHECK(length(snapshot_sha256)=64));
+CREATE TRIGGER customize_preimage_no_update BEFORE UPDATE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Immutable server projection preimage'); END;
+CREATE TRIGGER customize_preimage_no_delete BEFORE DELETE ON customize_projection_preimages BEGIN SELECT RAISE(ABORT,'Retain original server projection preimage'); END;

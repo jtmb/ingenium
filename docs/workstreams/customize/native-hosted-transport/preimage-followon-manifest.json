@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "baseCheckpoint": "fa33e1aa",
+  "rootAuthorization": "SQL133 reserved and unapplied; Root owns actual schema/startup/restore definition and independent132 db.ts registration. No db.ts proposal or auth/credential/vault schema change.",
+  "sources": [
+    {
+      "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+      "preimageSha256": "414814743bedbdd9bb43d8edf085955a689b84aa7e7351c81a36282be09ea5e1",
+      "postimageSha256": "87ff4c8ecf520404634ff245963eea7119c5c098201735bfe16993f0775773f4"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+      "preimageSha256": "5f706d5baff88d503dbb2fa3ce4838852de9aac4b1857a78efd45cf7a159c064",
+      "postimageSha256": "4090316f3a721007dffe1e45d15ffe1027d0ecefcc41464820cf9fa0bacde03f"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
+      "preimageSha256": "68f72cb9273f8e897dc4ff024afc39d13410d6c856a6561f7f71b9f87f23afb9",
+      "postimageSha256": "88d0c87dfe37ba81cc78a85130d62da1c2fa2f16d5a2037adca6b8b24fa21f6b"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "preimageSha256": "a3340b3914ded2d659a45f4fc3aaa6cc5b3b891fc338e526eb71662f810b1ac1",
+      "postimageSha256": "0204d7975e9ea06419fc5db82bb559212a09987642f14ed33ec2187f9792b572"
+    },
+    {
+      "path": "services/ingenium-api/lib/authorization-policy.ts",
+      "preimageSha256": "399e86c3597f31e7c1fe66a4f9565977d6effc0bbed068c5b3a679c6cfee6de6",
+      "postimageSha256": "80fefa7cf397bdd22d595ad0fe6b8fa3a686d2af6c28f61e5609854c034e33b6"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-projection-reconciliation.ts",
+      "newFile": true,
+      "postimageSha256": "56e842b1d195dcc86144f5df90dcde753641085582b911f719c6127534925ad0"
+    }
+  ]
+}
