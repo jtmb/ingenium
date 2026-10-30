@@ -1,0 +1,83 @@
+{
+  "kind": "Bounded actual separate candidate bridge source review and inert provider case analysis",
+  "owner": "veyra-bot worker legacy Dot session6",
+  "sourceOnly": true,
+  "rootHeadObserved": "653e2c2da775b75a94c53c074946a3c410743ce0",
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/dot-execution-delegation.ts",
+      "sha256": "d915d34a49a49c1f242138eb87772e599e0f2676e23955d6d17aa8c289cf02d5"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "sha256": "c6fd4d762622dda2bd9f8b81d6e93ce989d20c7ae4e0a02e92b84aa1aa3c250f"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+      "sha256": "d532e2b5abc43455d38d973fe3b6573ea33bcf33aecf30f0b356a80aef005602"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "sha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/dot-approved-scope.mjs",
+      "sha256": "9baccc0a8ec748ad0679070826162155dd3c92b2d223938fead79ba83463322a"
+    },
+    {
+      "path": "packages/veyra-operations/core126-candidate-observation.mjs",
+      "sha256": "ff416fb5e4b8334265b325cb7e7943548003902fe4339b8296c780f1f04afa55"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-owner.mjs",
+      "sha256": "1e6beefa49622995ecdd7cb32f64c5e1715512fcb5ec3fb0b8338eaddf73f2e8"
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "sha256": "f262f1a2119add00119a16e5830678848492a08edd84307da3731ba897cd8338"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "sha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8"
+    },
+    {
+      "path": "tools/veyra-release/core126-inert-probe.mjs",
+      "sha256": "bf9812e57c7c791bbf09e5beab99428c22cbb6055f5deb433a14e43da6c298aa"
+    }
+  ],
+  "concreteP1P2Findings": [],
+  "sourceReviewConclusion": "No standalone purpose/auth/source/transaction bypass established in current private candidate Core/API/prepare bridge; not full safety/runtime acceptance",
+  "requiredNextLifecycle": {
+    "paths": [
+      "packages/ingenium-core/lib/tools/dot-execution-delegation.ts:69",
+      "packages/ingenium-core/lib/tools/dot-execution-delegation.ts:118",
+      "services/ingenium-api/lib/dot-v2/dot-original-context.ts:101"
+    ],
+    "constraint": "Core candidate handle pins full operation row and expires30s; original placement lease expires independently. Admission fence transition changes row. Reacquire/refresh SAME persisted candidate source/intent and original scope for later SQL131 readiness/material; never reprepare or extend original intent deadline"
+  },
+  "providerAnalysis": {
+    "strictContractVsFullPath": "Manifest fields alone do not require provider success; route-only/argv/inventory predicates cannot establish verified model completion or native model-produced tool loop",
+    "positiveToolProgramNeededFor": [
+      "job-broker-route when exercised through actual native model/tool loop, unless an actual pinned native direct-tool API is used and claimed narrowly"
+    ],
+    "positiveResponseNeededFor": [
+      "original-result-route when claiming verified successful native response, beyond current route-only predicate"
+    ],
+    "fixed503AdequateFor": "Inventory/agent/reload/argv observations, denied/no-dispatch cases and meaningful sham-mutation control calibration; result-route failure only",
+    "probeConflict": "Legacy core126-inert-probe native branch starts separate serve on39262, which conflicts with candidate closed Core proxy39262 and is not same original standalone-child acceptance"
+  },
+  "remaining": [
+    "Root SQL131 actual waiting/readiness/material and retained manager/private Core RPC",
+    "Exact copier/image closure and actual typed composition",
+    "Real18 native/Core negative/provider/tool/result/retirement cases",
+    "Independent approval and fresh production admission",
+    "Windows/cluster/phases1-7 acceptance"
+  ],
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "sharedWrites": false,
+    "retained": "Compact source-review hashes/case analysis for Root lifecycle and actual harness design"
+  }
+}
