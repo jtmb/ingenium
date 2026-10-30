@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sourceOnly": true,
+  "path": "docs/workstreams/customize/native-hosted-transport/capture-legacy-plugin-owner.mjs",
+  "preimageSha256": "4ac3a6121c8fff3a51029e7e0ff37d37cfc4610e269397ac2a9a5eca6773a90e",
+  "postimageSha256": "d989679b769cabd8789581a1207d05dd96d1e82f011215695db1387ff40140aa",
+  "behavior": "shared actual original owner observation; existing active entry unchanged; added installation entry uses actual non-global selector or actual undefined default, all non-global/archived equality, separate full global observations; no project/identity/grant/archive mutation",
+  "exports": [
+    "captureLegacyPluginPaths",
+    "captureLegacyInstallationPaths"
+  ],
+  "runtimeQualification": "Root will qualify exact source across active/empty/archive-only; worker syntax only",
+  "noCoreOrDbImportedByWorker": true
+}
