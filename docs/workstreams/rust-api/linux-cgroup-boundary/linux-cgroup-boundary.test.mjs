@@ -27,6 +27,9 @@ test('true global boundary omits no finite constraints; finite leaf/ancestor and
  assert.equal(f.chain[2].kind,'global-controller-root');for(const name of ['memoryMax','memoryCurrent','pidsMax','pidsCurrent','cpuMilli'])assert.equal(f.chain[2][name],null);
  assert.equal(f.original.globalControllerBoundary.inode,'1');assert.equal(f.original.globalControllerBoundary.namespaceInode,'4026531835');
 }));
+test('unrelated nsfs handle roots retain legitimate mountinfo without weakening relevant path/mask checks',()=>fixture(({addMount,read})=>{
+ addMount('30 1 0:4 net:[4026531840] /run/docker/netns/default rw - nsfs nsfs rw');assert.equal(read().memoryHeadroom,2048);
+}));
 test('global root alone and all-unbounded descendant memory/tasks never become finite admission',async()=>{
  await fixture(({write,read})=>{write('/proc/self/cgroup','0::/\n');assert.throws(read,/FINITE_CGROUP/);});
  for(const key of ['memory.max','pids.max'])await fixture(({write,read})=>{for(const d of ['/parent','/parent/leaf'])write(root+d+'/'+key,'max\n');assert.throws(read,/FINITE_CGROUP/);});

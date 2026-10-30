@@ -1,12 +1,12 @@
 {
   "base": "251d19a22c9239da045ca5c66ce07c0beb77bad6",
   "scope": "One-file read-only kernel-probe proposal. Root applies; no cgroup/namespace/process writes or runtime qualification.",
-  "patchSha256": "232fc695a5a5bb6f7995843bcfdb4eab3eb90f0f47ae9d3e3c8ae2dcf437eda0",
+  "patchSha256": "70976276f766a5b9ff4ea82f39b89f00999586a42a299f6cf3e9e078a98bd04f",
   "changes": [
     {
       "path": "services/ingenium-api/lib/voice-v2/linux-resource-probe.mjs",
       "preimageSha256": "3a59d046dbfdf9fa446e195fbc8a979f32ca40a4799a3aecac0a479a709317cb",
-      "proposedSha256": "bdcf98d2d316ae38499d44143db6fa0b4b785ec2361fcc3769f377c001af4fa8"
+      "proposedSha256": "873ffa01801577b50bea74bb6a02be2f1252dedf35ec7ff545471ced17986fc6"
     }
   ],
   "protectedSource": [

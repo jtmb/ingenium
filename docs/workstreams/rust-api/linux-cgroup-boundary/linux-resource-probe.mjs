@@ -15,7 +15,9 @@ const rootControlFiles=['memory.max','memory.current','pids.max','pids.current',
 function mountRecords(text){return text.trim().split('\n').map(line=>{
  const parts=line.split(' - '),fields=parts[0].split(' '),fs=parts[1]?.split(' ');
  if(parts.length!==2||fields.length<6||fs.length<3||!/^\d+$/.test(fields[0])||!/^\d+$/.test(fields[1])||!/^\d+:\d+$/.test(fields[2]))fail('CPU_MOUNT_FACT_INVALID');
- const root=decode(fields[3]),point=decode(fields[4]);if(!root.startsWith('/')||!point.startsWith('/')||[root,point].some(p=>p.split('/').some(v=>v==='.'||v==='..')))fail('CPU_MOUNT_FACT_INVALID');
+ const root=decode(fields[3]),point=decode(fields[4]);
+ // Unrelated nsfs mounts can legitimately report a root such as net:[4026531840].
+ if(!point.startsWith('/')||point.split('/').some(v=>v==='.'||v==='..')||['proc','cgroup2'].includes(fs[0])&&(!root.startsWith('/')||root.split('/').some(v=>v==='.'||v==='..')))fail('CPU_MOUNT_FACT_INVALID');
  return {fields,root,point,type:fs[0]};
 });}
 function controllers(path){const raw=bounded(path,4096),names=raw.trim().split(/\s+/);if(names.some(v=>!v||!(/^[a-z][a-z0-9_]*$/).test(v))||new Set(names).size!==names.length||!['cpu','memory','pids'].every(v=>names.includes(v)))fail('CPU_GLOBAL_CONTROLLERS_UNKNOWN');return raw;}

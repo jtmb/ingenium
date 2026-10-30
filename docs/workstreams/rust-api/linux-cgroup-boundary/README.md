@@ -28,7 +28,7 @@ Root/worker7 still own any actual task leaf creation, finite control write/readb
 
 ## Validation and outputs
 
-Twelve in-memory VM cases cover a genuine-layout boundary with finite descendants and host pressure; global-only and all-unbounded refusal; missing nested leaf/ancestor files; partial/unreadable/malformed root files; wrong mount root/inode/namespace/proc/nsfs/cgroup filesystem; cgroup/proc masking; controller availability/enablement; finite ancestor pressure; directory/membership/mount/namespace identity races; repeated absence/controller/nsfs proof; and the unchanged fully present finite path. No fake fact is exposed as a product option. This is bounded source-policy evidence, not actual leaf, process, model or platform acceptance.
+Thirteen in-memory VM cases cover a genuine-layout boundary with finite descendants and host pressure; unrelated legitimate nsfs handle roots; global-only and all-unbounded refusal; missing nested leaf/ancestor files; partial/unreadable/malformed root files; wrong mount root/inode/namespace/proc/nsfs/cgroup filesystem; cgroup/proc masking; controller availability/enablement; finite ancestor pressure; directory/membership/mount/namespace identity races; repeated absence/controller/nsfs proof; and the unchanged fully present finite path. No fake fact is exposed as a product option. This is bounded source-policy evidence, not actual leaf, process, model or platform acceptance.
 
 From the existing owned checkout with TEMP/TMP/TMPDIR in the same existing coordination/rust-api root and NODE_DISABLE_COMPILE_CACHE=1:
 

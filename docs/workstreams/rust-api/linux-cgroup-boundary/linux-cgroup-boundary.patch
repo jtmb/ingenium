@@ -6,7 +6,7 @@
  import {resolve,relative,dirname,sep} from 'node:path';
  import {createHash} from 'node:crypto';
  const fail=code=>{throw Object.assign(new Error(code),{code});};
-@@ -11,6 +11,30 @@
+@@ -11,6 +11,32 @@
   let count=0,last=-1;for(const [a,b]of ranges){if(a<=last)fail('CPU_CPUSET_INVALID');count+=b-a+1;last=b;}return count;
  }
  const identity=path=>{const s=lstatSync(path,{bigint:true});if(!s.isDirectory()||s.isSymbolicLink())fail('CPU_CGROUP_CUSTODY');return {path,device:String(s.dev),inode:String(s.ino)};};
@@ -14,7 +14,9 @@
 +function mountRecords(text){return text.trim().split('\n').map(line=>{
 + const parts=line.split(' - '),fields=parts[0].split(' '),fs=parts[1]?.split(' ');
 + if(parts.length!==2||fields.length<6||fs.length<3||!/^\d+$/.test(fields[0])||!/^\d+$/.test(fields[1])||!/^\d+:\d+$/.test(fields[2]))fail('CPU_MOUNT_FACT_INVALID');
-+ const root=decode(fields[3]),point=decode(fields[4]);if(!root.startsWith('/')||!point.startsWith('/')||[root,point].some(p=>p.split('/').some(v=>v==='.'||v==='..')))fail('CPU_MOUNT_FACT_INVALID');
++ const root=decode(fields[3]),point=decode(fields[4]);
++ // Unrelated nsfs mounts can legitimately report a root such as net:[4026531840].
++ if(!point.startsWith('/')||point.split('/').some(v=>v==='.'||v==='..')||['proc','cgroup2'].includes(fs[0])&&(!root.startsWith('/')||root.split('/').some(v=>v==='.'||v==='..')))fail('CPU_MOUNT_FACT_INVALID');
 + return {fields,root,point,type:fs[0]};
 +});}
 +function controllers(path){const raw=bounded(path,4096),names=raw.trim().split(/\s+/);if(names.some(v=>!v||!(/^[a-z][a-z0-9_]*$/).test(v))||new Set(names).size!==names.length||!['cpu','memory','pids'].every(v=>names.includes(v)))fail('CPU_GLOBAL_CONTROLLERS_UNKNOWN');return raw;}
@@ -37,7 +39,7 @@
  /** Concrete read-only Linux kernel probe. No injectable capacity/positive-admission port. */
  export function readLinuxCpuCapacity(){
   if(process.platform!=='linux')fail('CPU_LINUX_RESOURCES_REQUIRED');
-@@ -18,19 +42,27 @@
+@@ -18,19 +44,27 @@
   if(!/^cgroup:\[[0-9]+\]$/.test(namespace))fail('CPU_CGROUP_NAMESPACE_UNKNOWN');
   const records=membership.trim().split('\n');if(records.length!==1||!records[0].startsWith('0::/'))fail('CPU_UNIFIED_CGROUP_REQUIRED');
   const member=records[0].slice(3);if(member.includes('\0')||member.split('/').some(p=>p==='..'||p==='.'))fail('CPU_CGROUP_PATH_INVALID');
@@ -71,7 +73,7 @@
    const quota=limit(cpu[0]),period=uint(cpu[1]);if(period===0||quota===0)fail('CPU_QUOTA_INVALID');
    const milli=quota===null?null:Number(BigInt(quota)*1000n/BigInt(period));
    if(memoryMax!==null)memoryHeadroom=Math.min(memoryHeadroom,Math.max(0,memoryMax-memoryCurrent));
-@@ -47,7 +79,8 @@
+@@ -47,7 +81,8 @@
   const cpuStat=bounded(leaf+'/cpu.stat');const usage=cpuStat.match(/^usage_usec ([0-9]+)$/m);if(!usage)fail('CPU_CPU_USAGE_UNKNOWN');
   for(const node of chain)if(JSON.stringify(identity(node.path))!==JSON.stringify({path:node.path,device:node.device,inode:node.inode}))fail('CPU_CGROUP_IDENTITY_CHANGED');
   if(bounded('/proc/self/cgroup')!==membership||bounded('/proc/self/mountinfo',1048576)!==mounts||readlinkSync('/proc/self/ns/cgroup')!==namespace)fail('CPU_CGROUP_IDENTITY_CHANGED');
