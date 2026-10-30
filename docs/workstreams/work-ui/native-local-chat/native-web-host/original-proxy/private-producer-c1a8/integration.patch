@@ -1,0 +1,334 @@
+--- a/apps/desktop/src-tauri/src/main.rs
++++ b/apps/desktop/src-tauri/src/main.rs
+@@ -0,0 +1 @@
++mod hosted_windows;
+@@ -460,0 +462 @@
++        .manage(hosted_windows::HostedWindows::default())
+@@ -465,0 +468,3 @@
++            if let Some(root)=app.get_webview_window("main"){
++                app.state::<hosted_windows::HostedWindows>().retain_created(root).map_err(std::io::Error::other)?;
++            }
+--- a/apps/desktop/src-tauri/src/workspace_windows.rs
++++ b/apps/desktop/src-tauri/src/workspace_windows.rs
+@@ -78 +78 @@
+-        WebviewWindowBuilder::new(&app, label, WebviewUrl::App(path.into()))
++        let created=WebviewWindowBuilder::new(&app, label, WebviewUrl::App(path.into()))
+@@ -85,3 +85,3 @@
+-            .build()
+-            .map(|_| ())
+-            .map_err(|_| "Could not open the workspace window.".to_string())
++            .build().map_err(|_| "Could not open the workspace window.".to_string())?;
++        app.state::<crate::hosted_windows::HostedWindows>().retain_created(created)?;
++        Ok(())
+--- /dev/null
++++ b/apps/desktop/src-tauri/src/hosted_windows.rs
+@@ -0,0 +1,42 @@
++//! Trusted constructor custody only; no renderer/service grant is minted here.
++use std::{collections::HashMap,sync::{Arc,Mutex,atomic::{AtomicBool,Ordering}}};
++use tauri::{Manager,Webview,WebviewWindow,Window,WindowEvent};
++pub(crate) struct WindowOriginal{uid:uuid::Uuid,root:Webview,parent:Window,fenced:AtomicBool}
++impl WindowOriginal{
++ pub(crate) fn uid(&self)->uuid::Uuid{self.uid}
++ pub(crate) fn parent(&self)->&Window{&self.parent}
++ pub(crate) fn check_requester(&self,actual:&Webview)->Result<(),String>{
++  // Label is only an expectation here: this object originated at actual Rust
++  // construction and holds the real root/parent. Child label cannot match.
++  if self.fenced.load(Ordering::Acquire)||actual.label()!=self.root.label()
++   ||!crate::ipc_origin::accepts(actual)||!crate::ipc_origin::accepts(&self.root)
++   ||!crate::workspace_windows::is_workspace_label(actual.label())
++   ||actual.window().label()!=self.parent.label(){return Err("Original native Work window changed".into())}
++  if self.root.app_handle().get_webview(self.root.label()).is_none(){return Err("Original Work webview unavailable".into())}
++  Ok(())
++ }
++ pub(crate) fn fence(&self){self.fenced.store(true,Ordering::Release);}
++}
++#[derive(Default)]pub(crate) struct HostedWindows{originals:Mutex<HashMap<String,Arc<WindowOriginal>>>}
++impl HostedWindows{
++ /// Call ONLY at actual main/detached Rust construction; not an invoke command.
++ /// Loading may still be about:blank; later request admission checks real origin.
++ pub(crate) fn retain_created(&self,created:WebviewWindow)->Result<Arc<WindowOriginal>,String>{
++  let root:Webview=created.as_ref().clone();
++  if !crate::workspace_windows::is_workspace_label(root.label()){return Err("Only actual Work windows may own Web".into())}
++  let original=Arc::new(WindowOriginal{uid:uuid::Uuid::new_v4(),parent:root.window(),root,fenced:AtomicBool::new(false)});
++  let mut originals=self.originals.lock().map_err(|_|"Original Work window registry unavailable")?;
++  if originals.contains_key(original.root.label()){return Err("Previous native Work window original remains retained".into())}
++  originals.insert(original.root.label().into(),original.clone());
++  let weak=Arc::downgrade(&original);
++  created.on_window_event(move|event|if matches!(event,WindowEvent::Destroyed){if let Some(original)=weak.upgrade(){original.fence();}});
++  Ok(original)
++ }
++ pub(crate) fn for_requester(&self,actual:&Webview)->Result<Arc<WindowOriginal>,String>{
++  let original=self.originals.lock().map_err(|_|"Original Work window registry unavailable")?.get(actual.label()).cloned().ok_or("Native window was not constructed by this host")?;
++  original.check_requester(actual)?;Ok(original)
++ }
++}
++// Native broker's concrete child authority must retain WindowOriginal + actual
++// approved peer/control connection + service ChildScopeOriginal. This module
++// deliberately has no supplied-boolean/DTO grant constructor or close witness.
+--- a/apps/service/src/routes/local_workspaces.rs
++++ b/apps/service/src/routes/local_workspaces.rs
+@@ -13 +13 @@
+-mod web_original;
++pub(crate) mod web_original;
+--- a/apps/service/src/routes/local_workspaces/web_original.rs
++++ b/apps/service/src/routes/local_workspaces/web_original.rs
+@@ -2,0 +3 @@
++pub(crate) mod private_receiver;
+--- a/apps/service/src/routes.rs
++++ b/apps/service/src/routes.rs
+@@ -0,0 +1 @@
++pub(crate) use local_workspaces::web_original::private_receiver::PrivateMount as LocalWebPrivateMount;
+--- /dev/null
++++ b/apps/service/src/routes/local_workspaces/web_original/private_receiver.rs
+@@ -0,0 +1,80 @@
++//! Child of service routes::local_workspaces::web_original.
++//! A concrete mounted streaming prompt receiver; NOT a native grant factory.
++//! Only its broker child module may construct Scope after genuine OS enrollment.
++use super::*;
++use axum::{body::Body,extract::{Request,State},http::{HeaderValue,StatusCode},response::{IntoResponse,Response},Router};
++use std::sync::atomic::AtomicBool;
++use std::sync::OnceLock;
++
++// No Deserialize/Default/public constructor. These are actual retained objects,
++// never supplied renderer proof. Root's approved broker must retain the same
++// native peer/process/window owner in its original registry alongside this Arc.
++pub(super) struct Scope{
++ state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,lease:Arc<LocalWebLease>,
++ endpoint:OnceLock<Endpoint>,authorization:HeaderValue,
++ fenced:AtomicBool,
++}
++struct Endpoint{host:HeaderValue,origin:HeaderValue}
++impl Scope{
++ fn current(&self)->Result<(),String>{
++  if self.fenced.load(Ordering::Acquire){return Err("Original private Web peer disconnected".into())}
++  check(&self.state,&self.binding,&self.lease)
++ }
++}
++fn exact_single(headers:&axum::http::HeaderMap,name:&str,expected:&HeaderValue)->bool{
++ let mut all=headers.get_all(name).iter();let Some(actual)=all.next()else{return false};
++ if all.next().is_some()||actual.as_bytes().len()!=expected.as_bytes().len(){return false}
++ // Fixed scoped secret, no renderer token/query/cookie and no body collection.
++ let different=actual.as_bytes().iter().zip(expected.as_bytes()).fold(0u8,|v,(a,b)|v|(a^b));different==0
++}
++pub(crate) struct PrivateMount{router:Router,scope:Arc<Scope>}
++impl PrivateMount{
++ pub(crate) fn router_clone(&self)->Router{self.router.clone()}
++ pub(crate) fn fence(&self){self.scope.fenced.store(true,Ordering::Release);self.scope.lease.revoke();}
++ pub(crate) fn bind_original_endpoint(&self,actual:std::net::SocketAddr)->Result<(),()>{
++  if !actual.ip().is_loopback()||actual.port()==0{return Err(())}
++  let host=HeaderValue::from_str(&actual.to_string()).map_err(|_|())?;
++  let origin=HeaderValue::from_str(&format!("http://{actual}")).map_err(|_|())?;
++  self.scope.endpoint.set(Endpoint{host,origin}).map_err(|_|())
++ }
++}
++fn router(scope:Arc<Scope>)->PrivateMount{
++ // Dedicated original listener ONLY. Never nest into ordinary bearer routes.
++ PrivateMount{router:Router::new().fallback(receive).with_state(scope.clone()),scope}
++}
++async fn receive(State(scope):State<Arc<Scope>>,request:Request<Body>)->Response{
++ match receive_original(scope,request).await{Ok(response)=>response,Err(())=>StatusCode::FORBIDDEN.into_response()}
++}
++async fn receive_original(scope:Arc<Scope>,request:Request<Body>)->Result<Response,()>{
++ scope.current().map_err(|_|())?;
++ let endpoint=scope.endpoint.get().ok_or(())?;
++ if request.uri().scheme().is_some()||request.uri().authority().is_some()
++  ||!exact_single(request.headers(),"host",&endpoint.host)
++  ||!exact_single(request.headers(),"authorization",&scope.authorization){return Err(())}
++ // Origin is an additional rejection filter; it never authenticates the child.
++ if request.headers().contains_key("origin")&&!exact_single(request.headers(),"origin",&endpoint.origin){return Err(())}
++ let path=format!("/api/session/{}/prompt",scope.lease.session_id());
++ if request.method()!=axum::http::Method::POST||request.uri().path()!=path{
++  // Asset/read/SSE/PTY adapters are an explicit remaining constructor gate.
++  // No altered HTML, fake upstream response or generic effect proxy fallback.
++  return Ok(StatusCode::SERVICE_UNAVAILABLE.into_response())
++ }
++ let target=request.uri().path_and_query().ok_or(())?.as_str().to_owned();
++ if target.len()>16384{return Err(())}
++ let mut content=Vec::new();let mut header_bytes=0usize;
++ for name in ["content-type","content-encoding","accept"]{
++  let mut values=request.headers().get_all(name).iter();let Some(value)=values.next()else{continue};
++  if values.next().is_some(){return Err(())}let value=value.to_str().map_err(|_|())?;
++  header_bytes=header_bytes.checked_add(name.len()+value.len()).filter(|n|*n<=16384).ok_or(())?;
++  content.push((name.to_owned(),value.to_owned()));
++ }
++ // The source applies a bounded content-header envelope, not a payload/RSS
++ // claim. Hyper may already own header/read-ahead buffers before this handler.
++ // No Authorization/Cookie/Origin is forwarded as replayable content.
++ scope.current().map_err(|_|())?;
++ let original=super::scoped_intake::receive_prompt(scope.state.clone(),scope.binding.clone(),scope.lease.clone(),"POST",&target,&content,request.into_body()).await.map_err(|_|())?;
++ scope.current().map_err(|_|())?;
++ let response=super::submit_prompt(scope.state.clone(),scope.binding.clone(),scope.lease.clone(),original).await.map_err(|_|())?;
++ // A genuine private ACK is already constrained to non3xx; keep a final guard.
++ if response.status().is_redirection(){return Err(())}Ok(response)
++}
+--- a/apps/service/src/server/original.rs
++++ b/apps/service/src/server/original.rs
+@@ -1,0 +2 @@
++mod private_listener;
+--- /dev/null
++++ b/apps/service/src/server/original/private_listener.rs
+@@ -0,0 +1,65 @@
++//! Proposed child of service server::original; no separate DB/service owner.
++//! Parent startup/broker registry must retain this Arc BEFORE start_once.
++use super::{connections,listener_resource::Listener,listener_startup::ListenerStartup};
++use crate::routes::{LocalWebPrivateMount,retained_result::ResultJoin,worker_original::WorkerPhase};
++use std::{io,net::{Ipv4Addr,SocketAddrV4},sync::{Arc,OnceLock,atomic::{AtomicBool,Ordering}},time::{Duration,Instant}};
++use tokio::{net::TcpStream,sync::{Mutex,watch}};
++enum Failure{Serve}
++pub(super) struct PrivateListener{
++ startup:Arc<ListenerStartup<Listener,io::Error>>,actual:Arc<OnceLock<Arc<Listener>>>,
++ task:Mutex<Option<ResultJoin<Failure>>>,book:Arc<connections::Book<TcpStream>>,
++ mount:LocalWebPrivateMount,stop:watch::Sender<bool>,first_stop:OnceLock<Instant>,
++ started:AtomicBool,
++}
++impl PrivateListener{
++ pub(super) fn fence(&self){self.mount.fence();let _=self.stop.send(true);let _=self.book.close();}
++ pub(super) fn prepare(deadline:Instant,mount:LocalWebPrivateMount)->Arc<Self>{
++  // Future retained unpolled before native bind can run. All startup aliases
++  // share the same actual Listener cell and its checked retirement original.
++  let actual=Arc::new(OnceLock::new());let sink=actual.clone();
++  let bind=async move{
++   let raw=tokio::net::TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST,0)).await.map_err(Arc::new)?;
++   let original=Listener::new(raw);
++   let _=sink.set(original.clone()); // actual source retained BEFORE publication
++   Ok(original) // startup also retains this same original on late completion
++  };
++  let(stop,_)=watch::channel(false);
++  Arc::new(Self{startup:ListenerStartup::prepare(deadline,bind),actual,task:Mutex::new(None),book:connections::Book::new(),mount,stop,first_stop:OnceLock::new(),started:AtomicBool::new(false)})
++ }
++ pub(super) async fn start_once(self:&Arc<Self>)->Result<std::net::SocketAddr,()>{
++  if self.started.swap(true,Ordering::AcqRel){return Err(())}
++  let actual=self.startup.wait_once(Instant::now).await.map_err(|_|())?;
++  // Even an unexpected duplicate cannot lose the original: startup retains
++  // its same actual Arc/outcome. No bind retry or replacement on failure.
++  if !self.actual.get().is_some_and(|saved|Arc::ptr_eq(saved,&actual)){return Err(())}
++  let address=actual.local_addr().map_err(|_|())?;
++  if !address.ip().is_loopback(){return Err(())}
++  self.mount.bind_original_endpoint(address)?; // actual retained bind, no DTO port
++  let mut task=self.task.try_lock().map_err(|_|())?;
++  if task.is_some(){return Err(())}
++  let book=self.book.clone();let router=self.mount.router_clone();let shutdown=self.stop.subscribe();let original=self.clone();
++  let work=async move{
++   connections::serve(book,move||{let actual=actual.clone();async move{actual.accept().await.map(|(io,_)|io)}},router,shutdown,move||original.first_stop.get().copied()).await.map_err(|_|Failure::Serve)
++  };
++  let(worker,publish)=ResultJoin::prepare(work).map_err(|_|())?;
++  *task=Some(worker); // actual handle retained BEFORE publication
++  task.as_mut().ok_or(())?.publish(publish).map_err(|_|())?;
++  Ok(address) // listener address ONLY, not whole-Web closure/readiness authority
++ }
++ pub(super) async fn retire_until(&self,proposed:Instant)->Result<(),()>{
++  self.fence();let deadline=(*self.first_stop.get_or_init(||proposed)).min(proposed);
++  self.book.close().map_err(|_|())?;
++  // A pending bind with no actual Listener remains retained/unknown. No boolean
++  // or absent output mints native close; startup driver must reconcile it.
++  let actual=self.actual.get().ok_or(())?;
++  actual.retire_until(deadline).await?;
++  loop{
++   if Instant::now()>=deadline{return Err(())}
++   let phase={let mut task=self.task.try_lock().map_err(|_|())?;task.as_mut().ok_or(())?.poll()};
++   match phase{WorkerPhase::Joined=>break,WorkerPhase::Failed=>return Err(()),WorkerPhase::Running=>tokio::time::sleep(Duration::from_millis(5)).await}
++  }
++  self.book.finish_until(deadline).await.map_err(|_|())
++  // This retires only this actual listener/HTTP scope. Native control peer,
++  // Desktop callback/child and engine originals require their OWN witnesses.
++ }
++}
+--- a/crates/adapters/src/lib.rs
++++ b/crates/adapters/src/lib.rs
+@@ -1,0 +2 @@
++pub mod native_web_peer;
+--- /dev/null
++++ b/crates/adapters/src/native_web_peer.rs
+@@ -0,0 +1,39 @@
++//! Facts from the actual retained connection; NEVER a verified-peer permit.
++//! Parent broker must retain accepted pipe/socket BEFORE calling these queries.
++pub mod linux_pidfd;
++use std::io;
++#[derive(Clone,Copy)]pub struct KernelPeer{pub pid:u32,pub uid:Option<u32>}
++#[cfg(windows)]mod win{
++ use super::*;
++ use std::os::windows::io::AsRawHandle;
++ use tokio::net::windows::named_pipe::{NamedPipeClient,NamedPipeServer};
++ // Exact kernel32 API signatures, no dependency feature/source edit. Root may
++ // instead enable the corresponding existing windows-sys System_Pipes feature.
++ #[link(name="kernel32")]
++ unsafe extern "system"{
++  fn GetNamedPipeClientProcessId(pipe:*mut std::ffi::c_void,pid:*mut u32)->i32;
++  fn GetNamedPipeServerProcessId(pipe:*mut std::ffi::c_void,pid:*mut u32)->i32;
++ }
++ pub fn accepted(pipe:&NamedPipeServer)->io::Result<KernelPeer>{
++  let mut pid=0;
++  if unsafe{GetNamedPipeClientProcessId(pipe.as_raw_handle(),&mut pid)}==0{return Err(io::Error::last_os_error())}
++  if pid==0{return Err(io::Error::other("Native client PID unavailable"))}Ok(KernelPeer{pid,uid:None})
++ }
++ pub fn connected(pipe:&NamedPipeClient)->io::Result<KernelPeer>{
++  let mut pid=0;
++  if unsafe{GetNamedPipeServerProcessId(pipe.as_raw_handle(),&mut pid)}==0{return Err(io::Error::last_os_error())}
++  if pid==0{return Err(io::Error::other("Native server PID unavailable"))}Ok(KernelPeer{pid,uid:None})
++ }
++}
++#[cfg(windows)]pub use win::{accepted as accepted_named_pipe_peer,connected as connected_named_pipe_peer};
++#[cfg(target_os="linux")]
++pub fn connected_uds_peer(stream:&tokio::net::UnixStream)->io::Result<KernelPeer>{
++ let original=stream.peer_cred()?;
++ let pid=u32::try_from(original.pid().ok_or_else(||io::Error::other("Native UDS peer PID unavailable"))?).map_err(|_|io::Error::other("Native UDS peer PID invalid"))?;
++ if pid==0{return Err(io::Error::other("Native UDS peer PID invalid"))}
++ Ok(KernelPeer{pid,uid:Some(original.uid())})
++}
++// Deliberately NO is_approved/current/retired constructor or positive predicate.
++// PID/UID are only inputs for the original process HANDLE/pidfd + birth/image/
++// protected-package capture. Root must implement that genuine owner factory;
++// a source/renderer/pipe hello DTO may never substitute for the actual object.
+--- /dev/null
++++ b/crates/adapters/src/native_web_peer/linux_pidfd.rs
+@@ -0,0 +1,50 @@
++//! Linux x86_64/aarch64 source only. Real socket-bound pidfd, never PID reopen.
++//! Parent registry retains this Arc BEFORE capture_on; no Drop cleanup/retry.
++#![cfg(all(target_os="linux",any(target_arch="x86_64",target_arch="aarch64")))]
++use std::{io,os::fd::AsRawFd,sync::{Arc,Mutex}};
++use tokio::net::UnixStream;
++// Pinned libc0.2.190 Linux UAPI values for these targets. Root may instead add
++// the exact existing libc dependency; no manifest/lock change is made here.
++const SOL_SOCKET:i32=1;const SO_PEERPIDFD:i32=77;
++#[repr(C)]struct PollFd{fd:i32,events:i16,revents:i16}
++unsafe extern "C"{
++ fn getsockopt(fd:i32,level:i32,name:i32,value:*mut std::ffi::c_void,length:*mut u32)->i32;
++ fn poll(fds:*mut PollFd,count:usize,timeout:i32)->i32;
++ fn close(fd:i32)->i32;
++}
++enum State{Reserved,Querying,Owned(i32),CaptureFailed,CloseStarted(i32),Closed,CloseFailed(i32)}
++pub struct PeerPidfd{state:Mutex<State>}
++impl PeerPidfd{
++ pub fn reserved()->Arc<Self>{Arc::new(Self{state:Mutex::new(State::Reserved)})}
++ pub fn capture_on(&self,actual:&UnixStream)->io::Result<()>{
++  let mut state=self.state.lock().map_err(|_|io::Error::other("Original peer pidfd poisoned"))?;
++  if !matches!(*state,State::Reserved){return Err(io::Error::other("Original peer pidfd already attempted"))}
++  *state=State::Querying;let mut fd=-1i32;let mut size=std::mem::size_of::<i32>()as u32;
++  let result=unsafe{getsockopt(actual.as_raw_fd(),SOL_SOCKET,SO_PEERPIDFD,(&mut fd as*mut i32).cast(),&mut size)};
++  if result!=0{*state=State::CaptureFailed;return Err(io::Error::last_os_error())}
++  if fd<0{*state=State::CaptureFailed;return Err(io::Error::other("Kernel returned no peer pidfd"))}
++  *state=State::Owned(fd); // actual new kernel descriptor retained BEFORE checks
++  if size!=std::mem::size_of::<i32>()as u32{return Err(io::Error::other("Peer pidfd result length unknown; original retained"))}
++  Ok(())
++ }
++ /// Query SAME actual kernel process object. True is peer exit only, never
++ /// agent/job/goal retirement. No signal/stop authority is exposed.
++ pub fn exited_observed(&self)->io::Result<bool>{
++  let state=self.state.lock().map_err(|_|io::Error::other("Original peer pidfd poisoned"))?;
++  let State::Owned(fd)=*state else{return Err(io::Error::other("Original peer pidfd unavailable"))};
++  let mut descriptor=PollFd{fd,events:1,revents:0};let result=unsafe{poll(&mut descriptor,1,0)};
++  if result<0{return Err(io::Error::last_os_error())}if result==0{return Ok(false)}
++  if descriptor.revents&(0x20|0x08)!=0{return Err(io::Error::other("Original peer pidfd poll failed"))}
++  if descriptor.revents&(1|0x10)!=0{return Ok(true)}Err(io::Error::other("Unknown original peer pidfd event"))
++ }
++ pub fn close_once(&self)->io::Result<()>{
++  let mut state=self.state.lock().map_err(|_|io::Error::other("Original peer pidfd poisoned"))?;
++  let State::Owned(fd)=*state else{return Err(io::Error::other("Original pidfd close unavailable or spent"))};
++  *state=State::CloseStarted(fd);
++  if unsafe{close(fd)}!=0{*state=State::CloseFailed(fd);return Err(io::Error::last_os_error())}
++  *state=State::Closed;Ok(())
++ }
++}
++// Unsupported SO_PEERPIDFD/kernel/architecture is a protocol qualification gate,
++// never permission to fall back to pidfd_open(SO_PEERCRED.pid). The actual UID,
++// process birth/start and approved executable/source capture remain required.

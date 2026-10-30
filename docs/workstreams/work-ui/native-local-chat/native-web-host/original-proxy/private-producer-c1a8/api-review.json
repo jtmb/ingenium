@@ -1,0 +1,47 @@
+{
+  "scope": "exact local primary source/API inspection; no OS calls or Native/peer qualification",
+  "dependencies": {
+    "tokio": {
+      "version": "1.53.2",
+      "archive_sha256": "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044",
+      "source_files_exact_archive_sha256": {
+        "src/net/windows/named_pipe.rs": "da168cff030a5e3335263f29d7279bb3ee17220f2e188f42460a5b6985d41f9f",
+        "src/net/unix/stream.rs": "a8c79acf19c29cceeacea03354c0d642d97ded1c7a7e5409a3e6084bc4130aeb",
+        "src/net/unix/ucred.rs": "f1da7401db1a50ef53d2c7f712008694dfb815080b08c5fa83af6c2e42b67abc"
+      }
+    },
+    "tauri": {
+      "version": "2.12.2",
+      "archive_sha256": "d061d042ccd2df9c9f1508c1e63d835278c0a4c8801eb41764080e51f2eaaf34",
+      "source_files_exact_archive_sha256": {
+        "src/webview/webview_window.rs": "5cf28b52b0ed7179926b1087df08d8765bf2c31805fb532f9260908a57422230",
+        "src/webview/mod.rs": "b5319b171c09a8e652d75585be39d92b387df370340ca90b58141b501c17009a"
+      }
+    },
+    "libc": {
+      "version": "0.2.190",
+      "archive_sha256": "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78",
+      "source_files_exact_archive_sha256": {
+        "src/new/linux_uapi/asm/socket.rs": "b910427d13ecbcee0c137c919c0eb0997cdf9aa30304874e45bd26795b6c3b54"
+      }
+    }
+  },
+  "checks": {
+    "three_archives_match_actual_lock": true,
+    "six_primary_files_exact_archive": true,
+    "actual_window_to_webview_asref": true,
+    "actual_webview_parent_window": true,
+    "actual_pipe_server_and_client_raw_borrow": true,
+    "pipe_no_owned_into_raw_handle_api": true,
+    "pipe_security_attributes_api": true,
+    "pipe_remote_rejection_and_first_instance": true,
+    "actual_uds_peer_cred_api": true,
+    "actual_uds_uid_pid_accessors": true,
+    "actual_linux_generic_peer_pidfd_constant": true
+  },
+  "passed": 11,
+  "compiler_runtime_or_os_queries_run": false,
+  "broker_factory_complete": false,
+  "kernel_behavior_reference": "https://github.com/torvalds/linux/blob/master/net/core/sock.c",
+  "kernel_behavior_limit": "SO_PEERPIDFD uses socket retained peer struct pid; target kernel/namespace support remains runtime qualification"
+}

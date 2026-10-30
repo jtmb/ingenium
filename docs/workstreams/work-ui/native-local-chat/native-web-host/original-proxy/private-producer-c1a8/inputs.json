@@ -1,0 +1,50 @@
+{
+  "apps/desktop/src-tauri/src/main.rs": {
+    "preimage_sha256": "c504e2096f8d884f055874f1afc64f2a39567bd6c1bd771af3a9a29202f09a5d",
+    "proposed_sha256": "46f292874c79a9bdd6a8810e56c0d11c56579fb029bb9c7dc6a637ae451d80c2"
+  },
+  "apps/desktop/src-tauri/src/workspace_windows.rs": {
+    "preimage_sha256": "dcc69560dc1647f8041c9d32cb84fccbf493862a2407294745a6d53b51de223d",
+    "proposed_sha256": "fafcb22276e1d3311159df537c028c042f1b3c5365008502aa763cbe9d94ace7"
+  },
+  "apps/desktop/src-tauri/src/hosted_windows.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "b11bc140d2081430bcb115beadefa1732bfa35b9fa8e6b1edc80ade57464cd93"
+  },
+  "apps/service/src/routes/local_workspaces.rs": {
+    "preimage_sha256": "b24010bb3a90de4a3be56861314df3d5658c4e733c4bd360b9ba80d7ceb440f6",
+    "proposed_sha256": "ac68140c4a887406f0986af203f2f25a00ce4e8d1b00d05c65f41cc6803ffc71"
+  },
+  "apps/service/src/routes/local_workspaces/web_original.rs": {
+    "preimage_sha256": "22f757b93d5dc7aece02051c01fa2793b2155ca4d9f50d656682a80788919e71",
+    "proposed_sha256": "e6a394fe8ffd018bc4e14454bfcddcf8c599d01b4712c7dba1532336e9d09766"
+  },
+  "apps/service/src/routes.rs": {
+    "preimage_sha256": "792818c0e8a6ca51f4d84a387c67fc179a3a7d9ded55053e0c715510ec03bb1c",
+    "proposed_sha256": "d4e3e882a14caf9035a9c2033ccc0062f2cde134d55be93e0eca594805d03307"
+  },
+  "apps/service/src/routes/local_workspaces/web_original/private_receiver.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "fcd4c65c332f34912570d1350188568e261630181ed355eafda62da9ab63338b"
+  },
+  "apps/service/src/server/original.rs": {
+    "preimage_sha256": "e0f7a1e30add500f78c46efcb11473db084cc6e28b366475d39ae2885ab6d5bf",
+    "proposed_sha256": "7604dbb840502ae0db5ffd53adf5da4ed90fa66572e14107894aa467c8f5c649"
+  },
+  "apps/service/src/server/original/private_listener.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "a6c2ba68dbd23a9bda817a989ca6ffbe9e29d11b05a7a7f11e66c1674342d5f4"
+  },
+  "crates/adapters/src/lib.rs": {
+    "preimage_sha256": "d31bd67bf73b68de85b16268c93b9ab3b7b8d31a628da8f280b39b27c778f140",
+    "proposed_sha256": "50a4ea7c194e91851c6a50d3fcd6064d2de8594ec282d5af854f35a701bc6178"
+  },
+  "crates/adapters/src/native_web_peer.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "eca62585bb62a62065e97f89882d194c1e4193eb1282332f523b0423663c2935"
+  },
+  "crates/adapters/src/native_web_peer/linux_pidfd.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "d1a31d1ef05e977a733f2812440191b2c078ba202f2f082899dfc06d9d8cc094"
+  }
+}
