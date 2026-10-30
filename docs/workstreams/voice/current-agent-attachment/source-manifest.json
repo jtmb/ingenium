@@ -39,6 +39,16 @@
       "sha256": "2016f36944291aa916bddb2b105d965129534eab3aa5941e4105d2a11c084aa7"
     },
     {
+      "path": "attached-tts-assembly-review.md",
+      "bytes": 1407,
+      "sha256": "04f7df6aefc9618876cbc4b078189feca1a0efe4fb0df8a4c6323ec907ba250f"
+    },
+    {
+      "path": "attached-tts-assembly.additions.ts",
+      "bytes": 4013,
+      "sha256": "ee5cdfbc2bacffdcac72461da9ec299f267935bcd7468a9e40cb5dc8e4fc0d97"
+    },
+    {
       "path": "attached-verbatim-policy.d.mts",
       "bytes": 730,
       "sha256": "f5f4d78dfc253cad570301127d9017b0aaea33800482cb3cd594b459ed72e166"
@@ -384,5 +394,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 374502.0
+  "totalContentBytes": 379922.0
 }
