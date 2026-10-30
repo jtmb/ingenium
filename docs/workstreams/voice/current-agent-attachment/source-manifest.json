@@ -204,6 +204,26 @@
       "sha256": "d58f3fb083a26b50d16d0a8852818c33c574c9bbfcb91420e9df03fd844da564"
     },
     {
+      "path": "production-call-assembly-receipt.json",
+      "bytes": 1213,
+      "sha256": "00c2c62f9c550c485205f7d5e377eddc82303f7d89dc18fa8225393e27141f1b"
+    },
+    {
+      "path": "production-call-assembly.md",
+      "bytes": 6912,
+      "sha256": "e976fa6a934c32a4a92c3fb366f8479c04380e9215241dcaff6b3e0ae82ad13f"
+    },
+    {
+      "path": "production-call-request-splice.json",
+      "bytes": 532,
+      "sha256": "63b8a7b5ea01a51619d6a31a0e595c1124b392cbd1c465b3f9e00196c17d4506"
+    },
+    {
+      "path": "production-call-request.additions.ts",
+      "bytes": 4276,
+      "sha256": "a99e6fd78be1f387bc18c54424ef647ca73712e3313e48f50be20c61d0beae95"
+    },
+    {
       "path": "raw-assistant-client-negative.test.ts",
       "bytes": 2531,
       "sha256": "121d3c003eccf39a2eb52d9e00ef9a2d416228018bb9c89da489962aab90d501"
@@ -334,5 +354,5 @@
       "sha256": "d5ce6d7a8a915fc7aaa63734a2d477579e372f5cca3f30fe5d72f73722108ec7"
     }
   ],
-  "totalContentBytes": 340680
+  "totalContentBytes": 353613.0
 }

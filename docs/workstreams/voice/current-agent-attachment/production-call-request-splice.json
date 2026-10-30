@@ -1,0 +1,10 @@
+{
+  "kind": "production-call-new-request-append-v1",
+  "applied": false,
+  "compiled": false,
+  "target": "services/ingenium-api/lib/voice-v2/request-context.ts",
+  "preimageSha256": "4794c5650782b3dbc1d8909019a23632cccd4f12852c9cf1f49992a06fd5b82a",
+  "appendFile": "production-call-request.additions.ts",
+  "appendSha256": "a99e6fd78be1f387bc18c54424ef647ca73712e3313e48f50be20c61d0beae95",
+  "instruction": "Verify exact preimage, append newline and source once inside actual module; Root compiles/tests. No mount/activation."
+}

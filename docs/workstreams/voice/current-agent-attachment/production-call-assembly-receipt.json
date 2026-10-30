@@ -1,0 +1,31 @@
+{
+  "kind": "production-call-assembly-source-receipt-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "parentCheckpoint": "2af2fa38aa7e308138cedd531dad70130cc0c922",
+  "appliedCanonical": false,
+  "compiled": false,
+  "testsExecuted": 0,
+  "runtimeQualified": false,
+  "review": "Manual auth/scope/callgraph/cleanup source review only",
+  "requiredRootCases": [
+    "forged handle/grant rejected",
+    "cross actor/authsession denied before network",
+    "sessionless bearer denied",
+    "any9axes/backend/start/source change denied",
+    "incoming request revoked after await denied",
+    "generation change drops event",
+    "End joins enrolled capture",
+    "reconnect new Request needs new grant",
+    "barge keeps subscription; End exact lease only"
+  ],
+  "blockers": [
+    "Exact bootstrap scope reference/transfer",
+    "Protected CPU installation paths",
+    "Core134 private original plan consume API",
+    "Actual router/132 message/speech/stream/audio/UI integration"
+  ],
+  "removedPaths": [],
+  "removedBytes": 0,
+  "retained": "Unique source/review/recipe/receipt/manifest; no bulk/cache/temp output",
+  "protected": "All13 pre-existing Native drafts and all canonical source unchanged"
+}
