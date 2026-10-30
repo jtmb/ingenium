@@ -1,0 +1,677 @@
+--- a/crates/adapters/src/lib.rs
++++ b/crates/adapters/src/lib.rs
+@@ -2,0 +3 @@
++pub mod native_web_payload;
+--- /dev/null
++++ b/crates/adapters/src/native_web_payload.rs
+@@ -0,0 +1,97 @@
++//! Actual backing allocations own resident-payload charges. No physical proof.
++use std::{io::{self,Read},ops::{Deref,Range},sync::{Arc,atomic::{AtomicUsize,Ordering}}};
++const LIMIT:usize=64*1024*1024;
++pub(crate) struct Pool{used:AtomicUsize,limit:usize}
++#[derive(Debug)]pub(crate) struct Refused;
++impl Pool{
++ pub(crate) fn for_registry()->Arc<Self>{Arc::new(Self{used:AtomicUsize::new(0),limit:LIMIT})}
++ pub(crate) fn allocate(self:&Arc<Self>,capacity:usize)->Result<Buffer,Refused>{
++  if capacity==0{return Err(Refused)}
++  let mut old=self.used.load(Ordering::Acquire);
++  loop{let next=old.checked_add(capacity).filter(|n|*n<=self.limit).ok_or(Refused)?;
++   match self.used.compare_exchange_weak(old,next,Ordering::AcqRel,Ordering::Acquire){Ok(_)=>break,Err(actual)=>old=actual}}
++  let charge=Charge{pool:self.clone(),capacity};
++  let layout=std::alloc::Layout::array::<u8>(capacity).map_err(|_|Refused)?;
++  let ptr=unsafe{std::alloc::alloc_zeroed(layout)};
++  if ptr.is_null(){return Err(Refused)}
++  // Nonzero exact initialized u8 layout from global allocator; Box frees same.
++  let bytes=unsafe{Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr,capacity))};
++  Ok(Buffer{allocation:Arc::new(Allocation{bytes,_charge:charge}),length:0})
++ }
++ pub(crate) fn used(&self)->usize{self.used.load(Ordering::Acquire)} // telemetry only
++}
++struct Charge{pool:Arc<Pool>,capacity:usize}
++impl Drop for Charge{fn drop(&mut self){let prior=self.pool.used.fetch_sub(self.capacity,Ordering::AcqRel);debug_assert!(prior>=self.capacity);}}
++struct Allocation{bytes:Box<[u8]>,_charge:Charge} // actual bytes drop FIRST
++pub(crate) struct Buffer{allocation:Arc<Allocation>,length:usize}
++impl Buffer{
++ pub(crate) fn len(&self)->usize{self.length}
++ pub(crate) fn is_empty(&self)->bool{self.length==0}
++ pub(crate) fn capacity(&self)->usize{self.allocation.bytes.len()}
++ pub(crate) fn refill<E>(&mut self,length:usize,fill:impl FnOnce(&mut[u8])->Result<(),E>)->Result<(),Option<E>>{
++  if length>self.capacity(){return Err(None)}
++  let actual=Arc::get_mut(&mut self.allocation).ok_or(None)?;
++  self.length=0;fill(&mut actual.bytes[..length]).map_err(Some)?;self.length=length;Ok(())
++ }
++ pub(crate) fn append(&mut self,bytes:&[u8])->Result<(),Refused>{
++  let end=self.length.checked_add(bytes.len()).filter(|n|*n<=self.capacity()).ok_or(Refused)?;
++  let actual=Arc::get_mut(&mut self.allocation).ok_or(Refused)?;
++  actual.bytes[self.length..end].copy_from_slice(bytes);self.length=end;Ok(())
++ }
++ pub(crate) fn read_once(&mut self,input:&mut impl Read,maximum:usize)->io::Result<usize>{
++  let end=self.capacity().min(self.length.saturating_add(maximum));
++  if end==self.length{return Err(io::Error::other("charged capacity exhausted"))}
++  let actual=Arc::get_mut(&mut self.allocation).ok_or_else(||io::Error::other("payload already shared"))?;
++  let count=input.read(&mut actual.bytes[self.length..end])?;
++  if count>end-self.length{return Err(io::Error::other("reader exceeded destination"))}
++  self.length+=count;Ok(count)
++ }
++ pub(crate) fn share(&self)->Payload{Payload{allocation:self.allocation.clone(),range:0..self.length}}
++ pub(crate) fn freeze(self)->Payload{Payload{allocation:self.allocation,range:0..self.length}}
++}
++impl AsRef<[u8]> for Buffer{fn as_ref(&self)->&[u8]{&self.allocation.bytes[..self.length]}}
++impl Deref for Buffer{type Target=[u8];fn deref(&self)->&[u8]{self.as_ref()}}
++pub(crate) fn json_payload(pool:&Arc<Pool>,value:&impl serde::Serialize)->Result<Payload,Refused>{
++ struct Counter(usize);impl io::Write for Counter{fn write(&mut self,b:&[u8])->io::Result<usize>{self.0=self.0.checked_add(b.len()).ok_or_else(||io::Error::other("length overflow"))?;Ok(b.len())}fn flush(&mut self)->io::Result<()>{Ok(())}}
++ impl io::Write for Buffer{fn write(&mut self,b:&[u8])->io::Result<usize>{self.append(b).map_err(|_|io::Error::other("charged destination exhausted"))?;Ok(b.len())}fn flush(&mut self)->io::Result<()>{Ok(())}}
++ let mut count=Counter(0);serde_json::to_writer(&mut count,value).map_err(|_|Refused)?;
++ let mut actual=pool.allocate(count.0.max(1))?;serde_json::to_writer(&mut actual,value).map_err(|_|Refused)?;Ok(actual.freeze())
++}
++/// Opaque, no public mint/Deserialize/into_vec or counter-release method.
++pub struct Payload{allocation:Arc<Allocation>,range:Range<usize>}
++impl Clone for Payload{fn clone(&self)->Self{Self{allocation:self.allocation.clone(),range:self.range.clone()}}}
++impl Payload{
++ pub fn len(&self)->usize{self.range.len()}
++ pub fn is_empty(&self)->bool{self.range.is_empty()}
++ pub(crate) fn belongs_to(&self,pool:&Arc<Pool>)->bool{Arc::ptr_eq(&self.allocation._charge.pool,pool)}
++ pub(crate) fn pool(&self)->&Arc<Pool>{&self.allocation._charge.pool}
++ pub fn span(&self,range:Range<usize>)->Option<Self>{
++  if range.start>range.end||range.end>self.len(){return None}
++  Some(Self{allocation:self.allocation.clone(),range:self.range.start+range.start..self.range.start+range.end})
++ }
++ pub fn cursor(&self)->Cursor{Cursor{body:self.clone(),offset:0}}
++ #[cfg(test)]pub(crate) fn owner_count(&self)->usize{Arc::strong_count(&self.allocation)}
++}
++impl AsRef<[u8]> for Payload{fn as_ref(&self)->&[u8]{&self.allocation.bytes[self.range.clone()]}}
++impl Deref for Payload{type Target=[u8];fn deref(&self)->&[u8]{self.as_ref()}}
++pub struct Cursor{body:Payload,offset:usize}
++impl Read for Cursor{fn read(&mut self,out:&mut[u8])->io::Result<usize>{let n=out.len().min(self.body.len()-self.offset);out[..n].copy_from_slice(&self.body.as_ref()[self.offset..self.offset+n]);self.offset+=n;Ok(n)}}
++
++#[cfg(test)]mod tests{
++ use super::*;
++ fn small(n:usize)->Arc<Pool>{Arc::new(Pool{used:AtomicUsize::new(0),limit:n})}
++ #[test]fn response_cursor_and_one_byte_span_keep_entire_capacity(){
++  let p=small(64);let mut b=p.allocate(64).unwrap();b.append(b"exact").unwrap();let body=b.freeze();let page=body.span(0..1).unwrap();let mut response=page.cursor();
++  drop(body);drop(page);assert_eq!(p.used(),64);assert!(p.allocate(1).is_err());let mut one=[0];response.read_exact(&mut one).unwrap();assert_eq!(one,[b'e']);drop(response);assert_eq!(p.used(),0);
++ }
++ #[test]fn shared_body_refuses_mutation_and_does_not_detach_charge(){
++  let p=small(8);let mut b=p.allocate(8).unwrap();b.append(b"x").unwrap();let last=b.share();assert!(b.append(b"y").is_err());drop(b);assert_eq!(last.as_ref(),b"x");assert_eq!(p.used(),8);drop(last);assert_eq!(p.used(),0);
++ }
++ #[test]fn refused_growth_keeps_prefix_and_other_owner(){
++  let p=small(4);let mut b=p.allocate(4).unwrap();b.append(b"raw").unwrap();assert!(b.append(b"!!").is_err());assert_eq!(b.as_ref(),b"raw");assert!(p.allocate(1).is_err());drop(b);assert_eq!(p.used(),0);
++ }
++ #[test]fn read_error_keeps_actual_prefix(){
++  struct Fault;impl Read for Fault{fn read(&mut self,_:&mut[u8])->io::Result<usize>{Err(io::Error::other("fault"))}}
++  let p=small(8);let mut b=p.allocate(8).unwrap();b.append(b"prefix").unwrap();assert!(b.read_once(&mut Fault,2).is_err());assert_eq!(b.as_ref(),b"prefix");assert_eq!(p.used(),8);
++ }
++}
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -127 +127 @@
+-        target: &str, headers: &[(String, String)], body: Vec<u8>,
++        target: &str, headers: &[(String, String)], intake: NativeWebIntake,
+@@ -129,0 +130 @@
++        let body=self.take_local_web_intake(lease,intake)?;
+@@ -138,0 +140,3 @@
++mod intake;
++pub use intake::NativeWebIntake;
++use crate::native_web_payload::Payload;
+@@ -150 +154 @@
+-    body:Arc<[u8]>,
++    body:Payload,
+@@ -155 +159 @@
+-        headers: &[(String, String)], body: Vec<u8>) -> Result<Self, RuntimeError> {
++        headers: &[(String, String)], body: Payload) -> Result<Self, RuntimeError> {
+@@ -162 +166 @@
+-        let metadata = serde_json::to_vec(&(&lease.original, method.as_str(), target,
++        let metadata = crate::native_web_payload::json_payload(body.pool(),&(&lease.original, method.as_str(), target,
+@@ -167 +171 @@
+-            method, raw_target: target.into(), route, query, headers: content, body:Arc::from(body), input_sha256 })
++            method, raw_target: target.into(), route, query, headers: content, body, input_sha256 })
+@@ -178 +182 @@
+-    pub(crate) fn body_owner(&self)->Arc<[u8]>{self.body.clone()}
++    pub(crate) fn body_owner(&self)->Payload{self.body.clone()}
+@@ -203,5 +206,0 @@
+-    pub fn journal_original(&self) -> Value {
+-        let mut scope=self.journal_scope();
+-        scope["body_bytes"]=json!(self.body.as_ref());
+-        scope
+-    }
+--- /dev/null
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/intake.rs
+@@ -0,0 +1,37 @@
++// Insert as child of local_workspaces::web_original; re-export NativeWebIntake.
++use super::*;
++use crate::native_web_payload::{Buffer,Payload};
++const INTAKE_LIMIT:usize=16*1024*1024; // preserve current limit; 20MiB gate OPEN
++pub struct NativeWebIntake{
++ body:Buffer,engine:Arc<super::super::super::web_engine_retirement::NativeWebEngineOriginal>,
++ binding:String,epoch:String,complete:bool,failed:bool,
++}
++impl NativeWebIntake{
++ // Authenticated host reserves BEFORE its first poll of the received HTTP Body.
++ pub fn append_frame(&mut self,bytes:&[u8])->Result<(),String>{
++  if self.complete||self.failed{return Err("Original intake unavailable".into())}
++  // Mark failure BEFORE copying; refusal retains the actual earlier prefix.
++  self.failed=true;
++  if self.body.len().checked_add(bytes.len()).is_none_or(|n|n>INTAKE_LIMIT){return Err("Original intake limit".into())}
++  self.body.append(bytes).map_err(|_|"Original charged destination unavailable")?;
++  self.failed=false;Ok(())
++ }
++ pub fn received_eof(&mut self)->Result<(),String>{if self.failed||self.complete{return Err("Original intake incomplete".into())}self.complete=true;Ok(())}
++ pub fn received_failure(&mut self){self.failed=true;}
++ pub fn retained_prefix(&self)->&[u8]{self.body.as_ref()}
++}
++impl LiveRuntime{
++ pub fn begin_local_web_intake(&self,lease:&LocalWebLease,current:&dyn Fn()->Result<(),String>)->Result<NativeWebIntake,RuntimeError>{
++  self.check_local_web_lease(lease,current)?;
++  let body=self.native_web_completions.payload_pool.allocate(INTAKE_LIMIT+1).map_err(|_|RuntimeError::AdmissionPending)?;
++  self.check_local_web_lease(lease,current)?;
++  Ok(NativeWebIntake{body,engine:lease.native_engine_original.clone(),binding:lease.binding_id.clone(),epoch:lease.invalidation_epoch.clone(),complete:false,failed:false})
++ }
++ pub(super) fn take_local_web_intake(&self,lease:&LocalWebLease,intake:NativeWebIntake)->Result<Payload,RuntimeError>{
++  if intake.failed||!intake.complete||!Arc::ptr_eq(&intake.engine,&lease.native_engine_original)
++   ||intake.binding!=lease.binding_id||intake.epoch!=lease.invalidation_epoch{return Err(RuntimeError::Binding)}
++  let body=intake.body.freeze();
++  if !body.belongs_to(&self.native_web_completions.payload_pool){return Err(RuntimeError::Binding)}
++  Ok(body)
++ }
++}
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -36 +36 @@
+-pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission,NativeWindowsWebRead};
++pub use local_workspaces::web_original::{LocalWebLease, NativeWebIntake, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission,NativeWindowsWebRead};
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs
+@@ -38,2 +38,2 @@
+-#[derive(Default)]
+-pub struct NativeWebCompletions{slots:Mutex<BTreeMap<String,Arc<NativeWebSendSlot>>>,generation:Arc<NativeWebRegistryOriginal>}
++pub struct NativeWebCompletions{slots:Mutex<BTreeMap<String,Arc<NativeWebSendSlot>>>,generation:Arc<NativeWebRegistryOriginal>,pub(crate) payload_pool:Arc<crate::native_web_payload::Pool>}
++impl Default for NativeWebCompletions{fn default()->Self{Self{slots:Mutex::new(BTreeMap::new()),generation:Arc::new(NativeWebRegistryOriginal::default()),payload_pool:crate::native_web_payload::Pool::for_registry()}}}
+@@ -40,0 +41 @@
++ pub fn reserve_history_page(&self)->crate::projects::NativeWebPageRead{crate::projects::NativeWebPageRead::for_registry(self.payload_pool.clone())}
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs
+@@ -4,0 +5 @@
++use crate::native_web_payload::{Payload,json_payload};
+@@ -31 +32 @@
+-    bytes:Arc<[u8]>,
++    bytes:Payload,
+@@ -38 +39 @@
+-    pub(crate) fn bytes_owner(&self)->Arc<[u8]>{self.bytes.clone()}
++    pub(crate) fn bytes_owner(&self)->Payload{self.bytes.clone()}
+@@ -48 +49 @@
+-pub fn materialize_resolved_web_files(original:&[u8],resolved:&crate::opencode::attachments::NativeWebFilesOriginal)->Result<EffectiveWebBody,String>{
++pub fn materialize_resolved_web_files(original:&Payload,resolved:&crate::opencode::attachments::NativeWebFilesOriginal)->Result<EffectiveWebBody,String>{
+@@ -120 +121 @@
+-pub fn materialize_web_uri_spans(original:&[u8],replacements:&[WebUriReplacement])->Result<EffectiveWebBody,String>{
++pub fn materialize_web_uri_spans(original:&Payload,replacements:&[WebUriReplacement])->Result<EffectiveWebBody,String>{
+@@ -154,3 +155,5 @@
+-            let mut insertion=if *comma{b",\"name\":".to_vec()}else{b"\"name\":".to_vec()};
+-            insertion.extend_from_slice(&serde_json::to_vec(name).map_err(|_|invalid())?);
+-            edits.push((*end..*end,insertion));
++            let prefix=if *comma{b",\"name\":".as_slice()}else{b"\"name\":".as_slice()};
++            let literal=json_payload(original.pool(),name).map_err(|_|invalid())?;
++            let mut insertion=original.pool().allocate(prefix.len()+literal.len()).map_err(|_|invalid())?;
++            insertion.append(prefix).map_err(|_|invalid())?;insertion.append(literal.as_ref()).map_err(|_|invalid())?;
++            edits.push((*end..*end,insertion.freeze()));
+@@ -158 +161 @@
+-        let literal=serde_json::to_vec(&replacement.effective_uri).map_err(|_|invalid())?;
++        let literal=json_payload(original.pool(),&replacement.effective_uri).map_err(|_|invalid())?;
+@@ -165 +168,2 @@
+-    let mut effective=Vec::new();let mut last=0;
++    let capacity=edits.iter().try_fold(original.len(),|n,(span,literal)|n.checked_sub(span.len()).and_then(|n|n.checked_add(literal.len()))).ok_or_else(invalid)?;
++    let mut effective=original.pool().allocate(capacity.max(1)).map_err(|_|invalid())?;let mut last=0;
+@@ -168 +172 @@
+-        effective.extend_from_slice(&original[last..span.start]);effective.extend_from_slice(&literal);last=span.end;
++        effective.append(&original[last..span.start]).map_err(|_|invalid())?;effective.append(literal.as_ref()).map_err(|_|invalid())?;last=span.end;
+@@ -171 +175 @@
+-    effective.extend_from_slice(&original[last..]);
++    effective.append(&original[last..]).map_err(|_|invalid())?;
+@@ -173 +177 @@
+-    Ok(EffectiveWebBody{original_body_sha256:hash(original),effective_body_sha256:hash(&effective),bytes:Arc::from(effective),transformations})
++    Ok(EffectiveWebBody{original_body_sha256:hash(original),effective_body_sha256:hash(&effective),bytes:effective.freeze(),transformations})
+@@ -177,0 +182 @@
++    fn charged(raw:&[u8])->Payload{let pool=crate::native_web_payload::Pool::for_registry();let mut b=pool.allocate(raw.len().max(1)).unwrap();b.append(raw).unwrap();b.freeze()}
+@@ -181 +186 @@
+-        let result=materialize_web_uri_spans(raw,&[replacement("file:///private/a?start=2&end=3")]).unwrap();
++        let result=materialize_web_uri_spans(&charged(raw),&[replacement("file:///private/a?start=2&end=3")]).unwrap();
+@@ -186,2 +191,2 @@
+-        for raw in [br#"{"files":[{"uri":"a","uri":"b"}]}"#.as_slice(),br#"{"files":[],"files":[]}"#.as_slice(),br#"{"metadata":{"x":1,"x":2}}"#.as_slice()]{assert!(materialize_web_uri_spans(raw,&[]).is_err());}
+-        assert!(materialize_web_uri_spans(br#"{"files":[{"uri":"file:///wrong"}]}"#,&[replacement("file:///original")]).is_err());
++        for raw in [br#"{"files":[{"uri":"a","uri":"b"}]}"#.as_slice(),br#"{"files":[],"files":[]}"#.as_slice(),br#"{"metadata":{"x":1,"x":2}}"#.as_slice()]{assert!(materialize_web_uri_spans(&charged(raw),&[]).is_err());}
++        assert!(materialize_web_uri_spans(&charged(br#"{"files":[{"uri":"file:///wrong"}]}"#),&[replacement("file:///original")]).is_err());
+@@ -191 +196 @@
+-        assert_eq!(materialize_web_uri_spans(raw,&[]).unwrap().bytes(),raw);
++        assert_eq!(materialize_web_uri_spans(&charged(raw),&[]).unwrap().bytes(),raw);
+@@ -193 +198 @@
+-        assert!(materialize_web_uri_spans(raw,&[replacement("file:///a"),replacement("file:///a")]).is_err());
++        assert!(materialize_web_uri_spans(&charged(raw),&[replacement("file:///a"),replacement("file:///a")]).is_err());
+@@ -198 +203 @@
+-        let result=materialize_web_uri_spans(raw,&[change.clone()]).unwrap();
++        let result=materialize_web_uri_spans(&charged(raw),&[change.clone()]).unwrap();
+@@ -200 +205 @@
+-        assert!(materialize_web_uri_spans(br#"{"files":[{"uri":"file:///private/a","name":"original"}]}"#,&[change]).is_err());
++        assert!(materialize_web_uri_spans(&charged(br#"{"files":[{"uri":"file:///private/a","name":"original"}]}"#),&[change]).is_err());
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_file_input.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_file_input.rs
+@@ -18 +18 @@
+-  match(&self.snapshot,&self.windows){(Some(s),None)=>materialize_resolved_web_files(original.body(),s),(None,Some(w))=>identity_windows_web_body(original,w),_=>Err("original file owner ambiguous".into())}
++  match(&self.snapshot,&self.windows){(Some(s),None)=>materialize_resolved_web_files(&original.body_owner(),s),(None,Some(w))=>identity_windows_web_body(original,w),_=>Err("original file owner ambiguous".into())}
+--- a/crates/adapters/src/opencode/local_web_transport.rs
++++ b/crates/adapters/src/opencode/local_web_transport.rs
+@@ -3,0 +4 @@
++use crate::native_web_payload::{Buffer,Payload};
+@@ -10 +11 @@
+- pub status:Option<u16>,pub content_type:Option<String>,pub body:Vec<u8>,
++ pub status:Option<u16>,pub content_type:Option<String>,pub body:Buffer,
+@@ -36 +37 @@
+-  let mut chunk=[0u8;8192];
++
+@@ -40 +41 @@
+-   match response.read(&mut chunk[..remaining.min(8192)]){
++   match observed.body.read_once(response,remaining.min(8192)){
+@@ -47 +48 @@
+-    Ok(count)=>observed.body.extend_from_slice(&chunk[..count]),
++    Ok(_count)=>{},
+@@ -55 +56 @@
+-  content_headers:&[(String,String)],effective_body:Arc<[u8]>)->Result<OriginalWebPromptRequest,EngineError>{
++  content_headers:&[(String,String)],effective_body:Payload)->Result<OriginalWebPromptRequest,EngineError>{
+@@ -73,0 +75 @@
++  let mut body=effective_body.pool().allocate(LIMIT+1).map_err(|_|EngineError::Transport)?;
+@@ -77,2 +79,2 @@
+-  let request=request.body(reqwest::blocking::Body::sized(std::io::Cursor::new(effective_body),length)).build().map_err(|_|EngineError::Transport)?;
+-  let mut body=Vec::new();body.try_reserve_exact(LIMIT+1).map_err(|_|EngineError::Transport)?;
++  let request=request.body(reqwest::blocking::Body::sized(effective_body.cursor(),length)).build().map_err(|_|EngineError::Transport)?;
++
+@@ -99 +101 @@
+-  let mut owned=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],Arc::from(&b"{}"[..])).unwrap();
++  let mut owned=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],fixture_payload(b"{}")).unwrap();
+@@ -101 +103 @@
+-  assert_eq!(owned.observation.status,Some(200));assert_eq!(owned.observation.body,b"{\"data\":");
++  assert_eq!(owned.observation.status,Some(200));assert_eq!(owned.observation.body.as_ref(),b"{\"data\":");
+@@ -103 +105 @@
+-  owned.execute_retained();assert_eq!(owned.observation.body,b"{\"data\":");
++  owned.execute_retained();assert_eq!(owned.observation.body.as_ref(),b"{\"data\":");
+@@ -113 +115 @@
+-  let expected:Arc<[u8]>=Arc::from(&br#"{ "text":"x", "metadata":{"future":true},"delivery":"queue" }"#[..]);
++  let expected:Payload=fixture_payload(&br#"{ "text":"x", "metadata":{"future":true},"delivery":"queue" }"#[..]);
+@@ -123,2 +125,2 @@
+-  assert!(Arc::strong_count(&expected)>=2,"prepared actual reader must retain shared original bytes");
+-  request.execute_retained();worker.join().unwrap();assert_eq!(request.observation.body,b"{}");
++  assert!(expected.owner_count()>=2,"prepared actual reader must retain the same charged allocation");
++  request.execute_retained();worker.join().unwrap();assert_eq!(request.observation.body.as_ref(),b"{}");
+@@ -127,0 +130,2 @@
++
++#[cfg(test)]fn fixture_payload(raw:&[u8])->Payload{let p=crate::native_web_payload::Pool::for_registry();let mut b=p.allocate(raw.len().max(1)).unwrap();b.append(raw).unwrap();b.freeze()}
+--- a/crates/adapters/src/opencode/local_web_transport/closure.rs
++++ b/crates/adapters/src/opencode/local_web_transport/closure.rs
+@@ -92 +92 @@
+-  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],Arc::from(&b"{}"[..])).unwrap();request.execute_retained();
++  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],fixture_payload(b"{}")).unwrap();request.execute_retained();
+@@ -98 +98 @@
+-  assert!(Arc::ptr_eq(ended.observation(),&observed));assert_eq!(observed.body,b"{}");peer.join().unwrap();assert!(eof.load(std::sync::atomic::Ordering::Acquire));
++  assert!(Arc::ptr_eq(ended.observation(),&observed));assert_eq!(observed.body.as_ref(),b"{}");peer.join().unwrap();assert!(eof.load(std::sync::atomic::Ordering::Acquire));
+@@ -109 +109 @@
+-  let observed=Arc::new(WebPromptObservation{status:None,content_type:None,body:Vec::new(),phase:WebTransportPhase::Prepared,failure:None});
++  let observed=Arc::new(WebPromptObservation{status:None,content_type:None,body:crate::native_web_payload::Pool::for_registry().allocate(1).unwrap(),phase:WebTransportPhase::Prepared,failure:None});
+--- a/crates/adapters/src/projects/local_web_originals.rs
++++ b/crates/adapters/src/projects/local_web_originals.rs
+@@ -0,0 +1,2 @@
++mod acknowledgement_page;
++pub use acknowledgement_page::{NativeWebAcknowledgementPage,NativeWebPageRead};
+@@ -118,19 +119,0 @@
+-    pub fn read_native_web_acknowledgement(&self,owner:&veyra_contracts::local_workspaces::LocalWorkspaceOwner,
+-        session:&str,operation:&str,instance:&str)->Result<Option<NativeWebAcknowledgement>,StoreError>{
+-        use sha2::{Digest,Sha256};
+-        self.check_local_owner(owner,instance)?;self.require_local_session(&owner.workspace_id,session)?;
+-        let receipt=self.local_receipt(operation)?.ok_or(StoreError::NotFound)?;
+-        if receipt.owner.installation_id!=owner.installation_id||receipt.owner.custodian_key!=owner.custodian_key
+-            ||receipt.owner.workspace_id!=owner.workspace_id||receipt.owner.environment!=owner.environment{return Err(StoreError::Conflict);}
+-        let row:Option<(String,i64,String,String,Vec<u8>,String)>=self.connection.query_row(
+-            "SELECT a.input_sha256,a.status,a.content_headers_json,a.body_sha256,a.body,p.scope_engine_json FROM local_web_original_acknowledgements a JOIN local_web_original_payloads p ON p.operation_id=a.operation_id WHERE a.operation_id=?",
+-            [operation],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
+-        let Some((input,status,headers,body_hash,body,scope))=row else{return Ok(None)};
+-        let scope:serde_json::Value=serde_json::from_str(&scope).map_err(|_|StoreError::Corrupt)?;
+-        if input!=receipt.request_sha256||format!("{:x}",Sha256::digest(&body))!=body_hash
+-            ||scope.pointer("/engine/session_id").and_then(serde_json::Value::as_str)!=Some(session){return Err(StoreError::Corrupt);}
+-        let headers:Vec<(String,String)>=serde_json::from_str(&headers).map_err(|_|StoreError::Corrupt)?;
+-        if headers.len()>1||headers.iter().any(|(k,v)|k!="content-type"||v.chars().any(char::is_control)){return Err(StoreError::Corrupt);}
+-        Ok(Some(NativeWebAcknowledgement{status:u16::try_from(status).map_err(|_|StoreError::Corrupt)?,headers,body}))
+-    }
+-
+--- /dev/null
++++ b/crates/adapters/src/projects/local_web_originals/acknowledgement_page.rs
+@@ -0,0 +1,118 @@
++//! Proposed child of projects::local_web_originals. Same original connection.
++use super::*;
++use crate::native_web_payload::{Payload,Pool};
++use std::sync::{Arc,Mutex};
++use std::time::Instant;
++const PAGE:usize=64*1024;
++const WINDOW:usize=8192;
++/// Retained by the actual worker capsule before any Blob opens. No DTO mint.
++pub(crate) struct PageReadCustody{state:Mutex<ReadState>}
++pub struct NativeWebPageRead{pub(crate) pool:Arc<Pool>,custody:Arc<PageReadCustody>}
++impl NativeWebPageRead{
++ pub(crate) fn for_registry(pool:Arc<Pool>)->Self{Self{pool,custody:PageReadCustody::reserved()}}
++ // Reserved also means this private reader never ran/opened a Blob. Service
++ // may use this only AFTER joining the same actual worker, never by itself.
++ pub fn no_live_blob_after_join(&self)->bool{self.custody.state.lock().is_ok_and(|s|matches!(*s,ReadState::Reserved|ReadState::NoBlob|ReadState::Closed))}
++}
++#[derive(Clone,Copy,PartialEq,Eq)]enum ReadState{Reserved,NoBlob,CloseUnknown,Closed,CloseFailed}
++impl PageReadCustody{
++ pub(crate) fn reserved()->Arc<Self>{Arc::new(Self{state:Mutex::new(ReadState::Reserved)})}
++ fn begin_once(&self)->Result<(),StoreError>{let mut s=self.state.lock().map_err(|_|StoreError::Conflict)?;if *s!=ReadState::Reserved{return Err(StoreError::Conflict)}*s=ReadState::NoBlob;Ok(())}
++ fn opened(&self)->Result<(),StoreError>{let mut s=self.state.lock().map_err(|_|StoreError::Conflict)?;if *s!=ReadState::NoBlob{return Err(StoreError::Conflict)}*s=ReadState::CloseUnknown;Ok(())}
++ fn close_actual(&self,blob:rusqlite::blob::Blob<'_>)->Result<(),StoreError>{
++  // A panic/missing result remains CloseUnknown. Consumed close error latches
++  // BEFORE close takes ownership, and no second close/reopen retry is provided.
++  let mut s=self.state.lock().map_err(|_|StoreError::Conflict)?;
++  if *s!=ReadState::CloseUnknown{return Err(StoreError::Conflict)}
++  *s=ReadState::CloseFailed;
++  blob.close()?;*s=ReadState::Closed;Ok(())
++ }
++ pub(crate) fn checked_closed(&self)->bool{self.state.lock().is_ok_and(|s|*s==ReadState::Closed)}
++}
++/// Bytes are an actual charged allocation; metadata never releases its charge.
++pub struct NativeWebAcknowledgementPage{
++ writer:Arc<NativeWebWriterOriginal>,operation:[u8;16],
++ pub(crate) bytes:Payload,pub(crate) offset:usize,pub(crate) total:usize,
++ pub(crate) status:u16,pub(crate) content_type:Option<Payload>,pub(crate) hash:[u8;64],
++}
++impl NativeWebAcknowledgementPage{
++ pub fn body(&self)->&[u8]{self.bytes.as_ref()}
++ pub fn body_owner(&self)->Payload{self.bytes.clone()}
++ pub fn offset(&self)->usize{self.offset}
++ pub fn total(&self)->usize{self.total}
++ pub fn status(&self)->u16{self.status}
++ pub fn content_type(&self)->Option<&str>{self.content_type.as_ref().and_then(|p|std::str::from_utf8(p.as_ref()).ok())}
++ pub fn body_sha256(&self)->&str{std::str::from_utf8(&self.hash).expect("checked ASCII hash")}
++}
++impl ProjectStore{
++ pub fn handoff_native_web_acknowledgement_page(&self,owner:&veyra_contracts::local_workspaces::LocalWorkspaceOwner,session:&str,operation:&str,instance:&str,page:&NativeWebAcknowledgementPage)->Result<Payload,StoreError>{
++  self.check_local_owner(owner,instance)?;self.require_local_session(&owner.workspace_id,session)?;
++  let id=uuid::Uuid::parse_str(operation).map_err(|_|StoreError::Invalid)?;
++  if !Arc::ptr_eq(&self.native_web_writer,&page.writer)||id.as_bytes()!=&page.operation{return Err(StoreError::Conflict)}
++  let current:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM local_web_original_acknowledgements a WHERE a.operation_id=?1 AND a.body_sha256=?2 AND NOT EXISTS(SELECT 1 FROM local_web_original_forget_receipts f WHERE f.operation_id=a.operation_id))",params![operation,page.body_sha256()],|r|r.get(0))?;
++  if !current{return Err(StoreError::Conflict)}Ok(page.body_owner())
++ }
++ pub fn read_native_web_acknowledgement_page(
++  &mut self,owner:&veyra_contracts::local_workspaces::LocalWorkspaceOwner,
++  session:&str,operation:&str,instance:&str,read:&NativeWebPageRead,offset:usize,
++  expected_hash:Option<&str>,deadline:Instant,
++ )->Result<Option<NativeWebAcknowledgementPage>,StoreError>{
++  use sha2::{Digest,Sha256};
++  let pool=&read.pool;let custody=&read.custody;
++  let operation_uuid=*uuid::Uuid::parse_str(operation).map_err(|_|StoreError::Invalid)?.as_bytes();
++  // Reserve BOTH actual destination and prepass scratch BEFORE row/BLOB load.
++  let mut page=pool.allocate(PAGE).map_err(|_|StoreError::Conflict)?;
++  let mut scratch=pool.allocate(WINDOW).map_err(|_|StoreError::Conflict)?;
++  let mut content=pool.allocate(16384).map_err(|_|StoreError::Conflict)?;
++  custody.begin_once()?;
++  self.check_local_owner(owner,instance)?;self.require_local_session(&owner.workspace_id,session)?;
++  // Preserve original reattachment rules: current service/revision checked
++  // above; historical receipt compares stable owner fields, not old instance.
++  let environment=crate::native_web_payload::json_payload(pool,&owner.environment).map_err(|_|StoreError::Conflict)?;
++  let environment=std::str::from_utf8(environment.as_ref()).map_err(|_|StoreError::Corrupt)?;
++  // Borrow scalar values from SQLite; copy only the fixed hash and the bounded
++  // precharged content-type buffer. No full scope/header JSON Value is loaded.
++  let tx=self.connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
++  let row:Option<(i64,i64,[u8;64],i64,bool)>=tx.query_row(
++   "SELECT a.rowid,a.status,a.body_sha256,length(a.body),json_array_length(a.content_headers_json),json_extract(a.content_headers_json,'$[0][1]') FROM local_web_original_acknowledgements a JOIN local_web_original_payloads p ON p.operation_id=a.operation_id JOIN local_workspace_operations o ON o.id=a.operation_id WHERE a.operation_id=?1 AND a.input_sha256=o.request_sha256 AND json_extract(p.scope_engine_json,'$.engine.session_id')=?2 AND json_extract(o.owner_json,'$.installation_id')=?3 AND json_extract(o.owner_json,'$.custodian_key')=?4 AND json_extract(o.owner_json,'$.workspace_id')=?5 AND json_extract(o.owner_json,'$.environment')=json_extract(?6,'$') AND json_type(a.content_headers_json)='array' AND (json_array_length(a.content_headers_json)=0 OR (json_array_length(a.content_headers_json)=1 AND json_type(a.content_headers_json,'$[0]')='array' AND json_array_length(a.content_headers_json,'$[0]')=2 AND json_extract(a.content_headers_json,'$[0][0]')='content-type' AND json_type(a.content_headers_json,'$[0][1]')='text')) AND NOT EXISTS(SELECT 1 FROM local_web_original_forget_receipts f WHERE f.operation_id=a.operation_id)",
++   params![operation,session,owner.installation_id,owner.custodian_key,owner.workspace_id,environment],|r|{
++    let raw=r.get_ref(2)?.as_str()?;
++    if raw.len()!=64||!raw.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)){return Err(rusqlite::Error::InvalidQuery)}
++    let mut hash=[0;64];hash.copy_from_slice(raw.as_bytes());
++    let present=r.get::<_,i64>(4)?==1;
++    if present{let raw=r.get_ref(5)?.as_str()?;if raw.chars().any(char::is_control){return Err(rusqlite::Error::InvalidQuery)}content.append(raw.as_bytes()).map_err(|_|rusqlite::Error::InvalidQuery)?;}
++    Ok((r.get(0)?,r.get(1)?,hash,r.get(3)?,present))
++   }).optional()?;
++  let Some((row,status,hash,total,present))=row else{return Ok(None)};
++  let total=usize::try_from(total).map_err(|_|StoreError::Corrupt)?;
++  if offset>total||expected_hash.is_some_and(|h|h.as_bytes()!=hash){return Err(StoreError::Conflict)}
++  let content_type=if present{Some(content.freeze())}else{None};
++  let status=u16::try_from(status).map_err(|_|StoreError::Corrupt)?;
++  if !(100..600).contains(&status)||(300..400).contains(&status){return Err(StoreError::Corrupt)}
++  let blob=tx.blob_open(rusqlite::MAIN_DB,"local_web_original_acknowledgements","body",row,true)?;
++  custody.opened()?;
++  // All fallible post-open work is inside this closure; explicit close runs
++  // even after length/hash/deadline/read/refill failure. Panic => unknown latch.
++  let read_result=(||{
++   if blob.len()!=total{return Err(StoreError::Corrupt)}
++   let mut position=0usize;let mut digest=Sha256::new();
++   while position<total{
++    if Instant::now()>=deadline{return Err(StoreError::BackupTimeout)}
++    let count=WINDOW.min(total-position);
++    scratch.refill(count,|dst|blob.read_at_exact(dst,position)).map_err(|e|e.map(StoreError::Database).unwrap_or(StoreError::Conflict))?;
++    digest.update(scratch.as_ref());position=position.checked_add(count).ok_or(StoreError::Corrupt)?;
++   }
++   let actual=digest.finalize();let alphabet=b"0123456789abcdef";
++   if actual.iter().enumerate().any(|(i,b)|hash[2*i]!=alphabet[(b>>4)as usize]||hash[2*i+1]!=alphabet[(b&15)as usize]){return Err(StoreError::Corrupt)}
++   let count=PAGE.min(total-offset);
++   page.refill(count,|dst|blob.read_at_exact(dst,offset)).map_err(|e|e.map(StoreError::Database).unwrap_or(StoreError::Conflict))?;
++   Ok(())
++  })();
++  // Same handle/row/read transaction from prepass through returned-page read.
++  let close_result=custody.close_actual(blob);
++  close_result?;read_result?;
++  tx.commit()?;
++  if !custody.checked_closed(){return Err(StoreError::Conflict)}
++  Ok(Some(NativeWebAcknowledgementPage{writer:self.native_web_writer.clone(),operation:operation_uuid,bytes:page.freeze(),offset,total,status,content_type,hash}))
++ }
++}
+--- a/crates/adapters/src/projects.rs
++++ b/crates/adapters/src/projects.rs
+@@ -4 +4 @@
+-pub use local_web_originals::{NativeWebDispatch,NativeWebReservation,NativeWebAcknowledgement,NativeWebPublished,SavedNativeWebPty};
++pub use local_web_originals::{NativeWebAcknowledgementPage,NativeWebPageRead,NativeWebDispatch,NativeWebReservation,NativeWebAcknowledgement,NativeWebPublished,SavedNativeWebPty};
+--- a/apps/service/src/routes/live_agent.rs
++++ b/apps/service/src/routes/live_agent.rs
+@@ -69 +69,2 @@
+-    pub(super) fn capture_local_web_request(&self,lease:&veyra_adapters::opencode::desktop_runtime::LocalWebLease,method:&str,target:&str,headers:&[(String,String)],body:Vec<u8>,current:&dyn Fn()->Result<(),String>)->Result<veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,String>{
++    pub(super) fn begin_local_web_intake(&self,lease:&veyra_adapters::opencode::desktop_runtime::LocalWebLease,current:&dyn Fn()->Result<(),String>)->Result<veyra_adapters::opencode::desktop_runtime::NativeWebIntake,String>{self.runtime.begin_local_web_intake(lease,current).map_err(|_|"Original charged intake refused".into())}
++    pub(super) fn capture_local_web_request(&self,lease:&veyra_adapters::opencode::desktop_runtime::LocalWebLease,method:&str,target:&str,headers:&[(String,String)],body:veyra_adapters::opencode::desktop_runtime::NativeWebIntake,current:&dyn Fn()->Result<(),String>)->Result<veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,String>{
+--- a/apps/service/src/routes/local_workspaces/web_original.rs
++++ b/apps/service/src/routes/local_workspaces/web_original.rs
+@@ -0,0 +1,3 @@
++mod scoped_intake;
++mod page_response;
++mod retained_page_worker;
+@@ -9 +12 @@
+-pub(super) struct WebPending {registry:Mutex<Option<Arc<veyra_adapters::opencode::desktop_runtime::NativeWebCompletions>>>}
++pub(super) struct WebPending {registry:Mutex<Option<Arc<veyra_adapters::opencode::desktop_runtime::NativeWebCompletions>>>,pages:Mutex<Vec<Arc<page_response::PageWork>>>}
+@@ -15,0 +19,2 @@
++  page_response::reconcile_abandoned(self)?;
++  if !self.pages.lock().map_err(|_|"Original page registry poisoned")?.is_empty(){return Err("Actual page worker ownership retained".into())}
+@@ -19,0 +25 @@
++  page_response::reconcile_abandoned(self)?;
+@@ -41 +47 @@
+-    lease:Arc<LocalWebLease>,original:NativeWebOriginal)->Result<NativeWebAcknowledgement,String>{
++    lease:Arc<LocalWebLease>,original:NativeWebOriginal)->Result<axum::response::Response,String>{
+@@ -45 +51,2 @@
+-    tokio::task::spawn_blocking(move||{
++    let response_state=state.clone();let response_binding=binding.clone();let response_lease=lease.clone();
++    let operation=tokio::task::spawn_blocking(move||{
+@@ -59,3 +66 @@
+-            let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
+-            return writer.as_ref().ok_or("Original Web writer retired")?.read_native_web_acknowledgement(binding.owner(),lease.session_id(),&retained.request_id,&state.instance_id)
+-                .map_err(|_|"Original Web response read refused")?.ok_or_else(||"Original Web outcome or forgotten response remains unavailable; no effect repeated".into());
++            return Ok(retained.request_id);
+@@ -89,4 +94,3 @@
+-        let writer=state.projects.try_lock().map_err(|_|"Original Web writer busy")?;
+-        writer.as_ref().ok_or("Original Web writer retired")?.read_native_web_acknowledgement(binding.owner(),lease.session_id(),&settled_operation,&state.instance_id)
+-            .map_err(|_|"Original Web response read refused")?.ok_or_else(||"Original Web outcome remains unknown; no effect repeated".into())
+-    }).await.map_err(|_|"Original Web worker ended; preserve original uncertainty")?
++        Ok(settled_operation)
++    }).await.map_err(|_|"Original Web worker ended; preserve original uncertainty")??;
++    page_response::response_for_operation(response_state,response_binding,response_lease,operation).await
+@@ -133 +137 @@
+-    content_headers: &[(String,String)], body: Vec<u8>,
++    content_headers: &[(String,String)], body: veyra_adapters::opencode::desktop_runtime::NativeWebIntake,
+--- /dev/null
++++ b/apps/service/src/routes/local_workspaces/web_original/scoped_intake.rs
+@@ -0,0 +1,29 @@
++//! Child of routes::local_workspaces::web_original. No public route installed.
++use super::*;
++use axum::body::Body;
++use futures_util::StreamExt;
++/// A concrete consumer of the actual received Body, not an already-built Vec.
++/// Call ONLY inside the original native-child + private-origin authenticated
++/// handler. Local bearer/LocalRequest alone is insufficient child authority.
++pub(super) async fn receive_prompt(
++ state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,lease:Arc<LocalWebLease>,
++ method:&str,target:&str,headers:&[(String,String)],body:Body,
++)->Result<NativeWebOriginal,String>{
++ check(&state,&binding,&lease)?;
++ let mut intake=state.live_agent.begin_local_web_intake(&lease,&||check_saved(&state,&binding,lease.session_id()))?;
++ // Reservation exists before polling data. The framework's transport buffers
++ // remain a separate required HTTP budget; no to_bytes/collect/to_vec/JSON AST.
++ let mut frames=body.into_data_stream();
++ while let Some(frame)=frames.next().await{
++  check(&state,&binding,&lease)?;
++  match frame{Ok(frame)=>intake.append_frame(frame.as_ref())?,Err(_)=>{intake.received_failure();return Err("Actual private request read failed".into())}}
++ }
++ intake.received_eof()?;
++ capture(&state,&binding,&lease,method,target,headers,intake)
++}
++
++// Missing outer function in current Native: no actual implementation of
++// desktop NativeAuthLease/OriginalWebAuthority creates/mounts a service private
++// proxy handler calling acquire -> receive_prompt -> submit_prompt. Root must
++// bind this concrete consumer under its actual child/origin/profile lifecycle.
++// It is intentionally not exposed on the ordinary authenticated public router.
+--- /dev/null
++++ b/apps/service/src/routes/local_workspaces/web_original/retained_page_worker.rs
+@@ -0,0 +1,33 @@
++//! Actual std JoinHandle custody; dropping a future is not joining a worker.
++use std::{sync::{Arc,Mutex},thread::JoinHandle};
++#[derive(Clone,Copy,PartialEq,Eq)]enum Phase{Reserved,Running,JoinFailed,Joined,SpawnFailed}
++pub(crate) struct Worker<T>{state:Mutex<State<T>>}
++struct State<T>{phase:Phase,handle:Option<JoinHandle<T>>,value:Option<T>}
++impl<T:Send+'static> Worker<T>{
++ // Registry must retain this exact allocation BEFORE calling start_once.
++ pub(crate) fn reserved()->Arc<Self>{Arc::new(Self{state:Mutex::new(State{phase:Phase::Reserved,handle:None,value:None})})}
++ pub(crate) fn start_once(&self,work:impl FnOnce()->T+Send+'static)->Result<(),()>{
++  let mut s=self.state.lock().map_err(|_|())?;if s.phase!=Phase::Reserved{return Err(())}
++  s.phase=Phase::SpawnFailed; // spawn refusal never looks like joined
++  match std::thread::Builder::new().name("native-web-page".into()).spawn(work){
++   Ok(handle)=>{s.handle=Some(handle);s.phase=Phase::Running;Ok(())},Err(_)=>Err(())
++  }
++ }
++ pub(crate) fn reconcile(&self)->Result<bool,()>{
++  let mut s=self.state.lock().map_err(|_|())?;
++  if s.phase==Phase::Joined{return Ok(true)}
++  if s.phase!=Phase::Running{return Err(())}
++  let handle=s.handle.as_ref().ok_or(())?;if !handle.is_finished(){return Ok(false)}
++  s.phase=Phase::JoinFailed; // latch BEFORE consuming the actual handle
++  let original=s.handle.take().ok_or(())?;
++  match original.join(){Ok(value)=>{s.value=Some(value);s.phase=Phase::Joined;Ok(true)},Err(_)=>Err(())}
++ }
++ pub(crate) fn take_joined(&self)->Result<T,()>{let mut s=self.state.lock().map_err(|_|())?;if s.phase!=Phase::Joined{return Err(())}s.value.take().ok_or(())}
++ // No Drop join, inferred success from missing handle, or retry factory.
++}
++#[cfg(test)]mod tests{
++ use super::*;
++ #[test]fn consumed_panic_stays_failed_on_second_reconciliation(){let w=Worker::reserved();w.start_once(||->(){panic!("fixture")}).unwrap();while w.state.lock().unwrap().handle.as_ref().is_some_and(|h|!h.is_finished()){std::thread::yield_now()}assert!(w.reconcile().is_err());assert!(w.reconcile().is_err());assert!(w.take_joined().is_err());}
++ #[test]fn unstarted_slot_never_reports_joined(){let w=Worker::<()>::reserved();assert!(w.reconcile().is_err());assert!(w.take_joined().is_err());}
++ #[test]fn actual_joined_value_is_consumed_once(){let w=Worker::reserved();w.start_once(||42).unwrap();while w.reconcile()==Ok(false){std::thread::yield_now()}assert_eq!(w.take_joined(),Ok(42));assert!(w.take_joined().is_err());}
++}
+--- /dev/null
++++ b/apps/service/src/routes/local_workspaces/web_original/page_response.rs
+@@ -0,0 +1,97 @@
++//! Child of service web_original. Actual worker original retained before spawn.
++use super::*;
++use super::retained_page_worker::Worker;
++use veyra_adapters::projects::{NativeWebAcknowledgementPage,NativeWebPageRead};
++use std::sync::atomic::AtomicBool;
++use axum::{body::{Body,Bytes},response::Response};
++type PageResult=Result<Option<NativeWebAcknowledgementPage>,String>;
++pub(super) struct PageWork{worker:Arc<Worker<PageResult>>,read:Arc<NativeWebPageRead>,abandoned:AtomicBool}
++struct Demand(Arc<PageWork>);
++impl Drop for Demand{fn drop(&mut self){self.0.abandoned.store(true,Ordering::Release);}}
++pub(super) fn reconcile_abandoned(pending:&WebPending)->Result<(),String>{
++ let mut jobs=pending.pages.lock().map_err(|_|"Original page registry poisoned")?;
++ let mut failed=false;
++ jobs.retain(|job|{
++  if !job.abandoned.load(Ordering::Acquire){return true}
++  match job.worker.reconcile(){
++   Ok(true) if job.read.no_live_blob_after_join()=>{let _actual=job.worker.take_joined();false},
++   Ok(false)=>true,_=>{failed=true;true},
++  }
++ });
++ if failed{Err("Original page worker close/join failure retained".into())}else{Ok(())}
++}
++async fn page(state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,lease:Arc<LocalWebLease>,operation:String,offset:usize,expected:Option<[u8;64]>)->Result<NativeWebAcknowledgementPage,String>{
++ check(&state,&binding,&lease)?;
++ reconcile_abandoned(&state.local_workspaces.web)?;
++ let actual=state.live_agent.original_web_completions();
++ let read=Arc::new(actual.reserve_history_page());
++ let job=Arc::new(PageWork{worker:Worker::reserved(),read:read.clone(),abandoned:AtomicBool::new(false)});
++ {
++  let mut registry=state.local_workspaces.web.pages.lock().map_err(|_|"Original page registry poisoned")?;
++  if registry.len()>=128{return Err("Original page worker capacity retained".into())}
++  registry.push(job.clone()); // custody BEFORE spawn, even if caller disappears
++ }
++ let demand=Demand(job.clone());
++ let worker_state=state.clone();
++ let deadline=Instant::now()+Duration::from_secs(5);
++ job.worker.start_once(move||{
++  check(&worker_state,&binding,&lease)?;
++  let mut writer=worker_state.projects.try_lock().map_err(|_|"Original page writer busy")?;
++  let store=writer.as_mut().ok_or("Original page writer retired")?;
++  let hash=expected.as_ref().map(|b|std::str::from_utf8(b).map_err(|_|"Invalid original hash")).transpose()?;
++  store.read_native_web_acknowledgement_page(binding.owner(),lease.session_id(),&operation,&worker_state.instance_id,&read,offset,hash,deadline)
++   .map_err(|_|"Original exact page read/close refused".into())
++ }).map_err(|_|"Original page worker spawn failed and retained")?;
++ loop{
++  match job.worker.reconcile(){
++   Ok(true)=>break,Ok(false)=>{},Err(_)=>return Err("Actual page worker join failed and retained".into()),
++  }
++  if Instant::now()>=deadline{return Err("Actual page worker remains retained".into())}
++  tokio::time::sleep(Duration::from_millis(5)).await;
++ }
++ if !job.read.no_live_blob_after_join(){return Err("Actual BLOB close remains unknown or failed".into())}
++ let result=job.worker.take_joined().map_err(|_|"Actual page result unavailable")?;
++ {
++  let mut registry=state.local_workspaces.web.pages.lock().map_err(|_|"Original page registry poisoned")?;
++  registry.retain(|old|!Arc::ptr_eq(old,&job)); // real joined/closed owner only
++ }
++ drop(demand);result?.ok_or_else(||"Original exact response unavailable or forgotten".into())
++}
++fn handoff(state:&ServiceState,binding:&LocalWorkspaceBinding,lease:&LocalWebLease,operation:&str,page:&NativeWebAcknowledgementPage)->Result<Bytes,String>{
++ check(state,binding,lease)?;
++ let writer=state.projects.try_lock().map_err(|_|"Original handoff writer busy")?;
++ let store=writer.as_ref().ok_or("Original handoff writer retired")?;
++ if lease.revoked(){return Err("Original Web lease revoked".into())}
++ let payload=store.handoff_native_web_acknowledgement_page(binding.owner(),lease.session_id(),operation,&state.instance_id,page).map_err(|_|"Original response handoff revoked")?;
++ // Ownership transfers inside SAME writer lock as the fresh forget check.
++ // bytes1.12.1 from_owner keeps Payload until LAST real Bytes clone drops.
++ Ok(Bytes::from_owner(payload))
++}
++struct Cursor{state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,lease:Arc<LocalWebLease>,operation:String,offset:usize,total:usize,hash:[u8;64],first:Option<Bytes>,failed:bool}
++pub(super) async fn response_for_operation(state:Arc<ServiceState>,binding:Arc<LocalWorkspaceBinding>,lease:Arc<LocalWebLease>,operation:String)->Result<Response,String>{
++ let first=page(state.clone(),binding.clone(),lease.clone(),operation.clone(),0,None).await?;
++ let total=first.total();let status=first.status();
++ let mut hash=[0;64];hash.copy_from_slice(first.body_sha256().as_bytes());
++ let header=first.content_type().map(axum::http::HeaderValue::from_str).transpose().map_err(|_|"Invalid original content type")?;
++ let bytes=handoff(&state,&binding,&lease,&operation,&first)?;
++ let offset=bytes.len();drop(first);
++ let cursor=Cursor{state,binding,lease,operation,offset,total,hash,first:Some(bytes),failed:false};
++ let stream=futures_util::stream::unfold(cursor,|mut c|async move{
++  if c.failed{return None}
++  if let Some(first)=c.first.take(){return Some((Ok::<_,std::io::Error>(first),c))}
++  if c.offset==c.total{return None} // historical byte EOF, NEVER physical proof
++  let result:Result<Bytes,String>=async{
++   let next=page(c.state.clone(),c.binding.clone(),c.lease.clone(),c.operation.clone(),c.offset,Some(c.hash)).await?;
++   if next.offset()!=c.offset||next.total()!=c.total{return Err("Original response representation changed".into())}
++   let bytes=handoff(&c.state,&c.binding,&c.lease,&c.operation,&next)?;
++   if bytes.is_empty(){return Err("Original response did not advance".into())}
++   c.offset=c.offset.checked_add(bytes.len()).filter(|n|*n<=c.total).ok_or("Original response length conflict")?;Ok(bytes)
++  }.await;
++  match result{Ok(bytes)=>Some((Ok(bytes),c)),Err(error)=>{c.failed=true;Some((Err(std::io::Error::other(error)),c))}}
++ });
++ let mut response=Response::new(Body::from_stream(stream));
++ *response.status_mut()=axum::http::StatusCode::from_u16(status).map_err(|_|"Invalid original status")?;
++ if let Some(value)=header{response.headers_mut().insert(axum::http::header::CONTENT_TYPE,value);}
++ response.headers_mut().insert(axum::http::header::CONTENT_LENGTH,axum::http::HeaderValue::from_str(&total.to_string()).map_err(|_|"Invalid original length")?);
++ Ok(response)
++}

@@ -1,0 +1,92 @@
+{
+  "crates/adapters/src/lib.rs": {
+    "preimage_sha256": "bdb21e908b66dbd08d1a45e253a87359c32c1e472c6d90ec77dfbc3ed8d47e2d",
+    "proposed_sha256": "7e0fe10797169814bc4a17cba9b0354e0a603e82d3cfda06734697fa32f22536",
+    "new": false
+  },
+  "crates/adapters/src/native_web_payload.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "1589a353b09f5bdf03cba026d44b3cc58885fa309497653ddd9cd287ef7d8337",
+    "new": true
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs": {
+    "preimage_sha256": "2c20e4c64be844d03202b5ab654e915257ba8c1690a15918a28881cd9ae968cd",
+    "proposed_sha256": "cecd31bfa4bcbe0883cd78d392e487c4cf6b9bc1d75c2ad946e7d152088ea789",
+    "new": false
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/intake.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "41b97b159f6d1ff98559e4590441800d157e99b3dd27822fb232b4c66fc4162f",
+    "new": true
+  },
+  "crates/adapters/src/opencode/desktop_runtime.rs": {
+    "preimage_sha256": "81e99b9edcda96f9b5dac1494b5ba9c214623e80ce610c54bb86e9c995be1438",
+    "proposed_sha256": "59ef3c68003296c8d6bf773f3ed8715b545663138e64520f5ec20749ea681e0a",
+    "new": false
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs": {
+    "preimage_sha256": "c1cb1632c35b067e7ab86712f22385fe5603a05103672a0e91f6bf763b93f3c0",
+    "proposed_sha256": "0fe59c8b2e2bdc27b778d284a9c2da56e9079f960e69fc81b0023916e83e86e6",
+    "new": false
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_materialization.rs": {
+    "preimage_sha256": "29b19512b463fb1ca99b982aab3585f3cfd9dcbcf4ece2c8094d9b55474ecf7d",
+    "proposed_sha256": "32c7cb9848eb1bc62b65641a0d1045347ce5c9b61fc43e042be1fca25c5e2979",
+    "new": false
+  },
+  "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_file_input.rs": {
+    "preimage_sha256": "07258c8321f89ca186f3c4440ee48e570ee72582d01f1ea58e3015a0f230c41d",
+    "proposed_sha256": "6fa4488a9d2b767280d0b1c34335d8759359536709d03a547845f90cc6337f34",
+    "new": false
+  },
+  "crates/adapters/src/opencode/local_web_transport.rs": {
+    "preimage_sha256": "f0222a634db74b04a6bc79173e84c7f6c56b8713bfb016191ab2294d144c4f84",
+    "proposed_sha256": "278c52b25340c3cfd3d6a7d9dc1472a3655a30ec54ad4a87397b15902cbfc793",
+    "new": false
+  },
+  "crates/adapters/src/opencode/local_web_transport/closure.rs": {
+    "preimage_sha256": "8ddd83489aeaafa920ef4fc6e7d521bfcf1ea9c37b7da010d5196df9c4fc76b9",
+    "proposed_sha256": "a3b700b65e405dd60fe34b841191db4b3891fba663459fb308fc78c1cbade2c0",
+    "new": false
+  },
+  "crates/adapters/src/projects/local_web_originals.rs": {
+    "preimage_sha256": "b947d9599d64c1e8e2ee2626bf00f22c78d7eb7f703149e499db243802b51ea9",
+    "proposed_sha256": "4df8b7fe2ff43dd5d61930da42cd421c04217e2838f01892cd4840587dd8ce04",
+    "new": false
+  },
+  "crates/adapters/src/projects/local_web_originals/acknowledgement_page.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "8f3ccffe9481d9f3906f818a06abb0c2472e9accdf2854e2293c94ff9accd237",
+    "new": true
+  },
+  "crates/adapters/src/projects.rs": {
+    "preimage_sha256": "6b5655824b0c02fddb8114139e93eb625697bc89d6677bcdcc4cf089b17c01b9",
+    "proposed_sha256": "a7fe37c55ea0f255c7269ce9c15e9ef50616004bf9d949e437598e4dd03d516c",
+    "new": false
+  },
+  "apps/service/src/routes/live_agent.rs": {
+    "preimage_sha256": "d3f0dd09464e8ed25d31ae70e35aa16f6b69f693d1102e24096f817b644a255a",
+    "proposed_sha256": "487a7b5efc658fad8c056dc78c8d18ef6bac3abce3a05246748f1fe7c0b8e5ba",
+    "new": false
+  },
+  "apps/service/src/routes/local_workspaces/web_original.rs": {
+    "preimage_sha256": "fbd08e4ee185c4ad52dcc906795bf4a11fb719449b57ca9f49d1a2a7af428ea8",
+    "proposed_sha256": "514dacdb160d82aedaf0329d1b529f0de83077242f5521d366a3f302f282100f",
+    "new": false
+  },
+  "apps/service/src/routes/local_workspaces/web_original/scoped_intake.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "4d831d09a75a4fd71d6ffab519c049585ba638051645768402ac470fffd835aa",
+    "new": true
+  },
+  "apps/service/src/routes/local_workspaces/web_original/retained_page_worker.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "f8443cd5b659d2de583d0b8465c9c36100d43538bcc7373b1a1efa9edf85717b",
+    "new": true
+  },
+  "apps/service/src/routes/local_workspaces/web_original/page_response.rs": {
+    "preimage_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "proposed_sha256": "0a68bd7231951b3c3e3f2a986c9c3e7e9d809493d5e94807221a57d378ae9c55",
+    "new": true
+  }
+}
