@@ -53,7 +53,8 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
    // Only an existing original Core claim with a canonical immutable admission may reach this point.
    if(a.phase!=="prepared"||a.containerId)return unknown("MANAGED_JOB_LAUNCH_ALREADY_DECIDED");
    await parent(a);a=await fresh(a,"launch");
-   const material=await buildRuntimeSpec(a),spec=material?.spec;
+   const previous=a,material=await buildRuntimeSpec(a),spec=material?.spec;
+   a=validate(material?.admission,a.runId);if(identity(a)!==identity(previous)||a.containerId!==previous.containerId)throw error("MANAGED_JOB_BINDING_CHANGED");
    if(typeof material?.capability!=="string"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(material.capability))throw error("MANAGED_JOB_CREDENTIAL_UNAVAILABLE"); // Reuses original canonical map and original resource/credential owners.
    if(!spec||spec.Image!==a.imageId||spec.WorkingDir!=="/workspace"||spec.User!=="1000:1000"||spec.HostConfig?.AutoRemove!==false||spec.HostConfig?.Privileged===true||spec.HostConfig?.PidMode||spec.HostConfig?.NetworkMode==="host")throw error("MANAGED_JOB_PROFILE_UNAVAILABLE");
    // Fixed managed-job role; no caller supplied entrypoint, argv, cwd, credential or container selector.
@@ -61,7 +62,7 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
    spec.Env=[...spec.Env,"INGENIUM_RUNTIME_ROLE=job",`INGENIUM_JOB_RUN_ID=${a.runId}`,`INGENIUM_JOB_ATTEMPT_ID=${a.attemptId}`];
    spec.Labels={...spec.Labels,...labels(a)};
    // Core persists create_intent BEFORE the first Docker effect. CAS admits one original attempt only.
-   if(!await core.claimEffect(a,"create"))return unknown("MANAGED_JOB_LAUNCH_ALREADY_DECIDED");
+   const createIntent=await core.claimEffect(a,"create");if(!createIntent?.accepted)return unknown("MANAGED_JOB_LAUNCH_ALREADY_DECIDED");a=validate(createIntent.admission,a.runId);
    let created;
    try{created=await docker("POST",`/containers/create?name=${path(jobName(a))}`,spec);}catch{await core.recordUnknown(a,"create");return unknown("MANAGED_JOB_CREATE_UNKNOWN");}
    if(created.status!==201||!sha.test(created.data?.Id??"")){await core.recordUnknown(a,"create");return unknown("MANAGED_JOB_CREATE_UNKNOWN");}
@@ -69,12 +70,12 @@ export function createManagedJobContainerOwner({core,docker,buildRuntimeSpec,han
    // A lost persistence acknowledgement may leave an owned container; never create/adopt/start a replacement.
    try{a=validate(await core.recordCreated(a,id),a.runId);if(a.containerId!==id)throw error("MANAGED_JOB_BINDING_CHANGED");}catch{return unknown("MANAGED_JOB_CREATE_PERSISTENCE_UNKNOWN");}
    await parent(a);a=await fresh(a,"launch");if(!await child(a))return unknown("MANAGED_JOB_ORIGINAL_CONTAINER_MISSING");
-   if(!await core.claimEffect(a,"start"))return unknown("MANAGED_JOB_START_ALREADY_DECIDED");
+   const startIntent=await core.claimEffect(a,"start");if(!startIntent?.accepted)return unknown("MANAGED_JOB_START_ALREADY_DECIDED");a=validate(startIntent.admission,a.runId);
    try{
     const started=await docker("POST",`/containers/${path(id)}/start`);
     if(started.status!==204){await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
     // Existing attach-only credential handoff; credential is scoped to this original run by Core.
-    a=await fresh(a,"launch");await handoff(id,a,material.capability);await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
+    a=await fresh(a,"launch");await handoff(id,a,material.capability);a=await fresh(a,"launch");await core.recordStarted(a);return {state:"active",code:"MANAGED_JOB_CONTAINER_STARTED"};
    }catch{await core.recordUnknown(a,"start");return unknown("MANAGED_JOB_START_UNKNOWN");}
   },
   async inspect(runId){if(!uuid.test(runId))throw error("MANAGED_JOB_BINDING_CHANGED");try{return await settle(await admission(runId,"inspect"));}catch(e){return unknown(e.code??"MANAGED_JOB_INSPECTION_UNAVAILABLE");}},

@@ -11,7 +11,7 @@ export function createManagedJobCoreClient({apiUrl,managerToken,fetchOwner=fetch
  const key=a=>({attemptId:a.attemptId,revision:a.revision,specHash:a.specHash});
  return Object.freeze({
   admit:(runId,action)=>request(runId,"admission",undefined,action),
-  claimEffect:async(a,kind)=>{const result=await request(a.runId,"effect-intent",{...key(a),kind});return result?.accepted===true;},
+  claimEffect:async(a,kind)=>{return await request(a.runId,"effect-intent",{...key(a),kind});},
   recordCreated:(a,containerId)=>request(a.runId,"created",{...key(a),containerId}),
   recordStarted:a=>request(a.runId,"started",key(a)),
   recordUnknown:(a,phase)=>request(a.runId,"unknown",{...key(a),phase}),

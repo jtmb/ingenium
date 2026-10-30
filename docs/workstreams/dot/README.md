@@ -53,3 +53,5 @@ Request composition and remaining owner contracts: [request-binding.md](request-
 Existing runner settlement source proposal: [settlement-proposal.md](settlement-proposal.md).
 
 Managed original-JobRun container and async execution proposal: [managed-job-protocol.md](managed-job-protocol.md).
+
+Core126 owner, explicit credential audience and endpoint implementation: [core126-implementation.md](core126-implementation.md).

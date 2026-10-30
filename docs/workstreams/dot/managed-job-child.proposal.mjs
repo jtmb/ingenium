@@ -18,7 +18,7 @@ export function createManagedJobChild({fetchAssignment,reportResult,spawn,verifi
    let done=false;proc.stdout?.on("data",value=>verifier.accept(value));proc.stderr?.on("data",()=>{});
    proc.on("error",reject);proc.on("close",code=>{if(done)return;done=true;const result=verifier.finish();
     // No raw output, prompt, transcript, credential or provider text is returned or logged.
-    Promise.resolve(reportResult(identity,{exitCode:Number.isInteger(code)?code:-1,verifiedResponse:code===0&&result.verified===true})).then(()=>resolve(code===0&&result.verified===true?0:1),reject);
+    Promise.resolve(reportResult(identity,{exitCode:Number.isInteger(code)?code:-1,verifiedResponse:code===0&&result.verified===true,events:[JSON.stringify(result.verified===true?{type:"step_finish",part:{type:"step-finish",reason:"stop"}}:{type:"error"})]})).then(()=>resolve(code===0&&result.verified===true?0:1),reject);
    });
   });
  };

@@ -1,0 +1,319 @@
+--- a/packages/ingenium-core/lib/tools/mcp-credentials.ts
++++ b/packages/ingenium-core/lib/tools/mcp-credentials.ts
+@@ -533,0 +534,76 @@
++
++// Append inside the existing mcp-credentials.ts owner, retaining its original private factories/imports.
++// No legacy kind/audience union, table row, receipt, encryption key or workspace is rewritten.
++export interface ManagedJobCredential {
++  id:string;kind:"job-run";audience:"job-run";runId:string;attemptId:string;
++  servicePrincipalId:string;organizationId:string;projectId:string;ownerUserId:string;
++  workspaceId:string;storageMappingHash:string;securityEpoch:number;principalSecurityEpoch:number;
++  scopes:string[];expiresAt:string;
++}
++function managedJobCredentialBinding(runId:string,attemptId?:string,now=new Date()) {
++  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),timestamp=now.toISOString();
++  const row=db.prepare(`SELECT e.*,run.effective_service_principal_id,
++      principal.security_epoch AS principal_epoch,workspace.security_epoch AS workspace_epoch
++    FROM job_run_managed_execution e
++    JOIN job_runs run ON run.id=e.run_id AND run.job_id=e.job_id AND run.project_id=e.project_id
++      AND run.organization_id=e.organization_id AND run.status='running'
++    JOIN service_principals principal ON principal.id=run.effective_service_principal_id
++      AND principal.organization_id=e.organization_id AND principal.status='active'
++    JOIN authorized_workspaces workspace ON workspace.id=e.workspace_id AND workspace.status='authorized'
++      AND workspace.organization_id=e.organization_id AND workspace.project_id=e.project_id
++      AND workspace.owner_user_id=e.owner_user_id AND workspace.storage_mapping_hash=e.binding_hash
++      AND workspace.security_epoch=e.binding_epoch
++    JOIN runtime_instances runtime ON runtime.id=e.runtime_id AND runtime.workspace_id=e.workspace_id
++      AND runtime.organization_id=e.organization_id AND runtime.project_id=e.project_id
++      AND runtime.owner_user_id=e.owner_user_id AND runtime.security_epoch=e.binding_epoch
++      AND runtime.revision=e.runtime_revision AND runtime.backend_container_id=e.parent_container_id
++      AND runtime.state IN ('READY','IDLE') AND runtime.absolute_expires_at>? AND runtime.idle_expires_at>?
++    JOIN users owner ON owner.id=e.owner_user_id AND owner.status='active'
++    JOIN organization_memberships member ON member.user_id=e.owner_user_id
++      AND member.organization_id=e.organization_id AND member.status='active'
++    LEFT JOIN project_memberships pm ON pm.project_id=e.project_id AND pm.user_id=e.owner_user_id
++    WHERE e.run_id=? AND e.deadline_at>? AND e.phase IN ('prepared','create_intent','created','start_intent','running')
++      AND (member.role IN ('owner','admin') OR pm.user_id IS NOT NULL)
++      AND NOT EXISTS(SELECT 1 FROM veyra_dot_records op WHERE op.kind='operation'
++        AND json_extract(op.body,'$.runId')=e.run_id AND json_extract(op.body,'$.state')='cancel_requested')
++    `).get(timestamp,timestamp,runId,timestamp) as Record<string,unknown>|undefined;
++  if(!row||attemptId!==undefined&&row.attempt_id!==attemptId)return undefined;
++  const granted=db.prepare(`SELECT 1 FROM job_runs run JOIN jobs job ON job.id=run.job_id AND job.project_id=run.project_id
++    JOIN projects project ON project.id=run.project_id AND project.organization_id=run.organization_id AND project.archived_at IS NULL
++    JOIN automation_principal_grants grant_row ON grant_row.project_id=run.project_id AND grant_row.organization_id=run.organization_id
++      AND grant_row.service_principal_id=run.effective_service_principal_id AND grant_row.permission='execute' AND grant_row.status='active'
++    WHERE run.id=? AND run.job_revision=job.revision AND job.service_principal_id=run.effective_service_principal_id
++      AND run.authorization_revision=grant_row.revision`).get(runId);
++  if(!granted)return undefined;
++  const a=JSON.parse(String(row.admission_json));
++  if(!Array.isArray(a.approvedScopes)||!a.approvedScopes.length||a.approvedScopes.length>64||a.approvedScopes.some((scope:unknown)=>typeof scope!=="string"||!/^[a-z][a-z0-9:._-]{0,127}$/.test(scope)||scope==="child-mcp:runtime"))return undefined;
++  return {row,a};
++}
++export function issueManagedJobCredential(input:{runId:string;attemptId:string}):ManagedJobCredential&{token:string} {
++  const issued=execTransaction(()=>{
++    const binding=managedJobCredentialBinding(input.runId,input.attemptId);if(!binding||binding.row.phase!=="prepared")throw Error("Original JobRun credential binding unavailable");
++    const db=getDb(process.env.INGENIUM_CORE_DB_PATH),prior=db.prepare("SELECT * FROM job_run_mcp_credentials WHERE run_id=?").get(input.runId) as Record<string,unknown>|undefined;
++    if(prior)throw Error("Original JobRun credential already issued; no rotation/replacement fallback");
++    const generated=newCredentialToken(),encrypted=encryptAuthSecret(generated.token),a=binding.a,row=binding.row;
++    db.prepare(`INSERT INTO job_run_mcp_credentials(id,run_id,attempt_id,kind,audience,service_principal_id,
++      principal_security_epoch,workspace_security_epoch,token_prefix,token_hash,encrypted_token,scopes_json,expires_at,created_at)
++      VALUES(?,?,?,'job-run','job-run',?,?,?,?,?,?,?,?,?)`).run(generated.id,input.runId,input.attemptId,row.effective_service_principal_id,
++        row.principal_epoch,row.workspace_epoch,generated.tokenPrefix,hashSecurityToken(generated.token),encrypted,JSON.stringify(a.approvedScopes),row.deadline_at,new Date().toISOString());
++    return {id:generated.id,kind:"job-run" as const,audience:"job-run" as const,runId:input.runId,attemptId:input.attemptId,
++      servicePrincipalId:String(row.effective_service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,
++      workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(row.workspace_epoch),principalSecurityEpoch:Number(row.principal_epoch),scopes:[...a.approvedScopes],expiresAt:String(row.deadline_at),token:generated.token};
++  });
++  checkpointAfterWrite();return issued;
++}
++/** This resolver is deliberately separate from generic MCP/service/runtime/browser authentication. */
++export function inspectManagedJobCredential(token:string,audience:"job-run",now=new Date()):ManagedJobCredential|undefined {
++  if(audience!=="job-run"||!/^ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(token))return undefined;
++  const db=getDb(process.env.INGENIUM_CORE_DB_PATH),credential=db.prepare("SELECT * FROM job_run_mcp_credentials WHERE token_hash=? AND kind='job-run' AND audience='job-run' AND revoked_at IS NULL AND expires_at>?")
++    .get(hashSecurityToken(token),now.toISOString()) as Record<string,unknown>|undefined;
++  if(!credential)return undefined;const binding=managedJobCredentialBinding(String(credential.run_id),String(credential.attempt_id),now);
++  if(!binding||binding.row.principal_epoch!==credential.principal_security_epoch||binding.row.workspace_epoch!==credential.workspace_security_epoch||credential.service_principal_id!==binding.row.effective_service_principal_id||credential.scopes_json!==JSON.stringify(binding.a.approvedScopes)||binding.row.credential_id!==credential.id)return undefined;
++  const a=binding.a;return {id:String(credential.id),kind:"job-run",audience:"job-run",runId:String(credential.run_id),attemptId:String(credential.attempt_id),servicePrincipalId:String(credential.service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(credential.workspace_security_epoch),principalSecurityEpoch:Number(credential.principal_security_epoch),scopes:[...a.approvedScopes],expiresAt:String(credential.expires_at)};
++}
++export function revokeManagedJobCredential(runId:string):void {
++  execTransaction(()=>getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("UPDATE job_run_mcp_credentials SET revoked_at=? WHERE run_id=? AND revoked_at IS NULL").run(new Date().toISOString(),runId));checkpointAfterWrite();
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -0,0 +1,102 @@
++import {createHash,randomUUID} from "node:crypto";
++const sha=value=>createHash("sha256").update(typeof value==="string"?value:JSON.stringify(value)).digest("hex");
++const fail=code=>{throw Object.assign(Error(code),{code,status:code.endsWith("UNAVAILABLE")?503:409});};
++const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
++const scopes=value=>Array.isArray(value)&&value.length>0&&value.length<=64&&value.every(v=>typeof v==="string"&&/^[a-z][a-z0-9:._-]{0,127}$/.test(v)&&!["child-mcp:runtime","user:admin"].includes(v));
++export const originalJobRunIdentity=run=>sha([run.id,run.job_id,run.project_id,run.organization_id,run.effective_service_principal_id,run.job_revision,run.schedule_revision??null,run.authorization_revision,run.trigger,run.scheduled_for??null,run.created_at]);
++/** Core sole writer. All async profile/catalog work finishes before synchronous DB transactions. */
++export function createCore126Owner(ports){
++ const {getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials,profiles,requireManager,verifierFactory}=ports;
++ const clock=ports.now??(()=>new Date()),id=ports.id??randomUUID,db=getDb();
++ const same=()=>{if(getDb()!==db)fail("MANAGED_JOB_DATABASE_REPLACED");};
++ const write=fn=>{same();if(db.inTransaction)fail("MANAGED_JOB_OUTER_TRANSACTION");const value=execTransaction(fn,1);if(db.inTransaction)fail("MANAGED_JOB_COMMIT_UNCONFIRMED");checkpointAfterWrite();return value;};
++ const row=runId=>{same();if(!uuid.test(runId))fail("MANAGED_JOB_INVALID_ID");return db.prepare("SELECT * FROM job_run_managed_execution WHERE run_id=?").get(runId);};
++ const read=runId=>{const r=row(runId);if(!r)fail("MANAGED_JOB_NOT_FOUND");return {r,a:{...JSON.parse(r.admission_json),phase:r.phase,revision:r.revision,containerId:r.original_container_id,cancelRequested:r.phase==="cancel_requested",outcomeConsumed:!!r.outcome_consumed_at}};};
++ function base(selection,ctx){
++  same();const run=jobs.getJobRun(selection.projectId,selection.runId),job=run&&jobs.getJob(selection.projectId,run.job_id);
++  if(!run||!job||run.project_id!==selection.projectId||run.organization_id!==job.organization_id||run.job_id!==job.id||run.job_revision!==job.revision||run.schedule_revision!==job.schedule_revision||run.effective_service_principal_id!==job.service_principal_id||!jobs.isJobRunAuthorizationCurrent(run.project_id,run.id))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
++  const workspace=runtimes.getAuthorizedWorkspace(selection.workspaceId),runtime=runtimes.resolveRuntimePreflightScope({runtimeId:selection.runtimeId,organizationId:job.organization_id,projectId:job.project_id,workspaceId:selection.workspaceId,storageMappingHash:workspace?.storageMappingHash});
++  if(!runtime||!workspace||workspace.status!=="authorized"||runtime.workspaceId!==workspace.id||runtime.ownerUserId!==workspace.ownerUserId||runtime.securityEpoch!==workspace.securityEpoch||runtime.organizationId!==job.organization_id||runtime.projectId!==job.project_id||!runtime.backendContainerId||!runtime.absoluteExpiresAt||Date.parse(runtime.absoluteExpiresAt)<=clock().getTime()||!runtime.idleExpiresAt||Date.parse(runtime.idleExpiresAt)<=clock().getTime())fail("MANAGED_JOB_RUNTIME_UNAVAILABLE");
++  if(job.owner_kind==="user"&&job.owner_user_id!==runtime.ownerUserId)fail("MANAGED_JOB_PRIVATE_DENIED");
++  if(ctx){const p=ctx.revalidate?.();if(!p||!["browser-user","user-token","service-principal"].includes(p.type)||!authorization.requireProjectPermission(p,job.project_id,"jobs","execute").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");if(job.visibility==="private"&&(!["browser-user","user-token"].includes(p.type)||p.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");}
++  const member=db.prepare("SELECT 1 FROM organization_memberships m JOIN users u ON u.id=m.user_id AND u.status='active' LEFT JOIN project_memberships pm ON pm.project_id=? AND pm.user_id=m.user_id WHERE m.organization_id=? AND m.user_id=? AND m.status='active' AND (m.role IN ('owner','admin') OR pm.user_id IS NOT NULL)").get(job.project_id,job.organization_id,runtime.ownerUserId);
++  if(!member)fail("MANAGED_JOB_MEMBERSHIP_UNAVAILABLE");
++  const op=db.prepare("SELECT 1 FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.state') IN ('claimed','running') AND json_extract(body,'$.runId')=? AND json_extract(body,'$.scope.projectId')=? AND json_extract(body,'$.scope.organizationId')=? AND json_extract(body,'$.scope.ownerUserId')=? AND json_extract(body,'$.scope.executionBindingId')=? LIMIT 1").get(run.id,job.project_id,job.organization_id,runtime.ownerUserId,workspace.id);
++  if(!op)fail("MANAGED_JOB_ORIGINAL_OPERATION_UNAVAILABLE");
++  const counts=db.prepare("SELECT count(*) AS global_count,count(*) FILTER(WHERE organization_id=?) AS org_count,count(*) FILTER(WHERE effective_service_principal_id=?) AS principal_count FROM job_runs WHERE status IN ('running','queued')").get(run.organization_id,run.effective_service_principal_id);
++  if(counts.global_count>2||counts.org_count>1||counts.principal_count>1)fail("MANAGED_JOB_QUOTA_UNAVAILABLE");
++  const principalEpoch=db.prepare("SELECT security_epoch FROM service_principals WHERE id=? AND status='active'").get(run.effective_service_principal_id)?.security_epoch;
++  if(!Number.isSafeInteger(principalEpoch))fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
++  return {run,job,runtime,workspace,principalEpoch,agentConfig:agents.getJobAgentConfig(job.project_id,job.agent)};
++ }
++ const hasCancelIntent=runId=>!!db.prepare("SELECT 1 FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.state')='cancel_requested' LIMIT 1").get(runId);
++ function current(runId,action){
++  const value=read(runId),{r,a}=value,run=jobs.getJobRun(r.project_id,runId);
++  if(!run||originalJobRunIdentity(run)!==r.run_identity_hash)fail("MANAGED_JOB_RUN_IDENTITY_CHANGED");
++  if(action==="launch"){
++   const facts=base({runId,projectId:r.project_id,runtimeId:r.runtime_id,workspaceId:r.workspace_id});
++   if(run.status!=="running"||a.cancelRequested||hasCancelIntent(runId)||clock().getTime()>=Date.parse(r.deadline_at)||facts.principalEpoch!==a.principalSecurityEpoch||facts.runtime.revision!==a.runtimeRevision||facts.runtime.backendContainerId!==a.parentContainerId||facts.workspace.storageMappingHash!==a.bindingHash||facts.workspace.securityEpoch!==a.bindingEpoch||sha(facts.agentConfig)!==a.agentHash)fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
++   profiles.assertCurrent(a,facts); // Server-owned immutable-image/profile/resource qualification, never request body.
++  }
++  return {...value,run};
++ }
++ const cas=(r,fields)=>{
++  const allowed=new Set(["phase","original_container_id","credential_id","material_consumed_at","result_json","retirement_proof","outcome_consumed_at","container_removed_at"]);
++  const entries=Object.entries(fields);if(entries.some(([k])=>!allowed.has(k)))fail("MANAGED_JOB_INVALID_WRITE");
++  const changed=db.prepare(`UPDATE job_run_managed_execution SET ${entries.map(([k])=>k+"=?").join(",")},revision=revision+1,updated_at=? WHERE run_id=? AND revision=?`).run(...entries.map(([,v])=>v),clock().toISOString(),r.run_id,r.revision).changes;
++  if(changed!==1)fail("MANAGED_JOB_REVISION_CONFLICT");return read(r.run_id).a;
++ };
++ const fence=(runId,key,action)=>{const c=current(runId,action);if(!key||Object.keys(key).some(k=>!["attemptId","revision","specHash","kind","containerId","phase","proof"].includes(k))||key.attemptId!==c.a.attemptId||key.specHash!==c.a.specHash||key.revision!==c.r.revision)fail("MANAGED_JOB_REVISION_CONFLICT");return c;};
++ const manager=ctx=>{requireManager(ctx);same();};
++ return Object.freeze({
++  async prepare(selection,ctx){
++   if(Object.keys(selection).sort().join("|")!=="projectId|runId|runtimeId|workspaceId")fail("MANAGED_JOB_INVALID_SELECTION");
++   const before=base(selection,ctx);if(row(selection.runId))return current(selection.runId,"launch").a;if(before.run.status!=="running")fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
++   const profile=await profiles.qualify(before); // Existing broker/provider factories; no SQL transaction crosses await.
++   const after=base(selection,ctx);if(originalJobRunIdentity(after.run)!==originalJobRunIdentity(before.run)||sha(after.agentConfig)!==sha(before.agentConfig)||after.runtime.revision!==before.runtime.revision)fail("MANAGED_JOB_AUTHORIZATION_UNAVAILABLE");
++   if(profile?.qualified!==true||!Number.isFinite(profile.expiresAt)||profile.expiresAt<=clock().getTime()||!scopes(profile.approvedScopes)||!/^[a-f0-9]{64}$/.test(profile.hash??"")||!/^[a-f0-9]{64}$/.test(profile.modelBindingHash??"")||profile.imageId!==profile.parentImageId||!/^sha256:[a-f0-9]{64}$/.test(profile.imageId)||!profile.resourceAdmissionId||!profile.daemonId||!Number.isSafeInteger(profile.provisioningRevision))fail("MANAGED_JOB_PROFILE_UNAVAILABLE");
++   const deadline=new Date(Math.min(clock().getTime()+after.job.timeout_minutes*60_000,Date.parse(after.runtime.absoluteExpiresAt),profile.expiresAt)).toISOString();
++   const a={runId:after.run.id,jobId:after.job.id,projectId:after.job.project_id,organizationId:after.job.organization_id,ownerUserId:after.runtime.ownerUserId,attemptId:id(),runtimeId:after.runtime.id,runtimeRevision:after.runtime.revision,provisioningRevision:profile.provisioningRevision,parentContainerId:after.runtime.backendContainerId,workspaceId:after.workspace.id,bindingHash:after.workspace.storageMappingHash,bindingEpoch:after.workspace.securityEpoch,jobRevision:after.run.job_revision,scheduleRevision:after.run.schedule_revision,grantRevision:after.run.authorization_revision,principalSecurityEpoch:after.principalEpoch,profileId:profile.id,profileHash:profile.hash,promptHash:sha(after.job.prompt_template),daemonId:profile.daemonId,imageId:profile.imageId,approvedScopes:[...profile.approvedScopes].sort(),resourceAdmissionId:profile.resourceAdmissionId,agentHash:sha(after.agentConfig),modelBindingHash:profile.modelBindingHash,model:profile.model,limits:profile.limits,projectName:profile.projectName,deadlineAt:deadline};a.specHash=sha(a);
++   return write(()=>{
++    base(selection,ctx);if(row(a.runId))return current(a.runId,"launch").a;
++    const columns={run_id:a.runId,project_id:a.projectId,organization_id:a.organizationId,owner_user_id:a.ownerUserId,job_id:a.jobId,attempt_id:a.attemptId,runtime_id:a.runtimeId,parent_container_id:a.parentContainerId,workspace_id:a.workspaceId,binding_hash:a.bindingHash,binding_epoch:a.bindingEpoch,runtime_revision:a.runtimeRevision,provisioning_revision:a.provisioningRevision,job_revision:a.jobRevision,schedule_revision:a.scheduleRevision,grant_revision:a.grantRevision,profile_id:a.profileId,profile_hash:a.profileHash,prompt_hash:a.promptHash,spec_hash:a.specHash,daemon_id:a.daemonId,image_id:a.imageId,phase:"prepared",resource_admission_id:a.resourceAdmissionId,admission_json:JSON.stringify(a),run_identity_hash:originalJobRunIdentity(after.run),deadline_at:deadline,created_at:clock().toISOString(),updated_at:clock().toISOString()};
++    db.prepare(`INSERT INTO job_run_managed_execution (${Object.keys(columns).join(",")}) VALUES (${Object.keys(columns).map(()=>"?").join(",")})`).run(...Object.values(columns));return read(a.runId).a;
++   });
++  },
++  admit(runId,action,ctx){manager(ctx);if(!["launch","inspect","cancel","cleanup"].includes(action))fail("MANAGED_JOB_INVALID_ACTION");if(action==="cancel"&&hasCancelIntent(runId)&&read(runId).r.phase!=="retired")return write(()=>{const {r}=current(runId,"inspect");return r.phase==="cancel_requested"?read(runId).a:cas(r,{phase:"cancel_requested"});});return current(runId,action).a;},
++  claimEffect(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch"),expected=key.kind==="create"?"prepared":key.kind==="start"?"created":null;if(!expected||r.phase!==expected||a.cancelRequested)return {accepted:false};const admission=cas(r,{phase:key.kind+"_intent"});return {accepted:true,admission};});},
++  recordCreated(runId,key,ctx){manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch");if(r.phase!=="create_intent"||r.original_container_id||!/^[a-f0-9]{64}$/.test(key.containerId)||key.containerId===a.parentContainerId)fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{original_container_id:key.containerId,phase:"created"});});},
++  recordStarted(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"launch");if(r.phase!=="start_intent")fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{phase:"running"});});},
++  recordUnknown(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"inspect");if(r.phase==="cancel_requested")return read(runId).a;if(!["create","start"].includes(key.phase)||r.phase!==key.phase+"_intent")fail("MANAGED_JOB_EFFECT_CONFLICT");return cas(r,{phase:key.phase+"_unknown"});});},
++  async launchMaterial(runId,key,ctx){manager(ctx);const before=fence(runId,key,"launch");if(before.r.phase!=="prepared"||before.r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
++   const facts=base({runId,projectId:before.a.projectId,runtimeId:before.a.runtimeId,workspaceId:before.a.workspaceId});const profile=await profiles.qualify(facts);
++   if(!profile.qualified||profile.hash!==before.a.profileHash||profile.modelBindingHash!==before.a.modelBindingHash)fail("MANAGED_JOB_PROFILE_UNAVAILABLE");
++   manager(ctx);return write(()=>{const {r,a}=fence(runId,key,"launch");if(r.material_consumed_at)fail("MANAGED_JOB_MATERIAL_UNAVAILABLE");
++    const credential=credentials.issueManagedJobCredential({runId,attemptId:a.attemptId});
++    const updated=cas(r,{credential_id:credential.id,material_consumed_at:clock().toISOString()});
++    const workspace=runtimes.getAuthorizedWorkspace(a.workspaceId);
++    return {admission:updated,runId,attemptId:a.attemptId,credentialRunId:runId,profileQualified:true,capability:credential.token,provision:{runtimeId:a.runtimeId,backendName:"ingenium-runtime-"+a.runtimeId.replaceAll("-",""),organizationId:a.organizationId,projectId:a.projectId,projectName:a.projectName,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storagePath:workspace.storagePath,storageMappingHash:a.bindingHash,securityEpoch:a.bindingEpoch,revision:a.provisioningRevision,capability:credential.token,capabilityExpiresAt:credential.expiresAt,limits:a.limits}};
++   });
++  },
++  recordRetired(runId,key,ctx){manager(ctx);return write(()=>{const {r,a,run}=fence(runId,key,"inspect"),p=key.proof;if(!p||Object.keys(p).sort().join("|")!=="attemptId|containerId|daemonId|exitCode|kind|runId|schemaVersion|specHash"||p.schemaVersion!==1||p.runId!==runId||p.attemptId!==a.attemptId||p.containerId!==r.original_container_id||p.daemonId!==a.daemonId||p.specHash!==a.specHash||p.kind!=="original-daemon-container-wait-join"||!Number.isInteger(p.exitCode))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");
++   const cancelled=r.phase==="cancel_requested";cas(r,{phase:"retired",retirement_proof:JSON.stringify(p)});credentials.revokeManagedJobCredential(runId);
++   const result=r.result_json?JSON.parse(r.result_json):null;
++   if(["running","queued"].includes(run.status)){if(cancelled)jobs.cancelJobRun(r.project_id,runId);else jobs.finishJobRun(r.project_id,runId,clock().getTime()>=Date.parse(r.deadline_at)?"timeout":p.exitCode===0&&result?.exitCode===0&&result?.verified?"success":"failed",p.exitCode);}
++   return read(runId).a;
++  });},
++  consume(runId,ctx){manager(ctx);return write(()=>{const {r,run}=current(runId,"inspect");if(r.phase!=="retired"||!r.retirement_proof||!["success","failed","cancelled","timeout"].includes(run.status)||!db.prepare("SELECT 1 FROM veyra_dot_records WHERE kind='operation' AND json_extract(body,'$.runId')=? AND json_extract(body,'$.state') IN ('success','failed','cancelled') LIMIT 1").get(runId))fail("MANAGED_JOB_OUTCOME_UNAVAILABLE");return r.outcome_consumed_at?read(runId).a:cas(r,{outcome_consumed_at:clock().toISOString()});});},
++  recordRemoved(runId,key,ctx){manager(ctx);return write(()=>{const {r}=fence(runId,key,"cleanup");if(r.phase!=="retired"||!r.outcome_consumed_at||!r.retirement_proof)fail("MANAGED_JOB_CLEANUP_UNAVAILABLE");return cas(r,{container_removed_at:clock().toISOString()});});},
++  readOriginalRun(runId,scope,ctx){const {r,a,run}=current(runId,"inspect"),principal=ctx?.revalidate?.();
++   if(!principal||scope.projectId!==r.project_id||scope.organizationId!==r.organization_id||scope.ownerUserId!==r.owner_user_id||scope.executionBindingId!==r.workspace_id||!authorization.requireProjectPermission(principal,r.project_id,"jobs","read").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");
++   const job=jobs.getJob(r.project_id,r.job_id);if(job.visibility==="private"&&(!["browser-user","user-token"].includes(principal.type)||principal.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");return run;
++  },
++  requireCancellationIntent(runId){if(!hasCancelIntent(runId)&&read(runId).r.phase!=="cancel_requested")fail("MANAGED_JOB_CANCEL_INTENT_REQUIRED");},
++  requireOriginalRetirementProof(runId,proof){const r=row(runId);if(!r?.retirement_proof||JSON.stringify(JSON.parse(r.retirement_proof))!==JSON.stringify(proof))fail("MANAGED_JOB_RETIREMENT_UNAVAILABLE");},
++  requestCancel(runId,ctx){const c=read(runId),principal=ctx?.revalidate?.();if(!principal||!authorization.requireProjectPermission(principal,c.r.project_id,"jobs","write").allowed)fail("MANAGED_JOB_PRIVATE_DENIED");const job=jobs.getJob(c.r.project_id,c.r.job_id);if(job.visibility==="private"&&(!["browser-user","user-token"].includes(principal.type)||principal.id!==job.owner_user_id))fail("MANAGED_JOB_PRIVATE_DENIED");return write(()=>{const {r}=current(runId,"inspect");if(r.phase==="retired")return read(runId).a;return cas(r,{phase:"cancel_requested"});});},
++  assignment(runId,credential){const {r,a,run}=current(runId,"launch");if(!credential||credential.kind!=="job-run"||credential.audience!=="job-run"||credential.runId!==runId||credential.attemptId!==a.attemptId||credential.id!==r.credential_id||credential.projectId!==a.projectId||credential.organizationId!==a.organizationId||credential.ownerUserId!==a.ownerUserId||credential.workspaceId!==a.workspaceId||credential.storageMappingHash!==a.bindingHash||credential.securityEpoch!==a.bindingEpoch||credential.servicePrincipalId!==run.effective_service_principal_id||!["start_intent","running"].includes(r.phase))fail("MANAGED_JOB_CREDENTIAL_DENIED");const job=jobs.getJob(r.project_id,r.job_id);return {runId,attemptId:a.attemptId,workspaceId:a.workspaceId,bindingHash:a.bindingHash,runtimeId:a.runtimeId,projectId:a.projectId,organizationId:a.organizationId,ownerUserId:a.ownerUserId,profileQualified:true,executable:"opencode",cwd:"/workspace",credentialBoundToOriginalRun:true,agent:job.agent,prompt:job.prompt_template,promptHash:a.promptHash,model:a.model};},
++  result(runId,input,credential){const assignment=this.assignment(runId,credential);if(!input||Object.keys(input).sort().join("|")!=="attemptId|result"||input.attemptId!==assignment.attemptId||!input.result||Object.keys(input.result).some(k=>!["exitCode","events","verifiedResponse"].includes(k))||!Number.isInteger(input.result.exitCode)||!Array.isArray(input.result.events)||input.result.events.length>128||Buffer.byteLength(JSON.stringify(input.result.events))>65536)fail("MANAGED_JOB_RESULT_DENIED");
++   const verifier=verifierFactory();for(const event of input.result.events){if(typeof event!=="string")fail("MANAGED_JOB_RESULT_DENIED");verifier.accept(event+"\n");}const verified=verifier.finish().verified===true;
++   return write(()=>{const {r}=current(runId,"launch");if(r.result_json)fail("MANAGED_JOB_RESULT_CONFLICT");cas(r,{result_json:JSON.stringify({exitCode:input.result.exitCode,verified,receivedAt:clock().toISOString()})});return {recorded:true};});
++  },
++ });
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -0,0 +1,52 @@
++import {timingSafeEqual} from "node:crypto";
++// loadToken is the ORIGINAL runtime-manager token-file owner; no API_TOKEN, caller token or new session fallback.
++export function createCore126ManagerGuard({loadToken}){
++ const requireManager=ctx=>{let expected;try{expected=loadToken();}catch{throw Object.assign(Error("Original manager credential enrollment unavailable"),{status:503});}const header=ctx?.request?.headers?.authorization;if(typeof expected!=="string"||!/^[A-Za-z0-9_-]{43,128}$/.test(expected)||typeof header!=="string"||!header.startsWith("Bearer "))throw Object.assign(Error("Manager authentication required"),{status:401});const left=Buffer.from(header.slice(7)),right=Buffer.from(expected);if(left.length!==right.length||!timingSafeEqual(left,right))throw Object.assign(Error("Manager authentication required"),{status:401});};
++ return {requireManager,context(request){const ctx={request};requireManager(ctx);return ctx;}};
++}
++/** Mount these closed handlers before generic user/runtime auth; they authenticate their OWN exact audience.
++ * No handler creates a browser/service/compatibility principal from a job-run credential.
++ */
++export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool}){
++ return {
++  async internal(request){
++   const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|consumed|removed)$/.exec(request.path);
++   if(!match)return null;const ctx=managerGuard.context(request),runId=match[1],operation=match[2];
++   if(operation==="admission"&&request.method==="GET")return {data:owner.admit(runId,request.query?.action,ctx)};
++   if(request.method!=="POST")throw Object.assign(Error("Method unavailable"),{status:405});
++   const body=request.body;
++   if(operation==="consumed"){if(body&&Object.keys(body).length)throw Object.assign(Error("Invalid consume request"),{status:422});return {data:owner.consume(runId,ctx)};}
++   if(!body||typeof body!=="object"||Array.isArray(body)||Buffer.byteLength(JSON.stringify(body))>65536)throw Object.assign(Error("Invalid journal request"),{status:422});
++   const methods={"launch-material":"launchMaterial","effect-intent":"claimEffect",created:"recordCreated",started:"recordStarted",unknown:"recordUnknown",retired:"recordRetired",removed:"recordRemoved"};
++   if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
++  },
++  async runtime(request){
++   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|result|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
++   if(!match)return null;
++   const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
++   const credential=credentials.inspectManagedJobCredential(token,"job-run");
++   if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
++   if(match[2]==="assignment"&&request.method==="GET")return {data:owner.assignment(match[1],credential)};
++   if(match[2]==="result"&&request.method==="POST")return {data:owner.result(match[1],request.body,credential)};
++   if(match[3]&&request.method==="POST"){
++    if(!authorizeTool||!dispatchExistingTool)throw Object.assign(Error("JobRun broker route unavailable"),{status:503});
++    owner.assignment(match[1],credential); // Recheck current run/profile/parent capability at each broker entry.
++    const authorized=authorizeTool(credential,match[3],request.body);return {data:await dispatchExistingTool(authorized,request.body)};
++   }
++   throw Object.assign(Error("Method unavailable"),{status:405});
++  },
++ };
++}
++/** A CLOSED per-tool Core policy decision, not a generic service principal returned to middleware. */
++export function createCore126ToolAuthorizer({credentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog}){
++ return (credential,toolName,body)=>{
++  if(credential.kind!=="job-run"||credential.audience!=="job-run"||!jobs.isJobRunAuthorizationCurrent(credential.projectId,credential.runId))throw Object.assign(Error("JobRun tool denied"),{status:403});
++  const tool=toolCatalog?.getTool(toolName);if(!tool||tool.name!==toolName||typeof tool.category!=="string")throw Object.assign(Error("Qualified original tool catalog unavailable"),{status:503});
++  const policy=mcpAuthorizationPolicy.explicitMcpAuthorizationPolicy(toolName,tool.category);
++  // Preserve actual private-content policy: never impersonate the owner to unlock browser/user-token-only tools.
++  if(policy.target!=="project"||policy.scopes.some(scope=>!credential.scopes.includes(scope))||body?.projectId&&body.projectId!==credential.projectId||body?.workspaceId&&body.workspaceId!==credential.workspaceId)throw Object.assign(Error("JobRun tool denied"),{status:403});
++  const decision=authorization.requireProjectPermission({type:"service-principal",id:credential.servicePrincipalId,scopes:credential.scopes,organizationId:credential.organizationId,projectId:credential.projectId,projectIds:[credential.projectId]},credential.projectId,policy.resource,policy.permission);
++  if(!decision.allowed)throw Object.assign(Error("JobRun tool denied"),{status:403});
++  return Object.freeze({toolName,policy,jobRunId:credential.runId,attemptId:credential.attemptId,projectId:credential.projectId,workspaceId:credential.workspaceId,credentialId:credential.id});
++ };
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -0,0 +1,64 @@
++import {agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault} from "ingenium-core";
++import {createHash} from "node:crypto";
++import {createCore126Owner} from "./core126-owner.mjs";
++import {createCore126ManagerGuard,createCore126ToolAuthorizer,createCore126Handlers} from "./core126-http.mjs";
++import {loadManagerToken} from "../runtime-manager-auth.js";
++import {JobResponseVerification} from "../job-response-verification.js";
++import {resolveJobProviderModel} from "../job-native-provider.js";
++const hash=(value:unknown)=>createHash("sha256").update(JSON.stringify(value)).digest("hex");
++/** imageOwner is Root's qualified immutable image/placement/profile owner, not labels or caller JSON.
++ * Missing qualification returns unavailable; there is no image/profile/model/capability fallback.
++ */
++export function createActualCore126Owner({imageOwner,dispatchExistingTool,toolCatalog}:any){
++ const managerGuard=createCore126ManagerGuard({loadToken:loadManagerToken});
++ const binding=(provider:any)=>hash([provider.connectionId,provider.providerKey,provider.authentication,provider.config]);
++ const requireCurrentParentScopes=(runtimeId:string,approvedScopes:string[])=>{
++  const row=getDb().prepare(`SELECT credential.scopes_json FROM runtime_capability_bindings binding
++    JOIN mcp_credentials credential ON credential.id=binding.mcp_credential_id AND credential.kind='runtime' AND credential.audience='runtime'
++      AND credential.revoked_at IS NULL AND credential.expires_at>?
++    JOIN runtime_instances runtime ON runtime.id=binding.runtime_id AND runtime.security_epoch=credential.security_epoch
++      AND runtime.workspace_id=credential.workspace_id AND runtime.owner_user_id=credential.created_by_user_id
++    JOIN service_principals principal ON principal.id=credential.service_principal_id AND principal.status='active'
++      AND principal.security_epoch=credential.security_epoch
++    WHERE binding.runtime_id=? AND binding.revoked_at IS NULL AND binding.expires_at>?`).get(new Date().toISOString(),runtimeId,new Date().toISOString()) as {scopes_json:string}|undefined;
++  const scopes=row?JSON.parse(row.scopes_json):null;
++  if(!Array.isArray(scopes)||approvedScopes.some(scope=>!scopes.includes(scope)))throw Error("Managed JobRun lacks an existing explicitly granted capability");
++ };
++ const profiles={
++  async qualify(facts:any){
++   if(typeof toolCatalog?.getTool!=="function"||typeof dispatchExistingTool!=="function")throw Error("Managed JobRun protected broker transport unavailable");
++   agents.validateProtectedOpenCodeDeployment();
++   let provider=vault.resolveJobProviderRuntime(facts.job.project_id,facts.job.id,facts.run.id);
++   const before=binding(provider);let model:string;
++   try{
++    // Actual paid-provider secret projection is not yet part of this qualified job-role image contract.
++    if(provider.authentication!=="anonymous"||provider.providerKey!=="opencode")throw Error("Managed JobRun provider secret handoff unavailable");
++    model=await resolveJobProviderModel(provider);
++   }finally{provider.release();}
++   provider=vault.resolveJobProviderRuntime(facts.job.project_id,facts.job.id,facts.run.id);
++   try{if(binding(provider)!==before)throw Error("Managed JobRun provider changed");}finally{provider.release();}
++   const image=await imageOwner?.qualifyOriginalJobRole({run:facts.run,job:facts.job,runtime:facts.runtime,workspace:facts.workspace,agentConfig:facts.agentConfig,model,modelBindingHash:before});
++   if(!image?.qualified||image.jobRunAudience!=="job-run"||image.transport!=="scoped-core126-mcp-v1"||image.model!==model||image.modelBindingHash!==before||!Array.isArray(image.approvedScopes))throw Error("Managed JobRun image/profile unavailable");
++   requireCurrentParentScopes(facts.runtime.id,image.approvedScopes);
++   // The existing original Core run already consumed automation quota; no second claim or grant is created.
++   return {...image,model,modelBindingHash:before,resourceAdmissionId:facts.run.id,
++    projectName:(getDb().prepare("SELECT name FROM projects WHERE id=? AND archived_at IS NULL").get(facts.job.project_id) as {name:string}|undefined)?.name,limits:{cpuMillis:facts.runtime.cpuMillis,memoryBytes:facts.runtime.memoryBytes,pidsLimit:facts.runtime.pidsLimit,diskBytes:facts.runtime.diskBytes,processLimit:facts.runtime.processLimit}};
++  },
++  assertCurrent(admission:any,facts:any){
++   agents.validateProtectedOpenCodeDeployment();
++   requireCurrentParentScopes(facts.runtime.id,admission.approvedScopes);
++   if(hash(facts.agentConfig)!==admission.agentHash||imageOwner?.assertCurrentOriginalJobRole(admission,facts)!==true)throw Error("Managed JobRun image/profile unavailable");
++   const provider=vault.resolveJobProviderRuntime(facts.job.project_id,facts.job.id,facts.run.id);
++   try{if(binding(provider)!==admission.modelBindingHash)throw Error("Managed JobRun provider changed");}finally{provider.release();}
++  },
++ };
++ const owner=createCore126Owner({getDb,execTransaction,checkpointAfterWrite,jobs,runtimes,agents,authorization,credentials:mcpCredentials,profiles,requireManager:managerGuard.requireManager,verifierFactory:()=>new JobResponseVerification()});
++ const authorizeTool=createCore126ToolAuthorizer({credentials:mcpCredentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog});
++ return {owner,managerGuard,executionPorts(context:any,selection:any){return {
++   inTransaction:()=>getDb().inTransaction,
++   prepareManagedExecution(runId:string,job:any,prompt:string){if(job.prompt_template!==prompt)throw Error("Original JobRun prompt changed");return owner.prepare({runId,projectId:job.project_id,runtimeId:selection.runtimeId,workspaceId:selection.workspaceId},context);},
++   requireOriginalRun:(scope:any,runId:string)=>owner.readOriginalRun(runId,scope,context),
++   requireCancellationIntent:(_scope:any,runId:string)=>owner.requireCancellationIntent(runId),
++   requireOriginalRetirementProof:(runId:string,proof:any)=>owner.requireOriginalRetirementProof(runId,proof),
++  };},handlers:createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool})};
++}
+--- /dev/null
++++ b/services/ingenium-api/lib/runtime-manager-auth.ts
+@@ -0,0 +1,10 @@
++import {lstatSync,readFileSync,realpathSync} from "node:fs";
++/** Exact original runtime-manager file owner, factored for Core's narrow journal enrollment.
++ * API_TOKEN, cookies, user/service credentials and caller-supplied token paths are not fallbacks.
++ */
++export function loadManagerToken():string {
++ const path=process.env.INGENIUM_RUNTIME_MANAGER_TOKEN_FILE?.trim();if(!path)throw Error("INGENIUM_RUNTIME_MANAGER_TOKEN_FILE is required");
++ const stat=lstatSync(path),uid=typeof process.getuid==="function"?process.getuid():stat.uid;
++ if(!stat.isFile()||stat.isSymbolicLink()||stat.uid!==uid||(stat.mode&0o077)!==0||realpathSync(path)!==path)throw Error("Runtime manager token file is unsafe");
++ const token=readFileSync(path,"utf8").trim();if(!/^[A-Za-z0-9_-]{43,128}$/.test(token))throw Error("Runtime manager token is invalid");return token;
++}

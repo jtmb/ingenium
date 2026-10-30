@@ -49,7 +49,7 @@
     "limits": "Fake owners/spawn only; no live Docker, processes, models, DB, services, compiler, install or control"
   },
   "asyncPatchSha256": "c93bd7ff323a7cc472d36c043bfde83864bbfe29df21eef42b35d05903be3805",
-  "managerPatchSha256": "779f1ee90804e4dff1f407ad2267c8edbe3a6142a19f02f185535418f890dc6e",
+  "managerPatchSha256": "8a87754334fd9e33d9c64ea07c72b2549aca3e543dd96e7d30c3349bcf9d7ab6",
   "newSourceHashes": {
     "managed-dot-execution.proposal.mjs": "3d50b6771a692289db71973bc9cafad608679787c8d8aa0e48bec9644ba334fd",
     "managed-job-child.proposal.mjs": "1150da451146621eff1218a2b146941e0aaeb2f8c74aba1bdbe5cb9a395f6519",
@@ -98,5 +98,6 @@
     "file": "126_managed_job_execution.proposal.sql",
     "installed": false,
     "productionWriteCutoverApproved": false
-  }
+  },
+  "core126OwnerProposal": "core126-proposal.json"
 }

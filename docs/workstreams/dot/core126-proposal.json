@@ -1,0 +1,103 @@
+{
+  "state": "unapplied Core126 implementation source proposal",
+  "migration": 126,
+  "owner": "01a18935-103f-7432-98b0-cd2c51f8c8ab",
+  "preimages": {
+    "packages/ingenium-core/lib/tools/jobs.ts": "a5d84c9a873decaa5497c354dc6a273a584ba92fae0209852b7de4ce3582eb49",
+    "services/ingenium-api/lib/job-runner.ts": "71624360a2a4b84d57d33044a3a6e458dab104a845c44d7f852e9ff9d07caa6d",
+    "packages/ingenium-core/lib/tools/mcp-credentials.ts": "5512d93f9c9174444f4635ae99cf75a0b551a0097220b27acd7ebfcf3134518e",
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": null,
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": null,
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": null,
+    "services/ingenium-api/lib/runtime-manager-auth.ts": null
+  },
+  "legacyGuardPatchSha256": "82baaa15b72c2c730948d823bea5c15ae90b9a043f4c30486173f10918ff4933",
+  "cryptoFactory": "Existing mcp-credentials.newCredentialToken/authentication.hashSecurityToken/encryptAuthSecret, no original row changes",
+  "runtimeAcceptance": false,
+  "ownerPatchSha256": "5cf414b4ec6ed8e7a83950861b023ca6d3fda1f787a567803b489d8ea56fe60a",
+  "supersedingManagerPatchSha256": "8a87754334fd9e33d9c64ea07c72b2549aca3e543dd96e7d30c3349bcf9d7ab6",
+  "migrationSqlSha256": "f4098aec485d8730a83397c34d305b78b26d6514c3b4c23fa732d0e0a4df27af",
+  "managerPreimages": {
+    "services/ingenium-api/scripts/runtime-manager.ts": "ae6888fb9e28a4188f520c854985dbe324978a47f73787bed8946cd273881f42",
+    "services/ingenium-api/lib/runtime-manager-client.ts": "4527dc37d53edcdcade93be4f7801f966350b0d85f1b92b423d18937d3efcd93",
+    "scripts/runtime-entrypoint.sh": "04c6cbe0177b47b47c178857d3b1ec00736d2f6db4f6c31ec3d4dc64647581e6",
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": null,
+    "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs": null,
+    "services/ingenium-api/scripts/runtime-job-child.ts": null
+  },
+  "actualCorePortSourceHashes": {
+    "packages/ingenium-core/lib/tools/jobs.ts": "a5d84c9a873decaa5497c354dc6a273a584ba92fae0209852b7de4ce3582eb49",
+    "packages/ingenium-core/lib/tools/runtimes.ts": "594f771d8b0e0ccf63a7695daa02292b46e66a6ce3388f7f6b10372deccbd719",
+    "packages/ingenium-core/lib/tools/authorization.ts": "9248705e19c7d49e1be57a182ca5e62181b5d9fd6fecd659df6d76f167a8cae7",
+    "packages/ingenium-core/lib/tools/authentication.ts": "6614b9124326ea5dac21fb0f9da9f1f07378126c61e8a4e670978b5cfc25306f",
+    "packages/ingenium-core/lib/tools/mcp-credentials.ts": "5512d93f9c9174444f4635ae99cf75a0b551a0097220b27acd7ebfcf3134518e",
+    "services/ingenium-api/lib/job-response-verification.ts": "d5a023e1e6e91bf24ef7d8ac7734f3df330e307ab1f083b6bca1399ccadc0c46"
+  },
+  "managerContractCorrection": "Material and accepted create/start intents return updated canonical admission revision; re-read after fast child result before started acknowledgement",
+  "legacyRowsModified": false,
+  "migrationInstalled": false,
+  "openGates": [
+    "Root-only migration126 installation/server/auth/Worker5 reconciliation and strict declarations/types",
+    "Actual immutable job-role image, scoped broker transport/capability/model qualification; paid-secret handoff unavailable",
+    "Actual full Core/crypto and selected-container/process/model/descendant/restart acceptance",
+    "Conservative prepared/no-create-ack case retains quota/unknown until explicit safe reconciliation; no absence proof"
+  ],
+  "applyChecks": {
+    "core126-owner.patch": {
+      "exit": 0,
+      "sha256": "5cf414b4ec6ed8e7a83950861b023ca6d3fda1f787a567803b489d8ea56fe60a"
+    },
+    "core126-legacy-guards.patch": {
+      "exit": 0,
+      "sha256": "82baaa15b72c2c730948d823bea5c15ae90b9a043f4c30486173f10918ff4933"
+    },
+    "managed-job-manager.patch": {
+      "exit": 0,
+      "sha256": "8a87754334fd9e33d9c64ea07c72b2549aca3e543dd96e7d30c3349bcf9d7ab6"
+    },
+    "managed-job-async-dot.patch": {
+      "exit": 0,
+      "sha256": "c93bd7ff323a7cc472d36c043bfde83864bbfe29df21eef42b35d05903be3805"
+    }
+  },
+  "parseChecks": {
+    "services/ingenium-api/scripts/runtime-manager.ts": 0,
+    "services/ingenium-api/lib/runtime-manager-client.ts": 0,
+    "scripts/runtime-entrypoint.sh": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-owner.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-child.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-job-core-client.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/managed-dot-execution.mjs": 0,
+    "services/ingenium-api/scripts/runtime-job-child.ts": 0,
+    "packages/ingenium-core/lib/tools/mcp-credentials.ts": 0,
+    "services/ingenium-api/lib/dot-v2/core126-owner.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": 0,
+    "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts": 0,
+    "services/ingenium-api/lib/runtime-manager-auth.ts": 0
+  },
+  "tests": {
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes /home/brajam/.local/bin/node --test docs/workstreams/dot/core126-sqlite.cpu.mjs docs/workstreams/dot/core126-enrollment.cpu.mjs docs/workstreams/dot/managed-job-owner.cpu.mjs docs/workstreams/dot/managed-job-async.cpu.mjs docs/workstreams/dot/managed-job-child.cpu.mjs docs/workstreams/dot/managed-dot-execution.cpu.mjs docs/workstreams/dot/managed-job-proposal.cpu.mjs",
+    "summary": "1..57\n# tests 57\n# suites 0\n# pass 57\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 238.868235",
+    "outputSha256": "abe0e1fa0165f0a45ccfff59b75412c92998b2d9f0b8c9fda4bc6a6516561081",
+    "scope": "Real memory SQLite and extracted actual Core SQL/auth/token/hash/verifier; fixture encryption/image/agent/Docker/spawn; no full configured Core import or real key",
+    "caseGroups": {
+      "core126-sqlite.cpu.mjs": 19,
+      "core126-enrollment.cpu.mjs": 2,
+      "managed-job-owner.cpu.mjs": 17,
+      "managed-job-async.cpu.mjs": 8,
+      "managed-job-child.cpu.mjs": 3,
+      "managed-dot-execution.cpu.mjs": 3,
+      "managed-job-proposal.cpu.mjs": 5
+    }
+  },
+  "cleanup": {
+    "removedPaths": [],
+    "removedBytes": 0,
+    "disposableOutputs": [],
+    "fileDatabaseOrKeyCreated": false,
+    "runtimeObjectsCreated": false,
+    "consumer": "Root review/integration and version-controlled source supersession"
+  }
+}
