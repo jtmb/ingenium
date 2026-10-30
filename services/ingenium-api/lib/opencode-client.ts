@@ -1010,19 +1010,21 @@ async function getV2MessagePage(
   directory: string | undefined,
   limit: number | undefined,
   cursor: string | undefined,
+  initialOrder: "asc" | "desc" = "asc",
+  strictLimit = false,
 ): Promise<OpenCodeResult<{ messages: MessageEnvelope[]; nextCursor?: string }>> {
   const session = await getV2Session(sessionId, directory);
   if (isOpenCodeError(session)) return session;
   const pageLimit = limit === undefined ? V2_PAGE_SIZE : Math.min(Math.max(limit, 1), V2_PAGE_SIZE);
   const query: Record<string, string | number> = { limit: pageLimit };
-  if (cursor === undefined) query.order = "asc";
+  if (cursor === undefined) query.order = initialOrder;
   else query.cursor = cursor;
   const result = await request<V2Page<V2ConversationMessage>>(
     `/api/session/${pathSegment(session.id)}/message`,
     { query },
   );
   if (isOpenCodeError(result) || !Array.isArray(result.data)) return isOpenCodeError(result) ? result : v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
-  if (result.data.length > V2_PAGE_SIZE) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
+  if (result.data.length > V2_PAGE_SIZE || strictLimit && result.data.length > pageLimit) return v2Error(result, "OPENCODE_V2_INVALID_RESPONSE");
   const nextCursor = result.cursor?.next;
   if (nextCursor !== undefined && nextCursor !== null
     && (typeof nextCursor !== "string" || nextCursor.length === 0)) {
@@ -1560,6 +1562,22 @@ export const opencodeClient = {
   ): Promise<OpenCodeResult<MessageEnvelope[]>> => {
     const result = await getV2MessagePage(sessionId, directory, limit, before);
     return isOpenCodeError(result) ? result : result.messages;
+  },
+
+  /** One bounded newest page, restored to chronological source order. The
+   * running 2.0.11 OpenAPI explicitly supports desc; legacy pages/cursors keep
+   * their existing asc behavior. This is at most 32 raw records, not 32 turns.
+   */
+  getRecentMessages: async (
+    sessionId: string,
+    limit = 32,
+    directory?: string,
+  ): Promise<OpenCodeResult<MessageEnvelope[]>> => {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 32) return {
+      error: { code: "OPENCODE_V2_INVALID_RECENT_LIMIT", message: "Recent message limit must be an integer between 1 and 32" },
+    };
+    const result = await getV2MessagePage(sessionId, directory, limit, undefined, "desc", true);
+    return isOpenCodeError(result) ? result : [...result.messages].reverse();
   },
 
   /** GET /api/session/{sessionID}/message/{messageID} [session.message.get]. */

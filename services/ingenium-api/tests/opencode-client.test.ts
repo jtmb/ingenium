@@ -687,6 +687,42 @@ describe("opencodeClient — method routing", () => {
     expect(secondMessageUrl.searchParams.has("order")).toBe(false);
   });
 
+  it("reads one descending recent page and restores chronological order without changing legacy paging", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-recent", "/workspace") }))
+      .mockResolvedValueOnce(mockResponse(200, { data: [
+        { id: "latest", type: "assistant", time: { created: 40, completed: 41 }, finish: "stop", content: [{ type: "text", text: "new answer" }] },
+        { id: "new-user", type: "user", time: { created: 30 }, text: "new question" },
+      ], cursor: { next: "older-page-is-not-followed" } }));
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await opencodeClient.getRecentMessages("ses-recent", 2, "/workspace");
+    expect(result).toMatchObject([{ info: { id: "new-user", role: "user" } }, { info: { id: "latest", role: "assistant" } }]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const url = new URL(fetchSpy.mock.calls[1][0] as string);
+    expect(url.searchParams.get("order")).toBe("desc");
+    expect(url.searchParams.get("limit")).toBe("2");
+    expect(url.searchParams.has("cursor")).toBe(false);
+    expect(url.searchParams.has("type")).toBe(false);
+  });
+
+  it.each([0, 33, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("refuses invalid recent-page limit %s before transport", async (limit) => {
+    const fetchSpy = vi.fn();vi.stubGlobal("fetch", fetchSpy);
+    expect(await opencodeClient.getRecentMessages("ses-recent", limit)).toMatchObject({ error: { code: "OPENCODE_V2_INVALID_RECENT_LIMIT" } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses an overfilled recent page rather than truncating or following another page", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, { data: v2Session("ses-recent", "/workspace") }))
+      .mockResolvedValueOnce(mockResponse(200, { data: [
+        { id: "a", type: "user", time: { created: 1 }, text: "a" },
+        { id: "b", type: "user", time: { created: 2 }, text: "b" },
+      ], cursor: {} }));
+    vi.stubGlobal("fetch", fetchSpy);
+    expect(await opencodeClient.getRecentMessages("ses-recent", 1, "/workspace")).toMatchObject({ error: { code: "OPENCODE_V2_INVALID_RESPONSE" } });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("verifies a hashed native session and exact user message binding", async () => {
     const nativeSessionId = "ses-native";
     const sessionId = `session-${createHash("sha256").update(nativeSessionId, "utf8").digest("hex")}`;
