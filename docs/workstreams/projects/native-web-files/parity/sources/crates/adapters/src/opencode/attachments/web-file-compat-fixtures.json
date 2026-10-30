@@ -1,0 +1,202 @@
+{
+  "pinnedCommit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+  "mime": [
+    {
+      "name": "empty",
+      "base64": "",
+      "mime": "text/plain"
+    },
+    {
+      "name": "ASCII",
+      "base64": "cGxhaW4=",
+      "mime": "text/plain"
+    },
+    {
+      "name": "PNG",
+      "base64": "iVBORw0KGgo=",
+      "mime": "image/png"
+    },
+    {
+      "name": "JPEG",
+      "base64": "/9j/",
+      "mime": "image/jpeg"
+    },
+    {
+      "name": "GIF",
+      "base64": "R0lGOA==",
+      "mime": "image/gif"
+    },
+    {
+      "name": "BMP",
+      "base64": "Qk0=",
+      "mime": "image/bmp"
+    },
+    {
+      "name": "PDF",
+      "base64": "JVBERi0=",
+      "mime": "application/pdf"
+    },
+    {
+      "name": "WebP",
+      "base64": "UklGRjAwMDBXRUJQ",
+      "mime": "image/webp"
+    },
+    {
+      "name": "AVIF",
+      "base64": "MDAwMGZ0eXBhdmlm",
+      "mime": "image/avif"
+    },
+    {
+      "name": "AVIS",
+      "base64": "MDAwMGZ0eXBhdmlz",
+      "mime": "image/avif"
+    },
+    {
+      "name": "NUL",
+      "base64": "QQBC",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "invalid UTF8",
+      "base64": "/w==",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "incomplete accepted UTF8",
+      "base64": "4oI=",
+      "mime": "text/plain"
+    },
+    {
+      "name": "invalid prefix plus incomplete",
+      "base64": "/+I=",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "thirty percent controls",
+      "base64": "AQIDQUFBQUFBQQ==",
+      "mime": "text/plain"
+    },
+    {
+      "name": "over thirty percent controls",
+      "base64": "AQIDBEFBQUFBQQ==",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "CRLF tabs",
+      "base64": "CQoLDA0=",
+      "mime": "text/plain"
+    },
+    {
+      "name": "UTF8 astral",
+      "base64": "8J+YgA==",
+      "mime": "text/plain"
+    },
+    {
+      "name": "UTF8 overlong",
+      "base64": "wIA=",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "UTF8 surrogate",
+      "base64": "7aCA",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "truncated PNG",
+      "base64": "iVBORw==",
+      "mime": "application/octet-stream"
+    },
+    {
+      "name": "short RIFF",
+      "base64": "UklGRg==",
+      "mime": "text/plain"
+    },
+    {
+      "name": "partial UTF8 after NUL",
+      "base64": "AOI=",
+      "mime": "application/octet-stream"
+    }
+  ],
+  "selection": [
+    {
+      "name": "CRLF inclusive source lines",
+      "base64": "YQ0KYg0KYwo=",
+      "mime": "text/plain",
+      "start": 2,
+      "end": 3,
+      "selectedBase64": "Yg0KYw=="
+    },
+    {
+      "name": "trailing empty",
+      "base64": "YQpiCg==",
+      "mime": "text/plain",
+      "start": 3,
+      "end": null,
+      "selectedBase64": ""
+    },
+    {
+      "name": "end without start ignored",
+      "base64": "YQpi",
+      "mime": "text/plain",
+      "start": null,
+      "end": 1,
+      "selectedBase64": "YQpi"
+    },
+    {
+      "name": "end before start empty",
+      "base64": "YQpi",
+      "mime": "text/plain",
+      "start": 2,
+      "end": 1,
+      "selectedBase64": ""
+    },
+    {
+      "name": "incomplete UTF8 selected replacement",
+      "base64": "4oI=",
+      "mime": "text/plain",
+      "start": 1,
+      "end": 1,
+      "selectedBase64": "77+9"
+    },
+    {
+      "name": "incomplete without range exact",
+      "base64": "4oI=",
+      "mime": "text/plain",
+      "start": null,
+      "end": null,
+      "selectedBase64": "4oI="
+    },
+    {
+      "name": "image range ignored",
+      "base64": "R0lGOA==",
+      "mime": "image/gif",
+      "start": 2,
+      "end": 3,
+      "selectedBase64": "R0lGOA=="
+    },
+    {
+      "name": "zero start becomes absent",
+      "base64": "YQpi",
+      "mime": "text/plain",
+      "start": 0,
+      "end": 1,
+      "selectedBase64": "YQpi"
+    },
+    {
+      "name": "zero end becomes absent",
+      "base64": "YQpi",
+      "mime": "text/plain",
+      "start": 1,
+      "end": 0,
+      "selectedBase64": "YQpi"
+    },
+    {
+      "name": "huge start empty",
+      "base64": "YQpi",
+      "mime": "text/plain",
+      "start": 9007199254740991,
+      "end": null,
+      "selectedBase64": ""
+    }
+  ]
+}

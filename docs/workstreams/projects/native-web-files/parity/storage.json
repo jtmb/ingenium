@@ -1,0 +1,14 @@
+{
+  "owner": "same existing Projects and execution task",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "existing authorized C-backed Ubuntu VHDX",
+  "generatedPaths": [
+    "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/native-web-files/parity",
+    "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/projects/native-web-parity.json"
+  ],
+  "peakDiskBytes": 1048576,
+  "download": "Exact pinned source in memory only; no source tree/cache/dependencies/build",
+  "tests": "Pure Node pinned functions/byte-count math; Rust unit fixtures for Root compilation; no model/engine/OS backend",
+  "protected": "All prior source/locks/runtime/receipts; no shared writes",
+  "cleanup": "No filesystem fixtures created; source/manifest/patch/test/minimal receipt retained for Root application and review"
+}

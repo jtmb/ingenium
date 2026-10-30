@@ -1,0 +1,10 @@
+--- a/crates/adapters/src/opencode/attachments.rs
++++ b/crates/adapters/src/opencode/attachments.rs
+@@ -4,6 +4,7 @@
+ //! SessionPrompt boundary materializes data URLs into persisted `{data,mime}`
+ //! message parts. This module only emits service-resolved inline data; callers
+ //! cannot use it to make OpenCode read arbitrary host paths.
++pub mod web_file_compat;
+ pub mod web_files;
+ pub use web_files::{resolve_local_web_files,NativeWebFilesOriginal,NativeWebFileReplacement};
+ use super::{Admission, OpenCodeClient, validate_session};

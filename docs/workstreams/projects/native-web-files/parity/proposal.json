@@ -1,0 +1,32 @@
+{
+  "existingDeltas": [
+    {
+      "path": "crates/adapters/src/opencode/attachments.rs",
+      "baseSha256": "8e7893ecf573e6ac4f6a6c8bb2c541ac0981ea33d689c93c8ba20d30644ccfd8",
+      "proposedSha256": "6b4a72b1160b628e301c0ae8bf842d41c5ae43791df91e8651ee8400588c8ee8"
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "crates/adapters/src/opencode/attachments/web-file-compat-fixtures.json",
+      "bytes": 4202,
+      "sha256": "f357a83f1ab2289022c5f4a0d141ca5bd00def1a8a644eec4dc26e40adbbb5c2"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_file_compat.rs",
+      "bytes": 4935,
+      "sha256": "cee540a4ace28b91927ffb113d1ed9c530f32f8ad05ac39a9190fc0f3ec5fc61"
+    }
+  ],
+  "patchSha256": "b4483a46ad32f0fd9d7311755f50392e5fd8aea6cfcec7f35779c938257b9790",
+  "activeLimitsChanged": false,
+  "activeResolverChanged": false,
+  "compiled": false,
+  "sharedWritten": false,
+  "activationRequires": [
+    "Root allocation7 actual BLOB aggregate and acknowledgment reservation",
+    "Coordinated source/wire/WSL/full-memory envelope",
+    "Directory materialization and provenance owner",
+    "Actual network-root custody owner"
+  ]
+}

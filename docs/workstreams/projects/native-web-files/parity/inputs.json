@@ -1,0 +1,101 @@
+{
+  "nativeSourceRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source",
+  "inputs": [
+    {
+      "path": "crates/adapters/src/opencode/attachments.rs",
+      "sha256": "8e7893ecf573e6ac4f6a6c8bb2c541ac0981ea33d689c93c8ba20d30644ccfd8"
+    },
+    {
+      "path": "crates/adapters/src/opencode/attachments/web_files.rs",
+      "sha256": "f86651cb8145b7ecf50e57181e61f0acf300436bf1d5f231c2a0aef68794c303"
+    },
+    {
+      "path": "crates/adapters/src/local_execution/web_files.rs",
+      "sha256": "a4a535b0ebf5063cac2ba3b5b320c8d299c66b446df685a870f40c21c81f4369"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/web-files.py",
+      "sha256": "b28c2683b032c0b6e1ccd8e814c4d17b067a098e4687c59726f259cdc3f6a3b6"
+    },
+    {
+      "path": "crates/adapters/src/wsl_workspace.rs",
+      "sha256": "34ff8fc88a9fbabf2969d5e0136c28649c8909577161400d83e49e771954b9d5"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "sha256": "876e1f2bdc5ca675a3ec293c0cd7ec1e33fe5e3edfa737bfda6a58c180201d42"
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "sha256": "6ac176c7ec0ef96edafc0a1927e9d88be171b25da64e7da01b55e2e1161f77a2"
+    }
+  ],
+  "upstream": [
+    {
+      "path": "packages/core/src/mime.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/mime.ts",
+      "bytes": 1377,
+      "sha256": "2898fc0a471236438177823763b1ee58fd92f871fe5ca19e23036c5d075ad57d"
+    },
+    {
+      "path": "packages/core/src/session/prompt.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/session/prompt.ts",
+      "bytes": 8910,
+      "sha256": "4a453f9e57d3cc48fc7d6ea23504d1437c751620d7b97bff795c090f2941fc99"
+    },
+    {
+      "path": "packages/schema/src/prompt-input.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/prompt-input.ts",
+      "bytes": 1266,
+      "sha256": "7da46cec88bf36b9e4d7be1e78506e6fdf8c5629ca2fb3397e8504cb08bbbfe7"
+    },
+    {
+      "path": "packages/schema/src/prompt.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/prompt.ts",
+      "bytes": 2961,
+      "sha256": "41b3000a4fe8ce1f48ad90bb0bd996ad52ca1dbe530b63cdc7f5af2b11b92d01"
+    },
+    {
+      "path": "packages/protocol/src/groups/session.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/session.ts",
+      "bytes": 36107,
+      "sha256": "9f78f4c34732adcd7fe87c3968ee28de9078b82494114b6a73053bd80c0ab5c1"
+    },
+    {
+      "path": "packages/schema/src/session-inbox.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/schema/src/session-inbox.ts",
+      "bytes": 3423,
+      "sha256": "61f9b9fd57409e4c8982da998142563a5d9fbd2148c47c383ad48f3897b73d51"
+    },
+    {
+      "path": "packages/core/src/session/runner/to-llm-message.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/session/runner/to-llm-message.ts",
+      "bytes": 12650,
+      "sha256": "849faab9bffcafe5c0cfec8bd4b0e11e27b6de43f3a0d65c4799c1085a15b10f"
+    },
+    {
+      "path": "packages/plugin/src/effect/session.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/plugin/src/effect/session.ts",
+      "bytes": 5333,
+      "sha256": "35c8809748334b444e5f0ba586c2517a4c245afebce3a3817a3bc4c7c25b47f9"
+    },
+    {
+      "path": "packages/plugin/src/effect/tool.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/plugin/src/effect/tool.ts",
+      "bytes": 2038,
+      "sha256": "71f46b38d2c48c27e0eafaab34c9f9ca03c95b007ec340d49f27a25faaf20c6d"
+    },
+    {
+      "path": "packages/core/src/plugin/hooks.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/plugin/hooks.ts",
+      "bytes": 4414,
+      "sha256": "2e475ccada7437c648d81c16403671deeb2de74517e4b05a397c5c2513cbbe48"
+    },
+    {
+      "path": "packages/core/src/plugin/host.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/core/src/plugin/host.ts",
+      "bytes": 24945,
+      "sha256": "881e5fba4ffe8267200f2a8c314aacd838f46d9ce5d13e713792db3c806feb10"
+    }
+  ]
+}
