@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-30T05:41:22.9710596Z",
+  "source": "veyra-phase-1/windows-source",
+  "cache": "Existing paired Native target/debug; read-only metadata inventory",
+  "evidenceClass": "Conservative peak estimate with compatible compiled inputs; no stage peak trace or compiler invocation",
+  "proposedCommand": [
+    "check",
+    "--locked",
+    "--offline",
+    "-j1",
+    "-p",
+    "veyra-service",
+    "-p",
+    "veyra-desktop"
+  ],
+  "environment": {
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_NET_OFFLINE": "true",
+    "CARGO_BUILD_JOBS": "1"
+  },
+  "genericFullBuildReservationBytes": 4294967296,
+  "checkOnlyReservationBytes": 2147483648,
+  "additionalConcurrentSourceBytes": 268435456,
+  "ceilingBytes": 21474836480,
+  "minimumFreeBytes": 16106127360,
+  "observations": {
+    "registryRmetaBytes": 695954498,
+    "macroDllBytes": 82361344,
+    "macroPdbBytes": 112357376,
+    "retainedLinkedWorkspaceTestPdbBytes": 324816896,
+    "registryAndHostRlibBytes": 826100522,
+    "buildOutputsBytes": 293691902,
+    "workspaceRmetaBytes": 129915884,
+    "fingerprintBytes": 3918266,
+    "fingerprintFiles": 2733,
+    "largestRmetaBytes": 71195600,
+    "workspaceSourceBytes": 20848378,
+    "declarationsDiffAgainstCacheBase": "No tracked changes observed",
+    "cacheBase": "268962e20bef8c246fce332241c08c00c1fc2317",
+    "retainedLinkedWorkspaceTestExeBytes": 51037184,
+    "retainedIncrementalBytes": 2895297798,
+    "normalTwoPackageCheckSucceeded": true,
+    "macroDllAndPdbBytes": 194718720
+  },
+  "cacheFingerprintInspection": {
+    "orderedRustflagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
+    "proofScope": "Matching retained fingerprint identities; not a complete freshness certificate",
+    "config": "9396254390672932401",
+    "ordinaryCheckProfile": "6921424168006762524",
+    "matchingCompilerAndFlagsRecords": 705,
+    "compiler": "17664546606611198464",
+    "otherCompilerRecords": 0,
+    "otherFlagsRecords": 0
+  },
+  "pins": {
+    "cargoLock": "a7bb23ff65c5359cddd1f9e5f98a762070124424417808e3117fef746a368aee",
+    "rustcExe": "fc40f1c8b65095a22a48c111aadc279c26a049b7e4161e8b99ffe3eb23873e86",
+    "rootCargoManifest": "fff5964b782a834da6f721eaa9ad1a5ace5bb85a95ea0bd282f92f98c5e66039",
+    "originalGate": "80fca15c1d42a88a98197e1405133ba56537c92f36f359dbe1a226ca096d38bc",
+    "cargoExe": "c9b44417dc8228b81923a1068a3c09e32d2793f2cced2a816789cf433c1f0d46",
+    "memberManifestRowsSha256": "766f36a30ff81a1fac3437a2d70bac74ea2f624790e3aeb2a97707362d91a532",
+    "desktopTauriConfig": "be24f1f633c2475f0098429efd957a6ac71504baae95b65afab4d80a0bcc72f9",
+    "desktopBuildScript": "02ae8cec00e0cecee6622f96e6fc485274b0b9619c3e168ea14027c4b0174671",
+    "rustToolchain": "33b88122a255a699294430b8a7749841bafeca2d02f29d0e8c4a538c5ae688b7",
+    "rustcDriver": "6e0929ce2af23442bd04d9a03e9311e8f6806dafd54af8f6a85c3cee535bfa73",
+    "rustcInfo": "409e2f494c197e3254845a381d7b95de6db9e048289d9d42f2c221ea3b623d6c",
+    "remapper": "49c34110e95b2a75efcc2827552fe856745b0db7d510e36d279cc334e85c2033"
+  },
+  "memberManifests": [
+    {
+      "path": "apps/desktop/src-tauri/Cargo.toml",
+      "sha256": "e4858798077c62426179401b01d7b9593493bd20bb67d714a386d0c0d93077f5"
+    },
+    {
+      "path": "apps/legacy-dock/Cargo.toml",
+      "sha256": "975e24a087400e8f0625f820fe06f7e54f5098334ef8f00f963389f6758c6226"
+    },
+    {
+      "path": "apps/service/Cargo.toml",
+      "sha256": "1b2f0c355fceebb50dc0990d36b114885540f1d581606482ac8809d7b5deaa3e"
+    },
+    {
+      "path": "crates/adapters/Cargo.toml",
+      "sha256": "5aabcaa2d40e26eeeaba5cfff79bed03d82c41d3f47b402a6328adee44fdfec6"
+    },
+    {
+      "path": "crates/contracts/Cargo.toml",
+      "sha256": "ba309e1f824b13b69d42d47d328889cf326768d34bff94e1d1f183d217b2de7b"
+    },
+    {
+      "path": "crates/core/Cargo.toml",
+      "sha256": "005e5796b56f10568575756e1d2d959c179472c3e70a8456b966138956db65dd"
+    },
+    {
+      "path": "crates/harness/Cargo.toml",
+      "sha256": "4e5828c11b9e6aae620db43215fe54ce32049f6a095ad3d40ce3e251f3c54a71"
+    },
+    {
+      "path": "crates/wsl-owner-helper/Cargo.toml",
+      "sha256": "cbdb6102237ab650bbcb4195ee6c38ffbe20e3ca13116a5d97dddf1fa063b8d0"
+    }
+  ],
+  "references": [
+    "evidence/windows-mvp-source-commit-gate-r2.json",
+    "evidence/windows-mvp-source-commit-gate-r2.log",
+    "coordination/integration/native-speech-compile-r1.json",
+    "qualify-native-speech-compile-r1.mjs"
+  ],
+  "assumptionsRequiringCoordinatorBinding": [
+    "Actual current workspace Source frozen before/after",
+    "Same declarations/features/profile/toolchain/flags/config/physical aliases",
+    "Compatible registry host rlibs/codegen inputs present; no cold full graph",
+    "No new build script generator/feature/target/profile override",
+    "Fresh complete paired-root and free-space measurements; exclusive lease"
+  ],
+  "cleanup": {
+    "removedBytes": 0,
+    "newDisposableOutputs": [],
+    "allPreviouslyProtectedTargetsPreserved": true,
+    "removedPaths": []
+  },
+  "buildAuthorized": false,
+  "workerCompilerInvoked": false,
+  "sharedGuardChanged": false
+}
