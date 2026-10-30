@@ -1,0 +1,44 @@
+{
+  "state": "unapplied four-file source follow-on after371; no actual shared writes",
+  "patchSha256": "be9bfc821f8c94517b58d4e276c5005dc75a59c676d14652b83f07901adec05e",
+  "preimages": {
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "fbdfffd05bd0c804ac67ea5ccd74c8f0112a96d0d7a329230a12e0a424e7eb38",
+    "services/ingenium-api/lib/dot-v2/core126-http.d.mts": "f64f67fceffc64217c0bf0da87e5d9e9fd4ceb8aa072975864fac26763b811d0",
+    "services/ingenium-api/lib/dot-v2/core126-runtime.ts": "16fa2e241df425ea0c9824f9cd4c4d93bc471b467b211b6799715c4ad202a998",
+    "services/ingenium-api/tests/veyra-dot-withdraw-independent.test.mjs": null
+  },
+  "postimages": {
+    "services/ingenium-api/lib/dot-v2/core126-http.mjs": "48c9485708a39f16b1788a796814e2eae445ec9173537fd6f6b4064b20dcc101",
+    "services/ingenium-api/lib/dot-v2/core126-http.d.mts": "f45caba30d49c0fa34afcee3660a54acb3f7218a917e38eb4c7879904ddb88eb",
+    "services/ingenium-api/lib/dot-v2/core126-runtime.ts": "09458d257660fa9bd393eff4cde4e6c296195a742cf0e5173c9df022c52b0692",
+    "services/ingenium-api/tests/veyra-dot-withdraw-independent.test.mjs": "5cbb68b0332fba5ffdda144aef232afe48ff6241d091bf264d2aca6f6ce416a0"
+  },
+  "factory": "createCore126WithdrawalHandler({credentials:Pick<ManagedCredentialPorts,\"withdrawManagedJobDispatch\">}):Core126Handlers[\"runtime\"]",
+  "tests": {
+    "pass": 24,
+    "fail": 0,
+    "outputSha256": "896989bd66a3e3a527a7e1d7610d27047821e5c128022e5ac2d7cbc37210d597",
+    "actualAfterApplyCommand": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes VEYRA_DOT_WITHDRAW_ACTUAL=1 /home/brajam/.local/bin/node --experimental-strip-types --test services/ingenium-api/tests/veyra-dot-withdraw-independent.test.mjs",
+    "scope": "Actual proposed HTTP factory and typed singleton source evaluated with original withdrawal SQL against :memory: SQLite; no runtime image/DB/service/socket/native/model/process started."
+  },
+  "protectedRootChanges": [
+    "describeOriginalJobBootstrap explicit optional image-owner503 guard",
+    "job-private-plugin final newline cleanup",
+    "actual Core127/128/Native integration",
+    "ingress finite allowlist Root-owned bootstrap-assignment/withdraw addition"
+  ],
+  "requiredRootWiring": [
+    "Apply four-file delta; existing original mcpCredentials owner supplies method from371",
+    "Keep finite ingress exact GET bootstrap-assignment / POST withdraw, no query, no cookie/origin/internal-service",
+    "All non-withdraw runtime/internal requests continue actualManagedJobOwner; no per-request/fake owner",
+    "Run actual Core/API strict checks and actual-source fixture plus original17/bootstrap/SDK/manager regression as appropriate"
+  ],
+  "result": "Only exact withdrawalRecorded:true/wholeContainerRetired:false emitted, no generic principal/current grant/image fallback or positive retirement/quota completion",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "runtimeObjects": false,
+    "sharedWrites": false
+  }
+}

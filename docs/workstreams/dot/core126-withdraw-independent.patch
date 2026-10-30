@@ -1,0 +1,97 @@
+--- a/services/ingenium-api/lib/dot-v2/core126-http.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-http.mjs
+@@ -4,10 +4,28 @@
+  const requireManager=ctx=>{let expected;try{expected=loadToken();}catch{throw Object.assign(Error("Original manager credential enrollment unavailable"),{status:503});}const header=ctx?.request?.headers?.authorization;if(typeof expected!=="string"||!/^[A-Za-z0-9_-]{43,128}$/.test(expected)||typeof header!=="string"||!header.startsWith("Bearer "))throw Object.assign(Error("Manager authentication required"),{status:401});const left=Buffer.from(header.slice(7)),right=Buffer.from(expected);if(left.length!==right.length||!timingSafeEqual(left,right))throw Object.assign(Error("Manager authentication required"),{status:401});};
+  return {requireManager,context(request){const ctx={request};requireManager(ctx);return ctx;}};
+ }
++/** Only self-reduction of the exact original credential/ledger; no owner/image/grant bootstrap. */
++export function createCore126WithdrawalHandler({credentials}){
++ return async request=>{
++  const match=/^\/runtime\/job-runs\/([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/withdraw$/.exec(request.path);
++  if(!match)return null;
++  const deny=()=>{throw Object.assign(Error("Original JobRun withdrawal denied"),{status:401});};
++  const headers=request.headers,body=request.body,uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
++  if(request.method!=="POST")throw Object.assign(Error("Method unavailable"),{status:405});
++  if(!headers||headers["x-ingenium-audience"]!=="job-run"||headers.cookie!==undefined||headers.origin!==undefined||headers["x-ingenium-internal-service"]!==undefined||Object.keys(request.query??{}).length||!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body).sort().join("|")!=="attemptId|reason|runId"||body.runId!==match[1]||typeof body.attemptId!=="string"||!uuid.test(body.attemptId)||headers["x-ingenium-job-attempt"]!==body.attemptId||!["CORE126_JOB_ENFORCEMENT_LOST","CORE126_JOB_PLUGIN_UNLOADED","CORE126_JOB_PARENT_STOP"].includes(body.reason))deny();
++  const auth=headers.authorization;if(typeof auth!=="string"||!/^Bearer ing_[A-Za-z0-9_-]{12}_[A-Za-z0-9_-]{43}$/.test(auth))deny();
++  if(typeof credentials?.withdrawManagedJobDispatch!=="function")throw Object.assign(Error("Original JobRun withdrawal unavailable"),{status:503});
++  const narrowed=credentials.withdrawManagedJobDispatch(auth.slice(7),{runId:match[1],attemptId:body.attemptId,reason:body.reason});
++  if(!narrowed)deny();
++  if(narrowed.withdrawalRecorded!==true||narrowed.wholeContainerRetired!==false)throw Object.assign(Error("Original JobRun withdrawal unavailable"),{status:503});
++  return {data:{withdrawalRecorded:true,wholeContainerRetired:false}};
++ };
++}
+ /** Mount these closed handlers before generic user/runtime auth; they authenticate their OWN exact audience.
+  * No handler creates a browser/service/compatibility principal from a job-run credential.
+  */
+ export function createCore126Handlers({owner,managerGuard,credentials,authorizeTool,dispatchExistingTool,listAuthorizedTools}){
++ const withdraw=createCore126WithdrawalHandler({credentials});
+  return {
+   async internal(request){
+    const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$/.exec(request.path);
+@@ -21,14 +39,10 @@
+    if(!methods[operation])throw Object.assign(Error("Method unavailable"),{status:405});return {data:await owner[methods[operation]](runId,body,ctx)};
+   },
+   async runtime(request){
+-   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|bootstrap-assignment|withdraw|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
++   const narrowed=await withdraw(request);if(narrowed)return narrowed;
++   const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\/(assignment|bootstrap-assignment|result|mcp-tools|mcp\/([A-Za-z0-9_:-]+))$/.exec(request.path);
+    if(!match)return null;
+    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
+-   if(match[2]==="withdraw"){
+-    const body=request.body;
+-    if(request.method!=="POST"||request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.cookie!==undefined||request.headers?.origin!==undefined||!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body).sort().join("|")!=="attemptId|reason|runId"||body.runId!==match[1]||request.headers?.["x-ingenium-job-attempt"]!==body.attemptId)throw Object.assign(Error("Original JobRun withdrawal denied"),{status:401});
+-    const narrowed=credentials.withdrawManagedJobDispatch(token,body);if(!narrowed)throw Object.assign(Error("Original JobRun withdrawal denied"),{status:401});return {data:narrowed};
+-   }
+    const credential=credentials.inspectManagedJobCredential(token,"job-run");
+    if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
+    if(match[2]==="bootstrap-assignment"&&request.method==="GET"){
+--- a/services/ingenium-api/lib/dot-v2/core126-http.d.mts
++++ b/services/ingenium-api/lib/dot-v2/core126-http.d.mts
+@@ -3,3 +3,4 @@
+ export declare function createCore126ManagerGuard(ports:{loadToken():string}):Core126ManagerGuard;
+ export declare function createCore126Handlers(ports:{owner:Core126Owner;managerGuard:Core126ManagerGuard;credentials:ManagedCredentialPorts;authorizeTool?:ClosedToolAuthorizer;dispatchExistingTool?:ExistingToolDispatcher;listAuthorizedTools?:(credential:ManagedJobCredential)=>unknown|Promise<unknown>}):Core126Handlers;
+ export declare function createCore126ToolAuthorizer(ports:{credentials:ManagedCredentialPorts;mcpAuthorizationPolicy:Pick<typeof mcpAuthorizationPolicy,"explicitMcpAuthorizationPolicy">;authorization:Core126OwnerPorts["authorization"];jobs:Core126OwnerPorts["jobs"];toolCatalog?:ExistingToolCatalog}):ClosedToolAuthorizer;
++export declare function createCore126WithdrawalHandler(ports:{credentials:Pick<ManagedCredentialPorts,"withdrawManagedJobDispatch">}):Core126Handlers["runtime"];
+--- a/services/ingenium-api/lib/dot-v2/core126-runtime.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-runtime.ts
+@@ -1,3 +1,5 @@
++import {mcpCredentials} from "ingenium-core";
++import {createCore126WithdrawalHandler} from "./core126-http.mjs";
+ import type {Core126ImageOwner} from "../../../../packages/veyra-operations/core126-image-owner.mjs";
+ import type {Core126Handlers} from "./managed-job-contracts.mjs";
+ import {createActualCore126Owner} from "./core126-actual-factory.js";
+@@ -10,7 +12,11 @@
+ export function actualManagedJobOwner():ReturnType<typeof createActualCore126Owner> {
+  if(!original)throw Object.assign(Error("Qualified managed JobRun original owner unavailable"),{status:503});return original;
+ }
++const originalWithdrawal=createCore126WithdrawalHandler({credentials:mcpCredentials});
+ export const actualManagedJobHandlers:Core126Handlers={
+  internal:request=>actualManagedJobOwner().handlers.internal(request),
+- runtime:request=>actualManagedJobOwner().handlers.runtime(request),
++ runtime:async request=>{
++  const narrowed=await originalWithdrawal(request);if(narrowed)return narrowed;
++  return await actualManagedJobOwner().handlers.runtime(request);
++ },
+ };
+--- /dev/null
++++ b/services/ingenium-api/tests/veyra-dot-withdraw-independent.test.mjs
+@@ -0,0 +1,18 @@
++import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {stripTypeScriptTypes} from 'node:module';import {DatabaseSync} from 'node:sqlite';import {createHash} from 'node:crypto';import {resolve,dirname} from 'node:path';import {fileURLToPath,pathToFileURL} from 'node:url';
++const root=process.env.VEYRA_DOT_PROPOSAL_SOURCE_ROOT??resolve(dirname(fileURLToPath(import.meta.url)),'../../..'),actual=process.env.VEYRA_DOT_WITHDRAW_ACTUAL==='1',dataUrl=s=>`data:text/javascript;base64,${Buffer.from(s).toString('base64')}`;
++const http=await import(actual?pathToFileURL(resolve(root,'services/ingenium-api/lib/dot-v2/core126-http.mjs')).href:dataUrl(readFileSync(new URL('./core126-http-withdraw-independent.proposal.mjs',import.meta.url),'utf8')));
++const runtimeRaw=actual?readFileSync(resolve(root,'services/ingenium-api/lib/dot-v2/core126-runtime.ts'),'utf8'):readFileSync(new URL('./core126-runtime-withdraw-independent.proposal.ts',import.meta.url),'utf8');
++const runId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',attemptId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',capability='ing_'+('a'.repeat(12))+'_'+('b'.repeat(43));
++function request(){return {path:`/runtime/job-runs/${runId}/withdraw`,method:'POST',headers:{authorization:'Bearer '+capability,'x-ingenium-audience':'job-run','x-ingenium-job-attempt':attemptId},query:{},body:{runId,attemptId,reason:'CORE126_JOB_ENFORCEMENT_LOST'}};}
++function credentialFixture(){const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE job_run_mcp_credentials(id TEXT,run_id TEXT,attempt_id TEXT,service_principal_id TEXT,token_hash TEXT,kind TEXT,audience TEXT,revoked_at TEXT,expires_at TEXT);CREATE TABLE job_run_managed_execution(run_id TEXT,attempt_id TEXT,credential_id TEXT,project_id TEXT,phase TEXT,revision INTEGER,updated_at TEXT);CREATE TABLE job_runs(id TEXT,project_id TEXT,effective_service_principal_id TEXT,status TEXT);CREATE TABLE veyra_dot_records(kind TEXT,revision INTEGER,body TEXT);`);const hash=s=>createHash('sha256').update(s).digest('hex');db.prepare('INSERT INTO job_run_mcp_credentials VALUES(?,?,?,?,?,?,?,?,?)').run('original-credential',runId,attemptId,'principal',hash(capability),'job-run','job-run','2000-01-01','2000-01-01');db.prepare('INSERT INTO job_run_managed_execution VALUES(?,?,?,?,?,?,?)').run(runId,attemptId,'original-credential','project','running',3,'old');db.prepare('INSERT INTO job_runs VALUES(?,?,?,?)').run(runId,'project','principal','running');const src=actual?readFileSync(resolve(root,'packages/ingenium-core/lib/tools/mcp-credentials.ts'),'utf8'):readFileSync(new URL('./job-withdraw-credential.append.ts',import.meta.url),'utf8');const start=src.indexOf('export function withdrawManagedJobDispatch('),end=src.indexOf('\n}',start)+2;assert.ok(start>=0&&end>start);const raw=stripTypeScriptTypes(src.slice(start,end)).replace('export function','function');const fn=new Function('getDb','execTransaction','checkpointAfterWrite','hashSecurityToken',raw+';return withdrawManagedJobDispatch;')(()=>db,work=>{db.exec('BEGIN');try{const result=work();db.exec('COMMIT');return result;}catch(error){db.exec('ROLLBACK');throw error;}},()=>{},hash);return {db,credentials:{withdrawManagedJobDispatch:fn,inspectManagedJobCredential(){throw Error('Current credential resolution MUST NOT run');}}};}
++function singleton(credentials,createOwner=()=>{throw Error('Owner creation MUST NOT run');}){const raw=stripTypeScriptTypes(runtimeRaw).replace(/^import .*;$/gm,'').replaceAll('export ','');return new Function('mcpCredentials','createCore126WithdrawalHandler','createActualCore126Owner',raw+';return {actualManagedJobHandlers,installActualManagedJobOwner,actualManagedJobOwner};')(credentials,http.createCore126WithdrawalHandler,createOwner);}
++test('pre-owner singleton withdraw works after restart with expired/revoked original token and no image/grant/owner',async()=>{const f=credentialFixture();try{const entry=singleton(f.credentials);assert.throws(()=>entry.actualManagedJobOwner(),{status:503});assert.deepEqual(await entry.actualManagedJobHandlers.runtime(request()),{data:{withdrawalRecorded:true,wholeContainerRetired:false}});assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'cancel_requested');assert.equal(f.db.prepare('SELECT status FROM job_runs').get().status,'running');assert.ok(f.db.prepare('SELECT revoked_at FROM job_run_mcp_credentials').get().revoked_at);}finally{f.db.close();}});
++test('normal runtime producer uses the identical closed withdrawal factory without owner ports',async()=>{const f=credentialFixture();try{const owner=new Proxy({},{get(){throw Error('Owner access MUST NOT run');}}),handlers=http.createCore126Handlers({owner,managerGuard:{},credentials:f.credentials});assert.deepEqual(await handlers.runtime(request()),{data:{withdrawalRecorded:true,wholeContainerRetired:false}});}finally{f.db.close();}});
++test('all other namespaces and runtime operations still require enrolled original singleton',async()=>{const f=credentialFixture();try{const entry=singleton(f.credentials);for(const operation of ['assignment','bootstrap-assignment','mcp-tools','result','mcp/ingenium_project_detail'])await assert.rejects(entry.actualManagedJobHandlers.runtime({...request(),path:`/runtime/job-runs/${runId}/${operation}`}),{status:503});await assert.rejects(Promise.resolve().then(()=>entry.actualManagedJobHandlers.internal({...request(),path:`/internal/managed-job-runs/${runId}/admission`})),{status:503});assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'running');}finally{f.db.close();}});
++const malformed=[['wrong method',r=>r.method='GET'],['missing audience',r=>delete r.headers['x-ingenium-audience']],['runtime audience',r=>r.headers['x-ingenium-audience']='runtime'],['cookie',r=>r.headers.cookie='s=x'],['origin',r=>r.headers.origin='http://bad'],['service header',r=>r.headers['x-ingenium-internal-service']='1'],['query',r=>r.query={action:'cancel'}],['wrong attempt header',r=>r.headers['x-ingenium-job-attempt']=runId],['extra body field',r=>r.body.extra=true],['array body',r=>r.body=[]],['wrong body run',r=>r.body.runId=attemptId],['invalid attempt',r=>r.body.attemptId='not-uuid'],['unknown reason',r=>r.body.reason='CALLER_APPROVED'],['array bearer',r=>r.headers.authorization=['Bearer '+capability]],['short bearer',r=>r.headers.authorization='Bearer ing_short'],['duplicate bearer',r=>r.headers.authorization+=' , Bearer '+capability]];
++for(const [label,mutate]of malformed)test(`pre-owner closed route rejects ${label} before original credential transaction`,async()=>{let calls=0;const entry=singleton({withdrawManagedJobDispatch(){calls++;throw Error('Must not reach transaction');}}),r=request();mutate(r);await assert.rejects(entry.actualManagedJobHandlers.runtime(r));assert.equal(calls,0);});
++test('canonical standalone matcher rejects aliases/trailing paths without resolving any token',async()=>{let calls=0;const handler=http.createCore126WithdrawalHandler({credentials:{withdrawManagedJobDispatch(){calls++;}}});for(const path of [`/api/v1/runtime/job-runs/${runId}/withdraw`,`/runtime/job-runs/${runId.toUpperCase()}/withdraw`,`/runtime/job-runs/${runId}/withdraw/`,`/runtime/job-runs/${runId}/withdraw-other`])assert.equal(await handler({...request(),path}),null);assert.equal(calls,0);});
++test('wrong original token/run/attempt never changes ledger and does not fall into owner initialization',async()=>{const f=credentialFixture();try{const entry=singleton(f.credentials);const badToken=request();badToken.headers.authorization='Bearer ing_'+('x'.repeat(12))+'_'+('y'.repeat(43));await assert.rejects(entry.actualManagedJobHandlers.runtime(badToken),{status:401});const other=request();other.path=`/runtime/job-runs/${attemptId}/withdraw`;other.body.runId=attemptId;await assert.rejects(entry.actualManagedJobHandlers.runtime(other),{status:401});assert.equal(f.db.prepare('SELECT phase FROM job_run_managed_execution').get().phase,'running');}finally{f.db.close();}});
++test('withdrawal emits only self-reduction flags and rejects any positive retirement claim',async()=>{const handler=http.createCore126WithdrawalHandler({credentials:{withdrawManagedJobDispatch:()=>({withdrawalRecorded:true,wholeContainerRetired:false,privateValue:'must not escape'})}});assert.deepEqual(await handler(request()),{data:{withdrawalRecorded:true,wholeContainerRetired:false}});const bad=http.createCore126WithdrawalHandler({credentials:{withdrawManagedJobDispatch:()=>({withdrawalRecorded:true,wholeContainerRetired:true})}});await assert.rejects(bad(request()),{status:503});});
++test('missing original withdrawal method fails closed without an owner fallback',async()=>{const entry=singleton({});await assert.rejects(entry.actualManagedJobHandlers.runtime(request()),{status:503});});
++test('enrolled singleton remains sole dispatcher for other routes and is not recreated for withdrawal',async()=>{let created=0,normal=0,narrowed=0;const entry=singleton({withdrawManagedJobDispatch:()=>{narrowed++;return {withdrawalRecorded:true,wholeContainerRetired:false};}},()=>{created++;return {handlers:{runtime:async()=>{normal++;return {data:'normal'};},internal:async()=>({data:'internal'})}};});entry.installActualManagedJobOwner({withFreshOriginalJobRole(){},assertCurrentOriginalJobRole(){}});assert.deepEqual(await entry.actualManagedJobHandlers.runtime({...request(),path:`/runtime/job-runs/${runId}/assignment`}),{data:'normal'});await entry.actualManagedJobHandlers.runtime(request());assert.equal(created,1);assert.equal(normal,1);assert.equal(narrowed,1);});
