@@ -36,6 +36,21 @@
       "sha256": "bd883d9f4a8a1e71978b798d0a7c11997ad857c5203ec22a208f71dcf93ac9ad"
     },
     {
+      "path": "native-web-host/README.md",
+      "bytes": 6919,
+      "sha256": "c0ee61babe09e269634842a7ca112cdb0aa1b194fadbec3290767ac4bccf1d8f"
+    },
+    {
+      "path": "native-web-host/contract.json",
+      "bytes": 3686,
+      "sha256": "ea58156d52c0180defe26e6973f84c725a45011d376eb740eb18766924df2cc2"
+    },
+    {
+      "path": "native-web-host/sources/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_binding.rs",
+      "bytes": 2476,
+      "sha256": "8a174addc8b9c4416c67579639d966df868980a778eb51ad73f0c39615577916"
+    },
+    {
       "path": "prepare-composition.py",
       "bytes": 5291,
       "sha256": "71e05b0bbb07955913c33148e3b681bc0db3875bf1ffe8044f90ab9b37658937"
