@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash,randomUUID } from "node:crypto";
 import { basename,isAbsolute,join,relative } from "node:path";
 import { mkdtempSync,realpathSync,statSync,writeFileSync } from "node:fs";
 import { createServer,type Server } from "node:http";
@@ -13,6 +13,13 @@ import { errorHandler } from "../lib/middleware/errors.js";
 import { authorizationMiddleware } from "../lib/authorization-policy.js";
 import { createMemoryLifecycleRouter } from "../lib/routes/memory-lifecycle.js";
 import { observeManagedRuntime } from "../lib/runtime-placement-contract.js";
+import { createRequestMemorySession } from "../lib/memory-v2/request-session.js";
+import { positionalCoreConnection } from "../lib/memory-v2/core-session.js";
+import { MemoryLifecycle } from "../lib/memory-v2/lifecycle.mjs";
+import { withManagedRequestPlacement } from "../lib/runtime-placement.js";
+import { opencodeClient,type MessageEnvelope } from "../lib/opencode-client.js";
+
+let admittedRequest:import("express").Request|undefined;
 import * as manager from "../lib/runtime-manager-client.js";
 let root="",directory="",origin="",sequence=0,server:Server;
 let fixture:ReturnType<typeof setup>;
@@ -27,7 +34,7 @@ function setup(createChat=true){
  const chatId=`session-http-${index}`,chat=createChat?contextConversations.createContextConversation(project.id,{title:"Private fixture conversation",organizationId:project.organization_id,ownerUserId:owner.id,visibility:"private",metadata:{source:"opencode-chat",sourceRuntimeId:runtime.id,sourceSessionId:chatId},idempotencyKey:`http-chat-${index}`}):null;
  const session=authentication.createSession(owner.id,new Date(),"HTTP fixture",true),otherSession=authentication.createSession(other.id);
  const credential=mcpCredentials.createMcpCredential({kind:"service",audience:"mcp",name:`HTTP memory reader ${index}`,servicePrincipalName:`HTTP memory reader principal ${index}`,scopes:["memory:read","projects:read"],organizationId:project.organization_id,projectId:project.id,workspaceId:workspace.id,launcherWorktree:workspace.storagePath,expiresAt:new Date(Date.now()+600000),createdByUserId:owner.id});
- const observation=()=>observeManagedRuntime({Id:runtime.backendContainerId!,Name:"/"+runtime.backendName,State:{Status:"running",Health:{Status:"healthy"}},Config:{Labels:{"com.ingenium.managed":"runtime-manager","com.ingenium.runtime.id":runtime.id,"com.ingenium.runtime.organization":project.organization_id,"com.ingenium.runtime.project":project.id,"com.ingenium.runtime.owner":owner.id,"com.ingenium.runtime.workspace":workspace.id,"com.ingenium.runtime.storage":workspace.storageMappingHash,"com.ingenium.runtime.security-epoch":String(runtime.securityEpoch),"com.ingenium.runtime.revision":String(runtime.revision),"org.opencontainers.image.revision":"c".repeat(40)}}},"fixture-owned-daemon",Date.now());
+ const observation=()=>observeManagedRuntime({Id:runtime.backendContainerId!,Name:"/"+runtime.backendName,State:{Status:"running",Health:{Status:"healthy"}},Config:{Labels:{"com.ingenium.managed":"runtime-manager","com.ingenium.runtime.id":runtime.id,"com.ingenium.runtime.organization":project.organization_id,"com.ingenium.runtime.project":project.id,"com.ingenium.runtime.owner":owner.id,"com.ingenium.runtime.workspace":workspace.id,"com.ingenium.runtime.storage":workspace.storageMappingHash,"com.ingenium.runtime.security-epoch":String(runtime.securityEpoch),"com.ingenium.runtime.revision":"1","org.opencontainers.image.revision":"c".repeat(40)}}},"fixture-owned-daemon",Date.now());
  return{project,owner,other,workspace,runtime,chatId,chat,session,otherSession,credential,observation};
 }
 function url(path:string,query:Record<string,string>={}){return `${origin}/api/v1/memory/lifecycle${path}?`+new URLSearchParams({projectId:fixture.project.id,workspaceId:fixture.workspace.id,runtimeId:fixture.runtime.id,...query});}
@@ -38,12 +45,47 @@ beforeAll(async()=>{
  const configured=process.env.VEYRA_MEMORY_HTTP_TEST_ROOT;if(!configured||!isAbsolute(configured))throw Error("Explicit task-owned HTTP fixture root required");root=realpathSync(configured);if(!statSync(root).isDirectory())throw Error("Fixture root unavailable");
  directory=mkdtempSync(join(root,"memory-http-"));if(relative(root,realpathSync(directory)).startsWith(".."))throw Error("Fixture escaped root");const key=join(directory,"fixture-auth-key");writeFileSync(key,Buffer.alloc(32,29).toString("base64url"),{flag:"wx",mode:0o600});
  vi.stubEnv("INGENIUM_HOME",directory);vi.stubEnv("INGENIUM_CORE_DB_PATH",join(directory,"data.db"));vi.stubEnv("INGENIUM_GLOBAL_CONFIG_PATH",join(directory,"opencode-global"));vi.stubEnv("INGENIUM_AUTH_ENCRYPTION_KEY_FILE",key);vi.stubEnv("INGENIUM_API_TOKEN","fixture-installation-key-".repeat(3));vi.stubEnv("INGENIUM_API_TOKEN_FILE","");vi.stubEnv("INGENIUM_DEPLOYMENT_MODE","control-plane");resetDbForTest();getDb();
- const app=express();app.use(express.json());app.use(authMiddleware);app.use(csrfMiddleware);app.use(authorizationMiddleware);app.use("/api/v1/memory/lifecycle",createMemoryLifecycleRouter());app.use(errorHandler);
+ const app=express();app.use(express.json());app.use(authMiddleware);app.use((req,_res,next)=>{admittedRequest=req;next();});app.use(csrfMiddleware);app.use(authorizationMiddleware);app.use("/api/v1/memory/lifecycle",createMemoryLifecycleRouter());app.use(errorHandler);
  server=createServer(app);await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
 beforeEach(()=>{vi.restoreAllMocks();fixture=setup();vi.spyOn(manager,"inspectManagedRuntimePlacement").mockImplementation(async()=>fixture.observation());});
 afterAll(async()=>{vi.restoreAllMocks();if(server)await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));resetDbForTest();vi.unstubAllEnvs();if(directory)writeFileSync(join(root,`${basename(directory)}-fixture.json`),JSON.stringify({owner:"01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",directory,databaseClosed:true,httpServerClosed:true,containsRealUserData:false,regeneration:"Run memory-lifecycle-http.test.ts with existing task-owned root",consumer:"Review first result then safety-checked exact fixture cleanup"},null,2),{flag:"wx"});});
 describe("real HTTP, authentication, CSRF and memory ownership composition",()=>{
+ it("primes actual-owner canonical source reads before fresh-chat recall and preserves a later incomplete tail",async()=>{
+  expect((await fetch(url("/scope-policy"),{headers:browser()})).status).toBe(200);
+  const request=admittedRequest!;
+  const selected={projectId:fixture.project.id,workspaceId:fixture.workspace.id,runtimeId:fixture.runtime.id};
+  const scope=await withManagedRequestPlacement(request,selected,()=>createRequestMemorySession(request,selected).resolveScope("read",fixture.chatId));
+  const userId="engine-user",assistantId="engine-answer",userContent="Remember the fixture preference",assistantContent="A complete canonical response";
+  const turn=contextConversations.persistContextChatTurn(fixture.project.id,fixture.chat!.id,{expectedRevision:0,sourceRuntimeId:fixture.runtime.id,sourceSessionId:fixture.chatId,userMessageId:userId,assistantMessageId:assistantId,userContent,assistantContent});
+  const hash=(value:string)=>createHash("sha256").update(value).digest("hex");
+  const refs=[{id:turn.userMessage.id,contentHash:hash(userContent)},{id:turn.assistantMessage.id,contentHash:hash(assistantContent)}];
+  // Seed an existing generated record through its real SQLite lifecycle owner;
+  // only its extraction source/model are fixtures. This public test runs no inference.
+  const seeded=new MemoryLifecycle({db:positionalCoreConnection(getDb()),authorize:()=>true,sources:(_scope,_chat,id)=>({contentHash:refs.find(ref=>ref.id===id)!.contentHash,active:false,excluded:false,uncertain:false,idleEligible:true,kind:"transcript"}),checkpoint:()=>{}});
+  seeded.setPolicy(scope,{operationId:randomUUID(),expectedRevision:0,enabled:true,generate:true,useMemory:true,externalContext:false});
+  seeded.setChatPolicy(scope,fixture.chatId,{operationId:randomUUID(),expectedRevision:0,useMemory:true,contribute:true});
+  seeded.commitRecall(scope,{operationId:randomUUID(),admission:seeded.admit(scope,fixture.chatId,refs),content:"The fixture user prefers concise answers.",model:"model-free-fixture"});
+  seeded.setPolicy(scope,{operationId:randomUUID(),expectedRevision:1,enabled:true,generate:false,useMemory:true,externalContext:false});
+  contextConversations.appendContextMessage(fixture.project.id,fixture.chat!.id,{role:"user",content:"An unrelated unfinished later turn",expectedRevision:turn.revision,idempotencyKey:"later-unfinished",metadata:{source:"opencode-chat",sourceRuntimeId:fixture.runtime.id,sourceSessionId:fixture.chatId,sourceMessageId:"later-engine-user"}});
+  const freshId="fresh-engine-chat";contextConversations.createContextConversation(fixture.project.id,{title:"Fresh private chat",organizationId:fixture.project.organization_id,ownerUserId:fixture.owner.id,visibility:"private",metadata:{source:"opencode-chat",sourceRuntimeId:fixture.runtime.id,sourceSessionId:freshId},idempotencyKey:"fresh-recall-chat"});
+  const now=Date.now()-10000;
+  const envelope=(id:string,role:"user"|"assistant",text:string,created:number):MessageEnvelope=>({info:{id,sessionID:fixture.chatId,role,time:{created,...(role==="assistant"?{completed:created+1}: {})},...(role==="assistant"?{finish:"stop"}: {})},parts:[{id:id+"-text",sessionID:fixture.chatId,messageID:id,type:"text",text}]});
+  const messages=[envelope(userId,"user",userContent,now-10),envelope(assistantId,"assistant",assistantContent,now)];
+  vi.spyOn(opencodeClient,"getSession").mockResolvedValue({id:fixture.chatId,slug:"fixture",projectID:"original-engine-project",directory:"/workspace",path:"/workspace",title:"Not exported",version:"2.0.11",time:{created:now-1000,updated:now+1},cost:0,tokens:{input:0,output:0,reasoning:0,cache:{read:0,write:0}}});
+  const exact=vi.spyOn(opencodeClient,"getSessionMessage").mockImplementation(async(_chat,id)=>messages.find(message=>message.info.id===id)!);
+  vi.spyOn(opencodeClient,"getRecentMessages").mockResolvedValue(messages);
+  const response=await fetch(url("/recall",{chatId:freshId}),{headers:browser()});
+  expect(response.status).toBe(200);const body=await response.json();expect(body.data.items).toHaveLength(1);expect(body.data.items[0].content).toBe("The fixture user prefers concise answers.");expect(body.sourceWindow.verifiedSources).toBe(2);expect(exact).toHaveBeenCalledTimes(2);
+  const disabled=await fetch(url(`/chats/${freshId}/policy`),{method:"PUT",headers:browser(fixture.session,true),body:JSON.stringify({operationId:randomUUID(),expectedRevision:0,useMemory:false,contribute:false})});expect(disabled.status).toBe(200);
+  const callsBeforeDisabled=exact.mock.calls.length,withoutMemory=await fetch(url("/recall",{chatId:freshId}),{headers:browser()});expect((await withoutMemory.json()).data.excluded).toBe(true);expect(exact.mock.calls).toHaveLength(callsBeforeDisabled);
+  expect((await fetch(url(`/chats/${freshId}/policy`),{method:"PUT",headers:browser(fixture.session,true),body:JSON.stringify({operationId:randomUUID(),expectedRevision:1,useMemory:true,contribute:false})})).status).toBe(200);
+  exact.mockImplementation(async(_chat,id)=>id===userId?{...messages[0]!,parts:[{...messages[0]!.parts[0]!,text:"Selected source changed"}]}:messages[1]!);
+  const changed=await fetch(url("/recall",{chatId:freshId}),{headers:browser()});expect(changed.status).toBe(200);const omitted=await changed.json();expect(omitted.data.items).toHaveLength(0);expect(omitted.sourceWindow.unavailableSourceCount).toBe(2);
+  const forgotten=await fetch(url("/forget"),{method:"POST",headers:browser(fixture.session,true),body:JSON.stringify({operationId:randomUUID(),memoryId:body.data.items[0].id,expectedVersion:1})});expect(forgotten.status).toBe(200);
+  exact.mockImplementation(async(_chat,id)=>messages.find(message=>message.info.id===id)!);
+  const callsBeforeForgetRead=exact.mock.calls.length,afterForget=await fetch(url("/recall",{chatId:freshId}),{headers:browser()});expect((await afterForget.json()).data.items).toHaveLength(0);expect(exact.mock.calls).toHaveLength(callsBeforeForgetRead);
+ });
  it("reads scope settings before chat creation without inserting defaults",async()=>{fixture=setup(false);expect(getDb().prepare("SELECT count(*) AS n FROM context_conversations WHERE project_id=?").get(fixture.project.id)).toEqual({n:0});const before=memoryRows();const response=await fetch(url("/scope-policy"),{headers:browser()});expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("no-store");const data=(await response.json()).data;expect(data.policy).toMatchObject({revision:0,enabled:true,generate:false,useMemory:true,externalContext:false});expect(data).not.toHaveProperty("chatId");expect(data).not.toHaveProperty("chat");expect(memoryRows()).toEqual(before);});
  it("uses actual engine identity distinct from the canonical Context record",async()=>{expect(fixture.chatId).not.toBe(fixture.chat!.id);const response=await fetch(url("/policy",{chatId:fixture.chatId}),{headers:browser()});expect(response.status).toBe(200);expect((await response.json()).data.chatId).toBe(fixture.chatId);const wrong=await fetch(url("/policy",{chatId:fixture.chat!.id}),{headers:browser()});expect(wrong.status).toBe(403);});
  it("persists and reconciles exactly the original operation, with CAS/conflict semantics",async()=>{const operationId=randomUUID(),body={operationId,expectedRevision:0,enabled:true,generate:false,useMemory:false,externalContext:false};const send=(value:unknown,extra:Record<string,string>={})=>fetch(url("/policy"),{method:"PUT",headers:{...browser(fixture.session,true),...extra},body:JSON.stringify(value)});const first=await send(body,{"Idempotency-Key":operationId});expect(first.status).toBe(200);const result=(await first.json()).data;expect(result.receipt.operationId).toBe(operationId);const repeated=await send(body);expect(repeated.status).toBe(200);expect((await repeated.json()).data).toMatchObject({receipt:result.receipt,idempotent:true});const receipt=await fetch(url(`/operations/${operationId}`),{headers:browser()});expect(receipt.status).toBe(200);expect((await receipt.json()).data).toEqual(result.receipt);expect((await send({...body,useMemory:true})).status).toBe(409);expect((await send({...body,operationId:randomUUID()})).status).toBe(409);const policy=await fetch(url("/scope-policy"),{headers:browser()});expect((await policy.json()).data.policy).toMatchObject({revision:1,useMemory:false});});

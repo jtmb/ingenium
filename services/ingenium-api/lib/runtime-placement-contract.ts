@@ -4,7 +4,7 @@ import type { PlacementRequest, TrustedPlacement } from "./projects-v2/request-e
 export interface ManagedRuntimeObservation {
   schemaVersion: 1; hostId: string; runtimeId: string; backendId: string; backendName: string;
   organizationId: string; ownerUserId: string; projectId: string; workspaceId: string;
-  bindingHash: string; bindingEpoch: number; runtimeRevision: number; imageRevision: string;
+  bindingHash: string; bindingEpoch: number; provisioningRevision: number; imageRevision: string;
   state: "running"; health: "healthy"; observedAt: number; expiresAt: number;
 }
 export interface ManagedContainerFacts {
@@ -34,18 +34,18 @@ export function observeManagedRuntime(container:ManagedContainerFacts,daemonId:u
   return Object.freeze({schemaVersion:1,hostId:"docker-daemon:"+createHash("sha256").update("veyra-docker-host-v1\0"+daemonId).digest("hex"),
     runtimeId,backendId:container.Id,backendName:name,organizationId:scope.organizationId,ownerUserId:scope.ownerUserId,
     projectId:scope.projectId,workspaceId:scope.workspaceId,bindingHash:labels["com.ingenium.runtime.storage"],
-    bindingEpoch:numberLabel(labels["com.ingenium.runtime.security-epoch"]),runtimeRevision:numberLabel(labels["com.ingenium.runtime.revision"]),
+    bindingEpoch:numberLabel(labels["com.ingenium.runtime.security-epoch"]),provisioningRevision:numberLabel(labels["com.ingenium.runtime.revision"]),
     imageRevision:labels["org.opencontainers.image.revision"],state:"running",health:"healthy",observedAt:now,expiresAt:now+5_000});
 }
 export function isManagedRuntimeObservation(value:unknown):value is ManagedRuntimeObservation {
   if(!value || typeof value!=="object" || Array.isArray(value))return false;
   const v=value as Record<string,unknown>;
-  const keys=["schemaVersion","hostId","runtimeId","backendId","backendName","organizationId","ownerUserId","projectId","workspaceId","bindingHash","bindingEpoch","runtimeRevision","imageRevision","state","health","observedAt","expiresAt"];
+  const keys=["schemaVersion","hostId","runtimeId","backendId","backendName","organizationId","ownerUserId","projectId","workspaceId","bindingHash","bindingEpoch","provisioningRevision","imageRevision","state","health","observedAt","expiresAt"];
   return Object.keys(v).sort().join("|")===keys.sort().join("|") && v.schemaVersion===1
     && text(v.hostId) && /^docker-daemon:[a-f0-9]{64}$/u.test(v.hostId) && text(v.runtimeId)
     && UUID.test(v.runtimeId) && sha(v.backendId) && v.backendName===`ingenium-runtime-${v.runtimeId.replaceAll("-","")}`
     && [v.organizationId,v.ownerUserId,v.projectId,v.workspaceId].every(x=>text(x)) && sha(v.bindingHash) && sha(v.imageRevision,40)
-    && integer(v.bindingEpoch) && integer(v.runtimeRevision) && v.state==="running" && v.health==="healthy"
+    && integer(v.bindingEpoch) && integer(v.provisioningRevision) && v.state==="running" && v.health==="healthy"
     && integer(v.observedAt) && integer(v.expiresAt) && v.expiresAt-v.observedAt===5_000;
 }
 /** Request-local qualification; an observation is never an authorization grant. */
@@ -56,7 +56,7 @@ export function qualifyManagedRuntimePlacement(expected:PlacementRequest,observa
     || observation.backendName!==expected.backendName || observation.organizationId!==expected.organizationId
     || observation.ownerUserId!==expected.ownerUserId || observation.projectId!==expected.projectId
     || observation.workspaceId!==expected.workspaceId || observation.bindingHash!==expected.bindingHash
-    || observation.bindingEpoch!==expected.bindingEpoch || observation.runtimeRevision!==expected.runtimeRevision)return null;
+    || observation.bindingEpoch!==expected.bindingEpoch || (!integer(expected.runtimeRevision)||observation.provisioningRevision>expected.runtimeRevision))return null;
   const {now,...facts}=expected; void now;
   return Object.freeze({...facts,hostId:observation.hostId,environmentId:`managed-runtime-v1:${installationId}`,
     observedAt:observation.observedAt,expiresAt:observation.expiresAt});

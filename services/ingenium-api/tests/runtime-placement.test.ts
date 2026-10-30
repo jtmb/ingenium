@@ -44,12 +44,20 @@ describe("original manager placement owner facts",()=>{
     for(const value of ["-1","01","1.5","9007199254740992"]){const {container}=fixture();container.Config!.Labels!["com.ingenium.runtime.security-epoch"]=value;expect(()=>observeManagedRuntime(container,"daemon",now)).toThrow();}
     expect(()=>observeManagedRuntime(fixture().container,"daemon",Number.MAX_SAFE_INTEGER)).toThrow();
   });
-  it("requires every original scope, epoch, revision and container identity to match",()=>{
+  it("requires every original scope, epoch and container identity to match",()=>{
     const {expected,observation}=fixture();
-    for(const field of ["organizationId","ownerUserId","projectId","workspaceId","bindingHash","bindingEpoch","runtimeId","runtimeRevision","backendName","backendContainerId"] as const){
+    for(const field of ["organizationId","ownerUserId","projectId","workspaceId","bindingHash","bindingEpoch","runtimeId","backendName","backendContainerId"] as const){
       const value=expected[field],changed={...expected,[field]:typeof value==="number"?value+1:value+"x"};
       expect(qualifyManagedRuntimePlacement(changed,observation,installation),field).toBeNull();
     }
+  });
+  it("preserves the original provisioning claim while Core lifecycle/activity revisions advance",()=>{
+    const {expected,observation}=fixture();
+    const placement=qualifyManagedRuntimePlacement({...expected,runtimeRevision:expected.runtimeRevision+7},observation,installation);
+    expect(observation.provisioningRevision).toBe(3);
+    expect(placement?.runtimeRevision).toBe(10);
+    expect(qualifyManagedRuntimePlacement({...expected,runtimeRevision:2},observation,installation)).toBeNull();
+    expect(qualifyManagedRuntimePlacement({...expected,runtimeRevision:-1},observation,installation)).toBeNull();
   });
   it("refuses future, expired, widened-duration and malformed protocol observations",()=>{
     const {expected,observation}=fixture();

@@ -6,14 +6,14 @@ import { memoryResponse } from "../memory-v2/http.mjs";
 import { mapRequestExecutionFailure } from "../memory-v2/request-policy.mjs";
 import { RequestExecutionError, type RequestExecutionSelection } from "../projects-v2/request-execution.js";
 import { withManagedRequestPlacement } from "../runtime-placement.js";
+import { readRequestMemoryRecall } from "../memory-request-recall.js";
 
-type Session=ReturnType<typeof createRequestMemorySession>;
 type Action=Parameters<typeof memoryResponse>[2]["action"];
 export interface MemoryLifecycleRouterPorts {
-  createSession:(request:Request,selected:RequestExecutionSelection)=>Session;
+  createSession:typeof createRequestMemorySession;
   withPlacement:<T>(request:Request,selected:RequestExecutionSelection,work:()=>T|Promise<T>)=>Promise<T>;
 }
-const statusByCode:Record<string,number>={MEMORY_ADAPTER_UNAVAILABLE:503,FORBIDDEN:403,INVALID_INPUT:422,INVALID_SCOPE:422,NOT_FOUND:404,VERSION_CONFLICT:409,OPERATION_CONFLICT:409,RESET_CHANGED:409};
+const statusByCode:Record<string,number>={MEMORY_ADAPTER_UNAVAILABLE:503,SOURCE_UNAVAILABLE:503,FORBIDDEN:403,INVALID_INPUT:422,INVALID_SCOPE:422,NOT_FOUND:404,VERSION_CONFLICT:409,OPERATION_CONFLICT:409,RESET_CHANGED:409};
 const scalar=(value:unknown,max=256):value is string=>typeof value==="string" && value.length>0 && value.length<=max && value===value.trim() && !/[\u0000-\u001f\u007f]/u.test(value);
 function selectionFor(req:Request):RequestExecutionSelection {
   const projectless=req.query.projectless;
@@ -52,7 +52,7 @@ export function createMemoryLifecycleRouter(overrides:Partial<MemoryLifecycleRou
           if(typeof value!=="string" || !/^(0|[1-9][0-9]*)$/u.test(value) || !Number.isSafeInteger(Number(value)))throw new MemoryError("INVALID_INPUT");
           query[key]=Number(value);
         }
-        const result=await withPlacement(req,selected,()=>{
+        const result=action==="recall" ? await readRequestMemoryRecall(req,selected,typeof chatId==="string"?chatId:undefined,query,{createSession,withPlacement}) : await withPlacement(req,selected,()=>{
           const session=createSession(req,selected);
           return memoryResponse(session.memory,(_request,permission:MemoryPermission)=>session.resolveScope(permission,typeof chatId==="string"?chatId:null),{
             action,method:req.method,body,query,chatId:typeof chatId==="string"?chatId:undefined,operationId:typeof req.params.operationId==="string"?req.params.operationId:undefined,
@@ -80,7 +80,7 @@ export function createMemoryLifecycleRouter(overrides:Partial<MemoryLifecycleRou
     else res.set({"Allow":"GET, PUT","Cache-Control":"no-store"}).status(405).json({error:{code:"METHOD_NOT_ALLOWED",message:"Method not allowed"}});
   });
   router.all("/chats/:chatId/policy",handler("set-chat-policy","PUT"));
-  router.all("/recall",handler("recall","GET",["maxItems","maxTokens"]));
+  router.all("/recall",handler("recall","GET",["maxItems","maxTokens","sourceOffset"]));
   router.all("/entries",handler("entries","GET",["offset","limit"]));
   router.all("/forget",handler("forget","POST"));
   router.all("/reset-preview",handler("reset-preview","GET"));
