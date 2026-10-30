@@ -1,0 +1,2168 @@
+{
+  "kind": "normal_API_prefix_shadow_source_review",
+  "inputFiles": 274,
+  "contexts": 231,
+  "names": [
+    "@modelcontextprotocol/sdk",
+    "@opencode-ai/sdk",
+    "@types/formidable",
+    "better-sqlite3",
+    "cors",
+    "express",
+    "formidable",
+    "helmet",
+    "ingenium-core",
+    "ingenium-email",
+    "zod"
+  ],
+  "conflicts": [],
+  "observations": [
+    {
+      "source": "services/ingenium-api/lib/application-health.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/application-health.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal dynamic import/require",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/authorization-policy.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/authorization-policy.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/backup-scheduler.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/chat-provider-catalog.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/cloudflare-trusted-ingress.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/cloudflare-tunnel-service.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/compatibility-runtime-access.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/compatibility-runtime-access.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/customize-scoped-v1-contracts",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-v2/project-authority.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/customize-v2/router.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dashboard-recent-work.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dashboard-safe-read-policy.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-broker.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-http.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-ingress.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-installed-image-owner.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-provider-resolution.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/core126-runtime.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-approved-scope.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-job-policy.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/dot-original-context.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-approved-scope.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-http.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/installed-dot-scheduler.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/managed-job-contracts.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-binding.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-session.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/request-session.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/dot-v2/router.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/email-runtime.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/email-runtime.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/helpers.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/helpers.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-native-provider.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/job-runner.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/lifecycle.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/lifecycle.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/mail-maintenance.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/mail-maintenance.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/manual-synthesis-models.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-usefulness-collector.ts",
+      "name": "@modelcontextprotocol/sdk",
+      "specifier": "@modelcontextprotocol/sdk/client/stdio.js",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "services/ingenium-api/node_modules/@modelcontextprotocol/sdk",
+      "version": "1.32.1",
+      "integrity": "sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==",
+      "proposedVersion": "1.32.1"
+    },
+    {
+      "source": "services/ingenium-api/lib/mcp-usefulness-collector.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-engine-owner.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-engine-owner.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-inspection.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-inspection.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-recall.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-request-recall.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/core-session.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/opencode-snapshot.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/recall-availability.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-session.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/memory-v2/request-session.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth-rate-limit.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/auth.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/csrf.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/csrf.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/errors.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/errors.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/errors.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/pre-auth-csrf.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/rate-limit.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/rate-limit.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/repository-sync-ingress.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/validate.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/validate.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/vault-gate.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/middleware/vault-gate.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/native-hosted-connection-owner.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/node-native-pairing-custody.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-client.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/opencode-messages-client.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/canonical-chat-binding.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution-owner.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/projects-v2/request-execution.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/request-identity.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/restore-runtime-guard.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/agents.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/agents.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/auth-preflight.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/backups.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/backups.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/bootstrap.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/cloudflare.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/cloudflare.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/commands.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/commands.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/configs.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/configs.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context-snapshot-ingest.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context-snapshot-ingest.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/settings",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/context.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/customize-scoped-v1-contracts",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/customize.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/dashboard.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/dashboard.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/dashboard.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal dynamic import/require",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs-ai.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs-ai.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/docs.ts",
+      "name": "formidable",
+      "specifier": "formidable",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/formidable",
+      "version": "3.5.4",
+      "integrity": "sha512-YikH+7CUTOtP44ZTnUhR7Ic2UASBPOqmaRkRKxRbywPTe5VxF7RRCck4af9wutiZ/QKM5nME9Bie2fFaPz5Gug=="
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/emails.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/emails.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal dynamic import/require",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/emails.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/extraction.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/extraction.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/jobs.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/jobs.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal dynamic import/require",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/logs.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/logs.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-servers.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-servers.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-tools.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/mcp-tools.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory-lifecycle.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory-lifecycle.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/memory.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-context.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-context.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-pairings.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/native-customize.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/observations.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/observations.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/opencode.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/opencode.ts",
+      "name": "formidable",
+      "specifier": "formidable",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/formidable",
+      "version": "3.5.4",
+      "integrity": "sha512-YikH+7CUTOtP44ZTnUhR7Ic2UASBPOqmaRkRKxRbywPTe5VxF7RRCck4af9wutiZ/QKM5nME9Bie2fFaPz5Gug=="
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/opencode.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/organizations.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/organizations.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/organizations.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/personality.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/personality.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/pipeline.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/pipeline.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/plugins.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/plugins.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/projects.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/projects.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/plugin-projection-transition",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/rag.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/rag.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/repository.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/repository.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/runtimes.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/runtimes.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/runtimes.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/servers.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/servers.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/services.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/services.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/services.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal dynamic import/require",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/settings.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import type",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/settings.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/skills.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/skills.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/synthesis.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/synthesis.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/synthesis.ts",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/tasks.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/tasks.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/usage.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/usage.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/vault.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/routes/vault.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-manager-client.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/runtime-original-provision",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-opencode-context.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-placement.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-placement.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-provisioner.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/runtime-reconciler.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/scheduler.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/scheduler.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/lib/server-global-provider-persistence.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/synthesis-cadence.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/synthesis-provider-resolution.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/usage-sync.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-binding.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts",
+      "name": "better-sqlite3",
+      "specifier": "better-sqlite3",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/better-sqlite3",
+      "version": "11.10.0",
+      "integrity": "sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ=="
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/attachment-delivery-owner.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/voice-operation-ledger",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/linux-cpu-admission.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/managed-supervisor.d.mts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/production-system.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/lib/voice-v2/request-context.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "name": "express",
+      "specifier": "express",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "name": "cors",
+      "specifier": "cors",
+      "kind": "literal import/export including types",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/cors",
+      "version": "2.8.6",
+      "integrity": "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==",
+      "proposedVersion": "2.8.6"
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "name": "helmet",
+      "specifier": "helmet",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/helmet",
+      "version": "7.2.0",
+      "integrity": "sha512-ZRiwvN089JfMXokizgqEPXsl2Guk094yExfoDXR0cBYWxtBbaSww/w+vT4WEJsBW2iTUi1GgZ6swmoug3Oy4Xw=="
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/api-server.ts",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email/lib/credential-crypto",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/scripts/check-database-integrity.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/restore-maintenance.ts",
+      "name": "better-sqlite3",
+      "specifier": "better-sqlite3",
+      "kind": "literal import/export including types",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/better-sqlite3",
+      "version": "11.10.0",
+      "integrity": "sha512-EwhOpyXiOEL/lKzHz9AW1msWFNzGc/z+LzeB3/jnFJpxu+th2yqvzsSWas1v9jgs9+xiXJcD5A8CJxAG2TaghQ=="
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-bootstrap.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/scripts/runtime-manager.ts",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core/lib/tools/runtime-original-provision",
+      "kind": "literal import/export including types",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "@modelcontextprotocol/sdk",
+      "specifier": "@modelcontextprotocol/sdk",
+      "kind": "original declared API dependency",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "services/ingenium-api/node_modules/@modelcontextprotocol/sdk",
+      "version": "1.32.1",
+      "integrity": "sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==",
+      "proposedVersion": "1.32.1"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "@opencode-ai/sdk",
+      "specifier": "@opencode-ai/sdk",
+      "kind": "original declared API dependency",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/@opencode-ai/sdk",
+      "version": "1.18.31",
+      "integrity": "sha512-Raouthf8Lhe9edjvYeeSK7SgvdoU6bBjH9qV3f70dHoa6h+z0X2TMz/e22/wKp/StlFUZ4kIRpYYxFnY8/k01w=="
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "@types/formidable",
+      "specifier": "@types/formidable",
+      "kind": "original declared API dependency",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/@types/formidable",
+      "version": "3.5.1",
+      "integrity": "sha512-aFQijSGbD8JCeEST2LEbwR7faHynbt43lojLIcTM/QhB2U06h41ZVRFVEql+Z1xdL+aKGIzm69V/P/uSW9N6XA=="
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "cors",
+      "specifier": "cors",
+      "kind": "original declared API dependency",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/cors",
+      "version": "2.8.6",
+      "integrity": "sha512-tJtZBBHA6vjIAaF6EnIaq6laBBP9aq/Y3ouVJjEfoHbRBcHBAHYcMh/w8LDrk2PvIMMq8gmopa5D4V8RmbrxGw==",
+      "proposedVersion": "2.8.6"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "express",
+      "specifier": "express",
+      "kind": "original declared API dependency",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/express",
+      "version": "4.22.2",
+      "integrity": "sha512-IuL+Elrou2ZvCFHs18/CIzy2Nzvo25nZ1/D2eIZlz7c+QUayAcYoiM2BthCjs+EBHVpjYjcuLDAiCWgeIX3X1Q==",
+      "proposedVersion": "4.22.2"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "formidable",
+      "specifier": "formidable",
+      "kind": "original declared API dependency",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/formidable",
+      "version": "3.5.4",
+      "integrity": "sha512-YikH+7CUTOtP44ZTnUhR7Ic2UASBPOqmaRkRKxRbywPTe5VxF7RRCck4af9wutiZ/QKM5nME9Bie2fFaPz5Gug=="
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "helmet",
+      "specifier": "helmet",
+      "kind": "original declared API dependency",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/helmet",
+      "version": "7.2.0",
+      "integrity": "sha512-ZRiwvN089JfMXokizgqEPXsl2Guk094yExfoDXR0cBYWxtBbaSww/w+vT4WEJsBW2iTUi1GgZ6swmoug3Oy4Xw=="
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "ingenium-core",
+      "specifier": "ingenium-core",
+      "kind": "original declared API dependency",
+      "state": "current_Core_capsule_required",
+      "originalPath": "node_modules/ingenium-core"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "ingenium-email",
+      "specifier": "ingenium-email",
+      "kind": "original declared API dependency",
+      "state": "inherited_original_lookup",
+      "originalPath": "node_modules/ingenium-email"
+    },
+    {
+      "source": "services/ingenium-api/package.json",
+      "name": "zod",
+      "specifier": "zod",
+      "kind": "original declared API dependency",
+      "state": "same_locked_identity_at_nearer_prefix",
+      "originalPath": "node_modules/zod",
+      "version": "4.6.7",
+      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+      "proposedVersion": "4.6.7"
+    }
+  ],
+  "runtimeComputedImports": [
+    {
+      "source": "services/ingenium-api/scripts/runtime-job-mcp.ts",
+      "line": 5,
+      "reason": "Computed runtime import is not a compiler-input file-copy request; actual runtime closure remains gated"
+    }
+  ],
+  "actualInstalledResolutionQualified": false
+}
