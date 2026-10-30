@@ -1,0 +1,12 @@
+{
+  "sdkVersion": "1.32.0",
+  "firstRun": {
+    "tests": 13,
+    "pass": 12,
+    "fail": 1
+  },
+  "test": "SDK close disconnects both linked transports and rejects later calls",
+  "failure": "Expected server.onclose=1/client.onclose=1; actual server.onclose=2/client.onclose=1 after server.close() with real SDK InMemoryTransport linked pair. Recursive peer close can revisit originating callback; callback count is not a singleton lifecycle contract.",
+  "sourceHash": "de5ac64f881c1b99adaa89fc023583286032608af3bd0787f4ee885d1f77f332",
+  "preservation": "Unique failure assertion retained; no runtime files/process/network created."
+}

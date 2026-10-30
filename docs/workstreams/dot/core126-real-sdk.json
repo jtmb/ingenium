@@ -1,0 +1,30 @@
+{
+  "state": "unapplied two-file source proposal; Root rerun actual source after apply",
+  "sdkVersion": "1.32.0",
+  "sdkRuntime": "real installed dist/esm Client, Server, InMemoryTransport and protocol schemas; no facades",
+  "patchSha256": "2c07bef62eb15c994cd7bc94b79d5bbb79ef94c7ad08b485b3313cb9b712a8e6",
+  "preimages": {
+    "packages/ingenium-extension/scripts/job-run-mcp-transport.ts": "80ceed6afcc494a862da68c7954925b4bf439b6615d0fe8066190ad542783d9d",
+    "packages/ingenium-extension/tests/veyra-dot-job-run-mcp-sdk.test.mjs": null
+  },
+  "postimages": {
+    "packages/ingenium-extension/scripts/job-run-mcp-transport.ts": "aa67ad16b4ab24352bd11d01d08619d52d1da76a45bb1eeb500124ae91b8f2d8",
+    "packages/ingenium-extension/tests/veyra-dot-job-run-mcp-sdk.test.mjs": "a205b21c3b2ef1eb98c97a36524202f2cdff72a0a5ea391d74d8719624bee464"
+  },
+  "tests": {
+    "pass": 14,
+    "fail": 0,
+    "command": "VEYRA_DOT_PROPOSAL_SOURCE_ROOT=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes VEYRA_DOT_TRANSPORT_PROPOSAL_FILE=/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/dot/docs/workstreams/dot/job-run-mcp-sdk-transport.proposal.ts /home/brajam/.local/bin/node --experimental-strip-types --test docs/workstreams/dot/veyra-dot-job-run-mcp-sdk.test.mjs",
+    "outputSha256": "6796c7620750afbd1ef6c7cca1cf008e36eba5d8882e98015f7c11d8c0bd2643",
+    "RootAfterApply": "unset VEYRA_DOT_TRANSPORT_PROPOSAL_FILE; node --experimental-strip-types --test packages/ingenium-extension/tests/veyra-dot-job-run-mcp-sdk.test.mjs",
+    "limitations": "Original current broker/http/client sources are used; in-memory credential/authority/project fixtures and inert fetch adapter isolate protocol behavior. This does not qualify full Core grants, stdio/process/network, image, production migration or live model work."
+  },
+  "firstFailure": "core126-sdk-first-failure.json retained; SDK recursive linked close callback counts are not singleton contract; both endpoint disconnection and pending rejection pass",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "runtimeObjects": false,
+    "sharedWrites": false
+  }
+}

@@ -1,0 +1,160 @@
+--- a/packages/ingenium-extension/scripts/job-run-mcp-transport.ts
++++ b/packages/ingenium-extension/scripts/job-run-mcp-transport.ts
+@@ -2,13 +2,17 @@
+ import {StdioServerTransport} from "@modelcontextprotocol/sdk/server/stdio.js";
+ import {ListToolsRequestSchema,CallToolRequestSchema} from "@modelcontextprotocol/sdk/types.js";
+ import {createJobRunMcpClient} from "./job-run-mcp-client.js";
++export type JobRunMcpClient=ReturnType<typeof createJobRunMcpClient>;
+ /** Dedicated SDK transport. Never imports generic binding, global HTTP client or browser/service Auth. */
+-export async function runJobRunMcpTransport():Promise<void>{
+- const client=createJobRunMcpClient();
++export async function createJobRunMcpServer(client:JobRunMcpClient=createJobRunMcpClient()):Promise<Server>{
+  await client.listTools(); // current-run authentication before exposing a transport
+  const server=new Server({name:"ingenium-job-run",version:"1.0.0"},{capabilities:{tools:{}}});
+  server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:await client.listTools()}));
+  server.setRequestHandler(CallToolRequestSchema,async request=>client.callTool(request.params.name,request.params.arguments??{}));
++ return server;
++}
++export async function runJobRunMcpTransport():Promise<void>{
++ const server=await createJobRunMcpServer();
+  await server.connect(new StdioServerTransport());
+  const close=()=>{void server.close().catch(()=>{process.exitCode=1;});};
+  process.once("SIGTERM",close);process.once("SIGINT",close);
+--- /dev/null
++++ b/packages/ingenium-extension/tests/veyra-dot-job-run-mcp-sdk.test.mjs
+@@ -0,0 +1,135 @@
++import test from "node:test";
++import assert from "node:assert/strict";
++import {readFileSync} from "node:fs";
++import {createRequire} from "node:module";
++import {stripTypeScriptTypes} from "node:module";
++import {dirname,resolve} from "node:path";
++import {fileURLToPath,pathToFileURL} from "node:url";
++const root=process.env.VEYRA_DOT_PROPOSAL_SOURCE_ROOT??resolve(dirname(fileURLToPath(import.meta.url)),"../../..");
++const packageRequire=createRequire(resolve(root,"packages/ingenium-extension/package.json"));
++const sdkDirectory=resolve(dirname(packageRequire.resolve("@modelcontextprotocol/sdk/server/index.js")),"../../..");
++const sdkVersion=JSON.parse(readFileSync(resolve(sdkDirectory,"package.json"),"utf8")).version;
++assert.equal(sdkVersion,"1.32.0","Review SDK behavior before changing pinned SDK version");
++const sdkUrl=name=>pathToFileURL(resolve(sdkDirectory,"dist/esm",name)).href;
++const {Client}=await import(sdkUrl("client/index.js"));
++const {InMemoryTransport}=await import(sdkUrl("inMemory.js"));
++const {McpError,ErrorCode}=await import(sdkUrl("types.js"));
++const asModule=s=>`data:text/javascript;base64,${Buffer.from(s).toString("base64")}`;
++const read=f=>readFileSync(resolve(root,f),"utf8");
++const clientSource=stripTypeScriptTypes(read("packages/ingenium-extension/scripts/job-run-mcp-client.ts"));
++const clientUrl=asModule(clientSource);
++const {createJobRunMcpClient}=await import(clientUrl);
++const transportFile=process.env.VEYRA_DOT_TRANSPORT_PROPOSAL_FILE??resolve(root,"packages/ingenium-extension/scripts/job-run-mcp-transport.ts");
++const transportSource=stripTypeScriptTypes(readFileSync(transportFile,"utf8")).replace(/from "(@modelcontextprotocol\/sdk\/[^"]+)"/g,(_m,spec)=>`from "${sdkUrl(spec.slice("@modelcontextprotocol/sdk/".length))}"`).replace('from "./job-run-mcp-client.js"',`from "${clientUrl}"`);
++const {createJobRunMcpServer}=await import(asModule(transportSource));
++assert.equal(typeof createJobRunMcpServer,"function","Actual transport constructor factoring must be applied");
++const policySource=stripTypeScriptTypes(read("packages/ingenium-core/lib/tools/mcp-authorization-policy.ts"));
++const policyUrl=asModule(policySource),policy=await import(policyUrl);
++const catalogSource=stripTypeScriptTypes(read("packages/ingenium-core/lib/tools/mcp-tool-catalog.ts")).replace('from "./mcp-authorization-policy.js"',`from "${policyUrl}"`);
++const catalog=await import(asModule(catalogSource));
++const {createCore126Broker}=await import(pathToFileURL(resolve(root,"services/ingenium-api/lib/dot-v2/core126-broker.mjs")).href);
++const {createCore126Handlers,createCore126ToolAuthorizer}=await import(pathToFileURL(resolve(root,"services/ingenium-api/lib/dot-v2/core126-http.mjs")).href);
++const runId="11111111-1111-4111-8111-111111111111",attemptId="22222222-2222-4222-8222-222222222222";
++const credential={id:"sdk-fixture-credential",kind:"job-run",audience:"job-run",runId,attemptId,servicePrincipalId:"fixture-original-principal",projectId:"p",organizationId:"o",workspaceId:"w",scopes:["projects:read","memory:read"]};
++function backend(){
++ let current=true,enabled=true,mode="normal",lookups=0,requests=0,held;
++ function holdNextCall(){
++  let release,markStarted;const gate=new Promise(r=>{release=r;});const started=new Promise(r=>{markStarted=r;});held={gate,markStarted};return {release,started};
++ }
++ const owner={assignment(id,c){if(!current||id!==runId||c.attemptId!==attemptId)throw Object.assign(Error("Fixture JobRun denied"),{status:403});return {};}};
++ const toolStates={getAllTools:catalog.getCatalogMap,getToolState:()=>enabled};
++ const authorizeTool=createCore126ToolAuthorizer({credentials:{},mcpAuthorizationPolicy:policy,authorization:{requireProjectPermission:()=>({allowed:current})},jobs:{isJobRunAuthorizationCurrent:()=>current},toolCatalog:{getTool:name=>catalog.getCatalogMap().get(name)}});
++ const broker=createCore126Broker({owner,authorizeTool,toolStates,projects:{getProjectById:id=>id==="p"?{id:"p",name:"owned",organization_id:"o",archived_at:null}:undefined,getProjectDetail:name=>{lookups++;assert.equal(name,"owned");return {project:{id:"p",name}};}}});
++ const handlers=createCore126Handlers({owner,managerGuard:{context(){throw Error("Manager is outside SDK fixture");}},credentials:{inspectManagedJobCredential:t=>current&&t==="sdk-fixture-private"?credential:undefined},authorizeTool,dispatchExistingTool:broker.dispatch,listAuthorizedTools:broker.list});
++ const requestsSeen=[];
++ const fetchImpl=async(url,init)=>{
++  requests++;const u=new URL(url);assert.equal(u.origin,"http://fixture.invalid");assert.equal(init.redirect,"error");
++  const headers=Object.fromEntries(new Headers(init.headers));requestsSeen.push({path:u.pathname,method:init.method,headers});
++  if(held&&u.pathname.includes("/mcp/")){const pending=held;held=undefined;pending.markStarted();await pending.gate;}
++  const request={path:u.pathname.slice("/api/v1".length),method:init.method,headers,body:init.body===undefined?undefined:JSON.parse(init.body)};
++  try{
++   const result=await handlers.runtime(request);
++   if(!result)return Response.json({error:{code:"NOT_FOUND"}},{status:404});
++   if(mode==="tool-error"&&u.pathname.includes("/mcp/"))return Response.json({data:{isError:true,content:[{type:"text",text:"Fixture tool could not read the project."}]}});
++   if(mode==="bad-result"&&u.pathname.includes("/mcp/"))return Response.json({data:{content:"invalid MCP content"}});
++   return Response.json(result);
++  }catch(error){return Response.json({error:{code:"FIXTURE_DENIED"}},{status:error.status??500});}
++ };
++ const createClient=(overrides={})=>createJobRunMcpClient({environment:{INGENIUM_MCP_AUDIENCE:"job-run",INGENIUM_MCP_CREDENTIAL_FILE:"/run/ingenium-runtime/capability",INGENIUM_JOB_RUN_ID:runId,INGENIUM_JOB_ATTEMPT_ID:attemptId,INGENIUM_API_URL:"http://fixture.invalid/api/v1",...overrides},readCredential:()=>"sdk-fixture-private",fetchImpl});
++ return {createClient,requestsSeen,holdNextCall,lookups:()=>lookups,requests:()=>requests,setCurrent:v=>current=v,setEnabled:v=>enabled=v,setMode:v=>mode=v};
++}
++async function connected(f){
++ const server=await createJobRunMcpServer(f.createClient());
++ const client=new Client({name:"veyra-dot-sdk-fixture",version:"1.0.0"},{capabilities:{}});
++ const [clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
++ let serverCloses=0,clientCloses=0;
++ server.onclose=()=>{serverCloses++;};client.onclose=()=>{clientCloses++;};
++ try{await server.connect(serverTransport);await client.connect(clientTransport);}
++ catch(error){await Promise.allSettled([client.close(),server.close()]);throw error;}
++ return {server,client,clientTransport,serverTransport,closes:()=>({server:serverCloses,client:clientCloses}),async close(){await client.close();await server.close();}};
++}
++const isDenied=error=>error instanceof McpError&&error.code===ErrorCode.InternalError&&error.message.includes("Original JobRun MCP transport denied");
++test("installed SDK initializes and lists the exact original authorized schema",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{
++  assert.equal(pair.client.getServerVersion().name,"ingenium-job-run");
++  const result=await pair.client.listTools();assert.deepEqual(result.tools,[{name:"ingenium_project_detail",description:catalog.getCatalogMap().get("ingenium_project_detail").description,inputSchema:{type:"object",properties:{name:{type:"string"}},required:["name"],additionalProperties:false}}]);
++  assert.equal(f.requests(),2);assert.equal(f.lookups(),0);
++  for(const request of f.requestsSeen){assert.equal(request.headers["x-ingenium-audience"],"job-run");assert.equal(request.headers["x-ingenium-job-attempt"],attemptId);assert.equal(request.path,`/api/v1/runtime/job-runs/${runId}/mcp-tools`);}
++ }finally{await pair.close();}
++});
++test("installed SDK tools/call preserves the actual broker's text result",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{const result=await pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}});assert.deepEqual(JSON.parse(result.content[0].text),{project:{id:"p",name:"owned"}});assert.equal(f.lookups(),1);assert.equal(f.requestsSeen.at(-1).path,`/api/v1/runtime/job-runs/${runId}/mcp/ingenium_project_detail`);}
++ finally{await pair.close();}
++});
++test("authentication failure rejects constructor before any SDK connection",async()=>{
++ const f=backend();f.setCurrent(false);await assert.rejects(createJobRunMcpServer(f.createClient()),/Original JobRun MCP transport denied/);assert.equal(f.requests(),1);assert.equal(f.lookups(),0);
++});
++test("wrong original attempt fails constructor authentication",async()=>{
++ const f=backend();await assert.rejects(createJobRunMcpServer(f.createClient({INGENIUM_JOB_ATTEMPT_ID:"33333333-3333-4333-8333-333333333333"})),/Original JobRun MCP transport denied/);assert.equal(f.lookups(),0);
++});
++test("revocation after initialization rejects actual SDK list and call",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{f.setCurrent(false);await assert.rejects(pair.client.listTools(),isDenied);await assert.rejects(pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}}),isDenied);assert.equal(f.lookups(),0);}
++ finally{await pair.close();}
++});
++test("tool toggle refreshes list and denies stale SDK calls",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{f.setEnabled(false);assert.deepEqual(await pair.client.listTools(),{tools:[]});await assert.rejects(pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}}),isDenied);assert.equal(f.lookups(),0);}
++ finally{await pair.close();}
++});
++for(const name of ["ingenium_memory_read","ingenium_project_list","ingenium_unknown_tool"]){
++ test(`SDK direct call cannot bypass withheld tool ${name}`,async()=>{const f=backend(),pair=await connected(f);try{await assert.rejects(pair.client.callTool({name,arguments:{name:"owned"}}),isDenied);assert.equal(f.lookups(),0);}finally{await pair.close();}});
++}
++test("SDK direct call cannot access another project or add authority fields",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{for(const args of [{name:"foreign"},{name:"owned",projectId:"foreign"},{name:"owned",extra:true}])await assert.rejects(pair.client.callTool({name:"ingenium_project_detail",arguments:args}),isDenied);assert.equal(f.lookups(),0);}
++ finally{await pair.close();}
++});
++test("SDK preserves valid tool-level isError without converting it to success",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{f.setMode("tool-error");const result=await pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}});assert.equal(result.isError,true);assert.equal(result.content[0].text,"Fixture tool could not read the project.");}
++ finally{await pair.close();}
++});
++test("SDK rejects invalid broker results with a bounded transport error",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{f.setMode("bad-result");await assert.rejects(pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}}),isDenied);}
++ finally{await pair.close();}
++});
++test("SDK close disconnects both linked transports and rejects later calls",async()=>{
++ const f=backend(),pair=await connected(f);
++ try{await pair.server.close();// InMemoryTransport recursively closes its peer, so callback counts need not be singleton.
++  assert.ok(pair.closes().server>=1&&pair.closes().client>=1);assert.equal(pair.server.transport,undefined);assert.equal(pair.client.transport,undefined);await assert.rejects(pair.client.listTools());await assert.rejects(pair.clientTransport.send({jsonrpc:"2.0",id:5,method:"tools/list"}),/Not connected/);await assert.rejects(pair.serverTransport.send({jsonrpc:"2.0",id:5,result:{tools:[]}}),/Not connected/);}
++ finally{await pair.close();}
++});
++
++test("SDK close rejects an in-flight call and releases pending fixture work",{timeout:2000},async()=>{
++ const f=backend(),pair=await connected(f);const held=f.holdNextCall();let request;
++ try{
++  request=pair.client.callTool({name:"ingenium_project_detail",arguments:{name:"owned"}});
++  const rejected=assert.rejects(request,error=>error instanceof McpError&&error.code===ErrorCode.ConnectionClosed);
++  await held.started;await pair.server.close();await rejected;
++  assert.equal(pair.server.transport,undefined);assert.equal(pair.client.transport,undefined);
++ }finally{held.release();await Promise.allSettled([request,pair.close()]);await new Promise(r=>setImmediate(r));}
++});
