@@ -1,0 +1,109 @@
+diff --git a/apps/web/src/features/work-ui/native-work.css b/apps/web/src/features/work-ui/native-work.css
+--- a/apps/web/src/features/work-ui/native-work.css
++++ b/apps/web/src/features/work-ui/native-work.css
+@@ -90,3 +90,34 @@
+   .native-work-presentation[data-tools=true] .wb-chat { display: none; }
+   .native-work-presentation .wb-composer { width: calc(100% - 16px); margin: 8px auto; }
+ }
++
++/* Field groups must wrap at their own usable width, rather than allowing a
++   select's intrinsic width to spill over the next labelled control. These
++   rules apply only to the native Work surface, including scaled text. */
++.native-work-default .native-work-presentation :is(.wb-toolbar, .wb-sessionbar) { min-inline-size: 0; max-inline-size: 100%; }
++.native-work-default .native-work-presentation .wb-toolbar .wb-crumb { flex: 1 1 100%; flex-wrap: wrap; max-inline-size: 100%; }
++.native-work-default .native-work-presentation .wb-toolbar .wb-crumb :is(strong, span) { min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; }
++.native-work-default .native-work-presentation .wb-toolbar :is(.wb-env, .wb-select) { display: flex; flex: 1 1 12rem; flex-direction: column; align-items: stretch; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
++.native-work-default .native-work-presentation .wb-toolbar :is(.wb-env, .wb-select) > span { display: block; }
++.native-work-default .native-work-presentation :is(.wb-env, .wb-select, .wb-mode) select { min-inline-size: 0; max-inline-size: 100%; inline-size: 100%; }
++.native-work-default .native-work-presentation .wb-sessionbar { align-items: flex-start; gap: 8px; }
++.native-work-default .native-work-presentation .wb-session-select { flex: 1 1 14rem; min-inline-size: 0; max-inline-size: 100%; }
++.native-work-default .native-work-presentation .wb-session-select > svg { flex: none; }
++.native-work-default .native-work-presentation .wb-session-select select { flex: 1 1 0; min-inline-size: 0; inline-size: 0; max-inline-size: 100%; }
++.native-work-default .native-work-presentation .wb-sessionbar .wb-mode { flex: 1 1 20rem; flex-wrap: wrap; min-inline-size: 0; max-inline-size: 100%; white-space: normal; }
++.native-work-default .native-work-presentation .wb-sessionbar .wb-mode > span { display: block; flex: 0 0 auto; }
++.native-work-default .native-work-presentation .wb-sessionbar .wb-mode > select { flex: 1 1 12rem; }
++.native-work-default .native-work-presentation .wb-sessionbar .wb-mode > small { display: block; flex: 1 0 100%; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
++.native-work-default .native-work-presentation :is(.wb-toolbar, .wb-sessionbar) > button { flex: 0 1 auto; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
++.native-work-default .native-work-presentation :is(.wb-toolbar, .wb-sessionbar) > button > svg { flex: none; }
++.native-work-default .native-work-presentation .wb-engine-note { flex-wrap: wrap; overflow-wrap: anywhere; }
++.native-work-default .native-work-presentation .wb-engine-note > span { min-inline-size: 0; max-inline-size: 100%; }
++.native-work-default .native-work-presentation :is(.wb-error, .wb-inline-note) { flex-wrap: wrap; min-inline-size: 0; overflow-wrap: anywhere; }
++.native-work-default .native-work-presentation :is(.wb-error, .wb-inline-note) > :is(div, span) { min-inline-size: 0; max-inline-size: 100%; }
++.native-work-default .native-work-presentation :is(.wb-error, .wb-inline-note) button { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
++/* Retain all attention content and original controls. If it cannot fit beside
++   the composer, allow scrolling instead of clipping the bottom of the chat. */
++.native-work-default .native-work-presentation .wb-chat { overflow-y: auto; overscroll-behavior: contain; }
++.native-work-default .native-work-presentation .wb-messages { min-block-size: 0; }
++.native-work-default .native-work-presentation .wb-composer { flex-shrink: 0; }
++.native-work-default .native-work-presentation .wb-chat > .native-work-disclosure > div { max-block-size: min(32dvh, 20rem); }
+diff --git a/apps/web/src/features/work-ui/native-work-reflow.browser.mjs b/apps/web/src/features/work-ui/native-work-reflow.browser.mjs
+new file mode 100644
+--- /dev/null
++++ b/apps/web/src/features/work-ui/native-work-reflow.browser.mjs
+@@ -0,0 +1,66 @@
++/** Passive assertions for the coordinator's existing real-App browser fixture.
++ * Open Conversation settings first; the fixture owns width and 100–200% scale.
++ * This module starts no browser, navigates nowhere, and triggers no action. */
++export async function assertNativeWorkReflow(page) {
++  const result = await page.evaluate(() => {
++    const tolerance = 2;
++    const visible = element => {
++      const style = getComputedStyle(element);
++      return element.getClientRects().length > 0 && style.visibility !== "hidden"
++        && style.display !== "none" && !element.closest("[inert]");
++    };
++    const box = element => {
++      const { left, top, right, bottom } = element.getBoundingClientRect();
++      return { left, top, right, bottom };
++    };
++    const rows = [...document.querySelectorAll(".native-work-default .native-work-presentation .wb-toolbar, .native-work-default .native-work-presentation .wb-sessionbar")].filter(visible);
++    const failures = [], measured = [];
++    for (const row of rows) {
++      const bounds = box(row);
++      const items = [...row.children].filter(visible).map(element => ({ element, bounds: box(element) }));
++      for (const item of items) {
++        if (item.bounds.left < bounds.left - tolerance || item.bounds.right > bounds.right + tolerance)
++          failures.push("A conversation field group exceeds its row");
++        for (const control of item.element.querySelectorAll("select, input, button")) {
++          if (!visible(control)) continue;
++          const controlBox = box(control);
++          if (controlBox.left < item.bounds.left - tolerance || controlBox.right > item.bounds.right + tolerance)
++            failures.push("A control exceeds its assigned field group: " + (control.getAttribute("aria-label") || control.tagName));
++        }
++      }
++      for (let first = 0; first < items.length; first++) {
++        for (let next = first + 1; next < items.length; next++) {
++          const a = items[first].bounds, b = items[next].bounds;
++          if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > tolerance
++            && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > tolerance)
++            failures.push("Conversation controls overlap");
++        }
++      }
++      measured.push({ row: row.className, groups: items.length });
++    }
++    if (rows.length < 2) failures.push("Open the actual Conversation settings before measuring");
++    const required = ["Session", "Access profile for new conversations", "Execution environment", "Model for new sessions"];
++    for (const name of required) {
++      const field = [...document.querySelectorAll(".native-work-default .native-work-presentation select")].find(element => element.getAttribute("aria-label") === name && visible(element));
++      if (!field) failures.push("Missing visible labelled field: " + name);
++    }
++    const chat = document.querySelector(".native-work-default .native-work-presentation .wb-chat");
++    if (chat && chat.scrollHeight > chat.clientHeight + tolerance && !["auto", "scroll"].includes(getComputedStyle(chat).overflowY))
++      failures.push("Attention content exceeds an unscrollable chat viewport");
++    return { width: innerWidth, height: innerHeight, scale: getComputedStyle(document.documentElement).getPropertyValue("--ui-text-scale"), measured, failures };
++  });
++  if (result.failures.length) throw new Error(JSON.stringify(result));
++  return result;
++}
++
++/** Fixture supplies the exact original recovery/permission/stop labels for its
++ * current state. Disabled controls stay valid evidence; this never clicks them. */
++export async function assertNativeAttentionReachable(page, labels) {
++  for (const name of labels) {
++    const matches = page.getByRole("button", { name, exact: true });
++    if (await matches.count() !== 1 || !await matches.isVisible())
++      throw new Error("Original attention control is not uniquely visible: " + name);
++    if (await matches.evaluate(element => Boolean(element.closest("[inert]"))))
++      throw new Error("Original attention control is inert: " + name);
++  }
++}

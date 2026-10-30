@@ -1,0 +1,39 @@
+{
+  "baseTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+  "baseCommit": "268962e20bef8c246fce332241c08c00c1fc2317",
+  "patchSha256": "2e88020896a0491f2d1b5a8b390688b4467d4eb202ca483fffabee4d974c8e25",
+  "bytes": 8515,
+  "frozenWorkerIndexPatchSha256": "1294cbf1b5cf778cae5b08cc306583d8071f93e35d39451510af630af9c60672",
+  "unchangedOwners": [
+    {
+      "path": "apps/web/src/features/workbench/Workbench.tsx",
+      "gitBlob": "08898a8e857dc8fa5b9a948b0437bdd1b8c3aa26"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.tsx",
+      "gitBlob": "730c60acbf9ecd4a6367f1703c826e2d73b180f8"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkPresentation.test.tsx",
+      "gitBlob": "71c431d424da2b1b2dc8e98e47a12375a5631d53"
+    }
+  ],
+  "files": [
+    {
+      "path": "apps/web/src/features/work-ui/native-work.css",
+      "beforeGitBlob": "bf80b2e003a4947458fc115f116d4d95daadda49",
+      "afterGitBlob": "30c9ff06cec6d9f4b2611e2b4add15d28f57ffa8",
+      "beforeSha256": "7e87c09b4d2ff6f1e52f4d214828b6c65dface5182f3102d72e720208e5a7ed3",
+      "afterSha256": "11a90b96cd2ab2a32c988f2eb39ce389f80f87bbd7810d6b7e210254f8731db8"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/native-work-reflow.browser.mjs",
+      "beforeGitBlob": null,
+      "afterGitBlob": "b73f21c6479962c2871dd8f1a1ea6b6920ee12b9",
+      "beforeSha256": null,
+      "afterSha256": "9033a864a2f99f0fc1a067b24d072372ce80284167ec4ba90acd840866c7eb08"
+    }
+  ],
+  "workerChecks": "Browser-helper syntax and exact reverse patch only; no browser/build",
+  "actualGoalStatus": "blocked"
+}
