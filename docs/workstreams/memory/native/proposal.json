@@ -3,33 +3,33 @@
   "projects_proposal": "8b18318e248c7e1cba953c1e68b47529aac1a276",
   "status": "unapplied-uncompiled-source-proposal",
   "required_reconciliation": {
-    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
-    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
-    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
-    "status": "bound-in-source-awaiting-Native-integration-review",
     "route_contract": "docs/workstreams/projects/native-local-v6/local-route-contract.json",
+    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
+    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
+    "provider_source_sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215",
+    "local_original_contract": "Additive LocalPromptOriginal and optional PromptRecord.local_original capture under original prompt writer; requires Projects8b prompt_scoped_checked_local composition; no fake Project or legacy backfill",
     "actual_export": "OpenCodeClient::local_recent_messages(id, cursor, limit) -> MessagePage",
+    "consumer": "crates/adapters/src/opencode/desktop_runtime/memory.rs:LiveRuntime::memory_recent",
+    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance",
+    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
+    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
+    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
     "provider_source": "docs/workstreams/projects/native-local-v6/sources/crates/adapters/src/opencode/local_conversations.rs",
+    "owner": "Root/Projects",
     "memory_purpose": {
       "ingress": "internal MemorySynthesis only; no public/general prompt or utility HTTP route",
+      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
+      "audit": "closed-synthesis-purpose.md",
+      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
       "open_validation": [
         "combined actual Native compile and Task regressions",
         "actual same-slot/authentication/retirement/lease negative controls",
         "Memory phase-owner inclusion in actual global shutdown capture",
         "actual productivity and Project/private generation acceptance"
       ],
-      "native_engine_changes": "none; backend authenticates actual runtime launch/binding/request UUID, not service TaskStore IDs",
-      "owner": "SAME provider registry/request slot/queue Book/retained workers/ModelWork/TransportSupervisor/attempt journal/Core leases",
-      "audit": "closed-synthesis-purpose.md",
       "status": "genuine producer and two-phase invocation implemented in unapplied source; Native compile/runtime acceptance OPEN"
     },
-    "authority": "Actual held ProjectStore owner; private verify_current and shared require_local_engine closure before/after reads; decoder grants no authority",
-    "contract": "ONE scoped latest page <=32; descending first; cursor-only next owned by Projects; memory never follows cursor; canonical conversion; reject overfill; chronological selected output",
-    "apply_gate": "Root must compose Projects owner/module wiring and review/compile the combined Native proposal; source binding does not establish runtime acceptance",
-    "route_contract_sha256": "cdacba40b95131ea9d4a5e7229cb31874d13d12bc2d6f723710df85d670dfe5f",
-    "owner": "Root/Projects",
-    "superseded": "eddbd5f2 OpenCodeClient::memory_recent insertion; do not apply",
-    "local_original_gate": "Root must reconcile all PromptRecord fixture constructors, version/rollback writer preservation and original receipt/lookup publication before runtime acceptance"
+    "status": "bound-in-source-awaiting-Native-integration-review"
   },
   "operations": [
     {

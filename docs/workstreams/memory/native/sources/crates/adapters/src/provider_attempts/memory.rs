@@ -11,6 +11,9 @@ pub struct MemoryAttemptMetadata{
  pub binding:veyra_contracts::ModelBinding,pub runtime:RuntimeMetadata,
 }
 fn hex(v:&str)->bool{v.len()==64&&v.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b))}
+fn checked_sql_count(value:i64)->Result<u64,ProviderAttemptStoreError>{
+ u64::try_from(value).map_err(|_|ProviderAttemptStoreError::Corrupt)
+}
 fn encode(value:&MemoryAttemptMetadata)->Result<String,ProviderAttemptStoreError>{
  use ProviderAttemptStoreError::Invalid;
  if !validation::uuid_id(&value.request_id)||![&value.scope_hash,&value.input_hash,&value.source_watermark,&value.payload_sha256].iter().all(|v|hex(v))||
@@ -29,7 +32,7 @@ impl ProviderAttemptStore{
  pub fn can_admit_memory_input(&self,request:&str,scope:&str,input:&str)->Result<(),ProviderAttemptStoreError>{
   if !validation::uuid_id(request)||!hex(scope)||!hex(input){return Err(ProviderAttemptStoreError::Invalid)}
   validation::validate_schema(&self.connection)?;
-  let count:u64=self.connection.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get(0))?;
+  let count=checked_sql_count(self.connection.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get::<_,i64>(0))?)?;
   if count>=4096{return Err(ProviderAttemptStoreError::Conflict)}
   let spent:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM attempts WHERE request_id=?1) OR EXISTS(SELECT 1 FROM memory_attempts WHERE request_id=?1 OR (scope_hash=?2 AND input_hash=?3))",
    params![request,scope,input],|r|r.get(0))?;
@@ -39,7 +42,7 @@ impl ProviderAttemptStore{
   let record=encode(value)?;
   let tx=self.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
   validation::validate_schema(&tx)?;
-  let count:u64=tx.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get(0))?;
+  let count=checked_sql_count(tx.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get::<_,i64>(0))?)?;
   if count>=4096{return Err(ProviderAttemptStoreError::Conflict)}
   let spent:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM attempts WHERE request_id=?1) OR EXISTS(SELECT 1 FROM memory_attempts WHERE request_id=?1 OR (scope_hash=?2 AND input_hash=?3))",
    params![value.request_id,value.scope_hash,value.input_hash],|r|r.get(0))?;
@@ -66,7 +69,7 @@ impl ProviderAttemptStore{
  }
 }
 pub(super) fn validate_rows(connection:&Connection)->Result<(),ProviderAttemptStoreError>{
- let count:u64=connection.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get(0))?;
+ let count=checked_sql_count(connection.query_row("SELECT count(*) FROM memory_attempts",[],|r|r.get::<_,i64>(0))?)?;
  if count>4096{return Err(ProviderAttemptStoreError::Corrupt)}
  let mut q=connection.prepare("SELECT request_id,scope_hash,input_hash,record,disposition FROM memory_attempts")?;
  let mut rows=q.query([])?;
@@ -84,7 +87,7 @@ pub(super) fn validate_rows(connection:&Connection)->Result<(),ProviderAttemptSt
 }
 pub(super) fn validate_schema_v3(connection:&Connection)->Result<(),ProviderAttemptStoreError>{
  type Shape=(String,String,String,Option<String>);
- let temp:u64=connection.query_row("SELECT count(*) FROM sqlite_temp_schema",[],|r|r.get(0))?;
+ let temp=checked_sql_count(connection.query_row("SELECT count(*) FROM sqlite_temp_schema",[],|r|r.get::<_,i64>(0))?)?;
  if temp!=0{return Err(ProviderAttemptStoreError::Corrupt)}
  let base=include_str!("0002.sql").split(';').map(str::trim).filter(|s|!s.is_empty()).collect::<Vec<_>>();
  let migration=include_str!("0003.sql");
@@ -110,4 +113,18 @@ pub(super) fn validate_schema_v3(connection:&Connection)->Result<(),ProviderAtte
  let mut q=connection.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY type,name")?;
  let observed=q.query_map([],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<Result<Vec<Shape>,_>>()?;
  if observed!=expected{return Err(ProviderAttemptStoreError::Corrupt)}Ok(())
+}
+#[cfg(test)]
+mod count_tests{
+ use super::*;
+ #[test]
+ fn sqlite_signed_counts_are_checked_without_unsigned_decoding(){
+  let connection=Connection::open_in_memory().unwrap();
+  for value in [i64::MIN,-1,0,4095,4096,4097,i64::MAX]{
+   let decoded=connection.query_row("SELECT ?1",[value],|row|row.get::<_,i64>(0)).unwrap();
+   let checked=checked_sql_count(decoded);
+   if value<0{assert!(matches!(checked,Err(ProviderAttemptStoreError::Corrupt)))}
+   else{assert_eq!(checked.unwrap(),u64::try_from(value).unwrap())}
+  }
+ }
 }
