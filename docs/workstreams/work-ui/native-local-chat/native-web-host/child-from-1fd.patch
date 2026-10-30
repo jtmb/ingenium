@@ -25,7 +25,7 @@
 +  </LocalWebPresentation>;
 --- /dev/null
 +++ b/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,63 @@
 +import { useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 +import { NativeWorkPresentation } from "../NativeWorkPresentation";
 +import type { LocalWebController, WebBounds } from "./local-web-controller.mjs";
@@ -41,7 +41,8 @@
 +}) {
 +  const id = useId(), anchor = useRef<HTMLDivElement>(null);
 +  const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-+  const pendingEnter = useRef(false), live = useRef(true), lifetime = useRef(0);
++  const pendingEnter = useRef(false), live = useRef(true), lifetime = useRef(0), activeController = useRef(controller);
++  activeController.current = controller;
 +  const bounds = (): WebBounds => {
 +    if (!anchor.current) throw Error("The Web viewport is unavailable.");
 +    const value = anchor.current.getBoundingClientRect();
@@ -52,7 +53,7 @@
 +    lifetime.current++;
 +    return () => {
 +      live.current = false; const closed = ++lifetime.current;
-+      queueMicrotask(() => { if (lifetime.current === closed) void controller.dispose().catch(() => { /* mandatory cleanupFailure callback owns the retained native handle */ }); });
++      queueMicrotask(() => { if (lifetime.current === closed || activeController.current !== controller) void controller.dispose().catch(() => { /* mandatory cleanupFailure callback owns the retained native handle */ }); });
 +    };
 +  }, [controller]);
 +  useLayoutEffect(() => {
@@ -90,7 +91,7 @@
 +}
 --- /dev/null
 +++ b/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx
-@@ -0,0 +1,52 @@
+@@ -0,0 +1,62 @@
 +import { useEffect } from "react";
 +import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 +import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -141,6 +142,16 @@
 +    await waitFor(()=>expect(f.port.show).toHaveBeenCalledTimes(1));
 +    await waitFor(()=>expect(f.controller.getSnapshot().busy).toBe(false));view.unmount();
 +    await waitFor(()=>expect(f.cleanupFailure).toHaveBeenCalledWith("native-binding",expect.any(Error)));
++  });
++  it("releases the old controller when its actual owner adapter is replaced",async()=>{
++    const first=fixture(),next=fixture();
++    const view=render(<LocalWebPresentation controller={first.controller} scope="same-view-slot" projectName="No project"><input aria-label="Work draft" defaultValue="kept"/></LocalWebPresentation>);
++    fireEvent.click(screen.getByRole("button",{name:"Web",exact:true}));
++    await waitFor(()=>expect(first.port.show).toHaveBeenCalledTimes(1));
++    await waitFor(()=>expect(first.controller.getSnapshot().busy).toBe(false));
++    view.rerender(<LocalWebPresentation controller={next.controller} scope="same-view-slot" projectName="No project"><input aria-label="Work draft" defaultValue="kept"/></LocalWebPresentation>);
++    await waitFor(()=>expect(first.port.release).toHaveBeenCalledTimes(1));
++    expect(next.port.show).not.toHaveBeenCalled();
 +  });
 +});
 --- /dev/null

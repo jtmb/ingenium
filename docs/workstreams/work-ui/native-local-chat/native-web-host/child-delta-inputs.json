@@ -13,14 +13,14 @@
       "preimage_lf_sha256": null,
       "requires_absent": true,
       "source": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx",
-      "after_lf_sha256": "fa17ce387a693b633eb5a880d75c74bf9e7d443927a327e64ac1254a0ac0e859"
+      "after_lf_sha256": "b0bfb5f230c5602ba558c5ae79d905509c27be2a2ff8c2c98d85b3c83730c93b"
     },
     {
       "path": "apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
       "preimage_lf_sha256": null,
       "requires_absent": true,
       "source": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
-      "after_lf_sha256": "88f7a4323d98e55231be2da0fec59ef02e93265ef028cb25f43b593b802e2985"
+      "after_lf_sha256": "897caf8cdd63c6ca7632cb6a7096edab719d10e6f2ae94900dd32f4f57af0bd3"
     },
     {
       "path": "apps/web/src/features/work-ui/local/local-web-controller.mjs",
@@ -44,7 +44,7 @@
       "after_lf_sha256": "f6d4dec5a19c827c24679517d49b22c0f0a9327915740082bf0059ec8985c0b3"
     }
   ],
-  "bytes": 34151,
-  "sha256": "f3b812b3f6cb5db817535ce4e7a6742bf15293d1cbb23bcbf1bdb2034abceb52",
+  "bytes": 35169,
+  "sha256": "0a8f0c6f3bd272e4250270e3e27816b8bedd79b8bd7255b8210894a35897f858",
   "application": "exact existing preimages/new paths absent; --unidiff-zero; Root reconciles actual current tree. Does not edit Cargo/lock/ACL/commands or implement the missing authority factory."
 }

@@ -13,7 +13,8 @@ function BoundWebPresentation({ controller, projectName, children }: {
 }) {
   const id = useId(), anchor = useRef<HTMLDivElement>(null);
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const pendingEnter = useRef(false), live = useRef(true), lifetime = useRef(0);
+  const pendingEnter = useRef(false), live = useRef(true), lifetime = useRef(0), activeController = useRef(controller);
+  activeController.current = controller;
   const bounds = (): WebBounds => {
     if (!anchor.current) throw Error("The Web viewport is unavailable.");
     const value = anchor.current.getBoundingClientRect();
@@ -24,7 +25,7 @@ function BoundWebPresentation({ controller, projectName, children }: {
     lifetime.current++;
     return () => {
       live.current = false; const closed = ++lifetime.current;
-      queueMicrotask(() => { if (lifetime.current === closed) void controller.dispose().catch(() => { /* mandatory cleanupFailure callback owns the retained native handle */ }); });
+      queueMicrotask(() => { if (lifetime.current === closed || activeController.current !== controller) void controller.dispose().catch(() => { /* mandatory cleanupFailure callback owns the retained native handle */ }); });
     };
   }, [controller]);
   useLayoutEffect(() => {

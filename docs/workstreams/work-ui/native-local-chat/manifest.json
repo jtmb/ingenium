@@ -37,8 +37,8 @@
     },
     {
       "path": "native-web-host/CHILD-HOST.md",
-      "bytes": 9938,
-      "sha256": "71207409b89a101f3eb4080ecd6e7b34d836dd644222e51150fe283fc7af517e"
+      "bytes": 9973,
+      "sha256": "f9071fa870a2012d33be0ad080452f9f32e27cdda41138076f4089296a4c3cd7"
     },
     {
       "path": "native-web-host/README.md",
@@ -48,12 +48,12 @@
     {
       "path": "native-web-host/child-delta-inputs.json",
       "bytes": 2437,
-      "sha256": "c0bc5716154d97fa226e987a33be4a5ec77d72a435363b953ff689c4d5bc6d03"
+      "sha256": "aa08b9c666efc4e81938fc9631a3ec4c4ba4b75330f9442b8533c895cd99537f"
     },
     {
       "path": "native-web-host/child-from-1fd.patch",
-      "bytes": 34151,
-      "sha256": "f3b812b3f6cb5db817535ce4e7a6742bf15293d1cbb23bcbf1bdb2034abceb52"
+      "bytes": 35169,
+      "sha256": "0a8f0c6f3bd272e4250270e3e27816b8bedd79b8bd7255b8210894a35897f858"
     },
     {
       "path": "native-web-host/child-integration.json",
@@ -132,13 +132,13 @@
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.test.tsx",
-      "bytes": 4807,
-      "sha256": "88f7a4323d98e55231be2da0fec59ef02e93265ef028cb25f43b593b802e2985"
+      "bytes": 5691,
+      "sha256": "897caf8cdd63c6ca7632cb6a7096edab719d10e6f2ae94900dd32f4f57af0bd3"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalWebPresentation.tsx",
-      "bytes": 4538,
-      "sha256": "fa17ce387a693b633eb5a880d75c74bf9e7d443927a327e64ac1254a0ac0e859"
+      "bytes": 4661,
+      "sha256": "b0bfb5f230c5602ba558c5ae79d905509c27be2a2ff8c2c98d85b3c83730c93b"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/NativeLocalActions.test.tsx",

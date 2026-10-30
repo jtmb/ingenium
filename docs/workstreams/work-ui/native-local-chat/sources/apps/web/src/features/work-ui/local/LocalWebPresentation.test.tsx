@@ -49,4 +49,14 @@ describe("native child Web presentation adapter proposal",()=>{
     await waitFor(()=>expect(f.controller.getSnapshot().busy).toBe(false));view.unmount();
     await waitFor(()=>expect(f.cleanupFailure).toHaveBeenCalledWith("native-binding",expect.any(Error)));
   });
+  it("releases the old controller when its actual owner adapter is replaced",async()=>{
+    const first=fixture(),next=fixture();
+    const view=render(<LocalWebPresentation controller={first.controller} scope="same-view-slot" projectName="No project"><input aria-label="Work draft" defaultValue="kept"/></LocalWebPresentation>);
+    fireEvent.click(screen.getByRole("button",{name:"Web",exact:true}));
+    await waitFor(()=>expect(first.port.show).toHaveBeenCalledTimes(1));
+    await waitFor(()=>expect(first.controller.getSnapshot().busy).toBe(false));
+    view.rerender(<LocalWebPresentation controller={next.controller} scope="same-view-slot" projectName="No project"><input aria-label="Work draft" defaultValue="kept"/></LocalWebPresentation>);
+    await waitFor(()=>expect(first.port.release).toHaveBeenCalledTimes(1));
+    expect(next.port.show).not.toHaveBeenCalled();
+  });
 });
