@@ -1,0 +1,93 @@
+{
+  "package": "reqwest-0.12.28",
+  "cargo_lock_version": "0.12.28",
+  "source": "registry+https://github.com/rust-lang/crates.io-index",
+  "package_checksum": "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147",
+  "actual_archive": "F:/Veyra-Dock-build/cargo-cache/registry/cache/index.crates.io-1949cf8c6b5b557f/reqwest-0.12.28.crate",
+  "read_only": true,
+  "files": [
+    {
+      "path": "src/blocking/client.rs",
+      "sha256": "28cd16f9133a84484598ab00a3d39c24413067747b3b619d357bfe95c84171bc",
+      "archive_exact": true,
+      "lines": [
+        [
+          1330,
+          1355
+        ],
+        [
+          1363,
+          1430
+        ],
+        [
+          1434,
+          1467
+        ],
+        [
+          1472,
+          1494
+        ],
+        [
+          1507,
+          1511
+        ]
+      ]
+    },
+    {
+      "path": "src/blocking/response.rs",
+      "sha256": "0ef0d5bfed59109238316f0f6dddf44dcfe68843f4491c59d24fab166cd766f4",
+      "archive_exact": true,
+      "lines": [
+        [
+          23,
+          47
+        ],
+        [
+          417,
+          443
+        ]
+      ]
+    },
+    {
+      "path": "src/blocking/request.rs",
+      "sha256": "045ffb9697312fc848f4e2f333f8bed6dae3268652ab298f1d4d4ce517342761",
+      "archive_exact": true,
+      "lines": [
+        [
+          19,
+          31
+        ],
+        [
+          564,
+          574
+        ]
+      ]
+    },
+    {
+      "path": "src/blocking/body.rs",
+      "sha256": "578d58f3c661a4c43b771e982bac1dd08a6fedaf98f8baacd096fbe0cad63f7a",
+      "archive_exact": true,
+      "lines": [
+        [
+          133,
+          145
+        ],
+        [
+          169,
+          176
+        ]
+      ]
+    }
+  ],
+  "facts": {
+    "final_inner_arc_drop": "closes tx then synchronously calls actual runtime thread join",
+    "inner_join_result": "discarded; runtime thread ended even if panic, not a normal-success assertion",
+    "response": "owns KeepCoreThreadAlive clone; drop body/Response before final Client",
+    "request_builder": "holds temporary Client clone; build(self) returns Request and drops clone",
+    "request": "no Client/KeepCoreThreadAlive field",
+    "original_sender": "fresh per-request Client; private Request owner not Clone; response is its only surviving additional InnerArc",
+    "outer_worker": "must consume actual Response and final Client, then real JoinHandle checked; persistent Pending/Joined/Failed",
+    "semantics": "transport termination only; raw observation unknown remains unknown; no engine/tree or HTTP success proof"
+  },
+  "runtime_tests_run": false
+}

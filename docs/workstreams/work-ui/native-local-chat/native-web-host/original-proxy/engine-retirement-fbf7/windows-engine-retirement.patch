@@ -1,0 +1,765 @@
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -21,6 +21,7 @@
+ /// Not Deserialize, Debug, Clone, or constructible from a claimed descriptor.
+ /// The private proxy retains this object; only opaque IDs cross native IPC.
+ pub struct LocalWebLease {
++    native_engine_original:Arc<super::super::web_engine_retirement::NativeWebEngineOriginal>,
+     binding: Arc<LocalWorkspaceBinding>,
+     original: OriginalEngine,
+     binding_id: String,
+@@ -72,7 +73,7 @@
+         current:&dyn Fn()->Result<(),String>)->Result<Value,RuntimeError>{
+         let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+         let observed=observe(&engine,&lease.binding,lease.session_id(),self.credentials_revision(),current)?;
+-        if observed!=lease.original||lease.revoked(){return Err(local_error());}
++        if !Arc::ptr_eq(&lease.native_engine_original,&engine.native_web_original)||observed!=lease.original||lease.revoked(){return Err(local_error());}
+         let reply:Value=super::super::super::decode(engine.client()?.request_query(reqwest::Method::GET,
+             &["api","pty",saved.id()],&[("location[directory]",lease.binding.directory().into())],None)?)?;
+         if reply.pointer("/location/directory").and_then(Value::as_str)!=Some(lease.binding.directory())
+@@ -95,7 +96,7 @@
+         hash.update(nonce.as_bytes());
+         hash.update(serde_json::to_vec(&original).map_err(|_| RuntimeError::Storage)?);
+         let invalidation_epoch = format!("{:x}", hash.finalize());
+-        Ok(LocalWebLease { binding, original, binding_id, invalidation_epoch,engine_stop:engine.monitor_stop.clone(),
++        Ok(LocalWebLease { native_engine_original:engine.native_web_original.clone(),binding, original, binding_id, invalidation_epoch,engine_stop:engine.monitor_stop.clone(),
+             revoked: AtomicBool::new(false) })
+     }
+
+@@ -111,7 +112,7 @@
+             let engine = self.lock_engine_for_directory(lease.binding.directory())?;
+             let observed = observe(&engine, &lease.binding, &lease.original.session_id,
+                 self.credentials_revision(), current)?;
+-            if observed != lease.original || lease.revoked()
++            if !Arc::ptr_eq(&lease.native_engine_original,&engine.native_web_original)||observed != lease.original || lease.revoked()
+                 || self.credentials_revision() != lease.original.revision { return Err(local_error()); }
+             Ok(())
+         })();
+@@ -136,6 +137,7 @@
+ /// JSON view for policy cannot replace this original. No Deserialize/Debug or
+ /// public constructor; renderer JSON and saved descriptors cannot manufacture it.
+ pub struct NativeWebOriginal {
++    native_engine_original:Arc<super::super::web_engine_retirement::NativeWebEngineOriginal>,
+     operation_id: String,
+     binding_id: String,
+     invalidation_epoch: String,
+@@ -160,10 +162,11 @@
+         let metadata = serde_json::to_vec(&(&lease.original, method.as_str(), target,
+             &route, &query, &content)).map_err(|_| RuntimeError::Storage)?;
+         let input_sha256 = input_hash(&metadata, &body);
+-        Ok(Self { operation_id, binding_id: lease.binding_id.clone(),
++        Ok(Self { native_engine_original:lease.native_engine_original.clone(),operation_id, binding_id: lease.binding_id.clone(),
+             invalidation_epoch: lease.invalidation_epoch.clone(), engine: lease.original.clone(),
+             method, raw_target: target.into(), route, query, headers: content, body, input_sha256 })
+     }
++    pub(crate) fn native_engine_original(&self)->&Arc<super::super::web_engine_retirement::NativeWebEngineOriginal>{&self.native_engine_original}
+     pub fn operation_id(&self) -> &str { &self.operation_id }
+     pub fn input_sha256(&self) -> &str { &self.input_sha256 }
+     pub fn method(&self) -> &Method { &self.method }
+@@ -436,7 +439,8 @@
+     }
+     fn inspect_local_web_prompt_locked(&self, engine:&OwnedEngine, lease:&LocalWebLease,
+         original:&NativeWebOriginal,current:&dyn Fn()->Result<(),String>) -> Result<LocalWebPromptInspection,RuntimeError> {
+-        if original.binding_id != lease.binding_id || original.invalidation_epoch != lease.invalidation_epoch
++        if original.native_engine_original.admission_closed()||!Arc::ptr_eq(&original.native_engine_original,&lease.native_engine_original)||!Arc::ptr_eq(&lease.native_engine_original,&engine.native_web_original)
++            ||original.binding_id != lease.binding_id || original.invalidation_epoch != lease.invalidation_epoch
+             || original.engine != lease.original || original.method != Method::POST
+             || original.route != format!("/api/session/{}/prompt", lease.session_id())
+             || original.headers.iter().any(|(k,v)| k == "content-encoding" && v != "identity")
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -30,6 +30,9 @@
+ const START_TIMEOUT: Duration = Duration::from_secs(15);
+ mod creation;
+ mod local_workspaces;
++mod web_engine_retirement;
++pub(crate) use web_engine_retirement::NativeWebEngineOriginal;
++pub(crate) use local_workspaces::web_completion::NativeWebEngineReadRetired;
+ pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission,NativeWindowsWebRead};
+ pub use local_workspaces::web_materialization::{EffectiveWebBody,WebUriReplacement,WebUriTransformation,materialize_web_uri_spans,materialize_resolved_web_files};
+ pub use local_workspaces::web_file_input::NativeWebFileInput;
+@@ -141,6 +144,8 @@
+ }
+
+ struct OwnedEngine {
++    native_web_original:Arc<web_engine_retirement::NativeWebEngineOriginal>,
++    native_web_workers:web_engine_retirement::WorkerOriginals,
+     model_port: u16,
+     environment: Environment,
+     account_scope: Option<AccountScope>,
+@@ -253,65 +258,26 @@
+         }
+         Ok(())
+     }
+-    fn settle_workers(&mut self, deadline: Instant) -> Result<(), RuntimeError> {
+-        if let Some(transport) = self.credential_transport.as_mut() {
+-            transport
+-                .stop_until(deadline)
+-                .map_err(|_| RuntimeError::Storage)?;
+-        }
+-        self.monitor_stop.store(true, Ordering::SeqCst);
+-        for worker in [
+-            self.monitor_thread
+-                .as_ref()
+-                .map(|worker| worker.is_finished()),
+-            self.event_thread
+-                .as_ref()
+-                .map(|worker| worker.is_finished()),
+-            self.bootstrap_writer
+-                .as_ref()
+-                .map(|worker| worker.is_finished()),
+-        ] {
+-            if worker == Some(false) {
+-                while self
+-                    .monitor_thread
+-                    .as_ref()
+-                    .is_some_and(|worker| !worker.is_finished())
+-                    || self
+-                        .event_thread
+-                        .as_ref()
+-                        .is_some_and(|worker| !worker.is_finished())
+-                    || self
+-                        .bootstrap_writer
+-                        .as_ref()
+-                        .is_some_and(|worker| !worker.is_finished())
+-                {
+-                    if Instant::now() >= deadline {
+-                        return Err(RuntimeError::Storage);
+-                    }
+-                    thread::sleep(Duration::from_millis(5));
+-                }
+-                break;
+-            }
+-        }
+-        if let Some(worker) = self.monitor_thread.take() {
+-            if worker.join().is_err() {
+-                self.prevent_isolation_close();
+-                return Err(RuntimeError::Storage);
+-            }
+-        }
+-        if let Some(worker) = self.event_thread.take() {
+-            if worker.join().is_err() {
+-                self.prevent_isolation_close();
+-                return Err(RuntimeError::Storage);
+-            }
+-        }
+-        if let Some(worker) = self.bootstrap_writer.take() {
+-            if !matches!(worker.join(), Ok(Ok(()))) {
+-                self.prevent_isolation_close();
+-                return Err(RuntimeError::Storage);
+-            }
+-        }
+-        Ok(())
++    fn settle_workers(&mut self,deadline:Instant)->Result<(),RuntimeError>{
++        let mut failed=false;
++        if let Some(transport)=self.credential_transport.as_mut(){if transport.stop_until(deadline).is_err(){failed=true;}}
++        self.monitor_stop.store(true,Ordering::SeqCst); // revocation only
++        while self.monitor_thread.as_ref().is_some_and(|w|!w.is_finished())
++            ||self.event_thread.as_ref().is_some_and(|w|!w.is_finished())
++            ||self.bootstrap_writer.as_ref().is_some_and(|w|!w.is_finished()){
++            if Instant::now()>=deadline{break;}
++            thread::sleep(Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())));
++        }
++        if self.monitor_thread.as_ref().is_some_and(|w|!w.is_finished()){failed=true;}
++        else if self.native_web_workers.join_monitor(self.monitor_thread.take()).is_err(){self.prevent_isolation_close();failed=true;}
++        if self.event_thread.as_ref().is_some_and(|w|!w.is_finished()){failed=true;}
++        else if self.native_web_workers.join_event(self.event_thread.take()).is_err(){self.prevent_isolation_close();failed=true;}
++        if self.bootstrap_writer.as_ref().is_some_and(|w|!w.is_finished()){failed=true;}
++        else if self.native_web_workers.join_bootstrap(self.bootstrap_writer.take()).is_err(){self.prevent_isolation_close();failed=true;}
++        // All three independent finished handles were reconciled even if one
++        // failed. Persistent per-original seals apply to Direct/Native too.
++        if failed{return Err(RuntimeError::Storage);}
++        self.native_web_workers.require_all()
+     }
+     fn stop_linux(&mut self, deadline: Instant) -> Result<(), RuntimeError> {
+         if self.child.is_isolated() {
+@@ -1124,6 +1090,8 @@
+             None => None,
+         };
+         let engine = OwnedEngine {
++            native_web_original:Arc::new(web_engine_retirement::NativeWebEngineOriginal::new()),
++            native_web_workers:web_engine_retirement::WorkerOriginals::new(bootstrap_writer.as_ref()),
+             model_port: options.model_port,
+             environment: options.environment,
+             account_scope,
+@@ -1192,6 +1160,7 @@
+                         let event_stream = event_client.events()?;
+                         *self.events.lock().map_err(|_| RuntimeError::Storage)? =
+                             live_events::EventBuffer::new();
++                        engine.native_web_workers.begin(web_engine_retirement::WorkerRole::Event)?;
+                         engine.event_thread = Some(live_events::spawn(
+                             event_client,
+                             event_stream,
+@@ -1206,6 +1175,7 @@
+                             isolation_request_id: engine.isolation_request_id.clone(),
+                             error: None,
+                         };
++                        engine.native_web_workers.begin(web_engine_retirement::WorkerRole::Monitor)?;
+                         engine.monitor_thread = Some(spawn_turn_monitor(
+                             monitor_client,
+                             Arc::clone(&self.active_turns),
+@@ -1249,6 +1219,7 @@
+             isolated_windows::ensure_no_unresolved(&self.storage)?;
+             return isolated_wsl::ensure_no_start_originals(&self.storage);
+         };
++        engine.native_web_original.close_admission();
+         self.credential_revision.fetch_add(1, Ordering::AcqRel);
+         engine.monitor_stop.store(true, Ordering::SeqCst);
+         engine.stop_linux(deadline)?;
+@@ -1262,6 +1233,7 @@
+                 engine.stop_windows_tree_until(deadline)?;
+                 engine.settle_workers(deadline)?;
+                 engine.finish_isolation_original(deadline)?;
++                self.native_web_completions.retire_stopped_windows_engine(engine,deadline)?;
+                 *slot = None;
+                 Ok(())
+             }
+@@ -1289,6 +1261,7 @@
+                 engine.stop_windows_tree_until(deadline)?;
+                 engine.settle_workers(deadline)?;
+                 engine.finish_isolation_original(deadline)?;
++                self.native_web_completions.retire_stopped_windows_engine(engine,deadline)?;
+                 *slot = None;
+                 Ok(())
+             }
+--- a/apps/service/src/routes/local_workspaces/web_original.rs
++++ b/apps/service/src/routes/local_workspaces/web_original.rs
+@@ -23,13 +23,15 @@
+   let store=writer.as_mut().ok_or("Original Web response writer retired")?;
+   let cleanup=actual.retire_never_sent(deadline);
+   let mut failed=false;
+-  for outcome in actual.outcomes()?{
++  let outcomes=match actual.outcomes(){Ok(outcomes)=>outcomes,Err(_)=>{failed=true;Vec::new()}};
++  for outcome in outcomes{
+    if Instant::now()>=deadline{failed=true;break;}
+    match store.acknowledge_native_web_prompt(&outcome,&service.instance_id){
+-    Ok(published)=>actual.retain_publication(published)?,Err(_)=>failed=true,
++    Ok(published)=>{if actual.retain_publication(published).is_err(){failed=true;}},Err(_)=>failed=true,
+    }
+   }
+-  if failed{Err("Actual original Web completions remain retained".into())}else{cleanup}
++  let transports=actual.finish_transport_originals_until(deadline);
++  if failed{Err("Actual original Web completions remain retained".into())}else{cleanup.and(transports)}
+  }
+ }
+
+--- a/crates/adapters/src/opencode/local_web_transport.rs
++++ b/crates/adapters/src/opencode/local_web_transport.rs
+@@ -1,6 +1,8 @@
+ //! Exactly-once original transport. The caller retains this object BEFORE I/O.
+ use super::*;
+ use std::sync::Arc;
++mod closure;
++pub(crate) use closure::{RetainedWebTransportClose,NativeWebTransportEnded};
+ const LIMIT:usize=16*1024*1024;
+ #[derive(PartialEq,Eq)]
+ pub(crate) enum WebTransportPhase{Prepared,Sending,Complete,Unknown}
+@@ -9,7 +11,7 @@
+  pub phase:WebTransportPhase,pub failure:Option<&'static str>,
+ }
+ pub(crate) struct OriginalWebPromptRequest{
+- http:Client,request:Option<reqwest::blocking::Request>,
++ http:Arc<Client>,request:Option<reqwest::blocking::Request>,
+  // Actual response remains here even on header/body failure or a panic.
+  response:Option<reqwest::blocking::Response>,
+  pub observation:Arc<WebPromptObservation>,
+@@ -60,6 +62,7 @@
+   let http=Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+    .retry(reqwest::retry::never()).connect_timeout(Duration::from_secs(5))
+    .timeout(Duration::from_secs(30)).build().map_err(|_|EngineError::Transport)?;
++  let http=Arc::new(http);
+   let mut request=http.request(Method::POST,target);
+   if let Some(auth)=&self.auth{request=request.basic_auth(&auth.username,Some(&auth.password));}
+   let mut seen=std::collections::BTreeSet::new();
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs
+@@ -1,7 +1,7 @@
+ //! In-process custody of an actual original request, enrolled BEFORE HTTP.
+ //! Neither a Run queue nor durable replay authority; unknown slots never send.
+ use super::*;
+-use crate::opencode::local_web_transport::{OriginalWebPromptRequest,WebPromptObservation,WebTransportPhase};
++use crate::opencode::local_web_transport::{OriginalWebPromptRequest,WebPromptObservation,WebTransportPhase,RetainedWebTransportClose,NativeWebTransportEnded};
+ use crate::projects::{NativeWebDispatch,NativeWebPublished};
+ use crate::local_execution::windows_web_read::RetainedWindowsWebRead;
+ /// Only actual retained sender completion can mint this. A parsed DTO, status,
+@@ -17,23 +17,34 @@
+ /// Unforgeable allocation identity shared by the pre-send slot and the private
+ /// original writer's publication witness. No deserialization or public mint.
+ pub(crate) struct NativeWebCompletionIdentity{nonce:uuid::Uuid}
++/// Private actual engine-tree proof bound to ONE actual held read. Registry
++/// mints it only after matching original engine Arc and querying the real job.
++pub(crate) struct NativeWebEngineReadRetired{
++ _tree:Arc<super::super::web_engine_retirement::NativeWebTreeRetired>,held:Arc<RetainedWindowsWebRead>,
++}
++impl NativeWebEngineReadRetired{
++ pub(crate) fn matches_carrier(&self,actual:&RetainedWindowsWebRead)->bool{std::ptr::eq(self.held.as_ref(),actual)}
++}
+ struct CompletionState{
+  request:Option<OriginalWebPromptRequest>,outcome:Option<Arc<super::web_original::LocalWebPromptOutcome>>,
+- published:Option<NativeWebPublished>,
++ published:Option<NativeWebPublished>,tree_retired:Option<NativeWebEngineReadRetired>,read_close_started:bool,read_closed:bool,sender_finished:bool,transport_close:Option<RetainedWebTransportClose>,transport_ended:Option<NativeWebTransportEnded>,
+ }
+ pub(crate) struct NativeWebSendSlot{
+  dispatch:NativeWebDispatch,identity:Arc<NativeWebCompletionIdentity>,state:Mutex<CompletionState>,
+ }
+ /// Constructed by the actual LiveRuntime; service binds this same allocation.
++pub(crate) struct NativeWebRegistryOriginal{_nonce:uuid::Uuid}
++impl Default for NativeWebRegistryOriginal{fn default()->Self{Self{_nonce:uuid::Uuid::new_v4()}}}
+ #[derive(Default)]
+-pub struct NativeWebCompletions{slots:Mutex<BTreeMap<String,Arc<NativeWebSendSlot>>>}
++pub struct NativeWebCompletions{slots:Mutex<BTreeMap<String,Arc<NativeWebSendSlot>>>,generation:Arc<NativeWebRegistryOriginal>}
+ impl NativeWebCompletions{
+  pub(crate) fn enroll(&self,dispatch:NativeWebDispatch)->Result<Arc<NativeWebSendSlot>,RuntimeError>{
+   let mut slots=self.slots.lock().map_err(|_|RuntimeError::Storage)?;
++  if dispatch.parts().0.native_engine_original().admission_closed(){return Err(RuntimeError::AdmissionPending);}
+   let operation=dispatch.parts().0.operation_id().to_owned();
+   if slots.contains_key(&operation)||slots.len()>=128{return Err(RuntimeError::AdmissionPending);}
+   let slot=Arc::new(NativeWebSendSlot{dispatch,identity:Arc::new(NativeWebCompletionIdentity{nonce:uuid::Uuid::new_v4()}),
+-   state:Mutex::new(CompletionState{request:None,outcome:None,published:None})});
++   state:Mutex::new(CompletionState{request:None,outcome:None,published:None,tree_retired:None,read_close_started:false,read_closed:false,sender_finished:false,transport_close:None,transport_ended:None})});
+   slots.insert(operation,slot.clone());Ok(slot)
+  }
+  /// Cleanup only an inactive actual slot whose request never entered HTTP.
+@@ -43,10 +54,19 @@
+   let mut removed=Vec::new();let mut failed=false;
+   for(operation,slot)in slots.iter(){
+    if Arc::strong_count(slot)!=1{continue;} // active worker retains this exact Arc
+-   let state=match slot.state.try_lock(){Ok(state)=>state,Err(_)=>{failed=true;continue;}};
+-   let never_sent=state.outcome.is_none()&&state.request.as_ref().is_none_or(|r|r.observation.phase==WebTransportPhase::Prepared);
++   let mut state=match slot.state.try_lock(){Ok(state)=>state,Err(_)=>{failed=true;continue;}};
++   let prepared=state.request.as_ref().map(|r|&r.observation)
++    .or_else(||state.transport_close.as_ref().map(|c|c.observation()));
++   let never_sent=state.outcome.is_none()&&prepared.is_none_or(|o|o.phase==WebTransportPhase::Prepared&&o.status.is_none()&&o.body.is_empty());
+    if !never_sent{continue;}
+-   match slot.dispatch.parts().2.retire_never_sent(deadline){Ok(())=>removed.push(operation.clone()),Err(_)=>failed=true}
++   if state.read_close_started&&!state.read_closed{failed=true;continue;}
++   if !state.read_closed{
++    state.read_close_started=true;
++    match slot.dispatch.parts().2.retire_never_sent(deadline){Ok(())=>state.read_closed=true,Err(_)=>{failed=true;continue;}}
++   }
++   // A prepared actual Client remains retained even though HTTP never began.
++   // Only a slot with NO transport owner can be removed on this path.
++   if state.request.is_none()&&state.transport_close.is_none(){removed.push(operation.clone());}
+   }
+   for operation in removed{slots.remove(&operation);}
+   if failed{Err("Inactive never-sent original checked close remains retained".into())}else{Ok(())}
+@@ -60,7 +80,7 @@
+   }Ok(outcomes)
+  }
+  pub fn retain_publication(&self,published:NativeWebPublished)->Result<(),String>{
+-  let mut slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
++  let slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
+   let operation=published.operation_id().to_owned();
+   let slot=slots.get(&operation).ok_or("Original request slot missing")?.clone();
+   let mut state=slot.state.lock().map_err(|_|"Original request slot poisoned")?;
+@@ -68,13 +88,87 @@
+   if !published.matches_outcome(&outcome){return Err("Publication belongs to a different actual request slot".into());}
+   if state.published.is_some(){return Err("Original publication already spent; do not repeat close".into());}
+   state.published=Some(published); // retain BEFORE any fallible checked close
++  if slot.dispatch.parts().2.windows_read().is_some()&&outcome.joined.is_none(){return Err("Actual materialization join remains unknown; no close attempted".into());}
++  if state.read_close_started&&!state.read_closed{return Err("Previous actual read close remains protected".into());}
++  state.read_close_started=true;
+   let publication=state.published.as_ref().expect("actual publication retained");
+   let retired=if let Some(read)=slot.dispatch.parts().2.windows_read(){
+    let Some(joined)=outcome.joined.as_ref()else{return Err("Actual Windows materialization join remains unknown".into())};
+    read.retire_published(joined,publication,Instant::now()+Duration::from_secs(3))?;true
+   }else{outcome.complete_response()&&matches!(outcome.admission(),"admitted"|"rejected")};
+-  if retired{drop(state);slots.remove(&operation);Ok(())}
+-  else{Err("Actual original Web request ownership remains unknown".into())}
++  if retired{
++   state.read_closed=true;
++   // Actual Client/Response remain owned: no checked transport-close API is
++   // provided by this delta. check_empty stays false; no new Web admission.
++   Ok(())
++  }else{Err("Actual original Web request ownership remains unknown".into())}
++ }
++ /// Called only at the genuine existing OwnedEngine stop boundary. This
++ /// function queries the real kernel job itself; it accepts no supplied proof
++ /// metadata/URL/PID/status/current-owner predicate. No workload is stopped here.
++ pub(crate) fn retire_stopped_windows_engine(&self,engine:&mut OwnedEngine,deadline:Instant)->Result<(),RuntimeError>{
++  let slots=self.slots.lock().map_err(|_|RuntimeError::Storage)?;
++  let has_windows_read=slots.values().any(|slot|Arc::ptr_eq(slot.dispatch.parts().0.native_engine_original(),&engine.native_web_original)&&slot.dispatch.parts().2.windows_read().is_some());
++  if !has_windows_read{return Ok(());}
++  let tree=Arc::new(super::super::web_engine_retirement::capture(engine,&self.generation)?);
++  if !Arc::ptr_eq(tree.registry(),&self.generation){return Err(RuntimeError::Binding);}
++  let mut failed=false;
++  for(_operation,slot)in slots.iter(){
++   let original=slot.dispatch.parts().0;
++   if !Arc::ptr_eq(original.native_engine_original(),tree.original()){continue;}
++   let Some(read)=slot.dispatch.parts().2.windows_read()else{continue};
++   if Arc::strong_count(slot)!=1||!read.matches_original(original){failed=true;continue;}
++   let mut state=match slot.state.try_lock(){Ok(state)=>state,Err(_)=>{failed=true;continue;}};
++   if state.request.as_ref().is_some_and(|r|r.observation.phase!=WebTransportPhase::Prepared)&&!state.sender_finished{failed=true;continue;}
++   if !state.read_closed{
++    // Any previous close attempt is protected. Never retry it through the
++    // engine-retirement path after a publication/checked-close failure.
++    if state.tree_retired.is_some()||state.read_close_started{failed=true;continue;}
++    state.tree_retired=Some(NativeWebEngineReadRetired{_tree:tree.clone(),held:read.held_original()});
++    state.read_close_started=true;
++    match read.retire_after_tree(state.tree_retired.as_ref().expect("actual tree proof retained"),deadline){
++     Ok(())=>state.read_closed=true,Err(_)=>{failed=true;continue;}
++    }
++   }
++   // FILESYSTEM-READ retirement only. The separate actual Client/Response,
++   // sender observation and exact raw prefix are explicitly retained. Even a
++   // complete private ACK is not a checked reqwest runtime/client close.
++  }
++  if failed{Err(RuntimeError::Storage)}else{Ok(())}
++ }
++ /// Finish the ACTUAL original closer, retaining raw observation separately.
++ /// No read-join or engine-tree authority is derived from transport ending.
++ pub fn finish_transport_originals_until(&self,deadline:Instant)->Result<(),String>{
++  let mut slots=self.slots.lock().map_err(|_|"Original Web registry poisoned")?;
++  let mut removed=Vec::new();let mut failed=false;
++  for(operation,slot)in slots.iter(){
++   if Arc::strong_count(slot)!=1{continue;}
++   let mut state=match slot.state.try_lock(){Ok(state)=>state,Err(_)=>{failed=true;continue;}};
++   if state.transport_ended.is_none(){
++    if state.transport_close.is_none(){
++     let Some(request)=state.request.as_ref()else{continue};
++     if !state.sender_finished&&request.observation.phase!=WebTransportPhase::Prepared{failed=true;continue;}
++     let actual=state.request.take().expect("actual owner observed under same slot lock");
++     // Capsule retained BEFORE spawn: errors cannot lose actual Client/Response.
++     state.transport_close=Some(RetainedWebTransportClose::retain(actual));
++    }
++    let completion=state.transport_close.as_mut().expect("actual capsule retained").finish_until(deadline);
++    match completion{Ok(Some(ended))=>state.transport_ended=Some(ended),_=>{failed=true;continue;}}
++   }
++   let ended=state.transport_ended.as_ref().expect("actual join witness retained");
++   let capsule=state.transport_close.as_ref().ok_or("Actual transport capsule missing")?;
++   if !Arc::ptr_eq(ended.observation(),capsule.observation())
++    ||state.outcome.as_ref().is_some_and(|o|!Arc::ptr_eq(&o.observed,ended.observation())){failed=true;continue;}
++   if !state.read_closed{continue;}
++   let published=match(&state.published,&state.outcome){(Some(p),Some(o))=>p.matches_outcome(o),_=>false};
++   let observed=ended.observation();
++   let never_sent=state.outcome.is_none()&&observed.phase==WebTransportPhase::Prepared&&observed.status.is_none()&&observed.body.is_empty();
++   if published||never_sent{removed.push(operation.clone());}
++   // Partial/unknown with no private publication is NOT disposable. Keep exact
++   // status/prefix even after real read/transport end for permitted persistence.
++  }
++  for operation in removed{slots.remove(&operation);}
++  if failed{Err("Actual original transport closure remains retained".into())}else{Ok(())}
+  }
+  pub fn check_empty(&self)->Result<(),String>{
+   let slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
+@@ -90,6 +184,7 @@
+   state.request=Some(request);
+   self.dispatch.parts().2.begin_actual_send().map_err(|_|RuntimeError::Storage)?;
+   state.request.as_mut().expect("request retained before send").execute_retained();
++  state.sender_finished=true; // actual blocking sender returned; NOT client/transport closure
+   let observed=state.request.as_ref().expect("original request retained").observation.clone();
+   let original=self.dispatch.parts().0;
+   let (admission,ack)=classify(&observed,original.session_id(),upstream.as_deref());
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read.rs
+@@ -7,6 +7,7 @@
+ use sha2::{Digest,Sha256};
+ use std::time::{Duration,Instant};
+ pub struct NativeWindowsWebRead{
++ native_engine_original:Arc<super::super::super::web_engine_retirement::NativeWebEngineOriginal>,
+  held:Arc<RetainedWindowsWebRead>,original:OriginalEngine,engine_key:String,
+  binding_id:String,invalidation_epoch:String,operation:String,input_sha256:String,
+ }
+@@ -60,7 +61,7 @@
+    // never-sent phase; a failed checked close remains in original inventory.
+    let _=held.retire_never_sent(Instant::now()+Duration::from_secs(3));return Err(error);
+   }
+-  Ok(NativeWindowsWebRead{held,original:observed,engine_key,binding_id:lease.binding_id.clone(),invalidation_epoch:lease.invalidation_epoch.clone(),operation:original.operation_id().into(),input_sha256:original.input_sha256().into()})
++  Ok(NativeWindowsWebRead{native_engine_original:engine.native_web_original.clone(),held,original:observed,engine_key,binding_id:lease.binding_id.clone(),invalidation_epoch:lease.invalidation_epoch.clone(),operation:original.operation_id().into(),input_sha256:original.input_sha256().into()})
+  }
+  pub fn check_local_windows_web_read(&self,lease:&LocalWebLease,original:&NativeWebOriginal,read:&NativeWindowsWebRead,current:&dyn Fn()->Result<(),String>)->Result<(),RuntimeError>{
+   let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+@@ -93,3 +94,7 @@
+ impl NativeWindowsWebRead{
+  pub(crate) fn retire_published(&self,joined:&super::super::web_completion::NativeWebReadJoined,published:&crate::projects::NativeWebPublished,deadline:Instant)->Result<(),String>{self.held.retire_published(joined,published,deadline)}
+ }
++
++impl NativeWindowsWebRead{
++ pub(crate) fn retire_after_tree(&self,retired:&super::super::web_completion::NativeWebEngineReadRetired,deadline:Instant)->Result<(),String>{self.held.retire_after_tree(retired,deadline)}
++}
+--- a/crates/adapters/src/local_execution/windows_web_read.rs
++++ b/crates/adapters/src/local_execution/windows_web_read.rs
+@@ -100,6 +100,17 @@
+   #[cfg(not(windows))]{let _=deadline;return Err("Windows original unavailable".into());}
+   #[cfg(windows)]{state.phase=Phase::Closed;Ok(())}
+  }
++ /// The actual registry's opaque proof already queried the same retained
++ /// engine job empty. No current auth or guessed leader-exit evidence enters.
++ pub(crate) fn retire_after_tree(&self,retired:&crate::opencode::desktop_runtime::NativeWebEngineReadRetired,deadline:Instant)->Result<(),String>{
++  if !retired.matches_carrier(self){return Err("different actual retired read owner".into());}
++  let mut state=self.state.try_lock().map_err(|_|"original read busy")?;
++  if !matches!(state.phase,Phase::Sending|Phase::Held|Phase::Refused|Phase::Reserved){return Err("original checked close already spent or uncertain".into());}
++  state.phase=Phase::Closing;
++  #[cfg(windows)]state.native.close_once(deadline)?;
++  #[cfg(not(windows))]{let _=deadline;return Err("Windows original unavailable".into());}
++  #[cfg(windows)]{state.phase=Phase::Closed;Ok(())}
++ }
+  pub(crate) fn is_closed(&self)->bool{self.state.try_lock().is_ok_and(|s|s.phase==Phase::Closed)}
+ }
+
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read/completion.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original/windows_read/completion.rs
+@@ -4,7 +4,7 @@
+ use base64::{Engine as _,engine::general_purpose::STANDARD};
+ impl NativeWindowsWebRead{
+  pub(crate) fn matches_original(&self,original:&NativeWebOriginal)->bool{
+-  self.original==original.engine&&self.operation==original.operation_id()&&self.input_sha256==original.input_sha256()
++  Arc::ptr_eq(&self.native_engine_original,original.native_engine_original())&&self.original==original.engine&&self.operation==original.operation_id()&&self.input_sha256==original.input_sha256()
+    &&self.binding_id==original.binding_id&&self.invalidation_epoch==original.invalidation_epoch
+  }
+  pub(crate) fn check_captured(&self,binding:&LocalWorkspaceBinding,session:&str,operation:&str,input:&str,current:&dyn Fn()->Result<(),String>)->Result<(),String>{
+--- a/crates/adapters/src/opencode/desktop_runtime/isolated_windows.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/isolated_windows.rs
+@@ -625,6 +625,8 @@
+             let startup_failed = worker.startup_failed;
+             let registration_path = worker.registration.clone();
+             *slot = Some(OwnedEngine {
++                native_web_original:Arc::new(web_engine_retirement::NativeWebEngineOriginal::new()),
++                native_web_workers:web_engine_retirement::WorkerOriginals::new(None),
+                 model_port: options.model_port,
+                 environment: options.environment,
+                 account_scope: Some(scope),
+--- a/crates/adapters/src/opencode/desktop_runtime/isolated_wsl.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/isolated_wsl.rs
+@@ -465,6 +465,8 @@
+                 worker.private_root()
+             ));
+             *slot = Some(OwnedEngine {
++                native_web_original:Arc::new(web_engine_retirement::NativeWebEngineOriginal::new()),
++                native_web_workers:web_engine_retirement::WorkerOriginals::new(None),
+                 model_port: options.model_port,
+                 environment: options.environment,
+                 account_scope: Some(scope),
+@@ -554,12 +556,14 @@
+         self.restore_turns(&client)?;
+         let event_stream = event_client.events()?;
+         *self.events.lock().map_err(|_| RuntimeError::Storage)? = live_events::EventBuffer::new();
++        engine.native_web_workers.begin(web_engine_retirement::WorkerRole::Event)?;
+         engine.event_thread = Some(live_events::spawn(
+             event_client,
+             event_stream,
+             self.events.clone(),
+             engine.monitor_stop.clone(),
+         ));
++        engine.native_web_workers.begin(web_engine_retirement::WorkerRole::Monitor)?;
+         engine.monitor_thread = Some(spawn_turn_monitor(
+             monitor_client,
+             Arc::clone(&self.active_turns),
+--- /dev/null
++++ b/crates/adapters/src/opencode/desktop_runtime/web_engine_retirement.rs
+@@ -0,0 +1,96 @@
++//! Opaque original-engine allocation and genuine Windows job-empty witness.
++//! No process is stopped here. Existing explicit lifecycle owns termination.
++use super::*;
++pub(crate) struct NativeWebEngineOriginal{_nonce:uuid::Uuid,admission_closed:AtomicBool}
++impl NativeWebEngineOriginal{
++ pub(super) fn new()->Self{Self{_nonce:uuid::Uuid::new_v4(),admission_closed:AtomicBool::new(false)}}
++ pub(super) fn close_admission(&self){self.admission_closed.store(true,Ordering::Release);}
++ pub(super) fn admission_closed(&self)->bool{self.admission_closed.load(Ordering::Acquire)}
++}
++/// Constructed only after querying the exact retained job and joining workers.
++/// No public constructor, Deserialize, metadata/PID/boolean retirement API.
++pub(crate) struct NativeWebTreeRetired{
++ original:Arc<NativeWebEngineOriginal>,registry:Arc<local_workspaces::web_completion::NativeWebRegistryOriginal>,
++}
++impl NativeWebTreeRetired{
++ pub(super) fn original(&self)->&Arc<NativeWebEngineOriginal>{&self.original}
++ pub(super) fn registry(&self)->&Arc<local_workspaces::web_completion::NativeWebRegistryOriginal>{&self.registry}
++}
++pub(super) fn capture(engine:&mut OwnedEngine,registry:&Arc<local_workspaces::web_completion::NativeWebRegistryOriginal>)->Result<NativeWebTreeRetired,RuntimeError>{
++ #[cfg(windows)]{
++  // require_local_engine permits this private Windows source only on the
++  // Direct non-project owner. Other backends need their actual tree witness.
++  if engine.environment!=Environment::Windows||!matches!(&engine.child,isolated_wsl::EngineProcess::Direct(_))
++   ||engine.account_scope.is_some()||engine.linux_owner.is_some()||engine.linux_launch.is_some()
++   ||engine.monitor_thread.is_some()||engine.event_thread.is_some()||engine.bootstrap_writer.is_some()
++   ||engine.credential_transport.is_some(){return Err(RuntimeError::Binding);}
++  engine.native_web_workers.require_all()?;
++  // A leader exit is necessary but insufficient. This SAME job was assigned
++  // to this exact suspended child before resume; all descendants remain owned.
++  if engine.child.try_wait().map_err(|_|RuntimeError::Storage)?.is_none(){return Err(RuntimeError::Storage);}
++  let job=engine.process_job.as_ref().ok_or(RuntimeError::Storage)?;
++  if !job.is_empty().map_err(|_|RuntimeError::Storage)?{return Err(RuntimeError::Storage);}
++  if let Some(relay)=engine.model_relay.as_ref(){relay.check_stopped().map_err(|_|RuntimeError::Storage)?;}
++  Ok(NativeWebTreeRetired{original:engine.native_web_original.clone(),registry:registry.clone()})
++ }
++ #[cfg(not(windows))]{let _=(engine,registry);Err(RuntimeError::Binding)}
++}
++
++#[derive(Clone,Copy,PartialEq,Eq)]enum JoinState{NeverStarted,Pending,Joined,Failed}
++pub(super) struct WorkerOriginal{state:JoinState}
++impl WorkerOriginal{
++ fn never_started()->Self{Self{state:JoinState::NeverStarted}}
++ fn begin(&mut self)->Result<(),RuntimeError>{
++  if self.state!=JoinState::NeverStarted{return Err(RuntimeError::Storage);}
++  self.state=JoinState::Pending;Ok(())
++ }
++ fn no_handle(&mut self)->Result<(),RuntimeError>{
++  match self.state{JoinState::NeverStarted|JoinState::Joined=>Ok(()),_=>{self.state=JoinState::Failed;Err(RuntimeError::Storage)}}
++ }
++ fn join_unit(&mut self,handle:JoinHandle<()>)->Result<(),RuntimeError>{
++  let pending=self.state==JoinState::Pending;self.state=JoinState::Failed;
++  match handle.join(){Ok(()) if pending=>{self.state=JoinState::Joined;Ok(())},_=>Err(RuntimeError::Storage)}
++ }
++ fn join_bootstrap(&mut self,handle:JoinHandle<std::io::Result<()>>)->Result<(),RuntimeError>{
++  let pending=self.state==JoinState::Pending;self.state=JoinState::Failed;
++  match handle.join(){Ok(Ok(())) if pending=>{self.state=JoinState::Joined;Ok(())},_=>Err(RuntimeError::Storage)}
++ }
++}
++pub(super) enum WorkerRole{Monitor,Event}
++pub(super) struct WorkerOriginals{monitor:WorkerOriginal,event:WorkerOriginal,bootstrap:WorkerOriginal}
++impl WorkerOriginals{
++ pub(super) fn new(bootstrap:Option<&JoinHandle<std::io::Result<()>>>)->Self{
++  Self{monitor:WorkerOriginal::never_started(),event:WorkerOriginal::never_started(),bootstrap:WorkerOriginal{state:if bootstrap.is_some(){JoinState::Pending}else{JoinState::NeverStarted}}}
++ }
++ pub(super) fn begin(&mut self,role:WorkerRole)->Result<(),RuntimeError>{match role{WorkerRole::Monitor=>self.monitor.begin(),WorkerRole::Event=>self.event.begin()}}
++ pub(super) fn join_monitor(&mut self,handle:Option<JoinHandle<()>>)->Result<(),RuntimeError>{match handle{Some(handle)=>self.monitor.join_unit(handle),None=>self.monitor.no_handle()}}
++ pub(super) fn join_event(&mut self,handle:Option<JoinHandle<()>>)->Result<(),RuntimeError>{match handle{Some(handle)=>self.event.join_unit(handle),None=>self.event.no_handle()}}
++ pub(super) fn join_bootstrap(&mut self,handle:Option<JoinHandle<std::io::Result<()>>>)->Result<(),RuntimeError>{match handle{Some(handle)=>self.bootstrap.join_bootstrap(handle),None=>self.bootstrap.no_handle()}}
++ pub(super) fn require_all(&self)->Result<(),RuntimeError>{
++  if [&self.monitor,&self.event,&self.bootstrap].iter().all(|w|matches!(w.state,JoinState::NeverStarted|JoinState::Joined)){Ok(())}else{Err(RuntimeError::Storage)}
++ }
++}
++
++#[cfg(test)]mod tests{
++ use super::*;
++ #[test]fn failed_real_join_then_stop_retry_stays_failed(){
++  let mut original=WorkerOriginal::never_started();original.begin().unwrap();
++  let handle=thread::spawn(||panic!("bounded worker join fault fixture"));
++  assert!(original.join_unit(handle).is_err());assert!(original.no_handle().is_err());assert!(original.begin().is_err());
++  assert!(matches!(original.state,JoinState::Failed));
++ }
++ #[test]fn bootstrap_io_failure_does_not_become_joined_after_handle_consumption(){
++  let mut original=WorkerOriginal::never_started();original.begin().unwrap();
++  let handle=thread::spawn(||Err(std::io::Error::other("bounded bootstrap fault fixture")));
++  assert!(original.join_bootstrap(handle).is_err());assert!(original.no_handle().is_err());
++ }
++ #[test]fn pending_missing_handle_is_failed_not_never_started(){
++  let mut original=WorkerOriginal::never_started();original.begin().unwrap();assert!(original.no_handle().is_err());
++  assert!(original.no_handle().is_err());
++ }
++ #[test]fn actual_join_success_and_genuine_never_started_are_distinct_terminal_states(){
++  let mut original=WorkerOriginal::never_started();original.no_handle().unwrap();assert!(matches!(original.state,JoinState::NeverStarted));
++  original.begin().unwrap();original.join_unit(thread::spawn(||())).unwrap();original.no_handle().unwrap();assert!(matches!(original.state,JoinState::Joined));
++  assert!(original.begin().is_err());
++ }
++}
+--- /dev/null
++++ b/crates/adapters/src/opencode/local_web_transport/closure.rs
+@@ -0,0 +1,116 @@
++//! Concrete closure of the actual private reqwest owners. Locked0.12.28 final
++//! InnerArc Drop closes its channel and synchronously joins its runtime thread.
++//! Inner join result is discarded by reqwest: this proves ENDED, not success.
++use super::*;
++use std::{sync::Mutex,thread::{self,JoinHandle},time::Instant};
++#[derive(PartialEq,Eq)]enum Phase{Ready,Pending,Joined,Failed}
++struct CloseOriginal{owner:Mutex<Option<OriginalWebPromptRequest>>,observed:Arc<WebPromptObservation>}
++enum WorkerResult{Ended,SharedOwner}
++/// No public constructor/Clone/Deserialize; actual checked join mints it.
++pub(crate) struct NativeWebTransportEnded{original:Arc<CloseOriginal>}
++impl NativeWebTransportEnded{
++ pub(crate) fn observation(&self)->&Arc<WebPromptObservation>{&self.original.observed}
++}
++pub(crate) struct RetainedWebTransportClose{
++ original:Arc<CloseOriginal>,worker:Option<JoinHandle<Result<WorkerResult,&'static str>>>,phase:Phase,
++}
++impl RetainedWebTransportClose{
++ pub(crate) fn retain(owner:OriginalWebPromptRequest)->Self{
++  let observed=owner.observation.clone();
++  Self{original:Arc::new(CloseOriginal{owner:Mutex::new(Some(owner)),observed}),worker:None,phase:Phase::Ready}
++ }
++ pub(crate) fn observation(&self)->&Arc<WebPromptObservation>{&self.original.observed}
++ fn start(&mut self)->Result<(),String>{
++  if self.phase!=Phase::Ready||self.worker.is_some(){return Err("Original transport close is not fresh".into());}
++  // Actual owner is ALREADY in the slot-owned capsule before this spawn. A
++  // spawn error only drops an Arc; never the actual Client/Response owners.
++  self.phase=Phase::Pending;let original=self.original.clone();
++  match thread::Builder::new().name("veyra-original-web-transport-close".into()).spawn(move||close_actual_owners(&original)){
++   Ok(worker)=>{self.worker=Some(worker);Ok(())},
++   Err(_)=>{self.phase=Phase::Failed;Err("Original transport closer spawn failed; owner retained".into())}
++  }
++ }
++ pub(crate) fn finish_until(&mut self,deadline:Instant)->Result<Option<NativeWebTransportEnded>,String>{
++  if self.phase==Phase::Failed{return Err("Original transport close failure is latched".into());}
++  if self.phase==Phase::Joined{return Ok(None);}
++  if self.phase==Phase::Ready{self.start()?;}
++  let Some(worker)=self.worker.as_ref()else{self.phase=Phase::Failed;return Err("Original closer handle absent; not joined".into());};
++  while !worker.is_finished(){
++   if Instant::now()>=deadline{return Err("Original transport closer pending; actual handle retained".into());}
++   thread::sleep(Duration::from_millis(5).min(deadline.saturating_duration_since(Instant::now())));
++  }
++  // Persistent failure precedes handle consumption. A later empty Option is
++  // never a fabricated successful join. No original close is retried on panic.
++  self.phase=Phase::Failed;
++  let worker=self.worker.take().ok_or("Original closer handle lost")?;
++  match worker.join(){
++   Ok(Ok(WorkerResult::Ended))=>{self.phase=Phase::Joined;Ok(Some(NativeWebTransportEnded{original:self.original.clone()}))},
++   Ok(Ok(WorkerResult::SharedOwner))=>{
++    // Atomic Arc::try_unwrap proved another actual owner is active. No final
++    // Client drop/close occurred; capsule still owns it. Wait for last consumer.
++    self.phase=Phase::Ready;Err("Another actual original Client owner remains; no closure witness".into())
++   },
++   _=>Err("Actual original closer failed or panicked; failure remains latched".into()),
++  }
++ }
++}
++fn close_actual_owners(original:&CloseOriginal)->Result<WorkerResult,&'static str>{
++ let owner=original.owner.lock().map_err(|_|"Original transport capsule poisoned")?.take().ok_or("Original transport owner absent")?;
++ let OriginalWebPromptRequest{http,request,response,observation}=owner;
++ // Response owns the only library KeepCoreThreadAlive clone after build.
++ // Drop it BEFORE the final native Client owner. Request owns no Client.
++ drop(response);drop(request);
++ match Arc::try_unwrap(http){
++  Ok(http)=>{
++   // Runs on this dedicated std worker, never inside an async runtime. Exact
++   // locked source synchronously joins the retained reqwest runtime thread.
++   drop(http);Ok(WorkerResult::Ended)
++  },
++  Err(http)=>{
++   *original.owner.lock().map_err(|_|"Original capsule restore poisoned")?=Some(OriginalWebPromptRequest{http,request:None,response:None,observation});
++   Ok(WorkerResult::SharedOwner)
++  }
++ }
++}
++
++#[cfg(test)]mod tests{
++ use super::*;
++ use std::{io::{BufRead,BufReader,Write},net::TcpListener};
++ fn actual_response()->(OriginalWebPromptRequest,JoinHandle<()>,Arc<std::sync::atomic::AtomicBool>){
++  let listener=TcpListener::bind("127.0.0.1:0").unwrap();
++  let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),None,Duration::from_secs(2)).unwrap();
++  let eof=Arc::new(std::sync::atomic::AtomicBool::new(false));let peer=eof.clone();
++  let server=thread::spawn(move||{
++   let(mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
++   let mut reader=BufReader::new(stream.try_clone().unwrap());let mut length=0;
++   loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}
++    if let Some(v)=line.to_ascii_lowercase().strip_prefix("content-length:"){length=v.trim().parse::<usize>().unwrap();}}
++   let mut body=vec![0;length];reader.read_exact(&mut body).unwrap();
++   stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap();stream.flush().unwrap();
++   let mut byte=[0u8;1];match reader.read(&mut byte){Ok(0)=>peer.store(true,std::sync::atomic::Ordering::Release),Err(e)if matches!(e.kind(),std::io::ErrorKind::ConnectionReset|std::io::ErrorKind::ConnectionAborted)=>peer.store(true,std::sync::atomic::Ordering::Release),other=>panic!("actual transport did not close: {other:?}")}
++  });
++  let mut request=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}").unwrap();request.execute_retained();
++  (request,server,eof)
++ }
++ #[test]fn actual_final_client_and_response_end_and_preserve_observation(){
++  let(owner,peer,eof)=actual_response();let observed=owner.observation.clone();let mut close=RetainedWebTransportClose::retain(owner);
++  let ended=close.finish_until(Instant::now()+Duration::from_secs(3)).unwrap().unwrap();
++  assert!(Arc::ptr_eq(ended.observation(),&observed));assert_eq!(observed.body,b"{}");peer.join().unwrap();assert!(eof.load(std::sync::atomic::Ordering::Acquire));
++  assert!(close.finish_until(Instant::now()+Duration::from_secs(1)).unwrap().is_none());
++ }
++ #[test]fn extra_actual_client_owner_cannot_mint_final_closure(){
++  let(owner,peer,_)=actual_response();let extra=owner.http.clone();let mut close=RetainedWebTransportClose::retain(owner);
++  assert!(close.finish_until(Instant::now()+Duration::from_secs(1)).is_err());assert!(close.phase==Phase::Ready);
++  drop(extra);assert!(close.finish_until(Instant::now()+Duration::from_secs(3)).unwrap().is_some());peer.join().unwrap();
++ }
++ #[test]fn actual_outer_worker_panic_then_retry_keeps_failed_seal(){
++  // A real panicking JoinHandle with an EMPTY no-OS-resource capsule tests the
++  // persistent failure seal without creating a protected failed-close target.
++  let observed=Arc::new(WebPromptObservation{status:None,content_type:None,body:Vec::new(),phase:WebTransportPhase::Prepared,failure:None});
++  let mut close=RetainedWebTransportClose{original:Arc::new(CloseOriginal{owner:Mutex::new(None),observed}),phase:Phase::Pending,
++   worker:Some(thread::spawn(||panic!("bounded actual closer fault fixture")))};
++  assert!(close.finish_until(Instant::now()+Duration::from_secs(1)).is_err());
++  assert!(close.finish_until(Instant::now()+Duration::from_secs(1)).is_err());assert!(close.phase==Phase::Failed);
++  assert!(close.original.owner.lock().unwrap().is_none());
++ }
++}
