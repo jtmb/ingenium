@@ -1,0 +1,53 @@
+{
+  "baseCommit": "f86aec9e37df71aae0f3368561669982884c3b15",
+  "scope": "PROPOSAL ONLY; Root owns SQL128 registration/apply/actual authority bindings",
+  "patchSha256": "79ddb26ab282d91b40b2aa9d01ec486ff26e528e5e9e8972ab00726b6865e5af",
+  "changes": [
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-ledger.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "b4c2ace194e9b3e2912034897ae68824c435b6f78dd0b3664e6ab2264a8b405a"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-cpu.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "5542cc0178d231465c762be046105155d6f60e40111856fe4c015f95180b66f2"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-owner.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "fe2847e794c109a9d74c2c86b1d10851283a4dc1db7de2f94d136557e44f8d43"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/voice-operation-contract.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "3b1a01a096612566f8db1a98d7362c845ca5fc3039f59f4390731ab5767a7cd2"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/128_voice_operations.sql",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "660e02b6039f1dbc0825b28cf8e2100250adbb65dbb20a27c32c1178786395bc"
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "7eec6815b760456bf29b3e3ba9dfd5ea332d79075d6859d05b292afbdab3801f",
+      "proposedSha256": "d17d9adc638af5852cf3f5145a5a8c57dc2152306c3237b635cac073ce9a2835"
+    }
+  ],
+  "currentContractHashes": [
+    {
+      "path": "packages/veyra-voice/session.mjs",
+      "sha256": "ef82844a682cd13231221749c8e69b8227d6560d7174bcc7a4ac8adae40f27d2"
+    },
+    {
+      "path": "services/ingenium-api/lib/voice-v2/cpu-ownership.mjs",
+      "sha256": "60a6bc1f135fafd239d48cf034806b3d70c0fdca91ada59484bcaea40cc6727c"
+    }
+  ]
+}

@@ -1,0 +1,551 @@
+--- /dev/null
++++ b/packages/ingenium-core/lib/tools/voice-operation-ledger.ts
+@@ -0,0 +1,227 @@
++import { createHash } from "node:crypto";
++import { createVoiceCpuExtension, validateControl, initialCpu } from "./voice-operation-cpu.js";
++import type {CpuPrivate,VoiceControl} from "./voice-operation-contract.js";
++
++export interface VoiceScope {
++  actorId:string;accountId:string;organizationId:string|null;projectId:string|null;conversationId:string;
++  runtimeId:string;executionBindingId:string;executionRevision:string;agentId:string;
++}
++export interface CpuIdentity {instanceId:string;bootId:string;ownerId:string;ownerGeneration:number;requestId:string;operationId:string;generation:string;kind:"transcribe"|"synthesize";digest:string}
++export interface VoiceOwner {instanceId:string;bootId:string;ownerId:string;ownerGeneration:number;leaseId:string}
++export type VoiceKind="voice-agent-turn"|"voice-agent-steer"|"voice-agent-queue"|"voice-speech-stt"|"voice-speech-tts"|"voice-cpu-supervisor";
++export type VoiceState="reserved"|"running"|"quarantined"|"terminal";
++export type VoiceOutcome="completed"|"failed"|"cancelled"|"cancelled-before-dispatch"|"unknown";
++export interface VoiceOriginal {operationId:string;requestId:string;kind:VoiceKind;scope:VoiceScope;turnGeneration:number;inputSha256:string;parentOperationId:string|null;controlOperationId:string|null;control:VoiceControl|null;deadlineAt:number;cpuIdentity:CpuIdentity|null}
++export interface VoiceMetadata {original:VoiceOriginal;owner:VoiceOwner;revision:number;state:VoiceState;outcome:VoiceOutcome|null;resultFingerprint:string|null;retentionId:string|null;retired:boolean;replayAllowed:false;quarantineCode:string|null;cpu?:CpuPrivate;control?:VoiceControl&{workerBootId:string|null};resourceRetired?:boolean;privateRevision?:number;resourceRetirement?:{operationId:string;retentionId:string;verifiedAt:number}}
++export interface VoiceChange {operationId:string;expectedRevision:number;owner:VoiceOwner;from:VoiceState;to:"running"|"quarantined"|"terminal";outcome?:VoiceOutcome;resultFingerprint?:string|null;proof?:unknown}
++export interface VerifiedVoiceContext {scope:VoiceScope;authSessionId:string;workspaceId:string;userSecurityEpoch:number;workspaceSecurityEpoch:number;runtimeSecurityEpoch:number;deadlineAt:number;owner:VoiceOwner;mode:"hosted";selectedConversationVerified:true}
++export interface VoiceRetirement {operationId:string;owner:VoiceOwner;identity:CpuIdentity|null;retentionId:string;drained:true;outcome:VoiceOutcome;resultFingerprint:string|null}
++type Row=Record<string,any>;
++export interface VoiceSqlDb {prepare(sql:string):{get(...values:any[]):any;all(...values:any[]):any[];run(...values:any[]):{changes:number|bigint}}}
++export interface VoiceLedgerPorts<C> {
++  db():VoiceSqlDb;transaction<T>(work:()=>T,mode:"deferred"|"immediate"):T;checkpoint():void;now():number;
++  currentScope(context:C,scope:VoiceScope|null,action:"reserve"|"read"|"transition"|"settle"|"quarantine"):VerifiedVoiceContext;
++  verifyRetirement(context:C,operation:Readonly<VoiceMetadata>,proof:unknown):VoiceRetirement;
++  requireOriginalResource(context:C,operation:Readonly<VoiceMetadata>|null,action:string,request:Readonly<Record<string,unknown>>):{operationId:string|null;owner:VoiceOwner;instanceId:string};
++}
++export class VoiceLedgerError extends Error {
++  code:string;status:number;
++  constructor(code:string,status=409){super(code);this.name="VoiceLedgerError";this.code=code;this.status=status;}
++}
++const fail=(code:string,status=409):never=>{throw new VoiceLedgerError(code,status);};
++const scopeKeys=["actorId","accountId","organizationId","projectId","conversationId","runtimeId","executionBindingId","executionRevision","agentId"];
++const cpuKeys=["instanceId","bootId","ownerId","ownerGeneration","requestId","operationId","generation","kind","digest"];
++const ownerKeys=["instanceId","bootId","ownerId","ownerGeneration","leaseId"];
++function object(value:unknown):value is Row {return !!value&&typeof value==="object"&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));}
++function exact(value:unknown,keys:string[],optional:string[]=[]):asserts value is Row {
++  if(!object(value)||keys.some(k=>!Object.hasOwn(value,k))||Object.keys(value).some(k=>![...keys,...optional].includes(k)))return fail("VOICE_SHAPE_INVALID",422);
++}
++const text=(v:unknown,max=256):v is string=>typeof v==="string"&&!!v.trim()&&v.length<=max&&Buffer.from(v,"utf8").toString("utf8")===v;
++const uuid=(v:unknown):v is string=>typeof v==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v)&&v!=="00000000-0000-0000-0000-000000000000";
++const integer=(v:unknown):v is number=>Number.isSafeInteger(v)&&Number(v)>=0;
++const hash=(v:unknown):v is string=>typeof v==="string"&&/^[0-9a-f]{64}$/.test(v);
++function canonical(value:unknown):string {
++  if(value===null||typeof value==="boolean"||typeof value==="string")return JSON.stringify(value);
++  if(typeof value==="number"&&Number.isSafeInteger(value))return JSON.stringify(value);
++  if(Array.isArray(value))return "["+value.map(canonical).join(",")+"]";
++  if(!object(value))return fail("VOICE_JSON_INVALID",422);
++  return "{"+Object.keys(value).sort().map(key=>JSON.stringify(key)+":"+canonical(value[key])).join(",")+"}";
++}
++const digest=(value:unknown)=>createHash("sha256").update(canonical(value)).digest("hex");
++const equal=(a:unknown,b:unknown)=>canonical(a)===canonical(b);
++export function validateVoiceScope(value:unknown):VoiceScope {
++  exact(value,scopeKeys);
++  if(scopeKeys.some(k=>!(["organizationId","projectId"].includes(k)&&value[k]===null)&&!text(value[k])))return fail("VOICE_SCOPE_INVALID",422);
++  return Object.freeze({...value}) as VoiceScope;
++}
++export function validateCpuIdentity(value:unknown):CpuIdentity {
++  exact(value,cpuKeys);
++  if(!text(value.instanceId,160)||!/^[A-Za-z0-9:_-]+$/.test(value.instanceId)
++    ||["bootId","ownerId","requestId","operationId","generation"].some(k=>!uuid(value[k]))
++    ||value.requestId!==value.operationId||!integer(value.ownerGeneration)||value.ownerGeneration<1
++    ||!["transcribe","synthesize"].includes(value.kind)||!hash(value.digest))return fail("VOICE_CPU_IDENTITY_INVALID",422);
++  return Object.freeze({...value}) as CpuIdentity;
++}
++function owner(value:unknown):VoiceOwner {
++  exact(value,ownerKeys);
++  if(!text(value.instanceId,160)||!/^[A-Za-z0-9:_-]+$/.test(value.instanceId)||!uuid(value.bootId)||!uuid(value.ownerId)
++    ||!integer(value.ownerGeneration)||value.ownerGeneration<1||!text(value.leaseId))return fail("VOICE_OWNER_INVALID",422);
++  return Object.freeze({...value}) as VoiceOwner;
++}
++export function validateVoiceOriginal(value:unknown):VoiceOriginal {
++  exact(value,["operationId","requestId","kind","scope","turnGeneration","inputSha256","parentOperationId","controlOperationId","control","deadlineAt","cpuIdentity"]);
++  if(!uuid(value.operationId)||!text(value.requestId)||!["voice-agent-turn","voice-agent-steer","voice-agent-queue","voice-speech-stt","voice-speech-tts","voice-cpu-supervisor"].includes(value.kind)
++    ||!integer(value.turnGeneration)||!hash(value.inputSha256)||!(value.parentOperationId===null||uuid(value.parentOperationId))
++    ||!integer(value.deadlineAt))return fail("VOICE_ORIGINAL_INVALID",422);
++  if(!(value.controlOperationId===null||uuid(value.controlOperationId)))return fail("VOICE_CONTROL_INVALID",422);
++  if(value.kind==="voice-cpu-supervisor") {validateControl(value.control);if(value.control.profileDigest!==value.inputSha256||value.cpuIdentity!==null||value.controlOperationId!==null||value.parentOperationId!==null)return fail("VOICE_CONTROL_INVALID",422);}
++  else if(value.control!==null)return fail("VOICE_CONTROL_INVALID",422);
++  const scope=validateVoiceScope(value.scope),cpu=value.cpuIdentity===null?null:validateCpuIdentity(value.cpuIdentity);
++  if(cpu&&(cpu.operationId!==value.operationId||cpu.digest!==value.inputSha256
++    ||(cpu.kind==="transcribe"?value.kind!=="voice-speech-stt":value.kind!=="voice-speech-tts")))return fail("VOICE_CPU_ORIGINAL_CONFLICT",422);
++  if(value.kind.startsWith("voice-speech-")&&!cpu)return fail("VOICE_CPU_IDENTITY_REQUIRED",422);
++  if(cpu&&value.controlOperationId===null)return fail("VOICE_CONTROL_REQUIRED",422);
++  if(value.kind==="voice-agent-turn"&&value.parentOperationId!==null||["voice-agent-steer","voice-agent-queue","voice-speech-tts"].includes(value.kind)&&value.parentOperationId===null)return fail("VOICE_PARENT_REQUIRED",422);
++  return Object.freeze({...value,scope,cpuIdentity:cpu}) as VoiceOriginal;
++}
++function metadata(row:Row):VoiceMetadata {
++  return {original:JSON.parse(row.original_json),owner:JSON.parse(row.owner_json),revision:row.revision,state:row.state,outcome:row.outcome,
++    resultFingerprint:row.result_fingerprint,retentionId:row.retention_id,retired:row.retired===1,replayAllowed:false,quarantineCode:row.quarantine_code};
++}
++/** One existing Core writer. This module never dispatches work, creates inference identities or replays. */
++export function createCoreVoiceOperationLedger<C>(ports:VoiceLedgerPorts<C>) {
++  if([ports.db,ports.transaction,ports.checkpoint,ports.now,ports.currentScope,ports.verifyRetirement,ports.requireOriginalResource].some(p=>typeof p!=="function"))return fail("VOICE_LEDGER_BINDING_REQUIRED",503);
++  const get=(id:string)=>ports.db().prepare("SELECT * FROM veyra_voice_operations WHERE operation_id=?").get(id) as Row|undefined;
++  function authorize(context:C,scope:VoiceScope|null,action:Parameters<VoiceLedgerPorts<C>["currentScope"]>[2],live:boolean):VerifiedVoiceContext {
++    const verified=ports.currentScope(context,scope,action);
++    if(!verified||verified.mode!=="hosted"||verified.selectedConversationVerified!==true||scope!==null&&!equal(validateVoiceScope(verified.scope),scope)
++      ||!text(verified.authSessionId)||!text(verified.workspaceId)||!integer(verified.userSecurityEpoch)||!integer(verified.workspaceSecurityEpoch)
++      ||!integer(verified.runtimeSecurityEpoch)||!integer(verified.deadlineAt))return fail("VOICE_CONTEXT_UNAVAILABLE",503);
++    owner(verified.owner);
++    scope=validateVoiceScope(verified.scope);
++    if(scope.organizationId===null||scope.projectId===null)return fail("VOICE_HOSTED_RUNTIME_REQUIRED",403);
++    const now=ports.now();
++    if(!integer(now)||verified.deadlineAt<=now)return fail("VOICE_CONTEXT_EXPIRED",403);
++    const user=ports.db().prepare("SELECT u.status,u.security_epoch,s.revoked_at,s.security_epoch AS session_epoch,s.idle_expires_at,s.absolute_expires_at FROM users u JOIN auth_sessions s ON s.user_id=u.id WHERE u.id=? AND s.id=?").get(scope.actorId,verified.authSessionId);
++    if(!user||user.status!=="active"||user.revoked_at!==null||user.security_epoch!==verified.userSecurityEpoch||user.session_epoch!==user.security_epoch
++      ||!Number.isFinite(Date.parse(user.idle_expires_at))||!Number.isFinite(Date.parse(user.absolute_expires_at))
++      ||Date.parse(user.idle_expires_at)<=now||Date.parse(user.absolute_expires_at)<=now)return fail("VOICE_UNAUTHENTICATED",401);
++    const project=ports.db().prepare("SELECT p.archived_at,p.organization_id,o.status AS organization_status,m.status AS member_status,m.role,pm.role AS project_role FROM projects p JOIN organizations o ON o.id=p.organization_id JOIN organization_memberships m ON m.organization_id=o.id AND m.user_id=? LEFT JOIN project_memberships pm ON pm.project_id=p.id AND pm.user_id=m.user_id WHERE p.id=?").get(scope.actorId,scope.projectId);
++    if(!project||project.archived_at!==null||project.organization_id!==scope.organizationId||project.organization_status!=="active"||project.member_status!=="active")return fail("VOICE_FORBIDDEN",403);
++    if(live&&!["owner","admin"].includes(project.role)&&project.project_role!=="editor")return fail("VOICE_FORBIDDEN",403);
++    const runtime=ports.db().prepare("SELECT r.*,w.status AS workspace_status,w.security_epoch AS workspace_epoch,w.organization_id AS workspace_organization,w.project_id AS workspace_project,w.owner_user_id AS workspace_owner FROM runtime_instances r JOIN authorized_workspaces w ON w.id=r.workspace_id WHERE r.id=?").get(scope.runtimeId);
++    if(!runtime||runtime.workspace_id!==verified.workspaceId||runtime.organization_id!==scope.organizationId||runtime.project_id!==scope.projectId||runtime.owner_user_id!==scope.actorId
++      ||runtime.workspace_organization!==scope.organizationId||runtime.workspace_project!==scope.projectId||runtime.workspace_owner!==scope.actorId
++      ||runtime.workspace_status!=="authorized"||runtime.workspace_epoch!==verified.workspaceSecurityEpoch||runtime.security_epoch!==verified.runtimeSecurityEpoch
++      ||runtime.workspace_epoch!==runtime.security_epoch)return fail("VOICE_RUNTIME_SCOPE_CHANGED",403);
++    if(live&&(!["READY","IDLE"].includes(runtime.state)||!hash(runtime.lease_owner_hash)
++      ||!Number.isFinite(Date.parse(runtime.lease_expires_at))||Date.parse(runtime.lease_expires_at)<=now
++      ||!Number.isFinite(Date.parse(runtime.absolute_expires_at))||Date.parse(runtime.absolute_expires_at)<=now))return fail("VOICE_RUNTIME_UNAVAILABLE",403);
++    return {...verified,deadlineAt:Math.min(verified.deadlineAt,Date.parse(user.idle_expires_at),Date.parse(user.absolute_expires_at),
++      ...(live?[Date.parse(runtime.lease_expires_at),Date.parse(runtime.absolute_expires_at)]:[]))};
++  }
++  function originalEpochs(row:Row,current:VerifiedVoiceContext):void {
++    if(row.user_epoch!==current.userSecurityEpoch||row.workspace_epoch!==current.workspaceSecurityEpoch||row.runtime_epoch!==current.runtimeSecurityEpoch)return fail("VOICE_ORIGINAL_EPOCH_CHANGED",403);
++  }
++  function requireRow(context:C,id:string,action:Parameters<VoiceLedgerPorts<C>["currentScope"]>[2],live:boolean) {
++    if(!uuid(id))return fail("VOICE_OPERATION_INVALID",422);
++    const row=get(id);if(!row){authorize(context,null,action,false);return fail("VOICE_NOT_FOUND",404);}
++    const current=authorize(context,validateVoiceScope(JSON.parse(row.scope_json)),action,live);
++    return {row,current};
++  }
++  const write=<T>(work:()=>T):T=>{const result=ports.transaction(work,"immediate");ports.checkpoint();return result;};
++  function compare(change:VoiceChange,row:Row):void {
++    if(!integer(change.expectedRevision)||change.expectedRevision!==row.revision||change.from!==row.state)return fail("VOICE_REVISION_CONFLICT");
++    if(!equal(owner(change.owner),JSON.parse(row.owner_json)))return fail("VOICE_ORIGINAL_OWNER_CHANGED",403);
++  }
++  function update(row:Row,state:VoiceState,outcome:VoiceOutcome|null=null,fingerprint:string|null=null,retention:string|null=null,code:string|null=null):VoiceMetadata {
++    const result=ports.db().prepare("UPDATE veyra_voice_operations SET state=?,outcome=?,result_fingerprint=?,retention_id=?,retired=?,quarantine_code=COALESCE(quarantine_code,?),revision=revision+1,updated_at=? WHERE operation_id=? AND revision=? AND state=?")
++      .run(state,outcome,fingerprint,retention,state==="terminal"&&outcome!=="unknown"?1:0,code,ports.now(),row.operation_id,row.revision,row.state);
++    if(Number(result.changes)!==1)return fail("VOICE_REVISION_CONFLICT");
++    const stored=get(row.operation_id);if(!stored)throw new Error("Voice operation vanished");return metadata(stored);
++  }
++  const publicLedger={
++    reserve(context:C,input:unknown,ownerInput:unknown) {
++      const original=validateVoiceOriginal(input),originalOwner=owner(ownerInput),originalHash=digest({original,owner:originalOwner});
++      return write(()=>{
++        const current=authorize(context,original.scope,"reserve",true);
++        if(!equal(current.owner,originalOwner))return fail("VOICE_ORIGINAL_OWNER_CHANGED",403);
++        if(original.cpuIdentity&&!["instanceId","ownerId","ownerGeneration"].every(k=>original.cpuIdentity?.[k as keyof CpuIdentity]===originalOwner[k as keyof VoiceOwner]))return fail("VOICE_CPU_OWNER_CONFLICT",403);
++        if(original.control) {
++          const authority=ports.requireOriginalResource(context,null,"reserveControl",{operationId:original.operationId,owner:originalOwner,control:original.control});
++          if(!authority||authority.operationId!==original.operationId||!equal(authority.owner,originalOwner)||authority.instanceId!==originalOwner.instanceId||original.control.instanceId!==originalOwner.instanceId)return fail("VOICE_RESOURCE_AUTHORITY_REQUIRED",403);
++        }
++        const old=get(original.operationId);
++        if(old){if(old.actor_id!==original.scope.actorId||old.scope_hash!==digest(original.scope))return fail("VOICE_NOT_FOUND",404);if(old.original_hash!==originalHash)return fail("VOICE_ORIGINAL_REUSE_CONFLICT");return {accepted:false,fresh:false,operation:metadata(old)};}
++        const duplicate=ports.db().prepare("SELECT operation_id FROM veyra_voice_operations WHERE scope_hash=? AND request_id=?").get(digest(original.scope),original.requestId);
++        if(duplicate)return fail("VOICE_REQUEST_ALREADY_RETAINED");
++        if(original.deadlineAt<=ports.now()||original.deadlineAt>current.deadlineAt)return fail("VOICE_DEADLINE_INVALID",403);
++        if(original.cpuIdentity) {
++          if(original.controlOperationId===null)return fail("VOICE_CONTROL_REQUIRED",403);
++          const control=get(original.controlOperationId);
++          if(!control||control.kind!=="voice-cpu-supervisor"||control.scope_hash!==digest(original.scope)||control.resource_retired!==0||control.state!=="running"||!equal(JSON.parse(control.owner_json),originalOwner)||JSON.parse(control.control_json).workerBootId!==original.cpuIdentity.bootId)return fail("VOICE_CONTROL_UNAVAILABLE",403);
++        }
++        if(original.parentOperationId){
++          const parent=get(original.parentOperationId);
++          if(!parent||parent.scope_hash!==digest(original.scope)||parent.turn_generation!==original.turnGeneration||parent.kind!=="voice-agent-turn"||parent.deadline_at<=ports.now()
++            ||(original.kind==="voice-speech-tts"?parent.state!=="terminal"||parent.outcome!=="completed"||!parent.result_fingerprint:parent.state!=="running"))return fail("VOICE_PARENT_UNAVAILABLE",403);
++        }
++        const now=ports.now();
++        ports.db().prepare("INSERT INTO veyra_voice_operations(operation_id,request_id,kind,scope_json,scope_hash,original_hash,original_json,input_sha256,actor_id,organization_id,project_id,runtime_id,workspace_id,user_epoch,workspace_epoch,runtime_epoch,turn_generation,parent_operation_id,cpu_identity_json,owner_json,deadline_at,control_operation_id,instance_id,owner_generation,control_json,cpu_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'reserved',?,?)")
++          .run(original.operationId,original.requestId,original.kind,canonical(original.scope),digest(original.scope),originalHash,canonical(original),original.inputSha256,original.scope.actorId,original.scope.organizationId,original.scope.projectId,original.scope.runtimeId,current.workspaceId,current.userSecurityEpoch,current.workspaceSecurityEpoch,current.runtimeSecurityEpoch,original.turnGeneration,original.parentOperationId,original.cpuIdentity?canonical(original.cpuIdentity):null,canonical(originalOwner),original.deadlineAt,original.controlOperationId,originalOwner.instanceId,originalOwner.ownerGeneration,original.control?canonical({...original.control,workerBootId:null}):null,original.cpuIdentity?canonical(initialCpu(original.cpuIdentity)):null,now,now);
++        const stored=get(original.operationId);if(!stored)throw new Error("Voice reserve was not retained");return {accepted:true,fresh:true,operation:metadata(stored)};
++      });
++    },
++    read(context:C,id:string):VoiceMetadata|null {
++      if(!uuid(id))return fail("VOICE_OPERATION_INVALID",422);
++      return ports.transaction(()=>{const row=get(id);authorize(context,row?validateVoiceScope(JSON.parse(row.scope_json)):null,"read",false);return row?metadata(row):null;},"deferred");
++    },
++    cas(context:C,change:VoiceChange):VoiceMetadata {
++      exact(change,["operationId","expectedRevision","owner","from","to"]);
++      if(!["running","quarantined"].includes(change.to))return fail("VOICE_TERMINAL_PROOF_REQUIRED",403);
++      return write(()=>{
++        const {row,current}=requireRow(context,change.operationId,"transition",change.to==="running");compare(change,row);
++        if(row.state==="terminal"||row.state==="quarantined"||change.to==="running"&&row.state!=="reserved")return fail("VOICE_TRANSITION_INVALID");
++        if(change.to==="running"){
++          originalEpochs(row,current);if(!equal(current.owner,change.owner))return fail("VOICE_ORIGINAL_OWNER_CHANGED",403);
++          if(row.deadline_at<=ports.now())return fail("VOICE_OPERATION_EXPIRED",403);
++        }
++        return change.to==="quarantined"?update(row,"terminal","unknown",null,null,"VOICE_OUTCOME_UNKNOWN"):update(row,change.to);
++      });
++    },
++    settle(context:C,change:VoiceChange):VoiceMetadata {
++      exact(change,["operationId","expectedRevision","owner","from","to","outcome","proof"],["resultFingerprint"]);
++      if(change.to!=="terminal"||!["completed","failed","cancelled","cancelled-before-dispatch","unknown"].includes(change.outcome??"")
++        ||!(change.resultFingerprint===undefined||change.resultFingerprint===null||hash(change.resultFingerprint)))return fail("VOICE_SETTLEMENT_INVALID",422);
++      return write(()=>{
++        const {row,current}=requireRow(context,change.operationId,"settle",false);compare(change,row);originalEpochs(row,current);
++        if(row.state==="terminal")return fail("VOICE_TERMINAL_IMMUTABLE");
++        if(change.outcome==="unknown") {if(change.proof!==null||change.resultFingerprint!=null)return fail("VOICE_SETTLEMENT_INVALID",422);return update(row,"terminal","unknown",null,null,"VOICE_OUTCOME_UNKNOWN");}
++        if(row.cpu_json) {
++          const cpu=JSON.parse(row.cpu_json);
++          if(cpu.phase!=="terminal"||cpu.outcome!==change.outcome||cpu.drained!==true)return fail("VOICE_CPU_RESULT_UNCONFIRMED",403);
++          if(change.outcome==="completed"&&(!cpu.resultFingerprint||cpu.resultFingerprint.sha256!==change.resultFingerprint))return fail("VOICE_CPU_RESULT_UNCONFIRMED",403);
++        }
++        const operation=metadata(row),proof=ports.verifyRetirement(context,structuredClone(operation),change.proof);
++        exact(proof,["operationId","owner","identity","retentionId","drained","outcome","resultFingerprint"]);
++        if(proof.operationId!==row.operation_id||!equal(owner(proof.owner),operation.owner)||proof.drained!==true||!uuid(proof.retentionId)
++          ||proof.outcome!==change.outcome||!equal(proof.identity,operation.original.cpuIdentity)||proof.resultFingerprint!==(change.resultFingerprint??null))return fail("VOICE_RETIREMENT_UNCONFIRMED",403);
++        if(proof.identity!==null)validateCpuIdentity(proof.identity);
++        if(row.cpu_json&&JSON.parse(row.cpu_json).retentionId!==proof.retentionId)return fail("VOICE_RETIREMENT_UNCONFIRMED",403);
++        if(change.resultFingerprint&&row.deadline_at<=ports.now())return fail("VOICE_RESULT_EXPIRED",403);
++        if(row.state==="reserved"&&change.outcome==="completed")return fail("VOICE_DISPATCH_NOT_CLAIMED",403);
++        return update(row,"terminal",change.outcome,change.resultFingerprint??null,proof.retentionId);
++      });
++    },
++    quarantine(context:C,id:string,expectedRevision:number,reason:string):VoiceMetadata {
++      if(!text(reason,64)||!/^[A-Z0-9_]+$/.test(reason))return fail("VOICE_QUARANTINE_CODE_INVALID",422);
++      return write(()=>{
++        const {row}=requireRow(context,id,"quarantine",false);
++        if(!integer(expectedRevision)||expectedRevision!==row.revision)return fail("VOICE_REVISION_CONFLICT");
++        if(row.state==="terminal"||row.state==="quarantined")return metadata(row);
++        return update(row,"terminal","unknown",null,null,reason);
++      });
++    },
++  };
++  return Object.assign(publicLedger,createVoiceCpuExtension(ports,{get,write,authorize,metadata,update,reserve:publicLedger.reserve,canonical,digest,equal,owner,uuid,hash,integer,text,exact,fail}));
++}
+--- /dev/null
++++ b/packages/ingenium-core/lib/tools/voice-operation-cpu.ts
+@@ -0,0 +1,172 @@
++import { randomUUID } from "node:crypto";
++import type {VoiceLedgerPorts,VoiceMetadata,VoiceOriginal,VoiceOwner,CpuIdentity,VoiceOutcome,VoiceScope,VerifiedVoiceContext,VoiceState} from "./voice-operation-ledger.js";
++import type {CpuPrivate,CpuRetentionChange,CpuRetentionAck,CpuResultFingerprint,VoiceControl,OriginalResourceRequest} from "./voice-operation-contract.js";
++type Row=Record<string,any>;
++interface Internal<C> {
++ get(id:string):Row|undefined;write<T>(work:()=>T):T;
++ authorize(context:C,scope:VoiceScope|null,action:"reserve"|"read"|"transition"|"settle"|"quarantine",live:boolean):VerifiedVoiceContext;
++ metadata(row:Row):VoiceMetadata;update(row:Row,state:VoiceState,outcome?:VoiceOutcome|null,fingerprint?:string|null,retention?:string|null,code?:string|null):VoiceMetadata;
++ reserve(context:C,original:unknown,owner:unknown):{accepted:boolean;fresh:boolean;operation:VoiceMetadata};
++ canonical(value:unknown):string;digest(value:unknown):string;equal(a:unknown,b:unknown):boolean;owner(value:unknown):VoiceOwner;
++ uuid(value:unknown):value is string;hash(value:unknown):value is string;integer(value:unknown):value is number;text(value:unknown,max?:number):value is string;
++ exact(value:unknown,keys:string[],optional?:string[]):asserts value is Row;fail(code:string,status?:number):never;
++}
++export function validateControl(value:unknown):asserts value is VoiceControl {
++ if(!value||typeof value!=="object"||Array.isArray(value))throw new Error("VOICE_CONTROL_INVALID");
++ const c=value as Record<string,unknown>;
++ if(Object.keys(c).sort().join()!==["instanceId","profileDigest","recoveryEndpointIdentity","retirementSecretSha256"].sort().join()
++  ||typeof c.instanceId!=="string"||!/^[A-Za-z0-9:_-]{1,160}$/.test(c.instanceId)
++  ||typeof c.profileDigest!=="string"||!/^[a-f0-9]{64}$/.test(c.profileDigest)
++  ||typeof c.retirementSecretSha256!=="string"||!/^[a-f0-9]{64}$/.test(c.retirementSecretSha256)
++  ||typeof c.recoveryEndpointIdentity!=="string"||!c.recoveryEndpointIdentity||c.recoveryEndpointIdentity.length>512)throw new Error("VOICE_CONTROL_INVALID");
++}
++export function initialCpu(identity:CpuIdentity):CpuPrivate&{permitId:string|null;transactions:Record<string,{digest:string;ack:CpuRetentionAck}>} {
++ return {identity,revision:0,phase:"bound",outcome:null,drained:false,retentionId:null,lastTransactionId:null,lastTransactionDigest:null,resultFingerprint:null,dispatchClaimed:false,quarantined:false,permitId:null,transactions:{}};
++}
++export function createVoiceCpuExtension<C>(ports:VoiceLedgerPorts<C>,i:Internal<C>) {
++ type Cpu=ReturnType<typeof initialCpu>;
++ const privateMetadata=(row:Row):VoiceMetadata=>({...i.metadata(row),...(row.cpu_json?{cpu:JSON.parse(row.cpu_json)}:{}),...(row.control_json?{control:JSON.parse(row.control_json)}:{}),...(row.resource_retirement_json?{resourceRetirement:JSON.parse(row.resource_retirement_json)}:{}),resourceRetired:row.resource_retired===1,privateRevision:row.private_revision});
++ function authority(context:C,row:Row|null,action:string,request:Row):void {
++   const actual=ports.requireOriginalResource(context,row?privateMetadata(row):null,action,request);
++   const requested=i.owner(request.owner);
++   if(!actual||!i.equal(i.owner(actual.owner),requested)||actual.instanceId!==requested.instanceId||actual.operationId!==(row?.operation_id??null))return i.fail("VOICE_RESOURCE_AUTHORITY_REQUIRED",403);
++   if(row&&!i.equal(JSON.parse(row.owner_json),requested))return i.fail("VOICE_ORIGINAL_OWNER_CHANGED",403);
++ }
++ function owned(context:C,request:OriginalResourceRequest,action:string):Row {
++   if(!i.uuid(request.operationId))return i.fail("VOICE_OPERATION_INVALID",422);
++   const row=i.get(request.operationId);if(!row)return i.fail("VOICE_NOT_FOUND",404);
++   authority(context,row,action,request);return row;
++ }
++ function cpuOwned(context:C,request:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number},action:string):{row:Row;cpu:Cpu} {
++   const row=owned(context,request,action);if(!row.cpu_json)return i.fail("VOICE_CPU_ORIGINAL_REQUIRED",403);
++   const cpu:Cpu=JSON.parse(row.cpu_json);
++   if(!i.equal(cpu.identity,request.identity))return i.fail("VOICE_CPU_ORIGINAL_CONFLICT",403);
++   if(!i.integer(request.expectedCpuRevision)||request.expectedCpuRevision!==cpu.revision)return i.fail("VOICE_CPU_REVISION_CONFLICT");
++   return {row,cpu};
++ }
++ function saveCpu(row:Row,cpu:Cpu):VoiceMetadata {
++   const serialized=i.canonical(cpu);if(Buffer.byteLength(serialized)>131072)return i.fail("VOICE_CPU_METADATA_LIMIT",503);
++   const changed=ports.db().prepare("UPDATE veyra_voice_operations SET cpu_json=?,private_revision=private_revision+1 WHERE operation_id=? AND private_revision=?").run(serialized,row.operation_id,row.private_revision);
++   if(Number(changed.changes)!==1)return i.fail("VOICE_PRIVATE_REVISION_CONFLICT");
++   const stored=i.get(row.operation_id);if(!stored)throw new Error("Voice CPU metadata vanished");return privateMetadata(stored);
++ }
++ function live(context:C,row:Row,requestedOwner:VoiceOwner):void {
++   const current=i.authorize(context,JSON.parse(row.scope_json),"transition",true);
++   if(!i.equal(current.owner,requestedOwner)||row.user_epoch!==current.userSecurityEpoch||row.workspace_epoch!==current.workspaceSecurityEpoch||row.runtime_epoch!==current.runtimeSecurityEpoch||row.deadline_at<=ports.now())return i.fail("VOICE_CPU_DISPATCH_REVOKED",403);
++   if(row.resource_retired)return i.fail("VOICE_CPU_DISPATCH_REVOKED",403);
++   if(row.control_operation_id) {
++     const control=i.get(row.control_operation_id);
++     if(!control||control.resource_retired||control.state!=="running"||control.scope_hash!==row.scope_hash)return i.fail("VOICE_CPU_DISPATCH_REVOKED",403);
++   }
++ }
++ function fingerprint(value:unknown):asserts value is CpuResultFingerprint {
++   i.exact(value,["status","contentType","sha256","bytes"]);
++   if(!i.integer(value.status)||value.status<100||value.status>599||!["application/json","audio/wav"].includes(value.contentType)||!i.hash(value.sha256)||!i.integer(value.bytes)||value.bytes>1440044)return i.fail("VOICE_CPU_RESULT_INVALID",422);
++ }
++ return {
++   reserveControl(context:C,input:{original:VoiceOriginal;owner:VoiceOwner;control:VoiceControl}) {
++     i.exact(input,["original","owner","control"]);validateControl(input.control);
++     if(input.original.kind!=="voice-cpu-supervisor"||!i.equal(input.original.control,input.control))return i.fail("VOICE_CONTROL_INVALID",422);
++     return i.reserve(context,input.original,input.owner);
++   },
++   privateRead(context:C,request:OriginalResourceRequest):VoiceMetadata {
++     i.exact(request,["operationId","owner"]);
++     return ports.transaction(()=>privateMetadata(owned(context,request,"read")),"deferred");
++   },
++   listControls(context:C,request:{instanceId:string;owner:VoiceOwner}):readonly VoiceMetadata[] {
++     i.exact(request,["instanceId","owner"]);
++     return ports.transaction(()=>{
++       authority(context,null,"listControls",request);
++       if(request.instanceId!==request.owner.instanceId)return i.fail("VOICE_RESOURCE_AUTHORITY_REQUIRED",403);
++       return ports.db().prepare("SELECT * FROM veyra_voice_operations WHERE kind='voice-cpu-supervisor' AND instance_id=? ORDER BY owner_generation DESC,operation_id LIMIT 128").all(request.instanceId).map(privateMetadata);
++     },"deferred");
++   },
++   bindWorkerBoot(context:C,request:OriginalResourceRequest&{workerBootId:string;physicalProof:unknown}):VoiceMetadata {
++     i.exact(request,["operationId","owner","workerBootId","physicalProof"]);
++     return i.write(()=>{
++       const row=owned(context,request,"bindWorkerBoot");
++       if(row.kind!=="voice-cpu-supervisor"||!i.uuid(request.workerBootId)||row.resource_retired)return i.fail("VOICE_CONTROL_INVALID",403);
++       const control=JSON.parse(row.control_json);
++       if(control.workerBootId!==null){if(control.workerBootId!==request.workerBootId)return i.fail("VOICE_WORKER_BOOT_IMMUTABLE");return privateMetadata(row);}
++       live(context,row,request.owner);
++       if(row.state!=="reserved")return i.fail("VOICE_CONTROL_INVALID",403);
++       control.workerBootId=request.workerBootId;
++       ports.db().prepare("UPDATE veyra_voice_operations SET control_json=?,private_revision=private_revision+1 WHERE operation_id=? AND private_revision=?").run(i.canonical(control),row.operation_id,row.private_revision);
++       i.update(row,"running");const stored=i.get(row.operation_id);if(!stored)throw new Error("Voice control vanished");return privateMetadata(stored);
++     });
++   },
++   claimCpuDispatch(context:C,request:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number}) {
++     i.exact(request,["operationId","owner","identity","expectedCpuRevision"]);
++     return i.write(()=>{
++       const {row,cpu}=cpuOwned(context,request,"claimCpuDispatch");live(context,row,request.owner);
++       if(row.state!=="reserved"||cpu.dispatchClaimed||cpu.quarantined||cpu.phase!=="bound")return i.fail("VOICE_CPU_DISPATCH_ALREADY_CLAIMED",403);
++       cpu.dispatchClaimed=true;cpu.permitId=randomUUID();saveCpu(row,cpu);i.update(row,"running");
++       return {identity:cpu.identity,permitId:cpu.permitId,revision:cpu.revision};
++     });
++   },
++   retainCpu(context:C,request:CpuRetentionChange):CpuRetentionAck {
++     i.exact(request,["operationId","owner","identity","transactionId","expectedCpuRevision","phase","outcome","drained"]);
++     if(!i.uuid(request.transactionId))return i.fail("VOICE_CPU_TRANSACTION_INVALID",422);
++     return i.write(()=>{
++       const row=owned(context,request,"retainCpu");if(!row.cpu_json)return i.fail("VOICE_CPU_ORIGINAL_REQUIRED",403);
++       const cpu:Cpu=JSON.parse(row.cpu_json),transactionDigest=i.digest(request);
++       if(!i.equal(cpu.identity,request.identity))return i.fail("VOICE_CPU_ORIGINAL_CONFLICT",403);
++       const old=cpu.transactions[request.transactionId];
++       if(old){if(old.digest!==transactionDigest)return i.fail("VOICE_CPU_TRANSACTION_CONFLICT");return old.ack;}
++       if(!i.integer(request.expectedCpuRevision)||request.expectedCpuRevision!==cpu.revision)return i.fail("VOICE_CPU_REVISION_CONFLICT");
++       if(Object.keys(cpu.transactions).length>=64)return i.fail("VOICE_CPU_TRANSACTION_LIMIT",503);
++       if(!cpu.dispatchClaimed||cpu.phase==="terminal")return i.fail("VOICE_CPU_TRANSITION_INVALID",403);
++       if(request.phase==="terminal") {
++         if(request.drained!==true||!["completed","failed","cancelled","cancelled-before-dispatch"].includes(request.outcome??""))return i.fail("VOICE_CPU_TERMINAL_UNCONFIRMED",403);
++         if(["bound","reserved"].includes(cpu.phase)&&request.outcome!=="cancelled-before-dispatch")return i.fail("VOICE_CPU_TRANSITION_INVALID",403);
++       } else {
++         if(request.outcome!==null||request.drained!==false||cpu.quarantined&&request.phase!=="uncertain")return i.fail("VOICE_CPU_TRANSITION_INVALID",403);
++         if(request.phase==="uncertain") { /* Durable uncertainty ACK is not retirement or dispatch authority. */ }
++         else if(request.phase==="reserved") {if(!["bound","reserved"].includes(cpu.phase))return i.fail("VOICE_CPU_TRANSITION_INVALID",403);}
++         else if(request.phase==="running") {if(cpu.phase!=="reserved"||row.state!=="running")return i.fail("VOICE_CPU_TRANSITION_INVALID",403);live(context,row,request.owner);}
++         else return i.fail("VOICE_CPU_TRANSITION_INVALID",422);
++       }
++       const ack={identity:cpu.identity,transactionId:request.transactionId,revision:cpu.revision+1,retentionId:randomUUID()};
++       Object.assign(cpu,{revision:ack.revision,phase:request.phase,outcome:request.outcome,drained:request.drained,retentionId:ack.retentionId,lastTransactionId:request.transactionId,lastTransactionDigest:transactionDigest});
++       if(request.phase==="uncertain")cpu.quarantined=true;
++       cpu.transactions[request.transactionId]={digest:transactionDigest,ack};saveCpu(row,cpu);
++       if(request.phase==="uncertain"&&row.state!=="terminal")i.update(row,"terminal","unknown",null,null,"CPU_OUTCOME_UNCERTAIN");
++       return ack;
++     });
++   },
++   recordCpuResult(context:C,request:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number;resultFingerprint:CpuResultFingerprint}):VoiceMetadata {
++     i.exact(request,["operationId","owner","identity","expectedCpuRevision","resultFingerprint"]);fingerprint(request.resultFingerprint);
++     return i.write(()=>{
++       const {row,cpu}=cpuOwned(context,request,"recordCpuResult");
++       if(cpu.phase!=="terminal"||!cpu.drained)return i.fail("VOICE_CPU_TERMINAL_UNCONFIRMED",403);
++       if((cpu.outcome==="completed")!==(request.resultFingerprint.status>=200&&request.resultFingerprint.status<300)
++         ||request.resultFingerprint.contentType!==(cpu.outcome==="completed"&&cpu.identity.kind==="synthesize"?"audio/wav":"application/json"))return i.fail("VOICE_CPU_RESULT_CONFLICT",403);
++       if(cpu.resultFingerprint){if(!i.equal(cpu.resultFingerprint,request.resultFingerprint))return i.fail("VOICE_CPU_RESULT_IMMUTABLE");return privateMetadata(row);}
++       cpu.resultFingerprint=request.resultFingerprint;return saveCpu(row,cpu);
++     });
++   },
++   quarantineCpu(context:C,request:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number;reason:string}):VoiceMetadata {
++     i.exact(request,["operationId","owner","identity","expectedCpuRevision","reason"]);
++     if(!i.text(request.reason,64)||!/^[A-Z0-9_]+$/.test(request.reason))return i.fail("VOICE_QUARANTINE_CODE_INVALID",422);
++     return i.write(()=>{
++       const {row,cpu}=cpuOwned(context,request,"quarantineCpu");cpu.quarantined=true;if(cpu.phase!=="terminal")cpu.phase="uncertain";
++       saveCpu(row,cpu);if(row.state!=="terminal")i.update(row,"terminal","unknown",null,null,request.reason);
++       const stored=i.get(row.operation_id);if(!stored)throw new Error("Voice operation vanished");return privateMetadata(stored);
++     });
++   },
++   retireOriginal(context:C,request:OriginalResourceRequest&{physicalProof:unknown}):VoiceMetadata {
++     i.exact(request,["operationId","owner","physicalProof"]);
++     return i.write(()=>{
++       const row=owned(context,request,"retireOriginal");
++       if(row.resource_retired)return privateMetadata(row);
++       const operation=privateMetadata(row),proof=ports.verifyRetirement(context,structuredClone(operation),request.physicalProof);
++       if(!proof||proof.operationId!==row.operation_id||!i.equal(proof.owner,operation.owner)||proof.drained!==true||!i.uuid(proof.retentionId)||!i.equal(proof.identity,operation.original.cpuIdentity))return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);
++       if(row.cpu_json){const cpu:Cpu=JSON.parse(row.cpu_json);if(cpu.phase==="terminal"&&cpu.retentionId!==proof.retentionId)return i.fail("VOICE_RETIREMENT_UNCONFIRMED",403);}
++       // Physical retirement may prove an original tree is gone while the public outcome remains unknown.
++       const receipt={operationId:row.operation_id,owner:operation.owner,identity:operation.original.cpuIdentity,retentionId:proof.retentionId,drained:true,verifiedAt:ports.now()};
++       ports.db().prepare("UPDATE veyra_voice_operations SET resource_retired=1,resource_retirement_json=?,private_revision=private_revision+1 WHERE operation_id=? AND private_revision=?").run(i.canonical(receipt),row.operation_id,row.private_revision);
++       const stored=i.get(row.operation_id);if(!stored)throw new Error("Voice resource vanished");return privateMetadata(stored);
++     });
++   },
++ };
++}
+--- /dev/null
++++ b/packages/ingenium-core/lib/tools/voice-operation-owner.ts
+@@ -0,0 +1,12 @@
++import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
++import { createCoreVoiceOperationLedger, type VoiceLedgerPorts, type VoiceSqlDb } from "./voice-operation-ledger.js";
++import type { CoreVoiceLedger } from "./voice-operation-contract.js";
++
++export type VoiceOperationAuthorities<C> = Pick<VoiceLedgerPorts<C>,"currentScope"|"verifyRetirement"|"requireOriginalResource">;
++/** Core-owned connection/transaction; API supplies actual closed request and private retirement authorities. */
++export function createVoiceOperationOwner<C>(authorities:VoiceOperationAuthorities<C>):CoreVoiceLedger<C> {
++  return createCoreVoiceOperationLedger({
++    ...authorities,db:()=>getDb() as unknown as VoiceSqlDb,
++    transaction:(work,mode)=>execTransaction(work,1,mode),checkpoint:checkpointAfterWrite,now:Date.now,
++  });
++}
+--- /dev/null
++++ b/packages/ingenium-core/lib/tools/voice-operation-contract.ts
+@@ -0,0 +1,25 @@
++import type {VoiceScope,VoiceOwner,CpuIdentity,VoiceOriginal,VoiceMetadata,VoiceChange} from "./voice-operation-ledger.js";
++export interface CpuResultFingerprint {status:number;contentType:"application/json"|"audio/wav";sha256:string;bytes:number}
++export interface VoiceControl {instanceId:string;profileDigest:string;recoveryEndpointIdentity:string;retirementSecretSha256:string}
++export interface CpuRetentionChange {operationId:string;owner:VoiceOwner;identity:CpuIdentity;transactionId:string;expectedCpuRevision:number;phase:"reserved"|"running"|"uncertain"|"terminal";outcome:null|"completed"|"failed"|"cancelled"|"cancelled-before-dispatch";drained:boolean}
++export interface CpuRetentionAck {identity:CpuIdentity;transactionId:string;revision:number;retentionId:string}
++export interface CpuPrivate {identity:CpuIdentity;revision:number;phase:"bound"|"reserved"|"running"|"uncertain"|"terminal";outcome:CpuRetentionChange["outcome"];drained:boolean;retentionId:string|null;lastTransactionId:string|null;lastTransactionDigest:string|null;resultFingerprint:CpuResultFingerprint|null;dispatchClaimed:boolean;quarantined:boolean}
++export interface OriginalResourceRequest {operationId:string;owner:VoiceOwner}
++export interface CoreVoiceLedger<C> {
++ reserve(context:C,original:VoiceOriginal,owner:VoiceOwner):{accepted:boolean;fresh:boolean;operation:VoiceMetadata};
++ read(context:C,operationId:string):VoiceMetadata|null;
++ cas(context:C,change:VoiceChange):VoiceMetadata;
++ settle(context:C,change:VoiceChange):VoiceMetadata;
++ quarantine(context:C,operationId:string,expectedRevision:number,reason:string):VoiceMetadata;
++ reserveControl(context:C,input:{original:VoiceOriginal;owner:VoiceOwner;control:VoiceControl}):{accepted:boolean;fresh:boolean;operation:VoiceMetadata};
++ privateRead(context:C,input:OriginalResourceRequest):VoiceMetadata;
++ listControls(context:C,input:{instanceId:string;owner:VoiceOwner}):readonly VoiceMetadata[];
++ bindWorkerBoot(context:C,input:OriginalResourceRequest&{workerBootId:string;physicalProof:unknown}):VoiceMetadata;
++ claimCpuDispatch(context:C,input:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number}):{identity:CpuIdentity;permitId:string;revision:number};
++ retainCpu(context:C,input:CpuRetentionChange):CpuRetentionAck;
++ recordCpuResult(context:C,input:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number;resultFingerprint:CpuResultFingerprint}):VoiceMetadata;
++ quarantineCpu(context:C,input:OriginalResourceRequest&{identity:CpuIdentity;expectedCpuRevision:number;reason:string}):VoiceMetadata;
++ retireOriginal(context:C,input:OriginalResourceRequest&{physicalProof:unknown}):VoiceMetadata;
++}
++// Scope stays exactly the existing nine-key portable contract. No native conversation/session mapping is invented.
++export type HostedVoiceScope=VoiceScope;
+--- /dev/null
++++ b/packages/ingenium-core/data/migrations/128_voice_operations.sql
+@@ -0,0 +1,89 @@
++-- PROPOSAL ONLY: Root owns SQL128 registration/application on the original Core DB.
++CREATE TABLE veyra_voice_operations (
++ operation_id TEXT PRIMARY KEY CHECK(length(operation_id)=36),
++ request_id TEXT NOT NULL CHECK(length(request_id) BETWEEN 1 AND 256),
++ kind TEXT NOT NULL CHECK(kind IN ('voice-agent-turn','voice-agent-steer','voice-agent-queue','voice-speech-stt','voice-speech-tts','voice-cpu-supervisor')),
++ scope_json TEXT NOT NULL CHECK(json_valid(scope_json) AND length(CAST(scope_json AS BLOB))<=4096),
++ scope_hash TEXT NOT NULL CHECK(length(scope_hash)=64), original_hash TEXT NOT NULL CHECK(length(original_hash)=64),
++ original_json TEXT NOT NULL CHECK(json_valid(original_json) AND length(CAST(original_json AS BLOB))<=8192),
++ input_sha256 TEXT NOT NULL CHECK(length(input_sha256)=64),
++ actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
++ organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE RESTRICT,
++ project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
++ runtime_id TEXT NOT NULL REFERENCES runtime_instances(id) ON DELETE RESTRICT,
++ workspace_id TEXT NOT NULL REFERENCES authorized_workspaces(id) ON DELETE RESTRICT,
++ user_epoch INTEGER NOT NULL CHECK(user_epoch>=0), workspace_epoch INTEGER NOT NULL CHECK(workspace_epoch>=0), runtime_epoch INTEGER NOT NULL CHECK(runtime_epoch>=0),
++ turn_generation INTEGER NOT NULL CHECK(turn_generation>=0),
++ parent_operation_id TEXT REFERENCES veyra_voice_operations(operation_id) ON DELETE RESTRICT,
++ control_operation_id TEXT REFERENCES veyra_voice_operations(operation_id) ON DELETE RESTRICT,
++ cpu_identity_json TEXT CHECK(cpu_identity_json IS NULL OR (json_valid(cpu_identity_json) AND length(CAST(cpu_identity_json AS BLOB))<=2048)),
++ owner_json TEXT NOT NULL CHECK(json_valid(owner_json) AND length(CAST(owner_json AS BLOB))<=2048),
++ instance_id TEXT NOT NULL, owner_generation INTEGER NOT NULL CHECK(owner_generation>=1),
++ control_json TEXT CHECK(control_json IS NULL OR (json_valid(control_json) AND length(CAST(control_json AS BLOB))<=4096)),
++ cpu_json TEXT CHECK(cpu_json IS NULL OR (json_valid(cpu_json) AND length(CAST(cpu_json AS BLOB))<=131072)),
++ resource_retired INTEGER NOT NULL DEFAULT 0 CHECK(resource_retired IN (0,1)), private_revision INTEGER NOT NULL DEFAULT 0 CHECK(private_revision>=0),
++ resource_retirement_json TEXT CHECK(resource_retirement_json IS NULL OR (json_valid(resource_retirement_json) AND length(CAST(resource_retirement_json AS BLOB))<=4096)),
++ deadline_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0),
++ state TEXT NOT NULL CHECK(state IN ('reserved','running','quarantined','terminal')),
++ outcome TEXT CHECK(outcome IN ('completed','failed','cancelled','cancelled-before-dispatch','unknown')),
++ result_fingerprint TEXT CHECK(result_fingerprint IS NULL OR length(result_fingerprint)=64),
++ retention_id TEXT CHECK(retention_id IS NULL OR length(retention_id)=36),
++ retired INTEGER NOT NULL DEFAULT 0 CHECK(retired IN (0,1)), quarantine_code TEXT,
++ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
++ UNIQUE(scope_hash,request_id),
++ CHECK((resource_retired=0 AND resource_retirement_json IS NULL) OR (resource_retired=1 AND resource_retirement_json IS NOT NULL)),
++ CHECK((state='terminal' AND ((outcome='unknown' AND retention_id IS NULL AND retired=0 AND result_fingerprint IS NULL) OR (outcome<>'unknown' AND outcome IS NOT NULL AND retention_id IS NOT NULL AND retired=1)))
++  OR (state<>'terminal' AND outcome IS NULL AND retention_id IS NULL AND retired=0 AND result_fingerprint IS NULL))
++);
++CREATE INDEX veyra_voice_operations_recovery ON veyra_voice_operations(actor_id,runtime_id,state,operation_id);
++CREATE UNIQUE INDEX veyra_voice_one_live_cpu_control ON veyra_voice_operations(instance_id) WHERE kind='voice-cpu-supervisor' AND resource_retired=0;
++CREATE TRIGGER veyra_voice_control_generation BEFORE INSERT ON veyra_voice_operations
++WHEN NEW.kind='voice-cpu-supervisor' AND EXISTS(SELECT 1 FROM veyra_voice_operations WHERE kind='voice-cpu-supervisor' AND instance_id=NEW.instance_id AND owner_generation>=NEW.owner_generation)
++BEGIN SELECT RAISE(ABORT,'voice supervisor generation must increase'); END;
++CREATE TRIGGER veyra_voice_operation_identity_immutable BEFORE UPDATE ON veyra_voice_operations
++WHEN NEW.operation_id IS NOT OLD.operation_id OR NEW.request_id IS NOT OLD.request_id OR NEW.kind IS NOT OLD.kind
++ OR NEW.scope_json IS NOT OLD.scope_json OR NEW.scope_hash IS NOT OLD.scope_hash OR NEW.original_hash IS NOT OLD.original_hash OR NEW.original_json IS NOT OLD.original_json
++ OR NEW.input_sha256 IS NOT OLD.input_sha256 OR NEW.actor_id IS NOT OLD.actor_id OR NEW.organization_id IS NOT OLD.organization_id
++ OR NEW.project_id IS NOT OLD.project_id OR NEW.runtime_id IS NOT OLD.runtime_id OR NEW.workspace_id IS NOT OLD.workspace_id
++ OR NEW.user_epoch IS NOT OLD.user_epoch OR NEW.workspace_epoch IS NOT OLD.workspace_epoch OR NEW.runtime_epoch IS NOT OLD.runtime_epoch
++ OR NEW.turn_generation IS NOT OLD.turn_generation OR NEW.parent_operation_id IS NOT OLD.parent_operation_id
++ OR NEW.control_operation_id IS NOT OLD.control_operation_id OR NEW.instance_id IS NOT OLD.instance_id OR NEW.owner_generation IS NOT OLD.owner_generation
++ OR NEW.cpu_identity_json IS NOT OLD.cpu_identity_json OR NEW.owner_json IS NOT OLD.owner_json
++ OR NEW.deadline_at IS NOT OLD.deadline_at OR NEW.created_at IS NOT OLD.created_at
++BEGIN SELECT RAISE(ABORT,'voice original identity is immutable'); END;
++CREATE TRIGGER veyra_voice_operation_terminal_immutable BEFORE UPDATE ON veyra_voice_operations
++WHEN OLD.state='terminal' AND (NEW.state IS NOT OLD.state OR NEW.outcome IS NOT OLD.outcome OR NEW.result_fingerprint IS NOT OLD.result_fingerprint OR NEW.retention_id IS NOT OLD.retention_id OR NEW.retired IS NOT OLD.retired OR NEW.revision IS NOT OLD.revision OR NEW.quarantine_code IS NOT OLD.quarantine_code)
++BEGIN SELECT RAISE(ABORT,'voice terminal is immutable'); END;
++CREATE TRIGGER veyra_voice_operation_revision BEFORE UPDATE ON veyra_voice_operations
++WHEN (NEW.state IS NOT OLD.state OR NEW.outcome IS NOT OLD.outcome OR NEW.revision IS NOT OLD.revision) AND (NEW.revision<>OLD.revision+1 OR NOT (
++ (OLD.state='reserved' AND NEW.state IN ('running','quarantined','terminal'))
++ OR (OLD.state='running' AND NEW.state IN ('quarantined','terminal'))
++ OR (OLD.state='quarantined' AND NEW.state='terminal')))
++BEGIN SELECT RAISE(ABORT,'voice transition requires checked revision'); END;
++CREATE TRIGGER veyra_voice_operation_no_delete BEFORE DELETE ON veyra_voice_operations
++BEGIN SELECT RAISE(ABORT,'voice originals are retained for no-replay'); END;
++CREATE TRIGGER veyra_voice_private_revision BEFORE UPDATE ON veyra_voice_operations
++WHEN NEW.resource_retired<OLD.resource_retired OR
++ ((NEW.cpu_json IS NOT OLD.cpu_json OR NEW.control_json IS NOT OLD.control_json OR NEW.resource_retired IS NOT OLD.resource_retired OR NEW.resource_retirement_json IS NOT OLD.resource_retirement_json) AND NEW.private_revision<>OLD.private_revision+1)
++ OR (OLD.resource_retirement_json IS NOT NULL AND NEW.resource_retirement_json IS NOT OLD.resource_retirement_json)
++BEGIN SELECT RAISE(ABORT,'voice private resource requires checked revision'); END;
++CREATE TRIGGER veyra_voice_control_identity_immutable BEFORE UPDATE ON veyra_voice_operations
++WHEN OLD.control_json IS NOT NULL AND (
++ json_extract(NEW.control_json,'$.instanceId') IS NOT json_extract(OLD.control_json,'$.instanceId')
++ OR json_extract(NEW.control_json,'$.profileDigest') IS NOT json_extract(OLD.control_json,'$.profileDigest')
++ OR json_extract(NEW.control_json,'$.recoveryEndpointIdentity') IS NOT json_extract(OLD.control_json,'$.recoveryEndpointIdentity')
++ OR json_extract(NEW.control_json,'$.retirementSecretSha256') IS NOT json_extract(OLD.control_json,'$.retirementSecretSha256')
++ OR (json_extract(OLD.control_json,'$.workerBootId') IS NOT NULL AND json_extract(NEW.control_json,'$.workerBootId') IS NOT json_extract(OLD.control_json,'$.workerBootId')))
++BEGIN SELECT RAISE(ABORT,'voice control identity is immutable'); END;
++CREATE TRIGGER veyra_voice_cpu_identity_terminal_immutable BEFORE UPDATE ON veyra_voice_operations
++WHEN OLD.cpu_json IS NOT NULL AND (
++ json_extract(NEW.cpu_json,'$.identity') IS NOT json_extract(OLD.cpu_json,'$.identity')
++ OR json_extract(NEW.cpu_json,'$.revision')<json_extract(OLD.cpu_json,'$.revision')
++ OR json_extract(NEW.cpu_json,'$.dispatchClaimed')<json_extract(OLD.cpu_json,'$.dispatchClaimed')
++ OR (json_extract(OLD.cpu_json,'$.phase')='terminal' AND (
++   json_extract(NEW.cpu_json,'$.phase') IS NOT 'terminal'
++   OR json_extract(NEW.cpu_json,'$.outcome') IS NOT json_extract(OLD.cpu_json,'$.outcome')
++   OR json_extract(NEW.cpu_json,'$.drained') IS NOT json_extract(OLD.cpu_json,'$.drained')
++   OR json_extract(NEW.cpu_json,'$.retentionId') IS NOT json_extract(OLD.cpu_json,'$.retentionId')))
++ OR (json_extract(OLD.cpu_json,'$.resultFingerprint') IS NOT NULL AND json_extract(NEW.cpu_json,'$.resultFingerprint') IS NOT json_extract(OLD.cpu_json,'$.resultFingerprint')))
++BEGIN SELECT RAISE(ABORT,'voice CPU identity/terminal is immutable'); END;
+--- a/packages/ingenium-core/lib/index.ts
++++ b/packages/ingenium-core/lib/index.ts
+@@ -74,3 +74,8 @@
+ export * as rag from "./tools/rag.js";
+ export { EndpointPolicyError, isIP, isPrivateAddress, safeEndpointFetch, safeLlmFetch, validateEndpointUrl } from "./tools/endpoint-policy.js";
+ export type { EndpointPolicyErrorCode, EndpointPolicyOptions } from "./tools/endpoint-policy.js";
++
++export * as voiceOperations from "./tools/voice-operation-ledger.js";
++export { createVoiceOperationOwner } from "./tools/voice-operation-owner.js";
++export type { VoiceOperationAuthorities } from "./tools/voice-operation-owner.js";
++export type { CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, CpuResultFingerprint, VoiceControl } from "./tools/voice-operation-contract.js";
