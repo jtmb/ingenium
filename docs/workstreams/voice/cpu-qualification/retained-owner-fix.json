@@ -1,0 +1,53 @@
+{
+  "kind": "retained-privileged-owner-source-fix-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "preimageCommit": "399192e042dc3ee8890de5864c55770a50edecbd",
+  "runEnvelopePreimageSha256": "0554c7b36e244a49b7c73c724dfb06c09c29e68d40e1d7a7f6875946be34083f",
+  "productionApproval": false,
+  "qualified": false,
+  "scope": "Same verified O_NOFOLLOW descriptor selects privileged executable via explicit inherited fd3; pathname only post-join invalidation",
+  "postimages": [
+    {
+      "path": "README.md",
+      "bytes": 23000,
+      "sha256": "feb797217c9fee4b6afe1c67c4c3b26b78ee33f30e644540e3eafb7cb747164d"
+    },
+    {
+      "path": "run-envelope.mjs",
+      "bytes": 8939,
+      "sha256": "17b389b577c269c04cbcc0b6a4f49dab8c44d7a43382b506ac5c1548c4ea02fb"
+    },
+    {
+      "path": "retained-kernel-owner.mjs",
+      "bytes": 4308,
+      "sha256": "42a4990af62233d8c518365bcfa68c759700a1d4b43cb03d8f607f50ff545cd9"
+    },
+    {
+      "path": "retained-kernel-owner.test.mjs",
+      "bytes": 6522,
+      "sha256": "a4344b734c514c0ed998fd0cf3e5c49fae68f604bda348ac4c9cab35990d02ae"
+    },
+    {
+      "path": "retained-owner-fix.patch",
+      "bytes": 18466,
+      "sha256": "568cac328ec168e958f2dc1ae6febab6227d83f7657cb714abc6f7305361ba33"
+    }
+  ],
+  "unitHarnessCases": 7,
+  "testsExecutedByWorker": false,
+  "staticSyntaxBodyParse": "Eight mjs sources including harness parsed without module evaluation",
+  "requiredRootValidation": [
+    "Run model-free harness",
+    "Qualify actual fd3 exec/inheritance under bounded inert owner",
+    "Original retained exit/close/pumps and cgroup drain",
+    "Continue all existing runtime/approval/Core/platform gates"
+  ],
+  "cleanup": {
+    "retained": "Minimal source, preimage delta and receipt for coordinator review/import/inert qualification",
+    "removedBytes": 0,
+    "newRuntimeBuildDependencyCacheModelDirectories": [],
+    "endCondition": "Retain minimal reproducible source; no disposable runtime outputs were created",
+    "removedPaths": []
+  },
+  "protected": "Earlier Native drafts and all source, locks, active builds, external roots and rejection evidence untouched"
+}

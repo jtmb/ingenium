@@ -315,3 +315,44 @@ Primary mechanisms: [Linux cgroup v2](https://docs.kernel.org/admin-guide/cgroup
 [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
 This source set is **uncompiled/unexecuted qualification tooling**, not qualified
 resource measurements, runtime acceptance or completed Phase1/release.
+
+### Retained privileged executable selection
+
+`run-envelope.mjs` delegates privileged launch to `retained-kernel-owner.mjs`.
+The launcher opens the declared kernel owner with `O_RDONLY | O_NOFOLLOW`, checks
+**that descriptor's** regular ELF bytes, exact SHA256, uid0, executable mode with
+no group/world writes, single link, device/inode and before/after metadata, and
+passes the still-open descriptor explicitly as inherited child fd3. It executes
+`/proc/self/fd/3`; it never reopens the original kernel-owner pathname for exec.
+A canonical path or a second pathname check is not atomic selection authority.
+The descriptor stays retained until the original Child exit (or spawn error),
+actual close and both pipe pumps settle. Synchronous spawn refusal closes it in
+finally; cancellation requests original-owner termination and still waits for
+positive original joins. Post-join input hashing/identity checks remain mandatory
+and invalidate changed qualification inputs; they do not select the executable.
+
+Root must place the reviewed compiled binary in a **fresh private root-owned
+regular file**, mode0500, nlink1, beneath its registered task root, pin its exact
+hash/size in the grant and declare `ownerUid: 0`. Do not chmod/chown unrelated
+source directories or rely on UID1000-owned ancestors to protect execution.
+Root's actual compiled binary receipt (not a worker execution) reported 36,064
+bytes, SHA256 `4925ae9d425ab4bd7e4996559e5cdbead3eb52b43ca78246f18d497befc0394d`,
+from kernel C source SHA256
+`a62dd094615c506846cbfcf93ed11125c91ad0754c32faa5a801c2ca22927eda`.
+That receipt is compiler evidence only; original-kernel/runtime gates remain.
+
+Coordinator-only model-free test command, with the same declared task-scoped
+TEMP/TMP/TMPDIR and Node caches disabled, is:
+
+```text
+node --test docs/workstreams/voice/cpu-qualification/retained-kernel-owner.test.mjs
+```
+
+The seven harness cases use injected descriptor/Child/signal fixtures and streams,
+never spawn a process or invoke the privileged owner. They cover pathname swap,
+synchronous/asynchronous launch failures, original join retention, cancellation,
+pipe failure, descriptor custody/hash/identity rejection and repeated no-leak
+failure cleanup. These are source-only harnesses authored by the worker and have
+not been executed by the worker. Root must additionally qualify actual Linux fd3
+inheritance and exec with the bounded inert C owner before any interpreter/model
+execution. `productionApproval: false` and all existing gates remain unchanged.

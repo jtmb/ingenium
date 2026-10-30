@@ -1,0 +1,260 @@
+diff --git a/docs/workstreams/voice/cpu-qualification/README.md b/docs/workstreams/voice/cpu-qualification/README.md
+index 47266fe5..323da914 100644
+--- a/docs/workstreams/voice/cpu-qualification/README.md
++++ b/docs/workstreams/voice/cpu-qualification/README.md
+@@ -315,3 +315,44 @@ Primary mechanisms: [Linux cgroup v2](https://docs.kernel.org/admin-guide/cgroup
+ [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+ This source set is **uncompiled/unexecuted qualification tooling**, not qualified
+ resource measurements, runtime acceptance or completed Phase1/release.
++
++### Retained privileged executable selection
++
++`run-envelope.mjs` delegates privileged launch to `retained-kernel-owner.mjs`.
++The launcher opens the declared kernel owner with `O_RDONLY | O_NOFOLLOW`, checks
++**that descriptor's** regular ELF bytes, exact SHA256, uid0, executable mode with
++no group/world writes, single link, device/inode and before/after metadata, and
++passes the still-open descriptor explicitly as inherited child fd3. It executes
++`/proc/self/fd/3`; it never reopens the original kernel-owner pathname for exec.
++A canonical path or a second pathname check is not atomic selection authority.
++The descriptor stays retained until the original Child exit (or spawn error),
++actual close and both pipe pumps settle. Synchronous spawn refusal closes it in
++finally; cancellation requests original-owner termination and still waits for
++positive original joins. Post-join input hashing/identity checks remain mandatory
++and invalidate changed qualification inputs; they do not select the executable.
++
++Root must place the reviewed compiled binary in a **fresh private root-owned
++regular file**, mode0500, nlink1, beneath its registered task root, pin its exact
++hash/size in the grant and declare `ownerUid: 0`. Do not chmod/chown unrelated
++source directories or rely on UID1000-owned ancestors to protect execution.
++Root's actual compiled binary receipt (not a worker execution) reported 36,064
++bytes, SHA256 `4925ae9d425ab4bd7e4996559e5cdbead3eb52b43ca78246f18d497befc0394d`,
++from kernel C source SHA256
++`a62dd094615c506846cbfcf93ed11125c91ad0754c32faa5a801c2ca22927eda`.
++That receipt is compiler evidence only; original-kernel/runtime gates remain.
++
++Coordinator-only model-free test command, with the same declared task-scoped
++TEMP/TMP/TMPDIR and Node caches disabled, is:
++
++```text
++node --test docs/workstreams/voice/cpu-qualification/retained-kernel-owner.test.mjs
++```
++
++The seven harness cases use injected descriptor/Child/signal fixtures and streams,
++never spawn a process or invoke the privileged owner. They cover pathname swap,
++synchronous/asynchronous launch failures, original join retention, cancellation,
++pipe failure, descriptor custody/hash/identity rejection and repeated no-leak
++failure cleanup. These are source-only harnesses authored by the worker and have
++not been executed by the worker. Root must additionally qualify actual Linux fd3
++inheritance and exec with the bounded inert C owner before any interpreter/model
++execution. `productionApproval: false` and all existing gates remain unchanged.
+diff --git a/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.mjs b/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.mjs
+new file mode 100644
+index 00000000..1346ac2a
+--- /dev/null
++++ b/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.mjs
+@@ -0,0 +1,65 @@
++/** Privileged ELF selection is the verified open descriptor, never a reopened path. */
++import { spawn } from 'node:child_process';
++import { createHash } from 'node:crypto';
++import * as fs from 'node:fs';
++import { isAbsolute } from 'node:path';
++
++const fail = code => { throw Object.assign(new Error(code), { code }); };
++const same = (a, b) => ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs', 'uid', 'mode', 'nlink'].every(k => a[k] === b[k]);
++
++// Dependency injection is for the model-free source harness. Production uses
++// the fixed real adapters below; mock results never qualify a runtime.
++export function createRetainedOwnerRunner({ io, spawnChild, signals }) {
++  return async function run(input, args, options) {
++    if (!isAbsolute(input.path) || input.ownerUid !== 0 || !Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1) fail('QUAL_ROOT_OWNER_INPUT_REQUIRED');
++    let fd, child, cancel, listening = false;
++    try {
++      fd = io.openSync(input.path, io.constants.O_RDONLY | io.constants.O_NOFOLLOW | io.constants.O_CLOEXEC);
++      const before = io.fstatSync(fd);
++      if (!before.isFile() || before.uid !== 0 || before.nlink !== 1 || before.mode & 0o022 || !(before.mode & 0o111)
++        || before.size < 4 || before.size > input.maxBytes) fail('QUAL_ROOT_OWNER_FD_CUSTODY');
++      const digest = createHash('sha256'), buffer = Buffer.alloc(65536), magic = Buffer.alloc(4); let count = 0;
++      for (;;) {
++        const n = io.readSync(fd, buffer, 0, buffer.length, null); if (!n) break;
++        if (count < 4) buffer.copy(magic, count, 0, Math.min(4 - count, n));
++        count += n; if (count > input.maxBytes) fail('QUAL_ROOT_OWNER_FD_BOUND'); digest.update(buffer.subarray(0, n));
++      }
++      const after = io.fstatSync(fd), sha256 = digest.digest('hex');
++      if (!same(before, after) || count !== before.size || !magic.equals(Buffer.from([127, 69, 76, 70]))
++        || sha256 !== input.sha256) fail('QUAL_ROOT_OWNER_FD_CHANGED');
++      const inputFact = { path: input.path, sha256, bytes: count, device: String(before.dev), inode: String(before.ino) };
++      if (input.originalFact && (inputFact.device !== input.originalFact.device || inputFact.inode !== input.originalFact.inode)) fail('QUAL_ROOT_OWNER_ORIGINAL_REPLACED');
++      // fd3 is explicitly inherited. /proc/self is the child at exec selection;
++      // neither this pathname nor the inherited mapping reopens input.path.
++      child = spawnChild('/proc/self/fd/3', args, { ...options, shell: false, stdio: ['ignore', 'pipe', 'pipe', fd] });
++      let firstError, exitValue; const buffers = { stdout: [], stderr: [] }, counts = { stdout: 0, stderr: 0 };
++      const exited = new Promise((yes, no) => {
++        child.once('error', error => { firstError ??= error; no(error); });
++        child.once('exit', (code, signal) => { exitValue = { code, signal }; yes(exitValue); });
++      });
++      const closed = new Promise(yes => child.once('close', yes));
++      cancel = () => { firstError ??= Object.assign(new Error('QUAL_CANCELLED'), { code: 'QUAL_CANCELLED' });
++        try { child.kill('SIGTERM'); } catch (error) { firstError ??= error; } };
++      async function pump(name) {
++        for await (const bytes of child[name]) {
++          counts[name] += bytes.length;
++          if (counts[name] > 262144) { firstError ??= new Error('QUAL_OUTPUT_BOUND'); cancel(); }
++          else buffers[name].push(Buffer.from(bytes));
++        }
++      }
++      const pumps = [pump('stdout'), pump('stderr')];
++      pumps.forEach(p => p.catch(error => { firstError ??= error; cancel(); }));
++      try { listening = true; signals.on('SIGINT', cancel); signals.on('SIGTERM', cancel); }
++      catch (error) { firstError ??= error; cancel(); }
++      // An async spawn error still requires the actual close and both pumps.
++      // Deadline/cancel never substitutes for these positive original joins.
++      const joined = await Promise.allSettled([exited, closed, ...pumps]);
++      return { inputFact, joined, firstError, exitValue, buffers };
++    } finally {
++      try { if (listening) { signals.off('SIGINT', cancel); signals.off('SIGTERM', cancel); } }
++      finally { if (fd !== undefined) io.closeSync(fd); }
++    }
++  };
++}
++
++export const runRetainedKernelOwner = createRetainedOwnerRunner({ io: fs, spawnChild: spawn, signals: process });
+diff --git a/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.test.mjs b/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.test.mjs
+new file mode 100644
+index 00000000..f970ba14
+--- /dev/null
++++ b/docs/workstreams/voice/cpu-qualification/retained-kernel-owner.test.mjs
+@@ -0,0 +1,95 @@
++/** Model-free harness only. No process is spawned, no privileged action occurs. */
++import test from 'node:test';
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { EventEmitter } from 'node:events';
++import { PassThrough } from 'node:stream';
++import { createRetainedOwnerRunner } from './retained-kernel-owner.mjs';
++
++const original = Buffer.from([127, 69, 76, 70, 1, 2, 3, 4]);
++const replacement = Buffer.from([127, 69, 76, 70, 9, 8, 7, 6]);
++const sha = bytes => createHash('sha256').update(bytes).digest('hex');
++const tick = () => new Promise(resolve => setImmediate(resolve));
++function fixture({ mode = 0o100500, uid = 0, nlink = 1, changed = false, spawnThrow = false } = {}) {
++  let pathnameBytes = original, closes = 0, spawned = 0, kills = 0, next = 40;
++  const descriptors = new Map(), signals = new EventEmitter(), child = new EventEmitter();
++  child.stdout = new PassThrough(); child.stderr = new PassThrough(); child.kill = signal => { assert.equal(signal, 'SIGTERM'); kills++; return true; };
++  const input = { path: '/mutable/task/kernel-owner', ownerUid: 0, sha256: sha(original), maxBytes: 4096,
++    originalFact: { device: '8', inode: '42' } };
++  const io = {
++    constants: { O_RDONLY: 0, O_NOFOLLOW: 0x20000, O_CLOEXEC: 0x80000 },
++    openSync(path, flags) { assert.equal(path, input.path); assert.ok(flags & this.constants.O_NOFOLLOW); const fd = next++; descriptors.set(fd, { bytes: pathnameBytes, offset: 0, stats: 0 }); return fd; },
++    fstatSync(fd) { const d = descriptors.get(fd); assert.ok(d); d.stats++; return { isFile: () => true,
++      dev: 8, ino: changed && d.stats > 1 ? 43 : 42, size: d.bytes.length, mtimeMs: 1, ctimeMs: 2, uid, mode, nlink }; },
++    readSync(fd, bytes, offset, count) { const d = descriptors.get(fd); assert.ok(d); const n = Math.min(count, d.bytes.length - d.offset);
++      d.bytes.copy(bytes, offset, d.offset, d.offset + n); d.offset += n; return n; },
++    closeSync(fd) { assert.ok(descriptors.delete(fd), 'descriptor closed exactly once'); closes++; },
++  };
++  const run = createRetainedOwnerRunner({ io, signals, spawnChild(path, args, options) {
++    spawned++; assert.equal(path, '/proc/self/fd/3'); assert.deepEqual(args, ['fixed']);
++    assert.equal(options.shell, false); assert.deepEqual(options.stdio.slice(0, 3), ['ignore', 'pipe', 'pipe']);
++    // Rename/replacement of the source path cannot change the inherited object.
++    pathnameBytes = replacement; const selected = descriptors.get(options.stdio[3]); assert.ok(selected);
++    assert.equal(sha(selected.bytes), sha(original)); assert.notEqual(sha(pathnameBytes), sha(selected.bytes));
++    if (spawnThrow) throw new Error('fixture synchronous spawn refusal'); return child;
++  } });
++  return { run: () => run(input, ['fixed'], { cwd: '/owned/run' }), child, signals,
++    counts: () => ({ open: descriptors.size, closes, spawned, kills }),
++    end: () => { child.stdout.end(); child.stderr.end(); }, input };
++}
++
++test('swapped pathname selects original inherited fd; retain through exit, pumps and actual close', async () => {
++  const f = fixture(), pending = f.run(); assert.equal(f.counts().open, 1);
++  f.child.emit('exit', 0, null); f.end(); await tick(); assert.equal(f.counts().open, 1);
++  f.child.emit('close', 0, null); const result = await pending;
++  assert.equal(result.inputFact.sha256, sha(original)); assert.ok(result.joined.every(p => p.status === 'fulfilled'));
++  assert.deepEqual(f.counts(), { open: 0, closes: 1, spawned: 1, kills: 0 });
++  assert.equal(f.signals.listenerCount('SIGTERM'), 0); assert.equal(f.signals.listenerCount('SIGINT'), 0);
++});
++
++test('synchronous spawn refusal closes original descriptor without a child', async () => {
++  const f = fixture({ spawnThrow: true }); await assert.rejects(f.run(), /synchronous spawn refusal/);
++  assert.deepEqual(f.counts(), { open: 0, closes: 1, spawned: 1, kills: 0 });
++});
++
++test('asynchronous spawn error retains fd until actual close and pipe joins', async () => {
++  const f = fixture(), pending = f.run(); f.child.emit('error', new Error('fixture async spawn refusal'));
++  f.end(); await tick(); assert.equal(f.counts().open, 1);
++  f.child.emit('close', -1, null); const result = await pending;
++  assert.equal(result.joined[0].status, 'rejected'); assert.equal(result.joined[1].status, 'fulfilled');
++  assert.equal(f.counts().open, 0); assert.equal(f.counts().closes, 1);
++});
++
++test('cancellation signals original owner and retains fd until positive joins', async () => {
++  const f = fixture(), pending = f.run(); f.signals.emit('SIGTERM');
++  assert.equal(f.counts().kills, 1); assert.equal(f.counts().open, 1);
++  f.child.emit('exit', null, 'SIGTERM'); await tick(); assert.equal(f.counts().open, 1);
++  f.end(); f.child.emit('close', null, 'SIGTERM'); const result = await pending;
++  assert.equal(result.exitValue.signal, 'SIGTERM'); assert.equal(result.firstError.code, 'QUAL_CANCELLED'); assert.equal(f.counts().open, 0);
++});
++
++test('pipe failure cancels but cannot replace original close/exit joins', async () => {
++  const f = fixture(), pending = f.run(); f.child.stdout.destroy(new Error('fixture pipe fault'));
++  await tick(); assert.ok(f.counts().kills > 0); assert.equal(f.counts().open, 1);
++  f.child.stderr.end(); f.child.emit('exit', 1, null); f.child.emit('close', 1, null);
++  const result = await pending; assert.ok(result.firstError); assert.equal(result.joined[2].status, 'rejected'); assert.equal(f.counts().open, 0);
++});
++
++test('descriptor custody, content changes and original identity refuse before spawn without leaks', async () => {
++  for (const options of [{ uid: 1000 }, { mode: 0o100522 }, { nlink: 2 }, { changed: true }]) {
++    const f = fixture(options); await assert.rejects(f.run(), /QUAL_ROOT_OWNER_FD_/);
++    assert.deepEqual(f.counts(), { open: 0, closes: 1, spawned: 0, kills: 0 });
++  }
++  for (const mutate of [f => { f.input.sha256 = sha(replacement); }, f => { f.input.originalFact.inode = '900'; }]) {
++    const f = fixture(); mutate(f); await assert.rejects(f.run(), /QUAL_ROOT_OWNER_/);
++    assert.deepEqual(f.counts(), { open: 0, closes: 1, spawned: 0, kills: 0 });
++  }
++});
++
++test('repeated spawn failures leak neither descriptors nor cancellation listeners', async () => {
++  for (let i = 0; i < 32; i++) {
++    const f = fixture({ spawnThrow: true }); await assert.rejects(f.run());
++    assert.equal(f.counts().open, 0); assert.equal(f.counts().closes, 1);
++    assert.equal(f.signals.listenerCount('SIGINT') + f.signals.listenerCount('SIGTERM'), 0);
++  }
++});
+diff --git a/docs/workstreams/voice/cpu-qualification/run-envelope.mjs b/docs/workstreams/voice/cpu-qualification/run-envelope.mjs
+index 439d6cf5..349ecb02 100644
+--- a/docs/workstreams/voice/cpu-qualification/run-envelope.mjs
++++ b/docs/workstreams/voice/cpu-qualification/run-envelope.mjs
+@@ -1,5 +1,5 @@
+ /** Root-only future execution. Importing this file starts nothing. */
+-import { spawn } from 'node:child_process';
++import { runRetainedKernelOwner } from './retained-kernel-owner.mjs';
+ import { createHash } from 'node:crypto';
+ import { readFileSync, openSync, closeSync, readSync, fstatSync, lstatSync, realpathSync, mkdirSync, writeFileSync, chmodSync, chownSync, constants } from 'node:fs';
+ import { resolve, dirname, relative, isAbsolute } from 'node:path';
+@@ -61,19 +61,14 @@ export async function runEnvelope(grantPath) {
+   mkdirSync(run, { mode: 0o750 }); chownSync(run, 0, grant.gid);
+   const scratch = resolve(run, 'tmp'); mkdirSync(scratch, { mode: 0o700 }); chownSync(scratch, grant.uid, grant.gid);
+   const args = [grant.runId, String(limits.memoryBytes), String(limits.pids), String(limits.quotaUsec), String(limits.periodUsec), String(limits.timeoutMs), String(grant.uid), String(grant.gid), scratch, '--', ...grant.command];
+-  // No shell, automatic pull, manager fallback, PID lookup or production grant.
+-  const child = spawn(grant.kernelOwner, args, { cwd: run, env: { PATH: '/usr/bin:/bin', TMPDIR: scratch, TMP: scratch, TEMP: scratch,
+-    VEYRA_QUAL_HOST_RESERVE_BYTES: String(grant.hostReserveBytes), VEYRA_QUAL_READONLY_PATHS: grant.readonlyMounts.join('\n') }, stdio: ['ignore', 'pipe', 'pipe'] });
+-  let firstError, exitValue; const buffers = { stdout: [], stderr: [] }, counts = { stdout: 0, stderr: 0 };
+-  const exited = new Promise((yes, no) => { child.once('error', error => { firstError ??= error; no(error); }); child.once('exit', (code, signal) => { exitValue = { code, signal }; yes(exitValue); }); });
+-  const closed = new Promise(yes => child.once('close', yes));
+-  const cancel = () => { child.kill('SIGTERM'); }; // Exact retained owner only; it retains/joins its own leaf.
+-  process.on('SIGINT', cancel); process.on('SIGTERM', cancel);
+-  async function pump(name) { for await (const bytes of child[name]) { counts[name] += bytes.length; if (counts[name] > 262144) { firstError ??= new Error('QUAL_OUTPUT_BOUND'); cancel(); } else buffers[name].push(Buffer.from(bytes)); } }
+-  const pumps = [pump('stdout'), pump('stderr')]; pumps.forEach(p => p.catch(error => { firstError ??= error; cancel(); }));
+-  // There is no timeout-to-success path. A blocked kernel/owner remains retained.
+-  const joined = await Promise.allSettled([exited, closed, ...pumps]);
+-  process.off('SIGINT', cancel); process.off('SIGTERM', cancel);
++  const ownerInput = grant.readonlyInputs.find(input => input.path === grant.kernelOwner);
++  // Verify and retain the exact root-owned ELF descriptor through all original
++  // Child exit/close/pipe joins. A mutable ancestor cannot redirect this exec.
++  const ownerRun = await runRetainedKernelOwner({ ...ownerInput,
++    originalFact: inputFacts.find(input => input.path === grant.kernelOwner) }, args,
++    { cwd: run, env: { PATH: '/usr/bin:/bin', TMPDIR: scratch, TMP: scratch, TEMP: scratch,
++      VEYRA_QUAL_HOST_RESERVE_BYTES: String(grant.hostReserveBytes), VEYRA_QUAL_READONLY_PATHS: grant.readonlyMounts.join('\n') } });
++  const { joined, exitValue, buffers } = ownerRun; let { firstError } = ownerRun;
+   try {
+     for (let i = 0; i < grant.readonlyInputs.length; i++) {
+       const input = grant.readonlyInputs[i], after = digestFile(input.path, input.sha256, input.maxBytes);

@@ -1,5 +1,5 @@
 /** Root-only future execution. Importing this file starts nothing. */
-import { spawn } from 'node:child_process';
+import { runRetainedKernelOwner } from './retained-kernel-owner.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, openSync, closeSync, readSync, fstatSync, lstatSync, realpathSync, mkdirSync, writeFileSync, chmodSync, chownSync, constants } from 'node:fs';
 import { resolve, dirname, relative, isAbsolute } from 'node:path';
@@ -61,19 +61,14 @@ export async function runEnvelope(grantPath) {
   mkdirSync(run, { mode: 0o750 }); chownSync(run, 0, grant.gid);
   const scratch = resolve(run, 'tmp'); mkdirSync(scratch, { mode: 0o700 }); chownSync(scratch, grant.uid, grant.gid);
   const args = [grant.runId, String(limits.memoryBytes), String(limits.pids), String(limits.quotaUsec), String(limits.periodUsec), String(limits.timeoutMs), String(grant.uid), String(grant.gid), scratch, '--', ...grant.command];
-  // No shell, automatic pull, manager fallback, PID lookup or production grant.
-  const child = spawn(grant.kernelOwner, args, { cwd: run, env: { PATH: '/usr/bin:/bin', TMPDIR: scratch, TMP: scratch, TEMP: scratch,
-    VEYRA_QUAL_HOST_RESERVE_BYTES: String(grant.hostReserveBytes), VEYRA_QUAL_READONLY_PATHS: grant.readonlyMounts.join('\n') }, stdio: ['ignore', 'pipe', 'pipe'] });
-  let firstError, exitValue; const buffers = { stdout: [], stderr: [] }, counts = { stdout: 0, stderr: 0 };
-  const exited = new Promise((yes, no) => { child.once('error', error => { firstError ??= error; no(error); }); child.once('exit', (code, signal) => { exitValue = { code, signal }; yes(exitValue); }); });
-  const closed = new Promise(yes => child.once('close', yes));
-  const cancel = () => { child.kill('SIGTERM'); }; // Exact retained owner only; it retains/joins its own leaf.
-  process.on('SIGINT', cancel); process.on('SIGTERM', cancel);
-  async function pump(name) { for await (const bytes of child[name]) { counts[name] += bytes.length; if (counts[name] > 262144) { firstError ??= new Error('QUAL_OUTPUT_BOUND'); cancel(); } else buffers[name].push(Buffer.from(bytes)); } }
-  const pumps = [pump('stdout'), pump('stderr')]; pumps.forEach(p => p.catch(error => { firstError ??= error; cancel(); }));
-  // There is no timeout-to-success path. A blocked kernel/owner remains retained.
-  const joined = await Promise.allSettled([exited, closed, ...pumps]);
-  process.off('SIGINT', cancel); process.off('SIGTERM', cancel);
+  const ownerInput = grant.readonlyInputs.find(input => input.path === grant.kernelOwner);
+  // Verify and retain the exact root-owned ELF descriptor through all original
+  // Child exit/close/pipe joins. A mutable ancestor cannot redirect this exec.
+  const ownerRun = await runRetainedKernelOwner({ ...ownerInput,
+    originalFact: inputFacts.find(input => input.path === grant.kernelOwner) }, args,
+    { cwd: run, env: { PATH: '/usr/bin:/bin', TMPDIR: scratch, TMP: scratch, TEMP: scratch,
+      VEYRA_QUAL_HOST_RESERVE_BYTES: String(grant.hostReserveBytes), VEYRA_QUAL_READONLY_PATHS: grant.readonlyMounts.join('\n') } });
+  const { joined, exitValue, buffers } = ownerRun; let { firstError } = ownerRun;
   try {
     for (let i = 0; i < grant.readonlyInputs.length; i++) {
       const input = grant.readonlyInputs[i], after = digestFile(input.path, input.sha256, input.maxBytes);

@@ -59,13 +59,33 @@
     },
     {
       "path": "README.md",
-      "bytes": 20475,
-      "sha256": "5436c0d48441887d7849dde55e9ade210dbbe6fe2abe3b23ff27caedc607e427"
+      "bytes": 23000,
+      "sha256": "feb797217c9fee4b6afe1c67c4c3b26b78ee33f30e644540e3eafb7cb747164d"
+    },
+    {
+      "path": "retained-kernel-owner.mjs",
+      "bytes": 4308,
+      "sha256": "42a4990af62233d8c518365bcfa68c759700a1d4b43cb03d8f607f50ff545cd9"
+    },
+    {
+      "path": "retained-kernel-owner.test.mjs",
+      "bytes": 6522,
+      "sha256": "a4344b734c514c0ed998fd0cf3e5c49fae68f604bda348ac4c9cab35990d02ae"
+    },
+    {
+      "path": "retained-owner-fix.json",
+      "bytes": 2151,
+      "sha256": "44ea745d5b79678ad803b887012775950513ffad26a2539ea0429bbe2f48427e"
+    },
+    {
+      "path": "retained-owner-fix.patch",
+      "bytes": 18466,
+      "sha256": "568cac328ec168e958f2dc1ae6febab6227d83f7657cb714abc6f7305361ba33"
     },
     {
       "path": "run-envelope.mjs",
-      "bytes": 9719,
-      "sha256": "0554c7b36e244a49b7c73c724dfb06c09c29e68d40e1d7a7f6875946be34083f"
+      "bytes": 8939,
+      "sha256": "17b389b577c269c04cbcc0b6a4f49dab8c44d7a43382b506ac5c1548c4ea02fb"
     },
     {
       "path": "storage-budget.mjs",
@@ -88,6 +108,6 @@
       "sha256": "cdb839c3270b5658bda70e0a22eb0cc9015010dd59a58a33b4ad21deeb629beb"
     }
   ],
-  "totalContentBytes": 128896.0,
+  "totalContentBytes": 162088.0,
   "validationScope": "Source metadata and syntax bodies only; coordinator compilation and all execution gates remain open"
 }
