@@ -7,6 +7,7 @@ import { mapRequestExecutionFailure } from "../memory-v2/request-policy.mjs";
 import { RequestExecutionError, type RequestExecutionSelection } from "../projects-v2/request-execution.js";
 import { withManagedRequestPlacement } from "../runtime-placement.js";
 import { readRequestMemoryRecall } from "../memory-request-recall.js";
+import { readRequestMemoryInspection } from "../memory-request-inspection.js";
 
 type Action=Parameters<typeof memoryResponse>[2]["action"];
 export interface MemoryLifecycleRouterPorts {
@@ -52,7 +53,9 @@ export function createMemoryLifecycleRouter(overrides:Partial<MemoryLifecycleRou
           if(typeof value!=="string" || !/^(0|[1-9][0-9]*)$/u.test(value) || !Number.isSafeInteger(Number(value)))throw new MemoryError("INVALID_INPUT");
           query[key]=Number(value);
         }
-        const result=action==="recall" ? await readRequestMemoryRecall(req,selected,typeof chatId==="string"?chatId:undefined,query,{createSession,withPlacement}) : await withPlacement(req,selected,()=>{
+        const result=action==="recall" ? await readRequestMemoryRecall(req,selected,typeof chatId==="string"?chatId:undefined,query,{createSession,withPlacement})
+          : action==="entries" ? await readRequestMemoryInspection(req,selected,query,{createSession,withPlacement})
+          : await withPlacement(req,selected,()=>{
           const session=createSession(req,selected);
           return memoryResponse(session.memory,(_request,permission:MemoryPermission)=>session.resolveScope(permission,typeof chatId==="string"?chatId:null),{
             action,method:req.method,body,query,chatId:typeof chatId==="string"?chatId:undefined,operationId:typeof req.params.operationId==="string"?req.params.operationId:undefined,
@@ -81,7 +84,7 @@ export function createMemoryLifecycleRouter(overrides:Partial<MemoryLifecycleRou
   });
   router.all("/chats/:chatId/policy",handler("set-chat-policy","PUT"));
   router.all("/recall",handler("recall","GET",["maxItems","maxTokens","sourceOffset"]));
-  router.all("/entries",handler("entries","GET",["offset","limit"]));
+  router.all("/entries",handler("entries","GET",["candidateOffset","limit"]));
   router.all("/forget",handler("forget","POST"));
   router.all("/reset-preview",handler("reset-preview","GET"));
   router.all("/reset",handler("reset","POST"));
