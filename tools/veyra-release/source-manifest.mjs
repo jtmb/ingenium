@@ -55,7 +55,9 @@ export function collectSource(root, expectedRevision) {
   });
   if (git('status', '--porcelain=v1', '--untracked-files=all').trim()
       || git('rev-parse', 'HEAD').trim() !== expectedRevision) throw new Error('Source changed during inventory');
-  return { schemaVersion: 1, revision: expectedRevision, tree: git('rev-parse', 'HEAD^{tree}').trim(),
+  const sourceDateEpoch = Number(git('show', '-s', '--format=%ct', expectedRevision).trim());
+  if (!Number.isSafeInteger(sourceDateEpoch) || sourceDateEpoch <= 0) throw new Error('Invalid source commit epoch');
+  return { schemaVersion: 1, revision: expectedRevision, sourceDateEpoch, tree: git('rev-parse', 'HEAD^{tree}').trim(),
     sourceSha256: digest(JSON.stringify(files)), fileCount: files.length,
     sourceBytes: files.reduce((sum, file) => sum + file.bytes, 0), files };
 }

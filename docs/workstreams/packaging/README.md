@@ -8,6 +8,8 @@ This stream owns `tools/veyra-release`, `packages/veyra-operations`, the prefixe
 
 The coordinator owns integrated builds, deployment, external account workflows, native execution, attended browser/desktop/audio qualification and acceptance. F01, F52, F54, F68 and H01-H06 remain open until their actual platform evidence passes. The complete 74 feature dispositions, 47 views, 20 Settings categories and 11 Windows rows remain authoritative. This stream does not approve deferrals or writable Rust cutover.
 
+The [Linux reproducibility follow-on](linux-reproducibility.md) supplies an immutable-base/snapshot/npm/provenance proposal and the coordinator-owned Dockerfile patch, with an explicit three-artifact browser-content gate.
+
 ## Release tooling
 
 Run from the integrated application repository with Node 22 or later. These commands read inputs and print JSON; they never build, download, copy a runtime, deploy, sign, update or delete an artifact.

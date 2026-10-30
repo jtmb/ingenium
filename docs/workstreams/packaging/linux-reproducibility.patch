@@ -1,0 +1,98 @@
+diff --git a/Dockerfile b/Dockerfile
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,12 +1,18 @@
+ # Compile workspace artifacts in the same glibc family as runtime so copied
+ # native Node modules remain loadable.
+-FROM node:22-slim AS builder
++ARG SOURCE_DATE_EPOCH
++FROM node:22-bookworm-slim@sha256:9f0dde62d10e7ff7a310ecaebd66225f6b46c17e6cb778449a77b05d3541bea2 AS builder
+ WORKDIR /app
++COPY --chown=root:root --chmod=0444 tools/veyra-release/reproducible-linux.mjs /usr/local/libexec/veyra/reproducible-linux.mjs
++COPY --chown=root:root --chmod=0444 tools/veyra-release/linux-build.lock.json /usr/local/share/veyra/linux-build.lock.json
++RUN VEYRA_IMAGE_BUILD_CONTEXT=1 node /usr/local/libexec/veyra/reproducible-linux.mjs configure /usr/local/share/veyra/linux-build.lock.json
+
+ # Native modules such as better-sqlite3 can fall back to node-gyp when a
+ # prebuilt binary is unavailable. These build-only tools never enter runtime.
+-RUN apt-get update && apt-get install -y --no-install-recommends \
+-    python3 make g++ ca-certificates && \
++RUN export VEYRA_IMAGE_BUILD_CONTEXT=1; apt-get update --error-on=any && \
++    node /usr/local/libexec/veyra/reproducible-linux.mjs verify-indexes /usr/local/share/veyra/linux-build.lock.json && \
++    apt-get install -y --no-install-recommends python3 make g++ ca-certificates && \
++    node /usr/local/libexec/veyra/reproducible-linux.mjs capture-os /usr/local/share/veyra/linux-build.lock.json /usr/local/share/veyra/builder-os-inputs.json && \
+     rm -rf /var/lib/apt/lists/*
+
+ COPY package.json package-lock.json ./
+@@ -22,6 +28,10 @@
+ RUN npm ci --workspaces --include-workspace-root
+
+ COPY . .
++ARG IMAGE_REVISION
++ARG IMAGE_SOURCE_SHA256
++ARG SOURCE_DATE_EPOCH
++RUN VEYRA_IMAGE_BUILD_CONTEXT=1 node /usr/local/libexec/veyra/reproducible-linux.mjs capture-source /usr/local/share/veyra/linux-build.lock.json /usr/local/share/veyra/source-inputs.json
+ RUN sh scripts/validate-deployment-config.sh
+ RUN node packages/ingenium-extension/scripts/plugin-source-closure.mjs \
+       --materialize /tmp/ingenium-extension-plugin-sources
+@@ -63,21 +73,28 @@
+ RUN python3 -B scripts/prepare-computer-use.py --lock config/computer-use.lock.json \
+       --output /external/computer-use
+
+-FROM node:22-slim AS runtime-base
++FROM node:22-bookworm-slim@sha256:9f0dde62d10e7ff7a310ecaebd66225f6b46c17e6cb778449a77b05d3541bea2 AS runtime-base
++COPY --chown=root:root --chmod=0444 tools/veyra-release/reproducible-linux.mjs /usr/local/libexec/veyra/reproducible-linux.mjs
++COPY --chown=root:root --chmod=0444 tools/veyra-release/linux-build.lock.json /usr/local/share/veyra/linux-build.lock.json
++RUN VEYRA_IMAGE_BUILD_CONTEXT=1 node /usr/local/libexec/veyra/reproducible-linux.mjs configure /usr/local/share/veyra/linux-build.lock.json
+
+ ARG OPENCODE_VERSION=2.0.11
+ ARG OPENCODE_SHA256=59e917d7c0704e84f050619973e28374269b1c814548f8c9ae7942f69d69ee13
+ ARG CLOUDFLARED_VERSION=2026.10.4
+ ARG CLOUDFLARED_SHA256=ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42
+-RUN apt-get update && apt-get install -y --no-install-recommends \
++RUN export VEYRA_IMAGE_BUILD_CONTEXT=1; apt-get update --error-on=any && \
++    node /usr/local/libexec/veyra/reproducible-linux.mjs verify-indexes /usr/local/share/veyra/linux-build.lock.json && \
++    apt-get install -y --no-install-recommends \
+     supervisor nginx curl ca-certificates tzdata git acl libcap2-bin libssl3 openssl && \
+     rm -rf /var/lib/apt/lists/*
+ # Patch the image's standalone npm tooling without changing application locks.
+-RUN NPM_CONFIG_CACHE=/tmp/ingenium-runtime-npm-cache NPM_CONFIG_LOGS_DIR=/tmp/ingenium-runtime-npm-logs \
++RUN export NPM_CONFIG_CACHE=/tmp/ingenium-runtime-npm-cache NPM_CONFIG_LOGS_DIR=/tmp/ingenium-runtime-npm-logs APPDATA=/tmp/ingenium-runtime-build-appdata LOCALAPPDATA=/tmp/ingenium-runtime-build-localappdata; curl --proto '=https' --tlsv1.2 -fsSL -o /tmp/veyra-npm.tgz 'https://registry.npmjs.org/npm/-/npm-12.2.1.tgz' && \
++    VEYRA_IMAGE_BUILD_CONTEXT=1 node /usr/local/libexec/veyra/reproducible-linux.mjs verify-npm /usr/local/share/veyra/linux-build.lock.json /tmp/veyra-npm.tgz && \
++    NPM_CONFIG_CACHE=/tmp/ingenium-runtime-npm-cache NPM_CONFIG_LOGS_DIR=/tmp/ingenium-runtime-npm-logs \
+     APPDATA=/tmp/ingenium-runtime-build-appdata LOCALAPPDATA=/tmp/ingenium-runtime-build-localappdata \
+-    npm install --global --ignore-scripts npm@12.2.1 && \
++    npm install --offline --global --ignore-scripts --no-audit --no-fund /tmp/veyra-npm.tgz && \
+     test "$(npm --version)" = "12.2.1" && \
+-    rm -rf /tmp/ingenium-runtime-npm-cache /tmp/ingenium-runtime-npm-logs /tmp/ingenium-runtime-build-appdata /tmp/ingenium-runtime-build-localappdata
++    rm -rf /tmp/ingenium-runtime-npm-cache /tmp/ingenium-runtime-npm-logs /tmp/ingenium-runtime-build-appdata /tmp/ingenium-runtime-build-localappdata /tmp/veyra-npm.tgz
+ RUN curl -fsSL -o /tmp/opencode.tar.gz "https://opencode.ai/files/bin/${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
+     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
+     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
+@@ -180,12 +197,17 @@
+ WORKDIR /app
+
+ COPY --from=builder --chown=root:root /app/node_modules ./node_modules
+-RUN playwright_cli="$(node -e 'const r = require("node:module").createRequire(require.resolve("@playwright/mcp")); process.stdout.write(require("node:path").join(require("node:path").dirname(r.resolve("playwright/package.json")), "cli.js"))')" && \
++RUN export VEYRA_IMAGE_BUILD_CONTEXT=1; playwright_cli="$(node -e 'const r = require("node:module").createRequire(require.resolve("@playwright/mcp")); process.stdout.write(require("node:path").join(require("node:path").dirname(r.resolve("playwright/package.json")), "cli.js"))')" && \
+     PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers node "$playwright_cli" install --with-deps chromium && \
++    node /usr/local/libexec/veyra/reproducible-linux.mjs verify-indexes /usr/local/share/veyra/linux-build.lock.json && \
++    node /usr/local/libexec/veyra/reproducible-linux.mjs capture-os /usr/local/share/veyra/linux-build.lock.json /usr/local/share/veyra/runtime-os-inputs.json && \
++    rm -rf /var/lib/apt/lists/* && \
+     browser_path="$(PLAYWRIGHT_BROWSERS_PATH=/opt/ingenium-playwright/browsers node -e 'process.stdout.write(require("node:module").createRequire(require.resolve("@playwright/mcp"))("playwright").chromium.executablePath())')" && \
+     test -x "$browser_path" && \
+     ln -s "$browser_path" /opt/ingenium-playwright/chromium && \
+     test "$(realpath /opt/ingenium-playwright/chromium)" = "$browser_path"
++COPY --from=builder --chown=root:root --chmod=0444 /usr/local/share/veyra/builder-os-inputs.json /usr/local/share/veyra/builder-os-inputs.json
++COPY --from=builder --chown=root:root --chmod=0444 /usr/local/share/veyra/source-inputs.json /usr/local/share/veyra/source-inputs.json
+ # Fail the image build if the copied native binding cannot load on the runtime
+ # libc. This protects the API from a delayed better-sqlite3 startup failure.
+ RUN node -e 'require("better-sqlite3")'
+@@ -316,7 +338,7 @@
+ ARG IMAGE_REVISION
+ ARG IMAGE_SOURCE="https://github.com/jtmb/ingenium"
+ ARG IMAGE_SOURCE_SHA256=""
+-RUN test -z "$IMAGE_SOURCE_SHA256" || { test "${#IMAGE_SOURCE_SHA256}" -eq 64 && printf '%s' "$IMAGE_SOURCE_SHA256" | grep -Eq '^[0-9a-f]{64}$'; }
++RUN test "${#IMAGE_SOURCE_SHA256}" -eq 64 && printf '%s' "$IMAGE_SOURCE_SHA256" | grep -Eq '^[0-9a-f]{64}$'
+ RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
+     case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac && \
+     case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac
