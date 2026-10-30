@@ -1,0 +1,640 @@
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs
+@@ -260,11 +260,15 @@
+     pub skill_ids: Vec<String>,
+ }
+ pub struct LocalWebPromptOutcome {
+-    operation_id:String,input_sha256:String,owner:LocalWorkspaceOwner,session_id:String,upstream_id:Option<String>,
+-    admission:&'static str,status:u16,content_type:Option<String>,body:Vec<u8>,
++    pub(super) operation_id:String,pub(super) input_sha256:String,pub(super) owner:LocalWorkspaceOwner,pub(super) session_id:String,pub(super) upstream_id:Option<String>,
++    pub(super) admission:&'static str,
++    pub(super) observed:Arc<crate::opencode::local_web_transport::WebPromptObservation>,
++    pub(super) identity:Arc<super::web_completion::NativeWebCompletionIdentity>,
++    pub(super) writer:Arc<crate::projects::local_web_originals::NativeWebWriterOriginal>,
++    pub(super) scope:String,
+ }
+ pub enum LocalWebOriginalSubmission {
+-    Sent(LocalWebPromptOutcome),
++    Sent(Arc<LocalWebPromptOutcome>),
+     Retained(veyra_contracts::local_workspaces::LocalOperationReceipt),
+ }
+ impl LocalWebPromptOutcome {
+@@ -274,11 +278,16 @@
+     pub fn session_id(&self)->&str{&self.session_id}
+     pub fn upstream_id(&self)->Option<&str>{self.upstream_id.as_deref()}
+     pub fn admission(&self)->&str{self.admission}
+-    pub fn status(&self)->u16{self.status}
+-    pub fn content_type(&self)->Option<&str>{self.content_type.as_deref()}
+-    pub fn body(&self)->&[u8]{&self.body}
++    pub fn status(&self)->u16{self.observed.status.unwrap_or(0)}
++    pub fn content_type(&self)->Option<&str>{self.observed.content_type.as_deref()}
++    pub fn body(&self)->&[u8]{&self.observed.body}
++    pub(crate) fn complete_response(&self)->bool{self.observed.phase==crate::opencode::local_web_transport::WebTransportPhase::Complete}
++    pub(crate) fn publication_identity(&self)->&Arc<super::web_completion::NativeWebCompletionIdentity>{&self.identity}
++    pub(crate) fn writer_identity(&self)->&Arc<crate::projects::local_web_originals::NativeWebWriterOriginal>{&self.writer}
++    pub(crate) fn original_scope(&self)->&str{&self.scope}
+ }
+ impl LiveRuntime {
++    pub fn original_web_completions(&self)->Arc<super::web_completion::NativeWebCompletions>{self.native_web_completions.clone()}
+     /// The reservation callback is the real service ProjectStore writer only.
+     /// Its Fresh witness cannot be forged by a renderer/DTO/positive callback.
+     /// Keep this exact original engine lock across resolver capture, DB fence,
+@@ -309,14 +318,15 @@
+     /// PromptRecord capture and exactly ONE full effective-body HTTP send.
+     pub fn dispatch_local_web_prompt_once(&self,lease:&LocalWebLease,
+         dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
+-    )->Result<LocalWebPromptOutcome,RuntimeError>{
++    )->Result<Arc<LocalWebPromptOutcome>,RuntimeError>{
+         let engine=self.lock_engine_for_directory(lease.binding.directory())?;
+         self.dispatch_local_web_prompt_locked(&engine,lease,dispatch,current)
+     }
+     fn dispatch_local_web_prompt_locked(&self,engine:&OwnedEngine,lease:&LocalWebLease,
+         dispatch:crate::projects::NativeWebDispatch,current:&dyn Fn()->Result<(),String>
+-    )->Result<LocalWebPromptOutcome,RuntimeError>{
+-        let (original,effective,files_original)=dispatch.into_parts();
++    )->Result<Arc<LocalWebPromptOutcome>,RuntimeError>{
++        let slot=self.native_web_completions.enroll(dispatch)?;
++        let (original,effective,files_original)=slot.parts();
+         let inspected=self.inspect_local_web_prompt_locked(&engine,lease,&original,current)?;
+         files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+         if effective.original_body_sha256()!=format!("{:x}",Sha256::digest(original.body()))
+@@ -376,21 +386,13 @@
+         require_local_engine(&engine,&lease.binding,current)?;
+         files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).map_err(|_|local_error())?;
+         if self.credentials_revision()!=lease.original.revision||lease.revoked(){return Err(local_error());}
+-        let sent=engine.client()?.send_original_web_prompt_once(lease.session_id(),original.raw_target(),original.headers(),effective.bytes());
+-        let (state,acknowledged)=match &sent{
+-            Ok(response) if response.status==200=>{
+-                let value:Option<Value>=serde_json::from_slice(&response.body).ok();
+-                let receipt=value.as_ref().and_then(|v|v.get("data"));
+-                let id=receipt.and_then(|v|v.get("id")).and_then(Value::as_str).filter(|id|id.starts_with("msg_")&&id.len()>4&&id.len()<=160&&id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'));
+-                if receipt.and_then(|v|v.get("sessionID")).and_then(Value::as_str)==Some(lease.session_id())
+-                    &&receipt.and_then(|v|v.get("type")).and_then(Value::as_str)==Some("user")
+-                    &&id.is_some()&&inspected.upstream_message_id.as_deref().is_none_or(|expected|id==Some(expected)){
+-                    (PromptState::Admitted,id.map(str::to_owned))
+-                }else{(PromptState::Uncertain,None)}
+-            },
+-            Ok(response) if matches!(response.status,400|401|403|404)=>(PromptState::Rejected,None),
+-            _=>(PromptState::Uncertain,None)
+-        };
++        let prepared=engine.client()?.prepare_original_web_prompt(lease.session_id(),original.raw_target(),original.headers(),effective.bytes())?;
++        let outcome=slot.send_retained(prepared,inspected.upstream_message_id.clone())?;
++        let state=match outcome.admission(){"admitted"=>PromptState::Admitted,"rejected"=>PromptState::Rejected,_=>PromptState::Uncertain};
++        let acknowledged=if outcome.admission()=="admitted"{outcome.upstream_id().map(str::to_owned)}else{None};
++        // Every fallible post-send step now runs AFTER actual slot retention.
++        // Writer/cache failure does not discard the complete/partial transport.
++        let _postprocessing=(||->Result<(),RuntimeError>{
+         let upstream_id=acknowledged.clone().or(inspected.upstream_message_id.clone());
+         if let Some(record)=records.get_mut(&operation){record.state=state;}
+         else if let Some(id)=acknowledged{
+@@ -408,16 +410,12 @@
+             _=>{}
+         }
+         drop(active);
+-        // Keep any positive original acknowledgement durably under its old
+-        // identity even if current custody subsequently refuses publication.
++        Ok(())})();
+         if require_local_engine(&engine,&lease.binding,current).is_err()||self.credentials_revision()!=lease.original.revision
+-            ||files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).is_err(){
+-            lease.revoke();return Err(local_error());
+-        }
+-        let response=sent.map_err(|_|RuntimeError::Unavailable("Original Web prompt outcome remains unknown; no request was repeated"))?;
+-        Ok(LocalWebPromptOutcome{operation_id:operation,input_sha256:original.input_sha256().into(),owner:original.owner().clone(),session_id:lease.session_id().into(),upstream_id,
+-            admission:match state{PromptState::Admitted=>"admitted",PromptState::Rejected=>"rejected",_=>"uncertain"},
+-            status:response.status,content_type:response.content_type,body:response.body})
++            ||files_original.check_current(&lease.binding,lease.session_id(),original.operation_id(),original.input_sha256(),current).is_err(){lease.revoke();}
++        // Even postprocessing/revocation failure returns the same actual slot
++        // outcome. The registry owns it independently of this worker/result.
++        Ok(outcome)
+     }
+     pub fn inspect_local_web_prompt(&self, lease: &LocalWebLease, original: &NativeWebOriginal,
+         current: &dyn Fn() -> Result<(), String>) -> Result<LocalWebPromptInspection, RuntimeError> {
+--- a/crates/adapters/src/projects.rs
++++ b/crates/adapters/src/projects.rs
+@@ -1,7 +1,7 @@
+ //! Transactional workspace storage, owned by the single Veyra service.
+ mod local_workspaces;
+-mod local_web_originals;
+-pub use local_web_originals::{NativeWebDispatch,NativeWebReservation,NativeWebAcknowledgement,SavedNativeWebPty};
++pub(crate) mod local_web_originals;
++pub use local_web_originals::{NativeWebDispatch,NativeWebReservation,NativeWebAcknowledgement,NativeWebPublished,SavedNativeWebPty};
+ pub use local_workspaces::LocalWorkspaceRecord;
+ mod backup;
+ mod close;
+@@ -47,6 +47,7 @@
+
+ pub struct ProjectStore {
+     connection: Connection,
++    native_web_writer:std::sync::Arc<local_web_originals::NativeWebWriterOriginal>,
+     local_custody: Option<std::sync::Arc<crate::local_custody::LocalCustody>>,
+     local_installation_id: Option<String>,
+ }
+@@ -152,7 +153,7 @@
+         }
+         validate_schema(&migration, SCHEMA_VERSION)?;
+         migration.commit()?;
+-        Ok(Self { connection, local_custody: None, local_installation_id: None })
++        Ok(Self { connection, native_web_writer:std::sync::Arc::new(local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None })
+     }
+
+     pub fn create(&mut self, draft: ProjectDraft) -> Result<Project, StoreError> {
+@@ -341,7 +342,7 @@
+         connection.execute_batch(include_str!("projects/0004.sql"))?;
+         connection.execute_batch(include_str!("projects/0005.sql"))?;
+         validate_schema(&connection, SCHEMA_VERSION)?;
+-        Ok(ProjectStore { connection, local_custody: None, local_installation_id: None })
++        Ok(ProjectStore { connection, native_web_writer:std::sync::Arc::new(local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None })
+     }
+     pub fn deny_writes(store: &mut ProjectStore) -> Result<(), StoreError> {
+         store.connection.pragma_update(None, "query_only", true)?;
+--- a/crates/adapters/src/projects/local_workspaces.rs
++++ b/crates/adapters/src/projects/local_workspaces.rs
+@@ -55,7 +55,7 @@
+    connection.busy_timeout(std::time::Duration::from_secs(5))?;
+    connection.execute_batch("PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;")?;
+    validate_schema(&connection,5)?;
+-   Self{connection,local_custody:None,local_installation_id:None}
++   Self{connection,native_web_writer:std::sync::Arc::new(super::local_web_originals::NativeWebWriterOriginal::new()),local_custody:None,local_installation_id:None}
+   }else{Self::open(path)?};
+   let tx=store.connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+   let current=schema_version(&tx)?;
+--- a/crates/adapters/src/opencode/desktop_runtime.rs
++++ b/crates/adapters/src/opencode/desktop_runtime.rs
+@@ -32,6 +32,8 @@
+ mod local_workspaces;
+ pub use local_workspaces::web_original::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection,LocalWebPromptOutcome,LocalWebOriginalSubmission};
+ pub use local_workspaces::web_materialization::{EffectiveWebBody,WebUriReplacement,WebUriTransformation,materialize_web_uri_spans,materialize_resolved_web_files};
++pub use local_workspaces::web_completion::NativeWebCompletions;
++pub(crate) use local_workspaces::web_completion::NativeWebCompletionIdentity;
+ pub use local_workspaces::web_event_policy::{WebEventDecision,NativeSseFrames,project_local_web_event};
+ mod prompt_original;
+ mod memory;
+@@ -436,6 +438,7 @@
+     mcp_operations: Mutex<()>,
+     mcp_visibility_operations: Mutex<()>,
+     active_turns: Arc<Mutex<BTreeMap<String, ActiveTurn>>>,
++    native_web_completions:Arc<local_workspaces::web_completion::NativeWebCompletions>,
+     credential_revision: AtomicU64,
+     events: Arc<Mutex<live_events::EventBuffer>>,
+ }
+@@ -452,6 +455,7 @@
+             mcp_operations: Mutex::new(()),
+             mcp_visibility_operations: Mutex::new(()),
+             active_turns: Arc::new(Mutex::new(BTreeMap::new())),
++            native_web_completions:Arc::new(local_workspaces::web_completion::NativeWebCompletions::default()),
+             credential_revision: AtomicU64::new(1),
+             events: Arc::new(Mutex::new(live_events::EventBuffer::new())),
+         }
+--- a/crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs
+@@ -2,6 +2,7 @@
+ use super::*;
+ mod conversations;
+ pub(super) mod web_original;
++pub(super) mod web_completion;
+ pub(super) mod web_materialization;
+ pub(super) mod web_event_policy;
+ use crate::local_execution::LocalWorkspaceBinding;
+--- a/apps/service/src/routes/local_workspaces/web_original.rs
++++ b/apps/service/src/routes/local_workspaces/web_original.rs
+@@ -4,47 +4,32 @@
+ use veyra_adapters::opencode::desktop_runtime::{LocalWebLease, NativeWebOriginal, LocalWebPromptInspection};
+ use veyra_adapters::{opencode::desktop_runtime::{LocalWebPromptOutcome,LocalWebOriginalSubmission},projects::NativeWebAcknowledgement};
+
++/// SAME actual adapter registry, bound before the worker may dispatch.
+ #[derive(Default)]
+-struct PendingState {outcomes:Vec<Arc<LocalWebPromptOutcome>>,fused:bool}
+-/// Publication completions only, not another Run or execution queue. The
+-/// original worker enrolls its actual response before its join result can be
+-/// dropped on HTTP disconnect. Writer faults retain exact private bytes.
+-#[derive(Default)]
+-pub(super) struct WebPending {state:Mutex<PendingState>}
+-impl WebPending {
+-    fn enroll(&self,outcome:LocalWebPromptOutcome)->Result<(),String>{
+-        let outcome=Arc::new(outcome);
+-        match self.state.lock(){
+-            Ok(mut state)=>{
+-                if state.outcomes.iter().any(|old|old.operation_id()==outcome.operation_id()){state.fused=true;}
+-                state.outcomes.push(outcome);
+-                if state.fused{Err("Original Web response publication is fused; exact outcomes retained".into())}else{Ok(())}
+-            },
+-            Err(poison)=>{
+-                // Retention-only poison recovery. Never authorize a request or
+-                // publish guessed state through a poisoned registry.
+-                let mut state=poison.into_inner();state.fused=true;state.outcomes.push(outcome);
+-                Err("Original Web response registry is poisoned; exact outcome retained".into())
+-            }
+-        }
+-    }
+-    pub(super) fn check_empty(&self)->Result<(),String>{
+-        let state=self.state.lock().map_err(|_|"Original Web response registry poisoned")?;
+-        if state.fused||!state.outcomes.is_empty(){return Err("Original Web response publication remains retained".into())}Ok(())
+-    }
+-    pub(super) fn flush(&self,service:&ServiceState,deadline:Instant)->Result<(),String>{
+-        let mut writer=service.projects.try_lock().map_err(|_|"Original Web response writer busy")?;
+-        let store=writer.as_mut().ok_or("Original Web response writer retired")?;
+-        let mut pending=self.state.lock().map_err(|_|"Original Web response registry poisoned")?;
+-        if pending.fused{return Err("Original Web response registry fused; preserve all outcomes".into())}
+-        let mut failed=false;let mut index=0;
+-        while index<pending.outcomes.len(){
+-            if Instant::now()>=deadline{failed=true;break;}
+-            if store.acknowledge_native_web_prompt(&pending.outcomes[index],&service.instance_id).is_ok(){pending.outcomes.remove(index);}
+-            else{failed=true;index+=1;}
+-        }
+-        if failed||!pending.outcomes.is_empty(){return Err("Original Web responses remain retained for the original writer".into())}Ok(())
+-    }
++pub(super) struct WebPending {registry:Mutex<Option<Arc<veyra_adapters::opencode::desktop_runtime::NativeWebCompletions>>>}
++impl WebPending{
++ fn bind(&self,actual:Arc<veyra_adapters::opencode::desktop_runtime::NativeWebCompletions>)->Result<(),String>{
++  let mut saved=self.registry.lock().map_err(|_|"Original Web registry poisoned")?;
++  if let Some(old)=saved.as_ref(){if !Arc::ptr_eq(old,&actual){return Err("Different original runtime registry refused".into());}}else{*saved=Some(actual);}Ok(())
++ }
++ pub(super) fn check_empty(&self)->Result<(),String>{
++  let saved=self.registry.lock().map_err(|_|"Original Web registry poisoned")?;
++  if let Some(actual)=saved.as_ref(){actual.check_empty()}else{Ok(())}
++ }
++ pub(super) fn flush(&self,service:&ServiceState,deadline:Instant)->Result<(),String>{
++  let saved=self.registry.lock().map_err(|_|"Original Web registry poisoned")?;
++  let Some(actual)=saved.as_ref()else{return Ok(())};
++  let mut writer=service.projects.try_lock().map_err(|_|"Original Web response writer busy")?;
++  let store=writer.as_mut().ok_or("Original Web response writer retired")?;
++  let mut failed=false;
++  for outcome in actual.outcomes()?{
++   if Instant::now()>=deadline{failed=true;break;}
++   match store.acknowledge_native_web_prompt(&outcome,&service.instance_id){
++    Ok(published)=>actual.retain_publication(published)?,Err(_)=>failed=true,
++   }
++  }
++  if failed{Err("Actual original Web completions remain retained".into())}else{Ok(())}
++ }
+ }
+
+ /// Called only by the native-authenticated private proxy. No public /operations
+@@ -53,6 +38,7 @@
+     lease:Arc<LocalWebLease>,original:NativeWebOriginal)->Result<NativeWebAcknowledgement,String>{
+     let serial=tokio::time::timeout(Duration::from_secs(5),state.serial.clone().lock_owned()).await
+         .map_err(|_|"Original Web admission is busy; no effect admitted")?;
++    state.local_workspaces.web.bind(state.live_agent.original_web_completions())?;
+     tokio::task::spawn_blocking(move||{
+         let _serial=serial;
+         check(&state,&binding,&lease)?;
+@@ -90,7 +76,8 @@
+         })?;
+         let settled_operation=match result{
+             LocalWebOriginalSubmission::Sent(outcome)=>{
+-                state.local_workspaces.web.enroll(outcome)?;
++                // Already retained before HTTP by the actual runtime slot.
++                let _same_actual_outcome=outcome;
+                 state.local_workspaces.web.flush(&state,Instant::now()+Duration::from_secs(5))?;
+                 operation
+             },
+--- a/apps/service/src/routes/live_agent.rs
++++ b/apps/service/src/routes/live_agent.rs
+@@ -55,6 +55,7 @@
+     replies: veyra_adapters::public_reply_store::ReplyStore,
+ }
+ impl LiveAgent {
++    pub(super) fn original_web_completions(&self)->Arc<veyra_adapters::opencode::desktop_runtime::NativeWebCompletions>{self.runtime.original_web_completions()}
+     pub(super) fn submit_local_web_prompt_original<F>(&self,lease:&veyra_adapters::opencode::desktop_runtime::LocalWebLease,original:veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,current:&dyn Fn()->Result<(),String>,reserve:F)->Result<veyra_adapters::opencode::desktop_runtime::LocalWebOriginalSubmission,String>
+     where F:FnOnce(veyra_adapters::opencode::desktop_runtime::NativeWebOriginal,veyra_adapters::opencode::desktop_runtime::EffectiveWebBody,veyra_adapters::opencode::attachments::NativeWebFilesOriginal)->Result<veyra_adapters::projects::NativeWebReservation,String>{
+         self.runtime.submit_local_web_prompt_original(lease,original,current,reserve).map_err(|_|"Original Web prompt outcome unavailable; no effect repeated".into())
+--- a/crates/adapters/src/projects/local_web_originals.rs
++++ b/crates/adapters/src/projects/local_web_originals.rs
+@@ -7,9 +7,31 @@
+
+ /// A move-only witness created only after the actual original writer committed
+ /// exact input + the existing operation's unknown fence in ONE transaction.
+-pub struct NativeWebDispatch { original: NativeWebOriginal, effective:EffectiveWebBody,files:NativeWebFilesOriginal }
++pub(crate) struct NativeWebWriterOriginal{_nonce:uuid::Uuid}
++impl NativeWebWriterOriginal{pub(super) fn new()->Self{Self{_nonce:uuid::Uuid::new_v4()}}}
++pub struct NativeWebDispatch { original:NativeWebOriginal,effective:EffectiveWebBody,files:NativeWebFilesOriginal,
++ writer:std::sync::Arc<NativeWebWriterOriginal>,scope:String }
++/// Same-row publication only. This is NOT materialization/read-join authority.
++pub struct NativeWebPublished{
++ identity:std::sync::Arc<crate::opencode::desktop_runtime::NativeWebCompletionIdentity>,
++ operation:String,input_sha256:String,body_sha256:String,
++}
++impl NativeWebPublished{
++ pub fn operation_id(&self)->&str{&self.operation}
++ pub(crate) fn matches_outcome(&self,outcome:&crate::opencode::desktop_runtime::LocalWebPromptOutcome)->bool{
++  use sha2::{Digest,Sha256};
++  std::sync::Arc::ptr_eq(&self.identity,outcome.publication_identity())&&self.operation==outcome.operation_id()
++   &&self.input_sha256==outcome.input_sha256()&&self.body_sha256==format!("{:x}",Sha256::digest(outcome.body()))
++ }
++ fn from_actual(outcome:&crate::opencode::desktop_runtime::LocalWebPromptOutcome)->Self{
++  use sha2::{Digest,Sha256};
++  Self{identity:outcome.publication_identity().clone(),operation:outcome.operation_id().into(),input_sha256:outcome.input_sha256().into(),body_sha256:format!("{:x}",Sha256::digest(outcome.body()))}
++ }
++}
+ impl NativeWebDispatch {
+-    pub(crate) fn into_parts(self) -> (NativeWebOriginal,EffectiveWebBody,NativeWebFilesOriginal) { (self.original,self.effective,self.files) }
++    pub(crate) fn parts(&self)->(&NativeWebOriginal,&EffectiveWebBody,&NativeWebFilesOriginal){(&self.original,&self.effective,&self.files)}
++    pub(crate) fn writer_identity(&self)->&std::sync::Arc<NativeWebWriterOriginal>{&self.writer}
++    pub(crate) fn original_scope(&self)->&str{&self.scope}
+ }
+ pub enum NativeWebReservation { Fresh(NativeWebDispatch), Retained(LocalOperationReceipt) }
+ /// Actual private original response only; never a public operation receipt or
+@@ -112,10 +134,15 @@
+     /// Exact actual response + the SAME original minimal settlement commit
+     /// together. Caller retains the sealed actual outcome until this succeeds;
+     /// a writer/IO fault must never drop it, re-POST, or fabricate settlement.
+-    pub fn acknowledge_native_web_prompt(&mut self,outcome:&crate::opencode::desktop_runtime::LocalWebPromptOutcome,instance:&str)->Result<(),StoreError>{
++    pub fn acknowledge_native_web_prompt(&mut self,outcome:&crate::opencode::desktop_runtime::LocalWebPromptOutcome,_instance:&str)->Result<NativeWebPublished,StoreError>{
+         use sha2::{Digest,Sha256};
+-        self.check_local_owner(outcome.owner(),instance)?;
+-        self.require_local_session(&outcome.owner().workspace_id,outcome.session_id())?;
++        // Retention ONLY: the exact original ProjectStore allocation minted
++        // this pre-send owner. Revocation cannot erase its actual completion.
++        // Another connection/reopened DB/DTO/row lookup cannot mint this Arc.
++        if !std::sync::Arc::ptr_eq(&self.native_web_writer,outcome.writer_identity())||!outcome.complete_response(){return Err(StoreError::Conflict);}
++        let scope:Option<String>=self.connection.query_row("SELECT scope_engine_json FROM local_web_original_payloads WHERE operation_id=?",[outcome.operation_id()],|r|r.get(0)).optional()?;
++        let forgotten:bool=self.connection.query_row("SELECT EXISTS(SELECT 1 FROM local_web_original_forget_receipts WHERE operation_id=?)",[outcome.operation_id()],|r|r.get(0))?;
++        if forgotten||scope.as_deref()!=Some(outcome.original_scope()){return Err(StoreError::Conflict);}
+         let receipt=self.local_receipt(outcome.operation_id())?.ok_or(StoreError::NotFound)?;
+         if receipt.owner!=*outcome.owner()||receipt.request_sha256!=outcome.input_sha256(){return Err(StoreError::Conflict);}
+         let headers=outcome.content_type().map(|v|vec![("content-type".to_owned(),v.to_owned())]).unwrap_or_default();
+@@ -128,7 +155,7 @@
+             "SELECT input_sha256,status,content_headers_json,body_sha256 FROM local_web_original_acknowledgements WHERE operation_id=?",
+             [outcome.operation_id()],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+         if let Some(prior)=prior{
+-            if prior!=(outcome.input_sha256().into(),i64::from(outcome.status()),headers,hash){return Err(StoreError::Conflict);}return Ok(());
++            if prior!=(outcome.input_sha256().into(),i64::from(outcome.status()),headers,hash){return Err(StoreError::Conflict);}return Ok(NativeWebPublished::from_actual(outcome));
+         }
+         let summary=serde_json::json!({"admission":outcome.admission(),"upstream_id":outcome.upstream_id(),"status":outcome.status()});
+         let summary=serde_json::to_string(&summary).map_err(|_|StoreError::Invalid)?;
+@@ -139,7 +166,7 @@
+             "UPDATE local_workspace_operations SET state='committed',result_json=? WHERE id=? AND state='unknown'"
+         }else{"UPDATE local_workspace_operations SET result_json=? WHERE id=? AND state='unknown'"};
+         if tx.execute(sql,params![summary,outcome.operation_id()])?!=1{return Err(StoreError::Conflict);}
+-        tx.commit()?;Ok(())
++        tx.commit()?;Ok(NativeWebPublished::from_actual(outcome))
+     }
+
+     /// Caller retains original ModelWork/queue/creation/cancellation admission
+@@ -226,7 +253,7 @@
+             params![original.operation_id(),original.method().as_str(),original.raw_target(),headers,scope,original.body(),effective.bytes(),transformations,provenance])?;
+         if tx.execute("UPDATE local_workspace_operations SET state='unknown' WHERE id=? AND state='intent'",[original.operation_id()])?!=1{return Err(StoreError::Conflict);}
+         tx.commit()?;
+-        Ok(NativeWebReservation::Fresh(NativeWebDispatch{original,effective,files}))
++        Ok(NativeWebReservation::Fresh(NativeWebDispatch{original,effective,files,writer:self.native_web_writer.clone(),scope}))
+     }
+
+     /// Explicit native privacy action only, after positive original terminal
+--- a/crates/adapters/src/opencode/local_web_transport.rs
++++ b/crates/adapters/src/opencode/local_web_transport.rs
+@@ -1,75 +1,96 @@
+-//! One original prompt HTTP send to the existing retained client endpoint.
+-//! This is not a generic method/path forwarding port or a second engine.
++//! Exactly-once original transport. The caller retains this object BEFORE I/O.
+ use super::*;
+-pub(crate) struct WebPromptResponse { pub status:u16,pub content_type:Option<String>,pub body:Vec<u8> }
+-impl OpenCodeClient {
+-    pub(crate) fn send_original_web_prompt_once(&self,session:&str,raw_target:&str,
+-        content_headers:&[(String,String)],effective_body:&[u8])->Result<WebPromptResponse,EngineError>{
+-        validate_session(session)?;
+-        let target=self.base.join(raw_target).map_err(|_|EngineError::InvalidEndpoint)?;
+-        let rendered=format!("{}{}",target.path(),target.query().map(|q|format!("?{q}")).unwrap_or_default());
+-        if target.origin()!=self.base.origin()||rendered!=raw_target
+-            ||target.path()!=format!("/api/session/{session}/prompt")||target.fragment().is_some()
+-            ||!target.username().is_empty()||target.password().is_some()||effective_body.len()>16*1024*1024
+-        {return Err(EngineError::Malformed);}
+-        // Actual cached reqwest0.12.28 declares retry::never and blocking
+-        // ClientBuilder::retry. No library retry, proxy discovery or redirects.
+-        let http=Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
+-            .retry(reqwest::retry::never()).connect_timeout(Duration::from_secs(5))
+-            .timeout(Duration::from_secs(30)).build().map_err(|_|EngineError::Transport)?;
+-        let mut request=http.request(Method::POST,target);
+-        if let Some(auth)=&self.auth{request=request.basic_auth(&auth.username,Some(&auth.password));}
+-        let mut seen=std::collections::BTreeSet::new();
+-        for (name,value) in content_headers{
+-            if !["content-type","accept","content-encoding"].contains(&name.as_str())||!seen.insert(name)
+-                ||(name=="content-encoding"&&value!="identity")
+-                ||value.chars().any(char::is_control){return Err(EngineError::Malformed);}
+-            request=request.header(name.as_str(),value.as_str());
+-        }
+-        let response=request.body(effective_body.to_vec()).send().map_err(|_|EngineError::Transport)?;
+-        let status=response.status().as_u16();
+-        // No browser/upstream redirect response crosses this native boundary.
+-        if (300..400).contains(&status){return Err(EngineError::Transport);}
+-        let content_type=response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|h|h.to_str().ok()).map(str::to_owned);
+-        let mut body=Vec::new();response.take(16*1024*1024+1).read_to_end(&mut body).map_err(|_|EngineError::Transport)?;
+-        if body.len()>16*1024*1024{return Err(EngineError::Malformed);}
+-        Ok(WebPromptResponse{status,content_type,body})
+-    }
++use std::sync::Arc;
++const LIMIT:usize=16*1024*1024;
++#[derive(PartialEq,Eq)]
++pub(crate) enum WebTransportPhase{Prepared,Sending,Complete,Unknown}
++pub(crate) struct WebPromptObservation{
++ pub status:Option<u16>,pub content_type:Option<String>,pub body:Vec<u8>,
++ pub phase:WebTransportPhase,pub failure:Option<&'static str>,
++}
++pub(crate) struct OriginalWebPromptRequest{
++ http:Client,request:Option<reqwest::blocking::Request>,
++ // Actual response remains here even on header/body failure or a panic.
++ response:Option<reqwest::blocking::Response>,
++ pub observation:Arc<WebPromptObservation>,
++}
++impl OriginalWebPromptRequest{
++ pub(crate) fn execute_retained(&mut self){
++  // No observation clone escapes until this call ends. A poisoned slot never
++  // retries; the registry still owns request/response and the read carrier.
++  let Some(observed)=Arc::get_mut(&mut self.observation)else{return};
++  if observed.phase!=WebTransportPhase::Prepared{return;}
++  let Some(request)=self.request.take()else{return};
++  observed.phase=WebTransportPhase::Sending;
++  match self.http.execute(request){
++   Ok(response)=>self.response=Some(response),
++   Err(_)=>{observed.phase=WebTransportPhase::Unknown;observed.failure=Some("send-or-response-unknown");return;}
++  }
++  let response=self.response.as_mut().expect("actual response assigned before inspection");
++  observed.status=Some(response.status().as_u16());
++  observed.content_type=response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|h|h.to_str().ok()).map(str::to_owned);
++  // The retained Response owns parsed headers. No claim of raw HTTP header
++  // wire preservation is made by reqwest. Body prefix bytes ARE exact.
++  let mut chunk=[0u8;8192];
++  loop{
++   let remaining=LIMIT+1-observed.body.len();
++   if remaining==0{observed.phase=WebTransportPhase::Unknown;observed.failure=Some("body-limit-observed");return;}
++   match response.read(&mut chunk[..remaining.min(8192)]){
++    Ok(0)=>{
++     if observed.status.is_some_and(|s|(300..400).contains(&s)){
++      observed.phase=WebTransportPhase::Unknown;observed.failure=Some("redirect-not-followed");
++     }else{observed.phase=WebTransportPhase::Complete;}
++     return;
++    },
++    Ok(count)=>observed.body.extend_from_slice(&chunk[..count]),
++    Err(_)=>{observed.phase=WebTransportPhase::Unknown;observed.failure=Some("body-read-unknown");return;}
++   }
++  }
++ }
++}
++impl OpenCodeClient{
++ pub(crate) fn prepare_original_web_prompt(&self,session:&str,raw_target:&str,
++  content_headers:&[(String,String)],effective_body:&[u8])->Result<OriginalWebPromptRequest,EngineError>{
++  validate_session(session)?;
++  let target=self.base.join(raw_target).map_err(|_|EngineError::InvalidEndpoint)?;
++  let rendered=format!("{}{}",target.path(),target.query().map(|q|format!("?{q}")).unwrap_or_default());
++  if target.origin()!=self.base.origin()||rendered!=raw_target
++   ||target.path()!=format!("/api/session/{session}/prompt")||target.fragment().is_some()
++   ||!target.username().is_empty()||target.password().is_some()||effective_body.len()>LIMIT{return Err(EngineError::Malformed);}
++  let http=Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none())
++   .retry(reqwest::retry::never()).connect_timeout(Duration::from_secs(5))
++   .timeout(Duration::from_secs(30)).build().map_err(|_|EngineError::Transport)?;
++  let mut request=http.request(Method::POST,target);
++  if let Some(auth)=&self.auth{request=request.basic_auth(&auth.username,Some(&auth.password));}
++  let mut seen=std::collections::BTreeSet::new();
++  for(name,value)in content_headers{
++   if !["content-type","accept","content-encoding"].contains(&name.as_str())||!seen.insert(name)
++    ||(name=="content-encoding"&&value!="identity")||value.chars().any(char::is_control){return Err(EngineError::Malformed);}
++   request=request.header(name.as_str(),value.as_str());
++  }
++  let request=request.body(effective_body.to_vec()).build().map_err(|_|EngineError::Transport)?;
++  let mut body=Vec::new();body.try_reserve_exact(LIMIT+1).map_err(|_|EngineError::Transport)?;
++  Ok(OriginalWebPromptRequest{http,request:Some(request),response:None,
++   observation:Arc::new(WebPromptObservation{status:None,content_type:None,body,phase:WebTransportPhase::Prepared,failure:None})})
++ }
+ }
+
+ #[cfg(test)]mod tests{
+-    use super::*;
+-    use std::{io::{BufRead,BufReader,Write},net::TcpListener,thread};
+-    fn fixture(status:&str)->(OpenCodeClient,thread::JoinHandle<(String,String,Vec<u8>)>){
+-        let listener=TcpListener::bind("127.0.0.1:0").unwrap();
+-        let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),Some(EngineAuth::new("fixture".into(),"secret".into())),Duration::from_secs(2)).unwrap();
+-        let status=status.to_owned();let worker=thread::spawn(move||{
+-            let (mut stream,_)=listener.accept().unwrap();stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+-            let mut reader=BufReader::new(stream.try_clone().unwrap());let mut first=String::new();reader.read_line(&mut first).unwrap();
+-            let mut headers=String::new();let mut length=0;
+-            loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}
+-                if let Some(value)=line.to_ascii_lowercase().strip_prefix("content-length:"){length=value.trim().parse().unwrap();}headers.push_str(&line);}
+-            let mut body=vec![0;length];reader.read_exact(&mut body).unwrap();
+-            let reply="{}";write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nLocation: /api/session/ses_fixture/prompt?redirected=yes\r\nConnection: close\r\n\r\n{reply}",reply.len()).unwrap();
+-            stream.flush().unwrap();drop(stream);listener.set_nonblocking(true).unwrap();
+-            thread::sleep(Duration::from_millis(80));assert!(listener.accept().is_err(),"original request was repeated or redirected");
+-            (first,headers,body)
+-        });(client,worker)
+-    }
+-    #[test]fn full_effective_bytes_and_exact_target_are_sent_once_with_private_auth(){
+-        let (client,worker)=fixture("200 OK");let target="/api/session/ses_fixture/prompt?opaque=a%20b";
+-        let body=br#"{ "id":"msg_fixture", "files":[{"uri":"data:text/plain;base64,eA=="}],"metadata":{"future":true},"delivery":"queue","resume":false }"#;
+-        client.send_original_web_prompt_once("ses_fixture",target,&[("content-type".into(),"application/json".into())],body).unwrap();
+-        let (request,headers,received)=worker.join().unwrap();assert_eq!(request,format!("POST {target} HTTP/1.1\r\n"));assert_eq!(received,body);
+-        assert!(headers.to_ascii_lowercase().contains("authorization: basic zml4dhvyztpzzwnyzxq="));
+-        assert!(!request.contains("secret")&&!request.contains("fixture:"));
+-    }
+-    #[test]fn redirect_and_failure_responses_are_never_retried(){
+-        for status in ["302 Found","503 Service Unavailable"]{
+-            let (client,worker)=fixture(status);
+-            let result=client.send_original_web_prompt_once("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}");
+-            if status.starts_with("302"){assert!(result.is_err());}else{assert_eq!(result.unwrap().status,503);}
+-            worker.join().unwrap();
+-        }
+-    }
++ use super::*;
++ use std::{io::{BufRead,BufReader,Write},net::TcpListener,thread};
++ #[test]fn partial_response_remains_exact_and_cannot_retry(){
++  let listener=TcpListener::bind("127.0.0.1:0").unwrap();
++  let client=OpenCodeClient::new(&format!("http://{}",listener.local_addr().unwrap()),None,Duration::from_secs(2)).unwrap();
++  let worker=thread::spawn(move||{
++   let(mut stream,_)=listener.accept().unwrap();let mut reader=BufReader::new(stream.try_clone().unwrap());
++   loop{let mut line=String::new();reader.read_line(&mut line).unwrap();if line=="\r\n"{break;}}
++   stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 999\r\nConnection: close\r\n\r\n{\"data\":").unwrap();
++   stream.flush().unwrap();
++  });
++  let mut owned=client.prepare_original_web_prompt("ses_fixture","/api/session/ses_fixture/prompt",&[],b"{}").unwrap();
++  owned.execute_retained();worker.join().unwrap();
++  assert_eq!(owned.observation.status,Some(200));assert_eq!(owned.observation.body,b"{\"data\":");
++  assert!(owned.observation.phase==WebTransportPhase::Unknown);assert!(owned.response.is_some());
++  owned.execute_retained();assert_eq!(owned.observation.body,b"{\"data\":");
++ }
+ }
+--- /dev/null
++++ b/crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs
+@@ -0,0 +1,86 @@
++//! In-process custody of an actual original request, enrolled BEFORE HTTP.
++//! Neither a Run queue nor durable replay authority; unknown slots never send.
++use super::*;
++use crate::opencode::local_web_transport::{OriginalWebPromptRequest,WebPromptObservation,WebTransportPhase};
++use crate::projects::{NativeWebDispatch,NativeWebPublished};
++
++/// Unforgeable allocation identity shared by the pre-send slot and the private
++/// original writer's publication witness. No deserialization or public mint.
++pub(crate) struct NativeWebCompletionIdentity{nonce:uuid::Uuid}
++struct CompletionState{
++ request:Option<OriginalWebPromptRequest>,outcome:Option<Arc<super::web_original::LocalWebPromptOutcome>>,
++ published:Option<NativeWebPublished>,
++}
++pub(crate) struct NativeWebSendSlot{
++ dispatch:NativeWebDispatch,identity:Arc<NativeWebCompletionIdentity>,state:Mutex<CompletionState>,
++}
++/// Constructed by the actual LiveRuntime; service binds this same allocation.
++#[derive(Default)]
++pub struct NativeWebCompletions{slots:Mutex<BTreeMap<String,Arc<NativeWebSendSlot>>>}
++impl NativeWebCompletions{
++ pub(crate) fn enroll(&self,dispatch:NativeWebDispatch)->Result<Arc<NativeWebSendSlot>,RuntimeError>{
++  let mut slots=self.slots.lock().map_err(|_|RuntimeError::Storage)?;
++  let operation=dispatch.parts().0.operation_id().to_owned();
++  if slots.contains_key(&operation)||slots.len()>=128{return Err(RuntimeError::AdmissionPending);}
++  let slot=Arc::new(NativeWebSendSlot{dispatch,identity:Arc::new(NativeWebCompletionIdentity{nonce:uuid::Uuid::new_v4()}),
++   state:Mutex::new(CompletionState{request:None,outcome:None,published:None})});
++  slots.insert(operation,slot.clone());Ok(slot)
++ }
++ pub fn outcomes(&self)->Result<Vec<Arc<super::web_original::LocalWebPromptOutcome>>,String>{
++  let slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
++  let mut outcomes=Vec::new();
++  for slot in slots.values(){
++   let state=slot.state.lock().map_err(|_|"Original Web request retained after interrupted completion")?;
++   if state.published.is_none(){if let Some(outcome)=&state.outcome{outcomes.push(outcome.clone());}}
++  }Ok(outcomes)
++ }
++ pub fn retain_publication(&self,published:NativeWebPublished)->Result<(),String>{
++  let slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
++  let slot=slots.get(published.operation_id()).ok_or("Original request slot missing")?;
++  let mut state=slot.state.lock().map_err(|_|"Original request slot poisoned")?;
++  let outcome=state.outcome.as_ref().ok_or("Original completion unavailable")?;
++  if !published.matches_outcome(outcome){return Err("Publication belongs to a different actual request slot".into());}
++  state.published=Some(published);
++  // Deliberately no remove()/drop/read-close here. Publication alone is NOT a
++  // SessionInbox.User materialization join or engine-tree retirement witness.
++  Ok(())
++ }
++ pub fn check_empty(&self)->Result<(),String>{
++  let slots=self.slots.lock().map_err(|_|"Original Web completion registry poisoned")?;
++  if slots.is_empty(){Ok(())}else{Err("Actual original Web request/read ownership remains retained".into())}
++ }
++}
++impl NativeWebSendSlot{
++ pub(crate) fn parts(&self)->(&super::web_original::NativeWebOriginal,&super::web_materialization::EffectiveWebBody,&crate::opencode::attachments::NativeWebFilesOriginal){self.dispatch.parts()}
++ pub(crate) fn send_retained(&self,request:OriginalWebPromptRequest,upstream:Option<String>)->Result<Arc<super::web_original::LocalWebPromptOutcome>,RuntimeError>{
++  // Acquire BEFORE HTTP. No post-send enrollment/lock is needed to keep bytes.
++  let mut state=self.state.lock().map_err(|_|RuntimeError::Storage)?;
++  if state.request.is_some()||state.outcome.is_some(){return Err(RuntimeError::AdmissionPending);}
++  state.request=Some(request);
++  state.request.as_mut().expect("request retained before send").execute_retained();
++  let observed=state.request.as_ref().expect("original request retained").observation.clone();
++  let original=self.dispatch.parts().0;
++  let (admission,ack)=classify(&observed,original.session_id(),upstream.as_deref());
++  let outcome=Arc::new(super::web_original::LocalWebPromptOutcome{
++   operation_id:original.operation_id().into(),input_sha256:original.input_sha256().into(),owner:original.owner().clone(),
++   session_id:original.session_id().into(),upstream_id:ack.or(upstream),admission,
++   observed,identity:self.identity.clone(),writer:self.dispatch.writer_identity().clone(),
++   scope:self.dispatch.original_scope().to_owned(),
++  });
++  state.outcome=Some(outcome.clone());Ok(outcome)
++ }
++}
++fn classify(observed:&WebPromptObservation,session:&str,expected:Option<&str>)->(&'static str,Option<String>){
++ if observed.phase!=WebTransportPhase::Complete{return("uncertain",None);}
++ if observed.status.is_some_and(|s|matches!(s,400|401|403|404)){return("rejected",None);}
++ if observed.status!=Some(200){return("uncertain",None);}
++ let Ok(value)=serde_json::from_slice::<Value>(&observed.body)else{return("uncertain",None)};
++ let Some(user)=value.get("data")else{return("uncertain",None)};
++ let id=user.get("id").and_then(Value::as_str).filter(|id|id.starts_with("msg_")&&id.len()>4&&id.len()<=160&&id.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'_'||b==b'-'));
++ // This is admission classification ONLY. Payload shape is not a file-read
++ // join witness; future join must bind the actual materialization semantics.
++ if user.get("sessionID").and_then(Value::as_str)==Some(session)&&user.get("type").and_then(Value::as_str)==Some("user")
++  &&user.pointer("/time/created").is_some_and(Value::is_number)&&user.get("payload").is_some_and(Value::is_object)
++  &&user.get("delivery").and_then(Value::as_str).is_some_and(|v|matches!(v,"steer"|"queue"))
++  &&id.is_some()&&expected.is_none_or(|v|id==Some(v)){("admitted",id.map(str::to_owned))}else{("uncertain",None)}
++}

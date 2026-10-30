@@ -1,0 +1,68 @@
+{
+  "base": "094c34e39b7ba62e7e3d3e45cd1e77d4432d48ed",
+  "scope": "source-only; publication is NOT read join; no activation",
+  "patch_sha256": "7c7738308e647c426279d59943901538cff4baf771fe0ba49508089037b75d9e",
+  "patch_bytes": 43498,
+  "files": [
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_original.rs",
+      "preimage_sha256": "54b0ce0dc0046d2f84bb2dc0b6d8b477cd9ee38492b781f31dbcd33a262c6a14",
+      "postimage_sha256": "eb040b63b4c32a1cfbf577da7b11724d2b708cebad821b3d70bfc882ca367a02",
+      "bytes": 36170
+    },
+    {
+      "path": "crates/adapters/src/projects.rs",
+      "preimage_sha256": "960b54038ac5c1ba7e357cd17442aceaa46195d1384fd06cbbb724fc550c0948",
+      "postimage_sha256": "6b5655824b0c02fddb8114139e93eb625697bc89d6677bcdcc4cf089b17c01b9",
+      "bytes": 21960
+    },
+    {
+      "path": "crates/adapters/src/projects/local_workspaces.rs",
+      "preimage_sha256": "f5c47fbbe0796514b53e4df0c402d50688dc0297d70c60c489d4f33fcfd6cab7",
+      "postimage_sha256": "7c30437d2312345f6d4b9a74d1ae8d989b0fcaa0f56c8f8316e71d28fac3edeb",
+      "bytes": 22916
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime.rs",
+      "preimage_sha256": "d2397761907455819cd0480d3d7e52171f701de73f3d7b2d5e77da0a29c591cc",
+      "postimage_sha256": "b6eb2534d08d40720e27447c544fc83685db4f4c7d6032e3acdb78ebc1082354",
+      "bytes": 144669
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
+      "preimage_sha256": "964e28dba9c9f8d99a1f436535104e8c488835990814ffc45c1c7530150ae0d1",
+      "postimage_sha256": "b2ec2bc05d5471a567603379e0de8a565dd5c1edc5728240eab0effb8d4f0cc5",
+      "bytes": 3380
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/web_original.rs",
+      "preimage_sha256": "2247b18f4e9daf6ad2155e7938a4e2a2269ec0abb43badfc32399d0fa700dcfe",
+      "postimage_sha256": "4bfbeb8f35468cb1c85e4511f555c98e1abd185806479c954058ef1891be71ee",
+      "bytes": 9203
+    },
+    {
+      "path": "apps/service/src/routes/live_agent.rs",
+      "preimage_sha256": "590dd8b107831b58a4b3716aea69aaaca60a8d6ca804819c10b14be8271bbc6a",
+      "postimage_sha256": "0359dc09bd5f6dd0b19883d036b7bde57c8a0edb4cd28ae09c471c597ec733cf",
+      "bytes": 56283
+    },
+    {
+      "path": "crates/adapters/src/projects/local_web_originals.rs",
+      "preimage_sha256": "0386f495484114a486aa4337b137644fe61612d92bf8d716fe4a5f1bd3510ad1",
+      "postimage_sha256": "05c690cd89898a98b206c34eb608de0d62bce0bfa09eee539548692a22fed31b",
+      "bytes": 23312
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_web_transport.rs",
+      "preimage_sha256": "96c6ce9459e7d698fa4e1eb2b606db3f23a0828f758023e05c4779d63f138251",
+      "postimage_sha256": "9d46fff4f289ce38a879e91b0256fcc60e186843fbebdd50bf0102fff858bc2e",
+      "bytes": 5541
+    },
+    {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/web_completion.rs",
+      "preimage_sha256": null,
+      "postimage_sha256": "8a9ac7f8057d8f189e1e76c49825cd2275690634f1f7f1c6c58bc24cc50c5b3f",
+      "bytes": 5846
+    }
+  ]
+}
