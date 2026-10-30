@@ -43,5 +43,63 @@
     "partialRustflagsSha256": "38f2a7cedf28808b2c241a34162360c88c417b27e4d10f7a53cd3682bf1f2e27",
     "rustToolchain": "33b88122a255a699294430b8a7749841bafeca2d02f29d0e8c4a538c5ae688b7"
   },
-  "scope": "Read-only metadata evidence; not a lease, actual peak trace or cache freshness certificate"
+  "scope": "Read-only metadata evidence; not a lease, actual peak trace or cache freshness certificate",
+  "frontendProducerReview": {
+    "decision": "Propose fixed conservative 2 GiB frontend-only estimate for independent coordinator review; no mixed/Cargo reduction or worker build",
+    "mode": "Read-only source and metadata; no module import or build",
+    "source": "veyra-phase-1/windows-source",
+    "vite": "8.3.4",
+    "reactPlugin": "6.1.2",
+    "ordinaryEmitterWriteFalse": "generate",
+    "publicCopyUnderBuildWrite": true,
+    "postcssDiscovery": "config.root through workspace root unless inline options",
+    "noticeInventoryIsAfterEmission": true,
+    "noticeInventoryMaximumBytes": 536870912,
+    "noticeInventoryMaximumFiles": 10000,
+    "pollingIsHardWriteBound": false,
+    "publicAsset": {
+      "path": "apps/web/public/veyra-blue.png",
+      "sha256": "32ceafc18f6e9a1174c5340eb396c686c296e1998a816b0d1acce010e9a98d92",
+      "bytes": 1986352
+    },
+    "pins": {
+      "config": "4fba999ce5ff4489ff48821e43c65a6dc760f32139912b231cbc4c5a787264d4",
+      "reactPluginEntry": "ef1c54fcb1f85f26688a807f32099ff7cd49027791f0d9d8b9b4baebf0fb87c2",
+      "noticeScope": "c766201111be4a827db44fe8093545ca5e0d00d8ec8ca95a615c1ca2493fc08c",
+      "wrapper": "50f0cced925e83b9931bd1690f517ee427f3b4a63e6fcfe988d448592501db51",
+      "rolldownWindowsBinding": "ad8ce881caacbd746362552136cc5fd3c6fbdec9ef00e6c97ff1fb1750c32a47",
+      "viteNodeChunk": "dab5039168ce4526f98058d84e31bf79eeed8eba558a9a27db570df893326364"
+    },
+    "missing": [
+      "Coordinator-bound exact-source noEmit receipt",
+      "Frozen complete source/config/environment/installed-input identity",
+      "Fresh paired-root/free-space measurements and exclusive coordinator lease",
+      "Actual production artifact and scope qualification"
+    ],
+    "normalMixedGuardChanged": false,
+    "buildAuthorized": false,
+    "peakEstimate": {
+      "stageBytes": 2147483648,
+      "concurrentSourceAllowanceBytes": 268435456,
+      "componentsMiB": {
+        "browserScopeEvidence": 64,
+        "scopedLogsAndTemp": 64,
+        "cache": 512,
+        "allocationAndUncertainty": 384,
+        "distributionAndPublic": 512,
+        "simultaneousTemporaryAndReplacement": 512
+      },
+      "evidenceClass": "Conservative planning estimate; no recovered peak trace or mathematical hard bound",
+      "webSourceFiles": 585,
+      "webSourceBytes": 6000294,
+      "contractsSourceBytes": 52515,
+      "publicFiles": 1,
+      "publicBytes": 1986352,
+      "reportedCoordinatorNativeBudgetBytes": 11391497728,
+      "reportedCoordinatorLinuxAllocatedBytes": 7143284736,
+      "projectedPeakWithSourceBytes": 20950701568,
+      "remainingCeilingBytes": 524134912,
+      "reportedInventoryIsFreshWorkerLease": false
+    }
+  }
 }

@@ -24,7 +24,7 @@ The accepted prior frontend build produced 144 distribution files. Later cleanup
 
 The existing frontend wrapper performs typechecking and Vite/worker/plugin processing after the shared guard. Its frontend-only nature does not authorize bypassing the normal gate or assuming a cached build. No frontend build was run by this reviewer.
 
-## Preconditions for a future smaller profile
+## Preconditions considered for a cached mixed stage
 
 A coordinator-reviewed, fixed profile would need all of the following before it could be considered:
 
@@ -35,7 +35,7 @@ A coordinator-reviewed, fixed profile would need all of the following before it 
 - A fixed policy integrated and reviewed by the coordinator through the normal guard/gate. Callers cannot provide a smaller reserve. Any unknown, changed or cold precondition uses the unchanged standard guard or refuses.
 - Fresh complete paired-root accounting plus the unchanged 20 GiB ceiling and both 15 GiB reserve checks, with serialized resource ownership. No invented approval or output relocation.
 
-This evidence is currently absent. The reviewer therefore proposes **no** numerical reduction. The immediate supported outcome is the existing standard refusal. Other authorized integration work may continue; remeasure if an independently eligible last consumer later finishes, without assuming any particular cleanup is safe. Existing failed cleanup targets, their children/aliases, running packages, runtime data, models and original rollback sources remain protected. No cleanup retry or workload stop is part of this proposal.
+This evidence is currently absent for the cached mixed/Cargo review. The reviewer therefore proposes **no** numerical reduction for that operation. A separately enumerated frontend-only conservative planning estimate is now documented in [frontend-production-reserve-review.md](frontend-production-reserve-review.md); it excludes the already-qualified matching no-emit stage and does not rely on a mathematical hard bound, filesystem quota or a recovered peak trace. The generic review tool here implements no such new profile; the separate frontend profile has its own review function. The immediate supported outcome is the existing standard refusal. Other authorized integration work may continue; remeasure if an independently eligible last consumer later finishes, without assuming any particular cleanup is safe. Existing failed cleanup targets, their children/aliases, running packages, runtime data, models and original rollback sources remain protected. No cleanup retry or workload stop is part of this proposal.
 
 ## Verification and reconciliation
 
