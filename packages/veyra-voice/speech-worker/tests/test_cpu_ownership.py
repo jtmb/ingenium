@@ -304,6 +304,7 @@ class ApplicationTests(unittest.TestCase):
         models = Models({"af_test": TinyVoice()}, [], self.model,
             {"qualified": True, "neuralCpuFallback": False}, "directml")
         legacy = Application(SpeechWorker(models, "af_test", INSTANCE), TOKEN)
+        self.assertNotIn("ownership", legacy.worker.health())
         response = legacy.handle("POST", "/v1/transcriptions", {**self.headers,
             "content-type": "application/octet-stream", "x-request-id": "legacy-gpu-protocol-fixture"}, bytes(8000))
         self.assertEqual(response.status, 200)

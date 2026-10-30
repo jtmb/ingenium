@@ -328,7 +328,7 @@ class SpeechWorker:
     def health(self) -> dict[str, object]:
         """Identify this independently owned service without exposing assets or tokens."""
         ready = self.ready()
-        return {
+        info: dict[str, object] = {
             "service": "veyra-speech",
             "instanceId": self.instance_id,
             "version": 1,
@@ -343,8 +343,10 @@ class SpeechWorker:
             if self.models.backend == "directml"
             else "cpu-onnx",
             "busy": self.inference_lock.locked(),
-            "ownership": self.cpu_operations.info() if self.cpu_operations is not None else None,
         }
+        if self.cpu_operations is not None:
+            info["ownership"] = self.cpu_operations.info()
+        return info
 
     def _purge_cancelled(self) -> None:
         """Bound pre-admission cancellation tombstones to thirty seconds."""
