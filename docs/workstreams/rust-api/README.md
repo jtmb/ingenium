@@ -151,3 +151,7 @@ The first-failure signature is test-only: closed_upstream_is_a_safe_gateway_fail
 The first debug build produced more output than the lease estimate. Cleanup was attempted only against the newly owned qualification target after checking source/lock/failure preservation, reparse points and process/file references. The automatic approval review rejected that action with the generic reason "blocked by policy"; no deletion was executed, no failed target was retried through another mechanism, and no workload was stopped. Further compilation was initially withheld. The coordinator then explicitly reconciled the retained target and authorized reuse under refreshed storage guards. The final successful run reused the same target and cache, with incremental compilation disabled; no second target or dependency tree was created.
 
 Windows CPU compile/test evidence is not Linux runtime, real-account authorization, deployed persistence or writable Rust acceptance.
+
+## Follow-on operator qualification
+
+The [exact-source qualification harness](qualification-harness.md) supplies reproducible original-credential parity, bounded startup/RSS/CPU/API measurements and model-free fixture tests. Its actual Windows/Linux authenticated measurements remain coordinator leased; fixture success is not platform or performance acceptance.
