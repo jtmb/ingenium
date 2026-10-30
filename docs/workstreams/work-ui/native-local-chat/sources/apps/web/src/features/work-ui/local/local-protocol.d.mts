@@ -6,13 +6,15 @@ export type WorkspaceObservation = Readonly<{ owner: LocalWorkspaceOwner; worksp
 } }>;
 export type SessionObservation = Readonly<{ id: string; location: { directory: string } }>;
 export type ChatOperation = Extract<LocalOperationRequest["operation"], { kind: "session_create" | "agent_turn" | "session_interrupt" | "session_select_model" | "session_select_agent" }>;
-export type Seal = { wire: string; sha256: string; phase: "reserved" | "unknown" | "committed" | "rejected"; receipt: LocalOperationReceipt | null; observation?: SessionObservation };
+export type LocalPromptReceipt = { request_id: string; session_id: string; message_id: string; request_sha256: string; original: import("@veyra/contracts").LocalPromptOriginal; admission: "admitted" | "rejected" | "uncertain"; state: "admitted" | "rejected" | "unknown" };
+export type Seal = { wire: string; sha256: string; phase: "reserved" | "unknown" | "committed" | "rejected"; receipt: LocalOperationReceipt | null; original_receipt?: LocalPromptReceipt; observation?: SessionObservation };
 export interface LocalTransport {
   readContext(current: () => boolean): Promise<unknown>;
   readRuntime(workspaceID: string, current: () => boolean): Promise<unknown>;
   readSessions(workspaceID: string, after: string | null, current: () => boolean): Promise<unknown>;
   readMessages(workspaceID: string, sessionID: string, cursor: string | null, current: () => boolean): Promise<unknown>;
   readStatus(workspaceID: string, sessionID: string, current: () => boolean): Promise<unknown>;
+  readPromptOriginal(workspaceID: string, sessionID: string, requestID: string, current: () => boolean): Promise<unknown>;
   createWorkspace(body: { request_id: string; environment: LocalEnvironment }, current: () => boolean): Promise<unknown>;
   readWorkspace(id: string, current: () => boolean): Promise<unknown>;
   dispatch(body: LocalOperationRequest, current: () => boolean): Promise<unknown>;

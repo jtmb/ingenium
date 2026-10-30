@@ -8,6 +8,8 @@ export type MessageRead = { owner: LocalWorkspaceOwner; session_id: string; orde
   cursor: { next: string | null; previous: string | null } };
 export type ConversationRead = { runtime: RuntimeRead; status: { running: boolean; terminal_observed: false; agent?: string; model?: { id: string }; outcome?: string }; page: MessageRead };
 export function identityFromContext(reply: unknown, selectedEnvironment: LocalEnvironment): LocalIdentity;
+export type LocalEnvironmentSelection = { environment: LocalEnvironment; label: string; selection_source: "native_windows_custody" | "recorded_project" };
+export function environmentSelections(reply: unknown): { environments: LocalEnvironmentSelection[]; default_environment: LocalEnvironment | null };
 export function boundRead<T>(reply: T, actualOwner: LocalWorkspaceOwner, sessionID?: string): T;
 export function messagePage(reply: unknown, actualOwner: LocalWorkspaceOwner, sessionID: string, cursor?: string | null): MessageRead;
 export function readConversation(transport: LocalTransport, owner: LocalWorkspaceOwner, sessionID: string, current: () => boolean, cursor?: string | null): Promise<ConversationRead>;

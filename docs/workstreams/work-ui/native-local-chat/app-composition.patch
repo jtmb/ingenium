@@ -1,0 +1,42 @@
+--- a/apps/web/src/app/App.tsx
++++ b/apps/web/src/app/App.tsx
+@@ -3,0 +4 @@
++import { LocalChatEntry } from "../features/work-ui/local/LocalChatEntry";
+@@ -247,0 +249 @@
++  const [newLocalChatVersion, setNewLocalChatVersion] = useState(0);
+@@ -1304,0 +1307,6 @@
++                localAvailable={connected && typeof gateway.workbench === "function" && !collaborationHeld}
++                onStartLocalChat={() => {
++                  if (collaborationHeldRef.current || restoring.current || operationBusy.current) return;
++                  setArea("workspace"); setWorkspaceView("projects"); setCodingWorkspace(true);
++                  setNewLocalChatVersion(value => value + 1);
++                }}
+@@ -1747,12 +1755,3 @@
+-            <NativeWorkPresentation scope={JSON.stringify([instance, "no-project"])} projectName="No project selected" hasWorkspace={false}>
+-              <section className="native-work-welcome">
+-                <img src="/veyra-blue.png" alt="" width="48" height="48" />
+-                <h1>What should we build?</h1>
+-                <p>Choose a project to start a conversation.</p>
+-                <NativeWorkNoProjectActions variant="welcome" scratchAvailable={connected && !!gateway.workbench && projectsSupported}
+-                  creating={scratchBusy} resumable={!!scratchRequestId}
+-                  onCreateScratch={() => { void startScratchChat("explicit-scratch-project"); }}
+-                  onChooseProject={() => setCodingWorkspace(false)} />
+-                {!connected && <p role="status">Reconnect Veyra before creating a scratch project.</p>}
+-              </section>
+-            </NativeWorkPresentation>
++            <LocalChatEntry gateway={gateway}
++              available={connected && typeof gateway.workbench === "function" && !collaborationHeld}
++              connectionEpoch={instance} startVersion={newLocalChatVersion} />
+--- a/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
++++ b/apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx
+@@ -3 +3 @@
+-export function NativeWorkNoProjectActions({ scratchAvailable, creating, resumable, onCreateScratch, onChooseProject, variant = "sidebar" }: {
++export function NativeWorkNoProjectActions({ scratchAvailable, creating, resumable, onCreateScratch, onChooseProject, localAvailable = false, onStartLocalChat, variant = "sidebar" }: {
+@@ -5,0 +6 @@
++  localAvailable?: boolean; onStartLocalChat?: () => void;
+@@ -10 +11 @@
+-    {variant === "sidebar" && <button type="button" className="button new-task" disabled aria-describedby={reason}>New chat</button>}
++    {variant === "sidebar" && <button type="button" className="button new-task" disabled={!localAvailable || !onStartLocalChat} onClick={onStartLocalChat} aria-describedby={reason}>New chat</button>}
+@@ -15 +16 @@
+-      <p id={reason}>Chats without a project are currently unavailable. Choose a project or create a scratch project.</p>
++      <p id={reason}>{localAvailable && onStartLocalChat ? "Start a local chat without creating a project, or choose a project." : "Chats without a project are currently unavailable. Choose a project or create a scratch project."}</p>

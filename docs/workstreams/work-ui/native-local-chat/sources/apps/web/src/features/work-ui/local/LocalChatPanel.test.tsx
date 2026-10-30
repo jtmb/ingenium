@@ -11,7 +11,7 @@ function fixture() {
     put: (key, previous, next) => { if ((values.get(key) ?? null) !== previous) throw Error("changed"); values.set(key, next); },
     withLock: async (_key, work) => work() };
   const transport: LocalTransport = { createWorkspace: vi.fn(), readWorkspace: vi.fn(), dispatch: vi.fn(), readReceipt: vi.fn(), readSession: vi.fn(),
-    readContext: vi.fn(), readRuntime: vi.fn(), readSessions: vi.fn(), readMessages: vi.fn(), readStatus: vi.fn() };
+    readContext: vi.fn(), readRuntime: vi.fn(), readSessions: vi.fn(), readMessages: vi.fn(), readStatus: vi.fn(), readPromptOriginal: vi.fn() };
   const identity = { installation_id: "actual-library", custodian_key: "actual-custodian", service_instance_id: "actual-instance", environment: { kind: "windows" as const } };
   const controller = new LocalChatController({ identity, flowID: "11111111-1111-4111-8111-111111111111", store, transport, current: () => true });
   return { controller, transport, identity };
@@ -40,7 +40,26 @@ describe("local Work presentation proposal", () => {
     fireEvent.change(screen.getByLabelText("Local message"), { target: { value: "Keep on unavailable" } });
     fireEvent.keyDown(screen.getByLabelText("Local message"), { key: "Enter" });
     await waitFor(() => expect(f.controller.getSnapshot().journal?.draft).toBe("Keep on unavailable"));
-    expect(screen.getByRole("button", { name: "Prepare private workspace" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Start local chat" }).hasAttribute("disabled")).toBe(true);
     expect(f.transport.createWorkspace).not.toHaveBeenCalled(); expect(f.transport.dispatch).not.toHaveBeenCalled();
+  });
+  it("keeps an unknown original locked through Web return and exposes only explicit read-only recovery", async () => {
+    const f = fixture(); await f.controller.setDraft("Exact unknown original", "actual-agent");
+    const journal = f.controller.getSnapshot().journal!;
+    const snapshot = { loaded: true, busy: false, error: null, journal: { ...journal,
+      prompts: [{ wire: "{}", sha256: "fixture-original-not-dispatched", phase: "unknown" as const, receipt: null }] } };
+    vi.spyOn(f.controller, "getSnapshot").mockReturnValue(snapshot);
+    vi.spyOn(f.controller, "restore").mockResolvedValue(undefined);
+    const send = vi.spyOn(f.controller, "send"), check = vi.spyOn(f.controller, "checkOriginals").mockResolvedValue(undefined);
+    render(<LocalChatPanel controller={f.controller} admission={{ kind: "observed", identity: f.identity, canRequest: true, message: "Checking message outcome." }} />);
+    await waitFor(() => expect((screen.getByLabelText("Local message") as HTMLTextAreaElement).value).toBe("Exact unknown original"));
+    expect(screen.getByLabelText("Local message").hasAttribute("disabled")).toBe(true);
+    fireEvent.keyDown(screen.getByLabelText("Local message"), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Web", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Return to Work" }));
+    expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Check message outcome" }));
+    await waitFor(() => expect(check).toHaveBeenCalledTimes(1));
+    expect(send).not.toHaveBeenCalled(); expect(f.transport.dispatch).not.toHaveBeenCalled();
   });
 });

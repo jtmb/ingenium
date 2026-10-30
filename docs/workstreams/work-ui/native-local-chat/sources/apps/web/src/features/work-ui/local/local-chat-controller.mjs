@@ -1,4 +1,4 @@
-import { UUID, clone, createWire, operationWire, identity, realm, same, sha256, requireValue, workspaceObservation, verifiedReceipt, createdSession } from "./local-protocol.mjs";
+import { UUID, clone, createWire, operationWire, identity, realm, same, sha256, requireValue, workspaceObservation, verifiedReceipt, verifiedPromptOriginal, createdSession } from "./local-protocol.mjs";
 
 /** Retained client originals, never another workspace or transcript authority. */
 export class LocalChatController {
@@ -13,7 +13,7 @@ export class LocalChatController {
   getSnapshot = () => this.snapshot;
   subscribe = listener => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   publish(journal, error = null) {
-    this.snapshot = Object.freeze({ loaded: true, busy: this.busy, error, journal: journal ? clone(journal) : null });
+    this.snapshot = Object.freeze({ loaded: this.snapshot.loaded || (!this.busy && journal !== null), busy: this.busy, error, journal: journal ? clone(journal) : null });
     for (const listener of this.listeners) listener();
   }
   requireCurrent() { requireValue(this.current(), "This local view changed. The original was kept; no further effect was sent."); }
@@ -38,10 +38,16 @@ export class LocalChatController {
       requireValue(expected === seal.wire, "A saved request is not the exact typed original.");
       if (body.operation && seal.receipt) verifiedReceipt(seal.receipt, seal);
       if (body.operation && ["committed", "rejected"].includes(seal.phase)) {
-        requireValue(seal.receipt?.state === "committed", "A settled original has no verified committed receipt.");
-        if (body.operation.kind === "agent_turn") requireValue(seal.receipt.result?.request_id === body.request_id
-          && seal.receipt.result?.admission === (seal.phase === "committed" ? "admitted" : "rejected"), "Prompt settlement changed.");
+        if (body.operation.kind === "agent_turn" && seal.original_receipt) {
+          await verifiedPromptOriginal(seal.original_receipt, seal, body.operation.session_id, journal.workspace?.observation?.workspace.root_path);
+          requireValue(seal.original_receipt.admission === (seal.phase === "committed" ? "admitted" : "rejected"), "Original prompt settlement changed.");
+        } else {
+          requireValue(seal.receipt?.state === "committed", "A settled original has no verified committed receipt.");
+          if (body.operation.kind === "agent_turn") requireValue(seal.receipt.result?.request_id === body.request_id
+            && seal.receipt.result?.admission === (seal.phase === "committed" ? "admitted" : "rejected"), "Prompt settlement changed.");
+        }
       }
+      if (seal.original_receipt) await verifiedPromptOriginal(seal.original_receipt, seal, body.operation?.session_id, journal.workspace?.observation?.workspace.root_path);
     }
     if (journal.workspace?.seal.phase === "committed") workspaceObservation(journal.workspace.observation, journal.identity, this.flowID);
     if (journal.session?.phase === "committed") {
@@ -173,7 +179,10 @@ export class LocalChatController {
   }
   settlePrompt(journal, save, seal, receipt) {
     requireValue(receipt.state === "committed", "The prompt outcome remains unknown; it will not be repeated.");
-    const original = JSON.parse(seal.wire), result = receipt.result;
+    this.settlePromptResult(journal, save, seal, receipt.result);
+  }
+  settlePromptResult(journal, save, seal, result) {
+    const original = JSON.parse(seal.wire);
     requireValue(result?.request_id === original.request_id && ["admitted", "uncertain", "rejected"].includes(result.admission), "The prompt result is not the retained original outcome.");
     if (result.admission === "admitted") {
       requireValue(typeof result.message_id === "string" && result.message_id, "The admitted message identity is unavailable.");
@@ -253,8 +262,15 @@ export class LocalChatController {
         journal.session.receipt = receipt; save(); this.settleSession(journal, save, receipt);
       }
       for (const prompt of journal.prompts.filter(item => item.phase === "unknown")) {
-        const receipt = verifiedReceipt(await this.transport.readReceipt(JSON.parse(prompt.wire).request_id, this.current), prompt);
-        prompt.receipt = receipt; save(); this.settlePrompt(journal, save, prompt, receipt);
+        const body = JSON.parse(prompt.wire);
+        const reply = await this.transport.readPromptOriginal(this.flowID, body.operation.session_id, body.request_id, this.current);
+        requireValue(reply !== null, "No matching retained prompt record was found. Absence is not permission to resend.");
+        const original = await verifiedPromptOriginal(reply, prompt, body.operation.session_id, journal.workspace.observation.workspace.root_path);
+        this.requireCurrent();
+        prompt.original_receipt = original; save();
+        // Retain the immutable operation receipt separately; only the actual
+        // prompt journal can resolve its uncertain admission projection.
+        this.settlePromptResult(journal, save, prompt, original);
       }
       for (const seal of journal.controls.filter(item => item.phase === "unknown")) {
         const receipt = verifiedReceipt(await this.transport.readReceipt(JSON.parse(seal.wire).request_id, this.current), seal);

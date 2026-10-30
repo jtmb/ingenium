@@ -8,6 +8,9 @@ paths = sorted(path for path in root.rglob("*") if path.is_file() and path.name 
 manifest = {
     "native_base_tree": "c295428576246dfa2b97f3a30f2045fc5ff1950f",
     "projects_source_commit": "8b18318e248c7e1cba953c1e68b47529aac1a276",
+    "prompt_lookup_source_commit": "db85f38dae79424723da9864fd4a416d26a14e38",
+    "effective_text_hash_source_blob": "4cf123b5a4d44175b3629e617eda5f99901866f0",
+    "environment_projection": "Root-authorized additive environments/default_environment; backend Root-owned; no client OS defaults",
     "files": [{"path": str(path.relative_to(root)).replace("\\", "/"), "bytes": path.stat().st_size,
                "sha256": hashlib.sha256(path.read_bytes()).hexdigest()} for path in paths],
     "removed_paths": [], "removed_bytes": 0,

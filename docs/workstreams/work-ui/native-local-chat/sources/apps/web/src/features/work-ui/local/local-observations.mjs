@@ -3,9 +3,25 @@ import { identity, owner, same, environment, requireValue, clone } from "./local
 /** Map only the enrolled library/custodian response. Snapshot is not a source. */
 export function identityFromContext(reply, selectedEnvironment) {
   const selected = environment(selectedEnvironment);
-  requireValue(Array.isArray(reply?.supported_environment_kinds) && reply.supported_environment_kinds.includes(selected.kind), "The selected local environment is unavailable.");
+  requireValue(environmentSelections(reply).environments.some(entry => same(entry.environment, selected)), "The selected local environment is unavailable.");
   return identity({ installation_id: reply.library_id, custodian_key: reply.custodian?.key,
     service_instance_id: reply.service_instance_id, environment: selected });
+}
+/** Actual additive server projection authorized by Root; candidate != readiness. */
+export function environmentSelections(reply) {
+  requireValue(Array.isArray(reply?.environments) && reply.environments.length <= 256, "Local environment choices are unavailable.");
+  const seen = new Set();
+  const environments = reply.environments.map(entry => {
+    const actual = environment(entry?.environment), key = JSON.stringify(actual);
+    requireValue(typeof entry.label === "string" && entry.label.length > 0 && entry.label.length <= 512 &&
+      ["native_windows_custody", "recorded_project"].includes(entry.selection_source) &&
+      (entry.selection_source !== "native_windows_custody" || actual.kind === "windows") && !seen.has(key), "A server environment choice is invalid.");
+    seen.add(key);
+    return { environment: actual, label: entry.label, selection_source: entry.selection_source };
+  });
+  const selected = reply.default_environment === null ? null : environment(reply.default_environment);
+  requireValue(selected === null || environments.some(entry => same(entry.environment, selected)), "The server default environment is unavailable.");
+  return { environments, default_environment: selected };
 }
 export function boundRead(reply, actualOwner, sessionID) {
   requireValue(same(owner(reply?.owner), owner(actualOwner)) && (!sessionID || reply.session_id === sessionID), "The observation belongs to another local owner or session.");

@@ -4,13 +4,13 @@ import type { LocalChatController } from "./local-chat-controller.mjs";
 import { readConversation, type ConversationRead } from "./local-observations.mjs";
 
 /** Actual normalized read projection, never client originals masquerading as chat. */
-export function LocalConversation({ controller, owner, sessionID, locked }: {
-  controller: LocalChatController; owner: LocalWorkspaceOwner; sessionID: string; locked: boolean;
+export function LocalConversation({ controller, owner, sessionID, locked, refreshVersion = 0 }: {
+  controller: LocalChatController; owner: LocalWorkspaceOwner; sessionID: string; locked: boolean; refreshVersion?: number;
 }) {
   const [view, setView] = useState<ConversationRead | null>(null), [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false), epoch = useRef(0);
   const ownerKey = JSON.stringify(owner);
-  useEffect(() => { epoch.current++; setBusy(false); setView(null); setError(null); return () => { epoch.current++; }; }, [controller, ownerKey, sessionID]);
+  useEffect(() => { setView(null); void load(); return () => { epoch.current++; }; }, [controller, ownerKey, sessionID, refreshVersion]);
   const load = async (cursor: string | null = null) => {
     const captured = ++epoch.current; setBusy(true); setError(null);
     try {

@@ -80,19 +80,22 @@ function LocalChatForm({ controller, admission, conversation, controls }: {
     <section className="native-local-chat" aria-label="Chat without a project">
       {!eligible && <p role="status">{admission.message}</p>}
       {(error || snapshot.error) && <p role="alert">{error ?? snapshot.error}</p>}
-      {unresolved && <div role="status"><p>An original outcome needs checking. No message or workspace will be repeated.</p>
-        <button type="button" disabled={working} onClick={() => { void run(true); }}>Check original receipts</button></div>}
+      {unresolved && <div role="status"><p>A saved message or action needs checking. It will not be sent again.</p>
+        <button type="button" disabled={working} onClick={() => { void run(true); }}>Check message outcome</button></div>}
       {!actualOwner && <button type="button" disabled={!snapshot.loaded || working || unresolved || !custodyEligible} onClick={() => {
         if (working) return; setWorking(true); setError(null);
-        void queue.current.then(() => controller.prepareWorkspace()).catch(cause => setError(cause instanceof Error ? cause.message : "Workspace outcome unknown.")).finally(() => setWorking(false));
-      }}>Prepare private workspace</button>}
+        void queue.current.then(async () => {
+          await controller.setDraft(latest.current.text, latest.current.agent);
+          await controller.prepareWorkspace();
+        }).catch(cause => setError(cause instanceof Error ? cause.message : "Workspace outcome unknown.")).finally(() => setWorking(false));
+      }}>Start local chat</button>}
       {actualOwner && <LocalRuntimeControls controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} onCatalog={setCatalog} />}
       <div className="native-local-transcript" aria-label="Local conversation">
-        {renderedConversation ?? (actualOwner && sessionID ? <LocalConversation controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} /> : <p role="status">Prepare the private workspace, then read its actual runtime to choose an agent. Saved originals are available below.</p>)}
+        {renderedConversation ?? (actualOwner && sessionID ? <LocalConversation controller={controller} owner={actualOwner} sessionID={sessionID} locked={unresolved || working} refreshVersion={journal?.prompts.filter(prompt => prompt.phase === "committed").length ?? 0} /> : <p role="status">{actualOwner ? "Choose an available agent to send your first message." : "Start a local chat to check available agents. Your draft is saved as you type."}</p>)}
       </div>
       {boundContent(controls, actualOwner, sessionID)}
       <div className="native-local-composer">
-        <label>Agent <select aria-label="Agent for the new local conversation" value={form.agent} disabled={!snapshot.loaded || working || unresolved || Boolean(sessionID)}
+        <label>Agent <select aria-label="Agent for the new local conversation" value={form.agent} disabled={!snapshot.loaded || working || unresolved || Boolean(sessionID) || !catalog.ready}
           onChange={event => update({ agent: event.target.value })}>
           <option value="">Choose an agent</option>
           {catalog.agents.map(agent => <option key={agent.id} value={agent.id}>{agent.label}</option>)}

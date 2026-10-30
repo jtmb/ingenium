@@ -1,0 +1,15 @@
+{
+  "base_tree": "c295428576246dfa2b97f3a30f2045fc5ff1950f",
+  "preimages": [
+    {
+      "path": "apps/web/src/app/App.tsx",
+      "lf_sha256": "5cde8274835a77d7991adde61f0ca6a9f50dffe8e22aec28a0225cb2235ffd65"
+    },
+    {
+      "path": "apps/web/src/features/work-ui/NativeWorkNoProjectActions.tsx",
+      "lf_sha256": "60284ec9cf2565da745866c1151249df9adfbd2f19e5619bac12a5a9e816e4be"
+    }
+  ],
+  "patch_sha256": "943978a112eeb4d97d4e0bc2ca586bbc7f1fec8bb1ade3c75212e970910b0bdd",
+  "scope": "Zero-context delta: requires --unidiff-zero only on exact preimages; Root reconciles actual current tree. App no-project branch + explicit sidebar callback only; Snapshot instance invalidates reads only, never supplies local ownership"
+}

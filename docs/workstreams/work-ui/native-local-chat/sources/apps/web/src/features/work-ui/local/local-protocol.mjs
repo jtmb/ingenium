@@ -74,6 +74,23 @@ export function verifiedReceipt(reply, seal) {
     ["intent", "unknown", "committed", "denied"].includes(reply.state), "The receipt does not match the exact original.");
   return clone(reply);
 }
+/** Actual persisted prompt journal projection, never transcript reconciliation. */
+export async function verifiedPromptOriginal(reply, seal, sessionID, rootPath) {
+  const request = JSON.parse(seal.wire), original = reply?.original;
+  requireValue(request.operation?.kind === "agent_turn" && request.operation.session_id === sessionID &&
+    reply?.request_id === request.request_id && reply.session_id === sessionID &&
+    reply.request_sha256 === seal.sha256 && original?.operation_request_sha256 === seal.sha256 &&
+    exact(original.request, ["request_id", "owner", "operation"]) &&
+    operationWire(original.request?.request_id, original.request?.owner, original.request?.operation) === seal.wire &&
+    original.session?.id === sessionID && original.session.location?.directory === rootPath &&
+    original.effective_text_sha256 === await sha256(request.operation.text) &&
+    typeof reply.message_id === "string" && reply.message_id.length > 0 &&
+    ["admitted", "rejected", "uncertain"].includes(reply.admission) &&
+    reply.state === (reply.admission === "uncertain" ? "unknown" : reply.admission) &&
+    new TextEncoder().encode(JSON.stringify(reply)).length <= 4 * 1024 * 1024,
+    "The retained prompt record does not match this exact original. It will not be repeated.");
+  return clone(reply);
+}
 export function createdSession(receipt, workspace) {
   const result = receipt.result, body = JSON.parse(workspace.sessionWire);
   const expected = "ses_" + body.request_id.replaceAll("-", "");
@@ -105,6 +122,7 @@ export function createLocalTransport(gateway) {
       return request("GET", base(workspaceID) + "/sessions/" + session(sessionID) + "/messages?limit=50" + (cursor === null ? "" : "&cursor=" + encodeURIComponent(cursor)), undefined, current);
     },
     readStatus: (workspaceID, sessionID, current) => request("GET", base(workspaceID) + "/sessions/" + session(sessionID) + "/status", undefined, current),
+    readPromptOriginal: (workspaceID, sessionID, requestID, current) => request("GET", base(workspaceID) + "/sessions/" + session(sessionID) + "/prompts/" + id(requestID), undefined, current),
     createWorkspace: (body, current) => { requireValue(same(JSON.parse(createWire(body.request_id, body.environment)), body), "Invalid creation body."); return request("POST", "/v1/local-workspaces/", body, current); },
     readWorkspace: (value, current) => request("GET", "/v1/local-workspaces/" + id(value), undefined, current),
     dispatch: (body, current) => { requireValue(operationWire(body.request_id, body.owner, body.operation) === JSON.stringify(body), "Invalid local operation."); return request("POST", "/v1/local-workspaces/operations", body, current); },

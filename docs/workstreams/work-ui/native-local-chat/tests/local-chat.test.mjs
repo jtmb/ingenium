@@ -4,7 +4,7 @@ import { webcrypto } from "node:crypto";
 import { LocalChatController } from "../sources/apps/web/src/features/work-ui/local/local-chat-controller.mjs";
 import { operationWire, sha256, createLocalTransport } from "../sources/apps/web/src/features/work-ui/local/local-protocol.mjs";
 import { browserOriginalStore } from "../sources/apps/web/src/features/work-ui/local/local-original-store.mjs";
-import { identityFromContext, messagePage, readConversation } from "../sources/apps/web/src/features/work-ui/local/local-observations.mjs";
+import { environmentSelections, identityFromContext, messagePage, readConversation } from "../sources/apps/web/src/features/work-ui/local/local-observations.mjs";
 import { localFlows } from "../sources/apps/web/src/features/work-ui/local/local-flow-index.mjs";
 globalThis.crypto ??= webcrypto;
 const flow = "11111111-1111-4111-8111-111111111111";
@@ -45,12 +45,32 @@ function fixture() {
     },
     async readSession(_workspace, sessionID) { calls.push(["read-session"]); return { id: sessionID, location: { directory: workspace.workspace.root_path } }; },
     async readReceipt(id) { calls.push(["read-receipt"]); const reply = structuredClone(receipts.get(id)); if (state.badHash) reply.request_sha256 = "0".repeat(64); return reply; },
+    async readPromptOriginal(_workspace, sessionID, id) {
+      calls.push(["read-original"]);
+      if (state.absentOriginal) return null;
+      const seal = persisted().prompts.find(item => JSON.parse(item.wire).request_id === id), request = JSON.parse(seal.wire);
+      const admission = state.originalAdmission ?? receipts.get(id).result.admission;
+      return { request_id: id, session_id: sessionID, message_id: "msg-actual-receipt", request_sha256: state.badHash ? "0".repeat(64) : seal.sha256,
+        admission, state: admission === "uncertain" ? "unknown" : admission,
+        original: { request, operation_request_sha256: seal.sha256, engine_revision: 1, engine_instance_id: "original-engine", engine_project_id: "real-engine-project",
+          session: { id: sessionID, location: { directory: workspace.workspace.root_path } }, model: {}, effective_text_sha256: await sha256(request.operation.text), files: [], skill_ids: [], memory: null, require_idle: false } };
+    },
   };
   const controller = () => new LocalChatController({ identity: actual, flowID: flow, store, transport,
     current: () => state.current, uuid: () => "00000000-0000-4000-8000-" + String(++state.counter).padStart(12, "0") });
   return { memory, calls, state, store, transport, controller, persisted };
 }
 const effects = f => f.calls.filter(([kind]) => ["create", "session_create", "agent_turn"].includes(kind));
+
+test("initial restore keeps composer unavailable until the retained draft is actually loaded", async () => {
+  const f = fixture(), original = f.controller(); await original.setDraft("Already retained draft", "build");
+  const reopened = f.controller(), restoring = reopened.restore();
+  assert.equal(reopened.getSnapshot().loaded, false);
+  await restoring;
+  assert.equal(reopened.getSnapshot().loaded, true);
+  assert.equal(reopened.getSnapshot().journal.draft, "Already retained draft");
+  assert.equal(effects(f).length, 0);
+});
 test("first Send fences every effect durably and submits captured Unicode bytes once", async () => {
   const f = fixture(), c = f.controller(); await c.restore();
   const original = " Preserve CRLF\r\n日本語 😀  ";
@@ -143,7 +163,7 @@ test("lost generic Stop acknowledgement retains exact control and check never re
 });
 test("actual context mapping rejects Snapshot aliases and absent environment custody", () => {
   const reply = { library_id: actual.installation_id, service_instance_id: actual.service_instance_id,
-    custodian: { key: actual.custodian_key }, supported_environment_kinds: ["windows"] };
+    custodian: { key: actual.custodian_key }, environments: [{ environment: { kind: "windows" }, label: "Windows", selection_source: "native_windows_custody" }], default_environment: { kind: "windows" } };
   assert.deepEqual(identityFromContext(reply, actual.environment), actual);
   assert.throws(() => identityFromContext({ ...reply, library_id: undefined, installation_id: "snapshot-alias" }, actual.environment), /ownership/);
   assert.throws(() => identityFromContext(reply, { kind: "wsl", distro: "Ubuntu", user: "actual-user" }), /environment/);
@@ -169,6 +189,9 @@ test("finite read transport encodes cursor and never accepts URL/Project query i
   assert.equal(calls[0][1], `/v1/local-workspaces/${flow}/sessions/${sid}/messages?limit=50&cursor=opaque%26project_id%3Dforeign`);
   assert.throws(() => transport.readMessages(flow, sid, "bad\nheader", () => true), /cursor/);
   assert.throws(() => transport.readRuntime("https://foreign", () => true), /original ID/);
+  transport.readPromptOriginal(flow, sid, flow, () => true);
+  assert.equal(calls[1][1], `/v1/local-workspaces/${flow}/sessions/${sid}/prompts/${flow}`);
+  assert.throws(() => transport.readPromptOriginal(flow, sid, "https://foreign", () => true), /original ID/);
 });
 test("local flow selection is durable before use and survives service restart without allocation", async () => {
   const f = fixture();
@@ -185,4 +208,43 @@ test("control serializers are closed and retain exact typed Rust declaration ord
     assert.deepEqual(JSON.parse(operationWire(flow, owner, operation)).operation, operation);
     assert.throws(() => operationWire(flow, owner, { ...operation, url: "https://foreign" }), /control/);
   }
+});
+test("only the exact persisted original can resolve an immutable uncertain operation without replay", async () => {
+  const f = fixture(), c = f.controller(); await c.setDraft("Original with CRLF\r\n😀", "build"); f.state.lose = "uncertain";
+  await assert.rejects(c.send(), /uncertain/);
+  f.state.originalAdmission = "admitted";
+  await c.checkOriginals();
+  const prompt = c.getSnapshot().journal.prompts[0];
+  assert.equal(prompt.receipt.result.admission, "uncertain");
+  assert.equal(prompt.original_receipt.admission, "admitted");
+  assert.equal(prompt.phase, "committed"); assert.equal(c.getSnapshot().journal.draft, "");
+  await f.controller().restore();
+  assert.equal(effects(f).filter(([kind]) => kind === "agent_turn").length, 1);
+  assert.equal(f.calls.filter(([kind]) => kind === "read-original").length, 1);
+});
+test("absent, rejected, or mixed original records preserve exact draft and never replay", async () => {
+  for (const outcome of ["absent", "rejected", "mixed"]) {
+    const f = fixture(), c = f.controller(); await c.setDraft("Preserve " + outcome, "build"); f.state.lose = "uncertain";
+    await assert.rejects(c.send());
+    if (outcome === "absent") f.state.absentOriginal = true;
+    else if (outcome === "rejected") f.state.originalAdmission = "rejected";
+    else {
+      const read = f.transport.readPromptOriginal;
+      f.transport.readPromptOriginal = async (...args) => { const reply = await read(...args); reply.original.request.owner.service_instance_id = "foreign-instance"; return reply; };
+    }
+    await assert.rejects(c.checkOriginals(), outcome === "absent" ? /Absence/ : outcome === "mixed" ? /exact original/ : /rejected/);
+    assert.equal(c.getSnapshot().journal.draft, "Preserve " + outcome);
+    assert.equal(c.getSnapshot().journal.prompts[0].phase, outcome === "rejected" ? "rejected" : "unknown");
+    assert.equal(effects(f).filter(([kind]) => kind === "agent_turn").length, 1);
+  }
+});
+test("server environment candidates never fabricate a Windows or default WSL user", () => {
+  const actualWSL = { kind: "wsl", distro: "Recorded distro", user: "recorded-user" };
+  const reply = { environments: [{ environment: actualWSL, label: "Saved WSL environment", selection_source: "recorded_project" }], default_environment: null };
+  assert.equal(environmentSelections(reply).default_environment, null);
+  assert.deepEqual(environmentSelections(reply).environments[0].environment, actualWSL);
+  assert.throws(() => environmentSelections({ ...reply, default_environment: { kind: "windows" } }), /default/);
+  assert.throws(() => environmentSelections({ environments: [{ environment: { kind: "wsl", distro: "Default" }, label: "No user", selection_source: "recorded_project" }], default_environment: null }), /environment/);
+  assert.throws(() => environmentSelections({ environments: [{ ...reply.environments[0], selection_source: "native_windows_custody" }], default_environment: null }), /choice/);
+  assert.deepEqual(environmentSelections({ environments: [], default_environment: null }), { environments: [], default_environment: null });
 });

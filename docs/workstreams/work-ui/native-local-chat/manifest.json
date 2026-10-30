@@ -1,41 +1,69 @@
 {
   "native_base_tree": "c295428576246dfa2b97f3a30f2045fc5ff1950f",
   "projects_source_commit": "8b18318e248c7e1cba953c1e68b47529aac1a276",
+  "prompt_lookup_source_commit": "db85f38dae79424723da9864fd4a416d26a14e38",
+  "effective_text_hash_source_blob": "4cf123b5a4d44175b3629e617eda5f99901866f0",
+  "environment_projection": "Root-authorized additive environments/default_environment; backend Root-owned; no client OS defaults",
   "files": [
     {
       "path": "README.md",
-      "bytes": 7195,
-      "sha256": "a137858a3c8df98854f8e456aa150c22caba4998a7b259c4f3da7f77f9af1fa0"
+      "bytes": 9371,
+      "sha256": "d7ad43e93606890034d537e504c0b576585b362e3314c770c8679ff4a4a6519e"
+    },
+    {
+      "path": "app-composition.patch",
+      "bytes": 3165,
+      "sha256": "943978a112eeb4d97d4e0bc2ca586bbc7f1fec8bb1ade3c75212e970910b0bdd"
+    },
+    {
+      "path": "composition-inputs.json",
+      "bytes": 736,
+      "sha256": "1421cf33d46f252213b828f656c2759aaaf4bdd6062f8296c7a19898679dfe83"
     },
     {
       "path": "inventory.py",
-      "bytes": 984,
-      "sha256": "3d95bd3ee85ddd77a7d632be410ece47a0e26b7c7e89753fc3c3c77bc7e2337e"
+      "bytes": 1280,
+      "sha256": "bd883d9f4a8a1e71978b798d0a7c11997ad857c5203ec22a208f71dcf93ac9ad"
+    },
+    {
+      "path": "prepare-composition.py",
+      "bytes": 5291,
+      "sha256": "71e05b0bbb07955913c33148e3b681bc0db3875bf1ffe8044f90ab9b37658937"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/LocalChatEntry.test.tsx",
+      "bytes": 6049,
+      "sha256": "007870328d4db61a0d1797bce930b363d2a3665f055eb9a00b0d15e94eb8c16f"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalChatEntry.tsx",
-      "bytes": 4472,
-      "sha256": "57ba0d04254b23934dd1fde6ad6b6b378032f6b71be207958f65f0452cc0bce6"
+      "bytes": 6867,
+      "sha256": "303da9b11cf76d38231284db3eb9c3b539fcd3c5b24562c23df526900729062f"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.test.tsx",
-      "bytes": 3647,
-      "sha256": "2a3b7935716139ac65c252fd22615b279279b422ae7ff0deb02e3545cab86967"
+      "bytes": 5392,
+      "sha256": "6fc9eadd33126f7cb8be73bfa92c83554b5583c22b9af7b1d3446f6283be5c24"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalChatPanel.tsx",
-      "bytes": 8715,
-      "sha256": "dfe92945e021f5af6e71fc575bd81317106fab2098f2f3779904b473b23da586"
+      "bytes": 8959,
+      "sha256": "ce00705470a4a9118ef40885a9db434a18406592cec51a9e9c04477c8a12a78d"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalConversation.tsx",
-      "bytes": 3591,
-      "sha256": "834e64016b1d3dda5eecc341ed40d047498f275a36288f0cf1ca833a05f79cb7"
+      "bytes": 3616,
+      "sha256": "154a9747f6c6342f829033033e19f093b42d22c9b63899168f3fefa08e7d5cfd"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/LocalRuntimeControls.tsx",
-      "bytes": 3694,
-      "sha256": "c57d15b45e8dc4b4b359599e0bf164da65b3fdaae0395d7a246eb052a47ddcd9"
+      "bytes": 4086,
+      "sha256": "067d55528bb09669775019c19a8e03296b6aadeea38500287c87bc92f8e1f686"
+    },
+    {
+      "path": "sources/apps/web/src/features/work-ui/local/NativeLocalActions.test.tsx",
+      "bytes": 1494,
+      "sha256": "c8b680a76b964ac4f7321985b97b542186c22ccb0edea429a9f94f4ae70a3242"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-chat-controller.d.mts",
@@ -44,8 +72,8 @@
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-chat-controller.mjs",
-      "bytes": 17861,
-      "sha256": "16624dd63667b2b70757ae37a7974bed71e3323e413580d662989bc507ed2da0"
+      "bytes": 19148,
+      "sha256": "5b4482ba491ed125448c7acc6854d1b4c46d4a144baedc14fb2850645271d355"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-chat.css",
@@ -64,13 +92,13 @@
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-observations.d.mts",
-      "bytes": 1482,
-      "sha256": "b117b4cc60f852a7bd959962c6f63d954136008cb7d8ed945d2a9accaa088f00"
+      "bytes": 1785,
+      "sha256": "8b8e9d9e76d3521b7a8a6f1b9ee6f1afbcb9dc52fa5294a29f309bc58b29b24c"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-observations.mjs",
-      "bytes": 2892,
-      "sha256": "40ac778889e0f23ccaa8bfd593238bd34e2751b733f639ee8efebb1d15a537a3"
+      "bytes": 4087,
+      "sha256": "8aa32a8d7178e3e6a4ebcb34fa125770b6c10f77a3f39c1e8de8d1af567799d5"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-original-store.d.mts",
@@ -84,18 +112,18 @@
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-protocol.d.mts",
-      "bytes": 2678,
-      "sha256": "63560648162010743ee70fdb48b64e5935ceeefcf6fb19a49109588fad7d7746"
+      "bytes": 3113,
+      "sha256": "adaceb2de019e4b0c46b74b66538b238591a872dcc0fa959273ebd4955698c52"
     },
     {
       "path": "sources/apps/web/src/features/work-ui/local/local-protocol.mjs",
-      "bytes": 9259,
-      "sha256": "f6432e5639e066cbf385eef97c2d28342adfe31aa37fd0d3dfe046d4d62b06e2"
+      "bytes": 10766,
+      "sha256": "31747a1467c7b2908527ab09f73a5b7a58e6a28d1f54dc7b19972374c87c689e"
     },
     {
       "path": "tests/local-chat.test.mjs",
-      "bytes": 14679,
-      "sha256": "1f14d4473985d1e3c2507a697b652b992fd4aa3cb6c585fc843c3ffb310c851f"
+      "bytes": 19702,
+      "sha256": "0222aa69ef8250d82ffa04836c6d3eb09fd6ad15c7574ded923fe1ae1d978dc4"
     }
   ],
   "removed_paths": [],
