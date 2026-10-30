@@ -1,0 +1,276 @@
+{
+  "title": "Private LocalReleaseTrust v1 proposal - schema is not issuance or approval",
+  "description": "Not a public API. Only the original Root-reviewed release/install writer may issue after independently reviewed actual source/build/packaged artifact receipts exist. Semantic and custody requirements in local-release-trust-contract-r1.md are mandatory beyond this field schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "issuer",
+    "release",
+    "expected",
+    "selection",
+    "publisher_policy"
+  ],
+  "properties": {
+    "format": {
+      "const": "veyra-local-release-trust"
+    },
+    "version": {
+      "const": 1
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "issuance_id",
+        "issued_at_utc"
+      ],
+      "properties": {
+        "kind": {
+          "const": "root_reviewed_release_install_writer"
+        },
+        "issuance_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "issued_at_utc": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 40
+        }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release",
+        "source_revision",
+        "source_snapshot_sha256",
+        "build_receipt_sha256",
+        "packaged_artifact_receipt_sha256",
+        "target",
+        "build_target"
+      ],
+      "properties": {
+        "release": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.-]+)?$"
+        },
+        "source_revision": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "source_snapshot_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "build_receipt_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "packaged_artifact_receipt_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "target": {
+          "const": "windows-x86_64"
+        },
+        "build_target": {
+          "const": "x86_64-pc-windows-msvc"
+        }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest_file",
+        "manifest_sha256",
+        "desktop",
+        "service"
+      ],
+      "properties": {
+        "manifest_file": {
+          "const": "MANIFEST.json"
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "desktop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "sha256",
+            "size_bytes",
+            "pe_machine"
+          ],
+          "properties": {
+            "file": {
+              "const": "Veyra.exe"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 268435456
+            },
+            "pe_machine": {
+              "const": "AMD64"
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "sha256",
+            "size_bytes",
+            "pe_machine"
+          ],
+          "properties": {
+            "file": {
+              "const": "veyra-service.exe"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 268435456
+            },
+            "pe_machine": {
+              "const": "AMD64"
+            }
+          }
+        }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "install_root",
+        "selected_version_directory",
+        "current_install_sha256",
+        "action",
+        "from_manifest_sha256",
+        "prior_selection_sha256",
+        "prior_trust_record_sha256"
+      ],
+      "properties": {
+        "install_root": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "selected_version_directory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "current_install_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "action": {
+          "enum": [
+            "initial_install",
+            "update",
+            "rollback",
+            "review_existing_exact_selection"
+          ]
+        },
+        "from_manifest_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prior_selection_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prior_trust_record_sha256": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "publisher_policy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "expected_certificate_sha1_thumbprint",
+            "verification_policy"
+          ],
+          "properties": {
+            "kind": {
+              "const": "verified_expected_publisher"
+            },
+            "expected_certificate_sha1_thumbprint": {
+              "type": "string",
+              "pattern": "^[0-9A-F]{40}$"
+            },
+            "verification_policy": {
+              "const": "windows_authenticode_cache_only_no_revocation"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "reviewed_packaged_artifact_receipt_sha256",
+            "signing_claim"
+          ],
+          "properties": {
+            "kind": {
+              "const": "locally_reviewed_exact_build"
+            },
+            "reviewed_packaged_artifact_receipt_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "signing_claim": {
+              "const": "none"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

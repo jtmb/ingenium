@@ -1,0 +1,163 @@
+{
+  "format": "veyra-private-local-release-trust-additive-patch-plan",
+  "version": 1,
+  "mode": "Source/interface proposal; NOT an applied or executable patch",
+  "sharedWriter": "01a188fc-d3ed-7dc2-ab95-e0eed8a793ec",
+  "nativeSource": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/",
+  "changes": [
+    {
+      "target": "tools/Veyra.Install.psm1",
+      "owner": "Root original local release/install driver, existing shared installer/rollback owner",
+      "anchor": "Select-VeyraInstallation after193 successful Write-VeyraState + exact selection readback; separately explicit review155 early return",
+      "addition": "Non-exported sidecar validation/publication helper using only original independently reviewed release context. No context -> normal install preserved, private unavailable. Failure after state publish -> separate private status, not selection rollback.",
+      "notChanged": [
+        "Export-ModuleMember",
+        "current-install.json closed shape",
+        "existing quiescence",
+        "normal installer selection",
+        "existing signed activation prerequisites"
+      ]
+    },
+    {
+      "target": "crates/adapters/src/installed_package/local_release_trust.rs (proposed new private Windows module)",
+      "owner": "Root sole shared install/startup contract writer",
+      "addition": "Closed duplicate-rejecting <=64KiB LocalReleaseTrust reader and non-serializable private RetainedLocalReleaseInputs. Hold live sidecar/selection/manifest/Desktop/service/ancestor/needed-receipt file handles, file IDs and comparison hashes; compare independent expected source/build/artifact/publisher/lineage. Factory callable only by actual native installation + captured initialized service owner.",
+      "notAdded": [
+        "HTTP route",
+        "Tauri/browser issuance command",
+        "Deserialize into retained owner",
+        "candidate/inspection DTO-to-owner constructor",
+        "positive bool callback",
+        "startup handshake",
+        "service cutover"
+      ]
+    },
+    {
+      "target": "actual private Native startup/installed owner integration (Root supplies)",
+      "addition": "Retain new private input owner for same broker lifetime; expose only bounded private unavailable status to renderer. Missing/stale record gates private Work/Web only; normal startup/features remain available.",
+      "blocker": "Private Work/Web broker not mounted in current Native source; Root imports worker1 separately."
+    }
+  ],
+  "anchors": [
+    {
+      "file": "tools/stage-coding-preview.mjs",
+      "start": 295,
+      "end": 341,
+      "meaning": "Existing package producer; independent Root receipt producer must approve actual output afterwards, never auto-issue from staging.",
+      "sha256": "db8ecbe7c6c7ea4442c69f4dfa33209c03cd57688ab6e85ce0af8518e738e067"
+    },
+    {
+      "file": "tools/install.ps1",
+      "start": 26,
+      "end": 48,
+      "meaning": "Existing initial install writer entry and package readback.",
+      "sha256": "b62ed57cf36df07ce686706e2b1e4c8b735376f5fa0137c7251bad4958b84857"
+    },
+    {
+      "file": "tools/update.ps1",
+      "start": 75,
+      "end": 77,
+      "meaning": "Existing update delegates to installer; no new service route.",
+      "sha256": "bd58c1d284797173e8fbe5497bb56d0f5793052c26e0ebd1c184286fa7b97fa0"
+    },
+    {
+      "file": "tools/rollback.ps1",
+      "start": 24,
+      "end": 28,
+      "meaning": "Existing rollback rechecks previous package and calls shared selection.",
+      "sha256": "b33c455bd7a5135f677403a7067f34f9e5c6c610b164dc4a054cecf0500b601b"
+    },
+    {
+      "file": "tools/Veyra.Install.psm1",
+      "start": 146,
+      "end": 202,
+      "meaning": "Shared original installer/rollback owner: post193 state publication + readback; explicit original review only for155 early return.",
+      "sha256": "8eabf3ed8033b2323122c417d7a85c75283bd3863d597dc1f395bc859d9700b0"
+    },
+    {
+      "file": "crates/adapters/src/installed_package.rs",
+      "start": 273,
+      "end": 318,
+      "meaning": "Inspection Custody stores historical identity and closes actual handles; cannot be private retained authority.",
+      "sha256": "170fbd43cd9ffae2ed3460517ccf17a0a65a6d953f9f1bb7bf15ae4877ca9494"
+    },
+    {
+      "file": "crates/adapters/src/installed_package.rs",
+      "start": 418,
+      "end": 543,
+      "meaning": "Local file/ancestor guards and original same-handle metadata confirmation to reuse.",
+      "sha256": "170fbd43cd9ffae2ed3460517ccf17a0a65a6d953f9f1bb7bf15ae4877ca9494"
+    },
+    {
+      "file": "crates/adapters/src/installed_package.rs",
+      "start": 888,
+      "end": 913,
+      "meaning": "Closed selection-row shape; additive sidecar avoids breaking keys.",
+      "sha256": "170fbd43cd9ffae2ed3460517ccf17a0a65a6d953f9f1bb7bf15ae4877ca9494"
+    },
+    {
+      "file": "crates/adapters/src/installed_package.rs",
+      "start": 933,
+      "end": 947,
+      "meaning": "Candidate self-hash/manifest declaration explicitly not independent expectation.",
+      "sha256": "170fbd43cd9ffae2ed3460517ccf17a0a65a6d953f9f1bb7bf15ae4877ca9494"
+    },
+    {
+      "file": "crates/adapters/src/installed_package/signature.rs",
+      "start": 71,
+      "end": 136,
+      "meaning": "Real retained-file Authenticode and signer comparison; policy cache-only/no-revocation; report is not approval.",
+      "sha256": "3f4ba0791e77fe4a5d188bcd5dc480e1214e68d9dc3716d0ddd925d47a11353a"
+    },
+    {
+      "file": "crates/adapters/src/installed_package/native/update.rs",
+      "start": 147,
+      "end": 185,
+      "meaning": "Separate service selection writer MUST NOT mint sidecar authority.",
+      "sha256": "954dc80d193613177d3a1e49856a5a58e03d0a67524bd133d579096564df5cd0"
+    },
+    {
+      "file": "crates/adapters/src/installed_package/native/activation.rs",
+      "start": 9,
+      "end": 53,
+      "meaning": "Existing startup observation holds Reads but can report mixed previous/target execution; new private validator cannot accept mixed pair.",
+      "sha256": "2d24ee252b17f187ace329424c5fabc0f13310c4889181f74e52bffecc7e71e0"
+    },
+    {
+      "file": "apps/desktop/src-tauri/src/package_startup.rs",
+      "start": 9,
+      "end": 29,
+      "meaning": "Captured initialized service executable source and explicitly unverified observation.",
+      "sha256": "3a3060ba01200c5c3dd6dbd4aa12e13f284e0c2d24f2f1ffc0cb93b14e7a0929"
+    },
+    {
+      "file": "apps/desktop/src-tauri/src/package_activation.rs",
+      "start": 117,
+      "end": 161,
+      "meaning": "Existing actual native activation owner/custody; no change to lifecycle or signed-only activation.",
+      "sha256": "1eeebd80c8e8b757181406d6d9c704a6c764010539f9c638ee9f522dcd803350"
+    },
+    {
+      "file": "crates/adapters/src/windows_file_metadata.rs",
+      "start": 5,
+      "end": 35,
+      "meaning": "Existing volume/128bit file ID, PhysicalMetadata and same-handle query.",
+      "sha256": "396b221602b988846c27d98f496218086c44e616ed02a947769684879171020c"
+    }
+  ],
+  "mandatorySemanticRules": [
+    "Expected executable hashes originate in actual independent Root reviewed release output receipt, not candidate manifest or DTO.",
+    "Sidecar source/build/publisher strings are not authentication; original writer provenance and file custody define local browser boundary.",
+    "Every update/rollback binds fresh exact current-install bytes; old record/historical previous row cannot authorize new selection.",
+    "Publisher mode is explicit and never falls back from failed verification to locally reviewed.",
+    "No record issued until actual reviewed source/build/packaged hashes and native writer/read custody exist.",
+    "No malicious full same-OS-user/root or loaded-memory identity defense claim."
+  ],
+  "blockers": [
+    "Root actual immutable source/build/packaged artifact/release receipts and exact manifest/Desktop/service hashes are not supplied for issuance.",
+    "Root must implement and source-review original private context ingress, bounded file-custodied writer/publication/readback and retained input factory; no such new code exists in this proposal.",
+    "Compiler/native handle/publication/normal-feature/private-Web acceptance has not been executed."
+  ],
+  "schema": "local-release-trust-field-schema-r1.json",
+  "contract": "local-release-trust-contract-r1.md"
+}

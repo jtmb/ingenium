@@ -1,0 +1,112 @@
+{
+  "format": "veyra-private-local-release-trust-source-receipt",
+  "version": 1,
+  "owner": "01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "at": "2026-10-30T22:03:42.383Z",
+  "canonicalSource": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/",
+  "sources": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/tools/stage-coding-preview.mjs",
+      "bytes": 16027,
+      "sha256": "db8ecbe7c6c7ea4442c69f4dfa33209c03cd57688ab6e85ce0af8518e738e067"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/tools/install.ps1",
+      "bytes": 2987,
+      "sha256": "b62ed57cf36df07ce686706e2b1e4c8b735376f5fa0137c7251bad4958b84857"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/tools/update.ps1",
+      "bytes": 4524,
+      "sha256": "bd58c1d284797173e8fbe5497bb56d0f5793052c26e0ebd1c184286fa7b97fa0"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/tools/rollback.ps1",
+      "bytes": 1520,
+      "sha256": "b33c455bd7a5135f677403a7067f34f9e5c6c610b164dc4a054cecf0500b601b"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/tools/Veyra.Install.psm1",
+      "bytes": 12527,
+      "sha256": "8eabf3ed8033b2323122c417d7a85c75283bd3863d597dc1f395bc859d9700b0"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/crates/adapters/src/installed_package.rs",
+      "bytes": 43208,
+      "sha256": "170fbd43cd9ffae2ed3460517ccf17a0a65a6d953f9f1bb7bf15ae4877ca9494"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/crates/adapters/src/installed_package/signature.rs",
+      "bytes": 7689,
+      "sha256": "3f4ba0791e77fe4a5d188bcd5dc480e1214e68d9dc3716d0ddd925d47a11353a"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/crates/adapters/src/installed_package/native/update.rs",
+      "bytes": 13974,
+      "sha256": "954dc80d193613177d3a1e49856a5a58e03d0a67524bd133d579096564df5cd0"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/crates/adapters/src/installed_package/native/activation.rs",
+      "bytes": 10011,
+      "sha256": "2d24ee252b17f187ace329424c5fabc0f13310c4889181f74e52bffecc7e71e0"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/apps/desktop/src-tauri/src/package_startup.rs",
+      "bytes": 1985,
+      "sha256": "3a3060ba01200c5c3dd6dbd4aa12e13f284e0c2d24f2f1ffc0cb93b14e7a0929"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/apps/desktop/src-tauri/src/package_activation.rs",
+      "bytes": 17212,
+      "sha256": "1eeebd80c8e8b757181406d6d9c704a6c764010539f9c638ee9f522dcd803350"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/windows-source/crates/adapters/src/windows_file_metadata.rs",
+      "bytes": 1969,
+      "sha256": "396b221602b988846c27d98f496218086c44e616ed02a947769684879171020c"
+    }
+  ],
+  "brokerContract": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/codex-workspace-plan-source/docs/workstreams/work-ui/native-local-chat/native-web-host/original-proxy/private-producer-c1a8/BROKER-CONTRACT.md",
+    "bytes": 9320,
+    "sha256": "c6fcf965c46b9ea49187fd64072fc8a85be5c848ab3628eecd32ef61a9f5c84f"
+  },
+  "preservedRefusal": {
+    "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/evidence/app-musl-consumed-cleanup-r1.json",
+    "bytes": 1818,
+    "sha256": "11dd16db0e0c0773c2ae9d019664307245371319968fa109775d32e1af119686"
+  },
+  "generated": [
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/packaging/docs/workstreams/packaging/local-release-trust-field-schema-r1.json",
+      "bytes": 6985,
+      "sha256": "3edd8151cee7fdd86e61e92434601bb2c1e15d9c1afcf1074f83fd17d09e4589"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/packaging/docs/workstreams/packaging/local-release-trust-contract-r1.md",
+      "bytes": 14872,
+      "sha256": "31d2567a92dfdf61792c4670ce6c40cfbfaad2c936f5caf5c10127418c2ec33c"
+    },
+    {
+      "path": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/packaging/docs/workstreams/packaging/local-release-trust-patch-plan-r1.json",
+      "bytes": 8383,
+      "sha256": "81907534c35f2b4eb30a63cbd205ac8821516d984b9a5edfff6b6791aaa57679"
+    }
+  ],
+  "trustRecordIssued": false,
+  "releaseReceiptIssued": false,
+  "buildStarted": false,
+  "runtimeStarted": false,
+  "canonicalWrites": false,
+  "cleanupAttempted": false,
+  "removedBytes": 0,
+  "retention": "Four minimal durable docs/metadata outputs plus existing worker status only; no scratch/build/cache/dependency outputs.",
+  "ready": "Field schema/owner contract proposal ready for Root integration review; implementation, actual release identities and all native acceptance remain gated.",
+  "validation": {
+    "allSourceAndRefusalHashesRechecked": true,
+    "validSourceAnchors": 15,
+    "closedSchemaObjects": 9,
+    "trustRecordIssued": false,
+    "noBuildOrRuntimeVerificationClaimed": true
+  }
+}
