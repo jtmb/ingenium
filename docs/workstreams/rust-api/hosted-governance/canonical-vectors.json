@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "note": "Synthetic originals only. Hash UTF-8 canonical of whole original; private headers excluded.",
+  "vectors": [
+    {
+      "original": {
+        "id": "original-create-fixture",
+        "binding": {
+          "authorityId": "veyra-hosted-governance:installation-fixture",
+          "connectionId": "connection-fixture",
+          "grantId": "grant-fixture",
+          "grantRevision": 1,
+          "epoch": "epoch-fixture",
+          "nativeLibraryId": "library-fixture",
+          "nativeServiceInstanceId": "native-fixture",
+          "hostedServiceInstanceId": "installation-fixture",
+          "nativeProjectId": "native-project",
+          "nativeProjectRevision": 4,
+          "actorId": "actor-fixture",
+          "installationId": "installation-fixture",
+          "hostedProjectId": "project-fixture",
+          "apiProject": "project-fixture",
+          "visibility": "project"
+        },
+        "command": {
+          "op": "create",
+          "reviewedAbsent": true,
+          "name": "release",
+          "description": "Exact Unicode α",
+          "content": "# Draft  \r\n"
+        }
+      },
+      "canonical": "{\"binding\":{\"actorId\":\"actor-fixture\",\"apiProject\":\"project-fixture\",\"authorityId\":\"veyra-hosted-governance:installation-fixture\",\"connectionId\":\"connection-fixture\",\"epoch\":\"epoch-fixture\",\"grantId\":\"grant-fixture\",\"grantRevision\":1,\"hostedProjectId\":\"project-fixture\",\"hostedServiceInstanceId\":\"installation-fixture\",\"installationId\":\"installation-fixture\",\"nativeLibraryId\":\"library-fixture\",\"nativeProjectId\":\"native-project\",\"nativeProjectRevision\":4,\"nativeServiceInstanceId\":\"native-fixture\",\"visibility\":\"project\"},\"command\":{\"content\":\"# Draft  \\r\\n\",\"description\":\"Exact Unicode α\",\"name\":\"release\",\"op\":\"create\",\"reviewedAbsent\":true},\"id\":\"original-create-fixture\"}",
+      "payloadHash": "06a9ba5281acb7a331855e4895d133a96b8fc9d24e6d9eb0370ede90acbe9314"
+    },
+    {
+      "original": {
+        "id": "original-approve-fixture",
+        "binding": {
+          "authorityId": "veyra-hosted-governance:installation-fixture",
+          "connectionId": "connection-fixture",
+          "grantId": "grant-fixture",
+          "grantRevision": 1,
+          "epoch": "epoch-fixture",
+          "nativeLibraryId": "library-fixture",
+          "nativeServiceInstanceId": "native-fixture",
+          "hostedServiceInstanceId": "installation-fixture",
+          "nativeProjectId": "native-project",
+          "nativeProjectRevision": 4,
+          "actorId": "actor-fixture",
+          "installationId": "installation-fixture",
+          "hostedProjectId": "project-fixture",
+          "apiProject": "project-fixture",
+          "visibility": "project"
+        },
+        "command": {
+          "op": "approve",
+          "id": "proposal-fixture",
+          "reviewer": "Display label",
+          "reviewed": {
+            "status": "pending",
+            "updatedAt": "2026-10-30T00:00:00.000Z",
+            "targetSkillId": "target-fixture",
+            "sourceProjectId": null,
+            "sourceName": null,
+            "expectedRevision": 3,
+            "expectedSourceRevision": null,
+            "currentTarget": {
+              "id": "target-fixture",
+              "revision": 3
+            },
+            "currentSource": null,
+            "proposalHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      },
+      "canonical": "{\"binding\":{\"actorId\":\"actor-fixture\",\"apiProject\":\"project-fixture\",\"authorityId\":\"veyra-hosted-governance:installation-fixture\",\"connectionId\":\"connection-fixture\",\"epoch\":\"epoch-fixture\",\"grantId\":\"grant-fixture\",\"grantRevision\":1,\"hostedProjectId\":\"project-fixture\",\"hostedServiceInstanceId\":\"installation-fixture\",\"installationId\":\"installation-fixture\",\"nativeLibraryId\":\"library-fixture\",\"nativeProjectId\":\"native-project\",\"nativeProjectRevision\":4,\"nativeServiceInstanceId\":\"native-fixture\",\"visibility\":\"project\"},\"command\":{\"id\":\"proposal-fixture\",\"op\":\"approve\",\"reviewed\":{\"currentSource\":null,\"currentTarget\":{\"id\":\"target-fixture\",\"revision\":3},\"expectedRevision\":3,\"expectedSourceRevision\":null,\"proposalHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"sourceName\":null,\"sourceProjectId\":null,\"status\":\"pending\",\"targetSkillId\":\"target-fixture\",\"updatedAt\":\"2026-10-30T00:00:00.000Z\"},\"reviewer\":\"Display label\"},\"id\":\"original-approve-fixture\"}",
+      "payloadHash": "da707d206e5581dd00556dadc3665742df8327ebd0c07c0c3976af791c330a47"
+    }
+  ]
+}

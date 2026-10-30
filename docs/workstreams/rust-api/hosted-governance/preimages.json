@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "fbafc1cd0de7e8809218d9e19cca1552ae459e64",
+  "scope": "PROPOSAL ONLY; Root installs SQL125 and private wiring after exact preimage checks",
+  "changes": [
+    {
+      "path": "packages/ingenium-core/lib/db.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "2e86c119ade03ccd93a8832e1bd5b5746d9aebc06c16cd65601fbe47cc3c04a7",
+      "proposedSha256": "49eb51ef0d02edd1a108af3b8dfe69d1740cd4fd7ab91fb920caf844e2340aef"
+    },
+    {
+      "path": "services/ingenium-api/lib/authorization-policy.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "500df5e3b59d2b648c6dc03ec15275ab31a565fdaa1dbaacdd4cbe3cabc6a16d",
+      "proposedSha256": "4642a0a6c19386f9927583e4b689724aee75d765a7c7f8e63fdf3a4f0cd1693c"
+    },
+    {
+      "path": "services/ingenium-api/scripts/api-server.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "f62ed0cfd5b6e6e53558ddb3883c831e1951eea0944ea8a5ec02809f6bd2d7d5",
+      "proposedSha256": "a0a6757eac2302247d4a3ef48e5bdc8aa75ae6d7eca80dbae5424fa7f8b8d282"
+    },
+    {
+      "path": "packages/veyra-customize/hosted-governance/contracts.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "16a0b24125a8e5fd9853b35bde53ff184f1202be0306406cfb8c4ebd3e2266b2",
+      "proposedSha256": "70df20a338972ea374afca3f426a98c0e64f56191cf43d8ee9a85038c13b9d2f"
+    },
+    {
+      "path": "packages/veyra-customize/hosted-governance/client.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "93558bb194760b27c93a6fc4d856af301aba671860dd6d33990b845ed9ce7b4b",
+      "proposedSha256": "43de06f4e0ba096e1a5fbc53700917194d944ed552cfe8a9ce8aac68f57e770e"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/skills.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "edb4a8e8d6b96dc74491a02d8b41ad0de0df25ea7010f3241f1f12cfe7d5fc0b",
+      "proposedSha256": "3488b2d2da7015e71a2eb93aa743849315b92d614bfbddfd5defcce8a9812935"
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "expectedAbsent": false,
+      "preimageSha256": "7eec6815b760456bf29b3e3ba9dfd5ea332d79075d6859d05b292afbdab3801f",
+      "proposedSha256": "5f34ad73da5af06f0292563abb81f6ccd7c723cb0f2ccfd90bedb56dfafbea9f"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/hosted-governance.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "783738c32984d1b6021acbec2ef57de8e7b70a3f5c80708b7eaeab8cbbf0634c"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "17dc3519e6c8482384df9a899d699a17a219c3a4de44081ef3100a6e20271a1a"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/native-customize.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "8dc8987429756be855c2b473497c08317ba42561823a908f55ed88158aadde96"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/native-customize-context.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "95c86c3ad516f6015e461644583e847adabef814dd286455faccef4002b177c4"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/native-customize-read.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "ed2e488dbfe9b3155d15b337e000b3ac9e39ed035f74c3769137ca9e1ad8aa0f"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/native-customize-wire.ts",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "c25f02e1a339ed3ff68a428bb4f2f0b622ac6b76d0ba3e3247fb3a153af5e2ef"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/125_native_hosted_governance.sql",
+      "expectedAbsent": true,
+      "preimageSha256": null,
+      "proposedSha256": "6e4ff4a851c15fe6f322c536c860100ed9301a54301d50e4f73e5fd25c7b2dfd"
+    }
+  ],
+  "patchSha256": "c142a97148512b25572ed108c1a8eea26db3c214b59b72a3d025205cfb1c5821"
+}
