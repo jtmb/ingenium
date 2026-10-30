@@ -43,8 +43,8 @@
         "tests/ingenium-dashboard/veyra-work-",
         "docs/workstreams/work-ui/"
       ],
-      "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "nativeSidecar": true,
+      "state": "native-source-milestone-accepted-staged-coordinator-qualification-open",
       "featureIds": [
         "F02",
         "F03",
@@ -75,10 +75,18 @@
       "ownedGoal": "Implement the screenshot-matched Veyra Work shell, navigation, composer and working feature views, preserving exact conversation state when toggling to unchanged upstream OpenCode Web. Deliver accessible components, behavioral tests, documentation, source/evidence and cleanup within the assigned Work UI writer territory, ready for coordinator integration and final visual/runtime acceptance.",
       "receipt": "coordination/work-ui/ownership.json",
       "statusReceipt": "coordination/work-ui/status.json",
-      "nativeCheckout": null,
-      "nativeWriterPaths": null,
+      "nativeCheckout": "parallel/native-projects",
+      "nativeWriterPaths": [
+        "apps/web/src/main.tsx",
+        "apps/web/src/app/",
+        "apps/web/src/styles/",
+        "apps/web/src/features/work-ui/",
+        "apps/web/src/features/workbench/LiveSessionSidebar.tsx",
+        "apps/web/src/features/workbench/Workbench.tsx"
+      ],
       "threadId": "01a18934-d937-7813-8c48-5ae85aad4f18",
-      "hostId": "local"
+      "hostId": "local",
+      "nativeBranch": "codex/veyra-parallel-native-projects"
     },
     {
       "id": "projects",
@@ -95,8 +103,8 @@
         "services/ingenium-dashboard/tests/veyra-projects-",
         "docs/workstreams/projects/"
       ],
-      "nativeSidecar": true,
-      "state": "active-goal-and-ownership-verified",
+      "nativeSidecar": false,
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F06",
         "F07",
@@ -119,15 +127,11 @@
       "ownedGoal": "Implement Codex-style folder/repository projects and projectless work, explicit native Windows/WSL/cluster execution bindings, terminals, Git and worktrees. Replace the global-project mechanism through a verified lossless migration design and isolated implementation separating installation settings from workspace ownership; preserve IDs/data/permissions. Deliver tests, migration-copy evidence, docs and cleanup ready for coordinator integration.",
       "receipt": "coordination/projects/ownership.json",
       "statusReceipt": "coordination/projects/status.json",
-      "nativeCheckout": "parallel/native-projects",
-      "nativeWriterPaths": [
-        "crates/adapters/src/projects.rs",
-        "crates/adapters/src/task_workspaces.rs",
-        "crates/adapters/src/workspace_archive.rs",
-        "docs/workstreams/projects/"
-      ],
+      "nativeCheckout": null,
+      "nativeWriterPaths": [],
       "threadId": "01a18934-fe43-76a0-940e-6766d96f5770",
-      "hostId": "local"
+      "hostId": "local",
+      "nativeIntegrationMode": "Source proposals already delivered; remaining native shared contracts/adapters/routes are coordinator-only in integration checkout"
     },
     {
       "id": "memory",
@@ -145,7 +149,7 @@
         "docs/workstreams/memory/"
       ],
       "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F19",
         "F20",
@@ -178,7 +182,7 @@
         "docs/workstreams/customize/"
       ],
       "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F40",
         "F41",
@@ -194,7 +198,10 @@
       "nativeCheckout": null,
       "nativeWriterPaths": null,
       "threadId": "01a18935-0723-7cc0-9ea1-5e70f5627cc5",
-      "hostId": "local"
+      "hostId": "local",
+      "writerFiles": [
+        "services/ingenium-dashboard/src/app/skills/page.tsx"
+      ]
     },
     {
       "id": "rust-api",
@@ -210,7 +217,7 @@
         "docs/workstreams/rust-api/"
       ],
       "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F21",
         "F22",
@@ -254,7 +261,7 @@
         "docs/workstreams/dot/"
       ],
       "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F46",
         "F47",
@@ -286,8 +293,8 @@
         "services/ingenium-dashboard/tests/veyra-voice-",
         "docs/workstreams/voice/"
       ],
-      "nativeSidecar": false,
-      "state": "active-goal-and-ownership-verified",
+      "nativeSidecar": true,
+      "state": "bounded-native-ui-source-accepted-coordinator-runtime-qualification-open",
       "featureIds": [
         "F55"
       ],
@@ -296,10 +303,16 @@
       "ownedGoal": "Reuse qualified Stratus voice pipeline components to implement Veyra dictation, calls with the current working agent and live conversational voice: transcription, speech playback, barge-in/interruption, tool activity and reconnect with exact conversation/runtime scope. Preserve active Stratus source/work/hold. Deliver scoped adapters/UI, CPU tests, integration recipes, docs and cleanup for coordinator-scheduled real audio/device acceptance.",
       "receipt": "coordination/voice/ownership.json",
       "statusReceipt": "coordination/voice/status.json",
-      "nativeCheckout": null,
-      "nativeWriterPaths": null,
+      "nativeCheckout": "parallel/native-packaging",
+      "nativeWriterPaths": [
+        "apps/web/src/features/workbench/VoiceWorkspace.tsx",
+        "apps/web/src/features/workbench/VoiceChat.tsx",
+        "apps/web/src/features/workbench/SpeechControls.tsx",
+        "apps/web/src/features/voice-ui/"
+      ],
       "threadId": "01a18935-1617-7d31-8e56-f77df7b6c756",
-      "hostId": "local"
+      "hostId": "local",
+      "nativeBranch": "codex/veyra-parallel-native-packaging"
     },
     {
       "id": "packaging",
@@ -316,8 +329,8 @@
         "services/ingenium-api/tests/veyra-operations-",
         "docs/workstreams/packaging/"
       ],
-      "nativeSidecar": true,
-      "state": "active-goal-and-ownership-verified",
+      "nativeSidecar": false,
+      "state": "scoped-source-milestone-integrated-coordinator-acceptance-open",
       "featureIds": [
         "F01",
         "F52",
@@ -335,12 +348,8 @@
       "ownedGoal": "Deliver reproducible Windows/Linux Veyra packaging, platform/browser adapters, operations/integration compatibility checks and release evidence. Preserve the existing Windows inference engine/settings/models and exclude that engine from Linux; preserve original data/Secrets/rollback sources. Prepare exact-source release/qualification tooling and tested adapters, docs and cleanup for coordinator-controlled builds, deployment and final platform acceptance.",
       "receipt": "coordination/packaging/ownership.json",
       "statusReceipt": "coordination/packaging/status.json",
-      "nativeCheckout": "parallel/native-packaging",
-      "nativeWriterPaths": [
-        "tools/veyra-release/",
-        "crates/harness/tests/veyra_release_",
-        "docs/workstreams/packaging/"
-      ],
+      "nativeCheckout": null,
+      "nativeWriterPaths": [],
       "threadId": "01a18935-1a8b-7eb3-a709-d874f70095e8",
       "hostId": "local"
     }
@@ -1072,5 +1081,19 @@
     "model": "gpt-6.1-sol",
     "workersEffort": "medium",
     "coordinatorEffort": "high"
+  },
+  "reportingProtocol": "Workers send immediate blocker/ready reports to the coordinator before standing down; coordinator acknowledges and supplies concrete guidance. Source milestones never complete the release.",
+  "reportAcknowledgements": {
+    "directReportsReceived": 8,
+    "coordinatorAcknowledged": 8,
+    "releaseComplete": false
+  },
+  "coordinatorBuildGate": {
+    "state": "blocked-by-approved-task-ceiling-after-eligible-cleanup",
+    "approvedCeilingBytes": 21474836480,
+    "standardBuildReservationBytes": 4294967296,
+    "nativeStagedTree": "268acab8c5dcf14ab188ecd8fdcbb21c9316179b",
+    "normalGateRequired": true,
+    "approvalOrGuardChanged": false
   }
 }
