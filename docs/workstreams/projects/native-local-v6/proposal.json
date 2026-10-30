@@ -262,8 +262,8 @@
     },
     {
       "path": "crates/adapters/src/projects/local_workspaces.rs",
-      "bytes": 20246,
-      "sha256": "27c1a618190c32d2fe21b198ed4ff43233b7bd2bab2a7f739f4f9fdd78ee8160"
+      "bytes": 20303,
+      "sha256": "08c4095cb8b8b1ba18d39f7e5d7a44c9484673df1b2a157628ac33efd155dfbd"
     },
     {
       "path": "crates/adapters/src/task_workspaces/private.rs",
@@ -280,5 +280,12 @@
   "nativeCheckoutWritten": false,
   "applied": false,
   "compiled": false,
-  "runtimeOrStateMigrationRun": false
+  "runtimeOrStateMigrationRun": false,
+  "rootSQLiteRevisionCorrection": {
+    "provenance": "Root reported E0277 during actual normalNative r4; Root fixed and starting r5",
+    "rowGetter": "i64 FromSql",
+    "publicRevision": "u64::try_from with StoreError::Corrupt for negative/out-of-range; no cast/fallback",
+    "workerCanonicalMirrored": true,
+    "workerRustBuildRun": false
+  }
 }

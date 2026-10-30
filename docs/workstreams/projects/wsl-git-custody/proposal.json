@@ -1,0 +1,58 @@
+{
+  "parentWorkerCommit": "8b18318e248c7e1cba953c1e68b47529aac1a276",
+  "base": "8b canonical source plus explicitly mirrored Root SQLite i64/checked-u64 revision correction; Root applied/composed Native separately",
+  "existingInputs": [
+    {
+      "path": "crates/adapters/src/local_execution.rs",
+      "baseSha256": "2eabf6e12dbcc6be125dfcbe7f3b3a15bc560614e53ff188d2017c21eaa0d8e0",
+      "proposedSha256": "80d98be55f40580cc9c156b2f39a1aed567911c5d746e771e93058298d6ee64d"
+    },
+    {
+      "path": "crates/adapters/src/local_custody/wsl-helper.py",
+      "baseSha256": "f425127e3d5af39a5bb47d299a4cd11dd77016d368e8a6733faa2c3b90ffee4e",
+      "proposedSha256": "cd438974249c78fc8ed3006d9055597baf2095a66083437f466f916e9307b952"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces/git.rs",
+      "baseSha256": "735e614a97fcaadc37972a951ab577601a77130e55c0f96a084b900e9c55dc78",
+      "proposedSha256": "02699cd50ab7ac34ede0acd6fd301205e5071d4357ec39bf7d7589742897f54e"
+    },
+    {
+      "path": "apps/service/src/routes/local_workspaces.rs",
+      "baseSha256": "d73580fd0f8e103c248f625fb8d6e2d53c1672349bb16cad0d3f672d32d14599",
+      "proposedSha256": "1df1777fc82d560401f9b191ca79a5586fd27b3bed545429abf5141eedb86258"
+    },
+    {
+      "path": "crates/adapters/src/projects/local_workspaces.rs",
+      "baseSha256": "08c4095cb8b8b1ba18d39f7e5d7a44c9484673df1b2a157628ac33efd155dfbd",
+      "proposedSha256": "3a894f0d4b38c2b542a928879106d6e2e7de78cec491c3e750a7ec2a60b13fc5"
+    }
+  ],
+  "canonicalNewSources": [
+    {
+      "path": "crates/adapters/src/local_custody/wsl-git-tree.py",
+      "bytes": 13861,
+      "sha256": "58ad29573370138f9f4c7cd6c9578e98d394e1de759d64d2ba373eb7f2c2b00d"
+    },
+    {
+      "path": "crates/adapters/src/local_wsl_git.rs",
+      "bytes": 14508,
+      "sha256": "3919a34d57aad2082404ac37dd0853fd27549f2a8efa24e0af396cfb8c7ac523"
+    }
+  ],
+  "patchSha256": "414458fcc0709fe5540144af5edaac8f055c466a0ce11688f6dbb4bbe07cf26d",
+  "nativeWritten": false,
+  "applied": false,
+  "compiled": false,
+  "actualWindowsWSLTransportQualified": false,
+  "nodeMigrationsChanged": false,
+  "nativeSchemaChanged": false,
+  "rootCompositionHook": {
+    "file": "apps/service/src/routes/workspace_retirement.rs",
+    "before": "state.local_workspaces.finish_until(self.deadline)?;",
+    "after": "local_workspaces::finish_with_registry(state, self.deadline)?;",
+    "rootOnly": true,
+    "appliedByWorker": false,
+    "requiredBeforeSQLiteDonorRetirement": true
+  }
+}

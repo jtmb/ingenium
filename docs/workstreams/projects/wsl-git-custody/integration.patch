@@ -1,0 +1,229 @@
+--- a/crates/adapters/src/local_execution.rs
++++ b/crates/adapters/src/local_execution.rs
+@@ -1,4 +1,7 @@
+ //! Explicit projectless custody. This type cannot be made from a Project or JSON.
++#[cfg(windows)]
++#[path="local_wsl_git.rs"]
++pub mod wsl_git;
+ use crate::{local_custody::LocalCustody,projects::ProjectStore};
+ use std::sync::Arc;
+ use serde_json::{Value,json};
+--- a/crates/adapters/src/local_custody/wsl-helper.py
++++ b/crates/adapters/src/local_custody/wsl-helper.py
+@@ -94,47 +94,9 @@
+             executable,argv=shells[a['shell']]
+             os.fchdir(current)
+             os.execv(executable,[executable]+argv)
+-        if action!='git': raise ValueError('operation')
+-        kind=a['operation']
+-        if kind=='status': argv=['status','--porcelain=v1','-z']
+-        elif kind=='diff': argv=['diff','--no-ext-diff','--no-textconv']
+-        elif kind in ('branch','worktree'):
+-            branch=a['branch']
+-            if not branch or len(branch)>128 or branch.startswith('-') or '..' in branch or '@{' in branch or any(c.isspace() or ord(c)<32 or c in '~^:?*[\\' for c in branch): raise ValueError('branch')
+-            if kind=='branch': argv=['switch','-c',branch]
+-            else:
+-                name=str(uuid.UUID(a['name']))
+-                if name!=a['name']: raise ValueError('worktree identity')
+-                try: os.mkdir('worktrees',0o700,dir_fd=current)
+-                except FileExistsError: pass
+-                parent=os.open('worktrees',flags,dir_fd=current);held.append(parent)
+-                pm=os.fstat(parent)
+-                if pm.st_uid!=os.geteuid() or pm.st_mode&0o077: raise ValueError('worktree custody')
+-                try: os.stat(name,dir_fd=parent,follow_symlinks=False)
+-                except FileNotFoundError: pass
+-                else: raise ValueError('worktree target exists')
+-                argv=['worktree','add','-b',branch,os.path.join(root,'worktrees',name)]
+-        else: raise ValueError('git operation')
+-        # No shell interpolation, pager, external diff or repository hooks.
+-        command=['/usr/bin/git','-c','core.fsmonitor=false','-c','core.hooksPath=/dev/null','--no-pager']+argv
+-        env={k:v for k,v in os.environ.items() if not k.startswith(('GIT_','GCM_'))}
+-        env.update(GIT_TERMINAL_PROMPT='0',GCM_INTERACTIVE='never')
+-        child=subprocess.Popen(command,cwd='/proc/self/fd/'+str(current),stdin=subprocess.DEVNULL,
+-            stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,start_new_session=True)
+-        output=bytearray();poll=selectors.DefaultSelector();poll.register(child.stdout,selectors.EVENT_READ)
+-        deadline=time.monotonic()+3
+-        try:
+-            while True:
+-                if time.monotonic()>=deadline or len(output)>1024*1024: raise ValueError('git result uncertain')
+-                for key,event in poll.select(0.02):
+-                    data=os.read(key.fileobj.fileno(),16384)
+-                    if data: output.extend(data)
+-                    elif child.poll() is not None: return {'exit_code':child.returncode,'output':output.decode('utf-8','replace')}
+-        finally:
+-            poll.close()
+-            if child.poll() is None:
+-                os.killpg(child.pid,signal.SIGKILL)
+-            child.wait()
++        if action=='git_tree' and len(sys.argv)==4 and sys.argv[1]=='--local-git-tree':
++            return local_git_tree(current,root,a)
++        raise ValueError('legacy unsupervised Git is unavailable')
+     finally:
+         for fd in reversed(held): os.close(fd)
+ if len(sys.argv)==3 and sys.argv[1]=='--local-terminal':
+--- a/apps/service/src/routes/local_workspaces/git.rs
++++ b/apps/service/src/routes/local_workspaces/git.rs
+@@ -5,18 +5,18 @@
+ use veyra_contracts::local_workspaces::{LocalEnvironment,LocalOperation};
+ struct Original{child:Child,job:OwnedProcessJob,out:Option<JoinHandle<Vec<u8>>>,err:Option<JoinHandle<Vec<u8>>>,binding:Arc<LocalWorkspaceBinding>}
+ #[derive(Default)]
+-pub(super) struct GitWorkers{retained:Mutex<Vec<Original>>,launches:Mutex<Vec<Arc<LocalGitLaunch>>>}
++pub(super) struct GitWorkers{retained:Mutex<Vec<Original>>,launches:Mutex<Vec<Arc<LocalGitLaunch>>>,wsl:veyra_adapters::local_execution::wsl_git::LocalWslGit}
+ fn branch(value:&str)->bool{!value.is_empty()&&value.len()<=128&&!value.starts_with('-')&&!value.contains("..")&&!value.contains("@{")&&!value.chars().any(|v|v.is_whitespace()||v.is_control()||"~^:?*[\\\"".contains(v))}
+ fn read(mut input:impl Read)->Vec<u8>{let mut out=Vec::new();let _=input.by_ref().take(1024*1024+1).read_to_end(&mut out);out}
+ impl GitWorkers {
+- pub(super) fn run(&self,binding:Arc<LocalWorkspaceBinding>,operation:&LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++ pub(super) fn run(&self,binding:Arc<LocalWorkspaceBinding>,request:&str,operation:&LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+   binding.verify()?;current()?;
+-  // Original run_wsl owns its Windows bridge, not arbitrary Linux Git
+-  // descendants. Do not enable this effect before that actual owner qualifies.
++  // Separate actual subreaper/pidfd owner; neither the legacy bridge nor
++  // process-group census authorizes this operation.
+   if matches!(binding.owner().environment,LocalEnvironment::Wsl{..}){
+-   return Err("WSL Git requires qualified separately typed Linux helper-tree custody".into());
++   return Err("WSL Git requires its opaque closed-original path".into());
+   }
+-  let (args,wsl):(Vec<String>,Value)=match operation {
++  let (args,_wsl):(Vec<String>,Value)=match operation {
+    LocalOperation::GitStatus=>(vec!["status".into(),"--porcelain=v1".into(),"-z".into()],json!({"action":"git","operation":"status"})),
+    LocalOperation::GitDiff=>(vec!["diff".into(),"--no-ext-diff".into(),"--no-textconv".into()],json!({"action":"git","operation":"diff"})),
+    LocalOperation::GitBranch{name} if branch(name)=>(vec!["switch".into(),"-c".into(),name.clone()],json!({"action":"git","operation":"branch","branch":name})),
+@@ -28,7 +28,7 @@
+    },
+    _=>return Err("unsupported Git operation".into()),
+   };
+-  if matches!(binding.owner().environment,LocalEnvironment::Wsl{..}){return binding.wsl_request(wsl);}
++
+   let root=std::path::Path::new(binding.directory());
+   let program=super::super::workbench::review_git_executable(root).map_err(|_|"existing Git executable unavailable")?;
+   let mut command=Command::new(program);
+@@ -68,7 +68,13 @@
+    std::thread::sleep(Duration::from_millis(5));
+   }
+  }
++ pub(super) fn run_wsl(&self,binding:Arc<LocalWorkspaceBinding>,request:&str,operation:&LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<veyra_adapters::local_execution::wsl_git::LocalWslGitClosed,String>{self.wsl.run(binding,request,operation,current)}
++ pub(super) fn poll_wsl(&self,request:&str)->Result<Option<veyra_adapters::local_execution::wsl_git::LocalWslGitClosed>,String>{self.wsl.poll_closed(request)}
++ pub(super) fn retain_wsl(&self,closed:veyra_adapters::local_execution::wsl_git::LocalWslGitClosed)->Result<(),String>{self.wsl.retain_closed(closed)}
++ pub(super) fn persist_wsl(&self,persist:&mut dyn FnMut(&veyra_adapters::local_execution::wsl_git::LocalWslGitClosed)->Result<(),String>)->Result<(),String>{self.wsl.persist_closed(persist)}
++ pub(super) fn has_wsl_witnesses(&self)->Result<bool,String>{self.wsl.has_closed()}
+  pub(super) fn finish_until(&self,deadline:Instant)->Result<(),String>{
++  self.wsl.finish_until(deadline)?;
+   let mut retained=self.retained.lock().map_err(|_|"Git originals unavailable")?;
+   let mut launches=self.launches.lock().map_err(|_|"Git launch originals unavailable")?;
+   for launch in launches.iter(){launch.finish_until(deadline)?;}
+--- a/apps/service/src/routes/local_workspaces.rs
++++ b/apps/service/src/routes/local_workspaces.rs
+@@ -33,6 +33,7 @@
+  pub(super) fn finish_until(&self,deadline:Instant)->Result<(),String>{
+   self.terminals.finish_until(deadline).map_err(|_|"private terminal originals remain retained")?;
+   self.git.finish_until(deadline)?;
++  if self.git.has_wsl_witnesses()?{return Err("persist actual WSL closure witnesses before donor retirement".into());}
+   self.custodies.finish_until(deadline)
+  }
+ }
+@@ -101,12 +102,17 @@
+  })))
+ }
+ async fn receipt(State(state):State<Arc<ServiceState>>,Extension(actor):Extension<LocalRequest>,Path(id):Path<String>)->Response{
+- reply(actor.check(&state).and_then(|_|with_store(&state,|store|{
++ reply(actor.check(&state).and_then(|_|{
++  if let Some(closed)=state.local_workspaces.git.poll_wsl(&id)?{
++   let persisted=with_store(&state,|store|store.record_local_wsl_git_closed(&closed).map_err(|_|"late original WSL receipt unavailable".into()));
++   if persisted.is_err(){state.local_workspaces.git.retain_wsl(closed)?;return Err("late closed WSL witness retained".into());}
++  }
++  with_store(&state,|store|{
+   let original=store.local_receipt(&id).map_err(|_|"original unavailable")?.ok_or("original absent; absence is not settlement")?;
+   if original.owner.installation_id!=store.local_installation_id().map_err(|_|"installation")?||
+    original.owner.custodian_key!=store.local_custody().map_err(|_|"custody")?.key(){return Err("different custodian".into());}
+   serde_json::to_value(original).map_err(|_|"original encoding".into())
+- })))
++ })}))
+ }
+ async fn operation(State(state):State<Arc<ServiceState>>,Extension(actor):Extension<LocalRequest>,Json(body):Json<LocalOperationRequest>)->Response{
+  let result=tokio::task::spawn_blocking(move||->Result<Value,String>{
+@@ -124,10 +130,6 @@
+    });
+   }
+   if state.draining.load(Ordering::Acquire)||*state.shutdown.borrow(){return Err("service admission closed".into());}
+-  if matches!(body.owner.environment,LocalEnvironment::Wsl{..})&&matches!(body.operation,
+-   LocalOperation::GitStatus|LocalOperation::GitDiff|LocalOperation::GitBranch{..}|LocalOperation::WorktreeCreate{..}){
+-   return Err("WSL Git helper-tree custody has not qualified; no original effect admitted".into());
+-  }
+   if matches!(body.operation,LocalOperation::SessionCreate{..}|LocalOperation::AgentTurn{..}) &&
+    (state.model_work.check_idle_until(Instant::now()+Duration::from_secs(5)).is_err() ||
+     state.model_operation_workers.has_retained()!=Ok(false)){return Err("finish original model ownership before private coding work".into());}
+@@ -142,6 +144,13 @@
+   let binding=binding.ok_or("original custody missing")?;
+   let current=||check_current(&state,&binding);
+   current()?;
++  if matches!(body.owner.environment,LocalEnvironment::Wsl{..})&&matches!(body.operation,LocalOperation::GitStatus|LocalOperation::GitDiff|LocalOperation::GitBranch{..}|LocalOperation::WorktreeCreate{..}){
++   let closed=state.local_workspaces.git.run_wsl(binding.clone(),&body.request_id,&body.operation,&current)?;
++   let persisted=with_store(&state,|store|store.record_local_wsl_git_closed(&closed).map_err(|_|"original WSL closure receipt unavailable".into()));
++   if persisted.is_err(){state.local_workspaces.git.retain_wsl(closed)?;return Err("actual closed WSL witness remains retained for persistence".into());}
++   current()?;
++   return with_store(&state,|store|serde_json::to_value(store.local_receipt(&body.request_id).map_err(|_|"original WSL receipt unavailable")?).map_err(|_|"original WSL receipt encoding".into()));
++  }
+   let outcome=match &body.operation {
+    LocalOperation::SessionCreate{title,agent}=>state.live_agent.create_local_session(&binding,&body.request_id,title,agent,&current),
+    LocalOperation::AgentTurn{session_id,text}=>state.live_agent.prompt_local(&binding,session_id,&body.request_id,text,&current),
+@@ -150,7 +159,7 @@
+    LocalOperation::TerminalInput{terminal_id,text}=>state.local_workspaces.terminals.input(&binding,terminal_id,text,&current).map_err(|_|"terminal input outcome uncertain".into()),
+    LocalOperation::TerminalResize{terminal_id,columns,rows}=>state.local_workspaces.terminals.resize(&binding,terminal_id,*columns,*rows,&current).map_err(|_|"terminal resize outcome uncertain".into()),
+    LocalOperation::TerminalClose{..}=>unreachable!(),
+-   git=>state.local_workspaces.git.run(binding.clone(),git,&current),
++   git=>state.local_workspaces.git.run(binding.clone(),&body.request_id,git,&current),
+   }?;
+   with_store(&state,|store|{
+    binding.verify_current(store,&state.instance_id)?;
+@@ -194,3 +203,11 @@
+  }).await;
+  reply(result.unwrap_or_else(|_|Err("terminal read unavailable".into())))
+ }
++
++/// Root replaces the shared retirement call with this exact typed hook.
++pub(super) fn finish_with_registry(state:&ServiceState,deadline:Instant)->Result<(),String>{
++ state.local_workspaces.terminals.finish_until(deadline).map_err(|_|"private terminal originals retained")?;
++ state.local_workspaces.git.finish_until(deadline)?;
++ with_store(state,|store|state.local_workspaces.git.persist_wsl(&mut |closed|store.record_local_wsl_git_closed(closed).map_err(|_|"actual WSL closure persistence refused".into())))?;
++ state.local_workspaces.custodies.finish_until(deadline)
++}
+--- a/crates/adapters/src/projects/local_workspaces.rs
++++ b/crates/adapters/src/projects/local_workspaces.rs
+@@ -149,7 +149,14 @@
+   if let Some(prior)=self.local_receipt(&request.request_id)?{
+    if prior.request_sha256!=digest||prior.owner!=request.owner{return Err(StoreError::Conflict);}return Ok(false);
+   }
+-  let kind=encoded(&request.operation)?.split(',').next().unwrap_or("").to_owned();
++  let value=serde_json::to_value(&request.operation).map_err(|_|StoreError::Invalid)?;
++  let kind=value["kind"].as_str().ok_or(StoreError::Invalid)?.to_owned();
++  if matches!(request.owner.environment,LocalEnvironment::Wsl{..})&&matches!(kind.as_str(),"git_status"|"git_diff"|"git_branch"|"worktree_create"){
++   // A restart or retired transport cannot turn an old unknown Linux original
++   // into absence. Preserve immutable legacy kind encodings without rewriting.
++   let pending:bool=self.connection.query_row(r#"SELECT EXISTS(SELECT 1 FROM local_workspace_operations WHERE workspace_id=? AND id<>? AND state IN ('intent','unknown') AND (state='intent' OR COALESCE(json_extract(result_json,'$.original_transport_closed'),0)<>1 OR COALESCE(json_extract(result_json,'$.tree_empty'),0)<>1 OR COALESCE(json_extract(result_json,'$.pipe_eof'),0)<>1) AND (kind IN ('git_status','git_diff','git_branch','worktree_create') OR kind LIKE '{"kind":"git_%' OR kind LIKE '{"kind":"worktree_create%'))"#,params![request.owner.workspace_id,request.request_id],|row|row.get(0))?;
++   if pending{return Err(StoreError::Conflict);}
++  }
+   let count:i64=self.connection.query_row("SELECT count(*) FROM local_workspace_operations",[],|r|r.get(0))?;
+   if count>=4096{return Err(StoreError::Invalid);}
+   self.connection.execute("INSERT INTO local_workspace_operations VALUES(?,?,?,?,?,'intent',NULL)",
+@@ -295,3 +302,21 @@
+   Ok(values)
+  }
+ }
++
++#[cfg(windows)]
++impl ProjectStore{
++ /// Only the actual retained Windows+Linux owner can construct this witness.
++ /// Cleanup persistence never re-labels an unknown effect as successful.
++ pub fn record_local_wsl_git_closed(&mut self,closed:&crate::local_execution::wsl_git::LocalWslGitClosed)->Result<(),StoreError>{
++  let custody=self.local_custody.as_ref().ok_or(StoreError::Invalid)?;
++  custody.verify_account().map_err(|_|StoreError::Conflict)?;
++  if closed.owner().installation_id!=self.local_installation_id()?||closed.owner().custodian_key!=custody.key()||!matches!(closed.owner().environment,LocalEnvironment::Wsl{..}){return Err(StoreError::Conflict);}
++  let original=self.connection.query_row("SELECT owner_json,state,result_json FROM local_workspace_operations WHERE id=?",[closed.request()],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?)))?;
++  if serde_json::from_str::<LocalWorkspaceOwner>(&original.0).map_err(|_|StoreError::Corrupt)?!=*closed.owner(){return Err(StoreError::Conflict);}
++  let bytes=encoded(closed.result())?;if bytes.len()>1024*1024{return Err(StoreError::Invalid);}
++  if let Some(prior)=original.2{if prior==bytes{return Ok(());}return Err(StoreError::Conflict);}
++  if original.1!="unknown"{return Err(StoreError::Conflict);}
++  let state=if closed.result()["outcome_unknown"]==true{"unknown"}else{"committed"};
++  if self.connection.execute("UPDATE local_workspace_operations SET result_json=?,state=? WHERE id=? AND state='unknown' AND result_json IS NULL",params![bytes,state,closed.request()])?!=1{return Err(StoreError::Conflict);}Ok(())
++ }
++}

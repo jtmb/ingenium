@@ -99,8 +99,8 @@ impl ProjectStore {
   self.local_custody()?;
   let row=self.connection.query_row("SELECT environment,revision,state,root_identity,root_path FROM local_workspaces WHERE id=? AND installation_id=? AND custodian_key=?",
    params![id,self.local_installation_id()?,self.local_custody()?.key()],
-   |r|Ok((r.get::<_,String>(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?.ok_or(StoreError::NotFound)?;
-  Ok(LocalWorkspaceRecord{id:id.into(),environment:serde_json::from_str(&row.0).map_err(|_|StoreError::Corrupt)?,revision:row.1,state:row.2,root_identity:row.3,root_path:row.4})
+   |r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional()?.ok_or(StoreError::NotFound)?;
+  Ok(LocalWorkspaceRecord{id:id.into(),environment:serde_json::from_str(&row.0).map_err(|_|StoreError::Corrupt)?,revision:u64::try_from(row.1).map_err(|_|StoreError::Corrupt)?,state:row.2,root_identity:row.3,root_path:row.4})
  }
  /// Reserve before any directory call. Existing UUIDs NEVER call allocation.
  pub fn reserve_local_workspace(&mut self,id:&str,environment:&LocalEnvironment,original:&str)->Result<bool,StoreError>{

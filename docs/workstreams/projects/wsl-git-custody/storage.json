@@ -1,0 +1,12 @@
+{
+  "owner": "01a18934-fe43-76a0-940e-6766d96f5770",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "existing authorized C-backed Ubuntu VHDX",
+  "source": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/parallel/projects/docs/workstreams/projects/wsl-git-custody",
+  "fixture": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/projects/wsl-git-custody-fixture",
+  "receipts": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/veyra-phase-1/coordination/projects",
+  "peakDiskBudget": "<2MiB source + <2MiB reproducible inert fixture; no builds/downloads/dependencies",
+  "regeneration": "python3 -B inert-fixture.py --scratch-root PHASE/coordination/projects; Node existing dependency-free suite",
+  "protected": "native checkout/index, original workspaces/user data, old canonical source and lockfiles; no service/GPU/model/runtime changes",
+  "cleanup": "finally verifies exact inventory/no active refs/mounts then removes owned fixture objects; source and minimal current receipt remain review inputs"
+}
