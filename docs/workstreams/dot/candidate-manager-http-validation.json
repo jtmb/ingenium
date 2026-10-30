@@ -1,0 +1,7 @@
+{
+  "sourceFixturePass": 42,
+  "sourceFixtureFail": 0,
+  "stdoutSha256": "f26b4ce6a600e3ac7fab49ccf8e2611f3f8e07f723b2cd8faba9b3e74d4b988a",
+  "testSourceSha256": "44d071a2bac5e74139cc8ebf533b5af10837217d4363515de74fe7dc8f69b97d",
+  "limits": "Fixed source route/ingress run under synthetic VM token/context/state; actual strict parser/HMAC and proposed missing-lease guard. No DB open/read/write, actual token read, process workload, build/native/model/Docker/auth runtime or42actual behavior claim. All positive constructors closed."
+}

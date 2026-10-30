@@ -1,0 +1,207 @@
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs b/services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs
+@@ -0,0 +1,67 @@
++// SOURCE proposal. Fixed private manager route; verified JSON remains DATA.
++import {createHmac,timingSafeEqual} from 'node:crypto';
++import {loadManagerToken} from '../runtime-manager-auth.js';
++import {withPersistedOriginalCandidateOperation} from './dot-original-context.js';
++import {parseStrictJobJson} from './job-bootstrap-frame.mjs';
++import {hash} from '../../../../packages/veyra-operations/core126-image-contract.mjs';
++const prefix='/api/v1/internal/original-candidate-job-runs',bodies=new WeakMap();
++const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v),integer=v=>Number.isSafeInteger(v)&&v>=0;
++const fail=(code,status=422)=>{throw Object.assign(Error(code),{code,status});};
++const need=(v,code='CANDIDATE_MANAGER_INPUT_INVALID',status=422)=>{if(!v)fail(code,status);};
++function exact(v,names){need(v&&typeof v==='object'&&!Array.isArray(v));const keys=Reflect.ownKeys(v);need(keys.every(k=>typeof k==='string')&&keys.sort().join('|')===[...names].sort().join('|')&&Object.values(Object.getOwnPropertyDescriptors(v)).every(d=>Object.hasOwn(d,'value')&&d.enumerable));}
++/** express.json verify hook only; bounded original bytes, never auth/authority. */
++export function captureOriginalCandidateManagerBody(request,bytes){if(request.path!==prefix&&!request.path?.startsWith(prefix+'/'))return;need(Buffer.isBuffer(bytes)&&bytes.length<=65536);bodies.set(request,Buffer.from(bytes));}
++export function readOriginalCandidateManagerBody(request){const value=bodies.get(request);return value?Buffer.from(value):undefined;}
++function authenticate(request){
++ const h=request.headers??{};need(!['cookie','origin','x-ingenium-internal-service','x-ingenium-audience','x-ingenium-job-attempt','transfer-encoding','content-encoding'].some(k=>h[k]!==undefined),'CANDIDATE_MANAGER_AUTH_REQUIRED',401);
++ let token;try{token=loadManagerToken();}catch{fail('CANDIDATE_MANAGER_TOKEN_OWNER_UNAVAILABLE',503);}const header=h.authorization;need(typeof token==='string'&&/^[A-Za-z0-9_-]{43,128}$/.test(token)&&typeof header==='string'&&header.startsWith('Bearer '),'CANDIDATE_MANAGER_AUTH_REQUIRED',401);
++ const left=Buffer.from(header.slice(7)),right=Buffer.from(token);need(left.length===right.length&&timingSafeEqual(left,right),'CANDIDATE_MANAGER_AUTH_REQUIRED',401);return token;
++}
++function originalBody(request){need(request.headers?.['content-type']==='application/json');need(Buffer.isBuffer(request.originalCandidateBody),'CANDIDATE_MANAGER_ORIGINAL_BODY_UNAVAILABLE',503);need(request.originalCandidateBody.length<=65536);try{return parseStrictJobJson(request.originalCandidateBody,65536);}catch{fail('CANDIDATE_MANAGER_JSON_INVALID');}}
++const readyKeys=['schemaVersion','kind','runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','daemonId','imageId','catalogSha256','artifactClosureSha256','selectionSha256','attachIdentityHash','trapAddress','proxyAddress','pid','networkMode','tty','observedAt','expiresAt'];
++function envelope(body,token,operation,state,now){
++ exact(body,['custodyId','observation','signature']);const o=body.observation,b=state.binding;
++ exact(o,['schemaVersion','domain','kind','custodyId','runId','attemptId','candidateIntentHash','specHash','selectionSha256','containerId','daemonId','childBirthHash','childStartHash','attachIdentityHash','deadlineAt','expectedRevision','observedAt','expiresAt','facts']);
++ need(hex(body.custodyId)&&body.custodyId===o.custodyId&&hex(body.signature),'CANDIDATE_MANAGER_CUSTODY_MISMATCH',403);
++ need(o.schemaVersion===1&&o.domain==='candidate-observation-v1'&&o.kind==='original-candidate-'+operation+'-v1');
++ const key=createHmac('sha256',token).update('candidate-observation-v1/key\0').digest(),mac=createHmac('sha256',key).update('candidate-observation-v1/payload\0').update(hash(o)).digest();need(timingSafeEqual(mac,Buffer.from(body.signature,'hex')),'CANDIDATE_MANAGER_MAC_INVALID',403);
++ need(['runId','attemptId','candidateIntentHash','specHash','selectionSha256','daemonId','deadlineAt'].every(k=>o[k]===b[k]),'CANDIDATE_MANAGER_ORIGINAL_CHANGED',409);
++ need(integer(o.expectedRevision)&&o.expectedRevision===state.revision,'CANDIDATE_MANAGER_REVISION_CHANGED',409);
++ need(integer(o.observedAt)&&integer(o.expiresAt)&&o.observedAt<=now&&now<o.expiresAt&&o.expiresAt-o.observedAt<=5000&&o.expiresAt>o.observedAt&&o.expiresAt<=b.deadlineMs&&now<b.deadlineMs,'CANDIDATE_MANAGER_OBSERVATION_EXPIRED',409);
++ const phase={'create-intent':'prepared',created:'create_intent','start-intent':'created',waiting:'start_intent',ready:'waiting'}[operation];need(state.phase===phase&&!state.cancelRequested&&!state.unknown,'CANDIDATE_MANAGER_PHASE_CHANGED',409);
++ for(const key of ['containerId','childBirthHash','childStartHash','attachIdentityHash']){const newlyObserved=operation==='created'&&['containerId','childBirthHash'].includes(key)||operation==='start-intent'&&key==='attachIdentityHash'||operation==='waiting'&&key==='childStartHash';if(newlyObserved)need(b[key]===null&&hex(o[key]));else need(o[key]===b[key],'CANDIDATE_MANAGER_CHILD_CHANGED',409);}
++ const f=o.facts;
++ if(operation==='create-intent'){exact(f,['createEffectHash']);need(hex(f.createEffectHash));}
++ if(operation==='created'){exact(f,['containerId','childBirthHash','createdAtMs']);need(f.containerId===o.containerId&&f.childBirthHash===o.childBirthHash&&integer(f.createdAtMs)&&f.createdAtMs<=now&&f.createdAtMs>=Date.parse(state.intent.issuedAt));}
++ if(operation==='start-intent'){exact(f,['startEffectHash','attachIdentityHash']);need(hex(f.startEffectHash)&&f.attachIdentityHash===o.attachIdentityHash);}
++ if(operation==='waiting'){exact(f,['childStartHash','startedAtMs']);need(f.childStartHash===o.childStartHash&&integer(f.startedAtMs)&&f.startedAtMs<=now&&f.startedAtMs>=state.childCreatedMs);}
++ if(operation==='ready'){exact(f,readyKeys);need(f.schemaVersion===1&&f.kind==='original-candidate-ready-v1'&&['runId','attemptId','candidateIntentHash','specHash','containerId','childBirthHash','childStartHash','daemonId','selectionSha256','attachIdentityHash'].every(k=>f[k]===o[k])&&f.imageId===b.imageId&&f.catalogSha256===b.catalogSha256&&f.artifactClosureSha256===b.artifactClosureSha256&&f.trapAddress==='127.0.0.1:39261'&&f.proxyAddress==='127.0.0.1:39262'&&f.networkMode==='none'&&f.tty===false&&integer(f.pid)&&f.pid>0&&integer(f.observedAt)&&integer(f.expiresAt)&&f.observedAt<=o.observedAt&&f.expiresAt>now&&f.expiresAt>f.observedAt&&f.expiresAt-f.observedAt<=5000&&f.expiresAt<=b.deadlineMs);}
++ return o; // DATA only. This is intentionally NOT an opaque lifecycle handle.
++}
++/** Only actual factory's SAME Core owner enters here; no token/clock/context or
++ * positive physical-constructor injection ports. All positive transitions CLOSED. */
++export function createOriginalCandidateManagerHttp(owner){return async request=>{
++ const match=/^\/internal\/original-candidate-job-runs\/([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/(admission|current|control|create-intent|created|start-intent|waiting|ready)$/.exec(request.path);if(!match)return null;
++ const token=authenticate(request);need(Object.keys(request.query??{}).length===0);const runId=match[1],operation=match[2];need(request.method===(operation==='admission'?'GET':'POST'),'CANDIDATE_MANAGER_METHOD_INVALID',405);
++ const body=operation==='admission'?undefined:originalBody(request);if(operation==='admission')need(request.originalCandidateBody===undefined&&(!request.body||Object.keys(request.body).length===0));
++ return withPersistedOriginalCandidateOperation(runId,context=>{
++  // Requires original in-memory prepare key in SAME Core/database and genuine
++  // candidate context. This method does no write or row-based reconstruction.
++  const state=owner.candidateOriginalManagerState(runId,{request},context),b=state.binding,now=Date.now();need(b.runId===runId);
++  if(operation==='admission'){need(state.phase==='prepared'&&state.revision===0&&!state.cancelRequested&&!state.unknown&&now<b.deadlineMs,'CANDIDATE_MANAGER_PREPARE_UNAVAILABLE',503);return{data:{intent:state.intent,intentHash:b.candidateIntentHash,specHash:b.specHash,selectionSha256:b.selectionSha256,phase:state.phase,revision:state.revision}};}
++  if(operation==='current'||operation==='control'){
++   exact(body,['attemptId','intentHash','specHash','selectionSha256','deadlineAt',operation==='current'?'stage':'custodyId']);need(body.attemptId===b.attemptId&&body.intentHash===b.candidateIntentHash&&body.specHash===b.specHash&&body.selectionSha256===b.selectionSha256&&body.deadlineAt===b.deadlineAt,'CANDIDATE_MANAGER_ORIGINAL_CHANGED',409);
++   if(operation==='current'){need(['create','attach','start','readiness'].includes(body.stage));const phases={create:['prepared'],attach:['created'],start:['created'],readiness:['waiting','ready']}[body.stage];need(phases?.includes(state.phase)&&!state.unknown&&!state.cancelRequested&&now<b.deadlineMs,'CANDIDATE_MANAGER_CURRENT_UNAVAILABLE',503);}else need(hex(body.custodyId));
++   // DATA only. A caller's custodyId is not adopted/bound here. After withdrawal,
++   // missing genuine retained control context refuses in the fixed context owner.
++   return{data:{intentHash:b.candidateIntentHash,specHash:b.specHash,selectionSha256:b.selectionSha256,deadlineAt:b.deadlineAt,revision:state.revision}};
++  }
++  envelope(body,token,operation,state,now);
++  // MAC authenticates manager-origin DATA, not live private Docker objects. No
++  // generic sign/verify callback or JSON-to-handle constructor is permitted.
++  // Root must bind custody to original lease + genuine physical constructor and
++  // call existing SAME-writer Core CAS in a final refreshed context transaction.
++  const missing={'create-intent':'CREATE_INTENT','created':'CHILD_RECEIPT','start-intent':'RETAINED_DUPLEX','waiting':'ORIGINAL_START','ready':'SAME_CHILD_READINESS'}[operation];
++  fail('CANDIDATE_MANAGER_GENUINE_'+missing+'_OWNER_UNAVAILABLE',503);
++ });
++};}
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts b/services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts
+new file mode 100644
+--- /dev/null
++++ b/services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts
+@@ -0,0 +1,8 @@
++import type {Core126Handlers,OriginalCandidateLease} from './managed-job-contracts.mjs';
++import type {CandidateLifecycleBinding} from './candidate-lifecycle-original-gates.mjs';
++import type {CandidateLifecyclePhase} from './candidate-lifecycle-owner.mjs';
++export interface CandidateManagerState {readonly intent:Readonly<Record<string,unknown>>;readonly binding:CandidateLifecycleBinding;readonly phase:CandidateLifecyclePhase;readonly revision:number;readonly cancelRequested:boolean;readonly unknown:boolean;readonly childCreatedMs:number|null;}
++export interface CandidateManagerStateOwner {candidateOriginalManagerState(runId:string,managerContext:unknown,originalContext:unknown):CandidateManagerState;}
++export function captureOriginalCandidateManagerBody(request:object,bytes:Buffer):void;
++export function readOriginalCandidateManagerBody(request:object):Buffer|undefined;
++export function createOriginalCandidateManagerHttp(owner:CandidateManagerStateOwner):(request:Parameters<Core126Handlers['internal']>[0]&{originalCandidateBody?:Buffer})=>ReturnType<Core126Handlers['internal']>;
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs
+--- a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs
+@@ -47,6 +47,12 @@
+   return write(()=>{const value=bound(runId);mode==="current"?current(value,context):control(value,context);const facts=original[method](handle,value.binding);return cas(value,typeof next==="function"?next(value):next,fields(facts,value));});
+  }
+  return Object.freeze({requireSchema,requirePrepared(runId){return metadata(prepared(runId));},
++  describeOriginalManagerLease(key){
++   const saved=key&&candidateLeases.get(key);if(!saved||saved.db!==db)deny("CORE131_ORIGINAL_LEASE_UNAVAILABLE");
++   const value=bound(saved.intent.run.runId);
++   if(value.r.admission_json!==JSON.stringify(saved.admission)||value.c.selection_sha256!==saved.selectionSha256||candidateInertIntentHash(saved.intent)!==value.c.candidate_intent_hash)deny("CORE131_ORIGINAL_LEASE_UNAVAILABLE");
++   return Object.freeze({intent:Object.freeze(structuredClone(saved.intent)),binding:value.binding,phase:value.c.phase,revision:value.c.revision,cancelRequested:value.c.cancel_requested_ms!==null,unknown:value.c.unknown_ms!==null,childCreatedMs:value.c.child_created_ms});
++  },
+   inspect(runId,context){const value=bound(runId);control(value,context);return metadata(value);},
+   createIntent(key,context,handle){const value=lease(key);return transition(value.c.run_id,context,handle,"current","requireOriginalCandidateCreateIntent","create_intent",facts=>{exact(facts,["createEffectHash"]);return{create_effect_hash:hash(facts.createEffectHash)};});},
+   bindChild:(runId,context,handle)=>transition(runId,context,handle,"control","requireOriginalCandidateChild",value=>value.c.phase==="unknown"?"unknown":"created",facts=>{exact(facts,["containerId","childBirthHash","createdAtMs"]);return{child_id:hash(facts.containerId),child_birth_hash:hash(facts.childBirthHash),child_created_ms:facts.createdAtMs};}),
+diff --git a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts
+--- a/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts
++++ b/services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts
+@@ -4,4 +4,4 @@
+ export interface CandidateLifecycleMetadata {readonly purpose:"candidate-inert-v1";readonly runId:string;readonly attemptId:string;readonly candidateIntentHash:string;readonly specHash:string;readonly phase:CandidateLifecyclePhase;readonly revision:number;readonly containerId:string|null;readonly childBirthHash:string|null;readonly deadlineAt:string;readonly unknown:boolean;readonly retirementRecorded:boolean;}
+ type Step=(runId:string,context:unknown,handle:OriginalCandidateLifecycleHandle)=>CandidateLifecycleMetadata;
+ export interface CandidateLifecycleOwnerMethods {candidateCreateIntent(lease:OriginalCandidateLease,context:unknown,handle:OriginalCandidateLifecycleHandle):CandidateLifecycleMetadata;candidateBindOriginalChild:Step;candidateStartIntent:Step;candidateObserveWaiting:Step;candidateObserveReady:Step;candidateCommitOriginalMaterial:Step;candidateObserveRunning:Step;candidateRecordOriginalResult:Step;candidateRequestCancellation(runId:string,context:unknown):CandidateLifecycleMetadata;candidateRetainUnknown:Step;candidateRecordOriginalRetirement:Step;candidateLifecycleReceipt(runId:string,context:unknown):CandidateLifecycleMetadata;}
+-export function createCandidateLifecycleExtension(options:{db:ReturnType<Core126OwnerPorts["getDb"]>;getDb:Core126OwnerPorts["getDb"];write<T>(work:()=>T):T;clock():Date;readManagedRow(runId:string):unknown;baseCurrent(selection:Core126Selection,context:unknown,purpose:"candidate-inert-v1"):Core126Facts;originalRunIdentity(run:Core126Facts["run"]):string;jobs:Pick<Core126OwnerPorts["jobs"],"getJobRun">;candidateLeases:WeakMap<object,unknown>}):Readonly<{requireSchema():void;requirePrepared(runId:string):CandidateLifecycleMetadata;inspect(runId:string,context:unknown):CandidateLifecycleMetadata;createIntent(lease:OriginalCandidateLease,context:unknown,handle:OriginalCandidateLifecycleHandle):CandidateLifecycleMetadata;bindChild:Step;startIntent:Step;observeWaiting:Step;observeReady:Step;commitOriginalMaterial:Step;observeRunning:Step;recordResult:Step;cancel(runId:string,context:unknown):CandidateLifecycleMetadata;unknown:Step;retire:Step}>;
++export function createCandidateLifecycleExtension(options:{db:ReturnType<Core126OwnerPorts["getDb"]>;getDb:Core126OwnerPorts["getDb"];write<T>(work:()=>T):T;clock():Date;readManagedRow(runId:string):unknown;baseCurrent(selection:Core126Selection,context:unknown,purpose:"candidate-inert-v1"):Core126Facts;originalRunIdentity(run:Core126Facts["run"]):string;jobs:Pick<Core126OwnerPorts["jobs"],"getJobRun">;candidateLeases:WeakMap<object,unknown>}):Readonly<{describeOriginalManagerLease(lease:OriginalCandidateLease):import("./candidate-manager-http.mjs").CandidateManagerState;requireSchema():void;requirePrepared(runId:string):CandidateLifecycleMetadata;inspect(runId:string,context:unknown):CandidateLifecycleMetadata;createIntent(lease:OriginalCandidateLease,context:unknown,handle:OriginalCandidateLifecycleHandle):CandidateLifecycleMetadata;bindChild:Step;startIntent:Step;observeWaiting:Step;observeReady:Step;commitOriginalMaterial:Step;observeRunning:Step;recordResult:Step;cancel(runId:string,context:unknown):CandidateLifecycleMetadata;unknown:Step;retire:Step}>;
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.mjs b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.mjs
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.mjs
+@@ -98,6 +98,12 @@
+    const lifecycle=candidateLifecycle.requirePrepared(runId);
+    return Object.freeze({intent:structuredClone(saved.intent),intentHash:purpose.candidateIntentHash,specHash:original.spec_hash,selectionSha256:saved.selectionSha256,phase:lifecycle.phase,revision:lifecycle.revision});
+   },
++  candidateOriginalManagerState(runId,managerContext,originalContext){
++   manager(managerContext);const key=retainedCandidateLeases.get(runId),saved=key&&candidateLeases.get(key);
++   if(!saved||saved.db!==db)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
++   if(typeof ports.originalCandidate?.require!=='function'||ports.originalCandidate.require(originalContext,{runId,projectId:saved.admission.projectId,runtimeId:saved.admission.runtimeId,workspaceId:saved.admission.workspaceId})!==undefined)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_CONTEXT_UNAVAILABLE');
++   const data=candidateLifecycle.describeOriginalManagerLease(key);if(data.binding.runId!==runId)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');return data;
++  },
+   candidateCreateIntentForOriginalRun(runId,context,handle){
+    same();const key=retainedCandidateLeases.get(runId);
+    if(!key)fail('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE');
+diff --git a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+--- a/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
++++ b/services/ingenium-api/lib/dot-v2/core126-owner.d.mts
+@@ -1,4 +1,4 @@
+ import type {CandidateLifecycleOwnerMethods} from "./candidate-lifecycle-owner.mjs";
+ import type {Core126OwnerPorts,Core126Owner,Core126Facts} from "./managed-job-contracts.mjs";
+ export declare function originalJobRunIdentity(run:Core126Facts["run"]):string;
+-export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner & CandidateLifecycleOwnerMethods;
++export declare function createCore126Owner(ports:Core126OwnerPorts):Core126Owner & CandidateLifecycleOwnerMethods & import("./candidate-manager-http.mjs").CandidateManagerStateOwner;
+diff --git a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+--- a/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-actual-factory.ts
+@@ -1,3 +1,4 @@
++import {createOriginalCandidateManagerHttp} from "./candidate-manager-http.mjs";
+ import {agents,authorization,checkpointAfterWrite,execTransaction,getDb,jobs,mcpAuthorizationPolicy,mcpCredentials,runtimes,vault} from "ingenium-core";
+ import {createHash} from "node:crypto";
+ import {requireOriginalCandidateCoordinatorContext,originalDotContextAuthority,withPersistedApprovedDotOperation,refreshOriginalApprovedDotContext} from "./dot-original-context.js";
+@@ -67,8 +68,10 @@
+   if(original.purpose!=='production')throw Object.assign(Error('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE'),{status:503});};
+  const rawHandlers=createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list});
+  const withdrawOriginal=createCore126WithdrawalHandler({credentials:mcpCredentials});
++ const candidateManagerHttp=createOriginalCandidateManagerHttp(owner);
+  const handlers:Core126Handlers={
+   async internal(request){
++   const candidate=await candidateManagerHttp(request);if(candidate)return candidate;
+    const match=/^\/internal\/managed-job-runs\/([a-f0-9-]+)\/([^/]+)$/.exec(request.path),runId=match?.[1],operation=match?.[2];
+    if(!runId)return rawHandlers.internal(request);
+    managerGuard.context(request); // Authenticate BEFORE original Core lookup or manager observations.
+diff --git a/services/ingenium-api/lib/dot-v2/core126-ingress.ts b/services/ingenium-api/lib/dot-v2/core126-ingress.ts
+--- a/services/ingenium-api/lib/dot-v2/core126-ingress.ts
++++ b/services/ingenium-api/lib/dot-v2/core126-ingress.ts
+@@ -1,24 +1,28 @@
++import {readOriginalCandidateManagerBody} from "./candidate-manager-http.mjs";
+ import type {RequestHandler} from "express";
+ import type {Core126Handlers} from "./managed-job-contracts.mjs";
+ /** Exact private audiences; generic browser/runtime auth never receives these requests. */
+ export function createCore126Ingress(handlers:Core126Handlers):RequestHandler {
+  const internalPrefix="/api/v1/internal/managed-job-runs",runtimePrefix="/api/v1/runtime/job-runs";
++ const candidatePrefix="/api/v1/internal/original-candidate-job-runs";
+  const uuid="[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}";
+  const internalPath=new RegExp("^"+internalPrefix+"/("+uuid+")/(admission|launch-material|effect-intent|created|started|unknown|retired|no-create-close|consumed|removed)$");
++ const candidatePath=new RegExp("^"+candidatePrefix+"/("+uuid+")/(admission|current|control|create-intent|created|start-intent|waiting|ready)$");
+  const runtimePath=new RegExp("^"+runtimePrefix+"/("+uuid+")/(assignment|bootstrap-assignment|withdraw|result|mcp-tools|mcp/[A-Za-z0-9_:-]{1,128})$");
+  return (req,res,next)=>{
+-  const internal=req.path===internalPrefix||req.path.startsWith(internalPrefix+"/");
++  const candidate=req.path===candidatePrefix||req.path.startsWith(candidatePrefix+"/");
++  const internal=candidate||req.path===internalPrefix||req.path.startsWith(internalPrefix+"/");
+   const runtime=req.path===runtimePrefix||req.path.startsWith(runtimePrefix+"/");
+   if(!internal&&!runtime){next();return;}
+   res.setHeader("Cache-Control","no-store");
+   const refuse=()=>res.status(404).json({error:{code:"NOT_FOUND",message:"Resource not found"}});
+-  const match=(internal?internalPath:runtimePath).exec(req.path),operation=match?.[2];
++  const match=(candidate?candidatePath:internal?internalPath:runtimePath).exec(req.path),operation=match?.[2];
+   if(!match||req.headers.cookie!==undefined||req.headers.origin!==undefined||req.headers["x-ingenium-internal-service"]!==undefined){refuse();return;}
+   const read=operation==="admission"||operation==="assignment"||operation==="bootstrap-assignment"||operation==="mcp-tools";
+   if(req.method!==(read?"GET":"POST")){refuse();return;}
+   const keys=Object.keys(req.query),action=req.query.action;
+-  if(operation==="admission" ? keys.length!==1||keys[0]!=="action"||typeof action!=="string"||!["launch","inspect","cancel","cleanup"].includes(action) : keys.length!==0){refuse();return;}
+-  const request={path:req.path.slice("/api/v1".length),method:req.method,headers:req.headers,query:operation==="admission"?{action}: {},body:req.body};
++  if(candidate ? keys.length!==0 : operation==="admission" ? keys.length!==1||keys[0]!=="action"||typeof action!=="string"||!["launch","inspect","cancel","cleanup"].includes(action) : keys.length!==0){refuse();return;}
++  const request={path:req.path.slice("/api/v1".length),method:req.method,headers:req.headers,query:!candidate&&operation==="admission"?{action}: {},body:req.body,...(candidate?{originalCandidateBody:readOriginalCandidateManagerBody(req)}:{})};
+   Promise.resolve().then(()=>internal?handlers.internal(request):handlers.runtime(request)).then(result=>{
+    if(!result){refuse();return;}res.json(result);
+   }).catch((error:unknown)=>{
+diff --git a/services/ingenium-api/scripts/api-server.ts b/services/ingenium-api/scripts/api-server.ts
+--- a/services/ingenium-api/scripts/api-server.ts
++++ b/services/ingenium-api/scripts/api-server.ts
+@@ -1,3 +1,4 @@
++import {captureOriginalCandidateManagerBody} from "../lib/dot-v2/candidate-manager-http.mjs";
+ import {createNativeScopedCustomizeRouter} from '../lib/routes/customize-scoped-v1.js';
+ import {createScopedCustomizeRouter} from "../lib/routes/customize-scoped.js";
+ import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
+@@ -155,7 +156,7 @@
+ app.use(repositorySyncContentTypeGate);
+ // Repository projections contain the bounded docs and resource manifests in one
+ // request, so they need a narrow ceiling above the default API body limit.
+-const defaultJsonParser = express.json({ limit: "2mb" });
++const defaultJsonParser = express.json({ limit: "2mb",verify(request,_response,bytes){captureOriginalCandidateManagerBody(request,bytes);} });
+ app.use((req, res, next) => isExactRepositorySyncRequest(req)
+   ? next()
+   : defaultJsonParser(req, res, next));

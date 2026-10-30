@@ -1,0 +1,65 @@
+[
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-manager-http.mjs",
+    "source": "candidate-manager-http.proposal.mjs",
+    "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "postimageSha256": "ec6d19bd21690882e735495d5ab2d0fd469316c7d242f5831c3152f2aeb32118",
+    "bytes": 9920
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-manager-http.d.mts",
+    "source": "candidate-manager-http.d.mts",
+    "preimageSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "postimageSha256": "cf1d63fff74994dab09ff0f7e81b66d530457904c47a391fd09f788b10fffe9f",
+    "bytes": 1090
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.mjs",
+    "source": "candidate-manager-http-lifecycle.proposal.mjs",
+    "preimageSha256": "2d153d5b873f44e643cb8272a11448c04f52f738939f9e16124c5f385446c604",
+    "postimageSha256": "952471e0dc02cb1462deb545253d53e405893451339d106ddf7fbd2c7dc64ae3",
+    "bytes": 12857
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/candidate-lifecycle-owner.d.mts",
+    "source": "candidate-manager-http-lifecycle.d.mts",
+    "preimageSha256": "d95a93862daf9557254f5d5abcd0d9ce2d5396719bca5a39996dcd186e295522",
+    "postimageSha256": "19a3fcb5f3fc77f9fbb110fcc834b09a884080a9254c798273a24070cb8e855a",
+    "bytes": 2617
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-owner.mjs",
+    "source": "candidate-manager-http-core.proposal.mjs",
+    "preimageSha256": "f66713e8e0bf0b8afbd35a79d4af34e8329b5d323078c1fe9d027f3e6fcb912c",
+    "postimageSha256": "d0358ffb928378452f349360f406d8df4104ca7bc47b19705569ec014d57fecb",
+    "bytes": 35028
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-owner.d.mts",
+    "source": "candidate-manager-http-core.d.mts",
+    "preimageSha256": "46cb91b37771bdaf2dff6214b4fc19d06ec14ce0a1b30f7666ce4b618ba04089",
+    "postimageSha256": "6a9cceb563fca968348b5e8f9ef0fe6487771d2ea63dc1541c4c0323d9d61e26",
+    "bytes": 442
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-actual-factory.ts",
+    "source": "candidate-manager-http-factory.proposal.ts",
+    "preimageSha256": "37b8c0d0f8f5f6e98d0152c6889d62037a2b4638df12d2fe6c3d864b2074b8ba",
+    "postimageSha256": "2bab431a0d4cd3ab48c3c8ff575d2737f09b5b9b62b8d8125e0bab293ea0f86d",
+    "bytes": 9699
+  },
+  {
+    "target": "services/ingenium-api/lib/dot-v2/core126-ingress.ts",
+    "source": "candidate-manager-http-ingress.proposal.ts",
+    "preimageSha256": "c11d13ac2ae0e011a1e607771242ed80ecc594ec739bc72f59f1ce1481a97de3",
+    "postimageSha256": "8fef3d813529d8d9834e8dee838ccc2adada0aaa958cb5ede0da6ac5598a6ecc",
+    "bytes": 3111
+  },
+  {
+    "target": "services/ingenium-api/scripts/api-server.ts",
+    "source": "candidate-manager-http-server.proposal.ts",
+    "preimageSha256": "5d355e752fb79174154f879e05e6a81fc748c0198efc4a36bdaeb76c9f289c88",
+    "postimageSha256": "221405c956487df1178ce25fe9af11e5cd561c50ec2cecb63fdc72c32e5dd148",
+    "bytes": 21727
+  }
+]
