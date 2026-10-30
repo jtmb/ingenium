@@ -196,3 +196,32 @@ test("registry revision changing during async work suppresses output and preserv
   assert.equal(f.op(),false);assert.equal(effects,1);
  }finally{f.close();}
 });
+
+test("local conversation stop and selection originals stay unknown after lost acknowledgements and never resend",()=>{
+ for(const command of [{kind:"session_interrupt",session_id:"ses_owned"},{kind:"session_select_model",session_id:"ses_owned",model_id:"engine-model"},{kind:"session_select_agent",session_id:"ses_owned",agent:"build"}]){
+  const f=fixture();try{
+   f.migrate();f.active();let effects=0;const request={request_id:operation,owner:f.owner,operation:command};
+   assert.equal(f.op(request),true);requireCurrentRegistry(f);
+   f.db.prepare("UPDATE local_workspace_operations SET state='unknown' WHERE id=? AND state='intent'").run(operation);effects++;
+   assert.equal(f.op(request),false);assert.equal(effects,1);
+   assert.throws(()=>f.op({...request,operation:{...command,session_id:"ses_foreign"}}));
+   assert.equal(f.db.prepare("SELECT state FROM local_workspace_operations WHERE id=?").get(operation).state,"unknown");
+  }finally{f.close();}
+ }
+});
+test("bounded private session references exclude foreign workspaces and ambiguous duplicate creation receipts",()=>{
+ const f=fixture();try{
+  f.migrate();f.active();
+  function created(id,workspaceId,session){
+   f.db.prepare("INSERT INTO local_workspace_operations VALUES(?,?,?,?,?,'committed',?)")
+    .run(id,workspaceId,JSON.stringify(f.owner),sha(id),"session_create",JSON.stringify({result_kind:"session_created",session:{id:session}}));
+  }
+  const foreign="44444444-4444-4444-8444-444444444444";f.reserve(foreign);
+  created("one",workspace,"ses_owned_a");created("two",foreign,"ses_foreign");
+  created("three",workspace,"ses_ambiguous");created("four",workspace,"ses_ambiguous");created("five",workspace,"ses_owned_b");
+  const source=readFileSync(new URL("sources/crates/adapters/src/projects/local_workspaces.rs",proposal),"utf8");
+  const query=source.match(/prepare\("(SELECT json_extract\(result_json,'\$\.session.id'\) AS session_id[^"\n]+)"\)/)?.[1];assert.ok(query);
+  const first=f.db.prepare(query).all(workspace,null,null,1).map(row=>row.session_id);assert.deepEqual(first,["ses_owned_a"]);
+  assert.deepEqual(f.db.prepare(query).all(workspace,first[0],first[0],100).map(row=>row.session_id),["ses_owned_b"]);
+ }finally{f.close();}
+});

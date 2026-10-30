@@ -1,5 +1,6 @@
 //! Actual directory-scoped engine methods, with a separately typed native owner.
 use super::*;
+mod conversations;
 use crate::local_execution::LocalWorkspaceBinding;
 use veyra_contracts::local_workspaces::LocalEnvironment;
 fn local_error()->RuntimeError{RuntimeError::Binding}
@@ -11,6 +12,8 @@ pub(super) fn require_local_engine(engine:&OwnedEngine,binding:&LocalWorkspaceBi
  };
  // Project-owned credential/plugin/isolation scope cannot be relabeled private.
  if engine.environment!=expected || engine.account_scope.is_some() || engine.child.is_isolated()
+  || engine._plugins.as_ref().is_some_and(|launch|!launch.empty())
+  || engine._assistants.as_ref().is_some_and(|launch|!launch.empty())
   {return Err(local_error());}
  engine.ensure_directory(binding.directory())
 }
@@ -22,7 +25,7 @@ impl LiveRuntime {
   let engine=self.lock_engine_for_directory(binding.directory())?;
   require_local_engine(&engine,binding,current)?;
   if !engine.client()?.agents(binding.directory())?.iter().any(|a|a.id==agent&&a.mode=="primary"&&!a.hidden){return Err(RuntimeError::AgentUnavailable);}
-  let model=ModelRef{id:engine.model.id.clone(),provider_id:provider_config::PROVIDER_ID.into(),variant:Some("default".into())};
+  let model=ModelRef{id:engine.model.id.clone(),provider_id:provider_config::PROVIDER_ID.into(),variant:Some(engine.model.variant.clone())};
   require_local_engine(&engine,binding,current)?;
   let id=format!("ses_{}",request.simple());
   let session=engine.client()?.create_bound_session_for_agent(binding.directory(),title,&id,&model,Some(agent))?;

@@ -4,6 +4,12 @@
   "nodeMigrationsChanged": false,
   "existingInputs": [
     {
+      "path": "crates/adapters/src/opencode/mod.rs",
+      "baseBlob": "d223c5684a275dbf64c3d9781ec7f0994319bbb3",
+      "proposedSha256": "ea74d8ce2f22459a816c3c34f4e48c873cc6914013509bdfad1492598786aa40",
+      "changed": true
+    },
+    {
       "path": "apps/service/src/routes.rs",
       "baseBlob": "cdd13f467919794b5282682b3ebf51614437f9f3",
       "proposedSha256": "c792fdad43c393c095b81a5ce992ad7432dbae048c68874756ca0d1ac05f2e6a",
@@ -54,7 +60,7 @@
     {
       "path": "apps/service/src/routes/live_agent.rs",
       "baseBlob": "27eba510d1d8528250ccf20d82cc1ebd640f4d70",
-      "proposedSha256": "983da07273e30370e57b6d62385eb8494a137a9863e70859a9a3b34f05a7d0ed",
+      "proposedSha256": "e099b272c87efa3bff47d2e5ac6aa14aa230f7a8ff7a83dff7b767ae6ebe933e",
       "changed": true
     },
     {
@@ -180,14 +186,19 @@
   ],
   "canonicalNewSources": [
     {
+      "path": "apps/service/src/routes/local_workspaces/conversations.rs",
+      "bytes": 4457,
+      "sha256": "13fb267c31ff3fbf9d65b1bdb18ab0a4f53b2676b0ab27510c442272452f222f"
+    },
+    {
       "path": "apps/service/src/routes/local_workspaces/git.rs",
       "bytes": 6572,
       "sha256": "735e614a97fcaadc37972a951ab577601a77130e55c0f96a084b900e9c55dc78"
     },
     {
       "path": "apps/service/src/routes/local_workspaces.rs",
-      "bytes": 13356,
-      "sha256": "5754468330dbee531079f1a512c8f930d580f1821e57a7f32bee93c663a11ca4"
+      "bytes": 14074,
+      "sha256": "d73580fd0f8e103c248f625fb8d6e2d53c1672349bb16cad0d3f672d32d14599"
     },
     {
       "path": "apps/service/src/routes/state_startup/local_custody.rs",
@@ -230,9 +241,19 @@
       "sha256": "911ffb31447a457e4a970280247ef124894327ca2019f4d8905bb124a88e376d"
     },
     {
+      "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces/conversations.rs",
+      "bytes": 6315,
+      "sha256": "817dea4a4a66df669b71b9e7b7b26e744aacddb580399aa8cd6c94b19ad3fcba"
+    },
+    {
       "path": "crates/adapters/src/opencode/desktop_runtime/local_workspaces.rs",
-      "bytes": 3083,
-      "sha256": "e16de6bbb636c83859e5078bee613f007eb00e52f4ea7d3d50b5cc5c9f2b41ec"
+      "bytes": 3251,
+      "sha256": "6444d34e6bfaf96fb0543f1b059976a9586a04a0e7099394d46c3f31d184b6de"
+    },
+    {
+      "path": "crates/adapters/src/opencode/local_conversations.rs",
+      "bytes": 4572,
+      "sha256": "af67f2348b579571145e5add34ab6134b8a2edc129f54712ef313ad3fd535215"
     },
     {
       "path": "crates/adapters/src/projects/0006.sql",
@@ -241,8 +262,8 @@
     },
     {
       "path": "crates/adapters/src/projects/local_workspaces.rs",
-      "bytes": 19251,
-      "sha256": "c4faed0aad10153313e3976a93c2f65b966cac5b8d31b40d202fe7dc6d5c88a5"
+      "bytes": 20246,
+      "sha256": "27c1a618190c32d2fe21b198ed4ff43233b7bd2bab2a7f739f4f9fdd78ee8160"
     },
     {
       "path": "crates/adapters/src/task_workspaces/private.rs",
@@ -251,11 +272,11 @@
     },
     {
       "path": "crates/contracts/src/local_workspaces.rs",
-      "bytes": 2716,
-      "sha256": "21217ee03740d91303085eb73ce87ef5cb8c2d199f57515c14e71b43828a63c7"
+      "bytes": 2874,
+      "sha256": "286b8be6f1148f9a6e8d3645e090ca9a50792e7633d4b362fae7bc9fccde1125"
     }
   ],
-  "integrationPatchSha256": "2201781a5480dddbf81cc593ddf56ed2c8bef5d941d069951ce9adf985869f20",
+  "integrationPatchSha256": "08a7d4d4e2e1288109b7f58713ca37c1f479424d4854cfe9369c523572193ffa",
   "nativeCheckoutWritten": false,
   "applied": false,
   "compiled": false,

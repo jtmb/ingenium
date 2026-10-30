@@ -1,3 +1,13 @@
+--- a/crates/adapters/src/opencode/mod.rs
++++ b/crates/adapters/src/opencode/mod.rs
+@@ -25,6 +25,7 @@
+ pub mod context_controls;
+ pub(crate) mod input_validation;
+ mod location;
++mod local_conversations;
+ pub use location::EngineProjectIdentity;
+ pub mod owned_wsl;
+ pub mod provider_config;
 --- a/apps/service/src/routes.rs
 +++ b/apps/service/src/routes.rs
 @@ -33,6 +33,8 @@
@@ -234,10 +244,21 @@
  mod desktop_connection;
 --- a/apps/service/src/routes/live_agent.rs
 +++ b/apps/service/src/routes/live_agent.rs
-@@ -54,6 +54,16 @@
+@@ -54,6 +54,27 @@
      replies: veyra_adapters::public_reply_store::ReplyStore,
  }
  impl LiveAgent {
++    pub(super) fn local_conversation_read(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,id:Option<&str>,kind:&str,cursor:Option<&str>,limit:u32,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++        match (kind,id){
++            ("runtime",None)=>self.runtime.local_runtime_context(binding,current),
++            ("messages",Some(id))=>self.runtime.local_messages(binding,id,cursor,limit,current),
++            ("status",Some(id))=>self.runtime.local_conversation_status(binding,id,current),
++            _=>Err(RuntimeError::Binding),
++        }.map_err(|_|"private conversation read unavailable".into())
++    }
++    pub(super) fn local_conversation_control(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,operation:&veyra_contracts::local_workspaces::LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
++        self.runtime.local_conversation_control(binding,operation,current).map_err(|_|"private conversation control outcome unknown".into())
++    }
 +    pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
 +        self.runtime.create_local_session(binding,request,title,agent,current).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
 +    }

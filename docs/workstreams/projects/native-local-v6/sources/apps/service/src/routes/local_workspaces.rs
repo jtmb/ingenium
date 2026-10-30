@@ -8,6 +8,7 @@ use serde_json::{Value,json};
 use sha2::{Digest,Sha256};
 use std::{sync::{Arc,Mutex},time::{Duration,Instant}};
 mod git;
+mod conversations;
 #[derive(Clone)]
 pub(super) struct LocalRequest{instance:String}
 impl LocalRequest {
@@ -36,7 +37,10 @@ impl Runtime {
  }
 }
 pub(super) fn router()->Router<Arc<ServiceState>>{
- Router::new().route("/",post(create)).route("/{id}",get(workspace))
+ Router::new().route("/",post(create)).route("/context",get(conversations::context)).route("/{workspace_id}",get(workspace))
+  .route("/{workspace_id}/runtime",get(conversations::runtime)).route("/{workspace_id}/sessions",get(conversations::sessions))
+  .route("/{workspace_id}/sessions/{session_id}/messages",get(conversations::messages))
+  .route("/{workspace_id}/sessions/{session_id}/status",get(conversations::status))
   .route("/operations/{id}",get(receipt)).route("/operations",post(operation))
   .route("/{workspace_id}/sessions/{session_id}",get(session))
   .route("/{workspace_id}/terminals/{terminal_id}",get(terminal))
@@ -130,7 +134,7 @@ async fn operation(State(state):State<Arc<ServiceState>>,Extension(actor):Extens
   let (fresh,binding)=with_store(&state,|store|{
    if !store.reserve_local_operation(&body,&state.instance_id).map_err(|_|"original conflict")?{return Ok((false,None));}
    let binding=LocalWorkspaceBinding::acquire(store,&body.owner,&state.instance_id)?;
-   if let LocalOperation::AgentTurn{session_id,..}=&body.operation{store.require_local_session(&body.owner.workspace_id,session_id).map_err(|_|"session is not owned by this private original")?;}
+   if let LocalOperation::AgentTurn{session_id,..}|LocalOperation::SessionInterrupt{session_id}|LocalOperation::SessionSelectModel{session_id,..}|LocalOperation::SessionSelectAgent{session_id,..}=&body.operation{store.require_local_session(&body.owner.workspace_id,session_id).map_err(|_|"session is not owned by this private original")?;}
    store.fence_local_operation(&body.request_id).map_err(|_|"durable dispatch fence unavailable")?;
    Ok((true,Some(binding)))
   })?;
@@ -141,6 +145,7 @@ async fn operation(State(state):State<Arc<ServiceState>>,Extension(actor):Extens
   let outcome=match &body.operation {
    LocalOperation::SessionCreate{title,agent}=>state.live_agent.create_local_session(&binding,&body.request_id,title,agent,&current),
    LocalOperation::AgentTurn{session_id,text}=>state.live_agent.prompt_local(&binding,session_id,&body.request_id,text,&current),
+   LocalOperation::SessionInterrupt{..}|LocalOperation::SessionSelectModel{..}|LocalOperation::SessionSelectAgent{..}=>state.live_agent.local_conversation_control(&binding,&body.operation,&current),
    LocalOperation::TerminalOpen{shell,columns,rows}=>state.local_workspaces.terminals.open(binding.clone(),&body.request_id,shell,*columns,*rows,&current).map_err(|_|"terminal outcome uncertain".into()),
    LocalOperation::TerminalInput{terminal_id,text}=>state.local_workspaces.terminals.input(&binding,terminal_id,text,&current).map_err(|_|"terminal input outcome uncertain".into()),
    LocalOperation::TerminalResize{terminal_id,columns,rows}=>state.local_workspaces.terminals.resize(&binding,terminal_id,*columns,*rows,&current).map_err(|_|"terminal resize outcome uncertain".into()),

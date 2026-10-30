@@ -14,6 +14,9 @@ pub struct LocalWorkspaceOwner {
 pub enum LocalOperation {
  SessionCreate { title:String, agent:String },
  AgentTurn { session_id:String, text:String },
+ SessionInterrupt { session_id:String },
+ SessionSelectModel { session_id:String, model_id:String },
+ SessionSelectAgent { session_id:String, agent:String },
  TerminalOpen { shell:String, columns:u16, rows:u16 },
  TerminalInput { terminal_id:String, text:String },
  TerminalResize { terminal_id:String, columns:u16, rows:u16 },

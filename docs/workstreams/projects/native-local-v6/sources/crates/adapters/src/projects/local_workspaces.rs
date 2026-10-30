@@ -283,3 +283,15 @@ impl ProjectStore{
   Ok(true)
  }
 }
+
+impl ProjectStore{
+ /// Bounded references to unique committed creations, never an engine catalog
+ /// scan or transcript mirror. Each later read revalidates the actual binding.
+ pub fn local_session_ids(&self,workspace:&str,after:Option<&str>,limit:u32)->Result<Vec<String>,StoreError>{
+  self.local_custody()?;
+  if !(1..=100).contains(&limit)||after.is_some_and(|id|id.is_empty()||id.len()>256||id.chars().any(char::is_control)){return Err(StoreError::Invalid);}
+  let mut statement=self.connection.prepare("SELECT json_extract(result_json,'$.session.id') AS session_id FROM local_workspace_operations WHERE workspace_id=? AND state='committed' AND json_extract(result_json,'$.result_kind')='session_created' AND (? IS NULL OR json_extract(result_json,'$.session.id')>?) GROUP BY session_id HAVING count(*)=1 ORDER BY session_id LIMIT ?")?;
+  let values=statement.query_map(params![workspace,after,after,limit],|row|row.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+  Ok(values)
+ }
+}

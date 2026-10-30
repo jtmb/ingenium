@@ -7,6 +7,7 @@ a=argparse.ArgumentParser();a.add_argument('--native-root',required=True);args=a
 native=Path(args.native_root);owned=Path(__file__).resolve().parent
 assert native.is_absolute() and native.resolve()==native and native.is_dir()
 expected={
+'crates/adapters/src/opencode/mod.rs':'d223c5684a275dbf64c3d9781ec7f0994319bbb3',
 'apps/service/src/routes.rs':'cdd13f467919794b5282682b3ebf51614437f9f3',
 'apps/service/src/routes/remote_control/proxy.rs':'a2e63d498f66bbf2f02d0649a1cde7741c004cf9',
 'apps/service/src/routes/state_startup/assembly.rs':'b91782227a7fca4663349d35f273c6f93d1eac0e',
@@ -48,6 +49,7 @@ def replace(rel,before,after):
  text=changed[rel]
  if text.count(before)!=1:raise RuntimeError('exact integration anchor drift: '+rel+' '+before[:80])
  changed[rel]=text.replace(before,after,1)
+replace('crates/adapters/src/opencode/mod.rs','mod location;','mod location;\nmod local_conversations;')
 replace('crates/contracts/src/lib.rs','use serde::{Deserialize, Serialize};','pub mod local_workspaces;\nuse serde::{Deserialize, Serialize};')
 replace('crates/adapters/src/lib.rs','//!','pub mod local_custody;\npub mod local_execution;\n#[cfg(windows)]\npub mod local_git_launch;\n//!') if False else None
 # Insert after module-level inner docs, before normal items.
@@ -127,6 +129,17 @@ changed[rel]=changed[rel][:a]+section+changed[rel][z:]
 rel='apps/service/src/routes/live_agent.rs'
 anchor='impl LiveAgent {'
 replace(rel,anchor,anchor+'''
+    pub(super) fn local_conversation_read(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,id:Option<&str>,kind:&str,cursor:Option<&str>,limit:u32,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+        match (kind,id){
+            ("runtime",None)=>self.runtime.local_runtime_context(binding,current),
+            ("messages",Some(id))=>self.runtime.local_messages(binding,id,cursor,limit,current),
+            ("status",Some(id))=>self.runtime.local_conversation_status(binding,id,current),
+            _=>Err(RuntimeError::Binding),
+        }.map_err(|_|"private conversation read unavailable".into())
+    }
+    pub(super) fn local_conversation_control(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,operation:&veyra_contracts::local_workspaces::LocalOperation,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
+        self.runtime.local_conversation_control(binding,operation,current).map_err(|_|"private conversation control outcome unknown".into())
+    }
     pub(super) fn create_local_session(&self,binding:&veyra_adapters::local_execution::LocalWorkspaceBinding,request:&str,title:&str,agent:&str,current:&dyn Fn()->Result<(),String>)->Result<Value,String>{
         self.runtime.create_local_session(binding,request,title,agent,current).map(|session|json!({"result_kind":"session_created","session":session})).map_err(|_|"private session original outcome unknown".into())
     }

@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "namespace": "/v1/local-workspaces",
+  "authority": "original protected local bearer/no-Origin middleware plus enrolled original OS custodian and current registry binding",
+  "bootstrapIsSnapshotServiceIdentity": false,
+  "reads": [
+    {
+      "method": "GET",
+      "path": "/context",
+      "scope": "actual enrolled utility library/service/custodian selectors; no engine readiness claim"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}",
+      "scope": "actual registry metadata"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/runtime",
+      "scope": "selected typed private binding; actual pinned engine version/catalog/current engine selection; engine-protocol readiness only"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/sessions",
+      "query": [
+        "after",
+        "limit"
+      ],
+      "scope": "bounded unique committed session-created references, actual engine metadata"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/sessions/{session_id}",
+      "scope": "actual exact owned engine session metadata"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/sessions/{session_id}/messages",
+      "query": [
+        "cursor",
+        "limit"
+      ],
+      "scope": "real normalized transcript; descending recent first page, opaque cursor subsequent pages; limit1..100 and4MiB returned projection bound"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/sessions/{session_id}/status",
+      "scope": "selected session process activity, agent/model/time/outcome; no OS retirement proof"
+    },
+    {
+      "method": "GET",
+      "path": "/{workspace_id}/terminals/{terminal_id}",
+      "query": [
+        "after"
+      ],
+      "scope": "actual retained local terminal bounded output"
+    },
+    {
+      "method": "GET",
+      "path": "/operations/{request_id}",
+      "scope": "original immutable local operation receipt"
+    }
+  ],
+  "writes": [
+    {
+      "method": "POST",
+      "path": "/",
+      "body": [
+        "request_id",
+        "environment"
+      ],
+      "scope": "existing create reservation"
+    },
+    {
+      "method": "POST",
+      "path": "/operations",
+      "body": [
+        "request_id",
+        "owner",
+        "operation"
+      ],
+      "scope": "strict LocalOperationRequest; actual current registry and selected engine checks; durable intent/unknown fence before each effect; no replay"
+    }
+  ],
+  "newOperationKinds": {
+    "session_interrupt": [
+      "session_id"
+    ],
+    "session_select_model": [
+      "session_id",
+      "model_id"
+    ],
+    "session_select_agent": [
+      "session_id",
+      "agent"
+    ]
+  },
+  "interruptSemantics": "generic stop of active execution in the selected current conversation; interrupted bool is upstream acknowledgement, no exact-original or OS descendant/terminal retirement guarantee; Voice exact-turn gate is separate",
+  "gatewayProposalOnly": true,
+  "gatewayRule": "Root may expose only these finite method/path/query/body shapes to the trusted local desktop gateway after source/runtime qualification; preserve local bearer actor and strict validators. No wildcard remote pairing/proxy route and no caller-selected upstream method, URL, principal or arbitrary headers.",
+  "qualifiedProtocol": {
+    "commit": "9eb6902aaf3c35ce985b67c605a775992249066b",
+    "messageGroup": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/message.ts",
+    "messageSourceSha256": "abdb0f6c8573eb2b7c606f47056b2b82108e23dde3834140d7709816b8015b38",
+    "sessionGroup": "https://raw.githubusercontent.com/anomalyco/opencode/9eb6902aaf3c35ce985b67c605a775992249066b/packages/protocol/src/groups/session.ts",
+    "liveSchemaCorroboration": "Root-reported coordination/integration/running-opencode-schema-r3.json; worker did not call running service"
+  }
+}
