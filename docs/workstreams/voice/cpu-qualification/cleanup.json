@@ -1,0 +1,39 @@
+{
+  "kind": "source-only-output-reconciliation-v1",
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "outputRoot": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/cpu-qualification",
+  "removedPaths": [],
+  "removedBytes": 0,
+  "metadataRewrittenInPlace": [
+    {
+      "reason": "Retain exact selected Linux/Windows wheel metadata; omit unselected redundant platform records",
+      "previousLogicalBytes": 149280,
+      "reductionLogicalBytes": 112827,
+      "retainedLogicalBytes": 36453,
+      "path": "pypi-metadata.json"
+    }
+  ],
+  "newBuildDependencyCacheModelRuntimeDirectories": [],
+  "retainedConsumer": "Coordinator review, import, compile and inert qualification followed by actual CPU install/model/helper/witness/Core measurements",
+  "endCondition": "Keep minimal reviewed source, hashes and recipes; retire generated runtime derivatives after their actual final consumer and all deletion checks",
+  "protected": [
+    "Earlier unapplied Native draft files outside this directory",
+    "Existing sources, locks, private evidence, active Native build and Stratus state",
+    "Every earlier cleanup-rejected target"
+  ],
+  "validation": [
+    "JSON parse",
+    "Six mjs syntax bodies parsed without imports or module execution",
+    "Git staged whitespace check required before commit"
+  ],
+  "unperformed": [
+    "C compilation",
+    "Python execution or syntax checking",
+    "Module/runtime tests",
+    "Interpreter/model/install/downloaded binaries",
+    "Process/cgroup/mount/device creation"
+  ],
+  "windowsRecoveredBytesClaimed": 0,
+  "linuxFilesystemRecoveredBytesClaimed": 0,
+  "note": "Logical in-place metadata reduction does not establish filesystem or Windows disk recovery"
+}

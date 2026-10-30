@@ -1,0 +1,16 @@
+{
+  "owner": "01a18935-1617-7d31-8e56-f77df7b6c756",
+  "taskRoot": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+  "physicalVolume": "Existing C-backed Ubuntu VHDX; original paired Windows/WSL ownership unchanged",
+  "actualWorkerOutput": "real-gmail-ui/veyra-phase-1/parallel/voice/docs/workstreams/voice/cpu-qualification",
+  "futureRootRunDirectory": "real-gmail-ui/veyra-phase-1/coordination/voice/cpu-qualification",
+  "futureDirectoryCreatedByWorker": false,
+  "combinedTaskCeilingBytes": 21474836480,
+  "minimumWindowsCFreeBytes": 16106127360,
+  "minimumDestinationFreeAfterStageBytes": 16106127360,
+  "metadataAndSourceOutputLimitBytes": 262144,
+  "protected": ["Stratus dirty source and active GPU environment/models/workloads", "Existing qualified input roots and credentials", "Original Veyra source/locks/private receipts and Native active build", "All earlier cleanup-rejected targets"],
+  "regeneration": "Pinned metadata endpoints recorded in artifact metadata; source recipe remains within owned docs. Qualification and installation are Root-only future actions.",
+  "authorizedWorkerEffects": "Source and small authoritative metadata only; no interpreter/model/install/downloaded binaries/device/runtime/mount or external-root changes",
+  "approvalEmitted": false
+}

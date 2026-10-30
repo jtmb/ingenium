@@ -1,0 +1,93 @@
+{
+  "kind": "voice-cpu-qualification-source-manifest-v1",
+  "qualified": false,
+  "files": [
+    {
+      "path": "cleanup.json",
+      "bytes": 1728,
+      "sha256": "2d2cd4d037c7d9f2a5a6eccd1760f5e6c31f1aebd4ae4ff7f64bfd937ee75b8c"
+    },
+    {
+      "path": "evidence-to-approval.mjs",
+      "bytes": 11325,
+      "sha256": "148251806cf9333209822b17ddd93941b5f17d84d4c65622fa1fb9d62550a86f"
+    },
+    {
+      "path": "kernel-owner.c",
+      "bytes": 17752,
+      "sha256": "a62dd094615c506846cbfcf93ed11125c91ad0754c32faa5a801c2ca22927eda"
+    },
+    {
+      "path": "kernel-prerequisites.json",
+      "bytes": 1329,
+      "sha256": "6a07d9d0488ac7a2b494fe7da3fd7b4c47399faa7c568253c8eeab0778ae4f56"
+    },
+    {
+      "path": "model-artifacts.json",
+      "bytes": 3643,
+      "sha256": "94b44928dd1da4ee0f5179207be373b93ea6cad19b1061c3c94bfc087a79e0f1"
+    },
+    {
+      "path": "ownership.json",
+      "bytes": 1308,
+      "sha256": "3a574e42028cc1ecab6a60f15e4b597c2f9223145d01bc5b6a37e0713048a017"
+    },
+    {
+      "path": "platform-adapters.mjs",
+      "bytes": 1313,
+      "sha256": "9960a876f28215d29cdfeb4919941745b381169757b31c705790fc9f20b3826e"
+    },
+    {
+      "path": "pypi-metadata.json",
+      "bytes": 35680,
+      "sha256": "fa6a9e26b7cd6eebea2c8869c00f45ffd14fd50df4810504d7fa95c641a06df0"
+    },
+    {
+      "path": "qualification-grant.template.json",
+      "bytes": 826,
+      "sha256": "33e315b55b19d8cad618ed1514de0b6720e7a2feb5996311958c49565390da94"
+    },
+    {
+      "path": "qualification-review.template.json",
+      "bytes": 665,
+      "sha256": "2b7f649ef4745ad94b80291f57a71d2c7b1ebb5dc63b58f00997d71caab2ecca"
+    },
+    {
+      "path": "qualify_cpu.py",
+      "bytes": 7164,
+      "sha256": "b90fd7f0b6852612f8e239fe5210d524be1257efb5919cc7f3dcbdc761b511b3"
+    },
+    {
+      "path": "README.md",
+      "bytes": 20475,
+      "sha256": "5436c0d48441887d7849dde55e9ade210dbbe6fe2abe3b23ff27caedc607e427"
+    },
+    {
+      "path": "run-envelope.mjs",
+      "bytes": 9719,
+      "sha256": "0554c7b36e244a49b7c73c724dfb06c09c29e68d40e1d7a7f6875946be34083f"
+    },
+    {
+      "path": "storage-budget.mjs",
+      "bytes": 3654,
+      "sha256": "4574d6359e55be540ead97fcb6cb7ac2b3c0275a16fca085efd35e12dda1eb15"
+    },
+    {
+      "path": "tooling-and-vad.json",
+      "bytes": 2004,
+      "sha256": "ffdb15a58acb0d7aa9fd64e86200ac69796d27369c1d3b5c00abcff5b3bc2379"
+    },
+    {
+      "path": "verify-environment.mjs",
+      "bytes": 4396,
+      "sha256": "82f6bc3355c08afbeb78859eff9d076786192beeae5f4d332889308480fdd758"
+    },
+    {
+      "path": "wheel-layout.mjs",
+      "bytes": 5915,
+      "sha256": "cdb839c3270b5658bda70e0a22eb0cc9015010dd59a58a33b4ad21deeb629beb"
+    }
+  ],
+  "totalContentBytes": 128896.0,
+  "validationScope": "Source metadata and syntax bodies only; coordinator compilation and all execution gates remain open"
+}

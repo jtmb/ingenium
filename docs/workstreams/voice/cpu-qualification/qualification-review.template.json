@@ -1,0 +1,17 @@
+{
+  "kind": "root-cpu-qualification-review-v1",
+  "approved": false,
+  "platform": "linux-cgroup-v2",
+  "fixtureEvidence": null,
+  "bindings": null,
+  "cases": {"coldHot": null, "helper": null, "witness": null, "probe": null, "wire": null},
+  "dependencyClosurePath": null,
+  "coreWireReceiptPath": null,
+  "coreWireReceiptSha256": null,
+  "modelArtifactsPath": null,
+  "approvalLifetimeMs": null,
+  "maxLifetimeMs": null,
+  "maxWitnessLifetimeMs": null,
+  "templateOnly": true,
+  "note": "No measurements or approval supplied. Root must review genuine retained original captures and actual Core/helper/witness joins. Model-only source results are insufficient."
+}

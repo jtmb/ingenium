@@ -1,0 +1,38 @@
+{
+  "pipBootstrap": {
+    "version": "25.0.1",
+    "filename": "pip-25.0.1-py3-none-any.whl",
+    "bytes": 1841526,
+    "sha256": "c46efd13b6aa8279f33f2864459c8ce587ea6a1a59ee20de055868d8f7688f7f",
+    "metadataUrl": "https://pypi.org/pypi/pip/25.0.1/json",
+    "url": "https://files.pythonhosted.org/packages/c9/bc/b7db44f5f39f9d0494071bddae6880eb645970366d0a200022a1a93d57f5/pip-25.0.1-py3-none-any.whl",
+    "existingSameWslReuse": "Resolved CPython3.12.13 lib/python3.12/ensurepip/_bundled; actual existing SHA256 matches upstream metadata; never install into or modify this external base"
+  },
+  "bundledVad": {
+    "distribution": "faster-whisper",
+    "version": "1.2.1",
+    "path": "faster_whisper/assets/silero_vad_v6.onnx",
+    "bytes": 1245151,
+    "gitBlobSha1": "9febab9bc0aa5ae2b27e69243d813427212bfb36",
+    "metadataUrl": "https://api.github.com/repos/SYSTRAN/faster-whisper/contents/faster_whisper/assets?ref=v1.2.1",
+    "url": "https://raw.githubusercontent.com/SYSTRAN/faster-whisper/v1.2.1/faster_whisper/assets/silero_vad_v6.onnx",
+    "delivery": "Bundled inside exact locked faster_whisper wheel; do not fetch separately or substitute a second VAD model",
+    "sha256": null,
+    "sha256Gate": "Root inspectWheel derives SHA256 from downloaded SHA256-verified wheel, checks RECORD digest and upstream git blob SHA1/size; missing receipt refuses approval"
+  },
+  "runtimeCustody": {
+    "basePythonCandidate": "Resolved existing Linux CPython3.12.13, not symlink alias; metadata/hash only until Root ABI qualification",
+    "voicesCandidate": "Verified bytes but mode0777 and /mnt/d ancestors0777 fail current profile/resource guard; no default reuse or external chmod",
+    "defaultNewModelBytes": 839818565,
+    "linuxWheelsBytes": 174890471,
+    "windowsWheelsBytes": 130621928
+  },
+  "workerExecuted": {
+    "interpreter": false,
+    "model": false,
+    "install": false,
+    "downloadedBinaries": false,
+    "cgroupCreation": false,
+    "controllerPolicyChange": false
+  }
+}

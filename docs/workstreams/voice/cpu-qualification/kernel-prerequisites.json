@@ -1,0 +1,38 @@
+{
+  "kind": "readonly-kernel-prerequisites-snapshot-v1",
+  "runtimeQualified": false,
+  "freshRootRecheckRequired": true,
+  "kernel": "6.6.87.2-microsoft-standard-WSL2",
+  "membership": "0::/init.scope",
+  "mount": "/sys/fs/cgroup",
+  "filesystem": "cgroup2",
+  "mountOptions": "rw,nosuid,nodev,noexec,relatime,nsdelegate",
+  "controllersAlreadyEnabled": [
+    "cpuset",
+    "cpu",
+    "io",
+    "memory",
+    "hugetlb",
+    "pids",
+    "rdma"
+  ],
+  "brajamParentWritable": false,
+  "rootParentWritable": true,
+  "rootCreationTestPerformed": false,
+  "parentControllerChangesPermitted": false,
+  "existingProcessMigrationPermitted": false,
+  "globalRootMissingLimitFiles": [
+    "memory.max",
+    "cpu.max",
+    "pids.max"
+  ],
+  "preferredAuthority": "Root-operated fresh task-owned leaf beneath existing enabled parent, exact original handles and positive drain; no Docker requirement",
+  "fallback": "Only a genuinely qualified existing manager if direct leaf authority cannot be established",
+  "memoryOrCpuApprovalDerivedFromSnapshot": false,
+  "notes": [
+    "Capacity metadata is not measured cold/hot/helper/witness memory demand",
+    "Private child mount authority remains untested",
+    "Do not treat unbounded init.scope as the qualification envelope",
+    "No cgroup or mount writes were performed by worker"
+  ]
+}
