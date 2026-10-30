@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-only-Core133-startup-qualification-input-followon",
+  "productBotName": "veyra-bot",
+  "rootHead": "f870c74f91525fe3a09a9fa6bda18d1062994689",
+  "canonicalEdit": {
+    "path": "packages/veyra-operations/core126-image-contract.mjs",
+    "beforeBytes": 20305,
+    "beforeSha256": "b5cf4a5c07d74566fb060b88987a9bc7788840c42529e94b1c0abb50e5ef5ff1",
+    "afterBytes": 22964,
+    "afterSha256": "6e2a4e9ff165d21c0c0295153954cbde158ccb49f92f1e6ee7098e377b6d4aad"
+  },
+  "patch": {
+    "bytes": 27951,
+    "sha256": "24c93fb1918e4779883de33b9362d16ee40cebbc52b2aaeb7cb4a5950d3d8bcb"
+  },
+  "before": {
+    "source": 112,
+    "image": 88
+  },
+  "after": {
+    "source": 133,
+    "image": 110
+  },
+  "sourceAdditions": [
+    "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
+    "packages/ingenium-core/lib/tools/customize-scoped-v1-contracts.ts",
+    "packages/ingenium-core/lib/tools/plugins.ts",
+    "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+    "packages/ingenium-core/lib/tools/plugin-config-text.ts",
+    "packages/ingenium-core/lib/tools/plugin-projection-reconciliation.ts",
+    "packages/ingenium-core/lib/tools/skills.ts",
+    "packages/ingenium-core/lib/tools/skill-governance.ts",
+    "packages/ingenium-core/lib/tools/hosted-governance.ts",
+    "packages/ingenium-core/lib/tools/hosted-governance-owner.ts",
+    "packages/ingenium-core/lib/tools/hosted-projection-plan.ts",
+    "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+    "packages/ingenium-core/lib/tools/paths.ts",
+    "packages/ingenium-core/lib/tools/maintenance-locks.ts",
+    "services/ingenium-api/scripts/api-server.ts",
+    "services/ingenium-api/scripts/runtime-gateway.ts",
+    "services/ingenium-api/scripts/restore-maintenance.ts",
+    "services/ingenium-api/lib/routes/customize-scoped.ts",
+    "services/ingenium-api/lib/routes/customize-scoped-v1.ts",
+    "services/ingenium-api/lib/customize-scoped-v1-proof.ts",
+    "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql"
+  ],
+  "imageAdditions": [
+    "/app/packages/ingenium-core/dist/lib/tools/customize-catalog-owner.js",
+    "/app/packages/ingenium-core/dist/lib/tools/customize-scoped-v1-contracts.js",
+    "/app/packages/ingenium-core/dist/lib/tools/plugins.js",
+    "/app/packages/ingenium-core/dist/lib/tools/plugin-lifecycle.js",
+    "/app/packages/ingenium-core/dist/lib/tools/plugin-config-text.js",
+    "/app/packages/ingenium-core/dist/lib/tools/plugin-projection-reconciliation.js",
+    "/app/packages/ingenium-core/dist/lib/tools/skills.js",
+    "/app/packages/ingenium-core/dist/lib/tools/skill-governance.js",
+    "/app/packages/ingenium-core/dist/lib/tools/hosted-governance.js",
+    "/app/packages/ingenium-core/dist/lib/tools/hosted-governance-owner.js",
+    "/app/packages/ingenium-core/dist/lib/tools/hosted-projection-plan.js",
+    "/app/packages/ingenium-core/dist/lib/tools/node-native-lifecycle.js",
+    "/app/packages/ingenium-core/dist/lib/tools/paths.js",
+    "/app/packages/ingenium-core/dist/lib/tools/maintenance-locks.js",
+    "/app/services/ingenium-api/dist/scripts/api-server.js",
+    "/app/services/ingenium-api/dist/scripts/runtime-manager.js",
+    "/app/services/ingenium-api/dist/scripts/runtime-gateway.js",
+    "/app/services/ingenium-api/dist/scripts/restore-maintenance.js",
+    "/app/services/ingenium-api/dist/lib/routes/customize-scoped.js",
+    "/app/services/ingenium-api/dist/lib/routes/customize-scoped-v1.js",
+    "/app/services/ingenium-api/dist/lib/customize-scoped-v1-proof.js",
+    "/app/packages/ingenium-core/dist/data/migrations/133_customize_scoped_catalog.sql"
+  ],
+  "metadataBudget": {
+    "class": "Conservative dense metadata-size fixture only, not valid candidate source/observed results",
+    "bytes": 47977,
+    "cap": 65536,
+    "limitChanged": false
+  },
+  "staticChecks": {
+    "exactCurrentSource": true,
+    "appendOnlyLists": true,
+    "originalProtocolCasesAndAuthorityUntouched": true,
+    "noDuplicates": true,
+    "noWildcards": true,
+    "normalCoreApiCompilerOwnsNewTsArtifacts": true,
+    "noNewCoreMjsHelperRequired": true,
+    "rawWireAlreadyPlanned": [
+      {
+        "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.mjs",
+        "target": "services/ingenium-api/dist/lib/voice-v2/raw-assistant-wire.mjs",
+        "sourceSha256": "b125c50a2130f4de37feca93e05b05f36404dfbf3571fd5ee1d476e2e5ec14aa",
+        "plannedEmittedSha256": "b125c50a2130f4de37feca93e05b05f36404dfbf3571fd5ee1d476e2e5ec14aa"
+      },
+      {
+        "source": "services/ingenium-api/lib/voice-v2/raw-assistant-wire.d.mts",
+        "target": "services/ingenium-api/dist/lib/voice-v2/raw-assistant-wire.d.mts",
+        "sourceSha256": "87a649b35e8f693e704a4a02c834af8d471016c0e8bb35f9e97419961e848891",
+        "plannedEmittedSha256": "87a649b35e8f693e704a4a02c834af8d471016c0e8bb35f9e97419961e848891"
+      }
+    ],
+    "CoreIndexExportsAudited": 83,
+    "CoreRuntimeModulesAudited": 91,
+    "actualBuild": false,
+    "actualCoreStartup": false,
+    "actualMigration": false
+  },
+  "runtimeWitnessLimit": "Current retained dist misses some new artifacts; no rebuilt package or runtime qualification is claimed. Normal original compiler/data-copy should regenerate them.",
+  "remaining": [
+    "Root apply exact contract postimage and regenerate all final actual source/image metadata after integrated source",
+    "Fresh original Core/API build/package/startup evidence for Core133 helpers and dist/data/migrations133; existing retained output tree is stale",
+    "Selected input lists remain controls rather than the entire91module Core barrel graph; full-source SHA/package lock/original immutable image and readonly profile remain mandatory",
+    "All real SQL131/coordinator/waiting child/readiness/egress/retirement/18cases/independentapproval/fullrelease acceptance gates remain open"
+  ],
+  "cleanup": {
+    "owner": "packaging worker01a18935-1a8b-7eb3-a709-d874f70095e8",
+    "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845",
+    "physicalVolume": "Existing C-backed WSL Ubuntu VHDX; unchanged root",
+    "generatedPaths": [
+      "docs/workstreams/packaging/core133-startup-audit.mjs",
+      "docs/workstreams/packaging/core133-startup-audit.json",
+      "docs/workstreams/packaging/core133-qualification-proposal.mjs",
+      "docs/workstreams/packaging/core133-qualification-freeze.mjs",
+      "docs/workstreams/packaging/core133-qualification.patch",
+      "docs/workstreams/packaging/core133-qualification-receipt.json",
+      "docs/workstreams/packaging/core133-qualification.md"
+    ],
+    "newDisposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "noSharedWrites": true,
+    "noSourceOrDependencyTreeCopies": true,
+    "retention": "Seven minimal audit/source/proposal/patch/receipt/guide files for Root input integration and actual build/qualification",
+    "regeneration": "Existing TEMP/TMP/TMPDIR=coordination/packaging; NODE_COMPILE_CACHE empty; VEYRA_CORE133_ROOT actual Root source; Node core133-startup-audit.mjs then Node core133-qualification-freeze.mjs in WSL",
+    "protected": "All shared source/original output/user/runtime/editor/workspace/backup data, Native/Cargo/cache/failure evidence and prior frozen proposals",
+    "WindowsRecoveryClaimed": false,
+    "LinuxRecoveryClaimed": false
+  }
+}
