@@ -1,6 +1,8 @@
 /** Lifecycle checks query existing owners; no new authority or terminal-state invention. */
 import type {getDb} from "../db.js";
 export function assertNativeGovernanceLifecycleClear(db:ReturnType<typeof getDb>,projectId?:string):void{
+ const customizeScope=projectId===undefined?"":" AND project_id=?";
+ if(db.prepare("SELECT 1 FROM customize_commands WHERE result_json IS NULL"+customizeScope+" LIMIT 1").get(...(projectId===undefined?[]:[projectId])))throw new Error("CUSTOMIZE_ORIGINAL_REQUIRES_RECONCILIATION");
  const scope=projectId===undefined?"":" AND g.hosted_project_id=?";
  const args=projectId===undefined?[]:[projectId];
  const pending=db.prepare("SELECT EXISTS(SELECT 1 FROM native_hosted_governance_effects e JOIN native_hosted_governance_grants g ON g.id=e.grant_id WHERE e.state='executing'"+scope+") AS held").get(...args) as {held:number}|undefined;

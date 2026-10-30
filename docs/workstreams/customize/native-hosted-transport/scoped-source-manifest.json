@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "status": "Source proposal only; Root application and acceptance pending",
+  "sources": [
+    {
+      "path": "packages/ingenium-core/lib/tools/plugins.ts",
+      "preimageSha256": "864bf20923d1e2b114a407ce4daff7c4397b0a8a956ec7c08f233b8aed3c5da4",
+      "postimageSha256": "f51341befe6b7078e03f7982d6b379c828ae939c7a4cdc8bff60349987284ff5"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/paths.ts",
+      "preimageSha256": "501991f83cdaba44a643cd23023d815825fdda72db2c6ee899b8eb4033e369ca",
+      "postimageSha256": "3e5960ca04df4e71fc1342b074bc44a527bfae0482635af1f975dd9da1d5a712"
+    },
+    {
+      "path": "packages/ingenium-core/lib/index.ts",
+      "preimageSha256": "eeb37db490aecb0516fa72b7b8df41a3bf7e0f2e322c6fc4698779ae13fb9c33",
+      "postimageSha256": "32908f76e48792236dca10069d50e2d7da4438920173098725c3bd5faf841bda"
+    },
+    {
+      "path": "services/ingenium-api/scripts/api-server.ts",
+      "preimageSha256": "3ffbb929802883bda600dbc40394780180ee024383ace2a3011c944363942166",
+      "postimageSha256": "360bfe035dd4afd205138a1f0d1c37c36a3feb74edfe8f7594610b8f04f52674"
+    },
+    {
+      "path": "services/ingenium-api/lib/authorization-policy.ts",
+      "preimageSha256": "ea923e5a072820a4ca9391a85c8fe7cddd31753c13e35af5cb5d9113d9fce3d9",
+      "postimageSha256": "399e86c3597f31e7c1fe66a4f9565977d6effc0bbed068c5b3a679c6cfee6de6"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/node-native-lifecycle.ts",
+      "preimageSha256": "9f00ed991d31334cab788b63834d52b1d485af0887171b18441be46fe9aba241",
+      "postimageSha256": "ca8a912e3a41008e493178932c13a8ff03354fba046bd54f17ed63643fb01459"
+    },
+    {
+      "path": "packages/ingenium-core/data/migrations/133_customize_scoped_catalog.sql",
+      "newFile": true,
+      "postimageSha256": "414814743bedbdd9bb43d8edf085955a689b84aa7e7351c81a36282be09ea5e1"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/plugin-lifecycle.ts",
+      "newFile": true,
+      "postimageSha256": "ee1eacc7656e2199bfafcd838ec5b8fc07ffd1b5f8a00fda4a0b11bc9bc567ba"
+    },
+    {
+      "path": "packages/ingenium-core/lib/tools/customize-catalog-owner.ts",
+      "newFile": true,
+      "postimageSha256": "68f72cb9273f8e897dc4ff024afc39d13410d6c856a6561f7f71b9f87f23afb9"
+    },
+    {
+      "path": "services/ingenium-api/lib/routes/customize-scoped.ts",
+      "newFile": true,
+      "postimageSha256": "a3340b3914ded2d659a45f4fc3aaa6cc5b3b891fc338e526eb71662f810b1ac1"
+    }
+  ]
+}

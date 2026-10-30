@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "sourceFiles": 10,
+  "actualReviewedPreimages": 6,
+  "actualBaseLiveSourcePins": 31,
+  "checks": [
+    {
+      "command": "node --check live-acceptance.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "summary": []
+    },
+    {
+      "command": "node --test live-acceptance.test.mjs scoped-contract.test.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "64cbcbc2799fdee259baeef2b984e5fc61b631cc3ed6267aea814231bddab8aa",
+      "summary": [
+        "# tests 13",
+        "# pass 13",
+        "# fail 0",
+        "# skipped 0"
+      ]
+    },
+    {
+      "command": "python3 check-scoped-ddl.py",
+      "exitCode": 0,
+      "stdoutSha256": "e67091e01c6e9f85d1bd989e31afc4e600b75ac8499f49e3efe9c8315cda2a5d",
+      "summary": [
+        "{\"ddlSyntax\": \"passed\", \"triggers\": 11, \"authOrSessionRowsCreated\": 0, \"liveMigrationOrOwnerAcceptance\": false}"
+      ]
+    },
+    {
+      "command": "node check-scoped-source.mjs",
+      "exitCode": 0,
+      "stdoutSha256": "06b93da098ea279f9fe00295a87c314b9a265ddda268d4ebe04cfe5d08ec616e",
+      "summary": [
+        "{\"strictRootFiles\":9,\"actualSourceFiles\":629,\"diagnostics\":0,\"emitted\":0}"
+      ]
+    }
+  ],
+  "runtime": "UNRUN worker; Root owns migration, actual TLS/DPAPI/login/custody/UI/multi-actor/executor/restore acceptance.",
+  "cleanup": {
+    "newScratch": [],
+    "removedPaths": [],
+    "compactedHistoricalDuplicates": [
+      {
+        "path": "native-owner-proposal.patch",
+        "beforeBytes": 110240,
+        "afterBytes": 703,
+        "reducedBytes": 109537
+      },
+      {
+        "path": "README.md",
+        "beforeBytes": 12983,
+        "afterBytes": 925,
+        "reducedBytes": 12058
+      }
+    ],
+    "exactOriginals": "Immutable Git9e505aa3d95a675ba7d55d231c5bccc455fdc833; hashes/commands retained in references",
+    "retained": "Reviewed source/contracts/recipes/minimal receipts; Root application and acceptance is remaining consumer",
+    "physicalVolume": "Existing C-backed Ubuntu VHDX root; no Windows recovery claim"
+  }
+}

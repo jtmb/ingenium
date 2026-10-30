@@ -1,6 +1,10 @@
+import {createScopedCustomizeRouter} from "../lib/routes/customize-scoped.js";
+import {createInstalledDotRouter} from "../lib/dot-v2/installed-dot-http.js";
+import {installedDotSchedulerRuntime} from "../lib/dot-v2/installed-dot-scheduler.js";
 import express from "express";
 import {createCore126Ingress} from "../lib/dot-v2/core126-ingress.js";
-import {actualManagedJobHandlers} from "../lib/dot-v2/core126-runtime.js";
+import {actualManagedJobHandlers,installActualManagedJobOwner} from "../lib/dot-v2/core126-runtime.js";
+import {loadInstalledCore126ImageOwner} from "../lib/dot-v2/core126-installed-image-owner.js";
 import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
@@ -195,6 +199,7 @@ app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/native-customize/pairings",createNativePairingRouter());
 const verifiedNative=createVerifiedNativeContextOwner(req=>createNodeNativePairingOwner(req).custody);
 app.use("/api/v1/native-customize",createNativeCustomizeRouter({context:createNativeCustomizeContextOwner(verifiedNative.owner),preflight:verifiedNative.preflight}));
+app.use("/api/v1/customize",createScopedCustomizeRouter());
 app.use("/api/v1/customize", createHostedCustomizeRouter());
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
@@ -221,6 +226,7 @@ app.use("/api/v1/logs", logsRouter);
 app.use("/api/v1/opencode", runtimeOpenCodeContext, opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
+app.use("/api/v1/dot",createInstalledDotRouter());
 
 app.use("/api/v1/services/cloudflare", cloudflareRouter);
 app.use("/api/v1/services", servicesRouter);
@@ -295,7 +301,7 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   });
 
   if (shouldStartBackgroundSchedulers()) {
-    startScheduler(config.port);
+    startScheduler(config.port,installedDotSchedulerRuntime);
     startBackupScheduler();
   } else {
     logger.info("api", "Background schedulers disabled by API test/maintenance mode");
@@ -408,6 +414,10 @@ export function startApiServer(): ApiServerHandle | null {
     return null;
   }
 
+  if(isControlPlaneMode()){
+    try{installActualManagedJobOwner(loadInstalledCore126ImageOwner());}
+    catch{logger.warn("runtime","Managed JobRun image approval is unavailable; execution remains closed");}
+  }
   const server = app.listen(config.port, isControlPlaneMode() ? "0.0.0.0" : "127.0.0.1");
   const lifecycle = createApiLifecycle(server);
   const disposeSignals = installShutdownSignalHandlers(lifecycle);

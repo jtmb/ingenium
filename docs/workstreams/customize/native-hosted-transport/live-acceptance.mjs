@@ -43,13 +43,16 @@ export function pinnedOptions(pem,expected){
 }
 export function sourceContract(config){
   const manifest=JSON.parse(fs.readFileSync(path.join(here,'live-source-contract.json'),'utf8'));
-  for(const row of manifest.sources){
+  const scoped=config.scopedCatalog===true?JSON.parse(fs.readFileSync(path.join(here,'scoped-source-manifest.json'),'utf8')):null;
+  const records=manifest.sources.map(row=>{const post=row.owner==='app'&&scoped?.sources.find(v=>v.path===row.path);return post?{...row,lfSha256:post.postimageSha256}:row;});
+  if(scoped)for(const row of scoped.sources)if(!records.some(v=>v.owner==='app'&&v.path===row.path))records.push({owner:'app',path:row.path,lfSha256:row.postimageSha256});
+  for(const row of records){
     const base=row.owner==='app'?config.appSource:config.nativeSource;
     requireFact(path.isAbsolute(base),'SOURCE_ROOT_REQUIRED');
     const bytes=fs.readFileSync(path.join(base,row.path));
     requireFact(sha(bytes.toString('utf8').replace(/\r\n/g,'\n'))===row.lfSha256,'SOURCE_PREIMAGE_MISMATCH:'+row.owner+':'+row.path);
   }
-  return sha(canonical(manifest));
+  return sha(canonical({manifest,scoped}));
 }
 class Client{
   constructor(base,options={}){this.base=base;this.options=options;this.cookies=new Map();this.csrf='';}
@@ -235,6 +238,35 @@ export async function run(config){
       const catalog=data(await read({op:'catalog',kind:'plugin',offset:0,limit:100}));requireFact(catalog.some(v=>v.name===name&&v.enabled),'PAIRED_PLUGIN_CATALOG_MISSING');
       await browser('POST','/api/v1/plugins/'+name+'/disable',{});
       await browser('DELETE','/api/v1/plugins/'+name);
+    });
+    if(config.scopedCatalog===true)await step('actual-scoped-catalog-and-plugin-lifecycle',async()=>{
+      const issue=async input=>{const result=data(await core.user('POST','/api/v1/customize/commands',{operationId:randomUUID(),...input}));requireFact(result.outcome==='succeeded','SCOPED_ORIGINAL_UNCONFIRMED');const first=data(await core.user('GET','/api/v1/customize/commands/'+result.operationId));same(first,result,'SCOPED_FIRST_RECEIPT_CHANGED');same(data(await core.user('GET','/api/v1/customize/commands/'+result.operationId)),first,'SCOPED_FIRST_RECEIPT_CHANGED');return result.value;};
+      const plugin='accept-catalog-'+id;
+      await browser('POST','/api/v1/plugins',{name:plugin,file_path:plugin+'.ts',source_content:'export default async () => ({});\r\n'});
+      const original=data(await core.user('GET','/api/v1/customize/project-source?projectId='+project.id+'&kind=plugin&name='+plugin));
+      const published=await issue({op:'publish',projectId:project.id,kind:'plugin',name:plugin,expectedRevision:original.revision,sourceSha256:original.sourceSha256,visibility:'personal'});
+      const discovered=data(await core.user('GET','/api/v1/customize/sources?visibility=personal&limit=100'));requireFact(discovered.data.some(v=>v.id===published.id),'PERSONAL_SOURCE_NOT_DISCOVERED');
+      const snapshot=data(await core.user('GET','/api/v1/customize/sources/'+published.id));same(snapshot.payload,original.payload,'PUBLISHED_SOURCE_BYTES_CHANGED');
+      const connected=await issue({op:'connect',sourceId:published.id,expectedRevision:published.revision,sourceSha256:published.sourceSha256,projectId:project.id,targetName:'installed-'+id});
+      requireFact(connected.state==='staged-disabled','CONNECTED_PLUGIN_NOT_STAGED');
+      let record=data(await browser('GET','/api/v1/plugins/installed-'+id));requireFact(!record.enabled,'CONNECT_ACTIVATED_PLUGIN');
+      for(const op of ['activate-plugin','archive-plugin','restore-plugin']){
+        const result=await issue({op,projectId:project.id,name:'installed-'+id,expectedRevision:record.revision});
+        if(op==='archive-plugin'){const archived=data(await core.user('GET','/api/v1/customize/archived-plugins?projectId='+project.id));record=archived.find(v=>v.id===result.pluginId);requireFact(record?.archived_at&&!record.enabled,'PLUGIN_ARCHIVE_NOT_RETAINED');}
+        else{record=data(await browser('GET','/api/v1/plugins/installed-'+id));if(op==='restore-plugin')requireFact(!record.archived_at&&!record.enabled,'RESTORE_IMPLICITLY_ACTIVATED_PLUGIN');}
+      }
+      const skillSource=data(await core.user('GET','/api/v1/customize/project-source?projectId='+project.id+'&kind=skill&name='+skillName));
+      const publicSkill=await issue({op:'publish',projectId:project.id,kind:'skill',name:skillName,expectedRevision:skillSource.revision,sourceSha256:skillSource.sourceSha256,visibility:'public'});
+      const publicList=data(await core.user('GET','/api/v1/customize/sources?visibility=public&limit=100'));requireFact(publicList.data.some(v=>v.id===publicSkill.id),'PUBLIC_ORGANIZATION_SOURCE_NOT_DISCOVERED');
+      const proposed=await issue({op:'connect',sourceId:publicSkill.id,expectedRevision:publicSkill.revision,sourceSha256:publicSkill.sourceSha256,projectId:project.id,targetName:'catalog-skill-'+id});
+      requireFact(proposed.state==='proposal-review-required'&&proposed.proposalId,'SKILL_INSTALL_BYPASSED_GOVERNANCE');
+      const notApplied=await core.browser('GET','/api/v1/skills/catalog-skill-'+id+query);requireFact(notApplied.status===404,'UNREVIEWED_SKILL_APPLIED');
+      const withdrawn=await issue({op:'withdraw',sourceId:published.id,expectedRevision:published.revision});requireFact(withdrawn.archived,'CATALOG_SOURCE_NOT_WITHDRAWN');
+      const restored=await issue({op:'restore-source',sourceId:published.id,expectedRevision:withdrawn.revision});requireFact(!restored.archived,'CATALOG_SOURCE_NOT_RESTORED');
+      const edited=await issue({op:'revise-plugin-source',sourceId:restored.id,expectedRevision:restored.revision,sourceSha256:restored.sourceSha256,description:'Reviewed derived source',source:'export default async () => ({ reviewed: true });\r\n'});requireFact(edited.parentSourceId===published.id&&edited.sourceSha256!==restored.sourceSha256,'CATALOG_EDIT_DID_NOT_RETAIN_PARENT');
+      same(data(await core.user('GET','/api/v1/customize/sources/'+published.id)).payload,original.payload,'CATALOG_EDIT_REPLACED_ORIGINAL');
+      report.openGates=report.openGates.filter(g=>g.gate!=='plugin-archive-restore-and-nonproject-discovery');
+      report.openGates.push({gate:'scoped-catalog-multi-actor-and-UI-Native-transport',reason:'Same real owner HTTP lifecycle passed; additional real account/org isolation, configured external providers and actual UI/Native command transport remain separate acceptance.'});
     });
     await step('actual-proposal-review-submit-approve',async()=>{
       const proposal=data(await browser('POST','/api/v1/skills/proposals',{proposalType:'create',targetName:'accept-proposal-'+id,proposedState:{description:'Live proposal',content:'Approved original proposal',alwaysApply:0}}));

@@ -1,0 +1,321 @@
+import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { Plugin } from "../schema.js";
+import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { resolve, relative, isAbsolute, dirname } from "node:path";
+import { getPluginsBase, getPluginConfigPath, isGlobal } from "./paths.js";
+import { z } from "zod";
+import {assertPluginCommandClear,validateProjectionPath,archive as archivePlugin} from "./plugin-lifecycle.js";
+
+export const pluginDescriptionSchema = z.string().max(2000).refine((value) => !value.includes("\0"), "Description must not contain NUL");
+export const pluginUpdateSchema = z.union([
+  z.object({ description: pluginDescriptionSchema }).strict(),
+  z.object({ file_path: z.string().optional(), source_content: z.string().optional() }).strict()
+    .refine((value) => value.file_path !== undefined || value.source_content !== undefined, "An update is required"),
+]);
+
+export function defaultPluginDescription(name: string): string {
+  const descriptions: Record<string, string> = {
+    "auto-observer": "Extracts learning observations from user conversations.",
+    observer: "Imports fallback observations and triggers learning synthesis.",
+    "resource-sync": "Synchronizes repository resources into the project workspace.",
+    lifecycle: "Uploads session context and records external usage at lifecycle boundaries.",
+    ponytail: "Encourages minimal, practical implementations through Ponytail mode.",
+  };
+  return Object.hasOwn(descriptions, name) ? descriptions[name]! : "Project-local OpenCode plugin.";
+}
+
+export function updatePluginDescription(projectId: string, name: string, description: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
+  z.string().min(1).max(256).parse(projectId);
+  z.string().min(1).max(256).parse(name);
+  pluginDescriptionSchema.parse(description);
+  const plugin = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    return db.prepare("UPDATE plugins SET description = ?, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL RETURNING *")
+      .get(description, new Date().toISOString(), projectId, name) as Plugin | undefined;
+  });
+  if (plugin) checkpointAfterWrite();
+  return plugin;
+}
+
+/**
+ * Validate that a plugin file path is safe:
+ * 1. Only allows alphanumeric, underscore, hyphen, dot, and forward-slash chars (no shell injection)
+ * 2. Resolves relative to the plugins base directory and verifies it doesn't escape via `..`
+ *
+ * @throws {Error} if the path contains unsafe characters or escapes the base directory
+ */
+function validatePluginPath(filePath: string, projectId?: string): string {
+  // Restrict to safe characters only — prevents shell injection via filenames
+  if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath) || filePath.split("/").some(p => !p || p === "." || p === "..")) {
+    throw new Error(`Invalid plugin file path: ${filePath}`);
+  }
+  const baseDir = getPluginsBase(projectId);
+  const resolved = resolve(baseDir, filePath);
+  const rel = relative(baseDir, resolved);
+  // Path traversal check: the resolved path must remain within baseDir
+  if (rel.startsWith("..") || isAbsolute(rel)) {
+    throw new Error(`Plugin path escapes base directory: ${filePath}`);
+  }
+  validateProjectionPath(resolved);
+  return filePath;
+}
+
+/**
+ * 🔴 Convention Requirement: Every plugin lifecycle operation MUST sync opencode.json's
+ * `plugins` array (see docs/concepts/conventions.md). This function appends the plugin path to
+ * the array on disk.
+ *
+ * The path format differs for global vs project-level configs:
+ * - Global:  `plugins/<filePath>`
+ * - Project: `.opencode/plugins/<filePath>`
+ */
+export function addPluginToConfig(filePath: string, projectId?: string): void {
+  const isGlobalProject = isGlobal(projectId);
+  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
+  try {
+    const configPath = getPluginConfigPath(projectId);
+    validateProjectionPath(configPath);
+    if (!existsSync(configPath)) { mkdirSync(dirname(configPath), {recursive:true}); writeFileSync(configPath, "{}\n", {flag:"wx"}); }
+    const config = JSON.parse(readFileSync(configPath, "utf-8"));
+    const entries = [...new Map([
+      ...(Array.isArray(config.plugins) ? config.plugins : []),
+      ...(Array.isArray(config.plugin) ? config.plugin : []),
+    ].map((entry) => [JSON.stringify(entry), entry])).values()];
+    if (!entries.includes(rel)) entries.push(rel);
+    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
+      config.plugins = entries;
+      delete config.plugin;
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+    }
+  } catch (error) { throw error; }
+}
+
+/**
+ * Remove a plugin entry from opencode.json's `plugins` array.
+ * Mirror of addPluginToConfig — keeps the disk config in sync when a plugin is deleted or disabled.
+ */
+export function removePluginFromConfig(filePath: string, projectId?: string): void {
+  const isGlobalProject = isGlobal(projectId);
+  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
+  try {
+    const configPath = getPluginConfigPath(projectId);
+    validateProjectionPath(configPath);
+    if (!existsSync(configPath)) { mkdirSync(dirname(configPath), {recursive:true}); writeFileSync(configPath, "{}\n", {flag:"wx"}); }
+    const config = JSON.parse(readFileSync(configPath, "utf-8"));
+    const entries = [...new Map([
+      ...(Array.isArray(config.plugins) ? config.plugins : []),
+      ...(Array.isArray(config.plugin) ? config.plugin : []),
+    ].map((entry) => [JSON.stringify(entry), entry])).values()].filter((entry) => entry !== rel);
+    if (config.plugin !== undefined || JSON.stringify(config.plugins) !== JSON.stringify(entries)) {
+      config.plugins = entries;
+      delete config.plugin;
+      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n");
+    }
+  } catch (error) { if (existsSync(getPluginConfigPath(projectId))) throw error; }
+}
+
+/** List all plugins registered for a project. */
+export function listPlugins(projectId: string): Plugin[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  return db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL").all(projectId) as Plugin[];
+}
+
+/**
+ * Enable a plugin: updates DB, writes the .ts source to disk, and adds the plugin path
+ * to opencode.json's `plugins` array.
+ *
+ * 🔴 Per HARD RULE #16, the config sync (addPluginToConfig) is mandatory here —
+ * without it, OpenCode won't load the plugin on startup.
+ */
+export function enablePlugin(projectId: string, name: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const now = new Date().toISOString();
+    db.prepare("UPDATE plugins SET enabled = 1, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL")
+      .run(now, projectId, name);
+
+    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
+      .get(projectId, name) as Plugin | undefined;
+
+    if (plugin?.source_content) {
+      ensurePluginDir(projectId);
+      const filePath = validatePluginPath(plugin.file_path, projectId);
+      const fullPath = resolve(getPluginsBase(projectId), filePath);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, plugin.source_content);
+      addPluginToConfig(plugin.file_path, projectId);
+    }
+    checkpointAfterWrite();
+    return plugin;
+  });
+}
+
+/**
+ * Disable a plugin: updates DB, removes the .ts file from disk, and removes the plugin path
+ * from opencode.json's `plugins` array.
+ */
+export function disablePlugin(projectId: string, name: string): Plugin | undefined {
+  assertPluginCommandClear(projectId);
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const now = new Date().toISOString();
+    db.prepare("UPDATE plugins SET enabled = 0, updated_at = ? WHERE project_id = ? AND name = ? AND archived_at IS NULL")
+      .run(now, projectId, name);
+
+    const plugin = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
+      .get(projectId, name) as Plugin | undefined;
+
+    if (plugin) {
+      const filePath = validatePluginPath(plugin.file_path, projectId);
+      const resolvedPath = resolve(getPluginsBase(projectId), filePath);
+      if (existsSync(resolvedPath)) unlinkSync(resolvedPath);
+      removePluginFromConfig(plugin.file_path, projectId);
+    }
+    checkpointAfterWrite();
+    return plugin;
+  });
+}
+
+/**
+ * Ensure the plugin base directory exists on disk.
+ * Used during initialization and before writing plugin files.
+ */
+export function ensurePluginDir(projectId?: string): void {
+  const dir = getPluginsBase(projectId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+/**
+ * Create a new plugin and persist it to DB + disk.
+ *
+ * Auto-populates source_content from the file on disk (if it exists and no content is provided),
+ * then writes the .ts file and syncs opencode.json.
+ *
+ * NOTE: The plugin `id` uses a timestamp+random scheme (`plugin_${Date.now()}_${random}`)
+ * rather than UUID — this is a legacy pattern. The timestamp portion provides rough creation ordering
+ * without needing a separate `created_at` sort query.
+ */
+export function createPlugin(
+  projectId: string,
+  name: string,
+  filePath: string,
+  sourceContent?: string,
+  initiallyEnabled = true
+): Plugin {
+  assertPluginCommandClear(projectId);
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    validatePluginPath(filePath, projectId);
+    if (db.prepare("SELECT 1 FROM plugins WHERE project_id=? AND (name=? OR file_path=?)").get(projectId,name,filePath)) throw new Error("Plugin target already exists; restore or edit its original row");
+    const now = new Date().toISOString();
+    const id = `plugin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const content = sourceContent !== undefined ? sourceContent : (() => {
+      try {
+        const resolvedPath = resolve(getPluginsBase(projectId), filePath);
+        if (existsSync(resolvedPath)) {
+          return readFileSync(resolvedPath, "utf-8");
+        }
+      } catch { /* file doesn't exist yet */ }
+      return "";
+    })();
+
+    db.prepare(
+      `INSERT INTO plugins (id, project_id, name, file_path, enabled, source_content, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, projectId, name, filePath, initiallyEnabled ? 1 : 0, content, now, now);
+
+    if (initiallyEnabled) ensurePluginDir(projectId);
+    if (initiallyEnabled && content) {
+      const fullPath = resolve(getPluginsBase(projectId), filePath);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, content);
+      addPluginToConfig(filePath, projectId);
+    }
+
+    checkpointAfterWrite();
+    return db.prepare("SELECT * FROM plugins WHERE id = ?").get(id) as Plugin;
+  });
+}
+
+/**
+ * Delete a plugin: removes from DB, deletes the .ts file from disk, and removes from opencode.json config.
+ * Returns false if the plugin doesn't exist.
+ */
+export function deletePlugin(projectId: string, name: string): boolean {
+  return Boolean(archivePlugin(projectId,name));
+}
+
+/**
+ * Update a plugin's file_path and/or source_content.
+ *
+ * Handles three scenarios:
+ * 1. Both file_path and source_content changed → remove old file, write new, update config
+ * 2. Only source_content changed → overwrite existing file
+ * 3. Only file_path changed → move file to new location, update config
+ *
+ * Always syncs opencode.json when the path changes (add/remove from `plugins` array).
+ */
+export function updatePlugin(
+  projectId: string,
+  name: string,
+  updates: { file_path?: string; source_content?: string }
+): Plugin | undefined {
+  assertPluginCommandClear(projectId);
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
+      .get(projectId, name) as Plugin | undefined;
+    if (!existing) return undefined;
+
+    const now = new Date().toISOString();
+    const newFilePath = updates.file_path ?? existing.file_path;
+    const newContent = updates.source_content !== undefined ? updates.source_content : (existing.source_content ?? "");
+
+    if (updates.file_path) validatePluginPath(updates.file_path, projectId);
+
+    db.prepare(
+      "UPDATE plugins SET file_path = ?, source_content = ?, updated_at = ? WHERE id = ?"
+    ).run(newFilePath, newContent, now, existing.id);
+
+      if (!existing.enabled) { checkpointAfterWrite(); return db.prepare("SELECT * FROM plugins WHERE id = ?").get(existing.id) as Plugin; }
+      if (updates.source_content !== undefined) {
+       ensurePluginDir(projectId);
+       if (updates.file_path && updates.file_path !== existing.file_path) {
+         try {
+           const oldPath = resolve(getPluginsBase(projectId), existing.file_path);
+           if (existsSync(oldPath)) unlinkSync(oldPath);
+         } catch { /* ignore */ }
+         removePluginFromConfig(existing.file_path, projectId);
+         addPluginToConfig(newFilePath, projectId);
+       }
+       const writePath = resolve(getPluginsBase(projectId), newFilePath);
+       mkdirSync(dirname(writePath), { recursive: true });
+       writeFileSync(writePath, newContent);
+     } else if (updates.file_path && updates.file_path !== existing.file_path) {
+       // Path-only change: read old file content, write to new location, remove old
+       ensurePluginDir(projectId);
+       const oldPath = resolve(getPluginsBase(projectId), existing.file_path);
+       const newPath = resolve(getPluginsBase(projectId), newFilePath);
+       if (existsSync(oldPath)) {
+         const content = readFileSync(oldPath, "utf-8");
+         mkdirSync(dirname(newPath), { recursive: true });
+         writeFileSync(newPath, content);
+         unlinkSync(oldPath);
+       }
+       removePluginFromConfig(existing.file_path, projectId);
+       addPluginToConfig(newFilePath, projectId);
+     }
+
+    checkpointAfterWrite();
+    return db.prepare("SELECT * FROM plugins WHERE id = ?").get(existing.id) as Plugin;
+  });
+}
+
+/** Get a single plugin by project and name. */
+export function getPlugin(projectId: string, name: string): Plugin | undefined {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  return db.prepare("SELECT * FROM plugins WHERE project_id = ? AND archived_at IS NULL AND name = ?")
+    .get(projectId, name) as Plugin | undefined;
+}

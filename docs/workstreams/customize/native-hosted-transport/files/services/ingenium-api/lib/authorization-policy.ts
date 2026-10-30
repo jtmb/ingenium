@@ -75,6 +75,11 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
 
 export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
+  // Dot's request-local service rechecks each command's original private source,
+  // jobs write/execute and capability policy. This outer read admission is never a command grant.
+  const dotRead=req.method==="GET"&&/^\/api\/v1\/dot\/(?:(?:suggestions|followups|operations|notifications)(?:\/[^/]+)?|queue|job-policy\/[^/]+)$/.test(req.path);
+  if(dotRead||req.method==="POST"&&req.path==="/api/v1/dot/commands")return {action:"jobs.dot."+(dotRead?"read":"command"),resource:"jobs",permission:"read",target:"project",sensitive:true};
+
   const nativePairing = req.method === "POST" && /^\/api\/v1\/native-customize\/pairings(?:\/[^/]+\/(?:inspect|quiesce|retire))?$/.test(req.path)
     || req.method === "GET" && /^\/api\/v1\/native-customize\/pairings\/[^/]+$/.test(req.path);
   if(nativePairing)return {action:"native-pairing."+permissionFor(req as Request),resource:"vault",permission:permissionFor(req as Request),target:"native-governance",browserSessionOnly:true,sensitive:req.method==="POST"};
@@ -113,6 +118,9 @@ export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial
     const collection = req.method === "GET" && (req.path === "/api/v1/projects" || req.path === "/api/v1/projects/archive");
     return { action: `projects.${permission}`, resource: "projects", permission, target: collection || (req.method === "POST" && req.path === "/api/v1/projects") ? "organization" : "project", sensitive: permission === "admin", stepUp: permission === "admin" };
   }
+  const scopedCustomize=req.method==="GET"&&/^\/api\/v1\/customize\/(?:sources(?:\/[^/]+)?|project-source|archived-plugins|installations|commands\/[^/]+)\/?$/i.test(req.path)
+    ||req.method==="POST"&&/^\/api\/v1\/customize\/commands\/?$/i.test(req.path);
+  if(scopedCustomize)return {action:"customize.scoped."+(req.method==="GET"?"read":"command"),resource:"plugins",permission:"read",target:"private",browserSessionOnly:true,sensitive:req.method!=="GET"};
   if (req.method === "GET" && /^\/api\/v1\/customize\/?$/i.test(req.path)) {
     const resource = req.query?.kind === "skill" ? "skills" : "plugins";
     return { action: resource + ".read", resource, permission: "read", target: "project" };
