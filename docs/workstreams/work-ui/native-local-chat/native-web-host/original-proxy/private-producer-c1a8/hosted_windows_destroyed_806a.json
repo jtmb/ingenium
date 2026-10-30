@@ -1,0 +1,29 @@
+{
+  "scope": "finite source review predicates only; actual Rust/native lifecycle unqualified",
+  "path": "apps/desktop/src-tauri/src/hosted_windows.rs",
+  "preimage_sha256": "b11bc140d2081430bcb115beadefa1732bfa35b9fa8e6b1edc80ade57464cd93",
+  "proposed_sha256": "536e6c066f8e3b4c76ba6ea3c75d48dab2f09ad0f4741ea4952566052cbbf052",
+  "patch_bytes": 2402,
+  "patch_sha256": "0734e0097f493b214585b09001cca953c175d7616e6d5bbf7a83da9391007016",
+  "checks": {
+    "exact_806a_preimage_preserved": true,
+    "same_native_file_only": true,
+    "registry_arc_owned": true,
+    "actual_destroyed_guard": true,
+    "fence_before_index_removal": true,
+    "exact_same_arc_and_uid_required": true,
+    "weak_callback_owners_no_registry_cycle": true,
+    "registration_precedes_insertion": true,
+    "no_registry_lock_across_callback_registration": true,
+    "observed_destroyed_written_only_in_native_callback": true,
+    "destroyed_during_enrollment_not_inserted": true,
+    "live_label_still_refused": true,
+    "requester_fence_and_origin_guards_preserved": true,
+    "no_close_drop_or_retirement_in_destroyed_callback": true,
+    "no_broker_package_or_control_factory_changed": true
+  },
+  "passed": 15,
+  "compiler_runtime_or_cu_run": false,
+  "shared_source_or_dependency_changes": false,
+  "full_goal_complete": false
+}

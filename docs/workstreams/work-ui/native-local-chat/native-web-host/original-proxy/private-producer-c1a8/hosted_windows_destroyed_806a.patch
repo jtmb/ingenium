@@ -1,0 +1,37 @@
+--- a/apps/desktop/src-tauri/src/hosted_windows.rs
++++ b/apps/desktop/src-tauri/src/hosted_windows.rs
+@@ -4 +4 @@
+-pub(crate) struct WindowOriginal{uid:uuid::Uuid,root:Webview,parent:Window,fenced:AtomicBool}
++pub(crate) struct WindowOriginal{uid:uuid::Uuid,root:Webview,parent:Window,fenced:AtomicBool,destroyed:AtomicBool}
+@@ -20 +20 @@
+-#[derive(Default)]pub(crate) struct HostedWindows{originals:Mutex<HashMap<String,Arc<WindowOriginal>>>}
++#[derive(Default)]pub(crate) struct HostedWindows{originals:Arc<Mutex<HashMap<String,Arc<WindowOriginal>>>>}
+@@ -27 +27,17 @@
+-  let original=Arc::new(WindowOriginal{uid:uuid::Uuid::new_v4(),parent:root.window(),root,fenced:AtomicBool::new(false)});
++  let original=Arc::new(WindowOriginal{uid:uuid::Uuid::new_v4(),parent:root.window(),root,fenced:AtomicBool::new(false),destroyed:AtomicBool::new(false)});
++  let weak=Arc::downgrade(&original);let index=Arc::downgrade(&self.originals);
++  let label=original.root.label().to_owned();let uid=original.uid();
++  // Register without holding the map lock, BEFORE insertion. If destruction
++  // races enrollment, its private observed bit prevents a stale later insert.
++  created.on_window_event(move|event|{
++   if !matches!(event,WindowEvent::Destroyed){return}
++   if let Some(original)=weak.upgrade(){
++    original.fence(); // revocation FIRST; not Web/engine/child retirement
++    original.destroyed.store(true,Ordering::Release);
++    if let Some(index)=index.upgrade(){
++     if let Ok(mut entries)=index.lock(){
++      if entries.get(&label).is_some_and(|current|Arc::ptr_eq(current,&original)&&current.uid()==uid){entries.remove(&label);}
++     } // poison retains the exact index; never replace/bypass it
++    }
++   }
++  });
+@@ -28,0 +45 @@
++  if original.destroyed.load(Ordering::Acquire){return Err("Original Work window was destroyed before enrollment".into())}
+@@ -31,2 +47,0 @@
+-  let weak=Arc::downgrade(&original);
+-  created.on_window_event(move|event|if matches!(event,WindowEvent::Destroyed){if let Some(original)=weak.upgrade(){original.fence();}});
+@@ -41,2 +56,2 @@
+-// approved peer/control connection + service ChildScopeOriginal. This module
+-// deliberately has no supplied-boolean/DTO grant constructor or close witness.
++// approved peer/control connection + service ChildScopeOriginal. Removing only
++// this destroyed window's index never retires those independent owning Arcs.
