@@ -1,0 +1,60 @@
+diff --git a/services/ingenium-api/scripts/copy-domain-runtime.mjs b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+--- a/services/ingenium-api/scripts/copy-domain-runtime.mjs
++++ b/services/ingenium-api/scripts/copy-domain-runtime.mjs
+@@ -8,5 +8,7 @@
+ const repository = path.resolve(apiRoot, '../..');
+ const domains = ['projects-v2', 'memory-v2', 'customize-v2', 'dot-v2', 'voice-v2'];
+ const shared = ['veyra-projects', 'veyra-memory', 'veyra-automation', 'veyra-voice', 'veyra-operations'];
++// Reviewed singleton only: never discover or copy the release-tools directory.
++const singletonTools = [{ source: 'tools/veyra-release/core126-candidate-intent.mjs', target: 'veyra-tools/veyra-release/core126-candidate-intent.mjs' }];
+ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+ const within = (root, candidate) => candidate === root || candidate.startsWith(root + path.sep);
+@@ -33,9 +35,34 @@
+     }
+   }
+   for (const root of roots) add(root.source, root);
++  const sourceOwner = fs.statSync(sourceRoot).uid;
++  const checkSingleton = stat => {
++    if (!stat.isFile() || stat.isSymbolicLink?.() || stat.nlink !== 1 || !Number.isSafeInteger(sourceOwner) || stat.uid !== sourceOwner || !Number.isSafeInteger(stat.size) || stat.size < 1 || stat.size > 65536) throw new Error('Unsafe reviewed runtime singleton');
++  };
++  const readSingleton = entry => {
++    let fd;
++    try {
++      if (fs.realpathSync(entry.source) !== entry.source) throw new Error('Runtime singleton aliases another source');
++      fd = fs.openSync(entry.source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
++      const first = fs.fstatSync(fd); checkSingleton(first);
++      const raw = fs.readFileSync(fd), last = fs.fstatSync(fd), current = fs.lstatSync(entry.source);
++      checkSingleton(last); checkSingleton(current);
++      if (raw.length !== first.size || fs.realpathSync(entry.source) !== entry.source || ['dev','ino','size','mtimeMs','uid','gid','mode','nlink'].some(key => first[key] !== last[key] || first[key] !== current[key])) throw new Error('Runtime singleton changed during read');
++      return raw;
++    } finally { if (fd !== undefined) fs.closeSync(fd); }
++  };
++  for (const item of singletonTools) {
++    const source = path.join(sourceRoot, ...item.source.split('/'));
++    let stat;
++    try { stat = fs.lstatSync(source); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
++    checkSingleton(stat);
++    const canonical = fs.realpathSync(source);
++    if (canonical !== source || !within(sourceRoot, canonical)) throw new Error('Runtime singleton escaped reviewed source');
++    files.set(canonical, { source: canonical, target: path.join(destination, ...item.target.split('/')), singleton: true });
++  }
+   const planned = [];
+   for (const entry of files.values()) {
+-    const raw = fs.readFileSync(entry.source);
++    const raw = entry.singleton ? readSingleton(entry) : fs.readFileSync(entry.source);
+     const text = raw.toString('utf8');
+     const syntax = ts.createSourceFile(entry.source, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+     const replacements = [];
+diff --git a/packages/veyra-operations/core126-image-contract.mjs b/packages/veyra-operations/core126-image-contract.mjs
+--- a/packages/veyra-operations/core126-image-contract.mjs
++++ b/packages/veyra-operations/core126-image-contract.mjs
+@@ -1,7 +1,7 @@
+ import {createHash} from 'node:crypto';
+ export const CORE126_PROTOCOL='scoped-core126-mcp-v1';
+-export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts','services/ingenium-api/lib/dot-v2/job-original-authority.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/job-private-control.mjs','services/ingenium-api/lib/dot-v2/job-private-files.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs','services/ingenium-api/lib/dot-v2/job-private-plugin.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs','services/ingenium-api/lib/dot-v2/core126-owner.mjs','packages/ingenium-core/lib/tools/mcp-credentials.ts','packages/ingenium-extension/scripts/job-run-mcp-transport.ts','packages/ingenium-extension/scripts/job-run-mcp-client.ts']);
+-export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js','/app/services/ingenium-api/dist/lib/dot-v2/job-original-authority.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-control.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-files.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-runtime.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-facade.mjs','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-client.js']);
++export const SOURCE_INPUTS=Object.freeze(['Dockerfile','package-lock.json','scripts/runtime-entrypoint.sh','services/ingenium-api/scripts/runtime-job-child.ts','services/ingenium-api/lib/dot-v2/managed-job-child.mjs','services/ingenium-api/lib/dot-v2/core126-http.mjs','services/ingenium-api/lib/runtime-manager-contract.ts','services/ingenium-api/scripts/runtime-manager.ts','services/ingenium-api/scripts/copy-domain-runtime.mjs','services/ingenium-api/scripts/runtime-job-mcp.ts','packages/veyra-operations/core126-agent-material.mjs','config/opencode-managed/job-opencode.json','config/opencode-managed/plugins/enforce-job-agent/index.mjs','config/opencode-managed/plugins/enforce-reserved-broker/index.mjs','.opencode/agents/execution/ingenium-llm-broker.md','packages/veyra-operations/core126-job-plugin.mjs','packages/veyra-operations/core126-job-bootstrap.mjs','services/ingenium-api/scripts/runtime-job-bootstrap.ts','services/ingenium-api/lib/dot-v2/job-original-authority.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs','services/ingenium-api/lib/dot-v2/job-private-control.mjs','services/ingenium-api/lib/dot-v2/job-private-files.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-runtime.mjs','services/ingenium-api/lib/dot-v2/job-private-plugin.mjs','services/ingenium-api/lib/dot-v2/job-bootstrap-facade.mjs','services/ingenium-api/lib/dot-v2/core126-owner.mjs','packages/ingenium-core/lib/tools/mcp-credentials.ts','packages/ingenium-extension/scripts/job-run-mcp-transport.ts','packages/ingenium-extension/scripts/job-run-mcp-client.ts','services/ingenium-api/lib/dot-v2/core126-purpose.mjs','tools/veyra-release/core126-candidate-intent.mjs']);
++export const IMAGE_INPUTS=Object.freeze(['/app/scripts/runtime-entrypoint.sh','/app/services/ingenium-api/dist/scripts/runtime-job-child.js','/app/services/ingenium-api/dist/lib/dot-v2/managed-job-child.mjs','/app/services/ingenium-api/dist/lib/dot-v2/core126-http.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-mcp.js','/app/services/ingenium-api/dist/veyra-runtime-closure.json','/usr/local/bin/opencode','/usr/local/share/ingenium/opencode-managed/opencode.json','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-agent-material.mjs','/usr/local/share/ingenium/opencode-managed/job-opencode.json','/usr/local/share/ingenium/opencode-managed/plugins/enforce-job-agent/index.mjs','/usr/local/share/ingenium/opencode-managed/plugins/enforce-reserved-broker/index.mjs','/usr/local/share/ingenium/opencode-managed/agents/ingenium-llm-broker.md','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-plugin.mjs','/app/services/ingenium-api/dist/veyra-packages/veyra-operations/core126-job-bootstrap.mjs','/app/services/ingenium-api/dist/scripts/runtime-job-bootstrap.js','/app/services/ingenium-api/dist/lib/dot-v2/job-original-authority.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-frame.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-control.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-files.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-runtime.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-private-plugin.mjs','/app/services/ingenium-api/dist/lib/dot-v2/job-bootstrap-facade.mjs','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-transport.js','/app/packages/ingenium-extension/dist/scripts/job-run-mcp-client.js','/app/services/ingenium-api/dist/lib/dot-v2/core126-purpose.mjs','/app/services/ingenium-api/dist/veyra-tools/veyra-release/core126-candidate-intent.mjs']);
+ export const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+ export const hex=v=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
+ export const imageId=v=>typeof v==='string'&&/^sha256:[a-f0-9]{64}$/.test(v);

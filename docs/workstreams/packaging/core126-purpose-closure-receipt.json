@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "kind": "exact-source-only-closure-integration-proposal",
+  "owner": "packaging 01a18935-1a8b-7eb3-a709-d874f70095e8",
+  "root": "/home/brajam/.local/state/ingenium-release/skill-zen-fix-1792810845/real-gmail-ui/prd-ui-fixes",
+  "sourceOnly": true,
+  "sharedWrites": false,
+  "canonicalHelperCopiedToSource": false,
+  "materializedBuild": false,
+  "runtimeExecuted": false,
+  "proposalFiles": [
+    {
+      "path": "services/ingenium-api/scripts/copy-domain-runtime.mjs",
+      "beforeSha256": "029887a063c945a08202e0075313f9f47b7251e5ae649bbe1bc16f90441a5798",
+      "beforeBytes": 6147,
+      "afterSha256": "a8bf9fb6132ca61ba099024505b19e8154a07b04e1a133ac37c6763a95848b23",
+      "afterBytes": 8201,
+      "preservesFinalNewline": true
+    },
+    {
+      "path": "packages/veyra-operations/core126-image-contract.mjs",
+      "beforeSha256": "a904467322ad5ddcc0e0d9084b84c303a0d95eccc5511aa0b7539beb10e0fcdb",
+      "beforeBytes": 11290,
+      "afterSha256": "1647f7b5586d18c167029f075c325f4044c069469af1017084c3e4cf057bc253",
+      "afterBytes": 11550,
+      "preservesFinalNewline": true
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "services/ingenium-api/lib/dot-v2/core126-purpose.mjs",
+      "bytes": 2675,
+      "sha256": "d865891ca7678458ec9872e5d108cdef31e7a913bf217e806d091b7420fc9bda"
+    },
+    {
+      "path": "tools/veyra-release/core126-candidate-intent.mjs",
+      "bytes": 4893,
+      "sha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1"
+    },
+    {
+      "path": "services/ingenium-api/lib/dot-v2/job-bootstrap-frame.mjs",
+      "bytes": 2337,
+      "sha256": "f585024e0e17d6eb37627d5b520c9c8cf2bca9c08bbbf5296db306f572dbfca8"
+    }
+  ],
+  "patch": {
+    "path": "docs/workstreams/packaging/core126-purpose-closure.patch",
+    "bytes": 10702,
+    "sha256": "006747b08fc8f3439c0177eb3082cc64f9dcc909e47fdf7d4696fdb236afdb03"
+  },
+  "arrays": {
+    "sourceBefore": 29,
+    "sourceAfter": 31,
+    "imageBefore": 25,
+    "imageAfter": 27,
+    "strictParserAlreadyPresent": true,
+    "strictParserDuplicated": false
+  },
+  "singleton": {
+    "source": "tools/veyra-release/core126-candidate-intent.mjs",
+    "target": "dist/veyra-tools/veyra-release/core126-candidate-intent.mjs",
+    "sourceSha256": "8b170f2ac20d2c151695768d1db1bf10207a6465354393bc51a9a164fe67b1a1",
+    "emittedSha256": "4fe8a52ba855ca6efc3b48cd0628dc25794d6867d684783d60dee4632cf02f8c"
+  },
+  "tests": {
+    "evidenceClass": "original AST/static-import read-only source plan; no materialized build/runtime",
+    "windows": {
+      "node": "24.18.0",
+      "passed": 12,
+      "failed": 0
+    },
+    "wsl": {
+      "node": "22.23.1",
+      "passed": 12,
+      "failed": 0
+    },
+    "actualRootPlanFiles": 71,
+    "typescript": "5.9.3",
+    "destinationCreated": false,
+    "priorTestDriverFailures": [
+      "Independent hunk consumer appended nonexistent final newline; corrected to retain original EOF",
+      "Windows VM test identifier was POSIX-only; corrected to actual source file URL"
+    ],
+    "newLegacyClosureCasePendingFinalRun": false,
+    "emittedGraphLink": "PASS without module evaluation/materialization"
+  },
+  "cleanup": {
+    "generatedDisposablePaths": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retainedReason": "Durable minimal reviewed proposal/patch/tests/guide/receipt for Root application and original closure regression; no source snapshots/full copied modules/deps/caches/targets",
+    "priorProtectedTargetsUntouched": true,
+    "windowsRecoveryClaimed": false,
+    "linuxRecoveryClaimed": false
+  },
+  "openGates": [
+    "Root exact apply/shared source integration and actual closure qualification",
+    "Original candidate lease and all18 actual inert cases",
+    "Protected independent image approval remains closed",
+    "Original complete release acceptance"
+  ],
+  "gitApplyCheck": "PASS read-only against exact Root source"
+}
