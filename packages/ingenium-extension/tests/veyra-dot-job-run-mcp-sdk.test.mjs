@@ -30,7 +30,7 @@ const catalog=await import(asModule(catalogSource));
 const {createCore126Broker}=await import(pathToFileURL(resolve(root,"services/ingenium-api/lib/dot-v2/core126-broker.mjs")).href);
 const {createCore126Handlers,createCore126ToolAuthorizer}=await import(pathToFileURL(resolve(root,"services/ingenium-api/lib/dot-v2/core126-http.mjs")).href);
 const runId="11111111-1111-4111-8111-111111111111",attemptId="22222222-2222-4222-8222-222222222222";
-const credential={id:"sdk-fixture-credential",kind:"job-run",audience:"job-run",runId,attemptId,servicePrincipalId:"fixture-original-principal",projectId:"p",organizationId:"o",workspaceId:"w",scopes:["projects:read","memory:read"]};
+const credential={purpose:"production",candidateIntentHash:null,id:"sdk-fixture-credential",kind:"job-run",audience:"job-run",runId,attemptId,servicePrincipalId:"fixture-original-principal",projectId:"p",organizationId:"o",workspaceId:"w",scopes:["projects:read","memory:read"]};
 function backend(){
  let current=true,enabled=true,mode="normal",lookups=0,requests=0,held;
  function holdNextCall(){

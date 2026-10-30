@@ -44,7 +44,7 @@ export function createCore126Handlers({owner,managerGuard,credentials,authorizeT
    if(!match)return null;
    const header=request.headers?.authorization,token=typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"";
    const credential=credentials.inspectManagedJobCredential(token,"job-run");
-   if(!credential||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
+   if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.runId!==match[1])throw Object.assign(Error("Original JobRun credential required"),{status:401});
    if(match[2]==="bootstrap-assignment"&&request.method==="GET"){
     if(request.headers?.["x-ingenium-audience"]!=="job-run"||request.headers?.["x-ingenium-job-attempt"]!==credential.attemptId)throw Object.assign(Error("Original JobRun bootstrap denied"),{status:401});
     return {data:owner.bootstrapAssignment(match[1],credential)};
@@ -71,7 +71,7 @@ export function createCore126Handlers({owner,managerGuard,credentials,authorizeT
 /** A CLOSED per-tool Core policy decision, not a generic service principal returned to middleware. */
 export function createCore126ToolAuthorizer({credentials,mcpAuthorizationPolicy,authorization,jobs,toolCatalog}){
  return (credential,toolName,body)=>{
-  if(credential.kind!=="job-run"||credential.audience!=="job-run"||!jobs.isJobRunAuthorizationCurrent(credential.projectId,credential.runId))throw Object.assign(Error("JobRun tool denied"),{status:403});
+  if(credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.kind!=="job-run"||credential.audience!=="job-run"||!jobs.isJobRunAuthorizationCurrent(credential.projectId,credential.runId))throw Object.assign(Error("JobRun tool denied"),{status:403});
   const tool=toolCatalog?.getTool(toolName);if(!tool||tool.name!==toolName||typeof tool.category!=="string")throw Object.assign(Error("Qualified original tool catalog unavailable"),{status:503});
   const policy=mcpAuthorizationPolicy.explicitMcpAuthorizationPolicy(toolName,tool.category);
   // Preserve actual private-content policy: never impersonate the owner to unlock browser/user-token-only tools.

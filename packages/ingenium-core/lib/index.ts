@@ -84,3 +84,5 @@ export * as voiceOperations from "./tools/voice-operation-ledger.js";
 export { createVoiceOperationOwner } from "./tools/voice-operation-owner.js";
 export type { VoiceOperationAuthorities } from "./tools/voice-operation-owner.js";
 export type { CoreVoiceLedger, CpuRetentionChange, CpuRetentionAck, CpuPrivate, CpuResultFingerprint, VoiceControl } from "./tools/voice-operation-contract.js";
+
+export {assertNativeGovernanceLifecycleClear} from "./tools/node-native-lifecycle.js";

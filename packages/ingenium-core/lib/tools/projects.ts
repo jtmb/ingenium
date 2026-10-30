@@ -1,3 +1,4 @@
+import {assertNativeGovernanceLifecycleClear,assertNativeGovernanceRecoveryRestore} from "./node-native-lifecycle.js";
 /**
  * Project CRUD — manages the two-project identity model (see docs/concepts/architecture.md).
  *
@@ -159,6 +160,7 @@ export function archiveProject(name: string): boolean {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name) as Project | undefined;
     if (!existing || existing.is_global) return false;
+    assertNativeGovernanceLifecycleClear(db,existing.id);
     const now = new Date().toISOString();
     db.prepare("UPDATE projects SET archived_at = ?, updated_at = ? WHERE id = ? AND archived_at IS NULL").run(now, now, existing.id);
     return true;
@@ -174,6 +176,7 @@ export function unarchiveProject(name: string): boolean {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NOT NULL").get(name);
     if (!existing) return false;
+    assertNativeGovernanceRecoveryRestore(db,(existing as Project).id);
     const activeGlobal = db.prepare(
       "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
     ).get((existing as Project).id) as { id: string } | undefined;
@@ -194,6 +197,7 @@ export function unarchiveProjectById(projectId: string): boolean {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE id = ? AND archived_at IS NOT NULL").get(projectId) as Project | undefined;
     if (!existing) return false;
+    assertNativeGovernanceRecoveryRestore(db,existing.id);
     const activeGlobal = db.prepare(
       "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
     ).get(existing.id) as { id: string } | undefined;
@@ -265,6 +269,7 @@ export function deleteProject(name: string): ProjectDeletionResult {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const project = db.prepare("SELECT id, is_global FROM projects WHERE name = ?").get(name) as { id: string; is_global: number } | undefined;
     if (!project) return { status: "not_found" } as ProjectDeletionResult;
+    assertNativeGovernanceLifecycleClear(db,project.id);
     const childTables = projectChildTables(db, project.id);
     if (childTables.length > 0) return { status: "has_children", childTables } as ProjectDeletionResult;
     if (project.is_global) recordGlobalProjectTransition(db, project.id, "ceased_global", new Date().toISOString());
@@ -295,6 +300,7 @@ export function updateProject(currentName: string, newName: string): Project | u
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(currentName) as Project | undefined;
     if (!existing) return undefined;
+    assertNativeGovernanceLifecycleClear(db,existing.id);
     const now = new Date().toISOString();
     // Names are validated identifiers. Renames intentionally do not move or create
     // filesystem paths; this avoids operating on any legacy/untrusted path value.
@@ -317,6 +323,7 @@ export function setProjectGlobal(name: string, isGlobal: boolean): boolean {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name) as Project | undefined;
     if (!existing || existing.archived_at) return false;
+    assertNativeGovernanceLifecycleClear(db);
     const now = new Date().toISOString();
     if (isGlobal) demoteActiveGlobalProjects(db, now, existing.id);
     db.prepare("UPDATE projects SET is_global = ?, updated_at = ? WHERE name = ?").run(isGlobal ? 1 : 0, now, name);

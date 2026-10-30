@@ -7,15 +7,17 @@ import {getDb,execTransaction,checkpointAfterWrite,vault,authorization,HostedRef
 import {authenticateRequestWithoutActivity} from "./middleware/auth.js";
 import {toAuthorizationPrincipal} from "./authorization-policy.js";
 import {createPairedNativeReader,decodePreparation,redeemNativePreparation,verifyRedeemed,type Preparation,type Redeemed,type PairedNativeCredential} from "./paired-native-reader.js";
+import {retirementProof} from "./paired-native-proof.js";
 import type {OriginalNativeConnectionCustody} from "./native-hosted-connection-owner.js";
 type Principal={type:"user";id:string;scopes:readonly string[];session:unknown};
 type Row=Record<string,any>;
-type Config={kind:"node-native-pairing-v1";enrollmentRequestId:string;installationId:string;projectId:string;phase:"redeeming"|"verifying"|"paired"|"unknown"|"disabled";preparationItemId:string;preparationVersion:number;credentialVersion:number;firstFailureCode?:string};
-type VaultOwner=Pick<typeof vault,"isSealed"|"decryptItem"|"updateItem">;
+type Config={kind:"node-native-pairing-v1";enrollmentRequestId:string;installationId:string;projectId:string;phase:"redeeming"|"verifying"|"paired"|"unknown"|"disabled"|"quiescing"|"retired";preparationItemId:string;preparationVersion:number;credentialVersion:number;retirement?:{grantId:string;grantRevision:number;proofSha256:string;physicalErasure:false};firstFailureCode?:string};
+type VaultOwner=Pick<typeof vault,"isSealed"|"decryptItem"|"updateItem"|"deleteItem">;
 export interface NativePairingBackend {
  db():SqlDb;transaction<T>(work:()=>T):T;checkpoint():void;vault:VaultOwner;
  principal(req:Request):Principal;
  project(principal:Principal,projectId:string,permission:"read"|"write"):boolean;
+ retirementProject(principal:Principal,projectId:string):boolean;
  owned(principal:Principal,row:Row,kind:"vault_item"|"provider_connection",permission:"read"|"write"):boolean;
  redeem(preparation:Preparation,actor:string,installation:string,projectId:string,retain:(receipt:Redeemed)=>void):Promise<PairedNativeCredential>;
  verify(credential:Redeemed):Promise<PairedNativeCredential>;
@@ -34,6 +36,7 @@ const defaults:NativePairingBackend={
  principal:defaultPrincipal,
  project:(p,id,permission)=>authorization.requireProjectPermission(toAuthorizationPrincipal(p as any),id,"vault",permission).allowed
   &&authorization.requireProjectPermission(toAuthorizationPrincipal(p as any),id,"skills","read").allowed,
+ retirementProject:(p,id)=>!!getDb().prepare("SELECT 1 FROM projects project JOIN organization_memberships member ON member.organization_id=project.organization_id WHERE project.id=? AND member.user_id=? AND member.status='active'").get(id,p.id),
  owned:(p,row,kind,permission)=>row.owner_kind==="user"&&row.owner_user_id===p.id&&authorization.requireOwnedResourcePermission(toAuthorizationPrincipal(p as any),{
   resourceType:kind,resourceId:row.id,organizationId:row.organization_id,ownerKind:"user",ownerUserId:p.id},permission).allowed,
  redeem:redeemNativePreparation,verify:verifyRedeemed,reader:createPairedNativeReader
@@ -41,7 +44,7 @@ const defaults:NativePairingBackend={
 function config(row:Row):Config{
  let c:unknown;try{c=JSON.parse(row.config_json);}catch{return fail("PAIRING_RECORD_UNAVAILABLE",503);}
  if(!object(c)||c.kind!==KIND||!identifier(c.enrollmentRequestId)||!identifier(c.installationId)||!identifier(c.projectId)||!identifier(c.preparationItemId)||
- !Number.isSafeInteger(c.preparationVersion)||!Number.isSafeInteger(c.credentialVersion)||!["redeeming","verifying","paired","unknown","disabled"].includes(c.phase))return fail("PAIRING_RECORD_UNAVAILABLE",503);
+ !Number.isSafeInteger(c.preparationVersion)||!Number.isSafeInteger(c.credentialVersion)||!["redeeming","verifying","paired","unknown","disabled","quiescing","retired"].includes(c.phase))return fail("PAIRING_RECORD_UNAVAILABLE",503);
  return c as Config;
 }
 function rowId(actor:string,installation:string,requestId:string){return "native-pair:"+createHash("sha256").update(JSON.stringify([actor,installation,requestId])).digest("hex");}
@@ -53,16 +56,16 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
   if(!installation||!identifier(installation.instance_id))fail("HOST_IDENTITY_UNAVAILABLE",503);
   return {p,installation:installation.instance_id as string};
  }
- function vaultItem(id:string,p:Principal,permission:"read"|"write"){
+ function vaultItem(id:string,p:Principal,permission:"read"|"write",retirement=false){
   const item=backend.db().prepare("SELECT id,project_id,organization_id,owner_kind,owner_user_id,type,version,access_policy FROM vault_items WHERE id=? AND access_policy<>?").get(id,DELETED) as Row|undefined;
-  if(!item||item.type!=="native-pairing-credential"||!backend.owned(p,item,"vault_item",permission)||!backend.project(p,item.project_id,permission))fail("NOT_FOUND",404);
+  if(!item||item.type!=="native-pairing-credential"||!backend.owned(p,item,"vault_item",permission)||!(retirement?backend.retirementProject(p,item.project_id):backend.project(p,item.project_id,permission)))fail("NOT_FOUND",404);
   return item;
  }
- function connection(enrollmentRequestId:string){
+ function connection(enrollmentRequestId:string,retirement=false){
   const s=subject(),id=rowId(s.p.id,s.installation,enrollmentRequestId);
   const row=backend.db().prepare("SELECT * FROM provider_connections WHERE id=? AND owner_kind='user' AND owner_user_id=? AND provider_type='native'").get(id,s.p.id) as Row|undefined;
   if(!row||!backend.owned(s.p,row,"provider_connection","read"))fail("NOT_FOUND",404);
-  const c=config(row);if(c.installationId!==s.installation||c.enrollmentRequestId!==enrollmentRequestId||!backend.project(s.p,c.projectId,"read"))fail("NOT_FOUND",404);
+  const c=config(row);if(c.installationId!==s.installation||c.enrollmentRequestId!==enrollmentRequestId||!(retirement?backend.retirementProject(s.p,c.projectId):backend.project(s.p,c.projectId,"read")))fail("NOT_FOUND",404);
   return {row,c,...s};
  }
  function plaintext(item:Row,p:Principal):Row{
@@ -78,7 +81,7 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
  function retain(enrollmentRequestId:string,secret:Row,phase:"verifying"|"paired",activate:boolean){
   backend.transaction(()=>{
    const {row,c}=connection(enrollmentRequestId),p=backend.principal(request);
-   if(c.phase==="disabled"||c.phase==="paired")fail("PAIRING_CAS_CONFLICT");
+   if(["disabled","paired","quiescing","retired"].includes(c.phase))fail("PAIRING_CAS_CONFLICT");
    const item=vaultItem(row.credential_item_id,p,"write");
    if(item.project_id!==c.projectId||item.version!==c.credentialVersion||backend.vault.isSealed())fail("PAIR_CREDENTIAL_CHANGED",503);
    backend.vault.updateItem(item.project_id,item.id,JSON.stringify(secret),{type:"user",id:p.id});
@@ -87,7 +90,7 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
   });backend.checkpoint();
  }
  function uncertain(enrollmentRequestId:string,code:string){
-  try{backend.transaction(()=>{const {row,c}=connection(enrollmentRequestId);if(c.phase==="paired"||c.phase==="disabled")return;change(row,{...c,phase:"unknown",firstFailureCode:c.firstFailureCode??code},0);});backend.checkpoint();}catch{/* Original claimed row remains durable; no clear/replay or secret fallback. */}
+  try{backend.transaction(()=>{const {row,c}=connection(enrollmentRequestId);if(["paired","disabled","quiescing","retired"].includes(c.phase))return;change(row,{...c,phase:"unknown",firstFailureCode:c.firstFailureCode??code},0);});backend.checkpoint();}catch{/* Original claimed row remains durable; no clear/replay or secret fallback. */}
  }
  async function pair(input:unknown){
   if(!object(input)||Object.keys(input).sort().join(",")!=="enrollmentRequestId,hostedProjectId,preparationItemId"||!identifier(input.enrollmentRequestId)||!identifier(input.preparationItemId)||!identifier(input.hostedProjectId))fail("INVALID_PAIRING",422);
@@ -111,7 +114,7 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
   }catch{uncertain(input.enrollmentRequestId,"NATIVE_PAIRING_UNCONFIRMED");return metadata(connection(input.enrollmentRequestId).row);}
  }
  async function recover(enrollmentRequestId:string){
-  const {row,c,p}=connection(enrollmentRequestId);if(c.phase==="paired"||c.phase==="disabled")return metadata(row);
+  const {row,c,p}=connection(enrollmentRequestId);if(["paired","disabled","quiescing","retired"].includes(c.phase))return metadata(row);
   const item=vaultItem(row.credential_item_id,p,"write");if(item.version!==c.credentialVersion)fail("PAIR_CREDENTIAL_CHANGED");
   const secret=plaintext(item,p);
   // A received cookie was retained before context verification. Recovery performs GET proof only.
@@ -120,19 +123,70 @@ export function createNodeNativePairingOwner(request:Request,overrides:Partial<N
   try{const credential=await backend.verify(secret as Redeemed);retain(enrollmentRequestId,{schemaVersion:1,stage:"paired",credential},"paired",true);}catch{uncertain(enrollmentRequestId,"NATIVE_PAIRING_UNCONFIRMED");}
   return metadata(connection(enrollmentRequestId).row);
  }
+ function lifecycleRevision(value:unknown):number{
+  if(!object(value)||Object.keys(value).join(",")!=="expectedRevision"||!Number.isSafeInteger(value.expectedRevision)||value.expectedRevision<0)fail("INVALID_PAIRING_LIFECYCLE",422);return value.expectedRevision;
+ }
+ function pendingEffects(id:string,p:Principal,installation:string,projectId:string):number{
+  const row=backend.db().prepare("SELECT count(*) AS count FROM native_hosted_governance_effects e JOIN native_hosted_governance_grants g ON g.id=e.grant_id WHERE g.enrollment_request_id=? AND g.owner_user_id=? AND g.installation_id=? AND g.hosted_project_id=? AND e.state='executing'").get(id,p.id,installation,projectId) as Row;
+  return Number(row.count);
+ }
+ function writable(row:Row,c:Config,p:Principal){
+  if(!backend.owned(p,row,"provider_connection","write")||!backend.retirementProject(p,c.projectId))fail("NOT_FOUND",404);
+ }
+ function quiesce(id:string,input:unknown){
+  const revision=lifecycleRevision(input);
+  backend.transaction(()=>{
+   const {row,c,p}=connection(id,true);writable(row,c,p);
+   if(row.revision!==revision)fail("PAIRING_CAS_CONFLICT");
+   if(c.phase==="retired"||c.phase==="quiescing")return;
+   change(row,{...c,phase:"quiescing"},0);
+  });backend.checkpoint();
+  const {row,c,p,installation}=connection(id,true);
+  return {...metadata(row),pendingEffects:pendingEffects(id,p,installation,c.projectId),physicalErasure:false};
+ }
+ async function retire(id:string,input:unknown){
+  const revision=lifecycleRevision(input),before=connection(id,true);writable(before.row,before.c,before.p);
+  if(before.row.revision!==revision)fail("PAIRING_CAS_CONFLICT");
+  if(before.c.phase==="retired")return {...metadata(before.row),physicalErasure:false};
+  if(before.c.phase!=="quiescing"||before.row.enabled!==0)fail("PAIRING_NOT_QUIESCED");
+  if(pendingEffects(id,before.p,before.installation,before.c.projectId)!==0)fail("HOSTED_EFFECTS_UNRESOLVED");
+  const item=vaultItem(before.row.credential_item_id,before.p,"write",true),secret=plaintext(item,before.p);
+  if(item.version!==before.c.credentialVersion||secret.stage!=="paired"||!object(secret.credential))fail("PAIR_RETIREMENT_PROOF_UNAVAILABLE",503);
+  const credential=secret.credential as PairedNativeCredential;
+  if(credential.original.actorId!==before.p.id||credential.original.installationId!==before.installation||credential.original.enrollmentRequestId!==id||credential.original.hostedProjectId!==before.c.projectId)fail("NATIVE_ATTESTATION_REFUSED",503);
+  const proof=await backend.reader(credential).readRetirement();
+  retirementProof(proof,credential.original);
+  backend.transaction(()=>{
+   const current=connection(id,true);writable(current.row,current.c,current.p);
+   const actual=vaultItem(item.id,current.p,"write",true);
+   if(current.row.revision!==revision||current.c.phase!=="quiescing"||current.p.id!==before.p.id||current.installation!==before.installation||actual.version!==item.version)fail("PAIRING_CAS_CONFLICT");
+   if(pendingEffects(id,current.p,current.installation,current.c.projectId)!==0)fail("HOSTED_EFFECTS_UNRESOLVED");
+   const grants=backend.db().prepare("SELECT * FROM native_hosted_governance_grants WHERE enrollment_request_id=?").all(id) as Row[];
+   for(const g of grants)if(g.owner_user_id!==current.p.id||g.installation_id!==current.installation||g.hosted_project_id!==current.c.projectId||g.native_library_id!==credential.original.nativeOwner.library_id||g.native_service_instance_id!==credential.original.nativeOwner.service_instance_id||g.native_project_id!==(credential.original.nativeOwner.project?.id??null)||g.native_project_revision!==(credential.original.nativeOwner.project?.revision??null))fail("NATIVE_ATTESTATION_REFUSED",503);
+   backend.db().prepare("UPDATE native_hosted_governance_grants SET revoked_at=COALESCE(revoked_at,?) WHERE enrollment_request_id=? AND owner_user_id=? AND installation_id=?").run(new Date().toISOString(),id,current.p.id,current.installation);
+   // Existing audited vault SOFT deletion. Ciphertext/originals are preserved; no physical-erasure claim.
+   backend.vault.deleteItem(actual.project_id,actual.id,{type:"user",id:current.p.id});
+   const deleted=backend.db().prepare("SELECT access_policy FROM vault_items WHERE id=?").get(actual.id) as Row;
+   if(deleted.access_policy!==DELETED)fail("PAIR_RETIREMENT_NOT_RETAINED",503);
+   change(current.row,{...current.c,phase:"retired",retirement:{grantId:credential.original.grantId,grantRevision:(proof as Row).grant.revision,proofSha256:createHash("sha256").update(JSON.stringify(proof)).digest("hex"),physicalErasure:false}},0);
+   backend.db().prepare("UPDATE provider_connections SET credential_item_id=NULL WHERE id=?").run(current.row.id);
+  });backend.checkpoint();
+  return {...metadata(connection(id,true).row),physicalErasure:false};
+ }
  const custody:OriginalNativeConnectionCustody={
   async withOriginal(actorId,installationId,enrollmentRequestId,work){
    const {row,c,p,installation}=connection(enrollmentRequestId);
-   if(p.id!==actorId||installation!==installationId||c.phase!=="paired"||row.enabled!==1)fail("NATIVE_ATTESTATION_UNAVAILABLE",503);
+   const recovery=request.method==="GET"&&/^\/operations(?:\/[^/]+)?$/.test(request.path),quiesced=c.phase==="quiescing";
+   if(p.id!==actorId||installation!==installationId||!(c.phase==="paired"&&row.enabled===1||quiesced&&row.enabled===0&&recovery))fail("NATIVE_ATTESTATION_UNAVAILABLE",503);
    const item=vaultItem(row.credential_item_id,p,"read");if(item.project_id!==c.projectId||item.version!==c.credentialVersion)fail("PAIR_CREDENTIAL_CHANGED",503);
    const secret=plaintext(item,p);if(secret.schemaVersion!==1||secret.stage!=="paired"||!object(secret.credential)||!object(secret.credential.original))fail("PAIR_CREDENTIAL_UNAVAILABLE",503);
    const original=secret.credential.original;
    if(original.actorId!==p.id||original.installationId!==installation||original.enrollmentRequestId!==enrollmentRequestId||original.hostedProjectId!==c.projectId)fail("NATIVE_ATTESTATION_REFUSED",503);
    const version=item.version,revision=row.revision,reader=backend.reader(secret.credential as PairedNativeCredential);
-   const assertCurrent=()=>{const fresh=connection(enrollmentRequestId),freshItem=vaultItem(item.id,fresh.p,"read");if(backend.vault.isSealed()||fresh.p.id!==p.id||fresh.installation!==installation||fresh.row.revision!==revision||freshItem.version!==version||fresh.row.enabled!==1||fresh.c.phase!=="paired")fail("PAIR_CREDENTIAL_CHANGED",503);};
+   const assertCurrent=()=>{const fresh=connection(enrollmentRequestId),freshItem=vaultItem(item.id,fresh.p,"read");if(backend.vault.isSealed()||fresh.p.id!==p.id||fresh.installation!==installation||fresh.row.revision!==revision||freshItem.version!==version||fresh.row.enabled!==row.enabled||fresh.c.phase!==c.phase)fail("PAIR_CREDENTIAL_CHANGED",503);};
    const result=await work({...reader,assertCurrent});assertCurrent();
    return result;
   }
  };
- return {pair,recover,status:(enrollmentRequestId:string)=>metadata(connection(enrollmentRequestId).row),custody};
+ return {pair,recover,quiesce,retire,status:(enrollmentRequestId:string)=>{const {row,c,p,installation}=connection(enrollmentRequestId,true);return {...metadata(row),pendingEffects:pendingEffects(enrollmentRequestId,p,installation,c.projectId),physicalErasure:false};},custody};
 }

@@ -1,3 +1,4 @@
+import {assertNativeGovernanceLifecycleClear} from "ingenium-core";
 import Database from "better-sqlite3";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -937,6 +938,7 @@ async function execute(): Promise<void> {
     } catch {
       throw new MaintenanceError("VERIFY_FAILED");
     }
+    assertNativeGovernanceLifecycleClear(getDb());
     let capsule = backups.captureRestoreExecutionCapsule(global.id, run.id);
     writeJournal(root, run.id, "claimed", capsule, targets);
     journal = readJournal(root);
@@ -946,6 +948,7 @@ async function execute(): Promise<void> {
     // Repeat after API/scheduler shutdown: no remotely managed child or accepted
     // in-flight effect may be hidden by the parent runtime reaching STOPPED.
     if (hasUnretiredManagedExecutionForRestore(getDb())) throw new MaintenanceError("HOLDER_REFUSED");
+    assertNativeGovernanceLifecycleClear(getDb());
     closeDbForMaintenance();
     scanOpenHolders(paths);
     capsule = backups.captureRestoreExecutionCapsule(global.id, run.id);

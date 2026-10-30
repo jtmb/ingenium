@@ -68,6 +68,8 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
   if(!imageOwner)throw Object.assign(Error("Qualified original image owner unavailable"),{status:503});
   return imageOwner.withFreshOriginalJobRole(facts,work);
  };
+ const requireProductionPurpose=(runId:string)=>{const original=owner.admissionPurpose(runId);
+  if(original.purpose!=='production')throw Object.assign(Error('MANAGED_JOB_ORIGINAL_CANDIDATE_LEASE_UNAVAILABLE'),{status:503});};
  const rawHandlers=createCore126Handlers({owner,managerGuard,credentials:mcpCredentials,authorizeTool,dispatchExistingTool,listAuthorizedTools:broker.list});
  const withdrawOriginal=createCore126WithdrawalHandler({credentials:mcpCredentials});
  const handlers:Core126Handlers={
@@ -76,6 +78,7 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    if(!runId)return rawHandlers.internal(request);
    managerGuard.context(request); // Authenticate BEFORE original Core lookup or manager observations.
    const needsImage=operation==="admission"&&request.query?.action==="launch"||["launch-material","effect-intent","created","started"].includes(operation??"");
+   if(needsImage)requireProductionPurpose(runId);
    return needsImage?withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.internal(request)):rawHandlers.internal(request);
   },
   async runtime(request){
@@ -83,7 +86,8 @@ export function createActualCore126Owner({imageOwner}:{imageOwner?:Core126ImageO
    const match=/^\/runtime\/job-runs\/([a-f0-9-]+)\//.exec(request.path),runId=match?.[1];
    if(!runId)return rawHandlers.runtime(request);
    const header=request.headers.authorization,credential=mcpCredentials.inspectManagedJobCredential(typeof header==="string"&&header.startsWith("Bearer ")?header.slice(7):"","job-run");
-   if(!credential||credential.runId!==runId)throw Object.assign(Error("Original JobRun credential required"),{status:401});
+   if(!credential||credential.purpose!=="production"||credential.candidateIntentHash!==null||credential.runId!==runId)throw Object.assign(Error("Original JobRun credential required"),{status:401});
+   requireProductionPurpose(runId);
    return withImage(owner.factsForOriginalImageCheck(runId),()=>rawHandlers.runtime(request));
   },
  };

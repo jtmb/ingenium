@@ -6,6 +6,11 @@ for(const [before,after] of [
  ['from "./core126-owner.proposal.mjs"',new URL('../lib/dot-v2/core126-owner.mjs',import.meta.url).href],
  ['from "./core126-http.proposal.mjs"',new URL('../lib/dot-v2/core126-http.mjs',import.meta.url).href],
 ]) { if(!source.includes(before))throw Error('Canonical fixture import changed');source=source.replace(before,'from '+JSON.stringify(after)); }
+// Load actual126/129 DDL and actual Core credential owner, preserving explicit fixture-only crypto/authority ports.
+const oldDdl='raw.exec(readFileSync(new URL("./126_managed_job_execution.proposal.sql",import.meta.url),"utf8"));';
+const oldCredentials='const extension=strip(readFileSync(new URL("./core126-credentials.proposal.ts",import.meta.url),"utf8"));';
+if(!source.includes(oldDdl)||!source.includes(oldCredentials))throw Error('Original Core fixture source changed');
+source=source.replace(oldDdl,'raw.exec(read("packages/ingenium-core/data/migrations/126_managed_job_execution.sql"));raw.exec(read("packages/ingenium-core/data/migrations/129_managed_candidate_purpose.sql"));').replace(oldCredentials,'const extension=strip(slice(actualCredentials,"export interface ManagedJobCredential {","/** Narrow self-withdrawal"));');
 // The installed material producer consumes the existing Core five-field projection.
 // Preserve named workspace IDs; only the obsolete fixture agent shape is updated.
 const oldAgent='const agent={mode:"primary",permissions:[]}';

@@ -534,7 +534,9 @@ export function incrementServicePrincipalSecurityEpoch(servicePrincipalId: strin
 
 // Append inside the existing mcp-credentials.ts owner, retaining its original private factories/imports.
 // No legacy kind/audience union, table row, receipt, encryption key or workspace is rewritten.
+/** Only the existing production credential is currently issued/inspected. Candidate authority remains closed. */
 export interface ManagedJobCredential {
+  purpose:'production';candidateIntentHash:null;
   id:string;kind:"job-run";audience:"job-run";runId:string;attemptId:string;
   servicePrincipalId:string;organizationId:string;projectId:string;ownerUserId:string;
   workspaceId:string;storageMappingHash:string;securityEpoch:number;principalSecurityEpoch:number;
@@ -568,6 +570,10 @@ function managedJobCredentialBinding(runId:string,attemptId?:string,now=new Date
         AND json_extract(op.body,'$.runId')=e.run_id AND json_extract(op.body,'$.state')='cancel_requested')
     `).get(timestamp,timestamp,runId,timestamp) as Record<string,unknown>|undefined;
   if(!row||attemptId!==undefined&&row.attempt_id!==attemptId)return undefined;
+  // Persisted purpose only. SQL129 defaults old rows to production without changing encrypted bytes.
+  // A candidate DTO/hash is NOT a genuine original lease; no candidate credential can be issued here yet.
+  if(row.purpose==='candidate-inert-v1')return undefined;
+  if(row.purpose!=='production'||row.candidate_intent_json!==null||row.candidate_intent_hash!==null||typeof row.profile_id!=='string'||!row.profile_id||typeof row.profile_hash!=='string'||!/^[a-f0-9]{64}$/.test(row.profile_hash))return undefined;
   const granted=db.prepare(`SELECT 1 FROM job_runs run JOIN jobs job ON job.id=run.job_id AND job.project_id=run.project_id
     JOIN projects project ON project.id=run.project_id AND project.organization_id=run.organization_id AND project.archived_at IS NULL
     JOIN automation_principal_grants grant_row ON grant_row.project_id=run.project_id AND grant_row.organization_id=run.organization_id
@@ -589,7 +595,7 @@ export function issueManagedJobCredential(input:{runId:string;attemptId:string})
       principal_security_epoch,workspace_security_epoch,token_prefix,token_hash,encrypted_token,scopes_json,expires_at,created_at)
       VALUES(?,?,?,'job-run','job-run',?,?,?,?,?,?,?,?,?)`).run(generated.id,input.runId,input.attemptId,row.effective_service_principal_id,
         row.principal_epoch,row.workspace_epoch,generated.tokenPrefix,hashSecurityToken(generated.token),encrypted,JSON.stringify(a.approvedScopes),row.deadline_at,new Date().toISOString());
-    return {id:generated.id,kind:"job-run" as const,audience:"job-run" as const,runId:input.runId,attemptId:input.attemptId,
+    return {purpose:"production" as const,candidateIntentHash:null,id:generated.id,kind:"job-run" as const,audience:"job-run" as const,runId:input.runId,attemptId:input.attemptId,
       servicePrincipalId:String(row.effective_service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,
       workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(row.workspace_epoch),principalSecurityEpoch:Number(row.principal_epoch),scopes:[...a.approvedScopes],expiresAt:String(row.deadline_at),token:generated.token};
   });
@@ -601,8 +607,8 @@ export function inspectManagedJobCredential(token:string,audience:"job-run",now=
   const db=getDb(process.env.INGENIUM_CORE_DB_PATH),credential=db.prepare("SELECT * FROM job_run_mcp_credentials WHERE token_hash=? AND kind='job-run' AND audience='job-run' AND revoked_at IS NULL AND expires_at>?")
     .get(hashSecurityToken(token),now.toISOString()) as Record<string,unknown>|undefined;
   if(!credential)return undefined;const binding=managedJobCredentialBinding(String(credential.run_id),String(credential.attempt_id),now);
-  if(!binding||binding.row.principal_epoch!==credential.principal_security_epoch||binding.row.workspace_epoch!==credential.workspace_security_epoch||credential.service_principal_id!==binding.row.effective_service_principal_id||credential.scopes_json!==JSON.stringify(binding.a.approvedScopes)||binding.row.credential_id!==credential.id)return undefined;
-  const a=binding.a;return {id:String(credential.id),kind:"job-run",audience:"job-run",runId:String(credential.run_id),attemptId:String(credential.attempt_id),servicePrincipalId:String(credential.service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(credential.workspace_security_epoch),principalSecurityEpoch:Number(credential.principal_security_epoch),scopes:[...a.approvedScopes],expiresAt:String(credential.expires_at)};
+  if(!binding||credential.purpose!=="production"||credential.candidate_intent_hash!==null||binding.row.principal_epoch!==credential.principal_security_epoch||binding.row.workspace_epoch!==credential.workspace_security_epoch||credential.service_principal_id!==binding.row.effective_service_principal_id||credential.scopes_json!==JSON.stringify(binding.a.approvedScopes)||binding.row.credential_id!==credential.id)return undefined;
+  const a=binding.a;return {purpose:"production",candidateIntentHash:null,id:String(credential.id),kind:"job-run",audience:"job-run",runId:String(credential.run_id),attemptId:String(credential.attempt_id),servicePrincipalId:String(credential.service_principal_id),organizationId:a.organizationId,projectId:a.projectId,ownerUserId:a.ownerUserId,workspaceId:a.workspaceId,storageMappingHash:a.bindingHash,securityEpoch:Number(credential.workspace_security_epoch),principalSecurityEpoch:Number(credential.principal_security_epoch),scopes:[...a.approvedScopes],expiresAt:String(credential.expires_at)};
 }
 export function revokeManagedJobCredential(runId:string):void {
   execTransaction(()=>getDb(process.env.INGENIUM_CORE_DB_PATH).prepare("UPDATE job_run_mcp_credentials SET revoked_at=? WHERE run_id=? AND revoked_at IS NULL").run(new Date().toISOString(),runId));checkpointAfterWrite();

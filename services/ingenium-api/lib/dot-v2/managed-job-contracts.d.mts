@@ -102,7 +102,14 @@ export interface Core126OwnerPorts {
  credentials:ManagedCredentialPorts;profiles:Core126Profiles;requireManager(context:ManagerContext):void;
  verifierFactory():ResponseVerifier;now?:()=>Date;id?:()=>string;
 }
+export type ManagedAdmissionPurpose = Readonly<{purpose:'production';candidateIntentHash:null}> | Readonly<{purpose:'candidate-inert-v1';candidateIntentHash:string}>;
+/** Not constructed here. A DTO/hash or TypeScript brand is not a runtime original lease. */
+declare const originalCandidateLeaseBrand:unique symbol;
+export interface OriginalCandidateLease {readonly [originalCandidateLeaseBrand]:never}
 export interface Core126Owner {
+ admissionPurpose(runId:string):ManagedAdmissionPurpose;
+ /** Closed until the original image/physical-parent/source/canary constructor is installed. No lease parameter. */
+ prepareCandidateInert(selection:Core126Selection,context:CoreActorContext):Promise<never>;
  /** Private Root composition only; these are never HTTP operations or permission grants. */
  factsForImagePreparation(selection:Core126Selection,context:CoreActorContext):Core126Facts;
  factsForOriginalImageCheck(runId:string):Core126Facts;

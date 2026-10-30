@@ -4,7 +4,7 @@ Coordinator: `01a188fc-d3ed-7dc2-ab95-e0eed8a793ec`. The stop condition is compl
 
 ## Integrated source
 
-The existing Core connection remains the database writer. SQL127 binds new runtime provisioning to the original manager create/start/attach transition. SQL128 retains voice operation identity, CPU acknowledgements, cancellation and original resource retirement. The restored signed Core capsule exercises these migrations and existing forget/restore behavior; it is fixture evidence, not production migration acceptance.
+The existing Core connection remains the database writer. SQL127 binds new runtime provisioning to the original manager create/start/attach transition. SQL128 retains voice operation identity, CPU acknowledgements, cancellation and original resource retirement. SQL129 adds explicit production/candidate purpose through a transactional rebuild of the existing table, with a typed-byte comparison of all38 original columns before replacement. Existing credentials retain their encrypted bytes and production purpose. Candidate data cannot promote itself into a production profile or credential. The restored signed Core capsule exercises these migrations and existing forget/restore behavior; it is fixture evidence, not production migration acceptance.
 
 Managed jobs now have a fixed private bootstrap frame, image-bound agent material, isolated job configuration and the existing scoped MCP transport. Self-withdrawal remains available after original credential expiry/revocation and before image-owner installation. It records cancellation and revocation; it cannot report process retirement or return quota.
 
@@ -14,11 +14,17 @@ The actual SSE client now accepts an optional AbortSignal through the pending-he
 
 Voice CPU source uses the retained Linux supervisor and the existing Core128 writer. The pinned OpenCode 2.0.11 public API does not expose a retained per-execution finalizer join. Agent voice therefore remains unavailable through that adapter until an actual original producer exists. Terminal events, idle, inbox acknowledgements and injected positive observer fixtures cannot close this gate. This is an outstanding delivery requirement.
 
+Canonical Context conversation IDs now resolve their actual engine session through the existing private metadata owner before Dot/Memory use. Hosted voice scope capture reads the fresh authenticated user/session, original manager placement and exact selected mapping; private resource cleanup retains its original proof after UI revocation. Linux CPU admission reads actual cgroup/proc facts and requires protected measured resource policy before cold/hot/witness effects. Real CPU assets, measured peaks, attended audio and original agent settlement remain required.
+
+Paired Native lifecycle adds restricted historical receipt reads, exact connection quiescence and positive Native revocation proof before Node soft retirement. Unknown original effects and first receipts remain immutable. Destructive project/restore/forget actions preserve unresolved custody. Receipt recovery cannot acquire bindings, enroll, read domain content or dispatch effects. Native compile and actual login/TLS/cross-store restore remain acceptance gates.
+
+The latest native source includes retained child Webview/auth callback modules and a trusted-Webview IPC guard. Three pinned Windows/Tauri compiler API issues were corrected after the normal gate exposed them. The combined source is in normal reviewed check14; no Work/Web runtime acceptance follows from compilation. Its genuine private proxy/engine lease and six native commands remain implementation work.
+
 ## Focused evidence
 
 - API/Core strict type checking passes on the composed source.
-- Managed-job regression selection: 106 passing cases, no skips.
-- Private bootstrap/withdrawal/ingress selection: 50 passing cases.
+- Managed-job regression selection:108 passing cases, no skips, using actual126/129 migrations and Core credential functions.
+- Private bootstrap/withdrawal/ingress selection:50 passing cases. Explicit purpose/credential isolation:10 passing cases. Paired Native lifecycle and historical receipt recovery:35 passing installed-source cases. SQL129 typed-byte migration:8 passing SQLite cases and actual Core signed-capsule startup/forget/restore.
 - Protected image-owner loader: 7 passing filesystem/manager-port fixtures.
 - Voice source selection: 85 passing cases; CPU Python selection: 58 passing model-free cases.
 - SSE cancellation: 5 passing cases using actual fetch and loopback HTTP, including cancellation before headers and during the body.

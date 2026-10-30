@@ -75,7 +75,7 @@ function isProjectBoundServiceContextOperation(req: Pick<Request, "method" | "pa
 
 export function policyForRequest(req: Pick<Request, "method" | "path"> & Partial<Pick<Request, "query">>): AuthorizationPolicy | undefined {
   const route = `${req.method} ${req.path}`;
-  const nativePairing = req.method === "POST" && /^\/api\/v1\/native-customize\/pairings(?:\/[^/]+\/inspect)?$/.test(req.path)
+  const nativePairing = req.method === "POST" && /^\/api\/v1\/native-customize\/pairings(?:\/[^/]+\/(?:inspect|quiesce|retire))?$/.test(req.path)
     || req.method === "GET" && /^\/api\/v1\/native-customize\/pairings\/[^/]+$/.test(req.path);
   if(nativePairing)return {action:"native-pairing."+permissionFor(req as Request),resource:"vault",permission:permissionFor(req as Request),target:"native-governance",browserSessionOnly:true,sensitive:req.method==="POST"};
   const nativeGovernance = req.method === "GET"
