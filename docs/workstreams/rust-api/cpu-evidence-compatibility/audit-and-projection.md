@@ -26,6 +26,24 @@ installedClosureSha256, actualHostAvailableBytes, purpose
 
 Validate closed plain data, digest formats and field types before canonicalization. Reject unknown/missing/duplicate keys and ambiguous JSON. A future producer with another key set needs its own explicit source-pinned schema adapter; do not silently drop new fields. This audit does not establish the key sets of unread helper/witness/probe/wire receipts.
 
+### Supported public probe source variant
+
+Subsequent public source inspection adds an explicit second variant: phase/qualify-cpu-resource-probe-r1.mjs SHA256 `e1103ac06a98f675a93c41c8da163513928b713f7f342e81446a2ed5de7280b8`, bindings line15. Its exact ten keys are:
+
+```text
+owner, kernelSourceSha256, kernelBootId, profileDigest, helperSha256,
+witnessSha256, codeBundleDigest, modelManifestSha256, modelSetDigest,
+installedClosureSha256
+```
+
+The model producer remains unchanged with its eleven-key schema. Even on the same boot/configuration, these two genuine shapes cannot satisfy the current whole-binding equality. Both envelope receipts use version1, so dispatch adapters by the Root-reviewed case AND source/producer schema identity, not version alone or a permissive test for whichever fields happen to exist. Name the decoders explicitly, e.g. model-r1-bindings and resource-probe-r1-bindings; neither decoder grants approval. Require the probe's additional binding.kernelBootId to agree with its actual kernelOwner.bootId and the reviewed common kernel environment. The legacy model has no such binding key and must use its actual kernel owner instead. Stable configuration projection remains identical; environment comparison remains mandatory.
+
+Probe source borrows kernelSourceSha256 and modelSetDigest from the original model capture. Root's review must hash-link that original evidence and compare the independently pinned kernel/model identities; this does not make the probe a model remeasurement. Its installed closure remains a raw-file hash requiring the same explicit proven alias mapping.
+
+The driver checks a freshly sampled available value before invoking the envelope but does not explicitly serialize that number into its bindings, grant/storage/result. The public probe child records memoryHeadroom and capacityOriginal, not hostAvailable. If a separate original operator preflight records the number, link its exact raw hash; otherwise mark that numeric fact unavailable. Do not copy the old model sample, resample later and backdate it, or equate headroom with raw host availability. Root review must distinguish original guard/finite-limit proof from an actually retained numeric sample. This does not invalidate the finite leaf/control/hash/positive-join observations; it bounds the measurement claim.
+
+Root reports probe case314f98d3-be87-416b-a7c3-a9680e9d2e0c passed in446ms with memoryPeak44130304, leaderMaxRss89849856 and pidsPeak7 plus positive joins. Those numbers are coordinator-reported, not independently read here. Aggregate kernel charge peak, leader RSS and the actual enforced hard limit remain different quantities. This case supplies no model import, production wire or approval evidence. Other helper/witness/wire raw schemas remain unverified by this audit.
+
 Project the following stable object for equality across all cases, the approved review configuration and the separate genuine Core wire receipt:
 
 ```text
