@@ -1,0 +1,160 @@
+{
+  "kind": "explicit P1 emitted-patch correction r2",
+  "priorPatchSha256": "4bc26ae03d291aeb71ac367c81a68a163644d7173ea2ed71ec3c8e5ee261f180",
+  "priorReceiptSha256": "2cf64db0622bef272431528e9de858af238486d78c66e13f63ad35e34de544bd",
+  "priorBadArtifacts": [
+    "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+    "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs"
+  ],
+  "priorSyntax": {
+    "artifacts": 19,
+    "failures": [
+      {
+        "path": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+        "message": "Unexpected token 'export'"
+      },
+      {
+        "path": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+        "message": "Unexpected token 'export'"
+      }
+    ]
+  },
+  "correctedPatchSha256": "0cc5ca65f38a93c4c223a8a78dbe8f02b900fc96d458474b908f570c5d379cf6",
+  "correctedPatchBytes": 57965,
+  "postimageChecks": 19,
+  "emittedArtifactSyntax": {
+    "artifacts": 19,
+    "failures": []
+  },
+  "targets": [
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "af69ffdba7a24d4ae36d5744b8d9401084c9d338e0f8b10306e14863673c71fe",
+      "bytes": 1329
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-original-invocation.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "6abe8afeb743f62f0b701b950dbf11e2da4e377dd539f1ae04fbb75773cf5c29",
+      "bytes": 434
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "1f46c2bed44f5e531f787eab705a7cec23266b2e6e07d18aef8472c42548b2bb",
+      "bytes": 10644
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-carrier.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "34db085a5228851c25c0c80eb34b04ca8e69cca03927d7f6b53fd5f47971bc2f",
+      "bytes": 2611
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "0957c8dc900f4125b24bdfc8d643c80e939834b53273b076b90abef0e20c03f8",
+      "bytes": 6784
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-loopback.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "82ecb842ce54a14c64be8557f9237ddd17ba41785689048ac808089fe77dce2c",
+      "bytes": 1117
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "94496d01993a05c1e3381965604cf1032846b2bdc9a8f0a00a8cc54f132a4f85",
+      "bytes": 9895
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-bootstrap-runtime.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "47f4502a17c01829a0c3e4c75bf9c06aff24abc94c33671010357a9d6613b5c2",
+      "bytes": 643
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "41f696f1568d09321e61cbd4099335850485ff25feaf448a916beafb229aafc1",
+      "bytes": 3524
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-private-plugin.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "5e083615accd16b2f9cf49ba4b452bf6ee71f174993c48c97119fffb0e6b326d",
+      "bytes": 189
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "38daef89658331061df4385d1d9135e8d753442230d17e1ccdd83e4b731044f5",
+      "bytes": 2018
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/candidate-docker-stream.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "39c6928f7590c9393e92f4d41499ea7303a2381cf964c1dfe622005d26844126",
+      "bytes": 290
+    },
+    {
+      "target": "packages/veyra-operations/core126-candidate-material.mjs",
+      "preimageSha256": null,
+      "postimageSha256": "863ed2427deacd92c09750a4e13028d05831dc3ccf6612f002521615184eed94",
+      "bytes": 2571
+    },
+    {
+      "target": "packages/veyra-operations/core126-candidate-material.d.mts",
+      "preimageSha256": null,
+      "postimageSha256": "b6475f7cc9e55244eaa85233f5d8310c3f004aae311f19a5472f7643dedd2420",
+      "bytes": 375
+    },
+    {
+      "target": "services/ingenium-api/scripts/runtime-candidate-bootstrap.ts",
+      "preimageSha256": null,
+      "postimageSha256": "d807173cbb481fe7f096f55bdca59cc5f770ccbc04f2522c8744044819c714e3",
+      "bytes": 918
+    },
+    {
+      "target": "services/ingenium-api/lib/dot-v2/managed-job-child.mjs",
+      "preimageSha256": "4c856c0a4d4df540b1f90a42ec5771870fae272e4851f12e43567d7225149e12",
+      "postimageSha256": "df4d6f2da61ae7d9a4a836e2d95948ec8ef478032caf2076adc2a52b2bdd2e1e",
+      "bytes": 2732
+    },
+    {
+      "target": "packages/veyra-operations/core126-agent-material.mjs",
+      "preimageSha256": "a3eb13ec7caf7a4e384b32a5c3eb605e31855a3b035779d12f84e41fe3115ade",
+      "postimageSha256": "6d6e0354becc927326e5d90b5477adaa8968ee4ae5e4e48d433fc069c19a20a6",
+      "bytes": 7493
+    },
+    {
+      "target": "packages/veyra-operations/core126-job-plugin.mjs",
+      "preimageSha256": "e34c5ecbc3729167d0cb8c1671943c7b5a3c45f02a44c0282b0ac5ab7541f125",
+      "postimageSha256": "f6e09ad01f3de57d948b2b159d10b20a931664cca5bc3e6a4b6bd4500ee99dfc",
+      "bytes": 8490
+    },
+    {
+      "target": "config/opencode-managed/plugins/enforce-job-agent/index.mjs",
+      "preimageSha256": "25dd213fcceb449103f9103e20a3bd2b4e5c44a2761d7562005a0ea32cdad0a3",
+      "postimageSha256": "f0abe3f7e53d91d56b9ed45d2f958d9e4edaa5d5faae930636e80fe8cfcae35c",
+      "bytes": 665
+    }
+  ],
+  "limits": "Exact source byte/syntax checks; no builds/import execution/runtime/SQL/manager/readiness/18-case qualification",
+  "cleanup": {
+    "disposableOutputs": [],
+    "removedPaths": [],
+    "removedBytes": 0,
+    "retained": "Explicit prior failure evidence, lossless corrected patch and checker for Root integration"
+  },
+  "validation": {
+    "sourceFixturePass": 26,
+    "sourceFixtureFail": 0,
+    "stdoutSha256": "af99174d4c40be4eadc52cbf8cbb5623b035157b0c46665d8f1a2fb3ecd93467",
+    "testSourceSha256": "43beffd11db62dbf972b85d056e1b4815272ec5e5ebf6927e28b078314dc4b18",
+    "checkOnlyRegenerationOutputs": 0,
+    "realProtocolCases": 0
+  }
+}

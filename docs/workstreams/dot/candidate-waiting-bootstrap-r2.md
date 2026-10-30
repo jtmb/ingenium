@@ -1,0 +1,13 @@
+# Explicit candidate patch P1 correction r2
+
+Use `candidate-waiting-bootstrap-r2.patch`, SHA256 `0cc5ca65f38a93c4c223a8a78dbe8f02b900fc96d458474b908f570c5d379cf6`.
+
+The frozen prior patch SHA256 `4bc26ae03d291aeb71ac367c81a68a163644d7173ea2ed71ec3c8e5ee261f180` is invalid and retained as failure evidence. Its receipt/manifest is also retained unchanged. The prior global declaration replacement inserted `declare` into executable candidate-carrier.mjs (+8bytes) and candidate-loopback.mjs (+16bytes), although the canonical proposal sources and manifest hashes were correct. Root independently repaired those two actual postimages from the pinned canonical source; this correction performs no shared source write.
+
+The new `candidate-waiting-freeze-r2.py` generates per-file diffs from pinned git preimages and exact canonical source bytes. It performs no global declaration replacement. It then independently reconstructs every emitted patched artifact, checks all nineteen postimage hashes against the original pinned manifest, and parses those exact output bytes (JavaScript parser for MJS, strip-only parser for declarations/TS). It also positively reproduces the old patch's exactly two byte/hash/syntax failures. Therefore valid proposal inputs alone cannot make an invalid emitted patch pass.
+
+Run `VEYRA_DOT_PROPOSAL_SOURCE_ROOT=<actual APP> NODE_COMPILE_CACHE= python3 docs/workstreams/dot/candidate-waiting-freeze-r2.py --check-only` for a no-output verification; omit --check-only to regenerate only the explicit r2 patch/receipt under this same owned docs root. The original frozen patch/receipt remain untouched. Existing task TEMP/TMP/TMPDIR apply; no compiler/cache/runtime output is created.
+
+The current focused source suite passes26/26 and includes this emitted-artifact regression, plus support for exact already-applied artifacts so source exports/minimal hunks are not applied twice in the fixture loader. This is source/data/VM/byte/syntax evidence, not strict Core/API, image, readiness, eighteen real protocol cases, model/runtime or retirement acceptance. Candidate SQL131/context/manager/Core RPC/copier/source gates remain Root-owned and open; full phases1–7 goal is not complete.
+
+Cleanup: no shared writes, installs, builds, runtime/model/desktop/Docker work or disposable outputs. Removed paths none; removed bytes0. Retained exact prior failure, explicit correction patch, checker, tests and compact receipt have a concrete Root review/integration consumer; end condition integration or explicit source supersession. Existing authorized C-backed WSL root remains unchanged.
