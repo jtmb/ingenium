@@ -1,0 +1,18 @@
+{
+  "scope": "source/exact composition only",
+  "checks": {
+    "complete_original_preserved_on_refusal": true,
+    "no_replacement_writer_created": true,
+    "actual_busy_fixture_captures_original_writer": true,
+    "actual_busy_fixture_checks_same_writer": true,
+    "existing_refusal_checks_still_twice": true,
+    "close_current_schema_setup": true,
+    "busy_current_schema_setup": true,
+    "exact_three_postimages": true
+  },
+  "passed": 8,
+  "compiler_run": false,
+  "rust_busy_sqlite_regression_run": false,
+  "production_migration_changed": false,
+  "activation": false
+}

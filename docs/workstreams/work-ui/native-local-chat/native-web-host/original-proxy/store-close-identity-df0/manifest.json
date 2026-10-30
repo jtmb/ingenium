@@ -1,0 +1,30 @@
+{
+  "base_fixture": "df0b6eb23a487330d71159cf396cb34d8ba43bdf",
+  "scope": "same original close-refusal identity plus two explicit current-schema test setups; no production migration/activation",
+  "patch_bytes": 3381,
+  "patch_sha256": "fb135be105d5747d332f9e2d7e2f7b60088cbfae7c6dbe87e8c133bea4f8137f",
+  "files": [
+    {
+      "path": "crates/adapters/src/projects/close/tests.rs",
+      "preimage_sha256": "f601bf63b190c898b3ef2fe81b4e082bed4cf1b6233a034af28b879f6f4e4174",
+      "postimage_sha256": "504c0e9be6971c41ed2024aee4d678b44dc3df24cac384b8a90b4d3647d64e6e",
+      "preimage_blob": null,
+      "fixture_predecessor": "df0b6eb23a487330d71159cf396cb34d8ba43bdf"
+    },
+    {
+      "path": "crates/adapters/src/projects/test_support/busy.rs",
+      "preimage_sha256": "590a6beabe53f447692e762b55c988f4e4c6a15ae60b1441d32e6dcd4269ac8c",
+      "postimage_sha256": "f2043308943ee32d61acb99034c274c0754ac7b17437772cfb8104f9778e9356",
+      "preimage_blob": null,
+      "fixture_predecessor": "df0b6eb23a487330d71159cf396cb34d8ba43bdf"
+    },
+    {
+      "path": "crates/adapters/src/projects/close.rs",
+      "preimage_sha256": "b9b8dc3f844a6f875e7fbc4a50d75d12e8211af6bf8c88c0e85ea4d32032da78",
+      "postimage_sha256": "dd6508950fa3945798f49677225d5c0fbf3b1f08739459dcdfecf9cfb485f1dc",
+      "preimage_blob": "2364046fb3500453f3bb8c8508dc8ee9e5b9f053",
+      "fixture_predecessor": null
+    }
+  ],
+  "rust_test_run": false
+}

@@ -1,0 +1,62 @@
+--- a/crates/adapters/src/projects/close/tests.rs
++++ b/crates/adapters/src/projects/close/tests.rs
+@@ -16,6 +16,7 @@
+     connection
+         .execute_batch(include_str!("../0004.sql"))
+         .unwrap();
++    connection.execute_batch(include_str!("../0005.sql")).unwrap();
+     super::super::validate_schema(&connection, super::super::SCHEMA_VERSION).unwrap();
+     ProjectStore { native_web_writer: std::sync::Arc::new(crate::projects::local_web_originals::NativeWebWriterOriginal::new()), local_custody: None, local_installation_id: None, connection }
+ }
+@@ -33,15 +34,18 @@
+     statement: Option<OwnedStatement>,
+     store: Option<ProjectStore>,
+     original: *mut ffi::sqlite3,
++    original_writer:std::sync::Arc<crate::projects::local_web_originals::NativeWebWriterOriginal>,
+ }
+ impl StatementFixture {
+     fn new(store: ProjectStore) -> Self {
+         // Borrowed handle: never independently adopt or close it.
+         let original = unsafe { store.connection.handle() };
++        let original_writer=store.native_web_writer.clone();
+         let mut fixture = Self {
+             statement: None,
+             store: Some(store),
+             original,
++            original_writer,
+         };
+         let mut raw = std::ptr::null_mut();
+         // Public fixed SQL, prepared only against this owned in-memory store.
+@@ -74,6 +78,7 @@
+     fn assert_same_handle_and_statement_usable(&self) {
+         let store = self.store.as_ref().unwrap();
+         assert_eq!(unsafe { store.connection.handle() }, self.original);
++        assert!(std::sync::Arc::ptr_eq(&store.native_web_writer,&self.original_writer),"close refusal must return the same private writer original");
+         let statement = self.statement.as_ref().unwrap().0.as_ptr();
+         assert_eq!(unsafe { ffi::sqlite3_db_handle(statement) }, self.original);
+         assert_eq!(unsafe { ffi::sqlite3_step(statement) }, ffi::SQLITE_ROW);
+--- a/crates/adapters/src/projects/test_support/busy.rs
++++ b/crates/adapters/src/projects/test_support/busy.rs
+@@ -62,6 +62,7 @@
+     connection.execute_batch(include_str!("../0002.sql"))?;
+     connection.execute_batch(include_str!("../0003.sql"))?;
+     connection.execute_batch(include_str!("../0004.sql"))?;
++    connection.execute_batch(include_str!("../0005.sql"))?;
+     validate_schema(&connection, SCHEMA_VERSION)?;
+     // Refuse a build/start-time mode that cannot supply serialized cleanup.
+     let original = NonNull::new(unsafe { connection.handle() }).ok_or(StoreError::Invalid)?;
+--- a/crates/adapters/src/projects/close.rs
++++ b/crates/adapters/src/projects/close.rs
+@@ -37,10 +37,10 @@
+     ///
+     /// SQLite close is synchronous and does not establish a wall-clock bound.
+     pub fn close(self) -> Result<ProjectStoreClosed, (Self, ProjectStoreCloseError)> {
+-        let Self { connection, local_custody, local_installation_id } = self;
++        let Self { connection, local_custody, local_installation_id, native_web_writer } = self;
+         match connection.close() {
+             Ok(()) => Ok(ProjectStoreClosed { _closed: () }),
+-            Err((connection, error)) => Err((Self { connection, local_custody, local_installation_id }, bounded_reason(&error))),
++            Err((connection, error)) => Err((Self { connection, local_custody, local_installation_id, native_web_writer }, bounded_reason(&error))),
+         }
+     }
+ }
