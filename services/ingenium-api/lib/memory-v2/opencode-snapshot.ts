@@ -23,7 +23,7 @@ export function createCanonicalOpenCodeSnapshotReader(options: OpenCodeSnapshotO
       getSession: (owner, chatId) => withOpenCodeRuntimeTarget(owner.target,
         () => opencodeClient.getSession(chatId, owner.directory)),
       getMessages: (owner, chatId, limit) => withOpenCodeRuntimeTarget(owner.target,
-        () => opencodeClient.getMessages(chatId, limit, undefined, owner.directory)),
+        () => opencodeClient.getRecentMessages(chatId, limit, owner.directory)),
       getSessionMessage: (owner, chatId, messageId) => withOpenCodeRuntimeTarget(owner.target,
         () => opencodeClient.getSessionMessage(chatId, messageId, owner.directory)),
     },

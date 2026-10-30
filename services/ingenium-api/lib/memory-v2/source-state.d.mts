@@ -7,5 +7,5 @@ export interface ApprovedMemoryEligibilityPolicy {
 export const CODEX_MEMORY_IDLE_POLICY: Readonly<{ version: 'codex-memory-source-v1'; defaultHours: 6; minHours: 1; maxHours: 48; provenance: readonly string[] }>;
 export function eligibilityFingerprint(policy: ApprovedMemoryEligibilityPolicy | null, scope: MemoryScope, execution: AuthenticatedExecution): string | null;
 export function contextMemorySourceState(input: { db: SqlConnection; scope: MemoryScope; execution: AuthenticatedExecution; chatId: string;
-  messageId: string; conversationId: string; contentHash: string; policy?: ApprovedMemoryEligibilityPolicy | null; completedSnapshot?: import('./bounded-snapshot.mjs').CompletedMemorySnapshot; nowMs?: number;
+  messageId: string; conversationId: string; contentHash: string; policy?: ApprovedMemoryEligibilityPolicy | null; completedSnapshot?: import('./bounded-snapshot.mjs').CompletedMemorySnapshot; readAvailability?: import('./recall-availability.mjs').RecallReadView | null; nowMs?: number;
 }): Pick<SourceState,'active' | 'excluded' | 'uncertain' | 'idleEligible' | 'eligibilityVersion'> | null;

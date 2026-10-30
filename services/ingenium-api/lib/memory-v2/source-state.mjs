@@ -1,3 +1,4 @@
+import { readVerifiedRecallSource } from './recall-availability.mjs';
 import { readCompletedSnapshotSource } from './bounded-snapshot.mjs';
 import { createHash } from 'node:crypto';
 import { scopeKey } from './lifecycle.mjs';
@@ -24,7 +25,7 @@ export function eligibilityFingerprint(policy, scope, execution) {
 }
 
 /** Reads canonical source facts on the supplied API connection; no transcript, policy or job is written. */
-export function contextMemorySourceState({ db, scope, execution, chatId, messageId, conversationId, contentHash, policy = null, completedSnapshot, nowMs = Date.now() }) {
+export function contextMemorySourceState({ db, scope, execution, chatId, messageId, conversationId, contentHash, policy = null, completedSnapshot, readAvailability, nowMs = Date.now() }) {
   const key = scopeKey(scope);
   if (scope.projectId === null || !Number.isSafeInteger(nowMs) || nowMs < 0) return null;
   const source = db.prepare(`SELECT m.id,m.sequence,m.role,m.content,m.content_hash,m.metadata,m.idempotency_key,m.created_at
@@ -77,6 +78,10 @@ export function contextMemorySourceState({ db, scope, execution, chatId, message
       idleEligible:!!(complete&&!pairExcluded&&(!archive||archive.event_type==='conversation_unarchived')&&host?.enabled===1&&host.generate===1&&chat?.contribute===1
         &&(!selected.externalContextUsed||host.external_context===1)),
       eligibilityVersion:selected.eligibilityVersion+':'+(archive?.archive_sequence??-1)};
+  }
+  if (readAvailability !== undefined) {
+    const state=readVerifiedRecallSource(readAvailability,{db,scope,execution,chatId,messageId,contentHash});
+    return state?{...state,excluded:excluded||state.excluded}:{active:false,excluded,uncertain:true,idleEligible:false};
   }
   const last = db.prepare(`SELECT id,sequence,role,metadata,idempotency_key,created_at FROM context_messages
     WHERE project_id=? AND conversation_id=? ORDER BY sequence DESC LIMIT 1`).get(scope.projectId,conversationId);

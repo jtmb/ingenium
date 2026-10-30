@@ -145,3 +145,5 @@ export function createOpenCodeSnapshotReader({scope,execution,chatId,minRolloutI
  }
  return Object.freeze({prepare,refresh,withVerifiedSources,invalidate});
 }
+
+export {message as normalizedMemoryMessage,terminal as isCanonicalMemoryTerminal,sessionIdentity as canonicalMemorySessionIdentity};

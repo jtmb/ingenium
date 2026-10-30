@@ -29,3 +29,23 @@ export function mapCanonicalContextPair(db,{scope,execution,chatId,user,assistan
    ||db.prepare('SELECT COUNT(*) AS count FROM context_messages WHERE project_id=? AND conversation_id=? AND sequence<=?').get(scope.projectId,u.conversation_id,a.sequence).count!==checkpoint.message_count)return null;
  return {conversationId:u.conversation_id,sourceRefs:[{id:u.id,contentHash:u.content_hash},{id:a.id,contentHash:a.content_hash}]};
 }
+
+/** Candidate mapping only, not engine proof. Persisted refs supply Context ID/hash;
+ * existing source metadata and retained adjacent checkpoint locate exact members.
+ */
+export function resolveContextPairCandidate(db,{scope,execution,chatId,sourceRef}) {
+ if(scope.projectId===null)return null;
+ const source=db.prepare(`SELECT m.id,m.conversation_id,m.sequence,m.role,m.content,m.content_hash
+  FROM context_messages m JOIN context_conversations c ON c.project_id=m.project_id AND c.id=m.conversation_id
+  WHERE m.id=? AND m.project_id=? AND c.organization_id=? AND c.owner_user_id=? AND c.visibility='private'
+   AND json_extract(c.metadata,'$.source')='opencode-chat' AND json_extract(c.metadata,'$.sourceRuntimeId')=?
+   AND json_extract(c.metadata,'$.sourceSessionId')=?`).get(sourceRef.id,scope.projectId,scope.organizationId,scope.ownerUserId,execution.runtimeId,chatId);
+ if(!source||source.content_hash!==sourceRef.contentHash||typeof source.content!=='string'||hash(source.content)!==sourceRef.contentHash||!['user','assistant'].includes(source.role))return null;
+ const first=source.role==='user'?source.sequence:source.sequence-1;
+ const rows=db.prepare(`SELECT role,content,json_extract(metadata,'$.sourceMessageId') AS engine_id FROM context_messages
+  WHERE project_id=? AND conversation_id=? AND sequence IN (?,?) ORDER BY sequence`).all(scope.projectId,source.conversation_id,first,first+1);
+ if(rows.length!==2||rows[0].role!=='user'||rows[1].role!=='assistant'||rows.some(row=>typeof row.engine_id!=='string'||!row.engine_id))return null;
+ const user={id:rows[0].engine_id,content:rows[0].content},assistant={id:rows[1].engine_id,content:rows[1].content};
+ const mapping=mapCanonicalContextPair(db,{scope,execution,chatId,user,assistant});
+ return mapping?{...mapping,user,assistant}:null;
+}

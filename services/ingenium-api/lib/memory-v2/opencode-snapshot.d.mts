@@ -25,3 +25,6 @@ export function createOpenCodeSnapshotReader(input:OpenCodeSnapshotOptions&{
  };
  mapContext:(input:{scope:MemoryScope;execution:AuthenticatedExecution;chatId:string;user:CompletedEngineMessage;assistant:CompletedEngineMessage})=>CanonicalContextPair|null;
 }):OpenCodeSnapshotReader;
+export function normalizedMemoryMessage(envelope:MessageEnvelope,chatId:string):{id:string;role:'user'|'assistant';content:string;revision:string;createdAt:number}|null;
+export function isCanonicalMemoryTerminal(envelope:MessageEnvelope):boolean;
+export function canonicalMemorySessionIdentity(session:SessionInfo,chatId:string,directory:string):string;

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 export class MemoryError extends Error {
   constructor(code) { super(code); this.code = code; }
 }
+const sourceReadPlans = new WeakMap(), sourceReadWindows = new WeakMap();
 const fail = (code) => { throw new MemoryError(code); };
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const hash = (value) => digest(JSON.stringify(value));
@@ -173,8 +174,57 @@ export class MemoryLifecycle {
   suppressed(key, kind, target) {
     return !!this.db.prepare('SELECT 1 FROM veyra_memory_suppression WHERE scope_key=? AND kind=? AND target=?').get(key, kind, target);
   }
-  activeRows(key) {
-    return this.db.prepare(`SELECT * FROM veyra_memory_recall WHERE scope_key=? AND state='active' ORDER BY updated_at DESC,id`).all(key)
+  planSourceReads(scope, chatId, { offset = 0, limit = 16, maxSources = 32 } = {}) {
+    const key = this.access(scope, 'read', text(chatId));
+    integer(limit, 1, 16); integer(offset, 0, Number.MAX_SAFE_INTEGER - limit); integer(maxSources, 1, 32);
+    const policy = this.policyAt(key), chat = this.chatAt(key, chatId);
+    const rows = policy.enabled && policy.useMemory && chat.useMemory
+      ? this.db.prepare(`SELECT id,version,content_hash,provenance_json FROM veyra_memory_recall WHERE scope_key=? AND state='active'
+          ORDER BY updated_at DESC,id LIMIT ? OFFSET ?`).all(key, limit, offset) : [];
+    const refs = new Map(), selected = []; let deferredForSourceBudget = 0;
+    for (const row of rows) {
+      if (this.suppressed(key, 'memory', row.id) || this.suppressed(key, 'content', row.content_hash)) continue;
+      const sources = JSON.parse(row.provenance_json).sources;
+      if (!Array.isArray(sources) || sources.length < 1 || sources.length > 32) fail('SOURCE_UNAVAILABLE');
+      if (sources.some(ref => this.suppressed(key, 'source', ref.id))) continue;
+      const additions = new Map();
+      for (const ref of sources) {
+        text(ref.id); text(ref.chatId); text(ref.contentHash, 64);
+        if (!/^[a-f0-9]{64}$/.test(ref.contentHash)) fail('SOURCE_UNAVAILABLE');
+        const refKey = JSON.stringify([ref.chatId, ref.id, ref.contentHash]);
+        if (!refs.has(refKey)) additions.set(refKey, Object.freeze({ id: ref.id, chatId: ref.chatId, contentHash: ref.contentHash }));
+      }
+      if (refs.size + additions.size > maxSources) { deferredForSourceBudget++; continue; }
+      for (const [refKey, ref] of additions) refs.set(refKey, ref);
+      selected.push({ ...row });
+    }
+    const plan = Object.freeze({ schemaVersion: 1, scopeHash: digest(key), chatId, offset, limit, scanCount: rows.length,
+      selectedMemoryCount: selected.length, deferredForSourceBudget, hasMore: rows.length === limit && !!this.db.prepare(`SELECT 1 FROM veyra_memory_recall WHERE scope_key=? AND state='active' ORDER BY updated_at DESC,id LIMIT 1 OFFSET ?`).get(key, offset + limit),
+      sourceRefs: Object.freeze([...refs.values()]) });
+    sourceReadPlans.set(plan, { memory: this, key, chatId, bindingHash: scope.bindingHash, bindingEpoch: scope.bindingEpoch, selected });
+    return plan;
+  }
+  withSourceReadPlan(scope, chatId, plan, work) {
+    const key = this.access(scope, 'read', text(chatId)), saved = sourceReadPlans.get(plan);
+    if (!saved || saved.memory !== this || saved.key !== key || saved.chatId !== chatId
+      || saved.bindingHash !== scope.bindingHash || saved.bindingEpoch !== scope.bindingEpoch || typeof work !== 'function'
+      || sourceReadWindows.has(this)) fail('SOURCE_UNAVAILABLE');
+    sourceReadWindows.set(this, saved);
+    try { const result = work(); if (result && typeof result.then === 'function') fail('INVALID_ADAPTER'); return result; }
+    finally { sourceReadWindows.delete(this); }
+  }
+  activeRows(key, boundedRecall = false) {
+    const window = boundedRecall ? sourceReadWindows.get(this) : null;
+    let rows;
+    if (window && window.key === key) {
+      if (!window.selected.length) return [];
+      const placeholders = window.selected.map(() => '?').join(',');
+      rows = this.db.prepare(`SELECT * FROM veyra_memory_recall WHERE scope_key=? AND state='active' AND id IN (${placeholders}) ORDER BY updated_at DESC,id`)
+        .all(key, ...window.selected.map(row => row.id))
+        .filter(row => window.selected.some(saved => row.id === saved.id && row.version === saved.version
+          && row.content_hash === saved.content_hash && row.provenance_json === saved.provenance_json));
+    } else rows = this.db.prepare(`SELECT * FROM veyra_memory_recall WHERE scope_key=? AND state='active' ORDER BY updated_at DESC,id`).all(key);
+    return rows
       .filter((row) => !this.suppressed(key, 'memory', row.id) && !this.suppressed(key, 'content', row.content_hash)
         && !JSON.parse(row.provenance_json).sources.some((ref) => this.suppressed(key, 'source', ref.id)));
   }
@@ -191,7 +241,7 @@ export class MemoryLifecycle {
     const policy = this.policyAt(key), chat = this.chatAt(key, chatId);
     if (!policy.enabled || !policy.useMemory || !chat.useMemory) return { items: [], omitted: [], excluded: true, usedTokens: 0 };
     const items = [], omitted = []; let usedTokens = 0;
-    for (const row of this.activeRows(key)) {
+    for (const row of this.activeRows(key, true)) {
       const provenance = JSON.parse(row.provenance_json);
       // A source can be revoked after extraction. Never serve stale authorization.
       const valid = this.sourceAvailable(scope, provenance);

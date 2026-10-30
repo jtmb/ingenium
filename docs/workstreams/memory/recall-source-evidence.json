@@ -1,0 +1,12 @@
+{
+  "schemaReceipt": "coordination/integration/running-opencode-schema-r2.json",
+  "rootReportedClientCommit": "f0dd892a",
+  "qualification": "Worker inspected shared source/metadata receipt only; Root/Work reported actual schema/client suite/noEmit/sample ordering checks. No worker transport/service/session-content call.",
+  "originalVersion": "2.0.11",
+  "rootClientFileSha256": "d28dbfb67f816bd6a6670bfbef31deb4fc8f679ca530a98d0390eeeb86fcca39",
+  "originalOpenapiSha256": "2fa254eff9933cf357e61fe918a2b4f8ccfda5e750fcb4299134f9685beab28a",
+  "schemaReceiptSha256": "5e41f5fd7954902b0756b4a6c137a70d2d9027411a3d5dcf139afbe185a5738f",
+  "observedDate": "2026-10-30",
+  "limits": "One descending raw page at most32, mapped then chronological; original asc/cursors unchanged; do not sort IDs or infer truncation from cursors",
+  "source": "Root APP working-tree shared original opencode-client.ts, getRecentMessages export inspected read-only"
+}

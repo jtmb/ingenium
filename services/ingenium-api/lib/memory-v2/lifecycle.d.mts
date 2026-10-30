@@ -35,9 +35,18 @@ export function scopeKey(scope: MemoryScope): string;
 export const DEFAULT_MEMORY_POLICY: Readonly<HostPolicy>;
 export const DEFAULT_CHAT_MEMORY_POLICY: Readonly<ChatPolicy>;
 export interface SuppressionBundle { schemaVersion: 1; scopeHash: string; entries: { kind: "memory" | "source" | "content"; target: string; receipt_id: string }[]; receipts: { operation_id: string; request_hash: string; receipt_json: string }[] }
+declare const sourceReadPlan: unique symbol;
+export interface SourceReadPlan {
+  readonly [sourceReadPlan]: true; readonly schemaVersion:1; readonly scopeHash:string; readonly chatId:string;
+  readonly offset:number; readonly limit:number; readonly scanCount:number; readonly selectedMemoryCount:number;
+  readonly deferredForSourceBudget:number; readonly hasMore:boolean;
+  readonly sourceRefs:readonly Readonly<SourceRef & {chatId:string}>[];
+}
 export class MemoryLifecycle {
   constructor(adapter: { db: SqlConnection; authorize: (scope: MemoryScope, permission: MemoryPermission, chatId: string | null) => boolean;
     sources: (scope: MemoryScope, chatId: string, id: string) => SourceState | null; checkpoint: () => void; runTransaction?: <T>(work: () => T) => T; clock?: () => string });
+  planSourceReads(scope:MemoryScope,chatId:string,input?:{offset?:number;limit?:number;maxSources?:number}):SourceReadPlan;
+  withSourceReadPlan<T>(scope:MemoryScope,chatId:string,plan:SourceReadPlan,work:()=>T):T;
   scopePolicy(scope: MemoryScope): ScopePolicy;
   policy(scope: MemoryScope, chatId: string): { schemaVersion: 1; scopeHash: string; chatId: string; bindingHash: string; bindingEpoch: number; policy: HostPolicy; chat: ChatPolicy; available: true };
   operation(scope: MemoryScope, operationId: string): MemoryReceipt | null;
